@@ -1,16 +1,16 @@
-# Metal-PHP
+# PHP on Metal (MHP)
 
-Metal-PHP is a PHP dialect that transpiles to c++ and is compiled to a native binary.
+PHP on Metal is a general-purpose programming language and a dialect of PHP that transpiles to C++ and is then compiled into a native binary.
 
-To be clear, you cannnot just write PHP code and expect it to work. Metal-PHP does a lot of things differently but is desigend to be easly picked up by PHP developers.
+Welcome to my highly opinionted and FAR from production ready version of PHP that goes fast.
 
-This is not a new idea at all, and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between Metal-PHP and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language that is inspired by PHP. My goal is still to create a new LLVM frontend, but for now transpiling to c++ is a much more in reach target. 
+To be clear, you cannnot just write PHP code and expect it to work. PHP on Metal does a lot of things differently but is desigend to be easly picked up by PHP developers.
 
-Also I should note this is still an experiment in a very very very early stage.
+This is not a new idea at all, and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between PHP on Metal and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language that is inspired by PHP. I really want to create a LLVM frontend at some point, but for now transpiling to c++ is a much more reachable target. 
 
 ## Language 
 
-Metal-PHP is a statically typed language and there is no support for dynamic typing or union types.
+PHP on Metal is a statically typed language and there is no support for dynamic typing or union types.
 
 ```php
 function multiply(int $a, int $b): int {
