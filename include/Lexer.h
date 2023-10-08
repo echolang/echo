@@ -13,17 +13,41 @@
 struct Token {
 public:
     enum class Type {
-        t_keyword,
-        t_identifier,
-        t_operator,
-        t_punctuation,
-        t_whitespace,
-        t_comment,
-        t_string_literal,
-        t_integer_literal,
-        t_hex_literal,
-        t_binary_literal,
-        t_floating_literal,
+        t_identifier, 
+        t_semicolon,                // ;
+        t_colon,                    // :
+        t_comma,                    // ,
+        t_dot,                      // .
+        t_logical_and,              // &&
+        t_logical_or,               // ||
+        t_logical_eq,               // ==
+        t_logical_neq,              // !=
+        t_logical_leq,              // <=
+        t_logical_geq,              // >=
+        t_equals,                   // =
+        t_op_inc,                   // ++
+        t_op_dec,                   // --
+        t_op_add,                   // +       
+        t_op_sub,                   // -
+        t_op_mul,                   // *
+        t_op_div,                   // /
+        t_op_mod,                   // %
+        t_qmark,                    // ?
+        t_exclamation,              // !
+        t_open_angle,               // <
+        t_close_angle,              // >
+        t_open_paren,               // (
+        t_close_paren,              // )
+        t_open_brace,               // {
+        t_close_brace,              // }
+        t_open_bracket,             // [
+        t_close_bracket,            // ]
+        t_string_literal,           // "..."
+        t_integer_literal,          // 123
+        t_hex_literal,              // 0x123
+        t_binary_literal,           // 0b101
+        t_floating_literal,         // 123.456
+        t_varname,                  // $varname
         t_unknown
     };
 
@@ -77,7 +101,7 @@ struct LexerCursor
             line++;
             char_offset = 1;
         } else {
-            char_offset++;
+            char_offset += offset;
         }
 
         it += offset;
@@ -109,6 +133,10 @@ struct LexerCursor
         return input.compare(it - input.begin(), str.size(), str) == 0;
     }
 
+    inline bool begins_with(const char *str) {
+        return input.compare(it - input.begin(), strlen(str), str) == 0;
+    }
+
     inline bool is_quote() {
         return peek() == MHP_VOCAB_DUBQUOTE || peek() == MHP_VOCAB_SNGQUOTE;
     }
@@ -121,6 +149,14 @@ struct LexerCursor
 
 class Lexer 
 {
+    template<size_t N>
+    struct CSXStrLiteral {
+        constexpr CSXStrLiteral(const char (&str)[N]) {
+            std::copy_n(str, N, value);
+        }
+        char value[N];
+    };
+
     using LexerFunctionSignature = std::function<bool(Lexer&, TokenCollection&, LexerCursor&)>;
 
     const std::vector<LexerRule> rules = {
@@ -164,14 +200,69 @@ public:
     Lexer() {}
 
     /**
+     * Returns a single character parser function, useful for (<, >, ?, etc.)
+     */
+    template <char C, Token::Type T>
+    bool parse_char_token(TokenCollection &tokens, LexerCursor &cursor) {
+        if (cursor.peek() != C) {
+            return false;
+        }
+
+        tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
+        cursor.skip();
+        return true;
+    }
+
+    /**
+     * Parses a multi-character token (e.g. "==" or "!=")
+     */
+    template <CSXStrLiteral lit, Token::Type T>
+    bool parse_exact_token(TokenCollection &tokens, LexerCursor &cursor) {
+        constexpr auto size = sizeof(lit.value);
+        constexpr auto contents = lit.value;
+
+        if (!cursor.begins_with(contents)) {
+            return false;
+        }
+
+        tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
+        cursor.skip(size);
+        return true;
+    }
+
+    /**
+     * Parses a token with the given regex pattern
+     */
+    template <CSXStrLiteral pattern, Token::Type T>
+    bool parse_regex_token(TokenCollection &tokens, LexerCursor &cursor) {
+        constexpr auto size = sizeof(pattern.value);
+        constexpr auto contents = pattern.value;
+
+        std::regex regex(contents);
+        std::smatch match;
+        if (!std::regex_search(cursor.it, cursor.input.end(), match, regex)) {
+            return false;
+        }
+
+        tokens.push(match.str(), T, cursor.line, cursor.char_offset);
+        cursor.skip(match.str().size());
+        return true;
+    }
+
+    /**
+     * Parse variable names
+     */
+    bool parse_varname(TokenCollection &tokens, LexerCursor &cursor);
+
+    /**
      * Parses a string literal
      */
-    bool parse_string(TokenCollection &tokens, LexerCursor &cursor);
+    bool parse_string_literal(TokenCollection &tokens, LexerCursor &cursor);
 
     /**
      * Parses a hex literal
      */
-    bool parse_hex(TokenCollection &tokens, LexerCursor &cursor);
+    bool parse_hex_literal(TokenCollection &tokens, LexerCursor &cursor);
 
     /**
      * Parses the given input string into a collection of tokens
