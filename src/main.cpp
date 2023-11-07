@@ -8,8 +8,8 @@ int main() {
     Lexer lexer;
     TokenCollection tokens;
 
-    // load the file "test.mhp" and convert it to a string
-    std::ifstream file("test.mhp");
+    // load the file "test.eco" and convert it to a string
+    std::ifstream file("test.eco");
     std::stringstream buffer;
     buffer << file.rdbuf();
     std::string str = buffer.str();

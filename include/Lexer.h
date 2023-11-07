@@ -24,6 +24,7 @@ public:
         t_logical_neq,              // !=
         t_logical_leq,              // <=
         t_logical_geq,              // >=
+        t_accessorlr,               // ->
         t_equals,                   // =
         t_op_inc,                   // ++
         t_op_dec,                   // --
@@ -47,6 +48,7 @@ public:
         t_hex_literal,              // 0x123
         t_binary_literal,           // 0b101
         t_floating_literal,         // 123.456
+        t_bool_literal,             // true, false
         t_varname,                  // $varname
         t_unknown
     };
@@ -71,6 +73,11 @@ struct TokenCollection {
     void push(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
         tokens.emplace_back(type, line, char_offset);
         token_values.push_back(value);
+    }
+
+    void clear() {
+        tokens.clear();
+        token_values.clear();
     }
 };
 

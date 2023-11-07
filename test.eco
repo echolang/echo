@@ -1,0 +1,10 @@
+function multiply(int $a, int $b) : int {
+    return $a * $b;
+}
+
+function main() : void {
+    $a = 2;
+    $b = 3;
+    $c = multiply($a, $b);
+    echo $c;
+}

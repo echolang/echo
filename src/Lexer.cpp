@@ -151,11 +151,13 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_char_token<'}', Token::Type::t_close_brace>,
         &Lexer::parse_char_token<'[', Token::Type::t_open_bracket>,
         &Lexer::parse_char_token<']', Token::Type::t_close_bracket>,
+        &Lexer::parse_exact_token<"true", Token::Type::t_bool_literal>,
+        &Lexer::parse_exact_token<"false", Token::Type::t_bool_literal>,
         &Lexer::parse_hex_literal,
-        &Lexer::parse_regex_token<"[0-9]+\\.[0-9]+f?", Token::Type::t_floating_literal>,
-        &Lexer::parse_regex_token<"[0-9]+", Token::Type::t_integer_literal>,
+        &Lexer::parse_regex_token<"^[0-9]+\\.[0-9]+f?", Token::Type::t_floating_literal>,
+        &Lexer::parse_regex_token<"^[0-9]+", Token::Type::t_integer_literal>,
         // generic identifier
-        &Lexer::parse_regex_token<"[_a-zA-Z0-9]+", Token::Type::t_identifier>
+        &Lexer::parse_regex_token<"^[_a-zA-Z0-9]+", Token::Type::t_identifier>
     };
     
     auto cursor = LexerCursor(input);

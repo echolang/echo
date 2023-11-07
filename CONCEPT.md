@@ -1,16 +1,16 @@
-# PHP on Metal (MHP)
+# Echo Lang
 
-PHP on Metal is a general-purpose programming language and a dialect of PHP that transpiles to C++ and is then compiled into a native binary.
+Echo is a general-purpose programming language and a dialect of PHP that transpiles to C++ and is then compiled into a native binary.
 
 Welcome to my highly opinionted and FAR from production ready version of PHP that goes fast.
 
-To be clear, you cannnot just write PHP code and expect it to work. PHP on Metal does a lot of things differently but is desigend to be easly picked up by PHP developers.
+To be clear, you cannnot just write PHP code and expect it to work. Echo does a lot of things differently but is desigend to be easly picked up by PHP developers.
 
-This is not a new idea at all, and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between PHP on Metal and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language that is inspired by PHP. I really want to create a LLVM frontend at some point, but for now transpiling to c++ is a much more reachable target. 
+This is not a new idea at all, and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between Echo and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language that is inspired by PHP. I really want to create a LLVM frontend at some point, but for now transpiling to c++ is a much more reachable target. 
 
 ## Language 
 
-PHP on Metal is a statically typed language and there is no support for dynamic typing or union types.
+Echo is a statically typed language and there is no support for dynamic typing or union types.
 
 ```php
 function multiply(int $a, int $b): int {
@@ -20,7 +20,7 @@ function multiply(int $a, int $b): int {
 echo multiply(25, 25) . "\n"; // 625
 ```
 
-Still feels like home right? also note the `<?php` tag is gone. Metal-PHP is not a templating language and does not do what PHP initally was only intended to do.
+Still feels like home right? also note the `<?php` tag is gone. Echo is not a templating language and does not do what PHP initally was only intended to do.
 
 ### Variables
 
@@ -52,9 +52,9 @@ $a = 50; // error
 
 #### Data Types
 
-From PHP you are probably used to the following data types `int`, `float`, `string`, `bool`, `array`, `object`, `resource`, `null`. Metal-PHP works a bit differently, only scalar types are supported. Everything else is an object.
+From PHP you are probably used to the following data types `int`, `float`, `string`, `bool`, `array`, `object`, `resource`, `null`. Echo works a bit differently, only scalar types are supported. Everything else is an object.
 
-Also an `int` in PHP is a 64 bit integer, in Metal-PHP it is 32 bit by default.
+Also an `int` in PHP is a 64 bit integer, in Echo it is 32 bit by default.
 
 ```php
 int $a = 42; 
@@ -80,7 +80,7 @@ uint64 $e = 42; // 64 bit unsigned integer
 
 ### Arrays / Container types
 
-Arrays are where things get a bit different. In PHP arrays are a special type of hash map that can contain any type of value. In Metal-PHP arrays are container objects that can only contain a single type of value. 
+Arrays are where things get a bit different. In PHP arrays are a special type of hash map that can contain any type of value. In Echo arrays are container objects that can only contain a single type of value. 
 
 ```php
 $numbers = [1, 2, 3, 4, 5]; // allowed
@@ -109,7 +109,7 @@ for($i = 0; $i < 10; $i++) {
 
 #### Maps
 
-Maps or dictonaries are allow you to restore and retrieve values by a key. In PHP maps are just arrays with string keys. In Metal-PHP maps are a special type of container object that can only contain a single type of value.
+Maps or dictonaries are allow you to restore and retrieve values by a key. In PHP maps are just arrays with string keys. In Echo maps are a special type of container object that can only contain a single type of value.
 
 ```php
 // will work
@@ -143,4 +143,30 @@ function main(Array<string> $argv): int {
     echo "Hello World\n";
     return 0;
 }
+```
+
+### Operator Overloading
+
+Operator overloading is supported for the following operators:
+
+```php
+class Point {
+    public float $x;
+    public float $y;
+}
+
+operator(+)(Point $a, Point $b): Point {
+    return new Point($a->x + $b->x, $a->y + $b->y);
+}
+
+operator(+)(Point $a, int $b): Point {
+    return new Point($a->x + $b, $a->y + $b);
+}
+
+$pointA = new Point(1.0, 1.0);
+$pointB = new Point(2.0, 2.0);
+
+$pointC = $pointA + $pointB;
+
+$pointD = $pointA + 2;
 ```
