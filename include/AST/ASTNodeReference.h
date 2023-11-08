@@ -33,6 +33,20 @@ namespace AST
         inline bool has_type() const {
             return parent_ptr != nullptr && parent_type == T::node_type;
         }
+
+        template <typename T>
+            requires NodeTypeProvider<T>
+        inline T &get() {
+            assert(has_type<T>());
+            return *static_cast<T*>(parent_ptr);
+        }
+
+        template <typename T>
+            requires NodeTypeProvider<T>
+        inline T *get_ptr() {
+            assert(has_type<T>());
+            return static_cast<T*>(parent_ptr);
+        }
     };
 
     typedef std::vector<NodeReference> NodeReferenceList;
@@ -42,6 +56,13 @@ namespace AST
         static_assert(std::is_base_of_v<Node, T>, "T must be derived from Node");
         assert(T::node_type == node->node_type);
         return NodeReference(T::node_type, static_cast<Node*>(node));
+    }
+
+    template <NodeTypeProvider T>
+    const NodeReference make_ref(T &node) {
+        static_assert(std::is_base_of_v<Node, T>, "T must be derived from Node");
+        assert(T::node_type == node.node_type);
+        return NodeReference(T::node_type, static_cast<Node*>(&node));
     }
 };
 

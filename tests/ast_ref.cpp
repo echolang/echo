@@ -25,6 +25,10 @@ TEST_CASE( "Node References", "[AST]" )
 
     REQUIRE( !ref3.has_type<AST::NullNode>() );
     REQUIRE( !ref3.has_type<AST::ScopeNode>() );
+
+    // resolve references
+    auto &ref1_node = ref1.get<AST::NullNode>();
+    REQUIRE( ref1_node.node_description() == "NULL" );
 }   
 
 TEST_CASE( "Node Reference List", "[AST]" ) 

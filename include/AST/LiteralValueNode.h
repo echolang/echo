@@ -11,9 +11,9 @@ namespace AST
     class LiteralValueNode : public Node
     {
     public:
-        Token literal_token;
+        TokenReference literal_token;
 
-        LiteralValueNode(Token literal_token) : 
+        LiteralValueNode(TokenReference literal_token) : 
             literal_token(literal_token)
         {};
 
@@ -24,7 +24,7 @@ namespace AST
         const std::string literal_type_description();
 
         const std::string node_description() override {
-            return "literal<" + literal_type_description() + ">(" + literal_token. + ")";
+            return "literal<" + literal_type_description() + ">(" + literal_token.value() + ")";
         }
 
     private:

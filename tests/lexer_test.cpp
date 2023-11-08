@@ -4,6 +4,23 @@
 
 #include <Lexer.h>
 
+TEST_CASE( "Token References", "[lexer]" ) {
+
+    TokenCollection tokens;
+
+    tokens.push("foo", Token::Type::t_identifier, 0, 0);
+    tokens.push("bar", Token::Type::t_identifier, 0, 0);
+
+    auto foo = tokens[0];
+    auto bar = tokens[1];
+
+    REQUIRE( foo.value() == "foo" );
+    REQUIRE( bar.value() == "bar" );
+
+    REQUIRE( foo.type() == Token::Type::t_identifier );
+    REQUIRE( bar.type() == Token::Type::t_identifier );
+}
+
 TEST_CASE( "Strings", "[lexer]" ) {
     Lexer lexer;
     TokenCollection tokens;

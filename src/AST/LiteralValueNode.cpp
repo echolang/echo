@@ -2,7 +2,7 @@
 
 const std::string AST::LiteralValueNode::literal_type_description()
 {
-    switch (literal_token.type)
+    switch (literal_token.type())
     {
         case Token::Type::t_integer_literal:
             return "int";
@@ -16,6 +16,8 @@ const std::string AST::LiteralValueNode::literal_type_description()
             return "hex";
         case Token::Type::t_bool_literal:
             return "bool";
+        default:
+            break;
     }
     
     return "unknown";

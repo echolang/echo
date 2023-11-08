@@ -1,8 +1,15 @@
+#ifndef LEXER_H
+#define LEXER_H
+
+#pragma once
+
 #include <iostream>
 #include <vector>
 #include <string>
 #include <regex>
 #include <concepts>
+
+#include "Token.h"
 
 #define MHP_VOCAB_LB '\n'
 #define MHP_VOCAB_SPACE ' '
@@ -10,75 +17,9 @@
 #define MHP_VOCAB_DUBQUOTE '"'
 #define MHP_VOCAB_SNGQUOTE '\''
 
-struct Token {
-public:
-    enum class Type {
-        t_identifier, 
-        t_semicolon,                // ;
-        t_colon,                    // :
-        t_comma,                    // ,
-        t_dot,                      // .
-        t_logical_and,              // &&
-        t_logical_or,               // ||
-        t_logical_eq,               // ==
-        t_logical_neq,              // !=
-        t_logical_leq,              // <=
-        t_logical_geq,              // >=
-        t_accessorlr,               // ->
-        t_equals,                   // =
-        t_op_inc,                   // ++
-        t_op_dec,                   // --
-        t_op_add,                   // +       
-        t_op_sub,                   // -
-        t_op_mul,                   // *
-        t_op_div,                   // /
-        t_op_mod,                   // %
-        t_qmark,                    // ?
-        t_exclamation,              // !
-        t_open_angle,               // <
-        t_close_angle,              // >
-        t_open_paren,               // (
-        t_close_paren,              // )
-        t_open_brace,               // {
-        t_close_brace,              // }
-        t_open_bracket,             // [
-        t_close_bracket,            // ]
-        t_string_literal,           // "..."
-        t_integer_literal,          // 123
-        t_hex_literal,              // 0x123
-        t_binary_literal,           // 0b101
-        t_floating_literal,         // 123.456
-        t_bool_literal,             // true, false
-        t_varname,                  // $varname
-        t_unknown
-    };
-
-    Type type;
-    size_t line;
-    size_t char_offset;
-
-    Token(Type type, size_t line, size_t char_offset)
-        : type(type), line(line), char_offset(char_offset) {}
-};
-
 struct LexerRule {
     std::regex pattern;
     Token::Type type;
-};
-
-struct TokenCollection {
-    std::vector<Token> tokens;
-    std::vector<std::string> token_values;
-
-    void push(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
-        tokens.emplace_back(type, line, char_offset);
-        token_values.push_back(value);
-    }
-
-    void clear() {
-        tokens.clear();
-        token_values.clear();
-    }
 };
 
 struct LexerCursor
@@ -278,3 +219,5 @@ public:
 
 private:
 };
+
+#endif // LEXER_H

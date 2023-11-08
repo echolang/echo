@@ -145,7 +145,26 @@ function main(Array<string> $argv): int {
 }
 ```
 
-### Operator Overloading
+### Generics
+
+Generics are supported for classes and functions. The following example shows how to create a generic class.
+
+```php
+class Stack<T> {
+    private Array<T> $items = [];
+
+    public function push(T $item): void {
+        $this->items->push($item);
+    }
+
+    public function pop(): T {
+        return $this->items->pop();
+    }
+}
+```
+
+
+### Operator Overloading
 
 Operator overloading is supported for the following operators:
 
@@ -155,11 +174,11 @@ class Point {
     public float $y;
 }
 
-operator(+)(Point $a, Point $b): Point {
+operator +(Point $a, Point $b): Point {
     return new Point($a->x + $b->x, $a->y + $b->y);
 }
 
-operator(+)(Point $a, int $b): Point {
+operator +(Point $a, int $b): Point {
     return new Point($a->x + $b, $a->y + $b);
 }
 
