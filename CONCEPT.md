@@ -189,3 +189,123 @@ $pointC = $pointA + $pointB;
 
 $pointD = $pointA + 2;
 ```
+
+### Fixed Arrays
+
+These represent actual arrays in the sense that they are a contiguous block of memory. They are fixed in size and cannot be resized. 
+
+```php
+FixedArray<int, 10> $numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+```
+
+#### Structs
+
+Structs are like classes in a sense, but they are passed by value instead of by reference. They are also not allowed to have methods.
+And are allocated on the stack instead of the heap.
+
+```php
+struct Point {
+    public float $x;
+    public float $y;
+}
+
+$point = Point(1.0, 1.0);
+```
+
+This means when they for example are stored in an array there is no pointer indirection happening, this 
+can lead to a performance boost in some cases due to better cache locality.
+
+```php
+$points = FixedArray<Point, 10>();
+for($i = 0; $i < 10; $i++) {
+    $points[] = Point($i, $i);
+}
+
+$points[0]->x = 42.0; // possible
+$points[0]->y = 42.0; // possible
+$points[1] = Point(42.0, 42.0); // also possible
+
+
+$pointCopy = $points[0]; // makes a copy of the point
+
+$pointRef = &$points[0]; // makes a reference to the point
+```
+
+### Unsafe Pointers
+
+Unsafe pointers aka raw pointers can be used to access memory directly, this can be useful in the right hands but also be very dangerous, hence the name.
+
+```php
+```
+
+### Standard Library
+
+The standard library is still very much a work in progress, but im trying to have a more modern approach to it. The standard library is split into modules / namespaces.
+
+```php
+use Echo\Math;
+
+echo Math\abs(-42); // 42
+echo Math\round(42.5); // 43
+echo Math\floor(42.5); // 42
+```
+
+You can also import specific functions from a module / namespace.
+
+```php
+use Echo\Math\{abs};
+
+echo abs(-42); // 42
+```
+
+### Namespaces
+
+To make a class or a function available to other namespaces you have to declare it as `public`.
+
+```php
+namespace MyModule\Logging;
+
+public function makeLogger(): Logger {
+    return new Logger();
+}
+
+public class Logger {
+    public function log(int $level, string $message): void {
+        echo '[' . $level . '] ' . $message . "\n";
+    }
+}
+```
+
+You can also extern values and even variables from other namespaces.
+
+```php
+namespace MyModule\Logging;
+
+public const LOG_LEVEL_DEBUG = 0;
+public const LOG_LEVEL_INFO = 1;
+public const LOG_LEVEL_WARNING = 2;
+
+public Array<string> $logEntries = [];
+```
+
+Which can then be imported like this:
+
+```php
+namespace MyModule;
+
+use MyModule\Logging\{Logger, makeLogger};
+use MyModule\Logging\{
+    LOG_LEVEL_DEBUG,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_WARNING
+};
+
+use MyModule\Logging\$logEntries;
+
+function doSomething(): void {
+    $logger = makeLogger();
+    $logger->log(LOG_LEVEL_DEBUG, "Debug message");
+    $logEntries[] = "Debug message";
+}
+```
+
