@@ -145,6 +145,173 @@ function main(Array<string> $argv): int {
 }
 ```
 
+### Functions
+
+Functions are declared just like you would expect them to be from PHP.
+
+```php
+function add(int $a, int $b): int {
+    return $a + $b;
+}
+```
+
+One difference is that the return type is required. The only exception to this is `void` which is the default return type.
+
+```php
+function doSomething(): void {
+    echo "Hello World\n";
+}
+
+// same as 
+function doSomething() {
+    echo "Hello World\n";
+}
+```
+
+
+#### Named arguments *
+
+Named arguments are supported.
+
+```php
+function lerp(Point $from, Point $to, float $alpha): Point {
+    // ...
+}
+
+lerp(Point(0.0, 0.0), Point(1.0, 1.0), 0.5); // works
+
+lerp(from: Point(0.0, 0.0), to: Point(1.0, 1.0), alpha: 0.5); // also works
+
+lerp(Point(0.0, 0.0), Point(1.0, 1.0), alpha: 0.5); // also works
+```
+
+This can become really useful when you have a function with a lot of arguments.
+
+```php
+function printPerson(
+    ?string $firstName = null,
+    ?string $lastName = null,
+    ?int $age = null,
+    ?string $address = null,
+    ?string $city = null,
+    ?string $country = null,
+    ?string $zipCode = null
+): void {
+    if ($firstName) echo "First Name: " . $firstName . "\n";
+    if ($lastName) echo "Last Name: " . $lastName . "\n";
+    if ($age) echo "Age: " . $age . "\n";
+    // ...
+}
+
+printPerson(firstName: "John", lastName: "Doe", country: "USA");
+printPerson(firstName: "Kim", age: 42, zipCode: "CH-8000");
+```
+
+You can force named arguments by using the `named` keyword.
+
+```php
+function listen(named string $forEvent, function<void()> $callback): void {
+    // ...
+}
+
+listen(forEvent: "click", function() {
+    echo "Clicked\n";
+});
+```
+
+Why would you want to force named arguments? They become part of the function signature meaning you can have multiple functions with the same name but different named arguments.
+
+```php
+function print(named int $fromDecimal, named string $currency): void {
+    echo round($fromDecimal / 100) . "{$currency}\n";
+}
+
+function print(named int $fromMicro, named string $currency): void {
+    echo round($fromMicro / 1000000) . "{$currency}\n";
+}
+
+print(fromDecimal: 100, currency: "€"); // 1€
+print(fromMicro: 1000000, currency: "€"); // 1€
+```
+
+This would not be possible without the `named` keyword. Because the function signature would be the same.
+
+```php
+print(int, string); // signature without named arguments
+print(fromDecimal: int, currency: string); // signature with named arguments
+```
+
+So when a call is made the compiler will search for a function with a matching signature:
+
+```php
+print(100, "€"); 
+// no matching function found, signature search was:
+// - print(int, string)
+
+
+print(fromDecimal: 100, currency: "€");
+// will match, signature search was:
+// - print(fromDecimal: int, currency: string)
+
+print(500, currency: "€");
+// no matching function found, signature search was:
+// - print(int, currency: string)
+```
+
+If I were to declare the following print function:
+
+```php
+print(int $logLevel, string $message) {
+    // ...
+}
+```
+
+This would expose the following function signatures:
+
+ * `print(int, string)`
+ * `print(logLevel: int, string)`
+ * `print(int, message: string)`
+ * `print(logLevel: int, message: string)`
+
+This means I coul not declare the following function after the one above:
+
+```php
+print(int $applicationId, string $message) { // will not compile, duplicate signature "print(int, string)"
+    // ...
+}
+
+
+// below will compile, signature is "print(applicationId: int, string)" and "print(applicationId: int, message: string)"
+// both signatures are unique
+print(named int $applicationId, string $message) {
+    // ...
+}
+```
+
+
+#### Multiple return values *
+
+Functions can return multiple values.
+
+```php
+function getPerson(): (string, string, int) {
+    return ("John", "Doe", 42);
+}
+
+($firstName, $lastName, $age) = getPerson();
+```
+
+These can be named as well.
+
+```php
+function getPerson(): (firstName: string, lastName: string, age: int) {
+    return (firstName: "John", lastName: "Doe", age: 42);
+}
+
+(firstName: $firstName, lastName: $lastName, age: $age) = getPerson();
+```
+
+
 ### Generics
 
 Generics are supported for classes and functions. The following example shows how to create a generic class.
@@ -307,5 +474,94 @@ function doSomething(): void {
     $logger->log(LOG_LEVEL_DEBUG, "Debug message");
     $logEntries[] = "Debug message";
 }
+```
+
+### Memory Management
+
+### Copy Types
+
+Basic scalar types like `int`, `float`, `bool` are copy types. This means that when they are passed to a function or assigned to a variable they are copied.
+
+Example:
+
+```php
+$a = 42;
+$b = $a; // $b is now a copy of $a
+$b = 50;
+
+echo $a;// 42
+```
+
+You can reference a copy type by using the `&` operator.
+
+```php
+$a = 42;
+$b = &$a; // $b is now a reference to $a
+$b = 50;
+
+echo $a;// 50
+```
+
+### Reference Types
+
+Reference types are bit more complicated as they give you more control over how memory is managed compared to how PHP does it.
+
+The default behaviour is just the same as PHP, when you assign a reference type to a variable or pass it to a function it is passed by reference. Internally
+we use reference counting to manage memory. This means that when the last reference to an object is removed it is automatically freed.
+
+Alternative to that you can construct an object as unique, this means that it is not reference counted and will be freed when it goes out of scope.
+
+```php
+class Car 
+{
+    public function makeNoise(): void {
+        echo "Vroom\n";
+    }
+}
+
+
+$foo = new Car();
+$bar = $foo; // $bar and $foo now point to the same object
+$bar->makeNoise(); // Vroom
+```
+
+You can construct an object as unique by using the `unique` keyword.
+
+```php
+class Car 
+{
+    public function makeNoise(): void {
+        echo "Vroom\n";
+    }
+}
+
+$foo = unique Car(); // $bar and $foo now point to different objects
+$bar = $foo; // $bar is now the owner of the object
+
+$bar->makeNoise(); // Vroom
+$foo->makeNoise(); // Error, ownership has been transfered to $bar
+```
+
+
+
+Echo uses reference counting to manage memory.
+
+```php
+class Car 
+{
+    public function makeNoise(): void {
+        echo "Vroom\n";
+    }
+}
+
+//        $bar is a heap object which is reference counted
+//                    |
+function doSomething(Bar $bar): void {
+    $bar->makeNoise();
+}
+
+$foo = new Bar();
+$bar = $foo; // $bar and $foo now point to the same object
+doSomething($foo); // Vroom
 ```
 
