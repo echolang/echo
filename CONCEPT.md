@@ -549,3 +549,21 @@ $foo = new Bar();
 $bar = $foo; // $bar and $foo now point to the same object
 doSomething($foo); // Vroom
 ```
+
+
+```php
+struct String {
+    uint64 size;
+    Array<uint8> data;
+}
+
+$stackString = String("Hey Whats up"); // meta is on the stack, data is on the heap
+$arcString = new String("Something else");
+
+// you can convrt both into references Ref<String> aka &String
+$strRef1 = &$stackString;
+$strRef2 = &$arcString;
+
+```
+
+
