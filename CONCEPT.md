@@ -558,11 +558,27 @@ struct String {
 }
 
 $stackString = String("Hey Whats up"); // meta is on the stack, data is on the heap
-$arcString = new String("Something else");
+$arcString = new String("Something else"); // same as Shared<String>
 
 // you can convrt both into references Ref<String> aka &String
 $strRef1 = &$stackString;
 $strRef2 = &$arcString;
+
+// auto references when just beeing read.
+function print(String $string) : void {
+    echo $string;
+}
+
+// auto copies when modified
+function print(String $string) : void {
+    echo $string->append("\n"); // as string is modified it is copied
+}
+
+// move the string into the function, the function scope becomes the owner of $string
+function print(mv String $string) : void {
+    // ...
+}
+
 
 ```
 
