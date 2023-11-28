@@ -295,6 +295,8 @@ function getPerson(): (string, string, int) {
 }
 
 ($firstName, $lastName, $age) = getPerson();
+
+echo $firstName . "\n"; // John
 ```
 
 These can be named as well.
@@ -305,6 +307,20 @@ function getPerson(): (firstName: string, lastName: string, age: int) {
 }
 
 (firstName: $firstName, lastName: $lastName, age: $age) = getPerson();
+
+echo $firstName . "\n"; // John
+```
+
+And be used as an unnamed type.
+
+```php
+function getPerson(): (firstName: string, lastName: string, age: int) {
+    return (firstName: "John", lastName: "Doe", age: 42);
+}
+
+$person = getPerson();
+
+echo $person->firstName . "\n"; // John
 ```
 
 ### Generics
@@ -466,7 +482,7 @@ function doSomething(): void {
 
 ### Memory Management
 
-### Copy Types
+#### Copy Types
 
 Basic scalar types like `int`, `float`, `bool` are copy types. This means that when they are passed to a function or assigned to a variable they are copied.
 
@@ -490,7 +506,7 @@ $b = 50;
 echo $a;// 50
 ```
 
-### Reference Types
+#### Reference Types
 
 Reference types are a bit more complicated as they give you more control over how memory is managed compared to how PHP does it.
 
@@ -522,7 +538,7 @@ class Car
     }
 }
 
-$foo = unique Car(); // $bar and $foo now point to different objects
+$foo = Car(); // $bar and $foo now point to different objects
 $bar = $foo; // $bar is now the owner of the object
 
 $bar->makeNoise(); // Vroom
@@ -552,12 +568,19 @@ doSomething($foo); // Vroom
 
 
 ```php
+// a struct is almost the same as a class, but there is a key difference
+// in its mutability. A struct is implicitly copied when mutated.
 struct String {
-    uint64 size;
-    Array<uint8> data;
+    uint64 $size;
+    Array<uint8> $data;
 }
 
-$stackString = String("Hey Whats up"); // meta is on the stack, data is on the heap
+class String2 {
+    uint64 $size;
+    Array<uint8> $data;
+}
+
+$stackString = String("Hey Whats up"); // allocated on the stack 
 $arcString = new String("Something else"); // same as Shared<String>
 
 // you can convrt both into references Ref<String> aka &String
@@ -565,21 +588,125 @@ $strRef1 = &$stackString;
 $strRef2 = &$arcString;
 
 // auto references when just beeing read.
+// the compiler implicitly converts this to print(const Ref<String> $string)
 function print(String $string) : void {
     echo $string;
 }
 
-// auto copies when modified
-function print(String $string) : void {
-    echo $string->append("\n"); // as string is modified it is copied
+// because the string is mutated inside the function scope, it is implicily copied before the linebreak is appended
+// the implicit copy is only created because the "String" type is a struct.
+function printLn(String $string) : void {
+    echo $string->append("\n");
 }
 
 // move the string into the function, the function scope becomes the owner of $string
-function print(mv String $string) : void {
+function printErr(mv String $string) : void {
     // ...
 }
 
+// stack behavior
+print($stackString); // implicit reference 
+print($strRef1); // explicit reference
+
+// heap behavior
+print($arcString); // implicit reference because Shared<String> can be implicitly converted to Ref<String>
+print($strRef2); // explicit reference
+
+// stack behavior
+printLn($stackString); // implicit reference, implicit copy inside the function scope
+printLn($strRef1); // explicit reference, implicit copy inside the function scope
+
+// heap behavior
+printLn($arcString); // implicit reference, implicit stakc copy inside the function scope
+printLn($strRef2); // explicit reference, implicit stack copy inside the function scope
+
+
+Array<String> $logs = [];
+function logString(String $string) : void {
+    $logs[] = $string;
+}
 
 ```
 
+Scrap the above... It would mix types and require duplicate function implementations and make it hard to reason
+which function is acutally used.. I want it simpler than that.
 
+To fix this an object symbol must be either a stack or rc heap object during compile time.
+
+```php
+// stack object 
+struct String {
+    uint64 $size;
+    Array<uint8> $data;
+}
+
+// reference counted heap object
+class String2 {
+    uint64 $size;
+    Array<uint8> $data;
+}
+
+$stackString = String("Hey Whats up");
+
+// will auto convert to print(const String &$string)
+function print(String $string) : void {
+    echo $string;
+}
+
+function printLn(String $string) : void {
+    echo $string->append("\n"); // implicit copy
+}
+
+function printErr(mv String $string) : void {
+    // ...
+}
+
+// stack behavior
+print($stackString); // implicit reference
+printLn($arcString); // implicit reference, implicit copy inside the function scope
+printErr($stackString); // takes ownership of the stack object
+
+// now our string2 RC object
+$arcString = new String2("Something else"); 
+
+// passes the reference counted object 
+function print(String2 $string) : void {
+    echo $string;
+}
+
+// the string is mutated inside the function scope, no copy is created because the "String2" type is a class.
+function printLn(String2 $string) : void {
+    echo $string->append("\n");
+}
+
+// move the string into the function, the function scope becomes the owner of the counted reference object
+function printErr(mv String2 $string) : void {
+    // ...
+}
+
+// heap behavior
+print($arcString); 
+printLn($arcString);
+printErr($arcString); // takes ownership of the reference counted object
+```
+
+Because structs do not have any runtime meta data they cannot be nulled or checked for nullability.
+You can also not perform any runtime reflection checks on them.
+
+```php
+struct A {
+    int $a = 42;
+}
+
+class B {
+    int $b = 420;
+}
+
+$struct = A();
+$class = new B();
+
+echo $class instanceof B; // true 
+echo $class instanceof A; // false
+
+echo $struct instanceof A; // error 
+```
