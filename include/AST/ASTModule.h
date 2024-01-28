@@ -3,21 +3,27 @@
 
 #pragma once
 
+#include "../Token.h"
 #include "ASTNode.h"
+#include "ASTFile.h"
 #include "ASTNodeReference.h"
 #include "ScopeNode.h"
+
+#include <filesystem>
 
 namespace AST
 {   
     class Module
     {
     public:
+        TokenCollection tokens = TokenCollection();
         NodeCollection nodes = NodeCollection();
-        ScopeNode &root; 
 
-        Module() : root(nodes.emplace_back<ScopeNode>()) {}
+        std::vector<File> files;
+
+        Module() {}
         ~Module() {}
-
+        
     private:
 
     };

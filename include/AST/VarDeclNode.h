@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ASTNode.h"
+#include "ASTValueType.h"
 #include "../Lexer.h"
 
 namespace AST 
@@ -13,6 +14,8 @@ namespace AST
     public:
         TokenReference token_varname;
         TokenReference token_type;
+
+        ValueType type;
 
         VarDeclNode(TokenReference token_varname, TokenReference token_type) : 
             token_varname(token_varname), token_type(token_type)

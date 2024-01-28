@@ -4,6 +4,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <memory>
 #include "ASTNodeTypes.h"
 #include "ASTNodeReference.h"
 
