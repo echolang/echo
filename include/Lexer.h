@@ -8,6 +8,7 @@
 #include <string>
 #include <regex>
 #include <concepts>
+#include <functional>
 
 #include "Token.h"
 
@@ -57,6 +58,12 @@ struct LexerCursor
 
     inline void skip_formatting() {
         while (is_formatting() && !is_eof()) {
+            skip();
+        }
+    }
+
+    inline void skip_until(char c) {
+        while (peek() != c && !is_eof()) {
             skip();
         }
     }
@@ -211,6 +218,16 @@ public:
      * Parses a hex literal
      */
     bool parse_hex_literal(TokenCollection &tokens, LexerCursor &cursor);
+
+    /**
+     * Parses a single line comment
+     */
+    bool parse_sl_comment(TokenCollection &tokens, LexerCursor &cursor);
+
+    /**
+     * Parses a multi-line comment
+     */
+    bool parse_ml_comment(TokenCollection &tokens, LexerCursor &cursor);
 
     /**
      * Parses the given input string into a collection of tokens

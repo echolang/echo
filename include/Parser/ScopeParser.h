@@ -3,14 +3,15 @@
 
 #pragma once
 
-class ScopeParser
+#include "AST/ScopeNode.h"
+#include "AST/ASTContext.h"
+#include "Parser/ParserCursor.h"
+
+namespace Parser
 {
-public:
-    ScopeParser();
-    ~ScopeParser();
-
-private:
-
+    AST::ScopeNode &parse_scope(Cursor &cursor, AST::Context &context);
 };
+
+
 
 #endif

@@ -118,11 +118,30 @@ bool Lexer::parse_hex_literal(TokenCollection &tokens, LexerCursor &cursor) {
     return true;
 }
 
+bool Lexer::parse_sl_comment(TokenCollection &tokens, LexerCursor &cursor)
+{
+    if (!cursor.begins_with("//")) {
+        return false;
+    }
+
+    cursor.skip(2);
+    cursor.skip_until('\n');
+
+    return true;
+}
+
+bool Lexer::parse_ml_comment(TokenCollection &tokens, LexerCursor &cursor)
+{
+    return false;
+}
+
 void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
     
     std::vector<Lexer::LexerFunctionSignature> functions = {
         &Lexer::parse_string_literal,
         &Lexer::parse_varname,
+        &Lexer::parse_sl_comment,
+        &Lexer::parse_ml_comment,
         &Lexer::parse_char_token<';', Token::Type::t_semicolon>,
         &Lexer::parse_char_token<':', Token::Type::t_colon>,
         &Lexer::parse_char_token<',', Token::Type::t_comma>,
@@ -179,7 +198,12 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         }
 
         if (!matched) {
-            throw UnknownTokenException { std::string(cursor.it, cursor.it + 10), cursor.line, cursor.char_offset };
+            // construct a string with some context around the unknown token
+            if (cursor.it + 10 < cursor.input.end()) {
+                throw UnknownTokenException { std::string(cursor.it, cursor.it + 10), cursor.line, cursor.char_offset };
+            } else {
+                throw UnknownTokenException { std::string(cursor.it, cursor.input.end()), cursor.line, cursor.char_offset };
+            }
         }
     }
 }

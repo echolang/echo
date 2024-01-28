@@ -71,7 +71,11 @@ struct TokenCollection {
         tokens.clear();
         token_values.clear();
     }
-    
+
+    inline size_t size() const {
+        return tokens.size();
+    }
+
     TokenReference operator[](size_t index) const;
 };
 

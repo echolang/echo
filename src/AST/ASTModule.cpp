@@ -1,11 +1,1 @@
-#include "ASTModule.h"
-
-ASTModule::ASTModule()
-{
-
-}
-
-ASTModule::~ASTModule()
-{
-
-}
+#include "AST/ASTModule.h"
