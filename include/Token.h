@@ -21,7 +21,7 @@ public:
         t_logical_leq,              // <=
         t_logical_geq,              // >=
         t_accessorlr,               // ->
-        t_equals,                   // =
+        t_assign,                   // =
         t_op_inc,                   // ++
         t_op_dec,                   // --
         t_op_add,                   // +       

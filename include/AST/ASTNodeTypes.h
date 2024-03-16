@@ -16,9 +16,7 @@ namespace AST
         n_scope,
         n_literal,
         n_vardecl,
-        n_varassign,
-        n_varaccess,
-        n_funcdecl,
+        n_type,
     };
 
     template<typename T>

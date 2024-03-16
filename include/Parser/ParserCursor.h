@@ -30,8 +30,12 @@ namespace Parser
             return _index >= range_size();
         }
 
+        inline bool is_valid(size_t index) const {
+            return index < range_size();
+        }
+
         inline bool is_valid_offset(size_t offset) const {
-            return _index + offset < range_size();
+            return is_valid(_index + offset);
         }
 
         inline TokenReference current() const {
@@ -43,6 +47,42 @@ namespace Parser
             assert(is_valid_offset(offset));
             return tokens[_index + offset];
         }
+
+        inline const Token::Type type(size_t index) const {
+            if (!is_valid(index)) return Token::Type::t_unknown;
+            return tokens.tokens[index].type;
+        }
+
+        inline const Token::Type type() const {
+            return type(_index);
+        }
+
+        inline const Token::Type peek_type(size_t offset) const {
+            return type(_index + offset);
+        }
+
+        inline const bool is_type_at(size_t index, const Token::Type as_type) const {
+            return type(index) == as_type;
+        }
+
+        inline const bool is_type(const Token::Type as_type) const {
+            return is_type_at(_index, as_type);
+        }
+
+        inline const bool peek_is_type(size_t offset, const Token::Type as_type) const {
+            return is_type_at(_index + offset, as_type);
+        }
+
+        inline const bool is_type_sequence(size_t offset, std::initializer_list<Token::Type> types) const {
+            for (auto type : types) {
+                if (!is_type_at(_index + offset, type)) {
+                    return false;
+                }
+                offset++;
+            }
+            return true;
+        }
+
 
         inline void skip(size_t offset = 1) {
             _index += offset;
