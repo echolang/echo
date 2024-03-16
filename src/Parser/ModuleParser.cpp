@@ -16,7 +16,7 @@ void Parser::ModuleParser::parse(Cursor &cursor, AST::Module &module) const
 {
 }
 
-void Parser::ModuleParser::parse_file(std::filesystem::path path, AST::Module &module) const
+void Parser::ModuleParser::parse_file(std::filesystem::path path, AST::Module &module, AST::Collector &collector) const
 {
     // load the file into a string
     // we probably should use a stream in the future
@@ -44,7 +44,13 @@ void Parser::ModuleParser::parse_file(std::filesystem::path path, AST::Module &m
         module
     };
 
-    auto &scope_node = Parser::parse_scope(cursor, context);
+    auto payload = Payload {
+        cursor,
+        context,
+        collector
+    };
+
+    auto &scope_node = Parser::parse_scope(payload);
     
     module.files.emplace_back(AST::File(path, scope_node));
 

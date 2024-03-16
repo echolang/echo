@@ -152,7 +152,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_exact_token<"!=", Token::Type::t_logical_neq>,
         &Lexer::parse_exact_token<"<=", Token::Type::t_logical_leq>,
         &Lexer::parse_exact_token<">=", Token::Type::t_logical_geq>,
-        &Lexer::parse_char_token<'=', Token::Type::t_equals>,
+        &Lexer::parse_char_token<'=', Token::Type::t_assign>,
         &Lexer::parse_exact_token<"++", Token::Type::t_op_inc>,
         &Lexer::parse_exact_token<"--", Token::Type::t_op_dec>,
         &Lexer::parse_char_token<'+', Token::Type::t_op_add>,

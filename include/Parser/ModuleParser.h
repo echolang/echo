@@ -7,6 +7,7 @@
 #include "../Token.h"
 #include "../Lexer.h"
 #include "../AST/ASTModule.h"
+#include "../AST/ASTCollector.h"
 
 #include <memory>
 
@@ -22,7 +23,7 @@ namespace Parser
 
         void parse(Cursor &cursor, AST::Module &module) const;
 
-        void parse_file(std::filesystem::path path, AST::Module &module) const;
+        void parse_file(std::filesystem::path path, AST::Module &module, AST::Collector &collector) const;
     };
 };
 

@@ -2,26 +2,27 @@
 
 #include "AST/VarDeclNode.h"
 
-AST::ScopeNode & Parser::parse_scope(Cursor &cursor, AST::Context &context)
+#include "Parser/VarDeclParser.h"
+
+AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
-    auto &scope_node = context.module.nodes.emplace_back<AST::ScopeNode>();
+    auto &cursor = payload.cursor;
+    auto &context = payload.context;
+
+    auto &scope_node = context.emplace_node<AST::ScopeNode>();
 
     while (!cursor.is_done())
     {
-        auto token = cursor.current();
-
-        if (token.type() == Token::Type::t_varname)
-        {
-            auto &vardecl = context.module.nodes.emplace_back<AST::VarDeclNode>(
-                token, token
-            );
-
-            cursor.skip_until(Token::Type::t_semicolon);
-
-            scope_node.children.push_back(AST::make_ref<AST::VarDeclNode>(&vardecl));
+        // var declaration 
+        // can be:
+        //   int $foo =
+        //   $bar = 
+        if (
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign })
+        ) {
+            parse_vardecl(payload);
         }
-
-        cursor.skip();
     }
 
     return scope_node;
