@@ -17,6 +17,7 @@ namespace AST
         n_literal,
         n_vardecl,
         n_type,
+        n_expression,
     };
 
     template<typename T>

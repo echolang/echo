@@ -17,9 +17,7 @@ namespace AST
 
         static constexpr NodeType node_type = NodeType::n_scope;
 
-        const std::string node_description() override {
-            return "Scope()";
-        }
+        const std::string node_description() override;
 
     private:
 

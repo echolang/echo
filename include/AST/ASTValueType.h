@@ -33,23 +33,7 @@ namespace AST
         t_void,
     };
 
-    std::string get_primitive_name(ValueTypePrimitive primitive) {
-        switch (primitive) {
-            case ValueTypePrimitive::t_complex: return "complex";
-            case ValueTypePrimitive::t_int8: return "int8";
-            case ValueTypePrimitive::t_int16: return "int16";
-            case ValueTypePrimitive::t_int32: return "int32";
-            case ValueTypePrimitive::t_int64: return "int64";
-            case ValueTypePrimitive::t_uint8: return "uint8";
-            case ValueTypePrimitive::t_uint16: return "uint16";
-            case ValueTypePrimitive::t_uint32: return "uint32";
-            case ValueTypePrimitive::t_uint64: return "uint64";
-            case ValueTypePrimitive::t_float32: return "float32";
-            case ValueTypePrimitive::t_float64: return "float64";
-            case ValueTypePrimitive::t_bool: return "bool";
-            case ValueTypePrimitive::t_void: return "void";
-        };
-    }
+    std::string get_primitive_name(ValueTypePrimitive primitive);
 
     class ValueType {
 
@@ -59,6 +43,8 @@ namespace AST
         std::optional<std::string> name;
         std::map<std::string, ValueType> properties;
 
+        ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
+
     public:
 
         static ValueType make_void() {
@@ -66,8 +52,13 @@ namespace AST
         }
 
         static ValueType make_unknown() {
-            return ValueType(ValueTypeKind::t_unknown);
+            return ValueType(ValueTypeKind::t_unknown, ValueTypePrimitive::t_void);
         }
+
+        static ValueType void_type() {
+            return ValueType(ValueTypePrimitive::t_void);
+        }
+
 
         ValueType() = default;
         ValueType(ValueTypePrimitive primitive) : kind(ValueTypeKind::t_primitive), primitive(primitive) {}
@@ -77,13 +68,6 @@ namespace AST
             for (auto& prop : properties) {
                 this->properties[prop.name.value()] = prop;
             }
-        }
-
-        template<ValueTypeKind K, typename = std::enable_if_t<K == ValueTypeKind::t_unknown>>
-        ValueType(ValueTypeKind kind) : kind(kind), primitive(ValueTypePrimitive::t_void) {}
-
-        static ValueType void_type() {
-            return ValueType(ValueTypePrimitive::t_void);
         }
 
         std::string get_type_match_signature() const {
@@ -101,6 +85,15 @@ namespace AST
             }
 
             signature += "}";
+            return signature;
+        }
+
+        std::string get_type_desciption() const {
+            if (is_named()) {
+                return name.value();
+            }
+
+            return get_type_match_signature();
         }
 
         bool is_primitive() const {

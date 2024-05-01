@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 
+#include <cstdint>
+
 struct Token {
 public:
     enum class Type {
@@ -50,15 +52,21 @@ public:
     };
 
     Type type;
-    size_t line;
-    size_t char_offset;
+    uint32_t line;
+    uint32_t char_offset; // if you have a file source file thats 2GB, you're have other problems
 
-    Token(Type type, size_t line, size_t char_offset)
+    Token(Type type, uint32_t line, uint32_t char_offset)
         : type(type), line(line), char_offset(char_offset) {}
 };
 
 struct TokenReference;
 struct TokenCollection {
+    struct Slice {
+        const TokenCollection &tokens;
+        const size_t start;
+        const size_t end;
+    };
+
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
 
@@ -77,6 +85,10 @@ struct TokenCollection {
     }
 
     TokenReference operator[](size_t index) const;
+
+    Slice slice(size_t start, size_t end) const {
+        return Slice{*this, start, end};
+    }
 };
 
 class TokenReference {
