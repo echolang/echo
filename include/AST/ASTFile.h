@@ -13,18 +13,26 @@ namespace AST
     class File
     {
         const std::filesystem::path path;
+        const TokenCollection::Slice tokens_slice;
 
     public:
+
+        ScopeNode *root = nullptr;
+        
         File(
             const std::filesystem::path &path,
-            ScopeNode &root
+            const TokenCollection::Slice &tokens_slice
         ) : 
             path(path), 
-            root(root) 
+            tokens_slice(tokens_slice)
         {};
         ~File() {};
-        
-        ScopeNode &root;
+
+        const std::filesystem::path &get_path() const {
+            return path;
+        }
+
+        std::string debug_description() const;
     };
 };
 #endif

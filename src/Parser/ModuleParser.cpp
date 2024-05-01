@@ -40,8 +40,14 @@ void Parser::ModuleParser::parse_file(std::filesystem::path path, AST::Module &m
 
     auto cursor = Cursor(module.tokens, startindex, endindex);
 
+    auto &file = module.files.emplace_back(AST::File(
+        path, 
+        module.tokens.slice(startindex, endindex)
+    ));
+
     AST::Context context = {
-        module
+        .module = module,
+        .file = file
     };
 
     auto payload = Payload {
@@ -50,9 +56,7 @@ void Parser::ModuleParser::parse_file(std::filesystem::path path, AST::Module &m
         collector
     };
 
-    auto &scope_node = Parser::parse_scope(payload);
-    
-    module.files.emplace_back(AST::File(path, scope_node));
+    file.root = &Parser::parse_scope(payload);
 
     parse(cursor, module);
 }

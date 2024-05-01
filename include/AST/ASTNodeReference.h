@@ -24,6 +24,10 @@ namespace AST
 
         ~NodeReference() {}
 
+        inline Node *node() {
+            return parent_ptr;
+        }
+
         inline bool has() { 
             return parent_ptr != nullptr; 
         }

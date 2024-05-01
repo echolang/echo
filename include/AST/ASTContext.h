@@ -4,12 +4,14 @@
 #pragma once
 
 #include "ASTModule.h"
+#include "ASTFile.h"
 
 namespace AST
 {  
     struct Context
     {
         Module &module;
+        File &file;
 
         template <typename T, typename... Args>
             requires NodeTypeProvider<T>

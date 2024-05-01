@@ -15,12 +15,26 @@ namespace Parser
         size_t _end = 0;
 
     public:
+        struct Snapshot {
+            size_t index;
+            size_t end;
+        };
+
         const TokenCollection &tokens;
 
         Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = 0) : 
             tokens(tokens), _index(start), _end(end) 
         {}
         ~Cursor() {};
+
+        inline Snapshot snapshot() const {
+            return { _index, _end };
+        }
+
+        inline void restore(const Snapshot &snapshot) {
+            _index = snapshot.index;
+            _end = snapshot.end;
+        }
 
         inline size_t range_size() const {
             return _end > 0 ? _end : tokens.size();

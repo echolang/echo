@@ -6,6 +6,7 @@
 #include "ASTNode.h"
 #include "ASTValueType.h"
 #include "../Lexer.h"
+#include "TypeNode.h"
 
 namespace AST 
 {
@@ -14,10 +15,10 @@ namespace AST
     public:
         TokenReference token_varname;
 
-        ValueType type;
+        TypeNode *type_n;
 
-        VarDeclNode(TokenReference token_varname) : 
-            token_varname(token_varname)
+        VarDeclNode(TokenReference token_varname, TypeNode *type) : 
+            token_varname(token_varname), type_n(type)
         {};
 
         ~VarDeclNode() {};
@@ -25,7 +26,7 @@ namespace AST
         static constexpr NodeType node_type = NodeType::n_vardecl;
 
         const std::string node_description() override {
-            return "vardecl(" + token_type.value() + ">(" + token_varname.value() + ")";
+            return "vardecl<" + type_n->node_description() + ">(" + token_varname.value() + ")";
         }
 
     private:
