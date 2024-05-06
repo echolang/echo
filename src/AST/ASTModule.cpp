@@ -1,21 +1,58 @@
 #include "AST/ASTModule.h"
 #include "Debugging.h"
+#include "Lexer.h"
 
 std::string AST::Module::debug_description() const
 {
     std::string result = "[Module]\n";
-    for (auto &file : files) {
-        result += "File<" + file.get_path().string() + ">\n{\n";
-        result += DD::tabbify(file.debug_description(), 2) + "\n";
+    for (auto &file : _files) {
+        result += "File<" + file->get_path().string() + ">\n{\n";
+        result += DD::tabbify(file->debug_description(), 2) + "\n";
         result += "}\n";
     }
     return result;
 }
 
+AST::File &AST::Module::add_file(const std::filesystem::path &path)
+{
+    auto file_index = _files.size();
+    _files.push_back(std::make_unique<File>(path));
+
+    auto &file = *_files[file_index].get();
+
+    file.module = this;
+
+    return file;
+}
+
+AST::TokenizedFile & AST::Module::tokenize(Lexer &lexer, const AST::File &file)
+{
+    // throw an error if the file content is not available
+    if (!file.content.has_value()) {
+        throw std::runtime_error("Cannot tokenize a file without content");
+    }
+
+    // sanity check that the given file is actually allocated in this module
+    if (file.module != this) {
+        throw std::runtime_error("Cannot tokenize a file that is not in this module");
+    }
+
+    size_t startindex = tokens.size();
+    lexer.tokenize(tokens, file.content.value());
+    size_t endindex = tokens.size();
+
+    _tokenized_files.push_back(TokenizedFile {
+        .file = &file,
+        .token_slice = tokens.slice(startindex, endindex)
+    });
+
+    return _tokenized_files.back();
+}
+
 AST::module_handle_t AST::ModuleCollection::add_module(const std::string &name)
 {
-    _modules.push_back(std::make_unique<Module>(name));
-    auto handle = _modules.size() - 1;
+    auto handle = _modules.size();
+    _modules.push_back(std::make_unique<Module>(name, handle));
     _module_map[name] = handle;
     return handle;
 }

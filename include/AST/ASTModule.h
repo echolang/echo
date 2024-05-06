@@ -11,6 +11,10 @@
 
 #include <filesystem>
 #include <unordered_map>
+#include <vector>
+#include <memory>
+
+class Lexer;
 
 namespace AST
 {   
@@ -23,15 +27,26 @@ namespace AST
         NodeCollection nodes = NodeCollection();
 
         const std::string name;
+        const module_handle_t handle;
 
-        std::vector<File> files;
-
-        Module(const std::string &name) : name(name) {}
+        Module(const std::string &name, module_handle_t handle) : 
+            name(name), handle(handle) 
+        {}
         ~Module() {}
 
         std::string debug_description() const;
-        
+
+        File &add_file(const std::filesystem::path &path);
+        TokenizedFile &tokenize(Lexer &lexer, const File &file);
+
+        bool is_owner_of(const TokenReference &tokenref) const {
+            return tokenref.belongs_to(tokens);
+        }
+
     private:
+
+        std::vector<std::unique_ptr<File>> _files;
+        std::vector<TokenizedFile> _tokenized_files;
 
     };
 
@@ -57,9 +72,7 @@ namespace AST
         bool has_module(const std::string &name);
 
         private: 
-
             std::vector<std::unique_ptr<Module>> _modules;
-            
             std::unordered_map<std::string, module_handle_t> _module_map;
     };
 

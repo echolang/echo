@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <regex>
 #include <concepts>
 #include <functional>
@@ -27,11 +28,27 @@ struct LexerCursor
 {
     size_t line;
     size_t char_offset;
+    size_t end_of_line_offset;
     std::string::const_iterator it;
     const std::string &input;
 
-    LexerCursor(const std::string &input)
-        : line(1), char_offset(1), it(input.begin()), input(input) {}
+    LexerCursor(const std::string &input) : 
+        line(1), char_offset(1), it(input.begin()), input(input) 
+    {
+        determine_end_of_line();
+    }
+
+    inline const std::string::const_iterator begin() const {
+        return input.begin();
+    }
+
+    inline const std::string::const_iterator end() const {
+        return input.end();
+    }
+
+    inline const std::string::const_iterator end_of_line() const {
+        return input.begin() + end_of_line_offset;
+    }
 
     inline bool is_eof() const {
         return it == input.end();
@@ -45,15 +62,29 @@ struct LexerCursor
         return *(it + offset);
     }
 
+    inline void determine_end_of_line() {
+        if (is_eof()) {
+            end_of_line_offset = input.size();
+        } else {
+            end_of_line_offset = input.find(MHP_VOCAB_LB, it - input.begin());
+        }
+    }
+
     inline void skip(size_t offset = 1) {
+        bool did_increment_line = false;
         if (peek() == MHP_VOCAB_LB) {
             line++;
             char_offset = 1;
+            did_increment_line = true;
         } else {
             char_offset += offset;
         }
 
         it += offset;
+
+        if (did_increment_line) {
+            determine_end_of_line();
+        }
     }
 
     inline void skip_formatting() {
@@ -114,11 +145,10 @@ class Lexer
 
     using LexerFunctionSignature = std::function<bool(Lexer&, TokenCollection&, LexerCursor&)>;
 
-    const std::vector<LexerRule> rules = {
-        // { std::regex(R"(^[+\-]?([0-9]*[.])?[0-9]+)"),   Token::Type::t_number },
-        { std::regex(R"([a-zA-Z0-9_]\w*)"),             Token::Type::t_identifier },
+    struct LexerFunctionEntry {
+        void *context;
+        LexerFunctionSignature function;
     };
-
 
 public:
     struct TokenException : public std::exception {
@@ -152,6 +182,24 @@ public:
         {}
     };
 
+    // struct RegexTokenMatcher {
+    //     std::regex pattern;
+    //     Token::Type type;
+
+    //     RegexTokenMatcher(const std::string &pattern, Token::Type type) : pattern(pattern), type(type) {}
+
+    //     bool match(TokenCollection &tokens, LexerCursor &cursor) {
+    //         std::smatch match;
+    //         if (!std::regex_search(cursor.it, cursor.input.end(), match, pattern)) {
+    //             return false;
+    //         }
+
+    //         tokens.push(match.str(), type, cursor.line, cursor.char_offset);
+    //         cursor.skip(match.str().size());
+    //         return true;
+    //     }
+    // };
+
     Lexer() {}
 
     /**
@@ -173,7 +221,7 @@ public:
      */
     template <CSXStrLiteral lit, Token::Type T>
     bool parse_exact_token(TokenCollection &tokens, LexerCursor &cursor) {
-        constexpr auto size = sizeof(lit.value);
+        constexpr auto size = sizeof(lit.value) - 1;
         constexpr auto contents = lit.value;
 
         if (!cursor.begins_with(contents)) {
@@ -193,14 +241,17 @@ public:
         constexpr auto size = sizeof(pattern.value);
         constexpr auto contents = pattern.value;
 
-        std::regex regex(contents);
+        static std::regex regex(contents, std::regex_constants::optimize);
+
         std::smatch match;
-        if (!std::regex_search(cursor.it, cursor.input.end(), match, regex)) {
+        if (!std::regex_search(cursor.it, cursor.end_of_line(), match, regex)) {
             return false;
         }
 
-        tokens.push(match.str(), T, cursor.line, cursor.char_offset);
-        cursor.skip(match.str().size());
+        auto match_str = match.str();
+
+        tokens.push(match_str, T, cursor.line, cursor.char_offset);
+        cursor.skip(match_str.size());
         return true;
     }
 

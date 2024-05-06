@@ -1,12 +1,12 @@
 # Echo Lang
 
-Echo is a general-purpose programming language and a dialect of PHP that transpiles to C++ and is then compiled into a native binary.
+Echo is a statically typed, compiled, general-purpose programming language.
 
 Welcome to my highly opinionated and far from production-ready version of PHP that goes brrrr.
 
-To be clear, you cannot just write PHP code and expect it to work. Echo does a lot of things differently but is designed to be easily picked up by PHP developers.
+Echo takes a lot of inspiration from modern PHP. To be clear, you cannot just write PHP code and expect it to work. Echo does a lot of things differently but is designed to be easily picked up by PHP developers.
 
-This is not a new idea at all and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between Echo and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language inspired by PHP. I really want to create an LLVM front end at some point, but for now, transpiling to C++ is a much more reachable target. 
+This is not a new idea at all and has also been tried before, most prominently by [Hack](https://hacklang.org/). One of the main differences between Echo and Hack is that this project does not aim to be a drop-in replacement for PHP, but rather a new language inspired by modern PHP. I really want to create an LLVM front end at some point, but for now, transpiling to C++ is a much more reachable target. 
 
 ## Language 
 

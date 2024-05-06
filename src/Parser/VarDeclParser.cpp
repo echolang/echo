@@ -1,9 +1,10 @@
 #include "Parser/VarDeclParser.h"
 
 #include "AST/VarDeclNode.h"
+#include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 
-AST::VarDeclNode & Parser::parse_vardecl(Parser::Payload &payload)
+void Parser::parse_vardecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
@@ -15,14 +16,48 @@ AST::VarDeclNode & Parser::parse_vardecl(Parser::Payload &payload)
         type = &parse_type(payload);    
     }
 
-    vardecl = &payload.context.emplace_node<AST::VarDeclNode>(cursor.current(), type);
+    // fetch the varname and skip it
+    auto nametoken = cursor.current();
+    cursor.skip();
 
-    
-    
+    // ensure that we actually have a varname
+    if (nametoken.type() != Token::Type::t_varname) {
+        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(nametoken), Token::Type::t_varname, nametoken.type());
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    // check if the name is already taken in the current scope
+    auto prev_vardecl = payload.context.scope().find_vardecl_by_name(nametoken.value());
+
+    // we have a previous declaration, this might be a mutable variable
+    if (prev_vardecl != nullptr) 
+    {    
+        // if the variable is a const, we cannot redeclare nor mutate it
+        if (prev_vardecl->type_n != nullptr && prev_vardecl->type_n->is_const) {
+            payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
+            cursor.try_skip_to_next_statement();
+            return;
+        }
+    }
+
+    vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);
+    payload.context.scope().add_vardecl(*vardecl);
+
     if (type == nullptr) {
         // if there is no explicit type we need to be able to infer it
-
+        
     }
+
+    // skip identifier
+
+    // if next token is a semicolon we are done for now
+    if (cursor.current().type() == Token::Type::t_semicolon) {
+        cursor.skip();
+        return;
+    }
+
+    // next one must be "="
 
     // if (token.type() == Token::Type::t_varname)
     // {
@@ -36,6 +71,4 @@ AST::VarDeclNode & Parser::parse_vardecl(Parser::Payload &payload)
     // }
 
     cursor.skip();
-
-    return *vardecl;
 }

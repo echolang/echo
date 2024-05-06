@@ -83,6 +83,15 @@ namespace Parser
             return is_type_at(_index, as_type);
         }
 
+        const bool is_type(std::initializer_list<Token::Type> types) const {
+            for (auto type : types) {
+                if (is_type_at(_index, type)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         inline const bool peek_is_type(size_t offset, const Token::Type as_type) const {
             return is_type_at(_index + offset, as_type);
         }
@@ -108,6 +117,12 @@ namespace Parser
                 skip();
             }
         }
+
+        void skip_until(std::initializer_list<Token::Type> types);
+
+        // this function is usally called after an error has been detected
+        // it will skip until the next statement or block is found to continue parsing
+        void try_skip_to_next_statement();
 
     private:
 

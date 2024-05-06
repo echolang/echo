@@ -11,7 +11,7 @@
 
 namespace Parser
 {
-    AST::VarDeclNode &parse_vardecl(Payload &payload);
+    void parse_vardecl(Payload &payload);
 };
 
 #endif
