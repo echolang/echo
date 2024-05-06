@@ -13,13 +13,17 @@ namespace AST
     {
     public:
         ValueTypeCollection value_types;
-        std::vector<Issue> issues;
+        std::vector<std::unique_ptr<AST::IssueRecord>> issues;
         
-
         Collector();
         ~Collector();
 
-        void collect_issue(const Context &context, Issue &issue);
+        template <typename T, typename... Args>
+        void collect_issue(const CodeRef &code_ref, Args... args) {
+            issues.push_back(std::make_unique<T>(code_ref, args...));
+        }
+
+        void print_issues() const;
     };
 };
 

@@ -172,6 +172,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_char_token<']', Token::Type::t_close_bracket>,
         &Lexer::parse_exact_token<"true", Token::Type::t_bool_literal>,
         &Lexer::parse_exact_token<"false", Token::Type::t_bool_literal>,
+        &Lexer::parse_exact_token<"const", Token::Type::t_const>,
         &Lexer::parse_hex_literal,
         &Lexer::parse_regex_token<"^[0-9]+\\.[0-9]+f?", Token::Type::t_floating_literal>,
         &Lexer::parse_regex_token<"^[0-9]+", Token::Type::t_integer_literal>,
@@ -186,6 +187,9 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         // formatting aka whitespace, tabs, newlines
         if (cursor.is_formatting()) {
             cursor.skip_formatting();
+            if (cursor.is_eof()) {
+                break;
+            }
         }
 
         bool matched = false;
@@ -202,7 +206,17 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
             if (cursor.it + 10 < cursor.input.end()) {
                 throw UnknownTokenException { std::string(cursor.it, cursor.it + 10), cursor.line, cursor.char_offset };
             } else {
-                throw UnknownTokenException { std::string(cursor.it, cursor.input.end()), cursor.line, cursor.char_offset };
+                auto begin = cursor.it - 10;
+                if (begin < cursor.input.begin()) {
+                    begin = cursor.input.begin();
+                }
+                auto end = cursor.it + 10;
+                if (end > cursor.input.end()) {
+                    end = cursor.input.end();
+                }
+                auto extract = std::string(begin, end);
+
+                throw UnknownTokenException { extract, cursor.line, cursor.char_offset };
             }
         }
     }

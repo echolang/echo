@@ -25,8 +25,19 @@ namespace AST
 
         static constexpr NodeType node_type = NodeType::n_vardecl;
 
+        const std::string &name() const {
+            return token_varname.value();
+        }
+
         const std::string node_description() override {
-            return "vardecl<" + type_n->node_description() + ">(" + token_varname.value() + ")";
+            std::string typestr;
+            if (type_n != nullptr) {
+                typestr = type_n->node_description();
+            } else {
+                typestr = "unknown";
+            }
+
+            return "vardecl<" + typestr + ">(" + token_varname.value() + ")";
         }
 
     private:

@@ -59,3 +59,21 @@ $b = mv $a; // $b is now the owner of the value type, $a becomes unset
 ```
 
 This seems like a silly example, but it becomes more useful when combined with functions and complex value types.
+
+For example you could have a function normalizing a vector, which takes the vector by value, normalizes it and returns it.
+
+```php
+function normalize(mv Point $p) : mv Point {
+    $length = sqrt($p->x * $p->x + $p->y * $p->y);
+    $p->x = $p->x / $length;
+    $p->y = $p->y / $length;
+    return $p;
+}
+
+$a = Point(x: 1.0, y: 2.0);
+$normalized = normalize($a); // $a is moved into $p, $p is moved into $normalized
+
+echo $a; // Error: $a is unset
+```
+
+This way you can avoid unnecessary copies and allocations.

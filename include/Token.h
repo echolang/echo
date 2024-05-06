@@ -48,6 +48,7 @@ public:
         t_floating_literal,         // 123.456
         t_bool_literal,             // true, false
         t_varname,                  // $varname
+        t_const,                    // const
         t_unknown
     };
 
@@ -59,12 +60,27 @@ public:
         : type(type), line(line), char_offset(char_offset) {}
 };
 
+// function to convert token type to string
+// mostly used for debugging purposes
+const std::string token_type_string(Token::Type type);
+
 struct TokenReference;
 struct TokenCollection {
     struct Slice {
         const TokenCollection &tokens;
         const size_t start;
         const size_t end;
+
+        const TokenReference start_ref() const;
+        const TokenReference end_ref() const;
+
+        const Token &startt() const {
+            return tokens.tokens[start];
+        }
+
+        const Token &endt() const {
+            return tokens.tokens[end];
+        }
     };
 
     std::vector<Token> tokens;
@@ -105,16 +121,49 @@ public:
         : tokens(*tokens), index(index) 
     {}
 
+    inline bool belongs_to(const TokenCollection &tokens) const {
+        return &this->tokens == &tokens;
+    }
+
     inline const bool is_valid() const {
         return index < tokens.tokens.size();
+    }
+
+    inline const std::string &value() const {
+        return tokens.token_values[index];
+    }
+
+    inline const Token &token() const {
+        return tokens.tokens[index];
     }
 
     inline const Token::Type type() const {
         return tokens.tokens[index].type;
     }
 
-    inline const std::string &value() const {
-        return tokens.token_values[index];
+    inline const uint32_t line() const {
+        return tokens.tokens[index].line;
+    }
+
+    inline const uint32_t char_offset() const {
+        return tokens.tokens[index].char_offset;
+    }
+
+    // same as char_offset..
+    inline const uint32_t column() const {
+        return tokens.tokens[index].char_offset;
+    }
+
+    inline TokenReference next() const {
+        return TokenReference(tokens, index + 1);
+    }
+
+    inline TokenReference prev() const {
+        return TokenReference(tokens, index - 1);
+    }
+
+    inline TokenCollection::Slice make_slice(size_t offset = 0) const {
+        return tokens.slice(index, index + offset);
     }
 };
 

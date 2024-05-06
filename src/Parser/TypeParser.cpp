@@ -4,7 +4,14 @@
 
 bool Parser::can_parse_type(Parser::Payload &payload)
 {
-    if (payload.cursor.is_type(Token::Type::t_identifier)) {
+    // a type can be preceded by a const keyword
+    size_t offset = 0;
+    if (payload.cursor.is_type(Token::Type::t_const)) {
+        offset++;
+    }
+
+    // a type can be an identifier
+    if (payload.cursor.peek_is_type(offset, Token::Type::t_identifier)) {
         return true;
     }
 
@@ -50,10 +57,20 @@ AST::ValueType get_primitive_type(const std::string &types_string)
 
 AST::TypeNode &Parser::parse_type(Parser::Payload &payload)
 {
+    bool is_const = false;
+
+    if (payload.cursor.is_type(Token::Type::t_const)) {
+        is_const = true;
+        payload.cursor.skip();
+    }
+
     auto token = payload.cursor.current();
     auto primitive_type = get_primitive_type(token.value());
 
     payload.cursor.skip();
 
-    return payload.context.emplace_node<AST::TypeNode>(primitive_type, token);
+    auto &node = payload.context.emplace_node<AST::TypeNode>(primitive_type, token);
+    node.is_const = is_const;
+
+    return node;
 }

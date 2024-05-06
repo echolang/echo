@@ -1,5 +1,5 @@
-#ifndef LEXER_H
-#define LEXER_H
+#ifndef DEBUGGING_H
+#define DEBUGGING_H
 
 #pragma once
 

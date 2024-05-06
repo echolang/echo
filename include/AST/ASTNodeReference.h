@@ -24,11 +24,11 @@ namespace AST
 
         ~NodeReference() {}
 
-        inline Node *node() {
+        inline Node *node() const {
             return parent_ptr;
         }
 
-        inline bool has() { 
+        inline bool has() const { 
             return parent_ptr != nullptr; 
         }
         
@@ -40,14 +40,14 @@ namespace AST
 
         template <typename T>
             requires NodeTypeProvider<T>
-        inline T &get() {
+        inline T &get() const {
             assert(has_type<T>());
             return *static_cast<T*>(parent_ptr);
         }
 
         template <typename T>
             requires NodeTypeProvider<T>
-        inline T *get_ptr() {
+        inline T *get_ptr() const {
             assert(has_type<T>());
             return static_cast<T*>(parent_ptr);
         }
