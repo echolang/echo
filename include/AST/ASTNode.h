@@ -8,8 +8,10 @@
 #include <memory>
 #include "ASTNodeTypes.h"
 #include "ASTNodeReference.h"
+#include "ASTVisitor.h"
 
-namespace AST {
+namespace AST 
+{
     class Node
     {
     public:
@@ -20,6 +22,8 @@ namespace AST {
         virtual const bool is_assignable() {
             return false;
         }
+
+        virtual void accept(Visitor &visitor) = 0;
     };
 
     typedef std::vector<std::unique_ptr<Node>> NodeList;

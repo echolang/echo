@@ -7,6 +7,7 @@
 #include "ASTValueType.h"
 #include "../Lexer.h"
 #include "TypeNode.h"
+#include "ExprNode.h"
 
 namespace AST 
 {
@@ -16,6 +17,8 @@ namespace AST
         TokenReference token_varname;
 
         TypeNode *type_n;
+
+        ExprNode *init_expr = nullptr;
 
         VarDeclNode(TokenReference token_varname, TypeNode *type) : 
             token_varname(token_varname), type_n(type)
@@ -37,7 +40,17 @@ namespace AST
                 typestr = "unknown";
             }
 
-            return "vardecl<" + typestr + ">(" + token_varname.value() + ")";
+            std::string desc = "vardecl<" + typestr + ">(" + token_varname.value() + ")";
+
+            if (init_expr != nullptr) {
+                desc += " = " + init_expr->node_description();
+            }
+
+            return desc;
+        }
+
+        void accept(Visitor& visitor) override {
+            visitor.visitVarDecl(*this);
         }
 
     private:

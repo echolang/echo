@@ -11,10 +11,23 @@ set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
 
 message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 
+# LLVM
+find_package(LLVM REQUIRED CONFIG)
+
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+add_definitions(${LLVM_DEFINITIONS})
+include_directories(${LLVM_INCLUDE_DIRS})
+link_directories(${LLVM_LIBRARY_DIRS})
+
+# Echo 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${SOURCES})
+
+llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)
+target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
 include_directories(${CMAKE_SOURCE_DIR}/include)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)

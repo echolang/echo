@@ -3,6 +3,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
+#include "Parser/ExprParser.h"
 
 void Parser::parse_vardecl(Parser::Payload &payload)
 {
@@ -39,23 +40,50 @@ void Parser::parse_vardecl(Parser::Payload &payload)
             cursor.try_skip_to_next_statement();
             return;
         }
+
+        // we do not allow to redefine the type of a variable, the type 
+        // has to be either explictly set in the firt declaration or inferred
+        if (prev_vardecl->type_n != nullptr && type != nullptr) {
+            payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
+            cursor.try_skip_to_next_statement();
+            return;
+        }
     }
 
     vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);
     payload.context.scope().add_vardecl(*vardecl);
-
-    if (type == nullptr) {
-        // if there is no explicit type we need to be able to infer it
-        
-    }
-
-    // skip identifier
 
     // if next token is a semicolon we are done for now
     if (cursor.current().type() == Token::Type::t_semicolon) {
         cursor.skip();
         return;
     }
+
+    if (!payload.cursor.is_type(Token::Type::t_assign)) {
+        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    cursor.skip();
+
+    // parse the expression
+    auto &expr = parse_expr(payload);
+    vardecl->init_expr = &expr;
+
+    if (type == nullptr) {
+        // if there is no explicit type we need to be able to infer it
+        if (vardecl->init_expr == nullptr) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(cursor.current()), "cannot infer type of variable without an initializer");
+            cursor.try_skip_to_next_statement();
+            return;
+        }
+        else {
+            vardecl->type_n = &payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type());
+        }
+    }
+
+    // skip identifier
 
     // next one must be "="
 

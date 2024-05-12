@@ -51,7 +51,8 @@ bool Lexer::parse_varname(TokenCollection &tokens, LexerCursor &cursor)
     if (cursor.peek() != '$') {
         return false;
     }
-
+    
+    auto start_col = cursor.char_offset;
     auto start = cursor.it;
     cursor.skip();
 
@@ -59,7 +60,7 @@ bool Lexer::parse_varname(TokenCollection &tokens, LexerCursor &cursor)
         cursor.skip();
     }
 
-    tokens.push(std::string(start, cursor.it), Token::Type::t_varname, cursor.line, cursor.char_offset);
+    tokens.push(std::string(start, cursor.it), Token::Type::t_varname, cursor.line, start_col);
 
     return true;
 }
