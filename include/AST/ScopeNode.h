@@ -27,6 +27,10 @@ namespace AST
 
         const std::string node_description() override;
 
+        void accept(Visitor& visitor) override {
+            visitor.visitScope(*this);
+        }
+
         inline ScopeNode &parent() const {
             assert(parent_ptr);
             return *parent_ptr;

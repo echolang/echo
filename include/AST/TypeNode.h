@@ -36,6 +36,10 @@ namespace AST
             return "type<" + const_str + type.get_type_desciption() + ">";
         }
 
+        void accept(Visitor& visitor) override {
+            visitor.visitType(*this);
+        }
+
     private:
 
     };

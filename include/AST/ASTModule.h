@@ -41,7 +41,10 @@ namespace AST
 
         bool is_owner_of(const TokenReference &tokenref) const {
             return tokenref.belongs_to(tokens);
-        }
+        }   
+
+        // file iterator
+        FileIterable files() { return FileIterable(_files); }
 
     private:
 
@@ -70,6 +73,17 @@ namespace AST
         Module &find_module(const std::string &name);
 
         bool has_module(const std::string &name);
+
+        // iterator
+        using iterator = std::vector<std::unique_ptr<Module>>::iterator;
+        using const_iterator = std::vector<std::unique_ptr<Module>>::const_iterator;
+
+        iterator begin() { return _modules.begin(); }
+        iterator end() { return _modules.end(); }
+        const_iterator begin() const { return _modules.begin(); }
+        const_iterator end() const { return _modules.end(); }
+        const_iterator cbegin() const { return _modules.cbegin(); }
+        const_iterator cend() const { return _modules.cend(); }
 
         private: 
             std::vector<std::unique_ptr<Module>> _modules;

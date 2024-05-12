@@ -7,6 +7,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
 #include "Parser/ModuleParser.h"
+#include "Compiler/LLVM/LLVMCompiler.h"
 
 #include <chrono>
 
@@ -33,7 +34,7 @@ int main() {
     for (auto &token : module.tokens.tokens) {
         auto value = module.tokens.token_values[tokeni];
         tokeni++;
-        std::cout << token_type_string(token.type) << " " << value << std::endl;
+        std::cout << token_type_string(token.type) << " " << value << token.line << ":" << token.char_offset << std::endl;
     }
 
     std::cout << "Module: " << module.debug_description() << std::endl;
@@ -42,6 +43,14 @@ int main() {
     
     // print how long it took in milliseconds
     std::cout << "Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+
+    // compile the module
+    LLVMCompiler compiler;
+    compiler.compile_bundle(bundle);
+
+    compiler.printIR(false);
+
+    compiler.run_code();
     
     return 0;
 }

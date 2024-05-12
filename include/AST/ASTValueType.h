@@ -70,6 +70,22 @@ namespace AST
             }
         }
 
+        bool is_primitive() const {
+            return kind == ValueTypeKind::t_primitive;
+        }
+
+        bool is_primitive_of_type(ValueTypePrimitive primitive) const {
+            return is_primitive() && this->primitive == primitive;
+        }
+
+        inline ValueTypePrimitive get_primitive_type() const {
+            return primitive;
+        }
+
+        bool is_named() const {
+            return name.has_value();
+        }
+
         std::string get_type_match_signature() const {
             if (is_primitive()) {
                 return get_primitive_name(primitive);
@@ -94,14 +110,6 @@ namespace AST
             }
 
             return get_type_match_signature();
-        }
-
-        bool is_primitive() const {
-            return kind == ValueTypeKind::t_primitive;
-        }
-
-        bool is_named() const {
-            return name.has_value();
         }
 
     };

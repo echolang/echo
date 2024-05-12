@@ -13,6 +13,26 @@
 namespace AST
 {  
     class Module;
+    class File;
+
+    class FileIterable {
+        std::vector<std::unique_ptr<File>>& _files;
+    public:
+        FileIterable(std::vector<std::unique_ptr<File>>& files) : _files(files) {}
+
+        class Iterator {
+            using VecIterator = std::vector<std::unique_ptr<File>>::iterator;
+            VecIterator _it;
+        public:
+            Iterator(VecIterator it) : _it(it) {}
+            Iterator& operator++() { ++_it; return *this; }
+            bool operator!=(const Iterator& other) const { return _it != other._it; }
+            File& operator*() const { return **_it; }
+        };
+
+        Iterator begin() { return Iterator(_files.begin()); }
+        Iterator end() { return Iterator(_files.end()); }
+    };
 
     class File
     {
