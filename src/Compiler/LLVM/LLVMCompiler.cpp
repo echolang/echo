@@ -154,3 +154,84 @@ void LLVMCompiler::printIR(bool toFile) {
     }
 }
 
+void LLVMCompiler::run_code() {
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
+
+    std::string errorStr;
+    const llvm::TargetOptions opts;
+    llvm::ExecutionEngine *EE = llvm::EngineBuilder(std::move(llvm_module))
+                                .setErrorStr(&errorStr)
+                                .setEngineKind(llvm::EngineKind::JIT)
+                                .setTargetOptions(opts)
+                                .create();
+
+    if (!EE) {
+        llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
+        return;
+    }
+
+    EE->finalizeObject();
+
+    auto *func = EE->FindFunctionNamed("main");
+    if (!func) {
+        llvm::errs() << "Function 'main' not found in module.\n";
+        return;
+    }
+
+    std::vector<llvm::GenericValue> noargs;
+    llvm::GenericValue gv = EE->runFunction(func, noargs);
+
+    llvm::outs() << "Function 'main' executed.\n";
+
+    delete EE;
+    llvm::llvm_shutdown();
+}
+
+void LLVMCompiler::make_exec(std::string executable_name)
+{
+    llvm::InitializeAllTargetInfos();
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmParsers();
+    llvm::InitializeAllAsmPrinters();
+
+    auto TargetTriple = llvm::sys::getDefaultTargetTriple();
+
+    std::string Error;
+    auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
+    if (!Target) {
+        llvm::errs() << Error;
+        return;
+    }
+
+    auto CPU = "generic";
+    auto Features = "";
+
+    llvm::TargetOptions opt;
+    auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, llvm::Reloc::PIC_);
+
+    llvm_module->setDataLayout(TargetMachine->createDataLayout());
+    llvm_module->setTargetTriple(TargetTriple);
+
+    auto Filename = "output.o";
+    std::error_code EC;
+    llvm::raw_fd_ostream dest(Filename, EC, llvm::sys::fs::OF_None);
+
+    if (EC) {
+        llvm::errs() << "Could not open file: " << EC.message();
+        return;
+    }
+
+    llvm::legacy::PassManager pass;
+    auto FileType = llvm::CodeGenFileType::ObjectFile;
+
+    if (TargetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+        llvm::errs() << "TargetMachine can't emit a file of this type";
+        return;
+    }
+
+    pass.run(*llvm_module);
+    dest.flush();
+}
