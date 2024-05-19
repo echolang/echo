@@ -37,6 +37,8 @@ namespace AST
 
         std::optional<ValueTypePrimitive> expected_primitive_type;
 
+        std::optional<std::string> override_literal_value;
+
         LiteralPrimitiveExprNode(TokenReference token) :
             token_literal(token)
         {
@@ -48,8 +50,12 @@ namespace AST
         {
         };
 
+        const std::string effective_token_literal_value() const {
+            return override_literal_value.value_or(token_literal.value());
+        }
+
         const std::string node_description() override {
-            return "literal<" + result_type().get_type_desciption() + ">(" + token_literal.value() + ")";
+            return "literal<" + result_type().get_type_desciption() + ">(" + effective_token_literal_value() + ")";
         }
     };
 
@@ -110,6 +116,7 @@ namespace AST
     class LiteralIntExprNode : public LiteralPrimitiveExprNode
     {
     public:
+
         LiteralIntExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
         {};

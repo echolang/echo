@@ -5,6 +5,11 @@
 
 #include <format>
 
+bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
+{
+    return true; // todo
+}
+
 AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
@@ -20,7 +25,7 @@ AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNo
 }
 
 
-AST::LiteralFloatExprNode *parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
+AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
@@ -65,7 +70,39 @@ AST::LiteralFloatExprNode *parse_literal_float(Parser::Payload &payload, AST::Ty
         // integers
         else if (expected_type->type.is_numeric_type()) 
         {
-            assert(false && "unimplemented");
+            // determine if the literal has any decimal values besides 0
+            // if so, we emit a error (not just a warning) because the user highly likely made a mistake
+            // or is expecting a wrong type.
+            double dliteral = std::stod(node.get_fvalue_string());
+            double dliteral_cmp = (double) (long long) dliteral;
+
+            if (dliteral != dliteral_cmp) {
+                payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
+                    payload.context.code_ref(current_token), 
+                    std::format(
+                        "The floating point number literal '{}' cannot be implicitly converted to an integer type due to non zero decimal values.", 
+                        node.get_fvalue_string()
+                    )
+                );
+
+                return nullptr;
+            }
+
+            // if we end up here our floating point number is a whole number
+            // so we can safely convert it to an integer, but we still have to check 
+            // if the integer type will fit the literal 
+
+            // the int literal is simply the fvalue string with everything after the dot removed
+            std::string int_literal = node.get_fvalue_string().substr(0, node.get_fvalue_string().find('.'));
+
+            if (!can_hold_literal_int(payload, expected_type->type, int_literal, current_token)) {
+                return nullptr;
+            }
+
+            auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token);
+            casted_node.override_literal_value.emplace(int_literal);
+
+            return &casted_node;
         }
         else {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(

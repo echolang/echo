@@ -33,8 +33,24 @@ namespace AST
         t_void,
     };
 
+    struct IntegerSize {
+        uint8_t size;
+        bool is_signed;
+
+        IntegerSize(uint8_t size, bool is_signed) : size(size), is_signed(is_signed) {}
+
+        int64_t get_max_negative_value() const {
+            return is_signed ? -(1 << (size * 8 - 1)) : 0;
+        }
+
+        uint64_t get_max_positive_value() const {
+            return is_signed ? (1 << (size * 8 - 1)) - 1 : (1 << (size * 8)) - 1;
+        }
+    };
+
     std::string get_primitive_name(ValueTypePrimitive primitive);
     uint8_t get_primitive_size(ValueTypePrimitive primitive);
+    IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
     class ValueType {
 
@@ -137,32 +153,29 @@ namespace AST
             }
         }
 
-        bool will_fit_into(ValueType other) const {
-            if (!(is_primitive() && other.is_primitive())) {
+        bool is_unsigned_integer() const {
+            if (!is_primitive()) {
                 return false;
             }
 
-            // for floating types we can just check if the size is smaller
-            if (is_floating_type() && other.is_floating_type()) {
-                return get_primitive_size(primitive) <= get_primitive_size(other.primitive);
-            }            
-
-            // for integers we need to check if the size is smaller and if the sign is compatible
-            else if (is_numeric_type() && other.is_numeric_type()) {
-                if (is_signed_integer() && !other.is_signed_integer()) {
-                    return false;
-                }
-
-                return get_primitive_size(primitive) <= get_primitive_size(other.primitive);
+            switch (this->primitive)
+            {
+            case ValueTypePrimitive::t_uint8:
+            case ValueTypePrimitive::t_uint16:
+            case ValueTypePrimitive::t_uint32:
+            case ValueTypePrimitive::t_uint64:
+                return true;
+            
+            default:
+                return false;
             }
-
-            // bool will fit into all numeric types
-            else if (primitive == ValueTypePrimitive::t_bool) {
-                return other.is_numeric_type();
-            }
-
-            return false;
         }
+
+        bool is_integer() const {
+            return is_signed_integer() || is_unsigned_integer();
+        }
+
+        bool will_fit_into(ValueType other) const;
         
         inline ValueTypePrimitive get_primitive_type() const {
             return primitive;
