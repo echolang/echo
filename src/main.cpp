@@ -7,7 +7,9 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
 #include "Parser/ModuleParser.h"
+#include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
+
 
 #include <chrono>
 
@@ -44,13 +46,33 @@ int main() {
     // print how long it took in milliseconds
     std::cout << "Time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
 
+    if (bundle.collector.has_critical_issues()) {
+
+        std::cout << "Critical issues found, cannot compile." << std::endl;
+        return 1;
+    }
+
     // compile the module
     LLVMCompiler compiler;
-    compiler.compile_bundle(bundle);
 
-    compiler.printIR(false);
+    try {
+        compiler.compile_bundle(bundle);
 
-    compiler.run_code();
+        compiler.printIR(false);
+
+        compiler.run_code();
+
+        // compiler.make_exec("test");
+
+    } catch (Compiler::CompilerException &e) {
+        auto issue = &e.issue();
+
+        std::cout << "Compiler Exception: " << e.what() << std::endl;
+        std::cout << "Issue at " << issue->code_ref.token_slice.startt().line << ":" << issue->code_ref.token_slice.startt().char_offset << std::endl;
+        std::cout << issue->message() << std::endl;
+        std::cout << issue->code_ref.get_referenced_code_excerpt() << std::endl;
+    
+    }
     
     return 0;
 }

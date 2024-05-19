@@ -16,6 +16,7 @@ namespace AST
         n_scope,
         n_literal,
         n_vardecl,
+        n_varref,
         n_type,
         n_expression,
     };

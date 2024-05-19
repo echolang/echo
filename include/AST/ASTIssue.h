@@ -28,6 +28,8 @@ public: \
 namespace AST
 {  
     class VarDeclNode;
+    enum class ValueTypePrimitive;
+    class ValueType;
 
     enum class IssueSeverity
     {
@@ -64,18 +66,25 @@ namespace AST
             }
         }
 
+        bool is_critical() const {
+            return severity == IssueSeverity::Error;
+        }
+
         virtual const std::string message() const = 0;
     };
 
     namespace Issue
     {
-        MAKE_ISSUE_DEF1(GenericError, IssueSeverity::Error, const std::string&, _message);
-        MAKE_ISSUE_DEF1(GenericWarning, IssueSeverity::Warning, const std::string&, _message);
-        MAKE_ISSUE_DEF1(GenericInfo, IssueSeverity::Info, const std::string&, _message);
+        MAKE_ISSUE_DEF1(GenericError, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(GenericWarning, IssueSeverity::Warning, const std::string, _message);
+        MAKE_ISSUE_DEF1(GenericInfo, IssueSeverity::Info, const std::string, _message);
 
         MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual);
         MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration);
-    }
+        MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
+        // MAKE_ISSUE_DEF2(ValueTypeConflict, IssueSeverity::Error, const ValueType *, expected, ValueType *, actual);
 
+        MAKE_ISSUE_DEF1(LossOfPrecision, IssueSeverity::Warning, const std::string, _message);
+    }
 };
 #endif

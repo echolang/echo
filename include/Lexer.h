@@ -67,6 +67,7 @@ struct LexerCursor
             end_of_line_offset = input.size();
         } else {
             end_of_line_offset = input.find(MHP_VOCAB_LB, it - input.begin());
+            end_of_line_offset = end_of_line_offset > input.size() ? input.size() : end_of_line_offset;
         }
     }
 

@@ -35,7 +35,7 @@ bool AST::ScopeNode::is_varname_taken(const std::string &varname) const
     return false;
 }
 
-const AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varname) const
+AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varname) const
 {
     auto found = _declared_variables.find(varname);
     if (found != _declared_variables.end()) {

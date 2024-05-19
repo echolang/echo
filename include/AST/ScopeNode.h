@@ -13,7 +13,7 @@ namespace AST
 
     class ScopeNode : public Node
     {
-        std::unordered_map<std::string, const VarDeclNode *> _declared_variables;
+        std::unordered_map<std::string, VarDeclNode *> _declared_variables;
 
     public:
         ScopeNode *parent_ptr = nullptr;
@@ -66,7 +66,7 @@ namespace AST
 
         bool is_varname_taken(const std::string &varname) const;
 
-        const VarDeclNode *find_vardecl_by_name(const std::string &varname) const;
+        VarDeclNode *find_vardecl_by_name(const std::string &varname) const;
 
     private:
 

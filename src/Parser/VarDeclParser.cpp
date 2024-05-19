@@ -11,10 +11,19 @@ void Parser::parse_vardecl(Parser::Payload &payload)
 
     AST::TypeNode *type = nullptr;
     AST::VarDeclNode *vardecl = nullptr;
+    bool is_const = false;
 
     // when we have an identifier we assume it to be the variable type
     if (can_parse_type(payload))  {
-        type = &parse_type(payload);    
+        type = &parse_type(payload);
+        is_const = type->is_const;
+    }
+
+    // special case is "const" but type must be inferred
+    // const $ronon = 10;
+    else if (cursor.is_type(Token::Type::t_const)) {
+        cursor.skip();
+        is_const = true;
     }
 
     // fetch the varname and skip it
@@ -35,7 +44,7 @@ void Parser::parse_vardecl(Parser::Payload &payload)
     if (prev_vardecl != nullptr) 
     {    
         // if the variable is a const, we cannot redeclare nor mutate it
-        if (prev_vardecl->type_n != nullptr && prev_vardecl->type_n->is_const) {
+        if (!prev_vardecl->has_type() && prev_vardecl->type_node()->is_const) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
             cursor.try_skip_to_next_statement();
             return;
@@ -43,7 +52,7 @@ void Parser::parse_vardecl(Parser::Payload &payload)
 
         // we do not allow to redefine the type of a variable, the type 
         // has to be either explictly set in the firt declaration or inferred
-        if (prev_vardecl->type_n != nullptr && type != nullptr) {
+        if (!prev_vardecl->has_type() && type != nullptr) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
             cursor.try_skip_to_next_statement();
             return;
@@ -68,10 +77,10 @@ void Parser::parse_vardecl(Parser::Payload &payload)
     cursor.skip();
 
     // parse the expression
-    auto &expr = parse_expr(payload);
-    vardecl->init_expr = &expr;
+    auto expr = parse_expr(payload, vardecl->optional_type_node());
+    vardecl->init_expr = expr;
 
-    if (type == nullptr) {
+    if (!vardecl->has_type()) {
         // if there is no explicit type we need to be able to infer it
         if (vardecl->init_expr == nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(cursor.current()), "cannot infer type of variable without an initializer");
@@ -79,24 +88,11 @@ void Parser::parse_vardecl(Parser::Payload &payload)
             return;
         }
         else {
-            vardecl->type_n = &payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type());
+            vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type()));
+            vardecl->type_node()->is_const = is_const;
         }
     }
 
-    // skip identifier
-
-    // next one must be "="
-
-    // if (token.type() == Token::Type::t_varname)
-    // {
-    //     auto &vardecl = context.module.nodes.emplace_back<AST::VarDeclNode>(
-    //         token, token
-    //     );
-
-    //     cursor.skip_until(Token::Type::t_semicolon);
-
-    //     scope_node.children.push_back(AST::make_ref<AST::VarDeclNode>(&vardecl));
-    // }
-
+    // skip the semicolon
     cursor.skip();
 }

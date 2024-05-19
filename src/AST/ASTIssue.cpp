@@ -35,3 +35,12 @@ ISSUE_MESSAGE_FNC(VariableRedeclaration)
         previous_declaration->token_varname.column());
 }
 
+ISSUE_MESSAGE_FNC(UnknownVariable)
+{
+    return std::format("The variable '{}' is not declared in the current scope", variable_name);
+}
+
+ISSUE_MESSAGE_FNC(LossOfPrecision)
+{
+    return std::format("This operation results in a loss of precision: {}", _message);
+}

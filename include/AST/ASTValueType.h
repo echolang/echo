@@ -34,6 +34,7 @@ namespace AST
     };
 
     std::string get_primitive_name(ValueTypePrimitive primitive);
+    uint8_t get_primitive_size(ValueTypePrimitive primitive);
 
     class ValueType {
 
@@ -78,6 +79,91 @@ namespace AST
             return is_primitive() && this->primitive == primitive;
         }
 
+        bool is_numeric_type() const {
+            if (!is_primitive()) {
+                return false;
+            }
+
+            switch (this->primitive)
+            {
+            case ValueTypePrimitive::t_int8:
+            case ValueTypePrimitive::t_int16:
+            case ValueTypePrimitive::t_int32:
+            case ValueTypePrimitive::t_int64:
+            case ValueTypePrimitive::t_uint8:
+            case ValueTypePrimitive::t_uint16:
+            case ValueTypePrimitive::t_uint32:
+            case ValueTypePrimitive::t_uint64:
+            case ValueTypePrimitive::t_float32:
+            case ValueTypePrimitive::t_float64:
+                return true;
+            
+            default:
+                return false;
+            }
+        }
+
+        bool is_floating_type() const {
+            if (!is_primitive()) {
+                return false;
+            }
+
+            switch (this->primitive)
+            {
+            case ValueTypePrimitive::t_float32:
+            case ValueTypePrimitive::t_float64:
+                return true;
+            
+            default:
+                return false;
+            }
+        }
+
+        bool is_signed_integer() const {
+            if (!is_primitive()) {
+                return false;
+            }
+
+            switch (this->primitive)
+            {
+            case ValueTypePrimitive::t_int8:
+            case ValueTypePrimitive::t_int16:
+            case ValueTypePrimitive::t_int32:
+            case ValueTypePrimitive::t_int64:
+                return true;
+            
+            default:
+                return false;
+            }
+        }
+
+        bool will_fit_into(ValueType other) const {
+            if (!(is_primitive() && other.is_primitive())) {
+                return false;
+            }
+
+            // for floating types we can just check if the size is smaller
+            if (is_floating_type() && other.is_floating_type()) {
+                return get_primitive_size(primitive) <= get_primitive_size(other.primitive);
+            }            
+
+            // for integers we need to check if the size is smaller and if the sign is compatible
+            else if (is_numeric_type() && other.is_numeric_type()) {
+                if (is_signed_integer() && !other.is_signed_integer()) {
+                    return false;
+                }
+
+                return get_primitive_size(primitive) <= get_primitive_size(other.primitive);
+            }
+
+            // bool will fit into all numeric types
+            else if (primitive == ValueTypePrimitive::t_bool) {
+                return other.is_numeric_type();
+            }
+
+            return false;
+        }
+        
         inline ValueTypePrimitive get_primitive_type() const {
             return primitive;
         }
