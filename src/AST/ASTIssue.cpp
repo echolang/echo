@@ -44,3 +44,8 @@ ISSUE_MESSAGE_FNC(LossOfPrecision)
 {
     return std::format("This operation results in a loss of precision: {}", _message);
 }
+
+ISSUE_MESSAGE_FNC(InvalidTypeConversion)
+{
+    return std::format("Invalid type conversion: {}", _message);
+}
