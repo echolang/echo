@@ -41,7 +41,7 @@ AST::ValueType get_primitive_type(const std::string &types_string)
     } else if (types_string == "uint64") {
         return AST::ValueType(AST::ValueTypePrimitive::t_uint64);
     } else if (types_string == "float") {
-        return AST::ValueType(AST::ValueTypePrimitive::t_float64);
+        return AST::ValueType(AST::ValueTypePrimitive::t_float32);
     } else if (types_string == "float32") {
         return AST::ValueType(AST::ValueTypePrimitive::t_float32);
     } else if (types_string == "float64") {

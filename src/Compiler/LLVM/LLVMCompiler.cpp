@@ -6,8 +6,13 @@
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Utils.h>
 
 #include "AST/VarDeclNode.h"
+#include "AST/ExprNode.h"
 
 #include <iostream>
 
@@ -29,6 +34,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     if (!llvm_module) {
         llvm::errs() << "Failed to create module.\n";
     }
+
+    llvm::FunctionCallee CalleeF = llvm_module->getOrInsertFunction("printf",
+        llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true /* this is var arg func type*/) 
+    );
 
     llvm::FunctionType *funcType = llvm::FunctionType::get(llvm_builder->getVoidTy(), false);
     llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", llvm_module.get());
@@ -56,75 +65,76 @@ void LLVMCompiler::visitType(AST::TypeNode &node)
 {
 }
 
-void LLVMCompiler::visitVarDecl(AST::VarDeclNode &node)
-{
-    auto varname = node.name();
-    llvm::Type* type = nullptr;
 
-    switch (node.type_n->type.get_primitive_type()) {
+llvm::Type *LLVMCompiler::get_llvm_type(AST::ValueTypePrimitive type)
+{
+    switch (type) {
         case AST::ValueTypePrimitive::t_float32:
-            type = llvm::Type::getFloatTy(*llvm_context);
-            break;
+            return llvm::Type::getFloatTy(*llvm_context);
         case AST::ValueTypePrimitive::t_float64:
-            type = llvm::Type::getDoubleTy(*llvm_context);
-            break;
+            return llvm::Type::getDoubleTy(*llvm_context);
         case AST::ValueTypePrimitive::t_int8:
-            type = llvm::Type::getInt8Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt8Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_int16:
-            type = llvm::Type::getInt16Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt16Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_int32:
-            type = llvm::Type::getInt32Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt32Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_int64:
-            type = llvm::Type::getInt64Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt64Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_uint8:
-            type = llvm::Type::getInt8Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt8Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_uint16:
-            type = llvm::Type::getInt16Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt16Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_uint32:
-            type = llvm::Type::getInt32Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt32Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_uint64:
-            type = llvm::Type::getInt64Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt64Ty(*llvm_context);
         case AST::ValueTypePrimitive::t_bool:
-            type = llvm::Type::getInt1Ty(*llvm_context);
-            break;
+            return llvm::Type::getInt1Ty(*llvm_context);
         default:
             throw std::runtime_error("Unsupported variable type");
     }
+}
+
+void LLVMCompiler::visitVarDecl(AST::VarDeclNode &node)
+{
+    auto varname = node.name();
+    llvm::Type* type = get_llvm_type(node.type_node()->type.get_primitive_type());
 
     // alloc the variable on the stack
     llvm::AllocaInst* alloca = llvm_builder->CreateAlloca(type, nullptr, varname);
 
+    // store the variable in the map
+    var_map[&node] = alloca;
+
     if (node.init_expr) {
         node.init_expr->accept(*this);
+
+        // check that the visited node pushed a value on the stack
+        assert(value_stack.size() > 0 && "No value on the stack");
+
         llvm::Value* init_value = value_stack.top();
+
+        // if the type is a float but our init_value is a double we need to convert it
+        if (type->isFloatTy() && init_value->getType()->isDoubleTy()) {
+            init_value = llvm_builder->CreateFPTrunc(init_value, type);
+        }
+        else if (type->isDoubleTy() && init_value->getType()->isFloatTy()) {
+            init_value = llvm_builder->CreateFPExt(init_value, type);
+        }
+
         llvm_builder->CreateStore(init_value, alloca);
         value_stack.pop();
-
-        llvm::FunctionCallee CalleeF = llvm_module->getOrInsertFunction("printf",
-            llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true /* this is var arg func type*/) 
-        );
-
-        // print the value
-        std::vector<llvm::Value *> ArgsV;
-        ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
-        llvm::Value* printed_value = llvm_builder->CreateFPExt(init_value, llvm::Type::getDoubleTy(*llvm_context), "toDouble");
-        ArgsV.push_back(printed_value);
-
-        llvm_builder->CreateCall(CalleeF, ArgsV);
     }
+}
+
+void LLVMCompiler::visitVarRef(AST::VarRefNode &node)
+{
 }
 
 void LLVMCompiler::visitLiteralFloatExpr(AST::LiteralFloatExprNode &node)
 {
-    if (node.is_double_precision()) {
+    if (node.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64) {
         value_stack.push(llvm::ConstantFP::get(*llvm_context, llvm::APFloat(node.double_value())));
     } else {
         value_stack.push(llvm::ConstantFP::get(*llvm_context, llvm::APFloat(node.float_value())));
@@ -139,7 +149,57 @@ void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node)
 {
 }
 
-void LLVMCompiler::printIR(bool toFile) {
+void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
+{
+    if (node.token_function_name.value() == "echo") {
+
+        for (auto &arg : node.arguments) {
+            arg->accept(*this);
+
+            auto arg_value = value_stack.top();
+            value_stack.pop();
+
+            // printf each argument value
+            std::vector<llvm::Value *> ArgsV;
+
+            if (arg_value->getType()->isFloatTy()) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
+                llvm::Value* printed_value = llvm_builder->CreateFPExt(arg_value, llvm::Type::getDoubleTy(*llvm_context), "toDouble");
+                ArgsV.push_back(printed_value);
+            } else if (arg_value->getType()->isDoubleTy()) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
+                ArgsV.push_back(arg_value);
+            } else if (arg_value->getType()->isIntegerTy()) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%d\n"));
+                ArgsV.push_back(arg_value);
+            } else if (arg_value->getType()->isIntegerTy(1)) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%d\n"));
+                ArgsV.push_back(arg_value);
+            } else if (arg_value->getType()->isPointerTy()) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%s\n"));
+                ArgsV.push_back(arg_value);
+            } else {
+                throw std::runtime_error("Unsupported argument type for 'echo'");
+            }
+
+            llvm_builder->CreateCall(llvm_module->getFunction("printf"), ArgsV);
+        }
+    }
+}
+
+void LLVMCompiler::visitVarRefExpr(AST::VarRefExprNode &node)
+{
+    auto var_ref = node.var_ref;
+    llvm::AllocaInst *var = var_map[var_ref->decl];
+
+    llvm::Type *type = var->getAllocatedType();
+    llvm::Value* varval = llvm_builder->CreateLoad(type, var, var->getName());
+
+    value_stack.push(varval);
+}
+
+void LLVMCompiler::printIR(bool toFile)
+{
     if (toFile) {
         std::error_code EC;
         llvm::raw_fd_ostream outFile("output.ll", EC);
@@ -191,13 +251,19 @@ void LLVMCompiler::run_code() {
 
 void LLVMCompiler::make_exec(std::string executable_name)
 {
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmParsers();
-    llvm::InitializeAllAsmPrinters();
+    // llvm::InitializeAllTargetInfos();
+    // llvm::InitializeAllTargets();
+    // llvm::InitializeAllTargetMCs();
+    // llvm::InitializeAllAsmParsers();
+    // llvm::InitializeAllAsmPrinters();
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    llvm::InitializeNativeTargetAsmParser();
+
+
 
     auto TargetTriple = llvm::sys::getDefaultTargetTriple();
+    // auto TargetTriple = "aarch64-linux-gnu";
 
     std::string Error;
     auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);

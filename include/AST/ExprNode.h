@@ -7,6 +7,10 @@
 #include "ASTValueType.h"
 #include "../Token.h"
 
+#include "VarRefNode.h"
+
+#include <optional>
+
 namespace AST 
 {
     class ExprNode : public Node
@@ -31,8 +35,16 @@ namespace AST
     public:
         TokenReference token_literal;
 
+        std::optional<ValueTypePrimitive> expected_primitive_type;
+
         LiteralPrimitiveExprNode(TokenReference token) :
             token_literal(token)
+        {
+        };
+
+        LiteralPrimitiveExprNode(TokenReference token, ValueTypePrimitive expected) :
+            token_literal(token),
+            expected_primitive_type(expected)
         {
         };
 
@@ -48,8 +60,20 @@ namespace AST
             LiteralPrimitiveExprNode(token)
         {};
 
+        LiteralFloatExprNode(TokenReference token, ValueTypePrimitive expected) :
+            LiteralPrimitiveExprNode(token, expected)
+        {
+            assert(expected == ValueTypePrimitive::t_float64 || expected == ValueTypePrimitive::t_float32);
+        };
+
+        ValueTypePrimitive get_effective_primitive_type() const {
+            return expected_primitive_type.value_or(
+                is_double_precision() ? ValueTypePrimitive::t_float64 : ValueTypePrimitive::t_float32
+            );
+        }
+
         ValueType result_type() const override {
-            return is_double_precision() ? ValueType(ValueTypePrimitive::t_float64) : ValueType(ValueTypePrimitive::t_float32);
+            return ValueType(get_effective_primitive_type());
         }
 
         // floats literals have to end with a "f" to be considered a float
@@ -62,15 +86,24 @@ namespace AST
             visitor.visitLiteralFloatExpr(*this);
         }
 
+        std::string get_fvalue_string() const {
+            if (is_double_precision()) {
+                return token_literal.value();
+            } else {
+                return token_literal.value().substr(0, token_literal.value().size() - 1);
+            }
+        }
+
+
         float float_value() const {
-            assert(!is_double_precision());
+            assert(get_effective_primitive_type() == ValueTypePrimitive::t_float32);
             // cut off the "f" at the end
-            return std::stof(token_literal.value().substr(0, token_literal.value().size() - 1));
+            return std::stof(get_fvalue_string());
         }
 
         double double_value() const {
-            assert(is_double_precision());
-            return std::stod(token_literal.value());
+            assert(get_effective_primitive_type() == ValueTypePrimitive::t_float64);
+            return std::stod(get_fvalue_string());
         }
     };
     
@@ -88,6 +121,22 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitLiteralIntExpr(*this);
         }
+
+        int32_t int32_value() const {
+            return std::stoi(token_literal.value());
+        }
+
+        int64_t int64_value() const {
+            return std::stoll(token_literal.value());
+        }
+
+        uint32_t uint32_value() const {
+            return std::stoul(token_literal.value());
+        }
+
+        uint64_t uint64_value() const {
+            return std::stoull(token_literal.value());
+        }
     };
 
     class LiteralBoolExprNode : public LiteralPrimitiveExprNode
@@ -103,6 +152,60 @@ namespace AST
 
         void accept(Visitor& visitor) override {
             visitor.visitLiteralBoolExpr(*this);
+        }
+    };
+
+    class VarRefExprNode : public ExprNode
+    {
+    public:
+        VarRefNode *var_ref;
+
+        VarRefExprNode(VarRefNode *var_ref) :
+            var_ref(var_ref)
+        {};
+
+        ~VarRefExprNode() {};
+
+        ValueType result_type() const override {
+            assert(var_ref->decl);
+            return var_ref->decl->type_node()->type;
+        }
+
+        const std::string node_description() override {
+            return "varexp(" + var_ref->node_description() + ")";
+        }
+
+        void accept(Visitor& visitor) override {
+            visitor.visitVarRefExpr(*this);
+        }
+    };
+
+    class FunctionCallExprNode : public ExprNode
+    {
+    public:
+        TokenReference token_function_name;
+        std::vector<ExprNode*> arguments;
+
+        FunctionCallExprNode(TokenReference token_function_name, std::vector<ExprNode*> arguments) :
+            token_function_name(token_function_name), arguments(arguments)
+        {};
+
+        ~FunctionCallExprNode() {}
+
+        const std::string node_description() override {
+            std::string desc = "call " + token_function_name.value() + "(";
+
+            for (auto arg : arguments) {
+                desc += arg->node_description() + ", ";
+            }
+
+            desc += ")";
+
+            return desc;
+        }
+
+        void accept(Visitor& visitor) override {
+            visitor.visitFunctionCallExpr(*this);
         }
     };
 

@@ -49,6 +49,7 @@ public:
         t_bool_literal,             // true, false
         t_varname,                  // $varname
         t_const,                    // const
+        t_echo,                     // echo
         t_unknown
     };
 

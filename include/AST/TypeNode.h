@@ -15,7 +15,7 @@ namespace AST
     {
     public:
         
-        ValueType type;
+        const ValueType type;
 
         std::optional<TokenReference> type_token;
 

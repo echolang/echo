@@ -21,3 +21,14 @@ void AST::Collector::print_issues() const
         std::cout << issue->code_ref.get_referenced_code_excerpt() << std::endl;
     }
 }
+
+bool AST::Collector::has_critical_issues() const
+{
+    for (const auto &issue : issues)  {
+        if (issue->is_critical()) {
+            return true;
+        }
+    }
+
+    return false;
+}

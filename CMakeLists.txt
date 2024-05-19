@@ -26,7 +26,25 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${SOURCES})
 
-llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)
+message(STATUS "AVAIL COMPONENETS: ${LLVM_AVAILABLE_LIBS}")
+message(STATUS "LLVM_TARGETS_TO_BUILD: ${LLVM_TARGETS_TO_BUILD}")
+set(LLVM_COMPONENTS
+    AArch64
+    # ARM
+    Core
+    ExecutionEngine
+    IRReader
+    MCJIT
+    Support
+    Target
+    Analysis
+    Passes
+)
+
+
+llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
+# llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)
+# llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_TARGETS_TO_BUILD} mcjit)
 target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
 include_directories(${CMAKE_SOURCE_DIR}/include)

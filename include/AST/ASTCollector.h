@@ -24,6 +24,8 @@ namespace AST
         }
 
         void print_issues() const;
+
+        bool has_critical_issues() const;
     };
 };
 

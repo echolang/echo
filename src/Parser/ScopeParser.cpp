@@ -1,8 +1,10 @@
 #include "Parser/ScopeParser.h"
 
 #include "AST/VarDeclNode.h"
+#include "AST/ExprNode.h"
 
 #include "Parser/VarDeclParser.h"
+#include "Parser/EchoPrintParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -39,6 +41,13 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
         ) {
             parse_vardecl(payload);
+        }
+
+        // print statement aka "echo $something"
+        else if (cursor.is_type(Token::Type::t_echo)) {
+            if (auto *echo_node = parse_echo(payload)) { 
+                scope_node.children.push_back(AST::make_ref(echo_node));
+            }
         }
 
         else {
