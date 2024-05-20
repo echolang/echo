@@ -121,8 +121,23 @@ namespace AST
             LiteralPrimitiveExprNode(token)
         {};
 
+        LiteralIntExprNode(TokenReference token, ValueTypePrimitive expected) :
+            LiteralPrimitiveExprNode(token, expected)
+        {
+            assert(
+                expected == ValueTypePrimitive::t_int8 ||
+                expected == ValueTypePrimitive::t_int16 ||
+                expected == ValueTypePrimitive::t_int32 ||
+                expected == ValueTypePrimitive::t_int64 ||
+                expected == ValueTypePrimitive::t_uint8 ||
+                expected == ValueTypePrimitive::t_uint16 ||
+                expected == ValueTypePrimitive::t_uint32 ||
+                expected == ValueTypePrimitive::t_uint64
+            );
+        };
+
         ValueType result_type() const override {
-            return ValueType(ValueTypePrimitive::t_int32);
+            return ValueType(expected_primitive_type.value_or(ValueTypePrimitive::t_int32));
         }
 
         void accept(Visitor& visitor) override {
