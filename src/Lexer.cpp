@@ -157,7 +157,6 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_exact_token<"++", Token::Type::t_op_inc>,
         &Lexer::parse_exact_token<"--", Token::Type::t_op_dec>,
         &Lexer::parse_char_token<'+', Token::Type::t_op_add>,
-        &Lexer::parse_char_token<'-', Token::Type::t_op_sub>,
         &Lexer::parse_char_token<'*', Token::Type::t_op_mul>,
         &Lexer::parse_char_token<'/', Token::Type::t_op_div>,
         &Lexer::parse_char_token<'%', Token::Type::t_op_mod>,
@@ -176,8 +175,9 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_exact_token<"const", Token::Type::t_const>,
         &Lexer::parse_exact_token<"echo", Token::Type::t_echo>,
         &Lexer::parse_hex_literal,
-        &Lexer::parse_regex_token<"^[0-9]+\\.[0-9]+f?", Token::Type::t_floating_literal>,
-        &Lexer::parse_regex_token<"^[0-9]+", Token::Type::t_integer_literal>,
+        &Lexer::parse_regex_token<"^-?[0-9]+\\.[0-9]+f?", Token::Type::t_floating_literal>,
+        &Lexer::parse_regex_token<"^-?[0-9]+", Token::Type::t_integer_literal>,
+        &Lexer::parse_char_token<'-', Token::Type::t_op_sub>,
         // generic identifier
         &Lexer::parse_regex_token<"^[_a-zA-Z0-9]+", Token::Type::t_identifier>
     };

@@ -3,27 +3,46 @@
 #include "AST/ExprNode.h"
 #include "AST/VarRefNode.h"
 
+#include "External/infint.h"
+
 #include <format>
 
 bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
 {
-    return true; // todo
+    InfInt value(literal);
+
+    auto int_size = AST::get_integer_size(type.get_primitive_type());
+
+    if (value > int_size.get_max_positive_value()) {
+        payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+            payload.context.code_ref(literal_token), 
+            std::format(
+                "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
+                literal,
+                AST::get_primitive_name(type.get_primitive_type()),
+                int_size.get_max_positive_value()
+            )
+        );
+
+        return false;
+    }
+
+    if (value < int_size.get_max_negative_value()) {
+        payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
+            payload.context.code_ref(literal_token), 
+            std::format(
+                "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
+                literal,
+                AST::get_primitive_name(type.get_primitive_type()),
+                int_size.get_max_negative_value()
+            )
+        );
+
+        return false;
+    }
+
+    return true;
 }
-
-AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
-{
-    auto &cursor = payload.cursor;
-    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(cursor.current());
-
-    // todo: store the required subtype in the AST node
-    // ensure that the literal is parsed correctly and an error is emitted if 
-    // the literal doesnt fit the expected type like 600 for a byte
-
-    cursor.skip();
-
-    return &node;
-}
-
 
 AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
@@ -99,7 +118,7 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
                 return nullptr;
             }
 
-            auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token);
+            auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
             casted_node.override_literal_value.emplace(int_literal);
 
             return &casted_node;
@@ -116,6 +135,22 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
     // no expected type, just parse the literal
     return &node;
 }
+
+
+AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(cursor.current());
+
+    // if there is a specified expected type, check if the literal fits the type
+    // if (expected_type != nullptr) 
+
+    cursor.skip();
+
+    return &node;
+}
+
+
 
 AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expected_type)
 {

@@ -49,3 +49,13 @@ ISSUE_MESSAGE_FNC(InvalidTypeConversion)
 {
     return std::format("Invalid type conversion: {}", _message);
 }
+
+ISSUE_MESSAGE_FNC(IntegerOverflow)
+{
+    return std::format("Integer overflow: {}", _message);
+}
+
+ISSUE_MESSAGE_FNC(IntegerUnderflow)
+{
+    return std::format("Integer underflow: {}", _message);
+}
