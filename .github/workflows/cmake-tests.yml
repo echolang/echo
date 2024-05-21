@@ -14,12 +14,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
-    - name: Set up Clang 15
-      uses: llvm/llvm-project@main
+    - name: Setup LLVM
+      uses: ZhongRuoyu/setup-llvm@v0
       with:
-        version: '15'
+        llvm-version: 18
 
     - name: Install dependencies
       run: |
