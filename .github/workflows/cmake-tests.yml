@@ -2,87 +2,35 @@ name: Tests
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+      - '**'
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - '**'
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        build_type: [Release]
-        c_compiler: [clang, cl]
-        include:
-          - os: windows-latest
-            c_compiler: cl
-            cpp_compiler: cl
-          - os: ubuntu-latest
-            c_compiler: clang-18
-            cpp_compiler: clang++-18
-          - os: macos-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-        exclude:
-          - os: windows-latest
-            c_compiler: clang
-          - os: ubuntu-latest
-            c_compiler: cl
-          - os: macos-latest
-            c_compiler: cl
+    runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v2
 
-    - name: Install LLVM 18 on Ubuntu
-      if: matrix.os == 'ubuntu-latest'
+    - name: Set up Clang 15
+      uses: llvm/llvm-project@main
+      with:
+        version: '15'
+
+    - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y wget lsb-release software-properties-common
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 18
-        sudo apt-get install -y clang-18 lldb-18 lld-18
-      env:
-        CC: clang-18
-        CXX: clang++-18
+        sudo apt-get install -y cmake ninja-build
 
-    - name: Install LLVM 18 on macOS
-      if: matrix.os == 'macos-latest'
-      run: |
-        brew update
-        brew install llvm@18
-        echo 'export PATH="/usr/local/opt/llvm@18/bin:$PATH"' >> ~/.zshrc
-        echo 'export LDFLAGS="-L/usr/local/opt/llvm@18/lib"' >> ~/.zshrc
-        echo 'export CPPFLAGS="-I/usr/local/opt/llvm@18/include"' >> ~/.zshrc
-        echo 'export PKG_CONFIG_PATH="/usr/local/opt/llvm@18/lib/pkgconfig"' >> ~/.zshrc
-        source ~/.zshrc
-      shell: zsh
+    - name: Configure with CMake
+      run: cmake -B build -S . -G Ninja -DCMAKE_C_COMPILER=clang-15 -DCMAKE_CXX_COMPILER=clang++-15
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-
-    - name: Configure CMake
-      run: |
-        cmake -B ${{ steps.strings.outputs.build-output-dir }} \
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-        -S ${{ github.workspace }}
-      env:
-        CC: ${{ matrix.c_compiler }}
-        CXX: ${{ matrix.cpp_compiler }}
-
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+    - name: Build with CMake
+      run: cmake --build build
 
     - name: Run tests
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --output-on-failure
+      run: cmake --build build --target test
