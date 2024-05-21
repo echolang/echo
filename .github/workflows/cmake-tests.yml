@@ -33,9 +33,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \ 
-          cmake \ 
+        sudo apt update
+        sudo apt install -y cmake \
           ninja-build \
           libc++-dev \
           libc++abi-dev \
