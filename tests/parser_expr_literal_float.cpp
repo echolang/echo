@@ -108,3 +108,41 @@ TEST_CASE( "expect int8 but got uncastable float", "[Parser Literal float]" )
     // there should be no reference
     REQUIRE_FALSE(ref.has());
 }
+
+TEST_CASE( "expect int8 but got float that would overflow", "[Parser Literal float]" ) 
+{
+    auto env = EchoTests::tests_make_parser_env(
+        "128.0f"
+    );
+
+    auto expected = AST::TypeNode(AST::ValueType(AST::ValueTypePrimitive::t_int8));
+    auto ref = Parser::parse_expr_ref(env.payload, &expected);
+
+    // ensure we collected a warning
+    REQUIRE(env.collector->issues.size() == 1);
+    auto &warning = env.collector->issues[0];
+    REQUIRE(warning->severity == AST::IssueSeverity::Error);
+    REQUIRE(warning->message().contains("overflow"));
+
+    // there should be no reference
+    REQUIRE_FALSE(ref.has());
+}
+
+TEST_CASE( "expect uint8 but got float that would underflow", "[Parser Literal float]" ) 
+{
+    auto env = EchoTests::tests_make_parser_env(
+        "-1.0f"
+    );
+
+    auto expected = AST::TypeNode(AST::ValueType(AST::ValueTypePrimitive::t_uint8));
+    auto ref = Parser::parse_expr_ref(env.payload, &expected);
+
+    // ensure we collected a warning
+    REQUIRE(env.collector->issues.size() == 1);
+    auto &warning = env.collector->issues[0];
+    REQUIRE(warning->severity == AST::IssueSeverity::Error);
+    REQUIRE(warning->message().contains("underflow"));
+
+    // there should be no reference
+    REQUIRE_FALSE(ref.has());
+}
