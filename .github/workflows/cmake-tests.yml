@@ -11,10 +11,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     env:
       CC: clang-18
       CXX: clang++-18
+      CXXFLAGS: -stdlib=libc++
 
     steps:
     - name: Checkout repository
