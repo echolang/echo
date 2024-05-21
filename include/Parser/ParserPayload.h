@@ -11,8 +11,8 @@ namespace Parser
 {
     struct Payload
     {
-        Cursor &cursor;
-        AST::Context &context;
+        Cursor cursor;
+        AST::Context context;
         AST::Collector &collector;
     };
 };

@@ -37,6 +37,7 @@ namespace AST
         std::string debug_description() const;
 
         File &add_file(const std::filesystem::path &path);
+        
         TokenizedFile &tokenize(Lexer &lexer, const File &file);
 
         bool is_owner_of(const TokenReference &tokenref) const {
