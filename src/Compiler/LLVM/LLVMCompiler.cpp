@@ -53,7 +53,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     // terminate the function
     llvm_builder->CreateRetVoid();
 
+    // optimize the module
+    // optimize();
 }
+
 void LLVMCompiler::visitScope(AST::ScopeNode &node)
 {
     for (auto &child : node.children) {
@@ -300,4 +303,29 @@ void LLVMCompiler::make_exec(std::string executable_name)
 
     pass.run(*llvm_module);
     dest.flush();
+}
+
+void LLVMCompiler::optimize() {
+    if (!llvm_module) {
+        llvm::errs() << "Module is not initialized.\n";
+        return;
+    }
+
+    llvm::PassBuilder passBuilder;
+    llvm::LoopAnalysisManager loopAM;
+    llvm::FunctionAnalysisManager functionAM;
+    llvm::CGSCCAnalysisManager cgsccAM;
+    llvm::ModuleAnalysisManager moduleAM;
+    
+    passBuilder.registerModuleAnalyses(moduleAM);
+    passBuilder.registerCGSCCAnalyses(cgsccAM);
+    passBuilder.registerFunctionAnalyses(functionAM);
+    passBuilder.registerLoopAnalyses(loopAM);
+    passBuilder.crossRegisterProxies(loopAM, functionAM, cgsccAM, moduleAM);
+
+    // make the pipeline
+    llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+
+    
+    modulePM.run(*llvm_module, moduleAM);
 }

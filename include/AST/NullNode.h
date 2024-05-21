@@ -19,6 +19,10 @@ namespace AST
             return "NULL";
         }
 
+        void accept(Visitor &visitor) override {
+            visitor.visitNull(*this);
+        }
+
     private:
 
     };
