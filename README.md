@@ -1,5 +1,7 @@
 # Echo Programming Language
 
+[![Tests Status](https://github.com/echolang/echo/actions/workflows/cmake-tests.yml/badge.svg)](https://github.com/echolang/echo/actions/workflows/cmake-tests.yml)
+
 Echo is a statically typed, natively compiled, general-purpose programming language.
 
 Welcome to my highly opinionated and far from production-ready version of PHP that goes brrrr.
