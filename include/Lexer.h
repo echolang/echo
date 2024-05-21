@@ -10,6 +10,7 @@
 #include <regex>
 #include <concepts>
 #include <functional>
+#include <cstring>
 
 #include "Token.h"
 
