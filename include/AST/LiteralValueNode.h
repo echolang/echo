@@ -43,8 +43,8 @@ namespace AST
     class LiteralFloatExprNode : public LiteralPrimitiveExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal_float
-        ;
+        static constexpr NodeType node_type = NodeType::n_literal_float;
+        
         LiteralFloatExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
         {};
@@ -68,7 +68,7 @@ namespace AST
         // floats literals have to end with a "f" to be considered a float
         // everything else is considered a double
         bool is_double_precision() const {
-            return token_literal.value().back() != 'f';
+            return effective_token_literal_value().back() != 'f';
         }
 
         void accept(Visitor& visitor) override {
@@ -77,9 +77,9 @@ namespace AST
 
         std::string get_fvalue_string() const {
             if (is_double_precision()) {
-                return token_literal.value();
+                return effective_token_literal_value();
             } else {
-                return token_literal.value().substr(0, token_literal.value().size() - 1);
+                return effective_token_literal_value().substr(0, token_literal.value().size() - 1);
             }
         }
 
@@ -128,12 +128,28 @@ namespace AST
             visitor.visitLiteralIntExpr(*this);
         }
 
+        int8_t int8_value() const {
+            return std::stoi(token_literal.value());
+        }
+
+        int16_t int16_value() const {
+            return std::stoi(token_literal.value());
+        }
+
         int32_t int32_value() const {
             return std::stoi(token_literal.value());
         }
 
         int64_t int64_value() const {
             return std::stoll(token_literal.value());
+        }
+
+        uint8_t uint8_value() const {
+            return std::stoul(token_literal.value());
+        }
+
+        uint16_t uint16_value() const {
+            return std::stoul(token_literal.value());
         }
 
         uint32_t uint32_value() const {

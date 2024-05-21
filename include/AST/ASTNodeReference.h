@@ -14,7 +14,7 @@ namespace AST
     class NodeReference
     {
         Node *parent_ptr = nullptr;
-        NodeType parent_type = NodeType::n_none;
+        NodeType parent_type = NodeType::n_void;
 
     public:
         NodeReference() = default;
@@ -51,6 +51,12 @@ namespace AST
             assert(has_type<T>());
             return static_cast<T*>(parent_ptr);
         }
+
+        template <typename T>
+            requires NodeTypeProvider<T>
+        inline T *unsafe_ptr() const {
+            return static_cast<T*>(parent_ptr);
+        }
     };
 
     typedef std::vector<NodeReference> NodeReferenceList;
@@ -67,6 +73,10 @@ namespace AST
         static_assert(std::is_base_of_v<Node, T>, "T must be derived from Node");
         assert(T::node_type == node.node_type);
         return NodeReference(T::node_type, static_cast<Node*>(&node));
+    }
+
+    inline const NodeReference make_void_ref() {
+        return NodeReference(NodeType::n_void, nullptr);
     }
 };
 

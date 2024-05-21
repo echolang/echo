@@ -9,6 +9,7 @@
 namespace Parser
 {
     AST::ExprNode *parse_expr(Payload &payload, AST::TypeNode *expected_type = nullptr);
+    const AST::NodeReference parse_expr_ref(Payload &payload, AST::TypeNode *expected_type = nullptr);
 };
 
 #endif
