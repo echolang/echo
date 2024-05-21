@@ -12,6 +12,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      CC: clang-18
+      CXX: clang++-18
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -30,7 +34,7 @@ jobs:
       run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
 
     - name: Build with CMake
-      run: cmake --build build
+      run: cmake --build build 
 
     - name: Run tests
       run: cmake --build build --target tests
