@@ -38,7 +38,6 @@ jobs:
           ninja-build \
           libc++-dev \
           libc++abi-dev \
-          libunwind-dev \
           zlib1g-dev
 
     - name: Configure CMake
