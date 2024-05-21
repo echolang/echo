@@ -12,7 +12,7 @@
         REQUIRE(lit.node_description() == desc); \
     }
 
-TEST_CASE( "test description", "[AST Literal Value]" ) 
+TEST_CASE( "node description", "[AST Literal]" ) 
 {
     auto tm = EchoTests::tests_make_module_with_content(
         "42 " // int literal
@@ -33,4 +33,67 @@ TEST_CASE( "test description", "[AST Literal Value]" )
     TEST_ASSERT_LIT_DESC(5, AST::LiteralFloatExprNode, "literal<float32>(-3.14f)");
     TEST_ASSERT_LIT_DESC(6, AST::LiteralBoolExprNode, "literal<bool>(true)");
     TEST_ASSERT_LIT_DESC(7, AST::LiteralBoolExprNode, "literal<bool>(false)");
+}
+
+TEST_CASE( "float value extraction", "[AST Literal]" ) 
+{
+    auto tm = EchoTests::tests_make_module_with_content(
+        "3.14 " // double literal
+        "-3.14 " // double literal
+        "3.14f " // float literal
+        "-3.14f " // float literal
+    );
+
+    auto &lit0 = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[0]);
+
+    REQUIRE(lit0.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64);
+    REQUIRE(lit0.get_fvalue_string() == "3.14");
+    REQUIRE(lit0.double_value() == 3.14);
+
+    auto &lit1 = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[1]);
+
+    REQUIRE(lit1.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64);
+    REQUIRE(lit1.get_fvalue_string() == "-3.14");
+    REQUIRE(lit1.double_value() == -3.14);
+
+    auto &lit2 = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[2]);
+
+    REQUIRE(lit2.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float32);
+    REQUIRE(lit2.get_fvalue_string() == "3.14");
+    REQUIRE(lit2.float_value() == 3.14f);
+
+    auto &lit3 = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[3]);
+
+    REQUIRE(lit3.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float32);
+    REQUIRE(lit3.get_fvalue_string() == "-3.14");
+    REQUIRE(lit3.float_value() == -3.14f);
+}
+
+
+TEST_CASE( "float value with expectation", "[AST Literal]" ) 
+{
+    auto tm = EchoTests::tests_make_module_with_content(
+        "3.14 " // double literal
+        "3.14f " // float literal
+    );
+
+    auto &lit0d = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[0], AST::ValueTypePrimitive::t_float64);
+
+    REQUIRE(lit0d.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64);
+    REQUIRE(lit0d.double_value() == 3.14);
+
+    auto &lit0f = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[0], AST::ValueTypePrimitive::t_float32);
+
+    REQUIRE(lit0f.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float32);
+    REQUIRE(lit0f.float_value() == 3.14f);
+
+    auto &lit1d = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[1], AST::ValueTypePrimitive::t_float64);
+
+    REQUIRE(lit1d.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float64);
+    REQUIRE(lit1d.double_value() == 3.14);
+
+    auto &lit1f = tm->nodes.emplace_back<AST::LiteralFloatExprNode>(tm->tokens[1], AST::ValueTypePrimitive::t_float32);
+
+    REQUIRE(lit1f.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float32);
+    REQUIRE(lit1f.float_value() == 3.14f);
 }
