@@ -11,7 +11,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [RelWithDebInfo]
+
     env:
+      BUILD_TYPE: ${{ matrix.build_type }}
       CC: clang-18
       CXX: clang++-18
       CXX_FLAGS: "-stdlib=libc++ -std=c++20"
@@ -31,11 +36,25 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake ninja-build
 
-    - name: Configure with CMake (use clang++-18)
-      run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
-    - name: Build with CMake
-      run: cmake --build build 
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --target tests
 
-    - name: Run tests
-      run: cmake --build build --target tests
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ./tests
+    
+    - name: Build release
+      if: success() # Only build a release binary if previous steps succeeded.
+      run: |
+        cmake --build ${{github.workspace}}/build --config Release --target echo
+        cp ${{github.workspace}}/build/echo ${{github.workspace}}/echo-${{env.BUILD_TYPE}}
+
+    - name: Upload release binary
+      uses: actions/upload-artifact@v2
+      if: success() # Only upload if previous steps succeeded.
+      with:
+        name: echo-${{env.BUILD_TYPE}}
+        path: ${{github.workspace}}/echo-${{env.BUILD_TYPE}}
