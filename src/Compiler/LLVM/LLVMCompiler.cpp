@@ -12,6 +12,7 @@
 #include <llvm/Transforms/Utils.h>
 
 #include "AST/VarDeclNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
 
 #include <iostream>

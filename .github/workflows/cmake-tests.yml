@@ -26,8 +26,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake ninja-build
 
-    - name: Configure with CMake
-      run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo -DCMAKE_CXX_STANDARD=20
+    - name: Configure with CMake (use clang++-18)
+      run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
 
     - name: Build with CMake
       run: cmake --build build

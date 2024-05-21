@@ -2,6 +2,7 @@
 
 #include "AST/ExprNode.h"
 #include "AST/VarRefNode.h"
+#include "AST/LiteralValueNode.h"
 
 #include "External/infint.h"
 
