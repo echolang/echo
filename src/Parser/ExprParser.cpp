@@ -45,7 +45,7 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
     return true;
 }
 
-AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
+const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
@@ -59,6 +59,10 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
         // floats / doubles
         if (expected_type->type.is_floating_type()) 
         {
+            // even if the number doesn't fit into the expected type, we can continue because the value is still valid
+            // we just loose precision and the user gets a warning
+            auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(current_token, expected_type->type.get_primitive_type());
+
             // if the actual type is a float32 and the expected type is a float64, emit an warning
             if (node.result_type().will_fit_into(expected_type->type) == false) {
                 
@@ -78,13 +82,13 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
                             fliteral
                         )
                     );
+
+                    // override the literal value with the float value
+                    casted_node.override_literal_value.emplace(std::to_string(fliteral));
                 }
             }
 
-            // even if the number doesn't fit into the expected type, we can continue because the value is still valid
-            // we just loose precision and the user gets a warning
-            auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(current_token, expected_type->type.get_primitive_type());
-            return &casted_node;
+            return AST::make_ref(casted_node);
         }
 
         // integers
@@ -105,7 +109,7 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
                     )
                 );
 
-                return nullptr;
+                return AST::make_void_ref();
             }
 
             // if we end up here our floating point number is a whole number
@@ -116,13 +120,13 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
             std::string int_literal = node.get_fvalue_string().substr(0, node.get_fvalue_string().find('.'));
 
             if (!can_hold_literal_int(payload, expected_type->type, int_literal, current_token)) {
-                return nullptr;
+                return AST::make_void_ref();
             }
 
             auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
             casted_node.override_literal_value.emplace(int_literal);
 
-            return &casted_node;
+            return AST::make_ref(casted_node);
         }
         else {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
@@ -134,11 +138,11 @@ AST::LiteralPrimitiveExprNode *parse_literal_float(Parser::Payload &payload, AST
     }
 
     // no expected type, just parse the literal
-    return &node;
+    return AST::make_ref(node);
 }
 
 
-AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
+const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
     auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(cursor.current());
@@ -148,12 +152,18 @@ AST::LiteralIntExprNode *parse_literal_int(Parser::Payload &payload, AST::TypeNo
 
     cursor.skip();
 
-    return &node;
+    return AST::make_ref(node);
 }
 
-
-
 AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto ref = parse_expr_ref(payload, expected_type);
+
+    // probably a bad idea, but it should never be not a expr node
+    return ref.unsafe_ptr<AST::ExprNode>();
+}
+
+const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
@@ -168,7 +178,7 @@ AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expec
     if (cursor.is_type(Token::Type::t_bool_literal)) {
         auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(cursor.current());
         cursor.skip();
-        return &node;
+        return AST::make_ref(node);
     }
 
     if (cursor.is_type(Token::Type::t_varname)) {
@@ -177,14 +187,14 @@ AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expec
         if (!vardecl) {
             payload.collector.collect_issue<AST::Issue::UnknownVariable>(payload.context.code_ref(cursor.current()), cursor.current().value());
             cursor.skip();
-            return nullptr;
+            return AST::make_void_ref();
         }   
 
         auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
         auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
         cursor.skip();
         
-        return &node;
+        return AST::make_ref(node);
     }
 
     assert(false && "unimplemented");

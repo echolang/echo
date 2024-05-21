@@ -11,7 +11,7 @@ namespace AST
 
     // node type enum
     enum class NodeType {
-        n_none,
+        n_void,
         n_null,
         n_scope,
         n_literal,
