@@ -26,7 +26,7 @@ int main() {
 
     auto parser = Parser::ModuleParser();
 
-    parser.parse_file(std::filesystem::path("test.eco"), module, bundle.collector);
+    parser.parse_file_from_disk(std::filesystem::path("test.eco"), module, bundle.collector);
 
     // end timer
     auto end = std::chrono::high_resolution_clock::now();

@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <string>
+#include <cassert>
 
 #include <cstdint>
 
@@ -131,27 +132,33 @@ public:
     }
 
     inline const std::string &value() const {
+        assert(is_valid());
         return tokens.token_values[index];
     }
 
     inline const Token &token() const {
+        assert(is_valid());
         return tokens.tokens[index];
     }
 
     inline const Token::Type type() const {
+        assert(is_valid());
         return tokens.tokens[index].type;
     }
 
     inline const uint32_t line() const {
+        assert(is_valid());
         return tokens.tokens[index].line;
     }
 
     inline const uint32_t char_offset() const {
+        assert(is_valid());
         return tokens.tokens[index].char_offset;
     }
 
     // same as char_offset..
     inline const uint32_t column() const {
+        assert(is_valid());
         return tokens.tokens[index].char_offset;
     }
 
