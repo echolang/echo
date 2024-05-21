@@ -92,7 +92,7 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
         }
 
         // integers
-        else if (expected_type->type.is_numeric_type()) 
+        else if (expected_type->type.is_integer()) 
         {
             // determine if the literal has any decimal values besides 0
             // if so, we emit a error (not just a warning) because the user highly likely made a mistake
