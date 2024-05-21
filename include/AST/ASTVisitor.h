@@ -14,6 +14,7 @@ namespace AST
     class LiteralBoolExprNode;
     class FunctionCallExprNode;
     class VarRefExprNode;
+    class NullNode;
 
     class Visitor
     {
@@ -29,6 +30,7 @@ namespace AST
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
         virtual void visitVarRefExpr(VarRefExprNode &node) = 0;
+        virtual void visitNull(NullNode &node) = 0;
     };
 }
 

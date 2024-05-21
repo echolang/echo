@@ -52,15 +52,16 @@ public:
 
     void compile_bundle(const AST::Bundle &bundle);
 
-    virtual void visitScope(AST::ScopeNode &node);
-    virtual void visitType(AST::TypeNode &node);
-    virtual void visitVarDecl(AST::VarDeclNode &node);
-    virtual void visitVarRef(AST::VarRefNode &node);
-    virtual void visitLiteralFloatExpr(AST::LiteralFloatExprNode &node);
-    virtual void visitLiteralIntExpr(AST::LiteralIntExprNode &node);
-    virtual void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
-    virtual void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
-    virtual void visitVarRefExpr(AST::VarRefExprNode &node);
+    void visitScope(AST::ScopeNode &node);
+    void visitType(AST::TypeNode &node);
+    void visitVarDecl(AST::VarDeclNode &node);
+    void visitVarRef(AST::VarRefNode &node);
+    void visitLiteralFloatExpr(AST::LiteralFloatExprNode &node);
+    void visitLiteralIntExpr(AST::LiteralIntExprNode &node);
+    void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
+    void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
+    void visitVarRefExpr(AST::VarRefExprNode &node);
+    void visitNull(AST::NullNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 
