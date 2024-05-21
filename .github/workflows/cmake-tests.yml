@@ -14,7 +14,8 @@ jobs:
     env:
       CC: clang-18
       CXX: clang++-18
-      CXXFLAGS: -stdlib=libc++
+      CXX_FLAGS: "-stdlib=libc++ -std=c++20"
+      USE_CLANG: 1
 
     steps:
     - name: Checkout repository
@@ -31,7 +32,7 @@ jobs:
         sudo apt-get install -y cmake ninja-build
 
     - name: Configure with CMake (use clang++-18)
-      run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo -DCMAKE_CXX_STANDARD=20 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
+      run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo
 
     - name: Build with CMake
       run: cmake --build build 
