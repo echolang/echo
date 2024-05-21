@@ -201,6 +201,10 @@ void LLVMCompiler::visitVarRefExpr(AST::VarRefExprNode &node)
     value_stack.push(varval);
 }
 
+void LLVMCompiler::visitNull(AST::NullNode &node)
+{
+}
+
 void LLVMCompiler::printIR(bool toFile)
 {
     if (toFile) {
