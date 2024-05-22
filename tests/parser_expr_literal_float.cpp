@@ -56,7 +56,7 @@ TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float
     REQUIRE(env.collector->issues.size() == 1);
     auto &warning = env.collector->issues[0];
     REQUIRE(warning->severity == AST::IssueSeverity::Warning);
-    REQUIRE(warning->message().contains("loss of precision"));
+    REQUIRE(warning->message().find("loss of precision") != std::string::npos);
 
     REQUIRE(lit->node_description() == "literal<float32>(123456.125000)");
 }
@@ -103,7 +103,7 @@ TEST_CASE( "expect int8 but got uncastable float", "[Parser Literal float]" )
     REQUIRE(env.collector->issues.size() == 1);
     auto &warning = env.collector->issues[0];
     REQUIRE(warning->severity == AST::IssueSeverity::Error);
-    REQUIRE(warning->message().contains("cannot be implicitly converted"));
+    REQUIRE(warning->message().find("cannot be implicitly converted") != std::string::npos);
 
     // there should be no reference
     REQUIRE_FALSE(ref.has());
@@ -122,7 +122,7 @@ TEST_CASE( "expect int8 but got float that would overflow", "[Parser Literal flo
     REQUIRE(env.collector->issues.size() == 1);
     auto &warning = env.collector->issues[0];
     REQUIRE(warning->severity == AST::IssueSeverity::Error);
-    REQUIRE(warning->message().contains("overflow"));
+    REQUIRE(warning->message().find("overflow") != std::string::npos);
 
     // there should be no reference
     REQUIRE_FALSE(ref.has());
@@ -141,7 +141,7 @@ TEST_CASE( "expect uint8 but got float that would underflow", "[Parser Literal f
     REQUIRE(env.collector->issues.size() == 1);
     auto &warning = env.collector->issues[0];
     REQUIRE(warning->severity == AST::IssueSeverity::Error);
-    REQUIRE(warning->message().contains("underflow"));
+    REQUIRE(warning->message().find("underflow") != std::string::npos);
 
     // there should be no reference
     REQUIRE_FALSE(ref.has());
