@@ -19,7 +19,7 @@ jobs:
       BUILD_TYPE: ${{ matrix.build_type }}
       CC: clang-18
       CXX: clang++-18
-      CXX_FLAGS: "-stdlib=libc++ -std=c++23"
+      CXX_FLAGS: "-stdlib=libc++ -std=c++20"
       USE_CLANG: 1
 
     steps:
