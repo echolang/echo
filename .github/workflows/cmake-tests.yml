@@ -9,7 +9,7 @@ on:
       - '**'
 
 jobs:
-  build:
+  build_and_test:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -53,16 +53,53 @@ jobs:
     - name: Test
       working-directory: ${{github.workspace}}/build
       run: ./tests
-    
-    - name: Build release
-      if: success() # Only build a release binary if previous steps succeeded.
-      run: |
-        cmake --build ${{github.workspace}}/build --config Release --target echo
-        cp ${{github.workspace}}/build/echo ${{github.workspace}}/echo-${{env.BUILD_TYPE}}
 
-    - name: Upload release binary
-      uses: actions/upload-artifact@v2
-      if: success() # Only upload if previous steps succeeded.
-      with:
-        name: echo-${{env.BUILD_TYPE}}
-        path: ${{github.workspace}}/echo-${{env.BUILD_TYPE}}
+  build_release:
+    runs-on: ubuntu-24.04
+    if: success()
+    env:
+      BUILD_TYPE: Release
+      CC: clang-18
+      CXX: clang++-18
+      USE_CLANG: 1
+      BIN_NAME: echo-linux-x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  
+      - name: Setup LLVM
+        uses: ZhongRuoyu/setup-llvm@v0
+        with:
+          llvm-version: 18
+  
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake \
+            ninja-build \
+            libc++-dev \
+            libc++abi-dev \
+            zlib1g-dev
+  
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18
+  
+      - name: Build release
+        if: success() 
+        run: |
+          cmake --build ${{github.workspace}}/build --config Release --target echo
+          cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+  
+      - name: Upload release binary
+        uses: actions/upload-artifact@v2
+        if: success()
+        with:
+          name: ${{env.BIN_NAME}}
+          path: ${{github.workspace}}/${{env.BIN_NAME}}
+  
+ 
