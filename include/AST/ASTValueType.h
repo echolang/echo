@@ -8,6 +8,7 @@
 #include <vector>
 #include <map>
 #include <optional>
+#include <cstdint>
 
 namespace AST
 {   
