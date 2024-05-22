@@ -97,3 +97,14 @@ TEST_CASE( "float value with expectation", "[AST Literal]" )
     REQUIRE(lit1f.get_effective_primitive_type() == AST::ValueTypePrimitive::t_float32);
     REQUIRE(lit1f.float_value() == 3.14f);
 }
+
+TEST_CASE( "int value extraction", "[AST Literal]" ) 
+{
+    auto tm = EchoTests::tests_make_module_with_content(
+        "42 " // int literal
+        "-42 " // int literal
+    );
+
+    auto &lit0 = tm->nodes.emplace_back<AST::LiteralIntExprNode>(tm->tokens[0]);
+
+}

@@ -129,35 +129,35 @@ namespace AST
         }
 
         int8_t int8_value() const {
-            return std::stoi(token_literal.value());
+            return std::stoi(effective_token_literal_value());
         }
 
         int16_t int16_value() const {
-            return std::stoi(token_literal.value());
+            return std::stoi(effective_token_literal_value());
         }
 
         int32_t int32_value() const {
-            return std::stoi(token_literal.value());
+            return std::stoi(effective_token_literal_value());
         }
 
         int64_t int64_value() const {
-            return std::stoll(token_literal.value());
+            return std::stoll(effective_token_literal_value());
         }
 
         uint8_t uint8_value() const {
-            return std::stoul(token_literal.value());
+            return std::stoul(effective_token_literal_value());
         }
 
         uint16_t uint16_value() const {
-            return std::stoul(token_literal.value());
+            return std::stoul(effective_token_literal_value());
         }
 
         uint32_t uint32_value() const {
-            return std::stoul(token_literal.value());
+            return std::stoul(effective_token_literal_value());
         }
 
         uint64_t uint64_value() const {
-            return std::stoull(token_literal.value());
+            return std::stoull(effective_token_literal_value());
         }
     };
 
