@@ -142,7 +142,7 @@ jobs:
           path: ${{github.workspace}}/${{env.BIN_NAME}}
 
   build_release_macos_arm:
-    runs-on: macos-14-xlarge
+    runs-on: macos-latest-xlarge
     needs: build_and_test
     env:
       BUILD_TYPE: Release
