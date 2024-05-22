@@ -30,7 +30,7 @@ add_library(${LIBNAME} STATIC ${SOURCES})
 message(STATUS "AVAIL COMPONENETS: ${LLVM_AVAILABLE_LIBS}")
 message(STATUS "LLVM_TARGETS_TO_BUILD: ${LLVM_TARGETS_TO_BUILD}")
 set(LLVM_COMPONENTS
-    AArch64
+    #AArch64
     # ARM
     Core
     ExecutionEngine
@@ -42,6 +42,23 @@ set(LLVM_COMPONENTS
     Passes
 )
 
+# add the native architecture to the list of components
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    set(NATIVE_ARCH "X86")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    set(NATIVE_ARCH "AArch64")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    set(NATIVE_ARCH "ARM")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "powerpc64le")
+    set(NATIVE_ARCH "PowerPC")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+    set(NATIVE_ARCH "RISCV")
+else()
+    message(FATAL_ERROR "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+message(STATUS "NATIVE_ARCH: ${NATIVE_ARCH}")
+list(APPEND LLVM_COMPONENTS ${NATIVE_ARCH})
 
 llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 # llvm_map_components_to_libnames(LLVM_LIBS support core irreader mcjit native)
