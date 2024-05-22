@@ -56,7 +56,7 @@ jobs:
 
   build_release:
     runs-on: ubuntu-24.04
-    if: success()
+    needs: build_and_test
     env:
       BUILD_TYPE: Release
       CC: clang-18
@@ -90,16 +90,12 @@ jobs:
             -DCMAKE_CXX_COMPILER=clang++-18
   
       - name: Build release
-        if: success() 
         run: |
           cmake --build ${{github.workspace}}/build --config Release --target echo
           cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
   
       - name: Upload release binary
         uses: actions/upload-artifact@v2
-        if: success()
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}
-  
- 
