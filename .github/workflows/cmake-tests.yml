@@ -99,3 +99,76 @@ jobs:
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}
+
+  build_release_macos_x86_64:
+    runs-on: macos-14
+    needs: build_and_test
+    env:
+      BUILD_TYPE: Release
+      CC: clang
+      CXX: clang++
+      USE_CLANG: 1
+      BIN_NAME: echo-macos-x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+  
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+  
+      - name: Build release
+        run: |
+          cmake --build ${{github.workspace}}/build --config Release --target echo
+          cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+  
+      - name: Upload release binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.BIN_NAME}}
+          path: ${{github.workspace}}/${{env.BIN_NAME}}
+
+  build_release_macos_arm:
+    runs-on: macos-14-xlarge
+    needs: build_and_test
+    env:
+      BUILD_TYPE: Release
+      CC: clang
+      CXX: clang++
+      USE_CLANG: 1
+      BIN_NAME: echo-macos-arm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+  
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+  
+      - name: Build release
+        run: |
+          cmake --build ${{github.workspace}}/build --config Release --target echo
+          cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+  
+      - name: Upload release binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.BIN_NAME}}
+          path: ${{github.workspace}}/${{env.BIN_NAME}}
+
