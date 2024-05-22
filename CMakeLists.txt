@@ -45,12 +45,10 @@ set(LLVM_COMPONENTS
 # add the native architecture to the list of components
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     set(NATIVE_ARCH "X86")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
     set(NATIVE_ARCH "AArch64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     set(NATIVE_ARCH "ARM")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "powerpc64le")
-    set(NATIVE_ARCH "PowerPC")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
     set(NATIVE_ARCH "RISCV")
 else()
