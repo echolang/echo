@@ -128,6 +128,8 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
 
             return AST::make_ref(casted_node);
         }
+        
+        // cannot cast
         else {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
                 payload.context.code_ref(current_token), 
@@ -141,16 +143,102 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
     return AST::make_ref(node);
 }
 
-
 const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
-    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(cursor.current());
+    auto current_token = cursor.current();
+
+    // we first check if the literal is larger then a 32bit integer, if so we automatically create a 64bit integer
+    InfInt intvalue(current_token.value());
+    auto guessed_int_type = AST::ValueTypePrimitive::t_int32;
+
+    if (intvalue > AST::get_integer_size(AST::ValueTypePrimitive::t_int32).get_max_positive_value()) {
+        guessed_int_type = AST::ValueTypePrimitive::t_int64;
+    }
+
+    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, guessed_int_type);
+    cursor.skip();
 
     // if there is a specified expected type, check if the literal fits the type
-    // if (expected_type != nullptr) 
+    if (expected_type != nullptr) 
+    {
+        // floats / doubles
+        // if the expected type is a float, we can "safely" convert the integer to a float
+        if (expected_type->type.is_floating_type()) 
+        {
+            // we can safely convert the integer to a float
+            auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(current_token, expected_type->type.get_primitive_type());
 
-    cursor.skip();
+            // @TODO we should add a detection if the float value is actually the same as the integer value
+            // as very large integers will loose precision when converted to a float
+            return AST::make_ref(casted_node);
+        }
+
+        // integers
+        else if (expected_type->type.is_integer())
+        {
+            auto &expected_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
+
+            // check if the expected type is unsigned and the literal is negative
+            // which should throw an error
+            if (expected_type->type.is_unsigned_integer() && intvalue < 0) {
+                payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
+                    payload.context.code_ref(current_token), 
+                    std::format(
+                        "The integer literal '{}' cannot be implicitly converted to an unsigned integer because it is negative.", 
+                        current_token.value()
+                    )
+                );
+
+                return AST::make_void_ref();
+            }
+
+            // check if the literal fits the expected type
+            auto int_size = AST::get_integer_size(expected_type->type.get_primitive_type());
+            auto lower_bound = int_size.get_max_negative_value();
+            auto upper_bound = int_size.get_max_positive_value();
+
+            if (intvalue < lower_bound) {
+                payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
+                    payload.context.code_ref(current_token), 
+                    std::format(
+                        "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
+                        current_token.value(),
+                        AST::get_primitive_name(expected_type->type.get_primitive_type()),
+                        lower_bound
+                    )
+                );
+
+                return AST::make_void_ref();
+            }
+
+            if (intvalue > upper_bound) {
+                payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+                    payload.context.code_ref(current_token), 
+                    std::format(
+                        "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
+                        current_token.value(),
+                        AST::get_primitive_name(expected_type->type.get_primitive_type()),
+                        upper_bound
+                    )
+                );
+
+                return AST::make_void_ref();
+            }
+
+            // if we end up here, the literal fits the expected type and can be used as expected
+            return AST::make_ref(expected_node);
+        }
+
+        // cannot cast
+        else {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(current_token), 
+                Token::Type::t_unknown,
+                current_token.type()
+            );
+        }
+    }
 
     return AST::make_ref(node);
 }
