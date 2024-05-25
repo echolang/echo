@@ -13,7 +13,7 @@ namespace AST
     {
         const Module *module;
         const TokenizedFile *file;
-        const TokenCollection::Slice token_slice;
+        const TokenSlice token_slice;
 
         std::tuple<uint32_t, uint32_t> line_range() const
         {

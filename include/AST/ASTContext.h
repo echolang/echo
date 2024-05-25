@@ -32,7 +32,7 @@ namespace AST
             return module.nodes.emplace_back<T>(std::forward<Args>(args)...);
         }
 
-        CodeRef code_ref(const TokenCollection::Slice &slice) const {
+        CodeRef code_ref(const TokenSlice &slice) const {
             return CodeRef { &module, &file, slice };
         }
 

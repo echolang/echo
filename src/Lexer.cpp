@@ -160,6 +160,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         &Lexer::parse_char_token<'*', Token::Type::t_op_mul>,
         &Lexer::parse_char_token<'/', Token::Type::t_op_div>,
         &Lexer::parse_char_token<'%', Token::Type::t_op_mod>,
+        &Lexer::parse_char_token<'^', Token::Type::t_op_pow>,
         &Lexer::parse_char_token<'?', Token::Type::t_qmark>,
         &Lexer::parse_char_token<'!', Token::Type::t_exclamation>,
         &Lexer::parse_char_token<'<', Token::Type::t_open_angle>,

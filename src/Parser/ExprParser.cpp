@@ -1,5 +1,6 @@
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTOps.h"
 #include "AST/ExprNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/LiteralValueNode.h"
@@ -251,9 +252,37 @@ AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expec
     return ref.unsafe_ptr<AST::ExprNode>();
 }
 
+bool is_expr_token(Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_floating_literal) ||
+           cursor.is_type(Token::Type::t_integer_literal) ||
+           cursor.is_type(Token::Type::t_bool_literal) ||
+           cursor.is_type(Token::Type::t_varname) || 
+           cursor.is_type(Token::Type::t_open_paren) || 
+           cursor.is_type(Token::Type::t_close_paren) || 
+           // if the token has a operator precendence, it is a valid expression token
+           AST::Operator::get_precedence(cursor.current().type()).precedence > 0;
+}
+
 const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
+
+    auto cursor_before = cursor.snapshot();
+
+    // determine the token range of the expression
+    while (is_expr_token(cursor) && !cursor.is_done()) {
+        cursor.skip();
+    }
+
+    auto cursor_after = cursor.snapshot();
+    auto expr_slice = cursor.slice(cursor_before, cursor_after);
+    cursor.restore(cursor_before);
+
+    // collect the tokens in range and perform the shunting yard algorithm
+    // to create a postfix expression
+    auto postfix_expr = AST::Operator::shunting_yard(expr_slice);
+
 
     if (cursor.is_type(Token::Type::t_floating_literal)) {
         return parse_literal_float(payload, expected_type);

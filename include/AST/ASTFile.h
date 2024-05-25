@@ -78,7 +78,7 @@ namespace AST
     struct TokenizedFile
     {
         const File *file;
-        const TokenCollection::Slice token_slice;
+        const TokenSlice token_slice;
     };
 };
 #endif
