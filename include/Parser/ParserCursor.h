@@ -36,6 +36,9 @@ namespace Parser
             _end = snapshot.end;
         }
 
+        // returns a slices from the given start and end snapshot
+        TokenSlice slice(const Snapshot &start, const Snapshot &end) const;
+
         inline size_t range_size() const {
             return _end > 0 ? _end : tokens.size();
         }
@@ -123,6 +126,7 @@ namespace Parser
         // this function is usally called after an error has been detected
         // it will skip until the next statement or block is found to continue parsing
         void try_skip_to_next_statement();
+
 
     private:
 

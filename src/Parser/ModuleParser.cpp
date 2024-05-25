@@ -13,7 +13,7 @@ Parser::ModuleParser::ModuleParser()
 
 Parser::Payload Parser::ModuleParser::make_parser_payload(const AST::TokenizedFile &tfile, AST::Module &module, AST::Collector &collector) const 
 {
-    auto cursor = Cursor(module.tokens, tfile.token_slice.start, tfile.token_slice.end);
+    auto cursor = Cursor(module.tokens, tfile.token_slice.start_index, tfile.token_slice.end_index);
 
     AST::Context context = {
         .module = module,

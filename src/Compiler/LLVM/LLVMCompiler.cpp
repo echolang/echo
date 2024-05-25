@@ -147,6 +147,13 @@ void LLVMCompiler::visitLiteralFloatExpr(AST::LiteralFloatExprNode &node)
 
 void LLVMCompiler::visitLiteralIntExpr(AST::LiteralIntExprNode &node)
 {
+    auto type = node.result_type().get_primitive_type();
+    auto value = node.uint64_value();
+
+    auto int_size = AST::get_integer_size(type);
+
+    // push an integer constant on the stack
+    value_stack.push(llvm::ConstantInt::get(*llvm_context, llvm::APInt(int_size.size * 8, value, int_size.is_signed)));
 }
 
 void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node)

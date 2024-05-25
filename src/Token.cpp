@@ -5,14 +5,24 @@ TokenReference TokenCollection::operator[](size_t index) const
     return TokenReference(*this, index);
 }
 
-const TokenReference TokenCollection::Slice::start_ref() const
+TokenSlice TokenCollection::slice(size_t start, size_t end) const
 {
-    return TokenReference(tokens, start);
+    return TokenSlice(*this, start, end);
 }
 
-const TokenReference TokenCollection::Slice::end_ref() const
+const TokenReference TokenSlice::start_ref() const
 {
-    return TokenReference(tokens, end);
+    return TokenReference(tokens, start_index);
+}
+
+const TokenReference TokenSlice::end_ref() const
+{
+    return TokenReference(tokens, end_index);
+}
+
+TokenSlice TokenReference::make_slice(size_t offset) const
+{
+    return tokens.slice(index, index + offset);
 }
 
 const std::string token_type_string(Token::Type type)
@@ -59,4 +69,27 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_unknown: return "unknown";
         default: return "[undefined]";
     }
+}
+
+bool Token::is_operator_type() const
+{
+    return is_one_of({
+        Token::Type::t_assign,
+        Token::Type::t_logical_or,
+        Token::Type::t_logical_and,
+        Token::Type::t_logical_eq,
+        Token::Type::t_logical_neq,
+        Token::Type::t_open_angle,
+        Token::Type::t_close_angle,
+        Token::Type::t_logical_geq,
+        Token::Type::t_logical_leq,
+        Token::Type::t_op_add,
+        Token::Type::t_op_sub,
+        Token::Type::t_op_mul,
+        Token::Type::t_op_div,
+        Token::Type::t_op_mod,
+        Token::Type::t_op_pow,
+        Token::Type::t_op_inc,
+        Token::Type::t_op_dec
+    });
 }

@@ -32,6 +32,7 @@ public:
         t_op_mul,                   // *
         t_op_div,                   // /
         t_op_mod,                   // %
+        t_op_pow,                   // ^
         t_qmark,                    // ?
         t_exclamation,              // !
         t_open_angle,               // <
@@ -60,6 +61,21 @@ public:
 
     Token(Type type, uint32_t line, uint32_t char_offset)
         : type(type), line(line), char_offset(char_offset) {}
+
+    inline bool is_a(Type type) const {
+        return this->type == type;
+    }
+
+    inline bool is_one_of(std::initializer_list<Type> types) const {
+        for (auto type : types) {
+            if (this->type == type) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool is_operator_type() const;
 };
 
 // function to convert token type to string
@@ -67,23 +83,8 @@ public:
 const std::string token_type_string(Token::Type type);
 
 struct TokenReference;
+struct TokenSlice;
 struct TokenCollection {
-    struct Slice {
-        const TokenCollection &tokens;
-        const size_t start;
-        const size_t end;
-
-        const TokenReference start_ref() const;
-        const TokenReference end_ref() const;
-
-        const Token &startt() const {
-            return tokens.tokens[start];
-        }
-
-        const Token &endt() const {
-            return tokens.tokens[end];
-        }
-    };
 
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
@@ -104,9 +105,7 @@ struct TokenCollection {
 
     TokenReference operator[](size_t index) const;
 
-    Slice slice(size_t start, size_t end) const {
-        return Slice{*this, start, end};
-    }
+    TokenSlice slice(size_t start, size_t end) const;
 };
 
 class TokenReference {
@@ -125,6 +124,17 @@ public:
 
     inline bool belongs_to(const TokenCollection &tokens) const {
         return &this->tokens == &tokens;
+    }
+
+    // returns the handle to the token inside of its collection
+    // Keep in mind that token and its value is owned by the collection
+    // use carefully.
+    inline size_t get_handle() const {
+        return index;
+    }
+
+    inline const TokenCollection &get_collection_ref() const {
+        return tokens;
     }
 
     inline const bool is_valid() const {
@@ -170,10 +180,118 @@ public:
         return TokenReference(tokens, index - 1);
     }
 
-    inline TokenCollection::Slice make_slice(size_t offset = 0) const {
-        return tokens.slice(index, index + offset);
+    TokenSlice make_slice(size_t offset = 0) const;
+
+    inline bool operator==(const TokenReference &other) const {
+        return &tokens == &other.tokens && index == other.index;
+    }
+
+    inline bool operator!=(const TokenReference &other) const {
+        return !(*this == other);
     }
 };
 
+struct TokenSlice {
+    const TokenCollection &tokens;
+    const size_t start_index;
+    const size_t end_index;
+
+    const TokenReference start_ref() const;
+    const TokenReference end_ref() const;
+
+    const Token &startt() const {
+        return tokens.tokens[start_index];
+    }
+
+    const Token &endt() const {
+        return tokens.tokens[end_index];
+    }
+
+    // returns the N'th token inside of the slice 
+    TokenReference operator[](size_t index) const {
+        assert(start_index + index <= end_index);
+        return TokenReference(tokens, start_index + index);
+    }
+
+    struct iterator {
+        const TokenSlice &slice;
+        size_t index;
+
+        iterator(const TokenSlice &slice, size_t index)
+            : slice(slice), index(index) {}
+
+        TokenReference operator*() const {
+            return TokenReference(slice.tokens, index);
+        }
+
+        iterator &operator++() {
+            index++;
+            return *this;
+        }
+
+        bool operator!=(const iterator &other) const {
+            return index != other.index;
+        }
+    };
+
+    iterator begin() const {
+        return iterator(*this, start_index);
+    }
+
+    iterator end() const {
+        return iterator(*this, end_index);
+    }
+};
+
+struct TokenList {
+    const TokenCollection &tokens;
+    std::vector<size_t> indices;
+
+    TokenList(const TokenCollection &tokens)
+        : tokens(tokens) {}
+
+    TokenReference operator[](size_t index) const {
+        return TokenReference(tokens, indices[index]);
+    }
+
+    void push(size_t index) {
+        indices.push_back(index);
+    }
+
+    void push(const TokenReference &ref) {
+        assert(ref.belongs_to(tokens));
+        indices.push_back(ref.get_handle());
+    }
+
+    // iterator for the token list
+    struct iterator {
+        const TokenList &list;
+        size_t index;
+
+        iterator(const TokenList &list, size_t index)
+            : list(list), index(index) {}
+
+        TokenReference operator*() const {
+            return TokenReference(list.tokens, list.indices[index]);
+        }
+
+        iterator &operator++() {
+            index++;
+            return *this;
+        }
+
+        bool operator!=(const iterator &other) const {
+            return index != other.index;
+        }
+    };
+
+    iterator begin() const {
+        return iterator(*this, 0);
+    }
+
+    iterator end() const {
+        return iterator(*this, indices.size());
+    }
+};
 
 #endif
