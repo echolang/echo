@@ -97,3 +97,22 @@ TEST_CASE( "HexLiterals", "[lexer]" ) {
     REQUIRE( tokens.tokens[0].type == Token::Type::t_hex_literal );
     REQUIRE( tokens.token_values[0] == "0x1234567890ABCDEF" );
 }
+
+// tests trying to parse custom operator symbols
+TEST_CASE( "Operator Prepass", "[lexer]" ) {
+    Lexer lexer;
+    TokenCollection tokens;
+    AST::OperatorRegistry ops;
+
+    std::string code = 
+        "operator (int $foo) <=> (int $bar) : int {"
+        "    return $foo + $bar;"
+        "}"
+        "echo 42 <=> 69";
+
+    lexer.tokenize_prepass_operators(code, ops);
+    lexer.tokenize(tokens, code, &ops);
+
+    REQUIRE( tokens.tokens.size() == 17 );
+
+}

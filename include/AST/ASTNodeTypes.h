@@ -14,6 +14,7 @@ namespace AST
         n_void,
         n_null,
         n_scope,
+        n_operator,
         n_literal,
         n_literal_float,
         n_literal_int,

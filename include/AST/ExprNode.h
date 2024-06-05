@@ -30,7 +30,6 @@ namespace AST
     private:
     };
 
-
     class VarRefExprNode : public ExprNode
     {
     public:

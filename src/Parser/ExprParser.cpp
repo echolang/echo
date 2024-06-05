@@ -261,7 +261,7 @@ bool is_expr_token(Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_open_paren) || 
            cursor.is_type(Token::Type::t_close_paren) || 
            // if the token has a operator precendence, it is a valid expression token
-           AST::Operator::get_precedence(cursor.current().type()).precedence > 0;
+           AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
 }
 
 const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
