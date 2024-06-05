@@ -3,7 +3,7 @@
 #include <stack>
 #include <iostream>
 
-AST::OpPrecedence AST::Operator::get_precedence(const Token::Type &type)
+AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &type)
 {
     switch (type)
     {
@@ -41,8 +41,8 @@ AST::OpPrecedence AST::Operator::get_precedence(const Token::Type &type)
     };
 }
 
-#define O1Prec get_precedence(token.type())
-#define O2Prec get_precedence(tokens[operator_stack.top()].type())
+#define O1Prec get_precedence_for_token(token.type())
+#define O2Prec get_precedence_for_token(tokens[operator_stack.top()].type())
 
 TokenList AST::Operator::shunting_yard(TokenSlice &token_slice)
 {
@@ -72,9 +72,9 @@ TokenList AST::Operator::shunting_yard(TokenSlice &token_slice)
                 !operator_stack.empty() &&
                 O2Prec.assoc == OpAssociativity::right &&
                 (
-                    O2Prec.precedence > O1Prec.precedence ||
+                    O2Prec.sequence > O1Prec.sequence ||
                     (
-                        O1Prec.precedence == O2Prec.precedence &&
+                        O1Prec.sequence == O2Prec.sequence &&
                         O1Prec.assoc == OpAssociativity::left
                     )
                 )
@@ -113,4 +113,77 @@ TokenList AST::Operator::shunting_yard(TokenSlice &token_slice)
     }
 
     return output;
+}
+
+AST::OperatorRegistry::OperatorRegistry()
+{
+    _predefined_operator_map.fill(nullptr);
+
+    // register the predefined operators
+    register_predefined_token_op(Token::Type::t_assign);
+    register_predefined_token_op(Token::Type::t_logical_or);
+    register_predefined_token_op(Token::Type::t_logical_and);
+    register_predefined_token_op(Token::Type::t_logical_eq);
+    register_predefined_token_op(Token::Type::t_logical_neq);
+    register_predefined_token_op(Token::Type::t_open_angle);
+    register_predefined_token_op(Token::Type::t_close_angle);
+    register_predefined_token_op(Token::Type::t_logical_geq);
+    register_predefined_token_op(Token::Type::t_logical_leq);
+    register_predefined_token_op(Token::Type::t_op_add);
+    register_predefined_token_op(Token::Type::t_op_sub);
+    register_predefined_token_op(Token::Type::t_op_mul);
+    register_predefined_token_op(Token::Type::t_op_div);
+    register_predefined_token_op(Token::Type::t_op_mod);
+    register_predefined_token_op(Token::Type::t_op_pow);
+    register_predefined_token_op(Token::Type::t_op_inc);
+    register_predefined_token_op(Token::Type::t_op_dec);
+}
+
+void AST::OperatorRegistry::register_predefined_token_op(const Token::Type &type)
+{
+    auto t = Token(type, 0, 0);
+    assert(t.is_operator_type() && "Token type is not an operator"); // sanity check
+
+    auto op = std::make_unique<PredefinedTokenOperator>(type);
+    _predefined_operator_map[static_cast<size_t>(type)] = op.get();
+    _operator_symbol_map[token_lit_symbol_string(type)] = op.get(); // also store it as a custom operator for easy lookup
+    _operators.push_back(std::move(op));
+}
+
+void AST::OperatorRegistry::register_custom_op(const std::string &name, int precedence, OpAssociativity assoc)
+{
+    auto op = std::make_unique<CustomOperator>(name, OpPrecedence{assoc, precedence});
+    _operator_symbol_map[name] = op.get();
+    _custom_operators.push_back(op.get());
+    _operators.push_back(std::move(op));
+}
+
+const AST::Operator *AST::OperatorRegistry::get_operator(const TokenReference &token) const
+{
+    if (!token.is_valid()) {
+        return nullptr;
+    }
+
+    // if the token type is an operator, we can use the predefined operator map directly
+    if (token.token().is_operator_type()) {
+        return _predefined_operator_map[static_cast<size_t>(token.type())];
+    }
+
+    // try to match the token value to a custom operator
+    auto custom_op = _operator_symbol_map.find(token.value());
+    if (custom_op != _operator_symbol_map.end()) {
+        return custom_op->second;
+    }
+
+    return nullptr;
+}
+
+const AST::Operator *AST::OperatorRegistry::get_operator(const std::string &symbol) const
+{
+    auto custom_op = _operator_symbol_map.find(symbol);
+    if (custom_op != _operator_symbol_map.end()) {
+        return custom_op->second;
+    }
+
+    return nullptr;
 }

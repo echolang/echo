@@ -48,6 +48,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_op_mul: return "op_mul (*)";
         case Token::Type::t_op_div: return "op_div (/)";
         case Token::Type::t_op_mod: return "op_mod (%)";
+        case Token::Type::t_op_pow: return "op_pow (^)";
         case Token::Type::t_qmark: return "qmark (?)";
         case Token::Type::t_exclamation: return "exclamation (!)";
         case Token::Type::t_open_angle: return "open_angle (<)";
@@ -68,6 +69,45 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_const: return "const";
         case Token::Type::t_unknown: return "unknown";
         default: return "[undefined]";
+    }
+}
+
+const std::string token_lit_symbol_string(const Token::Type type)
+{
+    switch (type) {
+        case Token::Type::t_semicolon: return ";";
+        case Token::Type::t_colon: return ":";
+        case Token::Type::t_comma: return ",";
+        case Token::Type::t_dot: return ".";
+        case Token::Type::t_logical_and: return "&&";
+        case Token::Type::t_logical_or: return "||";
+        case Token::Type::t_logical_eq: return "==";
+        case Token::Type::t_logical_neq: return "!=";
+        case Token::Type::t_logical_leq: return "<=";
+        case Token::Type::t_logical_geq: return ">=";
+        case Token::Type::t_accessorlr: return "->";
+        case Token::Type::t_assign: return "=";
+        case Token::Type::t_op_inc: return "++";
+        case Token::Type::t_op_dec: return "--";
+        case Token::Type::t_op_add: return "+";
+        case Token::Type::t_op_sub: return "-";
+        case Token::Type::t_op_mul: return "*";
+        case Token::Type::t_op_div: return "/";
+        case Token::Type::t_op_mod: return "%";
+        case Token::Type::t_op_pow: return "^";
+        case Token::Type::t_qmark: return "?";
+        case Token::Type::t_exclamation: return "!";
+        case Token::Type::t_open_angle: return "<";
+        case Token::Type::t_close_angle: return ">";
+        case Token::Type::t_open_paren: return "(";
+        case Token::Type::t_close_paren: return ")";
+        case Token::Type::t_open_brace: return "{";
+        case Token::Type::t_close_brace: return "}";
+        case Token::Type::t_open_bracket: return "[";
+        case Token::Type::t_close_bracket: return "]";
+        default: 
+            assert(false && "undefined operator type");
+            return "";
     }
 }
 

@@ -17,6 +17,12 @@ constexpr bool is_valid_varname_char(char c) {
            (c == '_');
 }
 
+constexpr bool is_seperating_char(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+           c == '(' || c == ')' || c == '{' || c == '}' ||
+           c == '[' || c == ']' || c == ';' || c == ',';
+}
+
 constexpr std::array<bool, 256> generate_hex_lut() {
     std::array<bool, 256> table = {};
     for (size_t i = 0; i < 256; ++i) {
@@ -41,9 +47,18 @@ constexpr std::array<bool, 256> generate_varname_lut() {
     return table;
 }
 
+constexpr std::array<bool, 256> generate_seperating_lut() {
+    std::array<bool, 256> table = {};
+    for (size_t i = 0; i < 256; ++i) {
+        table[i] = is_seperating_char(static_cast<char>(i));
+    }
+    return table;
+}
+
 constexpr auto hex_lut = generate_hex_lut();
 constexpr auto numeric_lut = generate_numeric_lut();
 constexpr auto varname_lut = generate_varname_lut();
+constexpr auto seperating_lut = generate_seperating_lut();
 
 bool Lexer::parse_varname(TokenCollection &tokens, LexerCursor &cursor)
 {
@@ -126,7 +141,7 @@ bool Lexer::parse_sl_comment(TokenCollection &tokens, LexerCursor &cursor)
     }
 
     cursor.skip(2);
-    cursor.skip_until('\n');
+    cursor.skip_until_nl();
 
     return true;
 }
@@ -136,8 +151,8 @@ bool Lexer::parse_ml_comment(TokenCollection &tokens, LexerCursor &cursor)
     return false;
 }
 
-void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
-    
+void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AST::OperatorRegistry *op_registry) 
+{   
     std::vector<Lexer::LexerFunctionSignature> functions = {
         &Lexer::parse_string_literal,
         &Lexer::parse_varname,
@@ -182,6 +197,14 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
         // generic identifier
         &Lexer::parse_regex_token<"^[_a-zA-Z0-9]+", Token::Type::t_identifier>
     };
+
+    // if there are some custom operators 
+    // we add them to the list of functions so that they are recognized
+    if (op_registry) {
+        for (const auto op : op_registry->get_custom_operators()) {
+            std::cout << "registering custom operator: " << op << std::endl;
+        }
+    }
     
     auto cursor = LexerCursor(input);
 
@@ -223,4 +246,107 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input) {
             }
         }
     }
+}
+
+void Lexer::tokenize_prepass_operators(const std::string &input, AST::OperatorRegistry &op_registry)
+{
+    // in this prepass we really only care to find custom operators in the input
+    // so we can register them and let the main tokenizer handle the rest
+    auto cursor = LexerCursor(input);
+
+    while (!cursor.is_eof()) 
+    {
+        // formatting aka whitespace, tabs, newlines
+        cursor.skip_formatting();
+
+        // nothing left to parse = done
+        if (cursor.is_eof()) {
+            break;
+        }
+
+        // operator defintions always begin with an "operator" keyword
+        // the operator keyword must be the first non-formatting character on the line
+        if (!cursor.begins_with("operator")) {
+            cursor.skip_until_nl();
+            continue;
+        }
+
+        cursor.skip(8); // skip "operator"
+
+        // after the operator there might be some precedence defition
+        //   operator(100, left)
+        // we still do not know if its a unary or binary operator but in the prepass we
+        // really only care to find the operator symbol / name
+        cursor.skip_formatting();
+        cursor.skip_scope('(', ')');
+
+        // now we would be here for a binary op
+        //   (int $a) ++ (int $b) : int
+        // unary op with prefix
+        //   ++(int $a) : int
+        // unary op with postfix
+        //   (int $a)++ : int
+        // or 
+        //   ++ : int
+
+        // considering that we can simply do this again
+        cursor.skip_formatting();
+        cursor.skip_scope('(', ')');
+        cursor.skip_formatting();
+
+        // and now we got
+        //   ++ (int $a) : int
+        //   ++(int $a) : int
+        //   ++ : int
+        //   ++ : int
+        // so in all cases we are at the beginning of the operator symbol
+        auto start = cursor.it;
+
+        // skip until the next whitespace or newline
+        while(!cursor.is_eof() && !cursor.is_formatting() && !cursor.is_seperating_char()) {
+            cursor.skip();
+        }
+
+        // now we have the operator symbol
+        auto op = std::string(start, cursor.it);
+
+        // check if the operator is already registered
+        if (!op_registry.get_operator(op)) {
+            op_registry.register_custom_op(op, -1, AST::OpAssociativity::left);
+        }
+
+        // skip until the end of the line
+        cursor.skip_until_nl();
+    }
+}
+
+void LexerCursor::skip_scope(const char open, const char close)
+{
+    int depth = 0;
+
+    // not at the start of a scope
+    if (peek() != open) {
+        return;
+    }
+
+    while (!is_eof()) {
+        if (peek() == open) {
+            depth++;
+        } else if (peek() == close) {
+            depth--;
+            if (depth == 0) {
+                skip();
+                return;
+            }
+        }
+        skip();
+    }
+}
+
+bool LexerCursor::is_seperating_char(size_t offset)
+{
+    if (offset >= input.size()) {
+        return true;
+    }
+    return seperating_lut[peek(offset)];
 }

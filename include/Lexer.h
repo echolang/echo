@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include "Token.h"
+#include "AST/ASTOps.h"
 
 #define MHP_VOCAB_LB '\n'
 #define MHP_VOCAB_SPACE ' '
@@ -101,6 +102,14 @@ struct LexerCursor
         }
     }
 
+    inline void skip_until_nl() {
+        skip_until(MHP_VOCAB_LB);
+    }
+
+    // will skip the currently begining scope and move the cursor to the end of the scope
+    // if the cursor is not at the beginning of a scope, the cursor will not be moved at all
+    void skip_scope(const char open, const char close);
+
     inline void advance() {
         if (is_eof()) {
             return;
@@ -132,6 +141,26 @@ struct LexerCursor
     inline bool is_formatting() {
         return peek() == MHP_VOCAB_SPACE || peek() == MHP_VOCAB_TAB || peek() == MHP_VOCAB_LB;
     }
+
+    // to be able to handle expressions properly we need to have some rule set of what is a valid
+    // ending of a token. This should allow us to identify custom operators even if they are built from 
+    // prexisting operators (e.g. "<=") for example "<=>" should be identified as a single token and not as "<=" and ">"
+    // Now one way would be to run the lexer twice, once to identify the custom operators and then to tokenize the input
+    // with those additional operators in mind. But I much more prefer to have the lexer identify these tokens in a single pass
+    //
+    // This might be a bit of a hack and it kinda breaks one rule is set myself in the beginning being "formatting characters should not be part of the syntax"
+    // but here me out:
+    //   $foo = 1 <=++2; 
+    //   $foo = 1 <= ++2; 
+    //              | The space makes it clear that these are two separate tokens
+    //   $foo = (1++ + 2++); // (++, +, ++) not (+++, ++) 
+    // i just hope that I won't come back to this and think "what a fucking idiot"
+    // 
+    // Update a weeek later:
+    // Turns out im an idiot, running the lexer twice with another set of lexing functions 
+    // is far easier and lets me identifiy custom operators early on in the full lexing pass. 
+    // keeping this here for the record and to remind myself that our mindset should be "we are dump till proven wrong" :)
+    bool is_seperating_char(size_t offset = 0);
 };
 
 
@@ -144,6 +173,11 @@ class Lexer
         }
         char value[N];
     };
+
+    class LexerFunction 
+    {
+        virtual const std::string &must_match() const;
+    };  
 
     using LexerFunctionSignature = std::function<bool(Lexer&, TokenCollection&, LexerCursor&)>;
 
@@ -219,6 +253,24 @@ public:
     }
 
     /**
+     * Same as "parse_char_token" but only accepts the token if it ends with a seperating character
+     */
+    template <char C, Token::Type T>
+    bool parse_char_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
+        if (cursor.peek() != C) {
+            return false;
+        }
+
+        if (!cursor.is_seperating_char(1)) {
+            return false;
+        }
+
+        tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
+        cursor.skip();
+        return true;
+    }
+
+    /**
      * Parses a multi-character token (e.g. "==" or "!=")
      */
     template <CSXStrLiteral lit, Token::Type T>
@@ -227,6 +279,27 @@ public:
         constexpr auto contents = lit.value;
 
         if (!cursor.begins_with(contents)) {
+            return false;
+        }
+
+        tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
+        cursor.skip(size);
+        return true;
+    }
+
+    /**
+     * Same as "parse_exact_token" but only accepts the token if it ends with a seperating character
+     */
+    template <CSXStrLiteral lit, Token::Type T>
+    bool parse_exact_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
+        constexpr auto size = sizeof(lit.value) - 1;
+        constexpr auto contents = lit.value;
+
+        if (!cursor.begins_with(contents)) {
+            return false;
+        }
+
+        if (!cursor.is_seperating_char(size)) {
             return false;
         }
 
@@ -285,7 +358,12 @@ public:
     /**
      * Parses the given input string into a collection of tokens
      */
-    void tokenize(TokenCollection &tokens, const std::string &input);
+    void tokenize(TokenCollection &tokens, const std::string &input, const AST::OperatorRegistry *op_registry = nullptr);
+
+    /**
+     * Tokenizer prepass (used to identify custom operators)
+     */
+    void tokenize_prepass_operators(const std::string &input, AST::OperatorRegistry &op_registry);
 
 private:
 };

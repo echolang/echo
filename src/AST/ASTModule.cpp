@@ -37,8 +37,11 @@ AST::TokenizedFile & AST::Module::tokenize(Lexer &lexer, const AST::File &file)
         throw std::runtime_error("Cannot tokenize a file that is not in this module");
     }
 
+    AST::OperatorRegistry ops;
+    lexer.tokenize_prepass_operators(file.content.value(), ops);
+
     size_t startindex = tokens.size();
-    lexer.tokenize(tokens, file.content.value());
+    lexer.tokenize(tokens, file.content.value(), &ops);
     size_t endindex = tokens.size();
 
     _tokenized_files.push_back(TokenizedFile {

@@ -33,6 +33,7 @@ public:
         t_op_div,                   // /
         t_op_mod,                   // %
         t_op_pow,                   // ^
+        t_op_custom,                // <custom>
         t_qmark,                    // ?
         t_exclamation,              // !
         t_open_angle,               // <
@@ -81,6 +82,10 @@ public:
 // function to convert token type to string
 // mostly used for debugging purposes
 const std::string token_type_string(Token::Type type);
+
+// returns a string representation of the literal symbol 
+// used for lexing and parsing, only available for literals
+const std::string token_lit_symbol_string(const Token::Type type);
 
 struct TokenReference;
 struct TokenSlice;
