@@ -7,7 +7,7 @@ TokenReference TokenCollection::operator[](size_t index) const
 
 TokenSlice TokenCollection::slice(size_t start, size_t end) const
 {
-    return TokenSlice(*this, start, end);
+    return TokenSlice{*this, start, end};
 }
 
 const TokenReference TokenSlice::start_ref() const

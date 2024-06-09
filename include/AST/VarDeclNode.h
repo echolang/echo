@@ -29,7 +29,7 @@ namespace AST
         std::string symbol_name;
 
         VarDeclNode(TokenReference token_varname, TypeNode *type) : 
-            token_varname(token_varname), _type_node(type)
+            _type_node(type), token_varname(token_varname)
         {
             symbol_name = token_varname.value().substr(1);
         };

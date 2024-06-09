@@ -34,6 +34,10 @@ namespace AST
         {}
         ~Module() {}
 
+        Module(const Module &) = delete;
+        Module(Module &&) = default;
+
+
         std::string debug_description() const;
 
         File &add_file(const std::filesystem::path &path);
