@@ -15,8 +15,6 @@
 
 TEST_CASE( "node description", "[AST Literal]" ) 
 {
-    try {
-    
     auto tm = EchoTests::tests_make_module_with_content(
         "42 " // int literal
         "-42 " // int literal
@@ -37,10 +35,6 @@ TEST_CASE( "node description", "[AST Literal]" )
     TEST_ASSERT_LIT_DESC(5, AST::LiteralFloatExprNode, "literal<float32>(-3.14f)");
     TEST_ASSERT_LIT_DESC(6, AST::LiteralBoolExprNode, "literal<bool>(true)");
     TEST_ASSERT_LIT_DESC(7, AST::LiteralBoolExprNode, "literal<bool>(false)");
-    }
-    catch (const std::exception &e) {
-        std::cout << e.what() << std::endl;
-    }
 }
 
 TEST_CASE( "float value extraction", "[AST Literal]" ) 
