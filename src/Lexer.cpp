@@ -591,7 +591,10 @@ bool LexerFunction::NumericLiteral::parse(TokenCollection &tokens, LexerCursor &
         cursor.skip();
     }
 
-    while (!cursor.is_eof() && numeric_lut[cursor.peek()]) {
+    while (!cursor.is_eof()) {
+        if (!numeric_lut[cursor.peek()]) {
+            break;
+        }
         value += cursor.peek();
         cursor.skip();
     }
@@ -607,7 +610,11 @@ bool LexerFunction::NumericLiteral::parse(TokenCollection &tokens, LexerCursor &
     cursor.skip();
 
     // we have a floating point number, so we need to find the fractional part
-    while (!cursor.is_eof() && numeric_lut[cursor.peek()]) {
+    while (!cursor.is_eof()) {
+        if (!numeric_lut[cursor.peek()]) {
+            break;
+        }
+
         value += cursor.peek();
         cursor.skip();
     }

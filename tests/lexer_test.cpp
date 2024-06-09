@@ -21,6 +21,78 @@ TEST_CASE( "Token References", "[lexer]" ) {
     REQUIRE( bar.type() == Token::Type::t_identifier );
 }
 
+TEST_CASE( "Numeric Literals", "[lexer]" ) 
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(
+        tokens, 
+        "42 " // decimal
+        "-42 " // negative decimal
+
+        "1.0 " // double
+        "-1.0 " // negative double
+
+        "1.0f " // float
+        "-1.0f " // negative float
+
+        "1. " // double autozero
+        "-1. " // negative double autozero
+
+        "1.f " // float autozero
+        "-1.f " // negative float autozero
+
+        "3.1415926535897932384626433" // pi
+
+        // todo add scientific notation
+    );
+
+    auto decimal = tokens[0];
+    REQUIRE( decimal.type() == Token::Type::t_integer_literal );
+    REQUIRE( decimal.value() == "42" );
+
+    auto negative_decimal = tokens[1];
+    REQUIRE( negative_decimal.type() == Token::Type::t_integer_literal );
+    REQUIRE( negative_decimal.value() == "-42" );
+
+    auto double_literal = tokens[2];
+    REQUIRE( double_literal.type() == Token::Type::t_floating_literal );
+    REQUIRE( double_literal.value() == "1.0" );
+
+    auto negative_double_literal = tokens[3];
+    REQUIRE( negative_double_literal.type() == Token::Type::t_floating_literal );
+    REQUIRE( negative_double_literal.value() == "-1.0" );
+
+    auto float_literal = tokens[4];
+    REQUIRE( float_literal.type() == Token::Type::t_floating_literal );
+    REQUIRE( float_literal.value() == "1.0f" );
+
+    auto negative_float_literal = tokens[5];
+    REQUIRE( negative_float_literal.type() == Token::Type::t_floating_literal );
+    REQUIRE( negative_float_literal.value() == "-1.0f" );
+
+    auto double_autozero = tokens[6];
+    REQUIRE( double_autozero.type() == Token::Type::t_floating_literal );
+    REQUIRE( double_autozero.value() == "1.0" );
+
+    auto negative_double_autozero = tokens[7];
+    REQUIRE( negative_double_autozero.type() == Token::Type::t_floating_literal );
+    REQUIRE( negative_double_autozero.value() == "-1.0" );
+
+    auto float_autozero = tokens[8];
+    REQUIRE( float_autozero.type() == Token::Type::t_floating_literal );
+    REQUIRE( float_autozero.value() == "1.0f" );
+
+    auto negative_float_autozero = tokens[9];
+    REQUIRE( negative_float_autozero.type() == Token::Type::t_floating_literal );
+    REQUIRE( negative_float_autozero.value() == "-1.0f" );
+
+    auto pi = tokens[10];
+    REQUIRE( pi.type() == Token::Type::t_floating_literal );
+    REQUIRE( pi.value() == "3.1415926535897932384626433" );
+}
+
 TEST_CASE( "Strings", "[lexer]" ) {
     Lexer lexer;
     TokenCollection tokens;
