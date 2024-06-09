@@ -23,7 +23,7 @@ namespace Parser
         const TokenCollection &tokens;
 
         Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = 0) : 
-            tokens(tokens), _index(start), _end(end) 
+            _index(start), _end(end), tokens(tokens)
         {}
         ~Cursor() {};
 
@@ -65,28 +65,28 @@ namespace Parser
             return tokens[_index + offset];
         }
 
-        inline const Token::Type type(size_t index) const {
+        inline Token::Type type(size_t index) const {
             if (!is_valid(index)) return Token::Type::t_unknown;
             return tokens.tokens[index].type;
         }
 
-        inline const Token::Type type() const {
+        inline Token::Type type() const {
             return type(_index);
         }
 
-        inline const Token::Type peek_type(size_t offset) const {
+        inline Token::Type peek_type(size_t offset) const {
             return type(_index + offset);
         }
 
-        inline const bool is_type_at(size_t index, const Token::Type as_type) const {
+        inline bool is_type_at(size_t index, const Token::Type as_type) const {
             return type(index) == as_type;
         }
 
-        inline const bool is_type(const Token::Type as_type) const {
+        inline bool is_type(const Token::Type as_type) const {
             return is_type_at(_index, as_type);
         }
 
-        const bool is_type(std::initializer_list<Token::Type> types) const {
+        bool is_type(std::initializer_list<Token::Type> types) const {
             for (auto type : types) {
                 if (is_type_at(_index, type)) {
                     return true;
@@ -95,11 +95,11 @@ namespace Parser
             return false;
         }
 
-        inline const bool peek_is_type(size_t offset, const Token::Type as_type) const {
+        inline bool peek_is_type(size_t offset, const Token::Type as_type) const {
             return is_type_at(_index + offset, as_type);
         }
 
-        inline const bool is_type_sequence(size_t offset, std::initializer_list<Token::Type> types) const {
+        inline bool is_type_sequence(size_t offset, std::initializer_list<Token::Type> types) const {
             for (auto type : types) {
                 if (!is_type_at(_index + offset, type)) {
                     return false;

@@ -87,7 +87,7 @@ const std::string token_type_string(Token::Type type);
 // used for lexing and parsing, only available for literals
 const std::string token_lit_symbol_string(const Token::Type type);
 
-struct TokenReference;
+class TokenReference;
 struct TokenSlice;
 struct TokenCollection {
 
@@ -142,7 +142,7 @@ public:
         return tokens;
     }
 
-    inline const bool is_valid() const {
+    inline bool is_valid() const {
         return index < tokens.tokens.size();
     }
 
@@ -156,23 +156,23 @@ public:
         return tokens.tokens[index];
     }
 
-    inline const Token::Type type() const {
+    inline Token::Type type() const {
         assert(is_valid());
         return tokens.tokens[index].type;
     }
 
-    inline const uint32_t line() const {
+    inline uint32_t line() const {
         assert(is_valid());
         return tokens.tokens[index].line;
     }
 
-    inline const uint32_t char_offset() const {
+    inline uint32_t char_offset() const {
         assert(is_valid());
         return tokens.tokens[index].char_offset;
     }
 
     // same as char_offset..
-    inline const uint32_t column() const {
+    inline uint32_t column() const {
         assert(is_valid());
         return tokens.tokens[index].char_offset;
     }

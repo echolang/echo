@@ -2,6 +2,7 @@
 
 #include <stack>
 #include <iostream>
+#include <memory>
 
 AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &type)
 {
@@ -53,7 +54,7 @@ TokenList AST::Operator::shunting_yard(TokenSlice &token_slice)
 
     for(auto token : token_slice)
     {
-        auto &tokenval = token.value();
+        // auto &tokenval = token.value();
 
         if (token.token().is_one_of({
             Token::Type::t_string_literal,

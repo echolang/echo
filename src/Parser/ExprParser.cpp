@@ -271,7 +271,10 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     auto cursor_before = cursor.snapshot();
 
     // determine the token range of the expression
-    while (is_expr_token(cursor) && !cursor.is_done()) {
+    while (!cursor.is_done()) {
+        if (!is_expr_token(cursor)) {
+            break;
+        }
         cursor.skip();
     }
 

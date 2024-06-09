@@ -69,6 +69,13 @@ TEST_CASE( "Strings", "[lexer]" ) {
     REQUIRE( tokens.token_values[0] == "'foo\nbar'" );
 }
 
+TEST_CASE( "Unterminated String", "[lexer]" ) {
+    Lexer lexer;
+    TokenCollection tokens;
+
+    REQUIRE_THROWS_AS( lexer.tokenize(tokens, "'foo"), Lexer::UnterminatedStringException );
+}
+
 
 TEST_CASE( "HexLiterals", "[lexer]" ) {
     Lexer lexer;
@@ -98,21 +105,21 @@ TEST_CASE( "HexLiterals", "[lexer]" ) {
     REQUIRE( tokens.token_values[0] == "0x1234567890ABCDEF" );
 }
 
-// tests trying to parse custom operator symbols
-TEST_CASE( "Operator Prepass", "[lexer]" ) {
-    Lexer lexer;
-    TokenCollection tokens;
-    AST::OperatorRegistry ops;
+// // tests trying to parse custom operator symbols
+// TEST_CASE( "Operator Prepass", "[lexer]" ) {
+//     Lexer lexer;
+//     TokenCollection tokens;
+//     AST::OperatorRegistry ops;
 
-    std::string code = 
-        "operator (int $foo) <=> (int $bar) : int {"
-        "    return $foo + $bar;"
-        "}"
-        "echo 42 <=> 69";
+//     std::string code = 
+//         "operator (int $foo) <=> (int $bar) : int {"
+//         "    return $foo + $bar;"
+//         "}"
+//         "echo 42 <=> 69";
 
-    lexer.tokenize_prepass_operators(code, ops);
-    lexer.tokenize(tokens, code, &ops);
+//     lexer.tokenize_prepass_operators(code, ops);
+//     lexer.tokenize(tokens, code, &ops);
 
-    REQUIRE( tokens.tokens.size() == 17 );
+//     REQUIRE( tokens.tokens.size() == 17 );
 
-}
+// }

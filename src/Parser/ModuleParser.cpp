@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <memory>
 
 Parser::ModuleParser::ModuleParser()
 {
@@ -65,6 +66,6 @@ void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const
 
 AST::TokenizedFile &Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
 {
-    auto &tfile = module.tokenize(*_lexer, file);
+    auto &tfile = module.tokenize(*_lexer.get(), file);
     return tfile;
 }

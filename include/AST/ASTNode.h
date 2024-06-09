@@ -19,7 +19,7 @@ namespace AST
 
         virtual const std::string node_description() = 0;
 
-        virtual const bool is_assignable() {
+        virtual bool is_assignable() {
             return false;
         }
 

@@ -6,10 +6,6 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <string_view>
-#include <regex>
-#include <concepts>
-#include <functional>
 #include <cstring>
 
 #include "Token.h"
@@ -21,17 +17,17 @@
 #define MHP_VOCAB_DUBQUOTE '"'
 #define MHP_VOCAB_SNGQUOTE '\''
 
-struct LexerRule {
-    std::regex pattern;
-    Token::Type type;
-};
+// struct LexerRule {
+//     std::regex pattern;
+//     Token::Type type;
+// };
 
 struct LexerCursor
 {
     size_t line;
     size_t char_offset;
     size_t end_of_line_offset;
-    std::string::const_iterator it;
+
     const std::string &input;
 
     LexerCursor(const std::string &input) : 
@@ -57,12 +53,18 @@ struct LexerCursor
     }
 
     inline char peek() const {
-        return *it;
+        return (it != input.end()) ? *it : '\0';
     }
 
     inline char peek(size_t offset) const {
-        return *(it + offset);
+        return (it + offset != input.end()) ? *(it + offset) : '\0';
     }
+
+    inline const std::string::const_iterator current() const {
+        return it;
+    }
+
+    void reset();
 
     inline void determine_end_of_line() {
         if (is_eof()) {
@@ -82,8 +84,12 @@ struct LexerCursor
         } else {
             char_offset += offset;
         }
-
-        it += offset;
+    
+        if (it + offset > input.end()) {
+            it = input.end();
+        } else {
+            it += offset;
+        }
 
         if (did_increment_line) {
             determine_end_of_line();
@@ -161,39 +167,171 @@ struct LexerCursor
     // is far easier and lets me identifiy custom operators early on in the full lexing pass. 
     // keeping this here for the record and to remind myself that our mindset should be "we are dump till proven wrong" :)
     bool is_seperating_char(size_t offset = 0);
+
+    // returns a string giving the user some context 
+    // of where in the code the iterator currently is, will never go beyond its current line
+    std::string get_code_sample(const std::string::const_iterator it, const uint32_t start_offset = 0, const uint32_t end_offset = 20) const;
+
+private:
+    std::string::const_iterator it;
 };
 
+namespace LexerFunction
+{
+    class Base 
+    {
+    public:
+        virtual ~Base() {};
+
+        // the priority of the lexer function, wil be used to sort
+        // all considered lexer functions.
+        virtual int priority() const = 0;
+
+        // defines what prefix needs to match entirely for this lexer function
+        // to be called, if an empty string is returned the function will be considered
+        // everywhere (for example for identifiers)
+        virtual const std::vector<std::string> must_match() const = 0;
+
+        // lex tha stuff
+        virtual bool parse(TokenCollection &tokens, LexerCursor &cursor) const = 0;
+    };
+
+    struct TreeNode {
+        std::string prefix;
+        std::vector<Base *> functions;
+        std::unordered_map<char, std::unique_ptr<TreeNode>> children;
+
+        TreeNode(const std::string &prefix) : prefix(prefix) {}
+        TreeNode() = default;
+    };
+
+    class CharToken : public Base
+    {
+    public:
+        const char lit;
+        const Token::Type type;
+
+        CharToken(const char lit, const Token::Type type) : lit(lit), type(type) {}
+
+        int priority() const override {
+            return 0; // default priority
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class StringToken : public Base
+    {
+    public:
+        const std::string lit;
+        const Token::Type type;
+
+        StringToken(const std::string lit, const Token::Type type) : lit(lit), type(type) {}
+
+        int priority() const override {
+            return lit.size(); // the longer the string the higher the priority
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class NumericLiteral : public Base
+    {
+    public:
+        int priority() const override {
+            return 10; // a negative number literal should be considered before the neg operator
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class HexLiteral : public Base
+    {
+    public:
+        int priority() const override {
+            return 20;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class StringLiteral : public Base
+    {
+    public:
+        int priority() const override {
+            return 5;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class VariableName : public Base
+    {
+    public:
+        int priority() const override {
+            return 100;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class SingleLineComment : public Base
+    {
+    public:
+        int priority() const override {
+            return 999;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class MultiLineComment : public Base
+    {
+    public:
+        int priority() const override {
+            return 999;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
+    class Identifier : public Base
+    {
+    public:
+        int priority() const override {
+            return -1;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+}
 
 class Lexer 
 {
-    template<size_t N>
-    struct CSXStrLiteral {
-        constexpr CSXStrLiteral(const char (&str)[N]) {
-            std::copy_n(str, N, value);
-        }
-        char value[N];
-    };
+    using FunctionList = std::vector<std::unique_ptr<LexerFunction::Base>>;
 
-    class LexerFunction 
-    {
-        virtual const std::string &must_match() const;
-    };  
-
-    using LexerFunctionSignature = std::function<bool(Lexer&, TokenCollection&, LexerCursor&)>;
-
-    struct LexerFunctionEntry {
-        void *context;
-        LexerFunctionSignature function;
-    };
+    // template<size_t N>
+    // struct CSXStrLiteral {
+    //     constexpr CSXStrLiteral(const char (&str)[N]) {
+    //         std::copy_n(str, N, value);
+    //     }
+    //     char value[N];
+    // };
+    // using LexerFunctionSignature = std::function<bool(Lexer&, TokenCollection&, LexerCursor&)>;
+    
+    const uint32_t MAX_PREFIX_LENGTH = 3;
 
 public:
     struct TokenException : public std::exception {
-
-        const std::string snippet;
-        const size_t line;
-        const size_t char_offset;
-        const std::string error_message;
-
         TokenException(const std::string &message, const std::string &snippet, size_t line, size_t char_offset) :
             snippet(snippet), 
             line(line), 
@@ -201,9 +339,19 @@ public:
             error_message(message)
         {}
 
-        const char *what() const throw() {
+        const char *what() const noexcept override {
             return error_message.c_str();
         }
+
+        const std::string &get_snippet() const {
+            return snippet;
+        }
+
+    private:
+        std::string snippet;
+        size_t line;
+        size_t char_offset;
+        std::string error_message;
     };
 
     struct UnknownTokenException : public TokenException {
@@ -218,142 +366,137 @@ public:
         {}
     };
 
-    // struct RegexTokenMatcher {
-    //     std::regex pattern;
-    //     Token::Type type;
-
-    //     RegexTokenMatcher(const std::string &pattern, Token::Type type) : pattern(pattern), type(type) {}
-
-    //     bool match(TokenCollection &tokens, LexerCursor &cursor) {
-    //         std::smatch match;
-    //         if (!std::regex_search(cursor.it, cursor.input.end(), match, pattern)) {
-    //             return false;
-    //         }
-
-    //         tokens.push(match.str(), type, cursor.line, cursor.char_offset);
-    //         cursor.skip(match.str().size());
-    //         return true;
-    //     }
-    // };
+    struct UnterminatedCommentException : public TokenException {
+        UnterminatedCommentException(const std::string &snippet, size_t line, size_t char_offset) :
+            TokenException("Unterminated comment at line " + std::to_string(line) + " offset " + std::to_string(char_offset) + " near: " + snippet, snippet, line, char_offset)
+        {}
+    };
 
     Lexer() {}
+    ~Lexer() {}
 
     /**
-     * Returns a single character parser function, useful for (<, >, ?, etc.)
+     * Executes the given function list
      */
-    template <char C, Token::Type T>
-    bool parse_char_token(TokenCollection &tokens, LexerCursor &cursor) {
-        if (cursor.peek() != C) {
-            return false;
-        }
+    void execute_functions(FunctionList &functions, TokenCollection &tokens, LexerCursor &cursor);
 
-        tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
-        cursor.skip();
-        return true;
-    }
 
-    /**
-     * Same as "parse_char_token" but only accepts the token if it ends with a seperating character
-     */
-    template <char C, Token::Type T>
-    bool parse_char_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
-        if (cursor.peek() != C) {
-            return false;
-        }
+    // /**
+    //  * Returns a single character parser function, useful for (<, >, ?, etc.)
+    //  */
+    // template <char C, Token::Type T>
+    // bool parse_char_token(TokenCollection &tokens, LexerCursor &cursor) {
+    //     if (cursor.peek() != C) {
+    //         return false;
+    //     }
 
-        if (!cursor.is_seperating_char(1)) {
-            return false;
-        }
+    //     tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
+    //     cursor.skip();
+    //     return true;
+    // }
 
-        tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
-        cursor.skip();
-        return true;
-    }
+    // /**
+    //  * Same as "parse_char_token" but only accepts the token if it ends with a seperating character
+    //  */
+    // template <char C, Token::Type T>
+    // bool parse_char_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
+    //     if (cursor.peek() != C) {
+    //         return false;
+    //     }
 
-    /**
-     * Parses a multi-character token (e.g. "==" or "!=")
-     */
-    template <CSXStrLiteral lit, Token::Type T>
-    bool parse_exact_token(TokenCollection &tokens, LexerCursor &cursor) {
-        constexpr auto size = sizeof(lit.value) - 1;
-        constexpr auto contents = lit.value;
+    //     if (!cursor.is_seperating_char(1)) {
+    //         return false;
+    //     }
 
-        if (!cursor.begins_with(contents)) {
-            return false;
-        }
+    //     tokens.push(std::string(1, C), T, cursor.line, cursor.char_offset);
+    //     cursor.skip();
+    //     return true;
+    // }
 
-        tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
-        cursor.skip(size);
-        return true;
-    }
+    // /**
+    //  * Parses a multi-character token (e.g. "==" or "!=")
+    //  */
+    // template <CSXStrLiteral lit, Token::Type T>
+    // bool parse_exact_token(TokenCollection &tokens, LexerCursor &cursor) {
+    //     constexpr auto size = sizeof(lit.value) - 1;
+    //     constexpr auto contents = lit.value;
 
-    /**
-     * Same as "parse_exact_token" but only accepts the token if it ends with a seperating character
-     */
-    template <CSXStrLiteral lit, Token::Type T>
-    bool parse_exact_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
-        constexpr auto size = sizeof(lit.value) - 1;
-        constexpr auto contents = lit.value;
+    //     if (!cursor.begins_with(contents)) {
+    //         return false;
+    //     }
 
-        if (!cursor.begins_with(contents)) {
-            return false;
-        }
+    //     tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
+    //     cursor.skip(size);
+    //     return true;
+    // }
 
-        if (!cursor.is_seperating_char(size)) {
-            return false;
-        }
+    // /**
+    //  * Same as "parse_exact_token" but only accepts the token if it ends with a seperating character
+    //  */
+    // template <CSXStrLiteral lit, Token::Type T>
+    // bool parse_exact_token_seperating(TokenCollection &tokens, LexerCursor &cursor) {
+    //     constexpr auto size = sizeof(lit.value) - 1;
+    //     constexpr auto contents = lit.value;
 
-        tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
-        cursor.skip(size);
-        return true;
-    }
+    //     if (!cursor.begins_with(contents)) {
+    //         return false;
+    //     }
 
-    /**
-     * Parses a token with the given regex pattern
-     */
-    template <CSXStrLiteral pattern, Token::Type T>
-    bool parse_regex_token(TokenCollection &tokens, LexerCursor &cursor) {
-        constexpr auto size = sizeof(pattern.value);
-        constexpr auto contents = pattern.value;
+    //     if (!cursor.is_seperating_char(size)) {
+    //         return false;
+    //     }
 
-        static std::regex regex(contents, std::regex_constants::optimize);
+    //     tokens.push(std::string(contents, size), T, cursor.line, cursor.char_offset);
+    //     cursor.skip(size);
+    //     return true;
+    // }
 
-        std::smatch match;
-        if (!std::regex_search(cursor.it, cursor.end_of_line(), match, regex)) {
-            return false;
-        }
+    // /**
+    //  * Parses a token with the given regex pattern
+    //  */
+    // template <CSXStrLiteral pattern, Token::Type T>
+    // bool parse_regex_token(TokenCollection &tokens, LexerCursor &cursor) {
+    //     // constexpr auto size = sizeof(pattern.value);
+    //     constexpr auto contents = pattern.value;
 
-        auto match_str = match.str();
+    //     static std::regex regex(contents, std::regex_constants::optimize);
 
-        tokens.push(match_str, T, cursor.line, cursor.char_offset);
-        cursor.skip(match_str.size());
-        return true;
-    }
+    //     std::smatch match;
+    //     if (!std::regex_search(cursor.it, cursor.end_of_line(), match, regex)) {
+    //         return false;
+    //     }
 
-    /**
-     * Parse variable names
-     */
-    bool parse_varname(TokenCollection &tokens, LexerCursor &cursor);
+    //     auto match_str = match.str();
 
-    /**
-     * Parses a string literal
-     */
-    bool parse_string_literal(TokenCollection &tokens, LexerCursor &cursor);
+    //     tokens.push(match_str, T, cursor.line, cursor.char_offset);
+    //     cursor.skip(match_str.size());
+    //     return true;
+    // }
 
-    /**
-     * Parses a hex literal
-     */
-    bool parse_hex_literal(TokenCollection &tokens, LexerCursor &cursor);
+    // /**
+    //  * Parse variable names
+    //  */
+    // bool parse_varname(TokenCollection &tokens, LexerCursor &cursor);
 
-    /**
-     * Parses a single line comment
-     */
-    bool parse_sl_comment(TokenCollection &tokens, LexerCursor &cursor);
+    // /**
+    //  * Parses a string literal
+    //  */
+    // bool parse_string_literal(TokenCollection &tokens, LexerCursor &cursor);
 
-    /**
-     * Parses a multi-line comment
-     */
-    bool parse_ml_comment(TokenCollection &tokens, LexerCursor &cursor);
+    // /**
+    //  * Parses a hex literal
+    //  */
+    // bool parse_hex_literal(TokenCollection &tokens, LexerCursor &cursor);
+
+    // /**
+    //  * Parses a single line comment
+    //  */
+    // bool parse_sl_comment(TokenCollection &tokens, LexerCursor &cursor);
+
+    // /**
+    //  * Parses a multi-line comment
+    //  */
+    // bool parse_ml_comment(TokenCollection &tokens, LexerCursor &cursor);
 
     /**
      * Parses the given input string into a collection of tokens

@@ -15,7 +15,7 @@ namespace EchoTests
 
     ParserEnv tests_make_parser_env(std::string content);
     
-    std::unique_ptr<AST::Module> tests_make_module_with_content(std::string content);
+    AST::Module tests_make_module_with_content(std::string content);
 }
 
 

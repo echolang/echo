@@ -41,7 +41,7 @@ namespace AST
                 return "[No content available]";
             }
 
-            const auto &content = file->file->content.value();
+            // const auto &content = file->file->content.value();
 
             auto lines = line_range();
 

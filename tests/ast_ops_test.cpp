@@ -5,7 +5,7 @@
 
 #define TEST_ASSERT_OP_LIT_TYPE(index, lit_type) \
     { \
-        auto op = registry.get_operator(tm->tokens[index]); \
+        auto op = registry.get_operator(tm.tokens[index]); \
         REQUIRE(op->type == lit_type); \
     }
 
@@ -53,7 +53,7 @@ TEST_CASE( "predefined token operators", "[AST Ops]" )
     TEST_ASSERT_OP_LIT_TYPE(16, Token::Type::t_op_dec);
 
     // test non existent operator
-    REQUIRE(registry.get_operator(tm->tokens[17]) == nullptr);
+    REQUIRE(registry.get_operator(tm.tokens[17]) == nullptr);
 }
 
 

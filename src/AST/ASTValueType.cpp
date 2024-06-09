@@ -20,6 +20,8 @@ std::string AST::get_primitive_name(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_float64: return "float64";
         case ValueTypePrimitive::t_bool: return "bool";
         case ValueTypePrimitive::t_void: return "void";
+
+        default: return "";
     };
 }
 

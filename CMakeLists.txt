@@ -8,6 +8,12 @@ set(LIBNAME ${APPNAME}_lib)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -g")
+set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
+
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
+set(CMAKE_BUILD_TYPE Debug)
+
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
 
 message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
@@ -19,10 +25,17 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
-link_directories(${LLVM_LIBRARY_DIRS})
+
+# DO NOT INCLUDE! THIS CAUSED AN ERROR THAT TOOK ME 3 FULL DAYS TO PIN DOWN
+# I leave this here as a warning to future me and as a totem to ward off evil spirits
+# honestly I do not even rember why I added this in the first place, it in combination 
+# with some other stupid mistakes of mine caused a segfault / bad access in the libunwind on ARM64 Mac's 
+# on Intel Mac's it worked fine which making this an absolute nightmare to debug
+# link_directories(${LLVM_LIBRARY_DIRS}) 
 
 # Echo 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
+set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-Wall -Wextra -pedantic -Wno-unused-parameter")
 
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${SOURCES})
@@ -72,7 +85,7 @@ Include(FetchContent)
 FetchContent_Declare(
   Catch2
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v3.4.0
+  GIT_TAG        v3.6.0
 )
 
 FetchContent_MakeAvailable(Catch2)
