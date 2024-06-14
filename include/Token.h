@@ -25,6 +25,11 @@ public:
         t_logical_geq,              // >=
         t_accessorlr,               // ->
         t_assign,                   // =
+        t_and,                      // &
+        t_or,                       // |
+        t_xor,                      // ^
+        t_op_shl,                   // <<
+        t_op_shr,                   // >>
         t_op_inc,                   // ++
         t_op_dec,                   // --
         t_op_add,                   // +       
@@ -32,7 +37,7 @@ public:
         t_op_mul,                   // *
         t_op_div,                   // /
         t_op_mod,                   // %
-        t_op_pow,                   // ^
+        t_op_pow,                   // **
         t_op_custom,                // <custom>
         t_qmark,                    // ?
         t_exclamation,              // !

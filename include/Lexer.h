@@ -31,7 +31,7 @@ struct LexerCursor
     const std::string &input;
 
     LexerCursor(const std::string &input) : 
-        line(1), char_offset(1), it(input.begin()), input(input) 
+        line(1), char_offset(1), input(input), it(input.begin())
     {
         determine_end_of_line();
     }
@@ -211,7 +211,10 @@ namespace LexerFunction
         const char lit;
         const Token::Type type;
 
-        CharToken(const char lit, const Token::Type type) : lit(lit), type(type) {}
+        CharToken(const char lit, const Token::Type type) : lit(lit), type(type) {
+            // must be a non null character
+            assert(lit != '\0');
+        }
 
         int priority() const override {
             return 0; // default priority

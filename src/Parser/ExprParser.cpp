@@ -264,28 +264,30 @@ bool is_expr_token(Parser::Cursor &cursor)
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
 }
 
-const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
+const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
-    auto cursor_before = cursor.snapshot();
+    // if (cursor.is_type(Token::Type::t_open_paren)) {
+    //     cursor.skip();
+    //     auto expr = Parser::parse_expr_ref(payload, expected_type);
 
-    // determine the token range of the expression
-    while (!cursor.is_done()) {
-        if (!is_expr_token(cursor)) {
-            break;
-        }
-        cursor.skip();
-    }
+    //     if (!cursor.is_type(Token::Type::t_close_paren)) {
+    //         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+    //             payload.context.code_ref(cursor.current()), 
+    //             Token::Type::t_close_paren,
+    //             cursor.current().type()
+    //         );
+    //         return AST::make_void_ref();
+    //     }
 
-    auto cursor_after = cursor.snapshot();
-    auto expr_slice = cursor.slice(cursor_before, cursor_after);
-    cursor.restore(cursor_before);
+    //     cursor.skip();
+    //     return expr;
+    // }
 
-    // collect the tokens in range and perform the shunting yard algorithm
-    // to create a postfix expression
-    auto postfix_expr = AST::Operator::shunting_yard(expr_slice);
-
+    // if (cursor.is_type(Token::Type::t_close_paren)) {
+    //     return AST::make_void_ref();
+    // }
 
     if (cursor.is_type(Token::Type::t_floating_literal)) {
         return parse_literal_float(payload, expected_type);
@@ -316,6 +318,175 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         
         return AST::make_ref(node);
     }
+
+    assert(false && "unimplemented");
+}
+
+struct ExprPart {
+    const AST::NodeReference node;
+    const AST::Operator *op;
+};
+
+#define O1Prec part.op->precedence
+#define O2Prec operator_stack.top()->precedence
+
+std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
+{
+    auto output = std::vector<ExprPart>();
+    auto operator_stack = std::stack<const AST::Operator *>();
+
+    for(auto part : expr_parts)
+    {
+        // if its a literal, variable etc. (not an operator)
+        if (part.op == nullptr) 
+        {
+            output.push_back(part);
+        }
+        else if (part.op->type == Token::Type::t_open_paren)
+        {
+            operator_stack.push(part.op);
+        }
+        else if (part.op->type == Token::Type::t_close_paren)
+        {
+            while (!operator_stack.empty() && operator_stack.top()->type != Token::Type::t_open_paren)
+            {
+                output.push_back({AST::make_void_ref(), operator_stack.top()});
+                operator_stack.pop();
+            }
+
+            // ensure we have the opening "(", otherwise something is off
+            assert(operator_stack.top()->type == Token::Type::t_open_paren);
+            operator_stack.pop();
+        }
+        else
+        {
+            while (
+                !operator_stack.empty() &&
+                // O2Prec.assoc != AST::OpAssociativity::left &&
+                operator_stack.top()->type != Token::Type::t_open_paren &&
+                (
+                    O2Prec.sequence < O1Prec.sequence ||
+                    (
+                        O1Prec.sequence == O2Prec.sequence &&
+                        O1Prec.assoc == AST::OpAssociativity::left
+                    )
+                )
+            ) {
+                output.push_back({AST::make_void_ref(), operator_stack.top()});
+                operator_stack.pop();
+            }
+
+            operator_stack.push(part.op);
+        }        
+    }
+
+    while (!operator_stack.empty())
+    {
+        output.push_back({AST::make_void_ref(), operator_stack.top()});
+        operator_stack.pop();
+    }
+
+    return output;
+}
+
+const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+
+    std::vector<ExprPart> expr_parts;
+
+    while(is_expr_token(cursor))
+    {
+        // try to parse an operator
+        auto op = payload.collector.operators.get_operator(cursor.current());
+        if (op != nullptr) {
+            cursor.skip();
+            expr_parts.emplace_back(AST::make_void_ref(), op);
+            continue;
+        }
+
+        // parse the next expression node
+        auto node = parse_expr_node(payload, expected_type);
+        expr_parts.emplace_back(node, nullptr);
+    }
+
+    auto postfix_expr = shunting_yard(expr_parts);
+
+    // build expressions nodes
+    std::stack<AST::NodeReference> node_stack;
+    for (auto &part : postfix_expr) 
+    {
+
+
+
+    // print the postfix expression
+    for (auto &part : postfix_expr) {
+        if (part.op != nullptr) {
+            std::cout << std::format("{} ", token_lit_symbol_string(part.op->type));
+        }
+        else {
+            if (part.node.has_type<AST::LiteralIntExprNode>()) {
+                std::cout << std::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
+            } else if (part.node.has_type<AST::LiteralFloatExprNode>()) {
+                std::cout << std::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
+            } else if (part.node.has_type<AST::LiteralBoolExprNode>()) {
+                std::cout << std::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
+            } else {
+                std::cout << std::format("{} ", part.node.node()->node_description());
+            }
+        }
+    }
+
+    std::cout << std::endl;
+
+    auto cursor_before = cursor.snapshot();
+
+    // // determine the token range of the expression
+    // while (!cursor.is_done()) {
+    //     if (!is_expr_token(cursor)) {
+    //         break;
+    //     }
+    //     cursor.skip();
+    // }
+
+    // auto cursor_after = cursor.snapshot();
+    // auto expr_slice = cursor.slice(cursor_before, cursor_after);
+    // cursor.restore(cursor_before);
+
+    // // collect the tokens in range and perform the shunting yard algorithm
+    // // to create a postfix expression
+    // auto postfix_expr = AST::Operator::shunting_yard(expr_slice);
+
+
+    // if (cursor.is_type(Token::Type::t_floating_literal)) {
+    //     return parse_literal_float(payload, expected_type);
+    // }
+
+    // if (cursor.is_type(Token::Type::t_integer_literal)) {
+    //     return parse_literal_int(payload, expected_type);
+    // }
+
+    // if (cursor.is_type(Token::Type::t_bool_literal)) {
+    //     auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(cursor.current());
+    //     cursor.skip();
+    //     return AST::make_ref(node);
+    // }
+
+    // if (cursor.is_type(Token::Type::t_varname)) {
+    //     auto vardecl = payload.context.scope().find_vardecl_by_name(cursor.current().value());
+
+    //     if (!vardecl) {
+    //         payload.collector.collect_issue<AST::Issue::UnknownVariable>(payload.context.code_ref(cursor.current()), cursor.current().value());
+    //         cursor.skip();
+    //         return AST::make_void_ref();
+    //     }   
+
+    //     auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
+    //     auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
+    //     cursor.skip();
+        
+    //     return AST::make_ref(node);
+    // }
 
     assert(false && "unimplemented");
 }

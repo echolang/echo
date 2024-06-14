@@ -1,6 +1,7 @@
 #include "Lexer.h"
 
 #include <algorithm>
+#include <cassert>
 
 constexpr bool is_hex_char(char c) {
     return (c >= '0' && c <= '9') || 
@@ -242,10 +243,14 @@ void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, 
 #define ECHO_LEX_MAKE_FNCLIST(name) \
     std::vector<std::unique_ptr<LexerFunction::Base>> name;
 
-#define ECHO_LEX_FNC_CHAR(name, lit, type) \
-    name.push_back(std::make_unique<LexerFunction::CharToken>(lit, type));
+#define ECHO_LEX_FNC_CHAR(name, type) \
+    assert(token_lit_symbol_string(type).length() == 1 && "Char token must have a length of 1"); \
+    name.push_back(std::make_unique<LexerFunction::CharToken>(token_lit_symbol_string(type).at(0), type));
 
-#define ECHO_LEX_FNC_STRING(name, lit, type) \
+#define ECHO_LEX_FNC_STRING(name, type) \
+    name.push_back(std::make_unique<LexerFunction::StringToken>(token_lit_symbol_string(type), type));
+
+#define ECHO_LEX_FNC_CUST_STRING(name, lit, type) \
     name.push_back(std::make_unique<LexerFunction::StringToken>(lit, type));
 
 void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AST::OperatorRegistry *op_registry) 
@@ -254,39 +259,44 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
 
     // build a list of lexer functions
     ECHO_LEX_MAKE_FNCLIST(lx_functions);
-    ECHO_LEX_FNC_CHAR(lx_functions, ';', Token::Type::t_semicolon);
-    ECHO_LEX_FNC_CHAR(lx_functions, ':', Token::Type::t_colon);
-    ECHO_LEX_FNC_CHAR(lx_functions, ',', Token::Type::t_comma);
-    ECHO_LEX_FNC_CHAR(lx_functions, '.', Token::Type::t_dot);
-    ECHO_LEX_FNC_STRING(lx_functions, "&&", Token::Type::t_logical_and);
-    ECHO_LEX_FNC_STRING(lx_functions, "||", Token::Type::t_logical_or);
-    ECHO_LEX_FNC_STRING(lx_functions, "==", Token::Type::t_logical_eq);
-    ECHO_LEX_FNC_STRING(lx_functions, "!=", Token::Type::t_logical_neq);
-    ECHO_LEX_FNC_STRING(lx_functions, "<=", Token::Type::t_logical_leq);
-    ECHO_LEX_FNC_STRING(lx_functions, ">=", Token::Type::t_logical_geq);
-    ECHO_LEX_FNC_CHAR(lx_functions, '=', Token::Type::t_assign);
-    ECHO_LEX_FNC_STRING(lx_functions, "++", Token::Type::t_op_inc);
-    ECHO_LEX_FNC_STRING(lx_functions, "--", Token::Type::t_op_dec);
-    ECHO_LEX_FNC_CHAR(lx_functions, '+', Token::Type::t_op_add);
-    ECHO_LEX_FNC_CHAR(lx_functions, '-', Token::Type::t_op_sub);
-    ECHO_LEX_FNC_CHAR(lx_functions, '*', Token::Type::t_op_mul);
-    ECHO_LEX_FNC_CHAR(lx_functions, '/', Token::Type::t_op_div);
-    ECHO_LEX_FNC_CHAR(lx_functions, '%', Token::Type::t_op_mod);
-    ECHO_LEX_FNC_CHAR(lx_functions, '^', Token::Type::t_op_pow);
-    ECHO_LEX_FNC_CHAR(lx_functions, '?', Token::Type::t_qmark);
-    ECHO_LEX_FNC_CHAR(lx_functions, '!', Token::Type::t_exclamation);
-    ECHO_LEX_FNC_CHAR(lx_functions, '<', Token::Type::t_open_angle);
-    ECHO_LEX_FNC_CHAR(lx_functions, '>', Token::Type::t_close_angle);
-    ECHO_LEX_FNC_CHAR(lx_functions, '(', Token::Type::t_open_paren);
-    ECHO_LEX_FNC_CHAR(lx_functions, ')', Token::Type::t_close_paren);
-    ECHO_LEX_FNC_CHAR(lx_functions, '{', Token::Type::t_open_brace);
-    ECHO_LEX_FNC_CHAR(lx_functions, '}', Token::Type::t_close_brace);
-    ECHO_LEX_FNC_CHAR(lx_functions, '[', Token::Type::t_open_bracket);
-    ECHO_LEX_FNC_CHAR(lx_functions, ']', Token::Type::t_close_bracket);
-    ECHO_LEX_FNC_STRING(lx_functions, "true", Token::Type::t_bool_literal);
-    ECHO_LEX_FNC_STRING(lx_functions, "false", Token::Type::t_bool_literal);
-    ECHO_LEX_FNC_STRING(lx_functions, "const", Token::Type::t_const);
-    ECHO_LEX_FNC_STRING(lx_functions, "echo", Token::Type::t_echo);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_semicolon);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_colon);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_comma);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_dot);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_and);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_or);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_eq);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_neq);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_leq);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_geq);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_assign);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_and);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_or);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_xor);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_inc);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_dec);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_shl);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_shr);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_add);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_sub);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_mul);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_div);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_mod);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_pow);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_qmark);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_exclamation);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_angle);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_angle);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_paren);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_paren);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_brace);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_brace);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_bracket);
+    ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_bracket);
+    ECHO_LEX_FNC_CUST_STRING(lx_functions, "true", Token::Type::t_bool_literal);
+    ECHO_LEX_FNC_CUST_STRING(lx_functions, "false", Token::Type::t_bool_literal);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_const);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_echo);
 
     lx_functions.push_back(std::make_unique<LexerFunction::NumericLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
@@ -295,6 +305,14 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     lx_functions.push_back(std::make_unique<LexerFunction::SingleLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::MultiLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::Identifier>());
+
+    // if there are some custom operators 
+    // we add them to the list of functions so that they are recognized
+    if (op_registry) {
+        for (const auto op : op_registry->get_custom_operators()) {
+            ECHO_LEX_FNC_CUST_STRING(lx_functions, op->name, Token::Type::t_op_custom);
+        }
+    }
 
     execute_functions(lx_functions, tokens, cursor);
 
@@ -345,14 +363,6 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     //     // generic identifier
     //     &Lexer::parse_regex_token<"^[_a-zA-Z0-9]+", Token::Type::t_identifier>
     // };
-
-    // // if there are some custom operators 
-    // // we add them to the list of functions so that they are recognized
-    // if (op_registry) {
-    //     for (const auto op : op_registry->get_custom_operators()) {
-    //         std::cout << "registering custom operator: " << op << std::endl;
-    //     }
-    // }
 
     // while (!cursor.is_eof()) 
     // {
@@ -789,8 +799,16 @@ bool LexerFunction::Identifier::parse(TokenCollection &tokens, LexerCursor &curs
 
     const auto start = cursor.current();
 
-    while (!cursor.is_eof() && varname_lut[cursor.peek()]) {
+    while (!cursor.is_eof()) {
+        if (!varname_lut[cursor.peek()]) {
+            break;
+        }
         cursor.skip();
+    }
+
+    // sanity check
+    if (start == cursor.current()) {
+        return false;
     }
 
     tokens.push(std::string(start, cursor.current()), Token::Type::t_identifier, start_line, start_offset);

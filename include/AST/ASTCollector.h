@@ -6,14 +6,16 @@
 #include "AST/ASTValueTypeCollection.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTContext.h"
+#include "AST/ASTOps.h"
 
 namespace AST
 {  
     class Collector
     {
     public:
-        ValueTypeCollection value_types;
         std::vector<std::unique_ptr<AST::IssueRecord>> issues;
+        ValueTypeCollection value_types = ValueTypeCollection();
+        OperatorRegistry operators = OperatorRegistry();
         
         Collector();
         ~Collector();
