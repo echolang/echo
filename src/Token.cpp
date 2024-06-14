@@ -28,6 +28,10 @@ TokenSlice TokenReference::make_slice(size_t offset) const
 const std::string token_type_string(Token::Type type)
 {
     switch (type) {
+        case Token::Type::t_assign: return "assign (=)";
+        case Token::Type::t_and: return "and (&)";
+        case Token::Type::t_or: return "or (|)";
+        case Token::Type::t_xor: return "xor (^)";
         case Token::Type::t_identifier: return "identifier";
         case Token::Type::t_semicolon: return "semicolon (;)";
         case Token::Type::t_colon: return "colon (:)";
@@ -40,7 +44,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_logical_leq: return "logical_leq (<=)";
         case Token::Type::t_logical_geq: return "logical_geq (>=)";
         case Token::Type::t_accessorlr: return "accessorlr (->)";
-        case Token::Type::t_assign: return "assign (=)";
+        case Token::Type::t_op_shl: return "op_shl (<<)";
+        case Token::Type::t_op_shr: return "op_shr (>>)";
         case Token::Type::t_op_inc: return "op_inc (++)";
         case Token::Type::t_op_dec: return "op_dec (--)";
         case Token::Type::t_op_add: return "op_add (+)";
@@ -48,7 +53,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_op_mul: return "op_mul (*)";
         case Token::Type::t_op_div: return "op_div (/)";
         case Token::Type::t_op_mod: return "op_mod (%)";
-        case Token::Type::t_op_pow: return "op_pow (^)";
+        case Token::Type::t_op_pow: return "op_pow (**)";
         case Token::Type::t_qmark: return "qmark (?)";
         case Token::Type::t_exclamation: return "exclamation (!)";
         case Token::Type::t_open_angle: return "open_angle (<)";
@@ -75,6 +80,10 @@ const std::string token_type_string(Token::Type type)
 const std::string token_lit_symbol_string(const Token::Type type)
 {
     switch (type) {
+        case Token::Type::t_assign: return "=";
+        case Token::Type::t_and: return "&";
+        case Token::Type::t_or: return "|";
+        case Token::Type::t_xor: return "^";
         case Token::Type::t_semicolon: return ";";
         case Token::Type::t_colon: return ":";
         case Token::Type::t_comma: return ",";
@@ -86,7 +95,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_logical_leq: return "<=";
         case Token::Type::t_logical_geq: return ">=";
         case Token::Type::t_accessorlr: return "->";
-        case Token::Type::t_assign: return "=";
+        case Token::Type::t_op_shl: return "<<";
+        case Token::Type::t_op_shr: return ">>";
         case Token::Type::t_op_inc: return "++";
         case Token::Type::t_op_dec: return "--";
         case Token::Type::t_op_add: return "+";
@@ -94,7 +104,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_op_mul: return "*";
         case Token::Type::t_op_div: return "/";
         case Token::Type::t_op_mod: return "%";
-        case Token::Type::t_op_pow: return "^";
+        case Token::Type::t_op_pow: return "**";
         case Token::Type::t_qmark: return "?";
         case Token::Type::t_exclamation: return "!";
         case Token::Type::t_open_angle: return "<";
@@ -105,6 +115,9 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_close_brace: return "}";
         case Token::Type::t_open_bracket: return "[";
         case Token::Type::t_close_bracket: return "]";
+        case Token::Type::t_const: return "const";
+        case Token::Type::t_echo: return "echo";
+    
         default: 
             assert(false && "undefined operator type");
             return "";
@@ -115,6 +128,11 @@ bool Token::is_operator_type() const
 {
     return is_one_of({
         Token::Type::t_assign,
+        Token::Type::t_and,
+        Token::Type::t_or,
+        Token::Type::t_xor,
+        Token::Type::t_open_paren,
+        Token::Type::t_close_paren,
         Token::Type::t_logical_or,
         Token::Type::t_logical_and,
         Token::Type::t_logical_eq,
@@ -123,6 +141,8 @@ bool Token::is_operator_type() const
         Token::Type::t_close_angle,
         Token::Type::t_logical_geq,
         Token::Type::t_logical_leq,
+        Token::Type::t_op_shl,
+        Token::Type::t_op_shr,
         Token::Type::t_op_add,
         Token::Type::t_op_sub,
         Token::Type::t_op_mul,

@@ -67,12 +67,13 @@ namespace AST
         const Operator *get_operator(const TokenReference &token) const;
         const Operator *get_operator(const std::string &symbol) const;
 
-        inline const std::vector<Operator *> &get_custom_operators() const {
+        inline const std::vector<CustomOperator *> &get_custom_operators() const {
             return _custom_operators;
         }
+
     private:
         std::vector<std::unique_ptr<Operator>> _operators;
-        std::vector<Operator *> _custom_operators;
+        std::vector<CustomOperator *> _custom_operators;
         std::unordered_map<std::string, Operator *> _operator_symbol_map;
         std::array<Operator *, static_cast<size_t>(Token::Type::t_unknown)> _predefined_operator_map;
     };
