@@ -160,6 +160,14 @@ void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node)
 {
 }
 
+void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
+{
+}
+
+void LLVMCompiler::visitUnaryExpr(AST::UnaryExprNode &node)
+{
+}
+
 void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
 {
     if (node.token_function_name.value() == "echo") {
@@ -210,6 +218,10 @@ void LLVMCompiler::visitVarRefExpr(AST::VarRefExprNode &node)
 }
 
 void LLVMCompiler::visitNull(AST::NullNode &node)
+{
+}
+
+void LLVMCompiler::visitOperator(AST::OperatorNode &node)
 {
 }
 

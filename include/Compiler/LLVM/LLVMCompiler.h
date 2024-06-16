@@ -61,7 +61,10 @@ public:
     void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
     void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
     void visitVarRefExpr(AST::VarRefExprNode &node);
+    void visitBinaryExpr(AST::BinaryExprNode &node);
+    void visitUnaryExpr(AST::UnaryExprNode &node);
     void visitNull(AST::NullNode &node);
+    void visitOperator(AST::OperatorNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 

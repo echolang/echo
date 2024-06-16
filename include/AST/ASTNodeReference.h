@@ -53,7 +53,6 @@ namespace AST
         }
 
         template <typename T>
-            requires NodeTypeProvider<T>
         inline T *unsafe_ptr() const {
             return static_cast<T*>(parent_ptr);
         }
