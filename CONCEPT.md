@@ -76,6 +76,18 @@ uint32 $d = 42; // 32-bit unsigned integer (default)
 uint64 $e = 42; // 64-bit unsigned integer
 ```
 
+#### Block var declaration
+
+The initalizer value of a variable can also be declared in a block.
+
+```php
+$randomNumber = {
+    $rng = new RandomNumberGenerator();
+    $rng->seed(42);
+    return $rng->next();
+};
+
+
 ### Arrays / Container types
 
 Arrays are where things get a bit different. In PHP arrays are a special type of hash map that can contain any type of value. In Echo, arrays are container objects that can only contain a single type of value. 

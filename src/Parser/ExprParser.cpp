@@ -3,6 +3,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ExprNode.h"
 #include "AST/VarRefNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
 
 #include "External/infint.h"
@@ -323,39 +324,41 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 }
 
 struct ExprPart {
+    // val node
     const AST::NodeReference node;
-    const AST::Operator *op;
+    // operator node
+    AST::OperatorNode *opnode;
 };
 
-#define O1Prec part.op->precedence
-#define O2Prec operator_stack.top()->precedence
+#define O1Prec part.opnode->op->precedence
+#define O2Prec operator_stack.top()->op->precedence
 
 std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
 {
     auto output = std::vector<ExprPart>();
-    auto operator_stack = std::stack<const AST::Operator *>();
+    auto operator_stack = std::stack<AST::OperatorNode *>();
 
     for(auto part : expr_parts)
     {
         // if its a literal, variable etc. (not an operator)
-        if (part.op == nullptr) 
+        if (part.opnode == nullptr) 
         {
             output.push_back(part);
         }
-        else if (part.op->type == Token::Type::t_open_paren)
+        else if (part.opnode->op->type == Token::Type::t_open_paren)
         {
-            operator_stack.push(part.op);
+            operator_stack.push(part.opnode);
         }
-        else if (part.op->type == Token::Type::t_close_paren)
+        else if (part.opnode->op->type == Token::Type::t_close_paren)
         {
-            while (!operator_stack.empty() && operator_stack.top()->type != Token::Type::t_open_paren)
+            while (!operator_stack.empty() && operator_stack.top()->op->type != Token::Type::t_open_paren)
             {
                 output.push_back({AST::make_void_ref(), operator_stack.top()});
                 operator_stack.pop();
             }
 
             // ensure we have the opening "(", otherwise something is off
-            assert(operator_stack.top()->type == Token::Type::t_open_paren);
+            assert(operator_stack.top()->op->type == Token::Type::t_open_paren);
             operator_stack.pop();
         }
         else
@@ -363,7 +366,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
             while (
                 !operator_stack.empty() &&
                 // O2Prec.assoc != AST::OpAssociativity::left &&
-                operator_stack.top()->type != Token::Type::t_open_paren &&
+                operator_stack.top()->op->type != Token::Type::t_open_paren &&
                 (
                     O2Prec.sequence < O1Prec.sequence ||
                     (
@@ -376,7 +379,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
                 operator_stack.pop();
             }
 
-            operator_stack.push(part.op);
+            operator_stack.push(part.opnode);
         }        
     }
 
@@ -399,9 +402,11 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     {
         // try to parse an operator
         auto op = payload.collector.operators.get_operator(cursor.current());
+        auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
+
         if (op != nullptr) {
             cursor.skip();
-            expr_parts.emplace_back(AST::make_void_ref(), op);
+            expr_parts.emplace_back(AST::make_void_ref(), &opnode);
             continue;
         }
 
@@ -416,13 +421,31 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     std::stack<AST::NodeReference> node_stack;
     for (auto &part : postfix_expr) 
     {
+        if (part.opnode != nullptr) 
+        {
+            auto right = node_stack.top();
+            node_stack.pop();
 
+            auto left = node_stack.top();
+            node_stack.pop();
 
+            auto &node = payload.context.emplace_node<AST::BinaryExprNode>(
+                part.opnode, 
+                left.unsafe_ptr<AST::ExprNode>(), 
+                right.unsafe_ptr<AST::ExprNode>()
+            );
+            node_stack.push(AST::make_ref(node));
+        }
+        else 
+        {
+            node_stack.push(part.node);
+        }
+    }
 
     // print the postfix expression
     for (auto &part : postfix_expr) {
-        if (part.op != nullptr) {
-            std::cout << std::format("{} ", token_lit_symbol_string(part.op->type));
+        if (part.opnode != nullptr) {
+            std::cout << std::format("{} ", token_lit_symbol_string(part.opnode->op->type));
         }
         else {
             if (part.node.has_type<AST::LiteralIntExprNode>()) {
@@ -436,6 +459,8 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             }
         }
     }
+
+    return node_stack.top();
 
     std::cout << std::endl;
 
