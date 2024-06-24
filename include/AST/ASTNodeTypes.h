@@ -22,10 +22,14 @@ namespace AST
         n_vardecl,
         n_varref,
         n_type,
+        n_type_cast,
         n_expr_binary,
         n_expr_unary,
         n_expr_call,
         n_expr_varref,
+        n_expr_void,
+        n_func_decl,
+        n_func_return,
     };
 
     template<typename T>

@@ -7,6 +7,7 @@ namespace AST
 {
     class ScopeNode;
     class TypeNode;
+    class TypeCastNode;
     class VarDeclNode;
     class VarRefNode;
     class LiteralFloatExprNode;
@@ -18,6 +19,8 @@ namespace AST
     class UnaryExprNode;
     class NullNode;
     class OperatorNode;
+    class FunctionDeclNode;
+    class ReturnNode;
 
     class Visitor
     {
@@ -26,6 +29,7 @@ namespace AST
 
         virtual void visitScope(ScopeNode &node) = 0;
         virtual void visitType(TypeNode &node) = 0;
+        virtual void visitTypeCast(TypeCastNode &node) = 0;
         virtual void visitVarDecl(VarDeclNode &node) = 0;
         virtual void visitVarRef(VarRefNode &node) = 0;
         virtual void visitLiteralFloatExpr(LiteralFloatExprNode &node) = 0;
@@ -37,6 +41,8 @@ namespace AST
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
         virtual void visitNull(NullNode &node) = 0;
         virtual void visitOperator(OperatorNode &node) = 0;
+        virtual void visitFunctionDecl(FunctionDeclNode &node) = 0;
+        virtual void visitReturn(ReturnNode &node) = 0;
     };
 }
 

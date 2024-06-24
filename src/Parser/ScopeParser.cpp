@@ -5,6 +5,9 @@
 
 #include "Parser/VarDeclParser.h"
 #include "Parser/EchoPrintParser.h"
+#include "Parser/FuncDeclParser.h"
+#include "Parser/FuncCallParser.h"
+#include "Parser/ReturnParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -21,13 +24,30 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         if (cursor.is_type(Token::Type::t_open_brace))
         {
             cursor.skip();
-            parse_scope(payload);
+            context.scope().add_child_scope(parse_scope(payload));
         }
         else if (cursor.is_type(Token::Type::t_close_brace))
         {
             cursor.skip();
             break;
         }
+        else if (cursor.is_type(Token::Type::t_function))
+        {
+            parse_funcdecl(payload);
+        }
+
+        else if (cursor.is_type(Token::Type::t_return))
+        {
+            scope_node.children.push_back(AST::make_ref(parse_return(payload)));
+        }
+
+        // print statement aka "echo $something"
+        else if (cursor.is_type(Token::Type::t_echo)) {
+            if (auto *echo_node = parse_echo(payload)) { 
+                scope_node.children.push_back(AST::make_ref(echo_node));
+            }
+        }
+
 
         // var declaration 
         // can be:
@@ -40,14 +60,11 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) || 
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
         ) {
-            parse_vardecl(payload);
+            parse_vardecl(payload, &scope_node);
         }
 
-        // print statement aka "echo $something"
-        else if (cursor.is_type(Token::Type::t_echo)) {
-            if (auto *echo_node = parse_echo(payload)) { 
-                scope_node.children.push_back(AST::make_ref(echo_node));
-            }
+        else if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
+            parse_funccall(payload);
         }
 
         else {

@@ -58,6 +58,10 @@ public:
         t_varname,                  // $varname
         t_const,                    // const
         t_echo,                     // echo
+        t_function,                 // function
+        t_return,                   // return
+        t_if,                       // if
+        t_else,                     // else
         t_unknown
     };
 

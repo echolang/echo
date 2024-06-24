@@ -9,7 +9,7 @@ These include arithmetic, logical, comparison and entirely custom operators.
 
 These are used to perform the fundamental mathematical operations like addition, subtraction, multiplication, etc.
 
-```php
+```echo
 $a = 1 + 2; // 3
 ```
 
@@ -17,7 +17,7 @@ $a = 1 + 2; // 3
 
 In Echo you can override the behavior of operators for your own types.
 
-```php
+```echo
 struct Point {
     public float $x;
     public float $y;
@@ -43,7 +43,7 @@ $pointD = $pointA + 2;
 
 You can define entirely new operators in Echo.
 
-```php
+```echo
 // returns the average of two numbers
 operator (float $a) avg (float $b): float {
     return ($a + $b) / 2;
@@ -56,7 +56,7 @@ $percentage = 10 avg 20; // 15
 
 Operators have a precedence, which determines the order in which they are evaluated.
 
-```php
+```echo
 // same as above but specifies the precedence and associativity
 operator(100, left) (float $a) avg (float $b): float {
     return ($a + $b) / 2;
@@ -69,7 +69,7 @@ These operators work on a single operand and can be prefix or suffix.
 
 The precedence of unary operators is higher than that of binary operators.
 
-```php
+```echo
 operator (int $a)++: int {
     return $a + 1;
 }
@@ -77,7 +77,7 @@ operator (int $a)++: int {
 
 With unary operators it does actually matter if the operator is prefix or suffix.
 
-```php
+```echo
 operator !!(Str $s): bool {
     return Str::upper($s);
 }
@@ -90,7 +90,7 @@ Passing a single int handle around can be very efficent but very inconvenient to
 
 If all values are known at compile time, the compiler can optimize the hash to a constant.
 
-```php
+```echo
 operator (String $s)_handle: int {
     return cheapHashFunction($s);
 }
@@ -102,7 +102,7 @@ $handle = "my.resource.texture.albedo"_handle;
 
 This mechanism can be used to define custom units, making some calculations and expressions more human readable.
 
-```php
+```echo
 struct Distance {
     public uint64 $millimeters;
 }

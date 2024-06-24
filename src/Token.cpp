@@ -73,6 +73,11 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_varname: return "varname";
         case Token::Type::t_const: return "const";
         case Token::Type::t_unknown: return "unknown";
+        case Token::Type::t_echo: return "echo";
+        case Token::Type::t_function: return "function";
+        case Token::Type::t_return: return "return";
+        case Token::Type::t_if: return "if";
+        case Token::Type::t_else: return "else";
         default: return "[undefined]";
     }
 }
@@ -117,6 +122,10 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_close_bracket: return "]";
         case Token::Type::t_const: return "const";
         case Token::Type::t_echo: return "echo";
+        case Token::Type::t_function: return "function";
+        case Token::Type::t_return: return "return";
+        case Token::Type::t_if: return "if";
+        case Token::Type::t_else: return "else";
     
         default: 
             assert(false && "undefined operator type");

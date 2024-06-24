@@ -9,6 +9,7 @@
 #include <map>
 #include <optional>
 #include <cstdint>
+#include <cassert>
 
 namespace AST
 {   
@@ -61,6 +62,8 @@ namespace AST
 
         std::optional<std::string> name;
         std::map<std::string, ValueType> properties;
+
+        // ComplexType *complex_type
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
 
@@ -185,6 +188,15 @@ namespace AST
 
         bool is_named() const {
             return name.has_value();
+        }
+
+        // compare two types
+        bool operator==(const ValueType& other) const {
+            if (is_primitive() && other.is_primitive()) {
+                return primitive == other.primitive;
+            }
+
+            assert(false && "Not implemented");
         }
 
         std::string get_type_match_signature() const {
