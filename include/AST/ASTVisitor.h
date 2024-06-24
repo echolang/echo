@@ -21,6 +21,7 @@ namespace AST
     class OperatorNode;
     class FunctionDeclNode;
     class ReturnNode;
+    class IfStatementNode;
 
     class Visitor
     {
@@ -43,6 +44,7 @@ namespace AST
         virtual void visitOperator(OperatorNode &node) = 0;
         virtual void visitFunctionDecl(FunctionDeclNode &node) = 0;
         virtual void visitReturn(ReturnNode &node) = 0;
+        virtual void visitIfStatement(IfStatementNode &node) = 0;
     };
 }
 

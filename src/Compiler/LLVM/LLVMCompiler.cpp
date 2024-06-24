@@ -15,7 +15,9 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/IfStatementNode.h"
 
 #include <iostream>
 
@@ -42,6 +44,17 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
         llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true /* this is var arg func type*/) 
     );
 
+    // first fetch all function declarations
+    for (auto &module : bundle.modules) {
+        for (auto &file : module->files()) {
+            for (auto &node : file.root->children) {
+                if (node.has_type<AST::FunctionDeclNode>()) {
+                    auto func_decl = node.get<AST::FunctionDeclNode>();
+                    func_decl.accept(*this);
+                }
+            }
+        }
+    }
     llvm::FunctionType *funcType = llvm::FunctionType::get(llvm_builder->getVoidTy(), false);
     llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", llvm_module.get());
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*llvm_context, "entry", function);
@@ -63,6 +76,12 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
 void LLVMCompiler::visitScope(AST::ScopeNode &node)
 {
     for (auto &child : node.children) {
+
+        // skip function declarations
+        if (child.has_type<AST::FunctionDeclNode>()) {
+            continue;
+        }
+
         child.node()->accept(*this);
     }
 }
@@ -296,6 +315,18 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
             case Token::Type::t_op_mod:
                 value_stack.push(llvm_builder->CreateSRem(left, right));
                 break;
+            case Token::Type::t_logical_eq:
+                value_stack.push(llvm_builder->CreateICmpEQ(left, right));
+                break;
+            case Token::Type::t_logical_neq:
+                value_stack.push(llvm_builder->CreateICmpNE(left, right));
+                break;
+            case Token::Type::t_close_angle:
+                value_stack.push(llvm_builder->CreateICmpSGT(left, right));
+                break;
+            case Token::Type::t_open_angle:
+                value_stack.push(llvm_builder->CreateICmpSLT(left, right));
+                break;
             default:
                 throw std::runtime_error("Unsupported binary operator");
         }
@@ -455,12 +486,51 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
     node.body->accept(*this);
 
     // terminate the function
-    llvm_builder->CreateRetVoid();
+    // llvm_builder->CreateRetVoid();
 }
 
 void LLVMCompiler::visitReturn(AST::ReturnNode &node)
 {
+    node.expr->accept(*this);
+
+    llvm::Value *ret = value_stack.top();
+    value_stack.pop();
+
+    llvm_builder->CreateRet(ret);
 }
+
+void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node)
+{
+    for(auto &block : node.blocks)
+    {
+        bool has_condition = block.condition != nullptr;
+        auto scope = block.block;
+
+        llvm::BasicBlock *if_block = llvm::BasicBlock::Create(*llvm_context, "if", llvm_builder->GetInsertBlock()->getParent());
+        llvm::BasicBlock *else_block = llvm::BasicBlock::Create(*llvm_context, "else", llvm_builder->GetInsertBlock()->getParent());
+        llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+
+        if (has_condition) {
+            block.condition->accept(*this);
+            llvm::Value *condition = value_stack.top();
+            value_stack.pop();
+
+            llvm_builder->CreateCondBr(condition, if_block, else_block);
+        } else {
+            llvm_builder->CreateBr(if_block);
+        }
+
+        llvm_builder->SetInsertPoint(if_block);
+        scope->accept(*this);
+        llvm_builder->CreateBr(merge_block);
+
+        llvm_builder->SetInsertPoint(else_block);
+        llvm_builder->CreateBr(merge_block);
+        
+        llvm_builder->SetInsertPoint(merge_block);
+    }
+}
+
 void LLVMCompiler::printIR(bool toFile)
 {
     if (toFile) {
@@ -584,8 +654,8 @@ void LLVMCompiler::optimize() {
     passBuilder.crossRegisterProxies(loopAM, functionAM, cgsccAM, moduleAM);
 
     // make the pipeline
-    // llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
-    llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O0);
+    llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+    // llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O0);
 
     
     modulePM.run(*llvm_module, moduleAM);

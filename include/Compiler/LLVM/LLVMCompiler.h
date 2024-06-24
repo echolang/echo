@@ -68,6 +68,7 @@ public:
     void visitOperator(AST::OperatorNode &node);
     void visitFunctionDecl(AST::FunctionDeclNode &node);
     void visitReturn(AST::ReturnNode &node);
+    void visitIfStatement(AST::IfStatementNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 
