@@ -10,7 +10,7 @@ Echo takes a lot of inspiration from modern PHP. However, to be clear, you canno
 
 Echo is a statically typed language and there is no support for dynamic typing or union types.
 
-```php
+```echo
 function multiply(int $a, int $b): int {
     return $a * $b;
 }
@@ -24,14 +24,14 @@ Still feels like home, right? Also note the `<?php` tag is gone. Echo is not a t
 
 Variables are declared just the way you would expect them to be from PHP, but with a catch. Variables have a static type which is determined at compile time. This means that you cannot change the type of a variable after it has been declared.
 
-```php
+```echo
 $a = 25; // works fine
 $b = "Hello World"; // works fine
 ```
 
 What you cannot do is declare a variable with an unknown type. In the example above, the type is determined by the value assigned to the variable. In this case, the `int` and `string` literal.
 
-```php
+```echo
 $a;
 $a = 25; // invalid;
 
@@ -43,7 +43,7 @@ $b = 25; // valid
 
 Variables can be declared as `const` which means they cannot be changed after they have been declared.
 
-```php
+```echo
 const $a = 25;
 $a = 50; // error
 ```
@@ -54,7 +54,7 @@ From PHP you are probably used to the following data types `int`, `float`, `stri
 
 Also, an `int` in PHP is a 64-bit integer, in Echo it is 32-bit by default.
 
-```php
+```echo
 int $a = 42; 
 int8 $b = 42; // 8-bit integer
 int16 $c = 42; // 16-bit integer
@@ -68,7 +68,7 @@ float64 $h = 42.0; // 64-bit float (default)
 
 Unsigned integers are also supported.
 
-```php
+```echo
 uint $a = 42;
 uint8 $b = 42; // 8-bit unsigned integer
 uint16 $c = 42; // 16-bit unsigned integer
@@ -80,7 +80,7 @@ uint64 $e = 42; // 64-bit unsigned integer
 
 The initalizer value of a variable can also be declared in a block.
 
-```php
+```echo
 $randomNumber = {
     $rng = new RandomNumberGenerator();
     $rng->seed(42);
@@ -92,7 +92,7 @@ $randomNumber = {
 
 Arrays are where things get a bit different. In PHP arrays are a special type of hash map that can contain any type of value. In Echo, arrays are container objects that can only contain a single type of value. 
 
-```php
+```echo
 $numbers = [1, 2, 3, 4, 5]; // allowed
 
 // will not compile:
@@ -101,7 +101,7 @@ $numbers = [1, 2, 3, 4, "Hello World"];
 
 As arrays are objects, they can hold methods and properties just like any other object. This means many functions you know from the standard library are to be called on the array object directly.
 
-```php
+```echo
 $numbers = [5, 4, 3, 2, 1];
 echo $numbers->count() . "\n"; // 5
 echo $numbers->pop() . "\n"; // 1
@@ -110,7 +110,7 @@ echo $numbers->count() . "\n"; // 4
 
 When the array's type cannot be determined at the declaration of the variable, the type can be specified:
 
-```php
+```echo
 Array<int> $numbers = [];
 for($i = 0; $i < 10; $i++) {
     $numbers[] = $i;
@@ -121,7 +121,7 @@ for($i = 0; $i < 10; $i++) {
 
 Maps or dictionaries allow you to store and retrieve values by a key. In PHP maps are just arrays with string keys. In Echo, maps are a special type of container object that can only contain a single type of value.
 
-```php
+```echo
 // will work
 $airports = [
     "LHR" => "London Heathrow",
@@ -137,7 +137,7 @@ $airports['LHR'] = 42; // error
 
 Also here, the type can be specified:
 
-```php
+```echo
 Map<string, string> $airports = [];
 $airports['LHR'] = "London Heathrow";
 $airports['CDG'] = "Paris Charles de Gaulle";
@@ -148,7 +148,7 @@ $airports['JFK'] = "New York John F. Kennedy";
 
 As this is a compiled language, there is no `<?php` tag. Instead, the entry point is a function called `main` that is called when the program starts.
 
-```php
+```echo
 function main(Array<string> $argv): int {
     echo "Hello World\n";
     return 0;
@@ -159,7 +159,7 @@ function main(Array<string> $argv): int {
 
 Functions are declared just like you would expect them to be from PHP.
 
-```php
+```echo
 function add(int $a, int $b): int {
     return $a + $b;
 }
@@ -167,7 +167,7 @@ function add(int $a, int $b): int {
 
 One difference is that the return type is required. The only exception to this is `void`, which is the default return type.
 
-```php
+```echo
 function doSomething(): void {
     echo "Hello World\n";
 }
@@ -182,7 +182,7 @@ function doSomething() {
 
 Named arguments are supported.
 
-```php
+```echo
 function lerp(Point $from, Point $to, float $alpha): Point {
     // ...
 }
@@ -196,7 +196,7 @@ lerp(Point(0.0, 0.0), Point(1.0, 1.0), alpha: 0.5); // also works
 
 This can become really useful when you have a function with a lot of arguments.
 
-```php
+```echo
 function printPerson(
     ?string $firstName = null,
     ?string $lastName = null,
@@ -218,7 +218,7 @@ printPerson(firstName: "Kim", age: 42, zipCode: "CH-8000");
 
 You can force named arguments by using the `named` keyword.
 
-```php
+```echo
 function listen(named string $forEvent, function<void()> $callback): void {
     // ...
 }
@@ -230,7 +230,7 @@ listen(forEvent: "click", function() {
 
 Why would you want to force named arguments? They become part of the function signature, meaning you can have multiple functions with the same name but different named arguments.
 
-```php
+```echo
 function print(named int $fromDecimal, named string $currency): void {
     echo round($fromDecimal / 100) . "{$currency}\n";
 }
@@ -245,14 +245,14 @@ print(fromMicro: 1000000, currency: "€"); // 1€
 
 This would not be possible without the `named` keyword. Because the function signature would be the same.
 
-```php
+```echo
 print(int, string); // signature without named arguments
 print(fromDecimal: int, currency: string); // signature with named arguments
 ```
 
 So when a call is made the compiler will search for a function with a matching signature:
 
-```php
+```echo
 print(100, "€"); 
 // no matching function found, signature search was:
 // - print(int, string)
@@ -268,7 +268,7 @@ print(500, currency: "€");
 
 If I were to declare the following print function:
 
-```php
+```echo
 print(int $logLevel, string $message) {
     // ...
 }
@@ -283,7 +283,7 @@ This would expose the following function signatures:
 
 This means I could not declare the following function after the one above:
 
-```php
+```echo
 print(int $applicationId, string $message) { // will not compile, duplicate signature "print(int, string)"
     // ...
 }
@@ -299,7 +299,7 @@ print(named int $applicationId, string $message) {
 
 Functions can return multiple values.
 
-```php
+```echo
 function getPerson(): (string, string, int) {
     return ("John", "Doe", 42);
 }
@@ -311,7 +311,7 @@ echo $firstName . "\n"; // John
 
 These can be named as well.
 
-```php
+```echo
 function getPerson(): (firstName: string, lastName: string, age: int) {
     return (firstName: "John", lastName: "Doe", age: 42);
 }
@@ -323,7 +323,7 @@ echo $firstName . "\n"; // John
 
 And be used as an unnamed type.
 
-```php
+```echo
 function getPerson(): (firstName: string, lastName: string, age: int) {
     return (firstName: "John", lastName: "Doe", age: 42);
 }
@@ -337,7 +337,7 @@ echo $person->firstName . "\n"; // John
 
 Generics are supported for classes and functions. The following example shows how to create a generic class.
 
-```php
+```echo
 class Stack<T> {
     private Array<T> $items = [];
 
@@ -355,7 +355,7 @@ class Stack<T> {
 
 Operator overloading is supported for the following operators:
 
-```php
+```echo
 class Point {
     public float $x;
     public float $y;
@@ -381,7 +381,7 @@ $pointD = $pointA + 2;
 
 These represent actual arrays in the sense that they are a contiguous block of memory. They are fixed in size and cannot be resized. 
 
-```php
+```echo
 FixedArray<int, 10> $numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 ```
 
@@ -389,7 +389,7 @@ FixedArray<int, 10> $numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 Structs are like classes in a sense, but they are passed by value instead of by reference. They are also not allowed to have methods and are allocated on the stack instead of the heap.
 
-```php
+```echo
 struct Point {
     public float $x;
     public float $y;
@@ -400,7 +400,7 @@ $point = Point(1.0, 1.0);
 
 This means when they for example are stored in an array there is no pointer indirection happening. This can lead to a performance boost in some cases due to better cache locality.
 
-```php
+```echo
 $points = FixedArray<Point, 10>();
 for($i = 0; $i < 10; $i++) {
     $points[] = Point($i, $i);
@@ -423,7 +423,7 @@ Unsafe pointers, aka raw pointers, can be used to access memory directly, this c
 
 The standard library is still very much a work in progress, but I'm trying to have a more modern approach to it. The standard library is split into modules/namespaces.
 
-```php
+```echo
 use Echo\Math;
 
 echo Math\abs(-42); // 42
@@ -433,7 +433,7 @@ echo Math\floor(42.5); // 42
 
 You can also import specific functions from a module/namespace.
 
-```php
+```echo
 use Echo\Math\{abs};
 
 echo abs(-42); // 42
@@ -443,7 +443,7 @@ echo abs(-42); // 42
 
 To make a class or a function available to other namespaces you have to declare it as `public`.
 
-```php
+```echo
 namespace MyModule\Logging;
 
 public function makeLogger(): Logger {
@@ -459,7 +459,7 @@ public class Logger {
 
 You can also extern values and even variables from other namespaces.
 
-```php
+```echo
 namespace MyModule\Logging;
 
 public const LOG_LEVEL_DEBUG = 0;
@@ -471,7 +471,7 @@ public Array<string> $logEntries = [];
 
 Which can then be imported like this:
 
-```php
+```echo
 namespace MyModule;
 
 use MyModule\Logging\{Logger, makeLogger};
@@ -498,7 +498,7 @@ Basic scalar types like `int`, `float`, `bool` are copy types. This means that w
 
 Example:
 
-```php
+```echo
 $a = 42;
 $b = $a; // $b is now a copy of $a
 $b = 50;
@@ -508,7 +508,7 @@ echo $a;// 42
 
 You can reference a copy type by using the `&` operator.
 
-```php
+```echo
 $a = 42;
 $b = &$a; // $b is now a reference to $a
 $b = 50;
@@ -524,7 +524,7 @@ The default behavior is just the same as PHP, when you assign a reference type t
 
 Alternative to that you can construct an object as unique, this means that it is not reference counted and will be freed when it goes out of scope.
 
-```php
+```echo
 class Car 
 {
     public function makeNoise(): void {
@@ -540,7 +540,7 @@ $bar->makeNoise(); // Vroom
 
 You can construct an object as unique by using the `unique` keyword.
 
-```php
+```echo
 class Car 
 {
     public function makeNoise(): void {
@@ -557,7 +557,7 @@ $foo->makeNoise(); // Error, ownership has been transferred to $bar
 
 Echo uses reference counting to manage memory.
 
-```php
+```echo
 class Car 
 {
     public function makeNoise(): void {
@@ -577,7 +577,7 @@ doSomething($foo); // Vroom
 ```
 
 
-```php
+```echo
 // a struct is almost the same as a class, but there is a key difference
 // in its mutability. A struct is implicitly copied when mutated.
 struct String {
@@ -643,7 +643,7 @@ which function is acutally used.. I want it simpler than that.
 
 To fix this an object symbol must be either a stack or rc heap object during compile time.
 
-```php
+```echo
 // stack object 
 struct String {
     uint64 $size;
@@ -703,7 +703,7 @@ printErr($arcString); // takes ownership of the reference counted object
 Because structs do not have any runtime meta data they cannot be nulled or checked for nullability.
 You can also not perform any runtime reflection checks on them.
 
-```php
+```echo
 struct A {
     int $a = 42;
 }

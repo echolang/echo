@@ -54,6 +54,7 @@ public:
 
     void visitScope(AST::ScopeNode &node);
     void visitType(AST::TypeNode &node);
+    void visitTypeCast(AST::TypeCastNode &node);
     void visitVarDecl(AST::VarDeclNode &node);
     void visitVarRef(AST::VarRefNode &node);
     void visitLiteralFloatExpr(AST::LiteralFloatExprNode &node);
@@ -65,6 +66,8 @@ public:
     void visitUnaryExpr(AST::UnaryExprNode &node);
     void visitNull(AST::NullNode &node);
     void visitOperator(AST::OperatorNode &node);
+    void visitFunctionDecl(AST::FunctionDeclNode &node);
+    void visitReturn(AST::ReturnNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 

@@ -1,0 +1,63 @@
+/**
+ * Native types
+ * 
+ * ----------------------------------------------------------------------------
+ */
+// boolean
+bool $trufie = true;
+bool $falsie = false;
+
+// integer
+int $int;
+uint $uint;
+
+// sized integers
+int8 $int8;
+uint8 $uint8;
+int16 $int16;
+uint16 $uint16;
+int32 $int32;
+uint32 $uint32;
+int64 $int64;
+uint64 $uint64;
+int128 $int128;
+uint128 $uint128;
+
+// floats 
+float $float;
+double $double;
+float32 $float;
+float64 $double;
+
+/**
+ * Numeric literals
+ * 
+ * ----------------------------------------------------------------------------
+ */
+
+// int
+$foo = 23;
+$bar = 999999999;
+
+// float
+$double = 23.0;
+$float = 3.14159f;
+
+// binary
+$bin = 0b1010;
+
+// hex
+$hex = 0x1A;
+$hex = 0X1A;
+
+/**
+ * Arithmetic operators
+ * 
+ * ----------------------------------------------------------------------------
+ */
+echo 1 + 1;
+echo 2 - 1;
+echo 2 * 2;
+echo 4 / 2;
+echo 5 % 2;
+echo 2 ** 3; 

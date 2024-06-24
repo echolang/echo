@@ -9,6 +9,8 @@
 
 namespace Parser
 {
+    // a subscope is simply but a scope within a scope that is not a body 
+    // of a function a loop or and
     AST::ScopeNode &parse_scope(Payload &payload);
 };
 

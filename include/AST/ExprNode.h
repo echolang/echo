@@ -24,9 +24,31 @@ namespace AST
 
         bool is_implcit = false;
 
+        ExprNode() {};
+        ExprNode(bool implicit) : is_implcit(implicit) {};
         virtual ~ExprNode() {};
 
     private:
+    };
+
+    class VoidExprNode : public ExprNode
+    {
+    public:
+        static constexpr NodeType node_type = NodeType::n_expr_void;
+
+        VoidExprNode() {};
+        ~VoidExprNode() {};
+
+        const std::string node_description() override {
+            return "void";
+        }
+
+        ValueType result_type() const override {
+            return ValueType::void_type();
+        }
+
+        // void goes into the void
+        void accept(Visitor& visitor) override {}
     };
 
     class VarRefExprNode : public ExprNode
@@ -93,17 +115,26 @@ namespace AST
         static constexpr NodeType node_type = NodeType::n_expr_binary;
 
         OperatorNode *op_node;
-        ExprNode *lhs;
-        ExprNode *rhs;
+        ExprNode *lhs = nullptr;
+        ExprNode *rhs = nullptr;
 
         BinaryExprNode(OperatorNode *op_node, ExprNode *lhs, ExprNode *rhs) :
             op_node(op_node), lhs(lhs), rhs(rhs)
         {};
-
         ~BinaryExprNode() {}
 
+        ValueType result_type() const override;
+
+        const std::string lhs_node_description() {
+            return lhs ? lhs->node_description() : "[undefined]";
+        }
+
+        const std::string rhs_node_description() {
+            return rhs ? rhs->node_description() : "[undefined]";
+        }
+
         const std::string node_description() override {
-            return "binexp(" + lhs->node_description() + " " + op_node->token_literal.value() + " " + rhs->node_description() + ")";
+            return "binexp<" + result_type().get_type_desciption() + ">(" + lhs_node_description() + " " + op_node->token_literal.value() + " " + rhs_node_description() + ")";
         }
 
         void accept(Visitor& visitor) override {

@@ -5,8 +5,11 @@
 #include "AST/VarRefNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/TypeCastNode.h"
 
 #include "External/infint.h"
+
+#include "Parser/FuncCallParser.h"
 
 #include <format>
 
@@ -261,34 +264,24 @@ bool is_expr_token(Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_varname) || 
            cursor.is_type(Token::Type::t_open_paren) || 
            cursor.is_type(Token::Type::t_close_paren) || 
+           cursor.is_type(Token::Type::t_identifier) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
+}
+
+AST::ExprNode *try_implicit_cast(Parser::Payload &payload, AST::ExprNode *source, const AST::TypeNode *expected_type)
+{   
+    // if the types match we can return the source node directly
+    if (source->result_type() == expected_type->type) {
+        return source;
+    }
+
+    
 }
 
 const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
-
-    // if (cursor.is_type(Token::Type::t_open_paren)) {
-    //     cursor.skip();
-    //     auto expr = Parser::parse_expr_ref(payload, expected_type);
-
-    //     if (!cursor.is_type(Token::Type::t_close_paren)) {
-    //         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-    //             payload.context.code_ref(cursor.current()), 
-    //             Token::Type::t_close_paren,
-    //             cursor.current().type()
-    //         );
-    //         return AST::make_void_ref();
-    //     }
-
-    //     cursor.skip();
-    //     return expr;
-    // }
-
-    // if (cursor.is_type(Token::Type::t_close_paren)) {
-    //     return AST::make_void_ref();
-    // }
 
     if (cursor.is_type(Token::Type::t_floating_literal)) {
         return parse_literal_float(payload, expected_type);
@@ -311,13 +304,30 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             payload.collector.collect_issue<AST::Issue::UnknownVariable>(payload.context.code_ref(cursor.current()), cursor.current().value());
             cursor.skip();
             return AST::make_void_ref();
-        }   
+        }
 
         auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
         auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
+
         cursor.skip();
+
+        // if there is a expected type, we have to check if it matches the variable type
+        if (expected_type != nullptr) {
+            if (vardecl->type_node()->type != expected_type->type) {
+                
+                // create a cast node and return it
+                auto &cast_node = payload.context.emplace_node<AST::TypeCastNode>(expected_type->type, &node, true);
+                return AST::make_ref(cast_node);
+            }
+        }
         
         return AST::make_ref(node);
+    }
+
+    // poterntial function call
+    if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
+        auto fcall = parse_funccall(payload);
+        return AST::make_ref(fcall);
     }
 
     assert(false && "unimplemented");
@@ -398,8 +408,16 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
     std::vector<ExprPart> expr_parts;
 
+    int depth = 0;
+
     while(is_expr_token(cursor))
     {
+        // if we have a closing parenthesis and the depth is 0, we can break the loop
+        // because we have reached the end of the expression
+        if (cursor.is_type(Token::Type::t_close_paren) && depth == 0) {
+            break;
+        }
+
         // try to parse an operator
         auto op = payload.collector.operators.get_operator(cursor.current());
         auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
@@ -407,12 +425,26 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         if (op != nullptr) {
             cursor.skip();
             expr_parts.emplace_back(AST::make_void_ref(), &opnode);
+
+            // if the operator is a open parenthesis, we increase the depth
+            if (op->type == Token::Type::t_open_paren) {
+                depth++;
+            } else if (op->type == Token::Type::t_close_paren) {
+                depth--;
+            }
+
             continue;
         }
 
         // parse the next expression node
         auto node = parse_expr_node(payload, expected_type);
         expr_parts.emplace_back(node, nullptr);
+    }
+
+    // if we have only one part, we can return it directly
+    if (expr_parts.size() == 1) {
+        assert(expr_parts[0].opnode == nullptr && "expected no operator");
+        return expr_parts[0].node;
     }
 
     auto postfix_expr = shunting_yard(expr_parts);
@@ -442,29 +474,28 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         }
     }
 
-    // print the postfix expression
-    for (auto &part : postfix_expr) {
-        if (part.opnode != nullptr) {
-            std::cout << std::format("{} ", token_lit_symbol_string(part.opnode->op->type));
-        }
-        else {
-            if (part.node.has_type<AST::LiteralIntExprNode>()) {
-                std::cout << std::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
-            } else if (part.node.has_type<AST::LiteralFloatExprNode>()) {
-                std::cout << std::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
-            } else if (part.node.has_type<AST::LiteralBoolExprNode>()) {
-                std::cout << std::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
-            } else {
-                std::cout << std::format("{} ", part.node.node()->node_description());
-            }
-        }
-    }
-
+    // sanity check
+    assert(node_stack.size() == 1);
     return node_stack.top();
 
-    std::cout << std::endl;
+    // // print the postfix expression
+    // for (auto &part : postfix_expr) {
+    //     if (part.opnode != nullptr) {
+    //         std::cout << std::format("{} ", token_lit_symbol_string(part.opnode->op->type));
+    //     }
+    //     else {
+    //         if (part.node.has_type<AST::LiteralIntExprNode>()) {
+    //             std::cout << std::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
+    //         } else if (part.node.has_type<AST::LiteralFloatExprNode>()) {
+    //             std::cout << std::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
+    //         } else if (part.node.has_type<AST::LiteralBoolExprNode>()) {
+    //             std::cout << std::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
+    //         } else {
+    //             std::cout << std::format("{} ", part.node.node()->node_description());
+    //         }
+    //     }
+    // }
 
-    auto cursor_before = cursor.snapshot();
 
     // // determine the token range of the expression
     // while (!cursor.is_done()) {

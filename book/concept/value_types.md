@@ -5,7 +5,7 @@ In echo we have next to familiar scalar value types like `int`, `float`, `bool` 
 Value types are copied when assigned to a variable or passed to a function.
 
 
-```php
+```echo
 $a = 1;
 $b = $a; // $b is a copy of $a
 $b = 2; // $a is still 1
@@ -14,7 +14,7 @@ echo $a; // 1
 
 The complex value types can be constructed similar to classes with the `struct` keyword.
 
-```php
+```echo
 struct Point {
     float $x;
     float $y;
@@ -29,7 +29,7 @@ These `struct` types are fundamentally different from classes, they are value ty
 
 Structs are constructed without the `new` keyword:
 
-```php
+```echo
 $a = Point(x: 1.0, y: 2.0);
 $b = $a; // $b is a copy of $a
 $b->x = 3.0; // $a is still (1.0, 2.0)
@@ -37,7 +37,7 @@ $b->x = 3.0; // $a is still (1.0, 2.0)
 
 The copy behavior also applies to function arguments:
 
-```php
+```echo
 function squared(Point $p) : Point {
     $p->x = $p->x * $p->x;
     $p->y = $p->y * $p->y;
@@ -53,7 +53,7 @@ Value types have a single owner, when the owner goes out of scope the value type
 
 This ownership can be transferred to another variable, this is called moving.
 
-```php
+```echo
 $a = Point(x: 1.0, y: 2.0);
 $b = mv $a; // $b is now the owner of the value type, $a becomes unset
 ```
@@ -62,7 +62,7 @@ This seems like a silly example, but it becomes more useful when combined with f
 
 For example you could have a function normalizing a vector, which takes the vector by value, normalizes it and returns it.
 
-```php
+```echo
 function normalize(mv Point $p) : mv Point {
     $length = sqrt($p->x * $p->x + $p->y * $p->y);
     $p->x = $p->x / $length;

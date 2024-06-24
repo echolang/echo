@@ -11,7 +11,7 @@ void AST::Context::push_scope(ScopeNode &scope)
 {
     // if we have an active scope, add the new scope as a child
     if (scope_ptr != nullptr) {
-        scope_ptr->add_child_scope(scope);
+        scope.parent_ptr = scope_ptr;
     }
 
     // update the current scope

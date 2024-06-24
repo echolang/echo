@@ -5,7 +5,19 @@
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 
-void Parser::parse_vardecl(Parser::Payload &payload)
+bool is_vardecl_end_token(const Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma) || cursor.is_type(Token::Type::t_close_paren);
+}
+
+// we do not want to actually skip a closing parenthesis
+// because the parent parse will check it to ensure it has parsed all arguments
+bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma);
+}
+
+AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode *scope)
 {
     auto &cursor = payload.cursor;
 
@@ -34,11 +46,14 @@ void Parser::parse_vardecl(Parser::Payload &payload)
     if (nametoken.type() != Token::Type::t_varname) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(nametoken), Token::Type::t_varname, nametoken.type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // check if the name is already taken in the current scope
-    auto prev_vardecl = payload.context.scope().find_vardecl_by_name(nametoken.value());
+    AST::VarDeclNode *prev_vardecl = nullptr;
+    if (scope != nullptr) {
+        prev_vardecl = scope->find_vardecl_by_name(nametoken.value());
+    }
 
     // we have a previous declaration, this might be a mutable variable
     if (prev_vardecl != nullptr) 
@@ -47,7 +62,7 @@ void Parser::parse_vardecl(Parser::Payload &payload)
         if (!prev_vardecl->has_type() && prev_vardecl->type_node()->is_const) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
             cursor.try_skip_to_next_statement();
-            return;
+            return nullptr;
         }
 
         // we do not allow to redefine the type of a variable, the type 
@@ -55,23 +70,29 @@ void Parser::parse_vardecl(Parser::Payload &payload)
         if (!prev_vardecl->has_type() && type != nullptr) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
             cursor.try_skip_to_next_statement();
-            return;
+            return nullptr;
         }
     }
 
     vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);
-    payload.context.scope().add_vardecl(*vardecl);
 
-    // if next token is a semicolon we are done for now
-    if (cursor.current().type() == Token::Type::t_semicolon) {
-        cursor.skip();
-        return;
+    // if we have a scope we add the variable to it
+    if (scope != nullptr) {
+        scope->add_vardecl(*vardecl);
+    }
+
+    // if next token is a semicolon or comma we are done for now
+    if (is_vardecl_end_token(cursor)) {
+        if (should_skip_vardecl_end_token(cursor)) {
+            cursor.skip();
+        }
+        return vardecl;
     }
 
     if (!payload.cursor.is_type(Token::Type::t_assign)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     cursor.skip();
@@ -85,7 +106,7 @@ void Parser::parse_vardecl(Parser::Payload &payload)
         if (vardecl->init_expr == nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(cursor.current()), "cannot infer type of variable without an initializer");
             cursor.try_skip_to_next_statement();
-            return;
+            return nullptr;
         }
         else {
             vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type()));
@@ -93,6 +114,12 @@ void Parser::parse_vardecl(Parser::Payload &payload)
         }
     }
 
-    // skip the semicolon
-    cursor.skip();
+    // skip the end of the statement
+    if (is_vardecl_end_token(cursor)) {
+        if (should_skip_vardecl_end_token(cursor)) {
+            cursor.skip();
+        }
+    }
+
+    return vardecl;
 }
