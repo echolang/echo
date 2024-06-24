@@ -30,6 +30,7 @@ namespace AST
         n_expr_void,
         n_func_decl,
         n_func_return,
+        n_if_statement,
     };
 
     template<typename T>

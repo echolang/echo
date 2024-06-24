@@ -7,6 +7,7 @@
 #include "Parser/EchoPrintParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/FuncCallParser.h"
+#include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
@@ -40,7 +41,10 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));
         }
-
+        else if (cursor.is_type(Token::Type::t_if))
+        {
+            scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
+        }
         // print statement aka "echo $something"
         else if (cursor.is_type(Token::Type::t_echo)) {
             if (auto *echo_node = parse_echo(payload)) { 
