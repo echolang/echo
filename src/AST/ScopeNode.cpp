@@ -1,5 +1,6 @@
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "Debugging.h"
 
 
@@ -17,6 +18,15 @@ void AST::ScopeNode::add_vardecl(VarDeclNode &vardecl)
 {
     children.push_back(AST::make_ref(vardecl));
     _declared_variables[vardecl.token_varname.value()] = &vardecl;
+}
+
+void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)
+{
+    children.push_back(AST::make_ref(funcdecl));
+
+    if (!funcdecl.is_anonymous()) {
+        _declared_functions[funcdecl.func_name()] = &funcdecl;
+    }
 }
 
 bool AST::ScopeNode::is_varname_taken(const std::string &varname) const
@@ -45,6 +55,21 @@ AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varnam
     // if this is not the root scope, check the parent tree
     if (!is_root()) {
         return parent().find_vardecl_by_name(varname);
+    }
+    
+    return nullptr;
+}
+
+AST::FunctionDeclNode *AST::ScopeNode::find_funcdecl_by_name(const std::string &funcname) const
+{
+    auto found = _declared_functions.find(funcname);
+    if (found != _declared_functions.end()) {
+        return found->second;
+    }
+
+    // if this is not the root scope, check the parent tree
+    if (!is_root()) {
+        return parent().find_funcdecl_by_name(funcname);
     }
     
     return nullptr;

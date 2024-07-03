@@ -38,6 +38,9 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload)
     payload.cursor.skip();
 
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(funcname_token, args);
+
+    // try to find the function declaration
+    funcall.decl = payload.context.scope().find_funcdecl_by_name(funcname_token.value());
     
     return &funcall;
 }

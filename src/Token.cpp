@@ -78,6 +78,9 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
         case Token::Type::t_else: return "else";
+        case Token::Type::t_while: return "while";
+        case Token::Type::t_for: return "for";
+        case Token::Type::t_break: return "break";
         default: return "[undefined]";
     }
 }
@@ -126,6 +129,9 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
         case Token::Type::t_else: return "else";
+        case Token::Type::t_while: return "while";
+        case Token::Type::t_for: return "for";
+        case Token::Type::t_break: return "break";
     
         default: 
             assert(false && "undefined operator type");

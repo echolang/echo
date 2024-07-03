@@ -1,6 +1,7 @@
 #include "Parser/VarDeclParser.h"
 
 #include "AST/VarDeclNode.h"
+#include "AST/VarMutNode.h"
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
@@ -72,6 +73,32 @@ AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode
             cursor.try_skip_to_next_statement();
             return nullptr;
         }
+
+        if (!payload.cursor.is_type(Token::Type::t_assign)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        cursor.skip();
+
+        // parse the expression
+        auto expr = parse_expr(payload, prev_vardecl->type_node());
+
+        // generate a var mutation node
+        auto varmut = &payload.context.emplace_node<AST::VarMutNode>(nametoken, expr, prev_vardecl);
+
+        // skip the end of the statement
+        if (is_vardecl_end_token(cursor)) {
+            if (should_skip_vardecl_end_token(cursor)) {
+                cursor.skip();
+            }
+        }
+
+        // add the varmut to the scope
+        payload.context.scope().children.push_back(AST::make_ref(varmut));
+
+        return nullptr;
     }
 
     vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);

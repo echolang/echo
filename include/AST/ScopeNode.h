@@ -10,10 +10,12 @@
 namespace AST 
 {
     class VarDeclNode;
+    class FunctionDeclNode;
 
     class ScopeNode : public Node
     {
         std::unordered_map<std::string, VarDeclNode *> _declared_variables;
+        std::unordered_map<std::string, FunctionDeclNode *> _declared_functions;
 
     public:
         ScopeNode *parent_ptr = nullptr;
@@ -63,10 +65,12 @@ namespace AST
         }
 
         void add_vardecl(VarDeclNode &vardecl);
+        void add_funcdecl(FunctionDeclNode &funcdecl);
 
         bool is_varname_taken(const std::string &varname) const;
 
         VarDeclNode *find_vardecl_by_name(const std::string &varname) const;
+        FunctionDeclNode *find_funcdecl_by_name(const std::string &funcname) const;
 
     private:
 

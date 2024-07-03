@@ -19,6 +19,8 @@
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/WhileStatementNode.h"
+#include "AST/VarMutNode.h"
 
 #include <iostream>
 
@@ -84,6 +86,11 @@ void LLVMCompiler::visitScope(AST::ScopeNode &node)
         }
 
         child.node()->accept(*this);
+
+        // after any return statement we need to terminate the block
+        if (child.has_type<AST::ReturnNode>()) {
+            break;
+        }
     }
 }
 
@@ -307,8 +314,8 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
     node.lhs->accept(*this);
     node.rhs->accept(*this);
 
-    auto lhsret =  node.lhs->result_type();
-    auto rhsret =  node.rhs->result_type();
+    auto lhsret = node.lhs->result_type();
+    auto rhsret = node.rhs->result_type();
 
     auto right = value_stack.top();
     value_stack.pop();
@@ -362,6 +369,12 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
                 break;
             case Token::Type::t_open_angle:
                 value_stack.push(llvm_builder->CreateICmpSLT(left, right));
+                break;
+            case Token::Type::t_logical_geq:
+                value_stack.push(llvm_builder->CreateICmpSGE(left, right));
+                break;
+            case Token::Type::t_logical_leq:
+                value_stack.push(llvm_builder->CreateICmpSLE(left, right));
                 break;
             default:
                 throw std::runtime_error("Unsupported binary operator");
@@ -571,45 +584,131 @@ void LLVMCompiler::visitReturn(AST::ReturnNode &node)
 
 void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node)
 {
-    llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
-    llvm::BasicBlock *current_block = llvm_builder->GetInsertBlock();
+    llvm::BasicBlock *if_block = llvm::BasicBlock::Create(*llvm_context, "if", llvm_builder->GetInsertBlock()->getParent());
+    llvm::BasicBlock *merge_block = nullptr;
 
-    llvm::BasicBlock *next_block = nullptr;
+    // condition
+    node.condition->accept(*this);
+    llvm::Value *condition = value_stack.top();
 
-    AST::IfStatementNode::Block *final_else = nullptr;
+    // if there is no else block we directly jump to the merge block
+    if (!node.else_scope) {
+        merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+        llvm_builder->CreateCondBr(condition, if_block, merge_block);
 
+        // if block
+        llvm_builder->SetInsertPoint(if_block);
+        node.if_scope->accept(*this);
 
-
-    for (size_t i = 0; i < node.blocks.size(); ++i)
-    {
-        auto &block = node.blocks[i];
-        bool has_condition = block.condition != nullptr;
-        auto scope = block.block;
-
-        llvm::BasicBlock *if_block = llvm::BasicBlock::Create(*llvm_context, "if", llvm_builder->GetInsertBlock()->getParent());
-        next_block = (i < node.blocks.size() - 1) ? llvm::BasicBlock::Create(*llvm_context, "else", llvm_builder->GetInsertBlock()->getParent()) : merge_block;
-
-        if (has_condition) {
-            block.condition->accept(*this);
-            llvm::Value *condition = value_stack.top();
-            value_stack.pop();
-
-            llvm_builder->SetInsertPoint(current_block);
-            llvm_builder->CreateCondBr(condition, if_block, next_block);
-        } else {
-            llvm_builder->SetInsertPoint(current_block);
-            llvm_builder->CreateBr(if_block);
+        // if last instruction is not a terminator we need to add a branch to the merge block
+        if (!llvm_builder->GetInsertBlock()->getTerminator()) {
+            llvm_builder->CreateBr(merge_block);
         }
 
-        llvm_builder->SetInsertPoint(if_block);
-        scope->accept(*this);
-        llvm_builder->CreateBr(merge_block);
+        // llvm_builder->CreateBr(merge_block);
+    } else {
+        llvm::BasicBlock *else_block = llvm::BasicBlock::Create(*llvm_context, "else", llvm_builder->GetInsertBlock()->getParent());
+        
+        llvm_builder->CreateCondBr(condition, if_block, else_block);
 
-        current_block = next_block;
+        // if block
+        llvm_builder->SetInsertPoint(if_block);
+        node.if_scope->accept(*this);
+        // llvm_builder->CreateBr(merge_block);
+
+        if (!llvm_builder->GetInsertBlock()->getTerminator()) {
+            merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+            llvm_builder->CreateBr(merge_block);
+        }
+
+        // else block
+        llvm_builder->SetInsertPoint(else_block);
+        node.else_scope->accept(*this);
+        // llvm_builder->CreateBr(merge_block);
+
+        if (!llvm_builder->GetInsertBlock()->getTerminator()) {
+            if (!merge_block) {
+                merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+            }
+            llvm_builder->CreateBr(merge_block);
+        }
     }
 
+    if (merge_block) {
+        llvm_builder->SetInsertPoint(merge_block);
+    }
+}
+
+void LLVMCompiler::visitWhileStatement(AST::WhileStatementNode &node)
+{
+    llvm::BasicBlock *loop_block = llvm::BasicBlock::Create(*llvm_context, "loop", llvm_builder->GetInsertBlock()->getParent());
+    llvm::BasicBlock *body_block = llvm::BasicBlock::Create(*llvm_context, "body", llvm_builder->GetInsertBlock()->getParent());
+    llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+
+    llvm_builder->CreateBr(loop_block);
+
+    // loop block
+    llvm_builder->SetInsertPoint(loop_block);
+    node.condition->accept(*this);
+    llvm::Value *condition = value_stack.top();
+    value_stack.pop();
+
+    llvm_builder->CreateCondBr(condition, body_block, merge_block);
+
+    // body block
+    llvm_builder->SetInsertPoint(body_block);
+    node.loop_scope->accept(*this);
+    llvm_builder->CreateBr(loop_block);
+
+    // merge block
     llvm_builder->SetInsertPoint(merge_block);
 }
+
+void LLVMCompiler::visitVarMut(AST::VarMutNode &node)
+{
+    // Visit the value expression to get its LLVM IR value
+    node.value_expr->accept(*this);
+    
+    // Get the value from the stack
+    llvm::Value* new_value = value_stack.top();
+    value_stack.pop();
+    
+    // Find the variable declaration
+    if (node.var_decl == nullptr) {
+        throw std::runtime_error("Variable declaration not found for mutation");
+    }
+    
+    // Get the allocated variable from the map
+    auto var_iter = var_map.find(node.var_decl);
+    if (var_iter == var_map.end()) {
+        throw std::runtime_error("Variable not found in the map");
+    }
+    
+    llvm::AllocaInst* var = var_iter->second;
+    llvm::Type* var_type = var->getAllocatedType();
+    
+    // Cast the new value to the variable's type if necessary
+    if (var_type->isFloatTy() && new_value->getType()->isDoubleTy()) {
+        new_value = llvm_builder->CreateFPTrunc(new_value, var_type);
+    } else if (var_type->isDoubleTy() && new_value->getType()->isFloatTy()) {
+        new_value = llvm_builder->CreateFPExt(new_value, var_type);
+    } else if (var_type->isIntegerTy() && new_value->getType()->isFloatingPointTy()) {
+        new_value = llvm_builder->CreateFPToSI(new_value, var_type);
+    } else if (var_type->isFloatingPointTy() && new_value->getType()->isIntegerTy()) {
+        new_value = llvm_builder->CreateSIToFP(new_value, var_type);
+    } else if (var_type->isIntegerTy() && new_value->getType()->isIntegerTy() && 
+               var_type->getIntegerBitWidth() != new_value->getType()->getIntegerBitWidth()) {
+        if (var_type->getIntegerBitWidth() > new_value->getType()->getIntegerBitWidth()) {
+            new_value = llvm_builder->CreateSExt(new_value, var_type);
+        } else {
+            new_value = llvm_builder->CreateTrunc(new_value, var_type);
+        }
+    }
+    
+    // Store the new value in the variable
+    llvm_builder->CreateStore(new_value, var);
+}
+
 
 void LLVMCompiler::printIR(bool toFile)
 {
@@ -644,6 +743,8 @@ void LLVMCompiler::run_code() {
         llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
         return;
     }
+
+    // enable debugging
 
     EE->finalizeObject();
 

@@ -14,6 +14,8 @@
 
 namespace AST 
 {
+    class FunctionDeclNode;
+
     class ExprNode : public Node
     {
     public:
@@ -86,11 +88,15 @@ namespace AST
         TokenReference token_function_name;
         std::vector<ExprNode*> arguments;
 
+        FunctionDeclNode *decl = nullptr;
+
         FunctionCallExprNode(TokenReference token_function_name, std::vector<ExprNode*> arguments) :
             token_function_name(token_function_name), arguments(arguments)
         {};
 
         ~FunctionCallExprNode() {}
+
+        ValueType result_type() const override;
 
         const std::string node_description() override {
             std::string desc = "call " + token_function_name.value() + "(";
@@ -99,7 +105,12 @@ namespace AST
                 desc += arg->node_description() + ", ";
             }
 
-            desc += ")";
+            if (arguments.size() > 0) {
+                desc.substr(0, desc.size() - 2);
+            }
+
+            desc += "): ";
+            desc += result_type().get_type_desciption();
 
             return desc;
         }
