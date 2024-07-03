@@ -13,41 +13,29 @@ namespace AST
     {
     public:
         static constexpr NodeType node_type = NodeType::n_if_statement;
-    
-        struct Block {
-            ExprNode *condition;
-            ScopeNode *block;
 
-            Block(ExprNode *condition, ScopeNode *block) : 
-                condition(condition), 
-                block(block) 
-            {};
-        };
-
-        std::vector<Block> blocks;
+        ExprNode *condition;
+        ScopeNode *if_scope;
+        ScopeNode *else_scope;
 
         IfStatementNode() = default;
-        IfStatementNode(std::vector<Block> blocks) : blocks(blocks) {};
+        IfStatementNode(
+            ExprNode *condition,
+            ScopeNode *if_scope,
+            ScopeNode *else_scope
+        ) : condition(condition), if_scope(if_scope), else_scope(else_scope) 
+        {}
         ~IfStatementNode() {}
 
         const std::string node_description() override {
             std::string desc = "";
-            size_t i = 0;
-            for (auto &block : blocks) {
-                std::string block_name = "if";
-                if (i > 0 && block.condition != nullptr) {
-                    block_name = "else if";
-                } else if (i > 0) {
-                    block_name = "else";
-                }
 
-                desc += block_name;
-                if (block.condition != nullptr) {
-                    desc += " (" + block.condition->node_description() + ") ";
-                }
+            desc += "if (" + condition->node_description() + ")\n";
+            desc += if_scope->node_description() + "\n";
 
-                desc += "\n" + block.block->node_description() + "\n";
-                i++;
+            if (else_scope) {
+                desc += "else\n";
+                desc += else_scope->node_description();
             }
 
             return desc;

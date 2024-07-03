@@ -1,0 +1,45 @@
+namespace math;
+
+/**
+ * max 
+ */
+public function max<T>(T a, T b) : T
+{
+    if (a > b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+/**
+ * min 
+ */
+public function min<T>(T a, T b) : T
+{
+    if (a < b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+/**
+ * abs 
+ */
+public function abs<T>(T a) : T
+{
+    if (a < 0) {
+        return -a;
+    } else {
+        return a;
+    }
+}
+
+/**
+ * pow 
+ */
+public function pow<T>(T a, T b) : T
+{
+    return a ** b;
+}

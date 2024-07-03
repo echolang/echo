@@ -35,6 +35,7 @@
 
 namespace AST {
     class VarDeclNode;
+    class VarMutNode;
 };
 
 class LLVMCompiler : public AST::Visitor
@@ -69,6 +70,8 @@ public:
     void visitFunctionDecl(AST::FunctionDeclNode &node);
     void visitReturn(AST::ReturnNode &node);
     void visitIfStatement(AST::IfStatementNode &node);
+    void visitWhileStatement(AST::WhileStatementNode &node);
+    void visitVarMut(AST::VarMutNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 

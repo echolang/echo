@@ -29,6 +29,10 @@ namespace AST
 
         ~FunctionDeclNode() {};
 
+        inline bool is_anonymous() const {
+            return !name_token.has_value();
+        }
+
         const std::string func_name() {
             if (name_token.has_value()) {
                 return name_token.value().value();
@@ -43,6 +47,14 @@ namespace AST
             }
 
             return "[unknown]";
+        }
+
+        const ValueType get_return_type() {
+            if (return_type) {
+                return return_type->type;
+            }
+
+            return ValueType::void_type();
         }
 
         const std::string node_description() override {

@@ -81,6 +81,10 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
 
     funcdecl.return_type = &parse_type(payload);
 
+    // we already add the function declaration to the scope
+    // in case the function is recursive
+    payload.context.scope().add_funcdecl(funcdecl);
+
     // if next token is a semicolon we are done for now
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
@@ -102,8 +106,20 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
 
     funcdecl.body = &parse_scope(payload);
 
+    // we expect a closing brace
+    if (!cursor.is_type(Token::Type::t_close_brace)) {
+        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_brace, cursor.current().type());
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    // skip the closing brace
+    cursor.skip();
+
     // pop the function scope
     payload.context.pop_scope();
 
-    payload.context.scope().children.push_back(AST::make_ref(funcdecl));
+    // payload.context.scope().children.push_back(AST::make_ref(funcdecl));
+
+
 }

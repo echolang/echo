@@ -62,6 +62,9 @@ public:
         t_return,                   // return
         t_if,                       // if
         t_else,                     // else
+        t_while,                    // while
+        t_for,                      // for
+        t_break,                    // break
         t_unknown
     };
 

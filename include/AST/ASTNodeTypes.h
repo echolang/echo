@@ -21,6 +21,7 @@ namespace AST
         n_literal_bool,
         n_vardecl,
         n_varref,
+        n_varmut,
         n_type,
         n_type_cast,
         n_expr_binary,
@@ -31,6 +32,8 @@ namespace AST
         n_func_decl,
         n_func_return,
         n_if_statement,
+        n_while_statement,
+        n_for_statement,
     };
 
     template<typename T>

@@ -9,6 +9,7 @@
 #include "Parser/FuncCallParser.h"
 #include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
+#include "Parser/WhileStatementParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -26,10 +27,19 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         {
             cursor.skip();
             context.scope().add_child_scope(parse_scope(payload));
+
+            // next token needs to be a closing brace
+            if (!cursor.is_type(Token::Type::t_close_brace))
+            {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(context.code_ref(cursor.current()), Token::Type::t_close_brace, cursor.current().type());
+                cursor.try_skip_to_next_statement();
+                break;
+            }
+
+            cursor.skip();
         }
         else if (cursor.is_type(Token::Type::t_close_brace))
         {
-            cursor.skip();
             break;
         }
         else if (cursor.is_type(Token::Type::t_function))
@@ -44,6 +54,10 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         else if (cursor.is_type(Token::Type::t_if))
         {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
+        }
+        else if (cursor.is_type(Token::Type::t_while))
+        {
+            scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
         }
         // print statement aka "echo $something"
         else if (cursor.is_type(Token::Type::t_echo)) {

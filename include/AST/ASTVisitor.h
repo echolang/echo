@@ -22,6 +22,8 @@ namespace AST
     class FunctionDeclNode;
     class ReturnNode;
     class IfStatementNode;
+    class WhileStatementNode;
+    class VarMutNode;
 
     class Visitor
     {
@@ -45,6 +47,8 @@ namespace AST
         virtual void visitFunctionDecl(FunctionDeclNode &node) = 0;
         virtual void visitReturn(ReturnNode &node) = 0;
         virtual void visitIfStatement(IfStatementNode &node) = 0;
+        virtual void visitWhileStatement(WhileStatementNode &node) = 0;
+        virtual void visitVarMut(VarMutNode &node) = 0;
     };
 }
 

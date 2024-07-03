@@ -1,4 +1,5 @@
 #include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 
 AST::ValueType AST::BinaryExprNode::result_type() const
 {   
@@ -12,4 +13,13 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     }
 
     return AST::ValueType::make_void();
+}
+
+AST::ValueType AST::FunctionCallExprNode::result_type() const
+{
+    if (decl == nullptr) {
+        return AST::ValueType::make_void();
+    }
+
+    return decl->get_return_type();
 }
