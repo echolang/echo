@@ -41,13 +41,17 @@ namespace AST
         bool is_signed;
 
         IntegerSize(uint8_t size, bool is_signed) : size(size), is_signed(is_signed) {}
-
+        
         int64_t get_max_negative_value() const {
-            return is_signed ? -(1 << (size * 8 - 1)) : 0;
+            if (!is_signed) return 0;
+            return -(1LL << (size * 8 - 1));
         }
 
         uint64_t get_max_positive_value() const {
-            return is_signed ? (1 << (size * 8 - 1)) - 1 : (1 << (size * 8)) - 1;
+            if (is_signed)
+                return (1ULL << (size * 8 - 1)) - 1;
+            else
+                return (1ULL << (size * 8)) - 1;
         }
     };
 
@@ -176,11 +180,17 @@ namespace AST
             }
         }
 
-        bool is_integer() const {
+        bool is_integer_type() const {
             return is_signed_integer() || is_unsigned_integer();
         }
 
+        bool is_boolean_type() const {
+            return is_primitive() && primitive == ValueTypePrimitive::t_bool;
+        }
+
         bool will_fit_into(ValueType other) const;
+
+        bool is_same_size(ValueType other) const;
         
         inline ValueTypePrimitive get_primitive_type() const {
             return primitive;

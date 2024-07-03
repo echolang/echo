@@ -5,6 +5,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/Scalar.h>
@@ -96,102 +97,114 @@ void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node)
     node.expr->accept(*this);
 
     // create a new value with the new type
-    auto new_type = node.result_type().get_primitive_type();
-    auto old_type = node.expr->result_type().get_primitive_type();
+    auto new_type = node.result_type();
+    auto old_type = node.expr->result_type();
 
-    auto new_llvm_type = get_llvm_type(new_type);
+    auto new_llvm_type = get_llvm_type(new_type.get_primitive_type());
 
     auto value = value_stack.top();
     value_stack.pop();
 
-
-    // @TODO make this pretty, i just wanted to try this out quickly
-
+    // if the types are identical we don't need to do anything
     if (old_type == new_type) {
         value_stack.push(value);
-    } else if (old_type == AST::ValueTypePrimitive::t_float32 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateFPExt(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_float64 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateFPTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int8 && new_type == AST::ValueTypePrimitive::t_int16) {
-        value_stack.push(llvm_builder->CreateSExt(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int16 && new_type == AST::ValueTypePrimitive::t_int8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int32 && new_type == AST::ValueTypePrimitive::t_int8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int32 && new_type == AST::ValueTypePrimitive::t_int16) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_int8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_int16) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_int32) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint8 && new_type == AST::ValueTypePrimitive::t_uint16) {
-        value_stack.push(llvm_builder->CreateZExt(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint16 && new_type == AST::ValueTypePrimitive::t_uint8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint32 && new_type == AST::ValueTypePrimitive::t_uint8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint32 && new_type == AST::ValueTypePrimitive::t_uint16) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_uint8) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_uint16) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_uint32) {
-        value_stack.push(llvm_builder->CreateTrunc(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int8 && new_type == AST::ValueTypePrimitive::t_uint8) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, false));
-    } else if (old_type == AST::ValueTypePrimitive::t_int16 && new_type == AST::ValueTypePrimitive::t_uint16) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, false));
-    } else if (old_type == AST::ValueTypePrimitive::t_int32 && new_type == AST::ValueTypePrimitive::t_uint32) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, false));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_uint64) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, false));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint8 && new_type == AST::ValueTypePrimitive::t_int8) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, true));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint16 && new_type == AST::ValueTypePrimitive::t_int16) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, true));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint32 && new_type == AST::ValueTypePrimitive::t_int32) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, true));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_int64) {
-        value_stack.push(llvm_builder->CreateIntCast(value, new_llvm_type, true));
-    } else if (old_type == AST::ValueTypePrimitive::t_int8 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int16 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int32 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int8 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int16 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int32 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_int64 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateSIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint8 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint16 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint32 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_float32) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint8 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint16 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint32 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else if (old_type == AST::ValueTypePrimitive::t_uint64 && new_type == AST::ValueTypePrimitive::t_float64) {
-        value_stack.push(llvm_builder->CreateUIToFP(value, new_llvm_type));
-    } else {
+        return;
+    }
+
+    // convert the value to a floating point type
+    if (new_type.is_floating_type()) {
+        if (old_type.is_integer_type()) {
+            if (old_type.is_signed_integer()) {
+                value = llvm_builder->CreateSIToFP(value, new_llvm_type);
+            } else {
+                value = llvm_builder->CreateUIToFP(value, new_llvm_type);
+            }
+        }
+        // cast to another floating point type simply requires an extension or truncation
+        else if (old_type.is_floating_type()) {
+            if (old_type.get_primitive_type() == AST::ValueTypePrimitive::t_float32) {
+                value = llvm_builder->CreateFPExt(value, new_llvm_type);
+            } else {
+                value = llvm_builder->CreateFPTrunc(value, new_llvm_type);
+            }
+        }
+        // cast to a boolean type
+        else if (old_type.is_boolean_type()) {
+            value = llvm_builder->CreateUIToFP(value, new_llvm_type);
+        }
+        else {
+            throw std::runtime_error("Unsupported type cast");
+        }
+    }
+
+    else if (new_type.is_integer_type()) {
+        if (old_type.is_floating_type()) {
+            if (new_type.is_signed_integer()) {
+                value = llvm_builder->CreateFPToSI(value, new_llvm_type);
+            } else {
+                value = llvm_builder->CreateFPToUI(value, new_llvm_type);
+            }
+        }
+        // cast to another integer type 
+        else if (old_type.is_integer_type()) {
+            // any int -> signed int
+            if (new_type.is_signed_integer()) {
+                // uint -> int
+                if (old_type.is_same_size(new_type) && old_type.is_unsigned_integer()) {
+                    value = llvm_builder->CreateIntCast(value, new_llvm_type, true);
+                } 
+                // int8 -> int32 (smaller -> larger)
+                else if (old_type.will_fit_into(new_type)) {
+                    value = llvm_builder->CreateSExt(value, new_llvm_type);
+                } 
+                // int32 -> int8 (larger -> smaller)
+                else {
+                    value = llvm_builder->CreateTrunc(value, new_llvm_type);
+                }
+            } 
+            // any int -> unsigned int
+            else {
+                // int -> uint
+                if (old_type.is_same_size(new_type) && old_type.is_signed_integer()) {
+                    value = llvm_builder->CreateIntCast(value, new_llvm_type, false);
+                } 
+                // uint8 -> uint32 (smaller -> larger)
+                else if (old_type.will_fit_into(new_type)) {
+                    value = llvm_builder->CreateZExt(value, new_llvm_type);
+                }
+                // uint32 -> uint8 (larger -> smaller)
+                else {
+                    value = llvm_builder->CreateTrunc(value, new_llvm_type);
+                }
+            }
+        }
+        // cast to a boolean type
+        else if (old_type.is_boolean_type()) {
+            value = llvm_builder->CreateZExt(value, new_llvm_type);
+        }
+        else {
+            throw std::runtime_error("Unsupported type cast");
+        }
+    }
+
+    else if (new_type.is_boolean_type()) {
+        if (old_type.is_integer_type()) {
+            value = llvm_builder->CreateICmpNE(value, llvm::ConstantInt::get(*llvm_context, llvm::APInt(1, 0, false)));
+        }
+        else if (old_type.is_floating_type()) {
+            value = llvm_builder->CreateFCmpONE(value, llvm::ConstantFP::get(*llvm_context, llvm::APFloat(0.0)));
+        }
+        else {
+            throw std::runtime_error("Unsupported type cast");
+        }
+    }
+
+    else {
         throw std::runtime_error("Unsupported type cast");
     }
+
+    // push the new value on the stack
+    value_stack.push(value);
 }
 
 llvm::Type *LLVMCompiler::get_llvm_type(AST::ValueTypePrimitive type)
@@ -282,6 +295,11 @@ void LLVMCompiler::visitLiteralIntExpr(AST::LiteralIntExprNode &node)
 
 void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node)
 {
+    if (node.get_bool_value()) {
+        value_stack.push(llvm::ConstantInt::getTrue(*llvm_context));
+    } else {
+        value_stack.push(llvm::ConstantInt::getFalse(*llvm_context));
+    }
 }
 
 void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
@@ -297,7 +315,7 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
     auto left = value_stack.top();
     value_stack.pop();
 
-    if (lhsret.is_integer() && rhsret.is_integer()) 
+    if (lhsret.is_integer_type() && rhsret.is_integer_type()) 
     {
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
@@ -315,6 +333,24 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
             case Token::Type::t_op_mod:
                 value_stack.push(llvm_builder->CreateSRem(left, right));
                 break;
+            case Token::Type::t_op_pow:
+                {
+                    // im kinda just copying the behavior of C with clang here
+                    // cast all values to double and then call the pow intrinsic
+                    // cast the result back to the original type
+                    std::vector<llvm::Type *> arg_type;
+                    arg_type.push_back(llvm::Type::getDoubleTy(*llvm_context));
+                    arg_type.push_back(llvm::Type::getDoubleTy(*llvm_context));
+
+                    llvm::Function *fun = llvm::Intrinsic::getDeclaration(llvm_module.get(), llvm::Intrinsic::pow, arg_type);
+                    std::vector<llvm::Value *> args;
+                    args.push_back(llvm_builder->CreateSIToFP(left, llvm::Type::getDoubleTy(*llvm_context)));
+                    args.push_back(llvm_builder->CreateSIToFP(right, llvm::Type::getDoubleTy(*llvm_context)));
+
+                    llvm::Value *result = llvm_builder->CreateCall(fun, args);
+                    value_stack.push(llvm_builder->CreateFPToSI(result, llvm::Type::getInt32Ty(*llvm_context)));
+                }
+                break;
             case Token::Type::t_logical_eq:
                 value_stack.push(llvm_builder->CreateICmpEQ(left, right));
                 break;
@@ -331,7 +367,20 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
                 throw std::runtime_error("Unsupported binary operator");
         }
     }
-    else 
+    else if (lhsret.is_boolean_type() && rhsret.is_boolean_type()) 
+    {
+        switch (node.op_node->op->type) {
+            case Token::Type::t_logical_and:
+                value_stack.push(llvm_builder->CreateAnd(left, right));
+                break;
+            case Token::Type::t_logical_or:
+                value_stack.push(llvm_builder->CreateOr(left, right));
+                break;
+            default:
+                throw std::runtime_error("Unsupported binary operator");
+        }
+    }
+    else if (lhsret.is_floating_type() && rhsret.is_floating_type())
     {
         // identify if the left or right value is a float and of what size
         bool left_is_float = lhsret.is_primitive_of_type(AST::ValueTypePrimitive::t_float32);
@@ -371,9 +420,13 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
             case Token::Type::t_op_mod:
                 value_stack.push(llvm_builder->CreateFRem(left, right));
                 break;
+            
             default:
                 throw std::runtime_error("Unsupported binary operator");
         }
+    }
+    else {
+        throw std::runtime_error("Unsupported binary operator");
     }
 }
 
@@ -391,26 +444,43 @@ void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
             auto arg_value = value_stack.top();
             value_stack.pop();
 
+            auto result_type = arg->result_type();
+
             // printf each argument value
             std::vector<llvm::Value *> ArgsV;
 
-            if (arg_value->getType()->isFloatTy()) {
-                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
-                llvm::Value* printed_value = llvm_builder->CreateFPExt(arg_value, llvm::Type::getDoubleTy(*llvm_context), "toDouble");
-                ArgsV.push_back(printed_value);
-            } else if (arg_value->getType()->isDoubleTy()) {
-                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
-                ArgsV.push_back(arg_value);
-            } else if (arg_value->getType()->isIntegerTy()) {
+
+            if (
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int8) || 
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int16) ||
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int32) ||
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int64)
+            ) {
                 ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%d\n"));
                 ArgsV.push_back(arg_value);
-            } else if (arg_value->getType()->isIntegerTy(1)) {
+            }
+            else if (
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint8) || 
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint16) ||
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint32) ||
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint64)
+            ) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%u\n"));
+                ArgsV.push_back(arg_value);
+            }
+            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float32)) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
+                ArgsV.push_back(arg_value);
+            }
+            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float64)) {
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%f\n"));
+                ArgsV.push_back(arg_value);
+            }
+            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_bool)) {
                 ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%d\n"));
                 ArgsV.push_back(arg_value);
-            } else if (arg_value->getType()->isPointerTy()) {
-                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%s\n"));
-                ArgsV.push_back(arg_value);
-            } else {
+            }
+            else {
                 throw std::runtime_error("Unsupported argument type for 'echo'");
             }
 
@@ -501,22 +571,33 @@ void LLVMCompiler::visitReturn(AST::ReturnNode &node)
 
 void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node)
 {
-    for(auto &block : node.blocks)
+    llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+    llvm::BasicBlock *current_block = llvm_builder->GetInsertBlock();
+
+    llvm::BasicBlock *next_block = nullptr;
+
+    AST::IfStatementNode::Block *final_else = nullptr;
+
+
+
+    for (size_t i = 0; i < node.blocks.size(); ++i)
     {
+        auto &block = node.blocks[i];
         bool has_condition = block.condition != nullptr;
         auto scope = block.block;
 
         llvm::BasicBlock *if_block = llvm::BasicBlock::Create(*llvm_context, "if", llvm_builder->GetInsertBlock()->getParent());
-        llvm::BasicBlock *else_block = llvm::BasicBlock::Create(*llvm_context, "else", llvm_builder->GetInsertBlock()->getParent());
-        llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*llvm_context, "merge", llvm_builder->GetInsertBlock()->getParent());
+        next_block = (i < node.blocks.size() - 1) ? llvm::BasicBlock::Create(*llvm_context, "else", llvm_builder->GetInsertBlock()->getParent()) : merge_block;
 
         if (has_condition) {
             block.condition->accept(*this);
             llvm::Value *condition = value_stack.top();
             value_stack.pop();
 
-            llvm_builder->CreateCondBr(condition, if_block, else_block);
+            llvm_builder->SetInsertPoint(current_block);
+            llvm_builder->CreateCondBr(condition, if_block, next_block);
         } else {
+            llvm_builder->SetInsertPoint(current_block);
             llvm_builder->CreateBr(if_block);
         }
 
@@ -524,11 +605,10 @@ void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node)
         scope->accept(*this);
         llvm_builder->CreateBr(merge_block);
 
-        llvm_builder->SetInsertPoint(else_block);
-        llvm_builder->CreateBr(merge_block);
-        
-        llvm_builder->SetInsertPoint(merge_block);
+        current_block = next_block;
     }
+
+    llvm_builder->SetInsertPoint(merge_block);
 }
 
 void LLVMCompiler::printIR(bool toFile)

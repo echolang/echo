@@ -97,7 +97,7 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
         }
 
         // integers
-        else if (expected_type->type.is_integer()) 
+        else if (expected_type->type.is_integer_type()) 
         {
             // determine if the literal has any decimal values besides 0
             // if so, we emit a error (not just a warning) because the user highly likely made a mistake
@@ -180,7 +180,7 @@ const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNo
         }
 
         // integers
-        else if (expected_type->type.is_integer())
+        else if (expected_type->type.is_integer_type())
         {
             auto &expected_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
 
@@ -317,6 +317,23 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
                 
                 // create a cast node and return it
                 auto &cast_node = payload.context.emplace_node<AST::TypeCastNode>(expected_type->type, &node, true);
+
+                // check if the cast could cause a loss of precision
+                auto source_size = AST::get_integer_size(vardecl->type_node()->type.get_primitive_type());
+                auto target_size = AST::get_integer_size(expected_type->type.get_primitive_type());
+
+                if (source_size.size > target_size.size) {
+                    payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
+                        payload.context.code_ref(varref.token_varname), 
+                        std::format(
+                            "The variable '{}' is casted from '{}' to '{}' which will result in a loss of precision.", 
+                            vardecl->name(),
+                            AST::get_primitive_name(vardecl->type_node()->type.get_primitive_type()),
+                            AST::get_primitive_name(expected_type->type.get_primitive_type())
+                        )
+                    );
+                }
+
                 return AST::make_ref(cast_node);
             }
         }

@@ -170,6 +170,10 @@ namespace AST
             LiteralPrimitiveExprNode(token)
         {};
 
+        bool get_bool_value() const {
+            return token_literal.value() == "true";
+        }
+
         ValueType result_type() const override {
             return ValueType(ValueTypePrimitive::t_bool);
         }

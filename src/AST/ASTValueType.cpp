@@ -91,3 +91,12 @@ bool AST::ValueType::will_fit_into(ValueType other) const
 
     return false;
 }
+
+bool AST::ValueType::is_same_size(ValueType other) const
+{
+    if (!(is_primitive() && other.is_primitive())) {
+        return false;
+    }
+
+    return get_primitive_size(primitive) == get_primitive_size(other.primitive);
+}
