@@ -81,6 +81,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
         case Token::Type::t_break: return "break";
+        case Token::Type::t_continue: return "continue";
+        case Token::Type::t_namespace: return "namespace";
         default: return "[undefined]";
     }
 }
@@ -132,6 +134,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
         case Token::Type::t_break: return "break";
+        case Token::Type::t_continue: return "continue";
+        case Token::Type::t_namespace: return "namespace";
     
         default: 
             assert(false && "undefined operator type");

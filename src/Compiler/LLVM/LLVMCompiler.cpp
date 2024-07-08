@@ -73,7 +73,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     llvm_builder->CreateRetVoid();
 
     // optimize the module
-    // optimize();
+    optimize();
 }
 
 void LLVMCompiler::visitScope(AST::ScopeNode &node)
@@ -469,7 +469,7 @@ void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int32) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int64)
             ) {
-                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%d\n"));
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%lld\n"));
                 ArgsV.push_back(arg_value);
             }
             else if (
@@ -478,7 +478,7 @@ void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint32) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint64)
             ) {
-                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%u\n"));
+                ArgsV.push_back(llvm_builder->CreateGlobalStringPtr("%llu\n"));
                 ArgsV.push_back(arg_value);
             }
             else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float32)) {

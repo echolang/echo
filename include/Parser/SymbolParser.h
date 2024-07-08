@@ -1,5 +1,5 @@
-#ifndef SCOPEPARSER_H
-#define SCOPEPARSER_H
+#ifndef SYMBOLPARSER_H
+#define SYMBOLPARSER_H
 
 #pragma once
 
@@ -9,9 +9,8 @@
 
 namespace Parser
 {
-    AST::ScopeNode &parse_scope(Payload &payload);
+    void parse_symbols(Payload &payload);
 };
-
 
 
 #endif

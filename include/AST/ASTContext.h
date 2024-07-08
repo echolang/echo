@@ -6,6 +6,7 @@
 #include "ASTModule.h"
 #include "ASTFile.h"
 #include "ASTCodeRef.h"
+#include "ASTNamespace.h"
 
 namespace AST
 {  
@@ -14,6 +15,8 @@ namespace AST
         Module &module;
 
         const TokenizedFile &file;
+
+        Namespace &current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
 

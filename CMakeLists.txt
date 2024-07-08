@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(APPNAME echo)
+set(APPNAME echoc)
 project(${APPNAME})
 
 set(LIBNAME ${APPNAME}_lib)
@@ -15,6 +15,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 set(CMAKE_BUILD_TYPE Debug)
 
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
+set(VS_DEBUGGER_COMMAND_ARGUMENTS "runc test.eco")
 
 message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 
@@ -78,6 +79,9 @@ target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
 include_directories(${CMAKE_SOURCE_DIR}/include)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
+
+# vendor
+add_subdirectory(vendor)
 
 # Unit tests
 Include(FetchContent)
