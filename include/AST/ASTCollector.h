@@ -7,6 +7,7 @@
 #include "AST/ASTIssue.h"
 #include "AST/ASTContext.h"
 #include "AST/ASTOps.h"
+#include "AST/ASTNamespace.h"
 
 namespace AST
 {  
@@ -16,6 +17,9 @@ namespace AST
         std::vector<std::unique_ptr<AST::IssueRecord>> issues;
         ValueTypeCollection value_types = ValueTypeCollection();
         OperatorRegistry operators = OperatorRegistry();
+        NamespaceManager namespaces = NamespaceManager();
+        
+        // create a registry for the native scalar cast types
         
         Collector();
         ~Collector();

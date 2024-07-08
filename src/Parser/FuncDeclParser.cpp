@@ -8,14 +8,14 @@
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
 
-void Parser::parse_funcdecl(Parser::Payload &payload)
+AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool symbol_only)
 {
     auto &cursor = payload.cursor;
 
     if (!cursor.is_type(Token::Type::t_function)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_function, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // skip the function keyword
@@ -25,7 +25,7 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     if (!cursor.is_type(Token::Type::t_identifier)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // fetch the function name and skip it
@@ -36,7 +36,7 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     if (!cursor.is_type(Token::Type::t_open_paren)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_paren, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     auto &funcdecl = payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
@@ -52,7 +52,7 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(nametoken), Token::Type::t_close_paren, Token::Type::t_unknown);
             cursor.try_skip_to_next_statement();
-            return;
+            return nullptr;
         }
 
         auto vardecl = parse_vardecl(payload, &funcscope);
@@ -66,7 +66,7 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     if (!cursor.is_type(Token::Type::t_colon)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_colon, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // skip the colon
@@ -76,10 +76,15 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     if (!can_parse_type(payload)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     funcdecl.return_type = &parse_type(payload);
+
+    // if we are only interested in the symbol, we are done
+    if (symbol_only) {
+        return &funcdecl;
+    }
 
     // we already add the function declaration to the scope
     // in case the function is recursive
@@ -88,14 +93,14 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     // if next token is a semicolon we are done for now
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
-        return;
+        return &funcdecl;
     }
 
     // if the next token is an open brace, we parse the function body
     if (!cursor.is_type(Token::Type::t_open_brace)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_brace, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // skip the open brace
@@ -110,7 +115,7 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     if (!cursor.is_type(Token::Type::t_close_brace)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_brace, cursor.current().type());
         cursor.try_skip_to_next_statement();
-        return;
+        return nullptr;
     }
 
     // skip the closing brace
@@ -120,6 +125,5 @@ void Parser::parse_funcdecl(Parser::Payload &payload)
     payload.context.pop_scope();
 
     // payload.context.scope().children.push_back(AST::make_ref(funcdecl));
-
-
+    return &funcdecl;
 }

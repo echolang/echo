@@ -12,6 +12,7 @@
 #include "Parser/FuncCallParser.h"
 
 #include <format>
+#include <stack>
 
 bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
 {
@@ -343,6 +344,10 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // poterntial function call
     if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
+
+        // check if the identifier token is a scalar type, and we simply generate a cast node
+        // if (payload.cursor.current().value())
+
         auto fcall = parse_funccall(payload);
         return AST::make_ref(fcall);
     }

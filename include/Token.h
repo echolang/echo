@@ -65,6 +65,8 @@ public:
         t_while,                    // while
         t_for,                      // for
         t_break,                    // break
+        t_continue,                 // continue
+        t_namespace,                // namespace
         t_unknown
     };
 

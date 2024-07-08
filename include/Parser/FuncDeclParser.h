@@ -6,11 +6,12 @@
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/ASTContext.h"
+#include "AST/FunctionDeclNode.h"
 #include "Parser/ParserPayload.h"
 
 namespace Parser
 {
-    void parse_funcdecl(Payload &payload);
+    AST::FunctionDeclNode *parse_funcdecl(Payload &payload, bool symbol_only = false);
 };
 
 

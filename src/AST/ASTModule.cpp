@@ -22,6 +22,8 @@ AST::File &AST::Module::add_file(const std::filesystem::path &path)
 
     file.module = this;
 
+    _tokenized_files.reserve(_files.size());
+
     return file;
 }
 
