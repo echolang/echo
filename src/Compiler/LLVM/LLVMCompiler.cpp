@@ -73,7 +73,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     llvm_builder->CreateRetVoid();
 
     // optimize the module
-    optimize();
+    // optimize();
 }
 
 void LLVMCompiler::visitScope(AST::ScopeNode &node)

@@ -71,6 +71,6 @@ AST::FunctionDeclNode *AST::ScopeNode::find_funcdecl_by_name(const std::string &
     if (!is_root()) {
         return parent().find_funcdecl_by_name(funcname);
     }
-    
+
     return nullptr;
 }

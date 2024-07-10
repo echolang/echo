@@ -1,8 +1,17 @@
 # C Binding
 
-You can use C functions in echo by creating a binding. This is done by creating a file with the `.echo` extension and using the `@c` directive to define the binding.
+You can use C functions in echo by using the `ffi` keyword. It is recommended to wrap the C function in a eco function to convert the C types to echo types.
 
 ```echo
-@c
-int32 printf(string format, ...);
+extern {
+    void time(ptr<uint64> time) as c_time;
+}
+
+function time() : int {
+    uint64 $time
+    c_time(&$time)
+    return $time
+}
+
+echo time();
 ```
