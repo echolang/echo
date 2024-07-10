@@ -1,6 +1,8 @@
 #include "Parser/FuncCallParser.h"
 #include "Parser/ExprParser.h"
 
+#include "AST/FunctionDeclNode.h"
+
 AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload)
 {
     if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren})) {
@@ -41,6 +43,14 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload)
 
     // try to find the function declaration
     funcall.decl = payload.context.scope().find_funcdecl_by_name(funcname_token.value());
+
+    // if no function declaration was found, try to locate an external symbol
+    if (funcall.decl == nullptr) {
+        auto symbol = payload.collector.namespaces.find_symbol(funcname_token.value());
+        if (symbol) {
+            funcall.decl = symbol->node.get_ptr<AST::FunctionDeclNode>();
+        }
+    }
     
     return &funcall;
 }

@@ -39,7 +39,23 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    auto &funcdecl = payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
+    auto fncsymbol = payload.collector.namespaces.find_symbol(nametoken.value());
+    AST::FunctionDeclNode *funcdecl = nullptr;
+
+    if (fncsymbol != nullptr) {
+        auto symboldecl = fncsymbol->node.get_ptr<AST::FunctionDeclNode>();
+        if (symboldecl != nullptr) {
+            funcdecl = symboldecl;
+
+            // if the function is already defined, we reset the arguments
+            // and reparse them with the new context
+            funcdecl->args.clear();
+        }
+    }
+
+    if (funcdecl == nullptr) {
+        funcdecl = &payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
+    }
 
     // skip the open parenthesis
     cursor.skip();
@@ -56,7 +72,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         }
 
         auto vardecl = parse_vardecl(payload, &funcscope);
-        funcdecl.args.push_back(vardecl);
+        funcdecl->args.push_back(vardecl);
     }
 
     // skip the close parenthesis
@@ -79,21 +95,21 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    funcdecl.return_type = &parse_type(payload);
+    funcdecl->return_type = &parse_type(payload);
 
     // if we are only interested in the symbol, we are done
     if (symbol_only) {
-        return &funcdecl;
+        return funcdecl;
     }
 
     // we already add the function declaration to the scope
     // in case the function is recursive
-    payload.context.scope().add_funcdecl(funcdecl);
+    payload.context.scope().add_funcdecl(*funcdecl);
 
     // if next token is a semicolon we are done for now
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
-        return &funcdecl;
+        return funcdecl;
     }
 
     // if the next token is an open brace, we parse the function body
@@ -109,7 +125,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // push the function scope
     payload.context.push_scope(funcscope);
 
-    funcdecl.body = &parse_scope(payload);
+    funcdecl->body = &parse_scope(payload);
 
     // we expect a closing brace
     if (!cursor.is_type(Token::Type::t_close_brace)) {
@@ -125,5 +141,5 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     payload.context.pop_scope();
 
     // payload.context.scope().children.push_back(AST::make_ref(funcdecl));
-    return &funcdecl;
+    return funcdecl;
 }

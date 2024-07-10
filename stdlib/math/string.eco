@@ -1,0 +1,40 @@
+struct string
+{
+    uint32 $length;
+    ptr<uint8> $data;
+
+    function push(uint8 $char) : void 
+    {
+        if ($length == 0) {
+            $data = mem::alloc<uint8>(1);
+        }
+        else {
+            $data = mem::realloc<uint8>($data, $length + 1);
+        }
+
+        $data:[$length] = $char;
+        $length = $length + 1;
+    } 
+
+    function at(uint32 $index) : uint8
+    {
+        if ($index >= $length) {
+            fatal("string index out of bounds");
+        }
+
+        return $data:[$index];
+    }
+
+    destructor()
+    {
+        if ($length > 0) {
+            mem::free($data);
+        }
+    }
+}
+
+
+$foo = string("Hey Ray");
+
+$foo->at(0); // 'H'
+$foo->at(1); // 'e'

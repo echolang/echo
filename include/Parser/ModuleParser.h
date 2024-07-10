@@ -41,7 +41,7 @@ namespace Parser
         ModuleParser();
         ~ModuleParser() {};
         
-        AST::TokenizedFile &make_tokenized_file(AST::Module &module, AST::File &file) const;
+        AST::TokenizedFile make_tokenized_file(AST::Module &module, AST::File &file) const;
 
         Parser::Payload make_parser_payload(const AST::TokenizedFile &file, AST::Module &module, AST::Collector &collector) const;
         

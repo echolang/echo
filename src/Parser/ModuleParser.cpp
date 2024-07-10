@@ -66,10 +66,9 @@ void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const
     // file.root = &Parser::parse_scope(payload);   
 }
 
-AST::TokenizedFile &Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
+AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
 {
-    auto &tfile = module.tokenize(*_lexer.get(), file);
-    return tfile;
+    return module.tokenize(*_lexer.get(), file);
 }
 
 void Parser::ModuleParser::parse_input(const InputPayload &payload) const
@@ -83,10 +82,10 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
     }
     
     // build all parser payloads
-    std::vector<std::tuple<AST::File *, AST::TokenizedFile *>> file_payloads;
+    std::vector<std::tuple<AST::File *, AST::TokenizedFile>> file_payloads;
     for (auto &file : payload.module.files()) {
-        auto &tfile = make_tokenized_file(payload.module, file);
-        file_payloads.push_back(std::make_tuple(&file, &tfile));
+        auto tfile = make_tokenized_file(payload.module, file);
+        file_payloads.push_back(std::make_tuple(&file, tfile));
         // parser_payloads.push_back(std::make_tuple(&file, make_parser_payload(tfile, payload.module, payload.collector)));
     }
 
@@ -94,14 +93,16 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
     // first pass to find declared symbols (functions, types) so that we can 
     // reference them when actually parsing the code
     for (auto &file_payload : file_payloads) {
-        auto parser_payload = make_parser_payload(*std::get<1>(file_payload), payload.module, payload.collector);
+        auto parser_payload = make_parser_payload(std::get<1>(file_payload), payload.module, payload.collector);
         parse_symbols(parser_payload);
     }
 
     // second pass to actually parse the code
     for (auto &file_payload : file_payloads) {
         auto file = std::get<0>(file_payload);
-        auto parser_payload = make_parser_payload(*std::get<1>(file_payload), payload.module, payload.collector);
+        auto parser_payload = make_parser_payload(std::get<1>(file_payload), payload.module, payload.collector);
         file->root = &parse_scope(parser_payload);
     }
+
+    
 }
