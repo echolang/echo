@@ -11,7 +11,7 @@ namespace Parser
 {
     bool can_parse_type(Payload &payload);
 
-    AST::TypeNode &parse_type(Payload &payload);
+    AST::TypeNode *parse_type(Payload &payload);
 };
 
 

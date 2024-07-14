@@ -284,6 +284,17 @@ namespace LexerFunction
         bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
     };
 
+    class ReferenceFrom : public Base
+    {
+    public:
+        int priority() const override {
+            return 50;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
     class SingleLineComment : public Base
     {
     public:

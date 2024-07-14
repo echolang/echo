@@ -20,6 +20,11 @@ namespace AST
         t_unknown
     };
 
+    enum class ValueTypeFlags {
+        t_const = 1 << 0,
+        t_pointer = 1 << 1,
+    };
+
     enum class ValueTypePrimitive {
         t_complex,
         t_int8,
@@ -59,11 +64,13 @@ namespace AST
     uint8_t get_primitive_size(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
-    class ValueType {
-
+    class ValueType 
+    {
         ValueTypeKind kind;
         ValueTypePrimitive primitive;
+        uint8_t type_flags = 0;
 
+        // @todo move this to the ComplexType class
         std::optional<std::string> name;
         std::map<std::string, ValueType> properties;
 
@@ -85,6 +92,15 @@ namespace AST
             return ValueType(ValueTypePrimitive::t_void);
         }
 
+        static ValueType make_const(ValueType type) {
+            type.set_const(true);
+            return type;
+        }
+
+        static ValueType make_pointer(ValueType type) {
+            type.set_pointer(true);
+            return type;
+        }
 
         ValueType() = default;
         ValueType(ValueTypePrimitive primitive) : kind(ValueTypeKind::t_primitive), primitive(primitive) {}
@@ -96,12 +112,40 @@ namespace AST
             }
         }
 
+        bool is_const() const {
+            return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_const);
+        }
+
+        bool is_pointer() const {
+            return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_pointer);
+        }
+
+        void set_const(bool is_const) {
+            if (is_const) {
+                type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_const);
+            } else {
+                type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_const);
+            }
+        }
+
+        void set_pointer(bool is_pointer) {
+            if (is_pointer) {
+                type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_pointer);
+            } else {
+                type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_pointer);
+            }
+        }
+
         bool is_primitive() const {
             return kind == ValueTypeKind::t_primitive;
         }
 
         bool is_primitive_of_type(ValueTypePrimitive primitive) const {
             return is_primitive() && this->primitive == primitive;
+        }
+
+        bool is_void() const {
+            return is_primitive_of_type(ValueTypePrimitive::t_void);
         }
 
         bool is_numeric_type() const {
@@ -228,11 +272,14 @@ namespace AST
         }
 
         std::string get_type_desciption() const {
+            std::string prefix = is_const() ? "const " : "";
+            std::string pointer = is_pointer() ? "*" : "";
+
             if (is_named()) {
-                return name.value();
+                return prefix + name.value() + pointer;
             }
 
-            return get_type_match_signature();
+            return prefix + get_primitive_name(primitive) + pointer;
         }
 
     };

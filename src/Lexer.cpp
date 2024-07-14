@@ -306,6 +306,10 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_break);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_continue);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_ptr);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_struct);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_class);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_enum);
 
     lx_functions.push_back(std::make_unique<LexerFunction::NumericLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
@@ -314,6 +318,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     lx_functions.push_back(std::make_unique<LexerFunction::SingleLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::MultiLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::Identifier>());
+    lx_functions.push_back(std::make_unique<LexerFunction::ReferenceFrom>());
 
     // if there are some custom operators 
     // we add them to the list of functions so that they are recognized
@@ -741,6 +746,29 @@ bool LexerFunction::HexLiteral::parse(TokenCollection &tokens, LexerCursor &curs
 
     tokens.push(value, Token::Type::t_hex_literal, cursor.line, start_offset);
 
+    return true;
+}
+
+// --- ReferenceFrom ---
+// ----------------------------------------------------------------------------
+const std::vector<std::string> LexerFunction::ReferenceFrom::must_match() const
+{
+    return { "&" };
+}
+
+bool LexerFunction::ReferenceFrom::parse(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    if (cursor.peek() != '&') {
+        return false;
+    }
+
+    // its only a reference if immediately followed by a var name or identifier
+    if (!varname_lut[cursor.peek(1)] && !cursor.begins_with("&$")) {
+        return false;
+    }
+
+    tokens.push("&", Token::Type::t_ref, cursor.line, cursor.char_offset);
+    cursor.skip();
     return true;
 }
 

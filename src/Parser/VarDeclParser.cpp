@@ -28,7 +28,7 @@ AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode
 
     // when we have an identifier we assume it to be the variable type
     if (can_parse_type(payload))  {
-        type = &parse_type(payload);
+        type = parse_type(payload);
         is_const = type->is_const;
     }
 
@@ -138,6 +138,7 @@ AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode
         else {
             vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type()));
             vardecl->type_node()->is_const = is_const;
+            vardecl->type_node()->is_pointer = vardecl->type_node()->type.is_pointer();
         }
     }
 

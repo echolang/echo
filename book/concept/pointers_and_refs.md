@@ -49,7 +49,7 @@ debug($ref: == $ref2:); // true
 debug($empty: == null); // true
 ```
 
-### Heap Allocation
+### Heap Allocation
 
 Echo allows you to allocate a blob of memory on the heap and get a pointer to it. This obviosly is not a safe operation and should be used with caution.
 
@@ -73,7 +73,7 @@ debug($it:[0]); // uint8(2)
 debug($it:[1]); // uint8(3)
 ```
 
-#### Type indexed
+#### Type indexed
 
 You can also index the pointer by type. This will automatically calculate the offset based on the type size.
 
@@ -83,7 +83,7 @@ $ptr = mem::alloc<int32>(4); // allocate 16 bytes of memory
 $ptr:[0] = 424242;
 $ptr:[1] = 696969;
 
-debug($ptr[0]); // int32(424242)
-debug($ptr[1]); // int32(696969)
+debug($ptr:[0]); // int32(424242)
+debug($ptr:[1]); // int32(696969)
 ```
 

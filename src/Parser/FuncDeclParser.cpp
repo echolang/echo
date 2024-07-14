@@ -95,7 +95,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    funcdecl->return_type = &parse_type(payload);
+    funcdecl->return_type = parse_type(payload);
 
     // if we are only interested in the symbol, we are done
     if (symbol_only) {

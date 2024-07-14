@@ -30,6 +30,7 @@ const std::string token_type_string(Token::Type type)
     switch (type) {
         case Token::Type::t_assign: return "assign (=)";
         case Token::Type::t_and: return "and (&)";
+        case Token::Type::t_ref: return "ref (&)";
         case Token::Type::t_or: return "or (|)";
         case Token::Type::t_xor: return "xor (^)";
         case Token::Type::t_identifier: return "identifier";
@@ -83,6 +84,11 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";
+        case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_struct: return "struct";
+        case Token::Type::t_class: return "class";
+        case Token::Type::t_enum: return "enum";
+
         default: return "[undefined]";
     }
 }
@@ -92,6 +98,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
     switch (type) {
         case Token::Type::t_assign: return "=";
         case Token::Type::t_and: return "&";
+        case Token::Type::t_ref: return "&";
         case Token::Type::t_or: return "|";
         case Token::Type::t_xor: return "^";
         case Token::Type::t_semicolon: return ";";
@@ -136,6 +143,10 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";
+        case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_struct: return "struct";
+        case Token::Type::t_class: return "class";
+        case Token::Type::t_enum: return "enum";
     
         default: 
             assert(false && "undefined operator type");

@@ -86,6 +86,7 @@ $randomNumber = {
     $rng->seed(42);
     return $rng->next();
 };
+```
 
 
 ### Arrays / Container types

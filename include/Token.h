@@ -26,6 +26,7 @@ public:
         t_accessorlr,               // ->
         t_assign,                   // =
         t_and,                      // &
+        t_ref,                      // & (reference)
         t_or,                       // |
         t_xor,                      // ^
         t_op_shl,                   // <<
@@ -67,6 +68,10 @@ public:
         t_break,                    // break
         t_continue,                 // continue
         t_namespace,                // namespace
+        t_ptr,                      // ptr
+        t_struct,                   // struct
+        t_class,                    // class
+        t_enum,                     // enum
         t_unknown
     };
 
