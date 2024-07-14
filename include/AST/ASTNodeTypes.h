@@ -28,6 +28,7 @@ namespace AST
         n_expr_unary,
         n_expr_call,
         n_expr_varref,
+        n_expr_varptr,
         n_expr_void,
         n_func_decl,
         n_func_return,

@@ -29,6 +29,9 @@ double $double;
 float32 $float;
 float64 $double;
 
+// const 
+const int $const = 23;
+
 /**
  * Numeric literals
  * 
@@ -61,3 +64,26 @@ echo 2 * 2;
 echo 4 / 2;
 echo 5 % 2;
 echo 2 ** 3; 
+
+/**
+ * Constrol structures
+ * 
+ * ----------------------------------------------------------------------------
+ */
+
+// if
+if (true) {
+    echo "true";
+} else if (false) {
+    echo "false";
+} else {
+    echo "else";
+}
+
+// while 
+while ($somethingIsTrue) {
+    echo "true";
+}
+
+
+

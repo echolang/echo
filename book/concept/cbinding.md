@@ -4,13 +4,13 @@ You can use C functions in echo by using the `ffi` keyword. It is recommended to
 
 ```echo
 extern {
-    void time(ptr<uint64> time) as c_time;
+    function time as c_time(ptr<uint64> $time): void;
 }
 
 function time() : int {
-    uint64 $time
-    c_time(&$time)
-    return $time
+    uint64 $time;
+    c_time(&$time);
+    return $time;
 }
 
 echo time();

@@ -36,7 +36,7 @@ namespace AST
         }
 
         CodeRef code_ref(const TokenSlice &slice) const {
-            return CodeRef { &module, &file, slice };
+            return CodeRef { &module, file.file, slice };
         }
 
         CodeRef code_ref(const TokenReference &tokenref) const {
@@ -44,7 +44,7 @@ namespace AST
                 throw std::runtime_error("TokenReference does not belong to this module");
             }
 
-            return CodeRef { &module, &file, tokenref.make_slice() };
+            return CodeRef { &module, file.file, tokenref.make_slice() };
         }
     };
 };

@@ -17,6 +17,8 @@ namespace AST
         // node that declared the type of this variable
         TypeNode *_type_node;
 
+        VarDeclNode *points_to = nullptr;
+
     public:
     
         TokenReference token_varname;

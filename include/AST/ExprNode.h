@@ -80,6 +80,33 @@ namespace AST
         }
     };
 
+    class VarPtrExprNode : public ExprNode
+    {
+    public:
+        static constexpr NodeType node_type = NodeType::n_expr_varptr;
+
+        VarRefNode *var_ref;
+
+        VarPtrExprNode(VarRefNode *var_ref) :
+            var_ref(var_ref)
+        {};
+
+        ~VarPtrExprNode() {};
+
+        ValueType result_type() const override {
+            assert(var_ref->decl);
+            return ValueType::make_pointer(var_ref->decl->type_node()->type);
+        }
+
+        const std::string node_description() override {
+            return "varptr(" + var_ref->node_description() + ")";
+        }
+
+        void accept(Visitor& visitor) override {
+            visitor.visitVarPtrExpr(*this);
+        }
+    };
+
     class FunctionCallExprNode : public ExprNode
     {
     public:

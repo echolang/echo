@@ -12,7 +12,7 @@ namespace AST
     struct CodeRef
     {
         const Module *module;
-        const TokenizedFile *file;
+        const File *file;
         const TokenSlice token_slice;
 
         std::tuple<uint32_t, uint32_t> line_range() const
@@ -37,7 +37,7 @@ namespace AST
 
         const std::string get_referenced_code_excerpt() const
         {
-            if (!file->file->content.has_value()) {
+            if (!file->content.has_value()) {
                 return "[No content available]";
             }
 
@@ -51,7 +51,7 @@ namespace AST
             excerpt += "Code excerpt:\n";
 
             for (uint32_t i = std::get<0>(lines) - 1; i <= std::get<1>(lines) + 1; i++) {
-                excerpt += " [" + std::to_string(i) + "]> " + file->file->get_content_of_line(i) + "\n";
+                excerpt += " [" + std::to_string(i) + "]> " + file->get_content_of_line(i) + "\n";
                 if (i == std::get<0>(lines)) {
                     excerpt += "     ";
                     for (uint32_t j = 0; j < token_slice.startt().char_offset; j++) {

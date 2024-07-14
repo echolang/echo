@@ -15,6 +15,7 @@ namespace AST
     class LiteralBoolExprNode;
     class FunctionCallExprNode;
     class VarRefExprNode;
+    class VarPtrExprNode;
     class BinaryExprNode;
     class UnaryExprNode;
     class NullNode;
@@ -40,6 +41,7 @@ namespace AST
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
         virtual void visitVarRefExpr(VarRefExprNode &node) = 0;
+        virtual void visitVarPtrExpr(VarPtrExprNode &node) = 0;
         virtual void visitBinaryExpr(BinaryExprNode &node) = 0;
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
         virtual void visitNull(NullNode &node) = 0;

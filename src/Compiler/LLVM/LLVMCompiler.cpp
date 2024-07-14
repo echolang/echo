@@ -249,6 +249,11 @@ void LLVMCompiler::visitVarDecl(AST::VarDeclNode &node)
     auto varname = node.name();
     llvm::Type* type = get_llvm_type(node.type_node()->type.get_primitive_type());
 
+    // might be a pointer type
+    if (node.type_node()->is_pointer) {
+        type = llvm::PointerType::get(type, 0);
+    }
+
     // alloc the variable on the stack
     llvm::AllocaInst* alloca = llvm_builder->CreateAlloca(type, nullptr, varname);
 
@@ -525,11 +530,29 @@ void LLVMCompiler::visitVarRefExpr(AST::VarRefExprNode &node)
 {
     auto var_ref = node.var_ref;
     llvm::AllocaInst *var = var_map[var_ref->decl];
+    llvm::Type *type = get_llvm_type(var_ref->decl->type_node()->type.get_primitive_type());
 
-    llvm::Type *type = var->getAllocatedType();
-    llvm::Value* varval = llvm_builder->CreateLoad(type, var, var->getName());
+    // handle pointer dereference
+    if (var_ref->decl->type_node()->is_pointer) {
+        // load the pointer first 
+        llvm::Type *ptr_type = llvm::PointerType::get(type, 0);
+        llvm::Value *ptr_val = llvm_builder->CreateLoad(ptr_type, var, var->getName());
+        // load the value from the pointer
+        llvm::Value *varval = llvm_builder->CreateLoad(type, ptr_val, var->getName());
+        value_stack.push(varval);
+    } else {
+        llvm::Value* varval = llvm_builder->CreateLoad(type, var, var->getName());
+        value_stack.push(varval);
+    }
+}
 
-    value_stack.push(varval);
+void LLVMCompiler::visitVarPtrExpr(AST::VarPtrExprNode &node)
+{
+    // should create a pointer to the variable being referenced
+    auto var_ref = node.var_ref;
+    llvm::AllocaInst *var = var_map[var_ref->decl];
+
+    value_stack.push(var);
 }
 
 void LLVMCompiler::visitNull(AST::NullNode &node)
@@ -686,6 +709,13 @@ void LLVMCompiler::visitVarMut(AST::VarMutNode &node)
     
     llvm::AllocaInst* var = var_iter->second;
     llvm::Type* var_type = var->getAllocatedType();
+
+    llvm::Value* target = var;
+
+    // if it's a pointer we need to dereference it
+    if (node.var_decl->type_node()->is_pointer) {
+        target = llvm_builder->CreateLoad(var->getAllocatedType(), var);
+    }
     
     // Cast the new value to the variable's type if necessary
     if (var_type->isFloatTy() && new_value->getType()->isDoubleTy()) {
@@ -706,7 +736,7 @@ void LLVMCompiler::visitVarMut(AST::VarMutNode &node)
     }
     
     // Store the new value in the variable
-    llvm_builder->CreateStore(new_value, var);
+    llvm_builder->CreateStore(new_value, target);
 }
 
 

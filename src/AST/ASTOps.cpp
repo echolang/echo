@@ -205,6 +205,11 @@ const AST::Operator *AST::OperatorRegistry::get_operator(const TokenReference &t
         return _predefined_operator_map[static_cast<size_t>(token.type())];
     }
 
+    // the token must be at least a custom operator to be valid
+    if (token.token().type != Token::Type::t_op_custom) {
+        return nullptr;
+    }
+
     // try to match the token value to a custom operator
     auto custom_op = _operator_symbol_map.find(token.value());
     if (custom_op != _operator_symbol_map.end()) {

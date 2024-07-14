@@ -10,8 +10,11 @@ bool Parser::can_parse_type(Parser::Payload &payload)
         offset++;
     }
 
-    // a type can be an identifier
-    if (payload.cursor.peek_is_type(offset, Token::Type::t_identifier)) {
+    // a type can be an identifier or ptr
+    if (
+        payload.cursor.peek_is_type(offset, Token::Type::t_identifier) ||
+        payload.cursor.peek_is_type(offset, Token::Type::t_ptr)
+    ) {
         return true;
     }
 
@@ -55,22 +58,59 @@ AST::ValueType get_primitive_type(const std::string &types_string)
     return AST::ValueType::make_unknown();
 }
 
-AST::TypeNode &Parser::parse_type(Parser::Payload &payload)
+AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
 {
     bool is_const = false;
+    bool is_pointer = false;
 
     if (payload.cursor.is_type(Token::Type::t_const)) {
         is_const = true;
         payload.cursor.skip();
     }
 
+    if (payload.cursor.is_type(Token::Type::t_ptr)) {
+        is_pointer = true;
+        payload.cursor.skip();
+
+        // ptr have a generics like syntax ptr<T>
+        if (!payload.cursor.is_type(Token::Type::t_open_angle)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(payload.cursor.current()),
+                Token::Type::t_open_angle,
+                payload.cursor.type()
+            );
+
+            return nullptr;
+        }
+
+        payload.cursor.skip();
+    }
+
     auto token = payload.cursor.current();
     auto primitive_type = get_primitive_type(token.value());
+    primitive_type.set_const(is_const);
+    primitive_type.set_pointer(is_pointer);
 
     payload.cursor.skip();
 
     auto &node = payload.context.emplace_node<AST::TypeNode>(primitive_type, token);
     node.is_const = is_const;
+    node.is_pointer = is_pointer;
 
-    return node;
+    // on pointer types we need to close the generics
+    if (is_pointer) {
+        if (!payload.cursor.is_type(Token::Type::t_close_angle)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(payload.cursor.current()),
+                Token::Type::t_close_angle,
+                payload.cursor.type()
+            );
+
+            return nullptr;
+        }
+
+        payload.cursor.skip();
+    }
+
+    return &node;
 }
