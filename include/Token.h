@@ -68,6 +68,7 @@ public:
         t_break,                    // break
         t_continue,                 // continue
         t_namespace,                // namespace
+        t_namespace_sep,            // ::
         t_ptr,                      // ptr
         t_struct,                   // struct
         t_class,                    // class

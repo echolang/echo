@@ -39,7 +39,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    auto fncsymbol = payload.collector.namespaces.find_symbol(nametoken.value());
+    auto fncsymbol = payload.collector.namespaces.find_symbol(nametoken.value(), *payload.context.current_namespace);
     AST::FunctionDeclNode *funcdecl = nullptr;
 
     if (fncsymbol != nullptr) {
@@ -56,6 +56,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     if (funcdecl == nullptr) {
         funcdecl = &payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
     }
+
+    // set the namespace of the function
+    funcdecl->ast_namespace = payload.context.current_namespace;
 
     // skip the open parenthesis
     cursor.skip();

@@ -15,7 +15,6 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 set(CMAKE_BUILD_TYPE Debug)
 
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
-set(VS_DEBUGGER_COMMAND_ARGUMENTS "runc test.eco")
 
 message(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 
@@ -40,6 +39,12 @@ set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-Wall -Wextra -
 
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${SOURCES})
+
+target_compile_definitions(${APPNAME} PRIVATE "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
+target_compile_definitions(${LIBNAME} PRIVATE "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
+
+# create an install target
+install(TARGETS ${APPNAME} DESTINATION bin)
 
 message(STATUS "AVAIL COMPONENETS: ${LLVM_AVAILABLE_LIBS}")
 message(STATUS "LLVM_TARGETS_TO_BUILD: ${LLVM_TARGETS_TO_BUILD}")

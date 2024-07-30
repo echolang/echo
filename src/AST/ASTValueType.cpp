@@ -44,6 +44,26 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
     };
 }
 
+char AST::get_primitive_id_char(ValueTypePrimitive primitive)
+{
+    switch (primitive) {
+        case ValueTypePrimitive::t_int8: return 'c';
+        case ValueTypePrimitive::t_int16: return 's';
+        case ValueTypePrimitive::t_int32: return 'i';
+        case ValueTypePrimitive::t_int64: return 'l';
+        case ValueTypePrimitive::t_uint8: return 'C';
+        case ValueTypePrimitive::t_uint16: return 'S';
+        case ValueTypePrimitive::t_uint32: return 'I';
+        case ValueTypePrimitive::t_uint64: return 'L';
+        case ValueTypePrimitive::t_float32: return 'f';
+        case ValueTypePrimitive::t_float64: return 'd';
+        case ValueTypePrimitive::t_bool: return 'b';
+        case ValueTypePrimitive::t_void: return 'v';
+
+        default: return 'u';
+    };
+}
+
 AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
 {
     const uint8_t size = get_primitive_size(primitive);
@@ -99,4 +119,34 @@ bool AST::ValueType::is_same_size(ValueType other) const
     }
 
     return get_primitive_size(primitive) == get_primitive_size(other.primitive);
+}
+
+std::string AST::ValueType::get_mangled_name() const
+{
+    std::string mangled_name = "";
+
+    // const or mutable
+    if (is_const()) {
+        mangled_name += "C"; // const
+    } else {
+        mangled_name += "M"; // mutable
+    }
+
+    // pointer or lvalue
+    if (is_pointer()) {
+        mangled_name += "R"; // rvalue
+    } else {
+        mangled_name += "L"; // lvalue
+    }
+
+    // primitive type
+    if (is_primitive()) {
+        mangled_name += "P"; // primitive type
+        mangled_name += get_primitive_id_char(primitive);
+    } else {
+        mangled_name += "C"; // complex type
+        assert(false && "Not implemented");
+    }
+
+    return mangled_name;
 }

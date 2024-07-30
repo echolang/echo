@@ -11,7 +11,7 @@ public: \
     arg1Type arg1Name; \
     className(const CodeRef &code_ref, arg1Type arg1Name) : IssueRecord(severity, code_ref), arg1Name(arg1Name) {}; \
     ~className() {}; \
-    const std::string message() const override; \
+    std::string message() const override; \
 };
 
 #define MAKE_ISSUE_DEF2(className, severity, arg1Type, arg1Name, arg2Type, arg2Name) \
@@ -21,7 +21,7 @@ public: \
     arg2Type arg2Name; \
     className(const CodeRef &code_ref, arg1Type arg1Name, arg2Type arg2Name) : IssueRecord(severity, code_ref), arg1Name(arg1Name), arg2Name(arg2Name) {}; \
     ~className() {}; \
-    const std::string message() const override; \
+    std::string message() const override; \
 };
 
 
@@ -70,7 +70,7 @@ namespace AST
             return severity == IssueSeverity::Error;
         }
 
-        virtual const std::string message() const = 0;
+        virtual std::string message() const = 0;
     };
 
     namespace Issue
@@ -82,6 +82,7 @@ namespace AST
         MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual);
         MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
+        MAKE_ISSUE_DEF1(UnknownFunction, IssueSeverity::Error, const std::string, function_name);
         // MAKE_ISSUE_DEF2(ValueTypeConflict, IssueSeverity::Error, const ValueType *, expected, ValueType *, actual);
 
         MAKE_ISSUE_DEF1(LossOfPrecision, IssueSeverity::Warning, const std::string, _message);

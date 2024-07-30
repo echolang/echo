@@ -3,7 +3,7 @@
 
 #include "AST/FunctionDeclNode.h"
 
-AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload)
+AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace)
 {
     if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren})) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_identifier, payload.cursor.current().type());
@@ -46,10 +46,22 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload)
 
     // if no function declaration was found, try to locate an external symbol
     if (funcall.decl == nullptr) {
-        auto symbol = payload.collector.namespaces.find_symbol(funcname_token.value());
+        
+        // if a namespace was provided, try to find the symbol in that namespace
+        if (!requested_namespace) {
+            requested_namespace = payload.context.current_namespace;
+        }
+
+        auto symbol = payload.collector.namespaces.find_symbol(funcname_token.value(), *requested_namespace);
         if (symbol) {
             funcall.decl = symbol->node.get_ptr<AST::FunctionDeclNode>();
         }
+    }
+
+    // if no function declaration was found, we have an issue
+    if (funcall.decl == nullptr) {
+        payload.collector.collect_issue<AST::Issue::UnknownFunction>(payload.context.code_ref(funcname_token), funcname_token.value());
+        return nullptr;
     }
     
     return &funcall;

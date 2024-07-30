@@ -1,0 +1,17 @@
+{
+    "cmake.debugConfig": {
+        "args": [
+            "run",
+            "-a",
+            "-p",
+            "test.eco",
+            "src/*"
+        ]
+    },
+    "files.associations": {
+        "unordered_map": "cpp",
+        "*.inc": "cpp",
+        "regex": "cpp",
+        "chrono": "cpp"
+    }
+}

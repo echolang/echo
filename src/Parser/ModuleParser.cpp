@@ -1,5 +1,6 @@
 #include "Parser/ModuleParser.h"
 
+#include "eco.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 
@@ -20,7 +21,7 @@ Parser::Payload Parser::ModuleParser::make_parser_payload(const AST::TokenizedFi
     AST::Context context = {
         .module = module,
         .file = tfile,
-        .current_namespace = collector.namespaces.root(),
+        .current_namespace = &collector.namespaces.root(),
     };
 
     return Payload {
@@ -84,9 +85,18 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
     // build all parser payloads
     std::vector<std::tuple<AST::File *, AST::TokenizedFile>> file_payloads;
     for (auto &file : payload.module.files()) {
+#if ECO_DONT_CATCH_EXCEPTIONS 
         auto tfile = make_tokenized_file(payload.module, file);
         file_payloads.push_back(std::make_tuple(&file, tfile));
-        // parser_payloads.push_back(std::make_tuple(&file, make_parser_payload(tfile, payload.module, payload.collector)));
+#else
+        try {
+            auto tfile = make_tokenized_file(payload.module, file);
+            file_payloads.push_back(std::make_tuple(&file, tfile));
+        }
+        catch (const Lexer::TokenException &e) {
+            throw TokenizationException(e, &file);
+        }
+#endif
     }
 
 
@@ -95,6 +105,11 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
     for (auto &file_payload : file_payloads) {
         auto parser_payload = make_parser_payload(std::get<1>(file_payload), payload.module, payload.collector);
         parse_symbols(parser_payload);
+    }
+
+    // dump symbols
+    if (dump_symbols) {
+        std::cout << payload.collector.namespaces.root().debug_dump_symbols() << std::endl;
     }
 
     // second pass to actually parse the code

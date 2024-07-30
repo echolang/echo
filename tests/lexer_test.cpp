@@ -275,7 +275,7 @@ TEST_CASE("Predefined Operatos", "[lexer]")
     TokenCollection tokens;
 
     // arithmetic operators
-    lexer.tokenize(tokens, "+ - * / % ^ ++ --");
+    lexer.tokenize(tokens, "+ - * / % ** ++ --");
 
     REQUIRE( tokens[0].type() == Token::Type::t_op_add );
     REQUIRE( tokens[1].type() == Token::Type::t_op_sub );

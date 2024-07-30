@@ -62,6 +62,7 @@ namespace AST
 
     std::string get_primitive_name(ValueTypePrimitive primitive);
     uint8_t get_primitive_size(ValueTypePrimitive primitive);
+    char get_primitive_id_char(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
     class ValueType 
@@ -253,23 +254,7 @@ namespace AST
             assert(false && "Not implemented");
         }
 
-        std::string get_type_match_signature() const {
-            if (is_primitive()) {
-                return get_primitive_name(primitive);
-            }
-
-            std::string signature = "{";
-            for (auto it = properties.begin(); it != properties.end(); ++it) {
-                const auto& [name, type] = *it;
-                signature += type.get_type_match_signature();
-                if (std::next(it) != properties.end()) {
-                    signature += ", ";
-                }
-            }
-
-            signature += "}";
-            return signature;
-        }
+        std::string get_mangled_name() const;
 
         std::string get_type_desciption() const {
             std::string prefix = is_const() ? "const " : "";

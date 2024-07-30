@@ -1,6 +1,8 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
 
+#include "Debugging.h"
+
 #include <vector>
 
 std::vector<std::string> split_namespace(const std::string &str) {
@@ -23,6 +25,11 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::string &name)
     // explode the name by the namespace separator
     std::vector<std::string> parts = split_namespace(name);
 
+    return retrieve(parts);
+}
+
+AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &parts)
+{
     // start from the root
     auto current = &_root;
 
@@ -31,6 +38,7 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::string &name)
     {
         if (current->_children.find(part) == current->_children.end()) {
             current->_children[part] = std::make_unique<Namespace>(part);
+            current->_children[part]->_parent = current;
         }
 
         current = current->_children[part].get();
@@ -44,6 +52,11 @@ const AST::Namespace *AST::NamespaceManager::get(const std::string &name) const
     // explode the name by the namespace separator
     std::vector<std::string> parts = split_namespace(name);
 
+    return get(parts);
+}
+
+const AST::Namespace *AST::NamespaceManager::get(const std::vector<std::string> &parts) const
+{
     // start from the root
     auto current = &_root;
 
@@ -58,6 +71,16 @@ const AST::Namespace *AST::NamespaceManager::get(const std::string &name) const
     }
 
     return current;
+}
+
+bool AST::NamespaceManager::exists(const std::vector<std::string> &parts) const 
+{
+    return get(parts) != nullptr;
+}
+
+bool AST::NamespaceManager::exists(const std::string &name) const
+{
+    return get(name) != nullptr;
 }
 
 AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &fullname) const
@@ -102,4 +125,22 @@ AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &symbol_name, 
 void AST::Namespace::push_symbol(std::unique_ptr<AST::Symbol> symbol)
 {
     _symbols[symbol->name()] = std::move(symbol);
+}
+
+std::string AST::Namespace::debug_dump_symbols() const
+{
+    std::string buffer;
+
+    std::string name = _name.empty() ? "<root>" : _name;
+    buffer = "[" + name + "]\n";
+
+    for (const auto &symbol : _symbols) {
+        buffer += "- " + symbol.first + "\n";
+    }
+
+    for (const auto &child : _children) {
+        buffer += DD::tabbify(child.second->debug_dump_symbols(), 1, '|');
+    }
+
+    return buffer;
 }

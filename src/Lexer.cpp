@@ -143,6 +143,16 @@ void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, 
             }
         }
 
+        // if still nothing matched retry with the root functions
+        if (!matched) {
+            for (auto &func : fnc_tree_root->functions) {
+                if (func->parse(tokens, cursor)) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
         if (!matched) {
             throw UnknownTokenException("Unexpected", cursor.line, cursor.char_offset );
         }
@@ -306,6 +316,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_break);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_continue);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace_sep);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_ptr);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_struct);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_class);
