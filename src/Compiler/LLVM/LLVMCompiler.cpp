@@ -1,9 +1,13 @@
 #include "Compiler/LLVM/LLVMCompiler.h"
+#include "Compiler/CompilerException.h"
 
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/InitLLVM.h>
+#include <llvm/Support/Program.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
@@ -11,6 +15,7 @@
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Utils.h>
+#include <llvm/Linker/Linker.h>
 
 #include "AST/VarDeclNode.h"
 #include "AST/LiteralValueNode.h"
@@ -21,6 +26,8 @@
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/VarMutNode.h"
+
+#include <fmt/core.h>
 
 #include <iostream>
 
@@ -33,23 +40,137 @@ LLVMCompiler::~LLVMCompiler()
 {
 }
 
+Compiler::LLVM::CmpUnit *LLVMCompiler::get_main_cmpu()
+{
+    if (_cmp_unit_map.find(ECO_MAIN_MODULE_NAME) == _cmp_unit_map.end()) {
+        return nullptr;
+    }
+
+    return _cmp_unit_map[ECO_MAIN_MODULE_NAME];
+}
+
+std::string LLVMCompiler::get_llvm_err_str()
+{
+    std::string error;
+    llvm::raw_string_ostream error_stream(error);
+    llvm::errs().write(error_stream.str().data(), error_stream.str().size());
+    return error;
+}
+
+void LLVMCompiler::create_cmp_units(const AST::Bundle &bundle)
+{
+    for (auto &module : bundle.modules) 
+    {
+        // check if the module is already in the map which is not allowed
+        if (_cmp_unit_map.find(module->name) != _cmp_unit_map.end()) {
+            throw Compiler::InternalCompilerException(fmt::format(
+                "A module named '{}' already exists, all module names of a bundle must be unique.",
+                module->name
+            ));
+        }
+
+        // create a new cmp unit for the module
+        _cmp_units.emplace_back(std::make_unique<Compiler::LLVM::CmpUnit>());
+        auto &cmp_unit = _cmp_units.back();
+        cmp_unit->ast_module = module.get();
+        cmp_unit->llvm_module = std::make_unique<llvm::Module>(module->name, *llvm_context);
+
+        _cmp_unit_map[module->name] = cmp_unit.get();
+    }
+
+    // ensure none of the modules are null
+    for (auto &cmp_unit : _cmp_units) {
+        if (cmp_unit->llvm_module == nullptr) {
+            throw Compiler::InternalCompilerException(fmt::format(
+                "Compiler failed to create a module for '{}', error: {}",
+                cmp_unit->ast_module->name,
+                get_llvm_err_str()
+            ));
+        }
+    }
+}
+
+llvm::Function *LLVMCompiler::create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    auto func_name = AST::mangle_function_name(node);
+    auto func_type = node->return_type->type;
+
+    // function arguments
+    // @TODO support complex types
+    std::vector<llvm::Type *> arg_types;
+    for (auto &arg : node->args) {
+        arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+    }
+
+    llvm::FunctionType *llvm_fnc_type = llvm::FunctionType::get(get_llvm_type(func_type.get_primitive_type()), arg_types, false);
+    llvm::Function *llvm_func = llvm::Function::Create(llvm_fnc_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
+
+    // store in the function map
+    cmp_unit.function_table.push_function(func_name, node, llvm_func);
+
+    return llvm_func;
+}
+
+void LLVMCompiler::build_function_maps(const AST::Bundle &bundle)
+{
+    for (auto &cmp_unit : _cmp_units) {
+        // first build all functions actually declared in the module
+        for (auto fncdecl : cmp_unit->ast_module->nodes.of_type<AST::FunctionDeclNode>()) {
+            create_llvm_func_decl(fncdecl, *cmp_unit);
+        }
+    }
+
+    // then go through all function calls inside each module 
+    // to decide which declarations to link in
+    for (auto &cmp_unit : _cmp_units) {
+        _current_cmp_unit = cmp_unit.get();
+        
+        for (auto fnccall : cmp_unit->ast_module->nodes.of_type<AST::FunctionCallExprNode>()) {
+            // if there is no matching llvm function for the call inside of the module
+            // we copy the declaration from another module
+            auto decl = fnccall->decl;
+            if (!decl) {
+                continue;
+            }
+
+            if (!cmp_unit->function_table.get_function_id(decl)) {
+                create_llvm_func_decl(decl, *cmp_unit);
+            }
+        }
+    }
+}
+
+
+Compiler::InternalCompilerException LLVMCompiler::make_internal_compiler_error(std::string message)
+{
+    return Compiler::InternalCompilerException(message, _current_file);
+}
+
 void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
 {
     llvm_context = std::make_unique<llvm::LLVMContext>();
-    llvm_module = std::make_unique<llvm::Module>("echo_module", *llvm_context);
     llvm_builder = std::make_unique<llvm::IRBuilder<>>(*llvm_context);
 
-    if (!llvm_module) {
-        llvm::errs() << "Failed to create module.\n";
+    // initialize the compilation units
+    create_cmp_units(bundle);
+
+    // build the function maps
+    build_function_maps(bundle);
+
+    // always declare printf @TODO make this a bit more dynamic
+    for (auto &cmp_unit : _cmp_units) {
+        cmp_unit->llvm_module->getOrInsertFunction("printf",
+            llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true) 
+        );
     }
 
-    llvm::FunctionCallee CalleeF = llvm_module->getOrInsertFunction("printf",
-        llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true /* this is var arg func type*/) 
-    );
+    // first fetch all function declarations inside of the module
+    for (auto &cmpu : _cmp_units) {
+        _current_cmp_unit = cmpu.get();
 
-    // first fetch all function declarations
-    for (auto &module : bundle.modules) {
-        for (auto &file : module->files()) {
+        for (auto &file : _current_cmp_unit->ast_module->files()) {
+            _current_file = &file;
+
             for (auto &node : file.root->children) {
                 if (node.has_type<AST::FunctionDeclNode>()) {
                     auto func_decl = node.get<AST::FunctionDeclNode>();
@@ -58,19 +179,48 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
             }
         }
     }
-    llvm::FunctionType *funcType = llvm::FunctionType::get(llvm_builder->getVoidTy(), false);
-    llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", llvm_module.get());
+
+    // search for the main module
+    Compiler::LLVM::CmpUnit *main_cmp_unit = get_main_cmpu();   
+    if (!main_cmp_unit) {
+        throw Compiler::InternalCompilerException("No main module found in the bundle", nullptr);
+    }
+
+    llvm::FunctionType *funcType = llvm::FunctionType::get(llvm_builder->getInt32Ty(), false);
+    llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", main_cmp_unit->llvm_module.get());
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*llvm_context, "entry", function);
     llvm_builder->SetInsertPoint(entry);
 
-    for (auto &module : bundle.modules) {
-        for (auto &file : module->files()) {
-            file.root->accept(*this);
-        }
+    _current_cmp_unit = main_cmp_unit;
+
+    // visit all nodes in the main module
+    for (auto &file : main_cmp_unit->ast_module->files()) {
+        _current_file = &file;
+        file.root->accept(*this);
     }
 
     // terminate the function
-    llvm_builder->CreateRetVoid();
+    llvm_builder->CreateRet(llvm_builder->getInt32(0));
+
+    // link all modules together into the main module
+    auto linker = llvm::Linker(*main_cmp_unit->llvm_module);
+
+    for (auto &cmpu : _cmp_units) {
+
+        // skip the main module
+        if (cmpu.get() == main_cmp_unit) {
+            continue;
+        }
+
+        if (linker.linkInModule(std::move(cmpu->llvm_module))) {
+            throw Compiler::InternalCompilerException(fmt::format(
+                "Failed to link module '{}'.\n{}", 
+                cmpu->ast_module->name,
+                get_llvm_err_str()
+            ));
+        }
+        cmpu->llvm_module = nullptr;
+    }
 
     // optimize the module
     // optimize();
@@ -354,7 +504,7 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
                     arg_type.push_back(llvm::Type::getDoubleTy(*llvm_context));
                     arg_type.push_back(llvm::Type::getDoubleTy(*llvm_context));
 
-                    llvm::Function *fun = llvm::Intrinsic::getDeclaration(llvm_module.get(), llvm::Intrinsic::pow, arg_type);
+                    llvm::Function *fun = llvm::Intrinsic::getDeclaration(curr_llvm_module(), llvm::Intrinsic::pow, arg_type);
                     std::vector<llvm::Value *> args;
                     args.push_back(llvm_builder->CreateSIToFP(left, llvm::Type::getDoubleTy(*llvm_context)));
                     args.push_back(llvm_builder->CreateSIToFP(right, llvm::Type::getDoubleTy(*llvm_context)));
@@ -502,13 +652,32 @@ void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
                 throw std::runtime_error("Unsupported argument type for 'echo'");
             }
 
-            llvm_builder->CreateCall(llvm_module->getFunction("printf"), ArgsV);
+            llvm_builder->CreateCall(curr_llvm_module()->getFunction("printf"), ArgsV);
         }
     }
 
     else 
     {
-        llvm::Function *func = llvm_module->getFunction(node.token_function_name.value());
+        // locate the function 
+        auto funcid = _current_cmp_unit->function_table.get_function_id(node.decl);
+        llvm::Function *func = _current_cmp_unit->function_table.get_llvm_function(funcid);
+
+        // look for the function in the other modules
+        if (!func) {
+            for (auto &cmp_unit : _cmp_units) {
+                if (cmp_unit.get() == _current_cmp_unit) {
+                    continue;
+                }
+
+                auto funcid = cmp_unit->function_table.get_function_id(node.decl);
+                func = cmp_unit->function_table.get_llvm_function(funcid);
+
+                if (func) {
+                    break;
+                }
+            }
+        }
+
         if (!func) {
             throw std::runtime_error("Function not found");
         }
@@ -565,17 +734,41 @@ void LLVMCompiler::visitOperator(AST::OperatorNode &node)
 
 void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
 {
-    AST::TypeNode *return_type = node.return_type;
-    assert(return_type && "Function return type is not set");
-    llvm::Type *llvm_return_type = get_llvm_type(return_type->type.get_primitive_type());
+    // sanity checks 
 
-    std::vector<llvm::Type *> arg_types;
-    for (auto &arg : node.args) {
-        arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+    // 1. must have a return type
+    if (!node.return_type) {
+        assert(false);
+        throw make_internal_compiler_error(fmt::format(
+            "Function '{}' has no return type associated with it.", 
+            node.func_name()
+        ));
     }
 
-    llvm::FunctionType *func_type = llvm::FunctionType::get(llvm_return_type, arg_types, false);
-    llvm::Function *func = llvm::Function::Create(func_type, llvm::Function::ExternalLinkage, node.func_name(), llvm_module.get());
+    // 2. must have a body
+    if (!node.body) {
+        assert(false);
+        throw make_internal_compiler_error(fmt::format(
+            "Function '{}' has no body associated with it.", 
+            node.func_name()
+        ));
+    }
+
+    // AST::TypeNode *return_type = node.return_type;
+    // assert(return_type && "Function return type is not set");
+    // llvm::Type *llvm_return_type = get_llvm_type(return_type->type.get_primitive_type());
+
+    // std::vector<llvm::Type *> arg_types;
+    // for (auto &arg : node.args) {
+    //     arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+    // }
+
+    // llvm::FunctionType *func_type = llvm::FunctionType::get(llvm_return_type, arg_types, false);
+    // llvm::Function *func = llvm::Function::Create(func_type, llvm::Function::ExternalLinkage, node.decorated_func_name(), curr_llvm_module());
+
+    // dump all function names in map
+    auto funcid = _current_cmp_unit->function_table.get_function_id_by_name(AST::mangle_function_name(&node));
+    auto func = _current_cmp_unit->function_table.get_llvm_function(funcid);
 
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*llvm_context, "entry", func);
     llvm_builder->SetInsertPoint(entry);
@@ -587,6 +780,9 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
         llvm_builder->CreateStore(&arg, alloca);
         var_map[node.args[arg.getArgNo()]] = alloca;
     }
+
+    // ensure a function body exists
+    
 
     // visit the function body
     node.body->accept(*this);
@@ -739,21 +935,18 @@ void LLVMCompiler::visitVarMut(AST::VarMutNode &node)
     llvm_builder->CreateStore(new_value, target);
 }
 
+void LLVMCompiler::visitNamespaceDecl(AST::NamespaceDeclNode &node)
+{
+}
+
+void LLVMCompiler::visitNamespace(AST::NamespaceNode &node)
+{
+}
 
 void LLVMCompiler::printIR(bool toFile)
-{
-    if (toFile) {
-        std::error_code EC;
-        llvm::raw_fd_ostream outFile("output.ll", EC);
-        if (EC) {
-            llvm::errs() << "Could not open file: " << EC.message() << '\n';
-            return;
-        }
-        llvm_module->print(outFile, nullptr);
-        outFile.close();
-    } else {
-        llvm_module->print(llvm::outs(), nullptr);
-    }
+{ 
+    auto main = get_main_cmpu();
+    main->llvm_module->print(llvm::outs(), nullptr);
 }
 
 void LLVMCompiler::run_code() {
@@ -761,13 +954,20 @@ void LLVMCompiler::run_code() {
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
 
+    auto main_cmp_unit = get_main_cmpu();
+    if (!main_cmp_unit) {
+        throw Compiler::InternalCompilerException("No main module found to run", nullptr);
+    }
+
     std::string errorStr;
     const llvm::TargetOptions opts;
-    llvm::ExecutionEngine *EE = llvm::EngineBuilder(std::move(llvm_module))
-                                .setErrorStr(&errorStr)
-                                .setEngineKind(llvm::EngineKind::JIT)
-                                .setTargetOptions(opts)
-                                .create();
+    llvm::ExecutionEngine *EE = llvm::EngineBuilder(std::move(get_main_cmpu()->llvm_module))
+        .setErrorStr(&errorStr)
+        .setEngineKind(llvm::EngineKind::JIT)
+        .setTargetOptions(opts)
+        .create();
+
+    get_main_cmpu()->llvm_module = nullptr;
 
     if (!EE) {
         llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
@@ -786,8 +986,6 @@ void LLVMCompiler::run_code() {
 
     std::vector<llvm::GenericValue> noargs;
     llvm::GenericValue gv = EE->runFunction(func, noargs);
-
-    llvm::outs() << "Function 'main' executed.\n";
 
     delete EE;
     llvm::llvm_shutdown();
@@ -822,12 +1020,12 @@ void LLVMCompiler::make_exec(std::string executable_name)
     llvm::TargetOptions opt;
     auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, llvm::Reloc::PIC_);
 
-    llvm_module->setDataLayout(TargetMachine->createDataLayout());
-    llvm_module->setTargetTriple(TargetTriple);
+    curr_llvm_module()->setDataLayout(TargetMachine->createDataLayout());
+    curr_llvm_module()->setTargetTriple(TargetTriple);
 
-    auto Filename = "output.o";
     std::error_code EC;
-    llvm::raw_fd_ostream dest(Filename, EC, llvm::sys::fs::OF_None);
+    std::string objectFileName = executable_name + ".o";
+    llvm::raw_fd_ostream dest(objectFileName, EC, llvm::sys::fs::OF_None);
 
     if (EC) {
         llvm::errs() << "Could not open file: " << EC.message();
@@ -842,12 +1040,23 @@ void LLVMCompiler::make_exec(std::string executable_name)
         return;
     }
 
-    pass.run(*llvm_module);
+    pass.run(*curr_llvm_module());
     dest.flush();
+
+    llvm::outs() << "Generated object file: " << objectFileName << "\n";
+
+    std::string command = "clang -o " + executable_name + " " + objectFileName;
+    int result = std::system(command.c_str());
+    if (result != 0) {
+        llvm::errs() << "Error: linking failed\n";
+        return;
+    }
+
+    llvm::outs() << "Executable \"" << executable_name << "\" created successfully\n";
 }
 
 void LLVMCompiler::optimize() {
-    if (!llvm_module) {
+    if (!curr_llvm_module()) {
         llvm::errs() << "Module is not initialized.\n";
         return;
     }
@@ -866,8 +1075,8 @@ void LLVMCompiler::optimize() {
 
     // make the pipeline
     llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
-    // llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O0);
-
+    modulePM.addPass(llvm::ModuleInlinerPass(llvm::getInlineParams(3, 0), llvm::InliningAdvisorMode::Default,
+                                  llvm::ThinOrFullLTOPhase::None));
     
-    modulePM.run(*llvm_module, moduleAM);
+    modulePM.run(*curr_llvm_module(), moduleAM);
 }

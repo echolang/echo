@@ -25,6 +25,8 @@ namespace AST
     class IfStatementNode;
     class WhileStatementNode;
     class VarMutNode;
+    class NamespaceDeclNode;
+    class NamespaceNode;
 
     class Visitor
     {
@@ -51,6 +53,8 @@ namespace AST
         virtual void visitIfStatement(IfStatementNode &node) = 0;
         virtual void visitWhileStatement(WhileStatementNode &node) = 0;
         virtual void visitVarMut(VarMutNode &node) = 0;
+        virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
+        virtual void visitNamespace(NamespaceNode &node) = 0;
     };
 }
 

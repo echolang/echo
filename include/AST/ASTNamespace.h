@@ -30,9 +30,16 @@ namespace AST
             return _name; 
         }
 
+        const Namespace *parent() const { 
+            return _parent; 
+        }
+
         void push_symbol(std::unique_ptr<Symbol> symbol);
 
+        std::string debug_dump_symbols() const;
+
     private:
+        Namespace *_parent = nullptr;
         std::string _name;
         std::unordered_map<std::string, std::unique_ptr<Namespace>> _children;
         std::unordered_map<std::string, std::unique_ptr<Symbol>> _symbols;
@@ -46,11 +53,14 @@ namespace AST
 
         // returns the namespace for the given name, creating it if it doesn't exist
         Namespace &retrieve(const std::string &name);
+        Namespace &retrieve(const std::vector<std::string> &parts);
 
         // returns the namespace for the given name, or nullptr if it doesn't exist
         const Namespace *get(const std::string &name) const;
+        const Namespace *get(const std::vector<std::string> &parts) const;
 
         bool exists(const std::string &name) const;
+        bool exists(const std::vector<std::string> &parts) const;
 
         Symbol *find_symbol(const std::string &fullname) const;
         Symbol *find_symbol(const std::string &symbol_name, const std::string &ns) const;

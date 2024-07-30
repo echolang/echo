@@ -38,6 +38,27 @@ namespace Parser
             AST::Collector &collector;
         };
 
+        struct TokenizationException : public std::exception
+        {
+            Lexer::TokenException exception;
+            AST::File *file;
+            std::string message;
+
+            TokenizationException(Lexer::TokenException exception, AST::File *file) : 
+                exception(exception), file(file)
+            {
+                message = (std::string(exception.what()) + " in file " + file->get_path().string());
+            };
+
+            const char *what() const noexcept override {
+                return message.c_str();
+            }
+        };
+
+        // when enabled, the parser will dump all symbols to stdout
+        // after parsing all files in the module
+        bool dump_symbols = true;
+
         ModuleParser();
         ~ModuleParser() {};
         

@@ -8,7 +8,7 @@
 
 namespace Parser
 {
-    AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload);
+    AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace = nullptr);
 };
 
 #endif

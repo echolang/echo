@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include "eco.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTVisitor.h"
+
+#include "Compiler/CompilerException.h"
+#include "Compiler/LLVM/CompilationUnit.h"
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
@@ -34,22 +38,31 @@
 #include <unordered_map>
 
 namespace AST {
+    class File;
     class VarDeclNode;
     class VarMutNode;
 };
 
 class LLVMCompiler : public AST::Visitor
 {
-    std::unique_ptr<llvm::LLVMContext> llvm_context;
-    std::unique_ptr<llvm::IRBuilder<>> llvm_builder;
-    std::unique_ptr<llvm::Module> llvm_module;
+    std::string get_llvm_err_str();
+
+
+    llvm::Module *curr_llvm_module() {
+        return _current_cmp_unit->llvm_module.get();
+    }
+
+
+    llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
     
-    std::stack<llvm::Value *> value_stack;
-    std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
+    void build_function_maps(const AST::Bundle &bundle);
+
 
 public:
     LLVMCompiler();
     ~LLVMCompiler();
+
+    Compiler::InternalCompilerException make_internal_compiler_error(std::string message);
 
     void compile_bundle(const AST::Bundle &bundle);
 
@@ -73,6 +86,8 @@ public:
     void visitIfStatement(AST::IfStatementNode &node);
     void visitWhileStatement(AST::WhileStatementNode &node);
     void visitVarMut(AST::VarMutNode &node);
+    void visitNamespaceDecl(AST::NamespaceDeclNode &node);
+    void visitNamespace(AST::NamespaceNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 
@@ -82,6 +97,22 @@ public:
     void make_exec(std::string executable_name);
 
 private:
+
+    Compiler::LLVM::CmpUnit *get_main_cmpu();
+
+    void create_cmp_units(const AST::Bundle &bundle);
+
+    std::vector<std::unique_ptr<Compiler::LLVM::CmpUnit>> _cmp_units;
+    std::unordered_map<std::string, Compiler::LLVM::CmpUnit *> _cmp_unit_map;
+
+    Compiler::LLVM::CmpUnit *_current_cmp_unit = nullptr;
+    AST::File *_current_file = nullptr;
+
+    std::unique_ptr<llvm::LLVMContext> llvm_context;
+    std::unique_ptr<llvm::IRBuilder<>> llvm_builder;
+    
+    std::stack<llvm::Value *> value_stack;
+    std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
 
 };
 

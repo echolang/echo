@@ -28,7 +28,7 @@ TEST_CASE( "predefined token operators", "[AST Ops]" )
         "* "  // t_op_mul
         "/ "  // t_op_div
         "% "  // t_op_mod
-        "^ "  // t_op_pow
+        "** "  // t_op_pow
         "++ " // t_op_inc
         "-- " // t_op_dec
         "this is not an operator"

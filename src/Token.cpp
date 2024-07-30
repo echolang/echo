@@ -84,6 +84,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";
+        case Token::Type::t_namespace_sep: return "namespace_sep (::)";
         case Token::Type::t_ptr: return "ptr";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
@@ -143,6 +144,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";
+        case Token::Type::t_namespace_sep: return "::";
         case Token::Type::t_ptr: return "ptr";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";

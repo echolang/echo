@@ -12,15 +12,18 @@
 
 namespace AST 
 {
+    class Namespace;
+
     class FunctionDeclNode : public Node
     {
     public:
         static constexpr NodeType node_type = NodeType::n_func_decl;
-
+            
         std::optional<TokenReference> name_token;
         std::vector<VarDeclNode*> args;
         TypeNode *return_type = nullptr;
-        ScopeNode* body = nullptr;
+        Namespace *ast_namespace = nullptr;
+        ScopeNode *body = nullptr;
 
         FunctionDeclNode() {};
         FunctionDeclNode(TokenReference name_token) :
@@ -33,13 +36,19 @@ namespace AST
             return !name_token.has_value();
         }
 
-        const std::string func_name() {
+        const std::string func_name() const {
             if (name_token.has_value()) {
                 return name_token.value().value();
             }
 
             return "[anonymous]";
         }
+
+        // returns the decorated function name as it would appear in the symbol table
+        // this is the name that is used to uniquely identify the function aka the mangled name
+        const std::string decorated_func_name() const;
+        
+        const std::string namespaced_func_name() const;
 
         const std::string get_return_type_description() {
             if (return_type) {
@@ -57,9 +66,7 @@ namespace AST
             return ValueType::void_type();
         }
 
-        const std::string node_description() override {
-            return "function " + func_name() + " -> " + get_return_type_description() + "\n" + body->node_description();
-        }
+        const std::string node_description() override;
 
         void accept(Visitor &visitor) override {
             visitor.visitFunctionDecl(*this);

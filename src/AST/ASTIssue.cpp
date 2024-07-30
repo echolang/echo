@@ -4,7 +4,7 @@
 #include <format>
 
 #define ISSUE_MESSAGE_FNC(className) \
-const std::string AST::Issue::className::message() const
+std::string AST::Issue::className::message() const
 
 ISSUE_MESSAGE_FNC(GenericError) {
     return _message;
@@ -38,6 +38,11 @@ ISSUE_MESSAGE_FNC(VariableRedeclaration)
 ISSUE_MESSAGE_FNC(UnknownVariable)
 {
     return std::format("The variable '{}' is not declared in the current scope", variable_name);
+}
+
+ISSUE_MESSAGE_FNC(UnknownFunction)
+{
+    return std::format("The function '{}' could not be found", function_name);
 }
 
 ISSUE_MESSAGE_FNC(LossOfPrecision)

@@ -125,22 +125,9 @@ namespace AST
 
         ValueType result_type() const override;
 
-        const std::string node_description() override {
-            std::string desc = "call " + token_function_name.value() + "(";
+        const std::string decorated_func_name() const;
 
-            for (auto arg : arguments) {
-                desc += arg->node_description() + ", ";
-            }
-
-            if (arguments.size() > 0) {
-                desc.substr(0, desc.size() - 2);
-            }
-
-            desc += "): ";
-            desc += result_type().get_type_desciption();
-
-            return desc;
-        }
+        const std::string node_description() override;
 
         void accept(Visitor& visitor) override {
             visitor.visitFunctionCallExpr(*this);

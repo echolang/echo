@@ -10,6 +10,7 @@
 #include "External/infint.h"
 
 #include "Parser/FuncCallParser.h"
+#include "Parser/NamespaceParser.h"
 
 #include <format>
 #include <stack>
@@ -259,6 +260,10 @@ AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expec
 
 bool is_expr_token(Parser::Cursor &cursor)
 {
+    if (cursor.is_done()) {
+        return false;
+    }
+
     return cursor.is_type(Token::Type::t_floating_literal) ||
            cursor.is_type(Token::Type::t_integer_literal) ||
            cursor.is_type(Token::Type::t_bool_literal) ||
@@ -361,13 +366,25 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
     }
 
-    // poterntial function call
+    // there might be a namespace used 
+    // like 
+    //   math::sin(1.0)
+    //   math::PI
+    //   math::$foo 
+    const AST::Namespace *ast_namespace = nullptr;
+    if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        auto ns_node = parse_namespace(payload);
+        assert(ns_node != nullptr && "expected a namespace node");
+        ast_namespace = ns_node->ast_namespace;
+    }
+
+    // potential function call
     if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
 
         // check if the identifier token is a scalar type, and we simply generate a cast node
         // if (payload.cursor.current().value())
 
-        auto fcall = parse_funccall(payload);
+        auto fcall = parse_funccall(payload, ast_namespace);
         return AST::make_ref(fcall);
     }
 
@@ -451,6 +468,9 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
     int depth = 0;
 
+    auto token = cursor.current();
+    auto tvalue = token.value();
+
     while(is_expr_token(cursor))
     {
         // if we have a closing parenthesis and the depth is 0, we can break the loop
@@ -479,6 +499,12 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
         // parse the next expression node
         auto node = parse_expr_node(payload, expected_type);
+        
+        // if the node is empty 
+        if (!node.has()) {
+            return AST::make_void_ref();
+        }
+        
         expr_parts.emplace_back(node, nullptr);
     }
 

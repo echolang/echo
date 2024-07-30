@@ -11,7 +11,7 @@ EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
     auto module_parser = Parser::ModuleParser();
 
     // parse the file
-    auto &tfile = module_parser.make_tokenized_file(*echomod, file);
+    auto tfile = module_parser.make_tokenized_file(*echomod, file);
 
     auto collector = std::make_unique<AST::Collector>();
 
@@ -37,7 +37,7 @@ AST::Module EchoTests::tests_make_module_with_content(std::string content)
     auto module_parser = Parser::ModuleParser();
 
     // parse the file
-    auto &tfile = module_parser.make_tokenized_file(module, file);
+    auto tfile = module_parser.make_tokenized_file(module, file);
 
     return module;
 }

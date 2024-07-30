@@ -1,0 +1,20 @@
+namespace math;
+
+// /**
+//  * Returns the sine of a given float value.
+//  */
+// #[inline]
+// #[intrinsic: "llvm.sin"]
+// function sin(float $x) : float;
+// function sin(double $x) : double;
+
+// /**
+//  * Returns the cosine of a given float value.
+//  */
+// function cos(float $x) : float;
+// function cos(double $x) : double;
+
+// #[inline]
+function triple(float $x) : float {
+    return 3.0f * $x;
+}

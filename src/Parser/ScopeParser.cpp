@@ -10,6 +10,7 @@
 #include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
 #include "Parser/WhileStatementParser.h"
+#include "Parser/NamespaceParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -42,11 +43,14 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         {
             break;
         }
+        else if (cursor.is_type(Token::Type::t_namespace))
+        {
+            parse_namespacedecl(payload);
+        }
         else if (cursor.is_type(Token::Type::t_function))
         {
             parse_funcdecl(payload);
         }
-
         else if (cursor.is_type(Token::Type::t_return))
         {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));

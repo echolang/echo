@@ -16,7 +16,7 @@ namespace AST
 
         const TokenizedFile &file;
 
-        Namespace &current_namespace;
+        Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
 
@@ -33,6 +33,10 @@ namespace AST
             requires NodeTypeProvider<T>
         inline T &emplace_node(Args&&... args) {
             return module.nodes.emplace_back<T>(std::forward<Args>(args)...);
+        }
+
+        CodeRef code_ref() const {
+            return CodeRef { &module, file.file, file.token_slice };
         }
 
         CodeRef code_ref(const TokenSlice &slice) const {

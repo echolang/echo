@@ -35,6 +35,8 @@ namespace AST
         n_if_statement,
         n_while_statement,
         n_for_statement,
+        n_namespace_decl,
+        n_namespace,
     };
 
     template<typename T>
