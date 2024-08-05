@@ -12,7 +12,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -g")
 set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
-set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Debug)
 
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
 
@@ -83,6 +83,7 @@ llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 target_link_libraries(${APPNAME} ${LLVM_LIBS})
 
 include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/stdlib/build)
 target_include_directories(${LIBNAME} PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
 # vendor

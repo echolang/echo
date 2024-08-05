@@ -41,6 +41,7 @@ namespace AST {
     class File;
     class VarDeclNode;
     class VarMutNode;
+    class AttributeNode;
 };
 
 class LLVMCompiler : public AST::Visitor
@@ -74,6 +75,7 @@ public:
     void visitLiteralFloatExpr(AST::LiteralFloatExprNode &node);
     void visitLiteralIntExpr(AST::LiteralIntExprNode &node);
     void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
+    void visitLiteralStringExpr(AST::LiteralStringExprNode &node);
     void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
     void visitVarRefExpr(AST::VarRefExprNode &node);
     void visitVarPtrExpr(AST::VarPtrExprNode &node);
@@ -88,6 +90,7 @@ public:
     void visitVarMut(AST::VarMutNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
+    void visitAttribute(AST::AttributeNode &node);
 
     llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
 

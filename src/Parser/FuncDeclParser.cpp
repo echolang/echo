@@ -3,6 +3,8 @@
 #include "AST/VarDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/LiteralValueNode.h"
+
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/VarDeclParser.h"
@@ -109,9 +111,35 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // in case the function is recursive
     payload.context.scope().add_funcdecl(*funcdecl);
 
+    // attach all attributes to the function
+    auto attributes = payload.context.scope().collect_attributes();
+    for (auto &attr : attributes) {
+        funcdecl->attributes.push_back(attr);
+    }
+
     // if next token is a semicolon we are done for now
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
+
+        // bodyless function declaration might be intrinsic
+        // so we check the attributes for the intrinsic attribute
+        auto intrinsic_attr = funcdecl->attributes.get_first("intrinsic");
+        if (intrinsic_attr) {
+            // @todo properly implement the attribute value extratction instead of hardcoded offset
+            if (intrinsic_attr->attribute_exprs.size() != 1) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(intrinsic_attr->attribute_tokens), "Intrinsic attribute is malformed.");
+                return nullptr;
+            }
+
+            if (!intrinsic_attr->attribute_exprs[0].has_type<AST::LiteralStringExprNode>()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(intrinsic_attr->attribute_tokens), "Intrinsic attribute value is not a string.");
+                return nullptr;
+            }
+
+            auto intrinsic_string_node = intrinsic_attr->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>();
+            funcdecl->intrinsic = intrinsic_string_node->get_string_value();
+        }
+
         return funcdecl;
     }
 

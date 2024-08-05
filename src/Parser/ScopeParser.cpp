@@ -11,6 +11,7 @@
 #include "Parser/ReturnParser.h"
 #include "Parser/WhileStatementParser.h"
 #include "Parser/NamespaceParser.h"
+#include "Parser/AttributeParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -69,7 +70,13 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
                 scope_node.children.push_back(AST::make_ref(echo_node));
             }
         }
-
+        // attribute definition
+        //   #[attr]
+        //   myfunc() {...
+        else if (cursor.is_type(Token::Type::t_hash))
+        {
+            parse_attribute(payload);
+        }
 
         // var declaration 
         // can be:

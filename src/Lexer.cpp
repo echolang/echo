@@ -303,6 +303,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_brace);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_bracket);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_bracket);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_hash);
     ECHO_LEX_FNC_CUST_STRING(lx_functions, "true", Token::Type::t_bool_literal);
     ECHO_LEX_FNC_CUST_STRING(lx_functions, "false", Token::Type::t_bool_literal);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_const);

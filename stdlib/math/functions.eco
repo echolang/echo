@@ -1,45 +1,21 @@
 namespace math;
 
 /**
- * max 
+ * Clamps a value between a minimum and maximum value.
+ * 
+ * @param $value The value to clamp.
+ * @param $min The minimum value.
+ * @param $max The maximum value.
+ * 
+ * @return The clamped value.
  */
-public function max<T>(T a, T b) : T
+function clamp(float $value, float $min, float $max) : float
 {
-    if (a > b) {
-        return a;
-    } else {
-        return b;
+    if ($value < $min) {
+        return $min;
     }
-}
-
-/**
- * min 
- */
-public function min<T>(T a, T b) : T
-{
-    if (a < b) {
-        return a;
-    } else {
-        return b;
+    if ($value > $max) {
+        return $max;
     }
-}
-
-/**
- * abs 
- */
-public function abs<T>(T a) : T
-{
-    if (a < 0) {
-        return -a;
-    } else {
-        return a;
-    }
-}
-
-/**
- * pow 
- */
-public function pow<T>(T a, T b) : T
-{
-    return a ** b;
+    return $value;
 }

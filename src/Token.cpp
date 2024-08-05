@@ -65,6 +65,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_close_brace: return "close_brace '}'";
         case Token::Type::t_open_bracket: return "open_bracket '['";
         case Token::Type::t_close_bracket: return "close_bracket ']'";
+        case Token::Type::t_hash: return "hash (#)";
         case Token::Type::t_string_literal: return "string_literal (\"\")";
         case Token::Type::t_integer_literal: return "integer_literal";
         case Token::Type::t_hex_literal: return "hex_literal";
@@ -133,6 +134,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_close_brace: return "}";
         case Token::Type::t_open_bracket: return "[";
         case Token::Type::t_close_bracket: return "]";
+        case Token::Type::t_hash: return "#";
         case Token::Type::t_const: return "const";
         case Token::Type::t_echo: return "echo";
         case Token::Type::t_function: return "function";

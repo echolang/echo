@@ -13,6 +13,7 @@ namespace AST
     class LiteralFloatExprNode;
     class LiteralIntExprNode;
     class LiteralBoolExprNode;
+    class LiteralStringExprNode;
     class FunctionCallExprNode;
     class VarRefExprNode;
     class VarPtrExprNode;
@@ -27,6 +28,7 @@ namespace AST
     class VarMutNode;
     class NamespaceDeclNode;
     class NamespaceNode;
+    class AttributeNode;
 
     class Visitor
     {
@@ -41,6 +43,7 @@ namespace AST
         virtual void visitLiteralFloatExpr(LiteralFloatExprNode &node) = 0;
         virtual void visitLiteralIntExpr(LiteralIntExprNode &node) = 0;
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
+        virtual void visitLiteralStringExpr(LiteralStringExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
         virtual void visitVarRefExpr(VarRefExprNode &node) = 0;
         virtual void visitVarPtrExpr(VarPtrExprNode &node) = 0;
@@ -55,6 +58,7 @@ namespace AST
         virtual void visitVarMut(VarMutNode &node) = 0;
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;
+        virtual void visitAttribute(AttributeNode &node) = 0;
     };
 }
 
