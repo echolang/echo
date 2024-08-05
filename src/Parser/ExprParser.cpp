@@ -271,6 +271,8 @@ bool is_expr_token(Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_open_paren) || 
            cursor.is_type(Token::Type::t_close_paren) || 
            cursor.is_type(Token::Type::t_identifier) ||
+           cursor.is_type(Token::Type::t_namespace_sep) ||
+           cursor.is_type(Token::Type::t_string_literal) ||
            cursor.is_type(Token::Type::t_ref) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
@@ -300,6 +302,12 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     if (cursor.is_type(Token::Type::t_bool_literal)) {
         auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(cursor.current());
+        cursor.skip();
+        return AST::make_ref(node);
+    }
+
+    if (cursor.is_type(Token::Type::t_string_literal)) {
+        auto &node = payload.context.emplace_node<AST::LiteralStringExprNode>(cursor.current());
         cursor.skip();
         return AST::make_ref(node);
     }

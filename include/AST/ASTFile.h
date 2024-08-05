@@ -67,6 +67,9 @@ namespace AST
         // this will also invalidate the line_offsets
         void set_content(const std::string &content);
 
+        // set content from c string
+        void set_content(const char *content, size_t length);
+
         // will read the file from disk and update the content
         void read_from_disk();
 

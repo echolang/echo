@@ -1,20 +1,27 @@
 namespace math;
 
-// /**
-//  * Returns the sine of a given float value.
-//  */
-// #[inline]
-// #[intrinsic: "llvm.sin"]
-// function sin(float $x) : float;
+/**
+ * Returns the sine of a given float value.
+ */
+#[inline]
+#[intrinsic: "llvm.sin"]
+function sin(float $x) : float;
+function sin<T: float|double|int>(T $x) : T;
 // function sin(double $x) : double;
 
-// /**
-//  * Returns the cosine of a given float value.
-//  */
-// function cos(float $x) : float;
+
+/**
+ * Returns the cosine of a given float value.
+ */
+#[inline]
+#[intrinsic: "llvm.cos"]
+function cos(float $x) : float;
 // function cos(double $x) : double;
 
-// #[inline]
-function triple(float $x) : float {
-    return 3.0f * $x;
-}
+/**
+ * Returns the square root of a given float value.
+ */
+#[inline]
+#[intrinsic: "llvm.sqrt"]
+function sqrt(float $x) : float;
+// function sqrt(double $x) : double;

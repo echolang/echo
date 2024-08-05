@@ -1,6 +1,7 @@
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/AttributeNode.h"
 #include "Debugging.h"
 
 
@@ -8,6 +9,7 @@ const std::string AST::ScopeNode::node_description()
 {
     std::string result = "Scope\n{\n";
     for (auto &child : children) {
+        if (!child.has()) continue;
         result += DD::tabbify(child.node()->node_description(), 2) + "\n";
     }
     result += "}\n";
@@ -43,6 +45,21 @@ bool AST::ScopeNode::is_varname_taken(const std::string &varname) const
     }
     
     return false;
+}
+
+void AST::ScopeNode::add_attribute(AST::AttributeNode &attribute)
+{
+    children.push_back(AST::make_ref(attribute));
+    _attribute_stack.push_back(&attribute);
+}
+
+std::vector<AST::AttributeNode *> AST::ScopeNode::collect_attributes()
+{
+    // create a copy of the attribute stack
+    auto result = _attribute_stack;
+    _attribute_stack.clear();
+
+    return result;
 }
 
 AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varname) const

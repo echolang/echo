@@ -19,6 +19,7 @@ namespace AST
         n_literal_float,
         n_literal_int,
         n_literal_bool,
+        n_literal_string,
         n_vardecl,
         n_varref,
         n_varmut,
@@ -37,6 +38,7 @@ namespace AST
         n_for_statement,
         n_namespace_decl,
         n_namespace,
+        n_attribute
     };
 
     template<typename T>

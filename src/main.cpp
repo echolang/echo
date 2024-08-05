@@ -10,9 +10,14 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTModuleEmbedder.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
+
+#if ECO_USE_EMBEDDED_STDLIB
+#include "stdlib_embedded.h"
+#endif
 
 #include <chrono>
 
@@ -100,9 +105,18 @@ int main_run(argparse::ArgumentParser &cli)
 
     AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
     auto &stdlib = bundle.modules.get_module(stdlib_handle);
+
+#if ECO_USE_EMBEDDED_STDLIB
+    EmbeddedModule::load_stdlib_module(bundle, stdlib);
+    parser.parse_module(stdlib, bundle.collector);
+#else
     auto stdlib_input = Parser::ModuleParser::InputPayload {
         .files = {
-            Parser::ModuleParser::InputFile(STDLIB_SOURCE_DIR "/symbolic/math.eco")
+            // symbolic
+            Parser::ModuleParser::InputFile(STDLIB_SOURCE_DIR "/symbolic/math.eco"),
+
+            // math
+            Parser::ModuleParser::InputFile(STDLIB_SOURCE_DIR "/math/functions.eco")
         },
         .module = stdlib,
         .collector = bundle.collector
@@ -111,6 +125,10 @@ int main_run(argparse::ArgumentParser &cli)
     if (handle_parse(parser, stdlib_input)) {
         throw std::runtime_error("Failed to parse the echo standard library.");
     }
+
+    // dump the stdlib module into an embedabble cpp file
+    AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
+#endif
 
     AST::module_handle_t module_handle = bundle.modules.add_module("main");
     auto &module = bundle.modules.get_module(module_handle);
@@ -137,7 +155,9 @@ int main_run(argparse::ArgumentParser &cli)
     }
 
     if (cli.get<bool>("--print-ast")) {
-        std::cout << "Module: " << module.debug_description() << std::endl;
+        for (const auto& mod : bundle.modules) {
+            std::cout << "Module: " << mod->debug_description() << std::endl;
+        }
     }
 
     bundle.collector.print_issues();
@@ -157,6 +177,10 @@ int main_run(argparse::ArgumentParser &cli)
         std::cout << "Issue at " << issue->code_ref.token_slice.startt().line << ":" << issue->code_ref.token_slice.startt().char_offset << std::endl;
         std::cout << issue->message() << std::endl;
         std::cout << issue->code_ref.get_referenced_code_excerpt() << std::endl;
+    }
+
+    if (cli.get<bool>("--optimize")) {
+        compiler.optimize();
     }
 
     if (cli.get<bool>("--print-ir")) {
@@ -267,6 +291,11 @@ int main(int argc, char *argv[])
 
         command.get().add_argument("-a", "--print-ast")
             .help("Print the AST to the console.")
+            .default_value(false)
+            .implicit_value(true);
+        
+        command.get().add_argument("-O", "--optimize")
+            .help("Sets the optimization level to 3, makes your code go brrrrrr.")
             .default_value(false)
             .implicit_value(true);
     }

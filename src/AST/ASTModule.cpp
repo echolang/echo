@@ -4,7 +4,7 @@
 
 std::string AST::Module::debug_description() const
 {
-    std::string result = "[Module]\n";
+    std::string result = "[" + name + "]\n";
     for (auto &file : _files) {
         result += "File<" + file->get_path().string() + ">\n{\n";
         result += DD::tabbify(file->debug_description(), 2) + "\n";

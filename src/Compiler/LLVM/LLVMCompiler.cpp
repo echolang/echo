@@ -90,6 +90,25 @@ void LLVMCompiler::create_cmp_units(const AST::Bundle &bundle)
     }
 }
 
+llvm::Intrinsic::IndependentIntrinsics get_intrinsic_for_string(const std::string &name)
+{
+    if (name == "llvm.sin") {
+        return llvm::Intrinsic::sin;
+    } else if (name == "llvm.cos") {
+        return llvm::Intrinsic::cos;
+    } else if (name == "llvm.exp") {
+        return llvm::Intrinsic::exp;
+    } else if (name == "llvm.log") {
+        return llvm::Intrinsic::log;
+    } else if (name == "llvm.sqrt") {
+        return llvm::Intrinsic::sqrt;
+    } else if (name == "llvm.pow") {
+        return llvm::Intrinsic::pow;
+    }
+
+    return llvm::Intrinsic::not_intrinsic;
+}
+
 llvm::Function *LLVMCompiler::create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
 {
     auto func_name = AST::mangle_function_name(node);
@@ -100,6 +119,13 @@ llvm::Function *LLVMCompiler::create_llvm_func_decl(const AST::FunctionDeclNode 
     std::vector<llvm::Type *> arg_types;
     for (auto &arg : node->args) {
         arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+    }
+
+    // handle intrinsic functions
+    if (node->intrinsic.has_value()) {
+        llvm::Function *intrinsic_llvm_func = llvm::Intrinsic::getDeclaration(cmp_unit.llvm_module.get(), get_intrinsic_for_string(node->intrinsic.value()), arg_types);
+        cmp_unit.function_table.push_function(func_name, node, intrinsic_llvm_func);
+        return intrinsic_llvm_func;
     }
 
     llvm::FunctionType *llvm_fnc_type = llvm::FunctionType::get(get_llvm_type(func_type.get_primitive_type()), arg_types, false);
@@ -464,6 +490,10 @@ void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node)
     }
 }
 
+void LLVMCompiler::visitLiteralStringExpr(AST::LiteralStringExprNode &node)
+{
+}
+
 void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
 {
     node.lhs->accept(*this);
@@ -588,6 +618,25 @@ void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node)
             case Token::Type::t_op_mod:
                 value_stack.push(llvm_builder->CreateFRem(left, right));
                 break;
+            case Token::Type::t_logical_eq:
+                value_stack.push(llvm_builder->CreateFCmpOEQ(left, right));
+                break;
+            case Token::Type::t_logical_neq:
+                value_stack.push(llvm_builder->CreateFCmpONE(left, right));
+                break;
+            case Token::Type::t_close_angle:
+                value_stack.push(llvm_builder->CreateFCmpOGT(left, right));
+                break;
+            case Token::Type::t_open_angle:
+                value_stack.push(llvm_builder->CreateFCmpOLT(left, right));
+                break;
+            case Token::Type::t_logical_geq:
+                value_stack.push(llvm_builder->CreateFCmpOGE(left, right));
+                break;
+            case Token::Type::t_logical_leq:
+                value_stack.push(llvm_builder->CreateFCmpOLE(left, right));
+                break;
+
             
             default:
                 throw std::runtime_error("Unsupported binary operator");
@@ -747,6 +796,11 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
 
     // 2. must have a body
     if (!node.body) {
+        // if its an intrinsic function we can skip this
+        if (node.intrinsic) {
+            return;
+        }
+
         assert(false);
         throw make_internal_compiler_error(fmt::format(
             "Function '{}' has no body associated with it.", 
@@ -940,6 +994,10 @@ void LLVMCompiler::visitNamespaceDecl(AST::NamespaceDeclNode &node)
 }
 
 void LLVMCompiler::visitNamespace(AST::NamespaceNode &node)
+{
+}
+
+void LLVMCompiler::visitAttribute(AST::AttributeNode &node)
 {
 }
 

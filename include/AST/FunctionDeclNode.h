@@ -8,11 +8,14 @@
 
 #include "ScopeNode.h"
 #include "VarDeclNode.h"
+#include "AttributeNode.h"
+
 #include <optional>
 
 namespace AST 
 {
     class Namespace;
+    class AttributeNode;
 
     class FunctionDeclNode : public Node
     {
@@ -21,9 +24,19 @@ namespace AST
             
         std::optional<TokenReference> name_token;
         std::vector<VarDeclNode*> args;
+
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;
+        
+        // the list of attributes that are attached to this function
+        AttributeList attributes;
+
+        // A function can be marked as intrinsic, meaning it is implemented in the compiler
+        // the string represents the name of the intrinsic function to be called 
+        // those function must be mapped by the compiler, unknown intrinsic functions will 
+        // result in a compile error
+        std::optional<std::string> intrinsic;
 
         FunctionDeclNode() {};
         FunctionDeclNode(TokenReference name_token) :

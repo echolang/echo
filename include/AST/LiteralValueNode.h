@@ -182,6 +182,33 @@ namespace AST
             visitor.visitLiteralBoolExpr(*this);
         }
     };
+
+    class LiteralStringExprNode : public ExprNode
+    {
+    public:
+        static constexpr NodeType node_type = NodeType::n_literal_string;
+
+        TokenReference token_literal;
+    
+        LiteralStringExprNode(TokenReference token) :
+            token_literal(token)
+        {};
+        ~LiteralStringExprNode() {};
+
+        ValueType result_type() const override {
+            return ValueType::make_void(); // @TODO
+        }
+
+        void accept(Visitor& visitor) override {
+            visitor.visitLiteralStringExpr(*this);
+        }
+
+        const std::string node_description() override {
+            return "literal<string>(\"" + token_literal.value() + "\")";
+        }
+
+        std::string get_string_value() const;
+    };
 };
 
 #endif

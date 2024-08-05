@@ -11,6 +11,7 @@ namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
+    class AttributeNode;
 
     class ScopeNode : public Node
     {
@@ -67,12 +68,21 @@ namespace AST
         void add_vardecl(VarDeclNode &vardecl);
         void add_funcdecl(FunctionDeclNode &funcdecl);
 
+        void add_attribute(AttributeNode &attribute);
+
+        std::vector<AttributeNode *> collect_attributes();
+
         bool is_varname_taken(const std::string &varname) const;
 
         VarDeclNode *find_vardecl_by_name(const std::string &varname) const;
         FunctionDeclNode *find_funcdecl_by_name(const std::string &funcname) const;
 
     private:
+
+        // a list of attributes currently collected in the scope
+        // its in the responsibilty of other parsers to detect if the attributes in the current scope apply 
+        // to their context and to consume them from the scope
+        std::vector<AttributeNode *> _attribute_stack;
 
     };
 };

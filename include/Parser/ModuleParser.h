@@ -57,7 +57,7 @@ namespace Parser
 
         // when enabled, the parser will dump all symbols to stdout
         // after parsing all files in the module
-        bool dump_symbols = true;
+        bool dump_symbols = false;
 
         ModuleParser();
         ~ModuleParser() {};
@@ -67,6 +67,7 @@ namespace Parser
         Parser::Payload make_parser_payload(const AST::TokenizedFile &file, AST::Module &module, AST::Collector &collector) const;
         
         void parse_input(const InputPayload &payload) const;
+        void parse_module(AST::Module &module, AST::Collector &collector) const;
 
     private:
         std::unique_ptr<Lexer> _lexer;

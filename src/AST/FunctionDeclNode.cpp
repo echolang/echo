@@ -4,7 +4,19 @@
 
 const std::string AST::FunctionDeclNode::node_description()
 {
-    return "function " + namespaced_func_name() + " -> " + get_return_type_description() + "\n" + body->node_description();
+    std::string buffer = "function " + namespaced_func_name() + " -> " + get_return_type_description() + "\n";
+
+    if (args.size() > 0) {
+        for (auto arg : args) {
+            buffer += " - " + arg->node_description() + "\n";
+        }
+    }
+
+    if (body) {
+        buffer += body->node_description();
+    }
+
+    return buffer;
 }
 
 const std::string AST::FunctionDeclNode::decorated_func_name() const

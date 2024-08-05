@@ -50,6 +50,7 @@ public:
         t_close_brace,              // }
         t_open_bracket,             // [
         t_close_bracket,            // ]
+        t_hash,                     // #
         t_string_literal,           // "..."
         t_integer_literal,          // 123
         t_hex_literal,              // 0x123
@@ -236,6 +237,18 @@ struct TokenSlice {
     TokenReference operator[](size_t index) const {
         assert(start_index + index <= end_index);
         return TokenReference(tokens, start_index + index);
+    }
+
+    bool is_empty() const {
+        return start_index == end_index;
+    }
+
+    size_t size() const {
+        return end_index - start_index;
+    }
+
+    bool valid_index(size_t index) const {
+        return start_index + index < end_index;
     }
 
     struct iterator {

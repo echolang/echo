@@ -16,7 +16,14 @@ void AST::File::set_content(const std::string &content)
     }
 }
 
-void AST::File::read_from_disk() 
+void AST::File::set_content(const char *content, size_t length)
+{
+    set_content(
+        std::string(static_cast<const char*>(content), static_cast<std::string::size_type>(length))
+    );
+}
+
+void AST::File::read_from_disk()
 {
     // load the file into a string
     // we probably should use a stream in the future
