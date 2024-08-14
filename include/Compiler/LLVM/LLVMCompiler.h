@@ -55,8 +55,10 @@ class LLVMCompiler : public AST::Visitor
 
 
     llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+    llvm::StructType *create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
     
     void build_function_maps(const AST::Bundle &bundle);
+    void build_struct_maps(const AST::Bundle &bundle);
 
 
 public:
@@ -91,8 +93,10 @@ public:
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
     void visitAttribute(AST::AttributeNode &node);
+    void visitStructDecl(AST::StructDeclNode &node);
 
-    llvm::Type *get_llvm_type(AST::ValueTypePrimitive type);
+    llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
+    llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
 
     void optimize();
     void printIR(bool toFile);

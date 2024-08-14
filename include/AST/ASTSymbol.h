@@ -9,10 +9,12 @@
 namespace AST
 {  
     class FunctionDeclNode;
+    class StructDeclNode;
 
     enum class SymbolType
     {
         t_function,
+        t_struct
     };
 
     class Symbol
@@ -26,6 +28,7 @@ namespace AST
         {}
 
         Symbol(FunctionDeclNode *func);
+        Symbol(StructDeclNode *strct);
 
         ~Symbol() {};
 

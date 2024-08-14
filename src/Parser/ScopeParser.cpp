@@ -12,6 +12,7 @@
 #include "Parser/WhileStatementParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/AttributeParser.h"
+#include "Parser/StructParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -51,6 +52,10 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         else if (cursor.is_type(Token::Type::t_function))
         {
             parse_funcdecl(payload);
+        }
+        else if (cursor.is_type(Token::Type::t_struct))
+        {
+            parse_struct(payload);
         }
         else if (cursor.is_type(Token::Type::t_return))
         {

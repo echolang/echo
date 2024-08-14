@@ -19,6 +19,9 @@ namespace AST
         ~ReturnNode() {};
 
         const std::string node_description() override {
+            if (expr == nullptr) {
+                return "return(void)";
+            }
             return "return(" + expr->node_description() + ")";
         }
 

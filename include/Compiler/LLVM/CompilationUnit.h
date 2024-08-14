@@ -22,6 +22,13 @@ namespace Compiler::LLVM
         std::unique_ptr<llvm::Module> llvm_module = nullptr;
 
         FunctionTable function_table;
+
+        std::unique_ptr<StructureTable> structure_table = nullptr;
+
+        CmpUnit() {
+            function_table = FunctionTable();
+            structure_table = std::make_unique<StructureTable>();
+        }
     };
 }
 

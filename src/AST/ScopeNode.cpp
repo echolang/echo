@@ -2,6 +2,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/AttributeNode.h"
+#include "AST/StructNode.h"
 #include "Debugging.h"
 
 
@@ -28,6 +29,15 @@ void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)
 
     if (!funcdecl.is_anonymous()) {
         _declared_functions[funcdecl.func_name()] = &funcdecl;
+    }
+}
+
+void AST::ScopeNode::add_structdecl(AST::StructDeclNode &structdecl)
+{
+    children.push_back(AST::make_ref(structdecl));
+
+    if (structdecl.name_token.has_value()) {
+        _declared_structs[structdecl.name_token.value().value()] = &structdecl;
     }
 }
 

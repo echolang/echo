@@ -26,6 +26,10 @@ namespace AST
         Namespace(const Namespace &) = delete;
         Namespace(Namespace &&) = delete;
 
+        bool is_root() const { 
+            return _parent == nullptr; 
+        }
+
         std::string name() const { 
             return _name; 
         }

@@ -10,9 +10,12 @@
 #include <optional>
 #include <cstdint>
 #include <cassert>
+#include <concepts>
 
 namespace AST
 {   
+    class ComplexType;
+
     enum class ValueTypeKind {
         t_primitive,
         t_class,
@@ -60,6 +63,14 @@ namespace AST
         }
     };
 
+    constexpr bool is_struct(ValueTypeKind kind) {
+        return kind == ValueTypeKind::t_struct;
+    }
+
+    constexpr bool is_class(ValueTypeKind kind) {
+        return kind == ValueTypeKind::t_class;
+    }
+
     std::string get_primitive_name(ValueTypePrimitive primitive);
     uint8_t get_primitive_size(ValueTypePrimitive primitive);
     char get_primitive_id_char(ValueTypePrimitive primitive);
@@ -67,18 +78,6 @@ namespace AST
 
     class ValueType 
     {
-        ValueTypeKind kind;
-        ValueTypePrimitive primitive;
-        uint8_t type_flags = 0;
-
-        // @todo move this to the ComplexType class
-        std::optional<std::string> name;
-        std::map<std::string, ValueType> properties;
-
-        // ComplexType *complex_type
-
-        ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
-
     public:
 
         static ValueType make_void() {
@@ -93,6 +92,14 @@ namespace AST
             return ValueType(ValueTypePrimitive::t_void);
         }
 
+        static ValueType make_struct(ComplexType *complex_type) {
+            return ValueType(ValueTypeKind::t_struct, complex_type);
+        }
+
+        static ValueType make_class(ComplexType *complex_type) {
+            return ValueType(ValueTypeKind::t_class, complex_type);
+        }
+
         static ValueType make_const(ValueType type) {
             type.set_const(true);
             return type;
@@ -104,13 +111,14 @@ namespace AST
         }
 
         ValueType() = default;
-        ValueType(ValueTypePrimitive primitive) : kind(ValueTypeKind::t_primitive), primitive(primitive) {}
+        ValueType(ValueTypePrimitive primitive) : 
+            kind(ValueTypeKind::t_primitive), 
+            primitive(primitive) 
+        {}
 
-        template<ValueTypeKind K, typename = std::enable_if_t<K == ValueTypeKind::t_class || K == ValueTypeKind::t_struct>>
-        ValueType(ValueTypeKind kind, std::vector<ValueType> properties) : kind(kind) {
-            for (auto& prop : properties) {
-                this->properties[prop.name.value()] = prop;
-            }
+        inline ComplexType *get_complex_type() const {
+            assert(is_struct() || is_class());
+            return _complex_type;
         }
 
         bool is_const() const {
@@ -147,6 +155,14 @@ namespace AST
 
         bool is_void() const {
             return is_primitive_of_type(ValueTypePrimitive::t_void);
+        }
+
+        bool is_struct() const {
+            return kind == ValueTypeKind::t_struct;
+        }
+
+        bool is_class() const {
+            return kind == ValueTypeKind::t_class;
         }
 
         bool is_numeric_type() const {
@@ -241,10 +257,6 @@ namespace AST
             return primitive;
         }
 
-        bool is_named() const {
-            return name.has_value();
-        }
-
         // compare two types
         bool operator==(const ValueType& other) const {
             if (is_primitive() && other.is_primitive()) {
@@ -260,14 +272,35 @@ namespace AST
             std::string prefix = is_const() ? "const " : "";
             std::string pointer = is_pointer() ? "*" : "";
 
-            if (is_named()) {
-                return prefix + name.value() + pointer;
-            }
+            // if (is_named()) {
+            //     return prefix + name.value() + pointer;
+            // }
 
             return prefix + get_primitive_name(primitive) + pointer;
         }
 
+    private:
+        ValueTypeKind kind;
+        ValueTypePrimitive primitive;
+        uint8_t type_flags = 0;
+        ComplexType *_complex_type = nullptr;
+
+        ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
+        ValueType(ValueTypeKind kind, ComplexType *complex_type) : 
+            kind(kind), 
+            primitive(ValueTypePrimitive::t_complex), 
+            _complex_type(complex_type) 
+        {}
     };
+    
+    class ComplexType {
+    public:
+        std::optional<std::string> name;
+
+    private:
+        std::map<std::string, ValueType> _properties;
+    };
+
 };
 
 #endif

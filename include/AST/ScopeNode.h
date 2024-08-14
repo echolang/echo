@@ -11,12 +11,14 @@ namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
+    class StructDeclNode;
     class AttributeNode;
 
     class ScopeNode : public Node
     {
         std::unordered_map<std::string, VarDeclNode *> _declared_variables;
         std::unordered_map<std::string, FunctionDeclNode *> _declared_functions;
+        std::unordered_map<std::string, StructDeclNode *> _declared_structs;
 
     public:
         ScopeNode *parent_ptr = nullptr;
@@ -67,6 +69,7 @@ namespace AST
 
         void add_vardecl(VarDeclNode &vardecl);
         void add_funcdecl(FunctionDeclNode &funcdecl);
+        void add_structdecl(StructDeclNode &structdecl);
 
         void add_attribute(AttributeNode &attribute);
 

@@ -11,11 +11,56 @@
 namespace Compiler::LLVM
 {   
     typedef size_t function_id_t;
+    typedef size_t structure_id_t;
 
     struct Function 
     {
         const AST::FunctionDeclNode *ast_funcdecl;
         llvm::Function *llvm_func;
+    };
+
+    struct Structure
+    {
+        const AST::StructDeclNode *ast_structdecl;
+        llvm::StructType *llvm_struct;
+    };
+
+    class StructureTable
+    {
+    public:
+        StructureTable() {
+            _structures.push_back({ nullptr, nullptr });
+        }
+
+        structure_id_t push_structure(const AST::StructDeclNode *structdecl, llvm::StructType *structtype);
+
+        Structure &get_structure(structure_id_t id) {
+            assert(id < _structures.size());
+            return _structures[id];
+        }
+
+        structure_id_t get_structure_id(const AST::StructDeclNode *structdecl) const {
+            auto it = _struct_ast_map.find(structdecl);
+            if (it != _struct_ast_map.end()) {
+                return it->second;
+            }
+
+            return 0;
+        }
+
+        structure_id_t get_structure_id(const AST::ComplexType *type) const {
+            auto it = _struct_type_map.find(type);
+            if (it != _struct_type_map.end()) {
+                return it->second;
+            }
+
+            return 0;
+        }
+
+    private:
+        std::vector<Structure> _structures;
+        std::unordered_map<const AST::StructDeclNode *, structure_id_t> _struct_ast_map;
+        std::unordered_map<const AST::ComplexType *, structure_id_t> _struct_type_map;
     };
 
     class FunctionTable

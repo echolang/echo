@@ -35,6 +35,13 @@ namespace AST
             return module.nodes.emplace_back<T>(std::forward<Args>(args)...);
         }
 
+        // same as emplace_node but will return a pointer to the node instead of a reference
+        template <typename T, typename... Args>
+            requires NodeTypeProvider<T>
+        inline T *emplace_nodep(Args&&... args) {
+            return &module.nodes.emplace_back<T>(std::forward<Args>(args)...);
+        }
+
         CodeRef code_ref() const {
             return CodeRef { &module, file.file, file.token_slice };
         }

@@ -6,7 +6,7 @@ namespace math;
 #[inline]
 #[intrinsic: "llvm.sin"]
 function sin(float $x) : float;
-function sin<T: float|double|int>(T $x) : T;
+// function sin<T: float|double|int>(T $x) : T;
 // function sin(double $x) : double;
 
 

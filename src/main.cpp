@@ -154,6 +154,10 @@ int main_run(argparse::ArgumentParser &cli)
         return 1;
     }
 
+    if (cli.get<bool>("--print-symbol-table")) {
+        std::cout << bundle.collector.namespaces.root().debug_dump_symbols() << std::endl;
+    }
+
     if (cli.get<bool>("--print-ast")) {
         for (const auto& mod : bundle.modules) {
             std::cout << "Module: " << mod->debug_description() << std::endl;
@@ -291,6 +295,11 @@ int main(int argc, char *argv[])
 
         command.get().add_argument("-a", "--print-ast")
             .help("Print the AST to the console.")
+            .default_value(false)
+            .implicit_value(true);
+
+        command.get().add_argument("-syt", "--print-symbol-table")
+            .help("Print the registered symbol table to the console.")
             .default_value(false)
             .implicit_value(true);
         

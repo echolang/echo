@@ -38,7 +38,8 @@ namespace AST
         n_for_statement,
         n_namespace_decl,
         n_namespace,
-        n_attribute
+        n_attribute,
+        n_struct_decl
     };
 
     template<typename T>

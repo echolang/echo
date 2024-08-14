@@ -29,6 +29,7 @@ namespace AST
     class NamespaceDeclNode;
     class NamespaceNode;
     class AttributeNode;
+    class StructDeclNode;
 
     class Visitor
     {
@@ -59,6 +60,7 @@ namespace AST
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;
         virtual void visitAttribute(AttributeNode &node) = 0;
+        virtual void visitStructDecl(StructDeclNode &node) = 0;
     };
 }
 

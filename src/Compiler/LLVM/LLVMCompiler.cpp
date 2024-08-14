@@ -26,6 +26,7 @@
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/VarMutNode.h"
+#include "AST/StructNode.h"
 
 #include <fmt/core.h>
 
@@ -128,13 +129,52 @@ llvm::Function *LLVMCompiler::create_llvm_func_decl(const AST::FunctionDeclNode 
         return intrinsic_llvm_func;
     }
 
-    llvm::FunctionType *llvm_fnc_type = llvm::FunctionType::get(get_llvm_type(func_type.get_primitive_type()), arg_types, false);
+    llvm::FunctionType *llvm_fnc_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
     llvm::Function *llvm_func = llvm::Function::Create(llvm_fnc_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
 
     // store in the function map
     cmp_unit.function_table.push_function(func_name, node, llvm_func);
 
     return llvm_func;
+}
+
+llvm::StructType *LLVMCompiler::create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (!node->name_token.has_value()) {
+        assert(false);
+        throw make_internal_compiler_error("Anonymous struct declarations are not yet supported.");
+    }
+
+    auto struct_name = node->struct_name();
+    // if (_current_cmp_unit->struct_table.is_defined(struct_name)) {
+    //     assert(false);
+    //     throw make_internal_compiler_error(fmt::format(
+    //         "Struct '{}' is already defined.", 
+    //         struct_name
+    //     ));
+    // }
+
+    // make the prop types
+    std::vector<llvm::Type *> member_types;
+    for (const auto &prop : node->properties) {
+        llvm::Type *llvm_type = get_llvm_type(prop->type_node()->type.get_primitive_type());
+        if (!llvm_type) {
+            assert(false);
+            throw make_internal_compiler_error(fmt::format(
+                "Unknown type for field '{}' in struct '{}'.", 
+                prop->name(), struct_name
+            ));
+        }
+        member_types.push_back(llvm_type);
+    }
+
+    // define the llvm struct type
+    llvm::StructType *llvm_struct_type = llvm::StructType::create(*llvm_context, member_types, struct_name);
+
+    // store the struct in the struct table
+    cmp_unit.structure_table->push_structure(node, llvm_struct_type);
+
+    return llvm_struct_type;
 }
 
 void LLVMCompiler::build_function_maps(const AST::Bundle &bundle)
@@ -166,6 +206,18 @@ void LLVMCompiler::build_function_maps(const AST::Bundle &bundle)
     }
 }
 
+void LLVMCompiler::build_struct_maps(const AST::Bundle &bundle)
+{
+    // for now we do dump implementation which just copies all 
+    // struct types between all compilation units, this obviosly 
+    // should in the future only happen if a compilation unit actually 
+    // references the structure
+    for (auto &cmp_unit : _cmp_units) {
+        for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::StructDeclNode>()) {
+            create_llvm_struct_decl(struct_decl, *cmp_unit);
+        }
+    }
+}
 
 Compiler::InternalCompilerException LLVMCompiler::make_internal_compiler_error(std::string message)
 {
@@ -180,17 +232,36 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     // initialize the compilation units
     create_cmp_units(bundle);
 
+    // build the struct maps
+    build_struct_maps(bundle);
+
     // build the function maps
     build_function_maps(bundle);
 
-    // always declare printf @TODO make this a bit more dynamic
+    // always declare printf @TODO make this a bit more dynamic..
     for (auto &cmp_unit : _cmp_units) {
         cmp_unit->llvm_module->getOrInsertFunction("printf",
             llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*llvm_context), 0), true) 
         );
     }
 
-    // first fetch all function declarations inside of the module
+    // fetch and build all structs in the module
+    // for (auto &cmpu : _cmp_units) {
+    //     _current_cmp_unit = cmpu.get();
+
+    //     for (auto &file : _current_cmp_unit->ast_module->files()) {
+    //         _current_file = &file;
+
+    //         for (auto &node : file.root->children) {
+    //             if (node.has_type<AST::StructDeclNode>()) {
+    //                 auto struct_decl = node.get<AST::StructDeclNode>();
+    //                 struct_decl.accept(*this);
+    //             }
+    //         }
+    //     }
+    // }
+
+    // fetch all function declarations inside of the module
     for (auto &cmpu : _cmp_units) {
         _current_cmp_unit = cmpu.get();
 
@@ -390,7 +461,25 @@ void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node)
     value_stack.push(value);
 }
 
-llvm::Type *LLVMCompiler::get_llvm_type(AST::ValueTypePrimitive type)
+llvm::Type *LLVMCompiler::get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (type.is_primitive()) {
+        return get_llvm_type(type.get_primitive_type());
+    }
+
+    if (type.is_struct()) {
+        auto struct_id = cmp_unit.structure_table->get_structure_id(type.get_complex_type());
+        if (!struct_id) {
+            throw std::runtime_error("Trying to get a non declared struct in compilation unit");
+        }
+
+        return cmp_unit.structure_table->get_structure(struct_id).llvm_struct;
+    }
+
+    throw std::runtime_error("Unsupported type");
+}
+
+llvm::Type *LLVMCompiler::get_llvm_type(const AST::ValueTypePrimitive type)
 {
     switch (type) {
         case AST::ValueTypePrimitive::t_float32:
@@ -423,7 +512,7 @@ llvm::Type *LLVMCompiler::get_llvm_type(AST::ValueTypePrimitive type)
 void LLVMCompiler::visitVarDecl(AST::VarDeclNode &node)
 {
     auto varname = node.name();
-    llvm::Type* type = get_llvm_type(node.type_node()->type.get_primitive_type());
+    llvm::Type* type = get_llvm_type(node.type_node()->type, *_current_cmp_unit);
 
     // might be a pointer type
     if (node.type_node()->is_pointer) {
@@ -847,7 +936,19 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
 
 void LLVMCompiler::visitReturn(AST::ReturnNode &node)
 {
-    node.expr->accept(*this);
+    // handle returns without an actual extression
+    if (node.expr == nullptr) {
+        llvm_builder->CreateRetVoid();
+        return;
+    }
+
+    // handle expressions resulting in void
+    if (node.expr->result_type().is_void()) {
+        llvm_builder->CreateRetVoid();
+        return;
+    }
+
+    node.expr->accept(*this);    
 
     llvm::Value *ret = value_stack.top();
     value_stack.pop();
@@ -999,6 +1100,87 @@ void LLVMCompiler::visitNamespace(AST::NamespaceNode &node)
 
 void LLVMCompiler::visitAttribute(AST::AttributeNode &node)
 {
+}
+
+void LLVMCompiler::visitStructDecl(AST::StructDeclNode &node)
+{
+    // if (!node.name_token.has_value()) {
+    //     assert(false);
+    //     throw make_internal_compiler_error("Anonymous struct declarations are not yet supported.");
+    // }
+
+    // auto struct_name = node.struct_name();
+    // // if (_current_cmp_unit->struct_table.is_defined(struct_name)) {
+    // //     assert(false);
+    // //     throw make_internal_compiler_error(fmt::format(
+    // //         "Struct '{}' is already defined.", 
+    // //         struct_name
+    // //     ));
+    // // }
+
+    // // make the prop types
+    // std::vector<llvm::Type *> member_types;
+    // for (const auto &prop : node.properties) {
+    //     llvm::Type *llvm_type = get_llvm_type(prop->type_node()->type.get_primitive_type());
+    //     if (!llvm_type) {
+    //         assert(false);
+    //         throw make_internal_compiler_error(fmt::format(
+    //             "Unknown type for field '{}' in struct '{}'.", 
+    //             prop->name(), struct_name
+    //         ));
+    //     }
+    //     member_types.push_back(llvm_type);
+    // }
+
+    // // define the llvm struct type
+    // llvm::StructType *llvm_struct_type = llvm::StructType::create(*llvm_context, member_types, struct_name);
+
+    // // save the current entry block
+    // llvm::BasicBlock *entry_block = llvm_builder->GetInsertBlock();
+
+    // if (!node.properties.empty()) {
+    //     // function type for the constructor: return type is void, argument is pointer to struct
+    //     llvm::Type *void_type = llvm::Type::getVoidTy(*llvm_context);
+    //     llvm::PointerType *struct_ptr_type = llvm_struct_type->getPointerTo();
+    //     llvm::FunctionType *ctor_type = llvm::FunctionType::get(void_type, {struct_ptr_type}, false);
+        
+    //     // create the constructor function
+    //     llvm::Function *ctor = llvm::Function::Create(
+    //         ctor_type, llvm::Function::ExternalLinkage, struct_name + "_ctor", curr_llvm_module());
+
+    //     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*llvm_context, "entry", ctor);
+    //     llvm_builder->SetInsertPoint(entry);
+
+    //     // get the pointer to the struct from the function's arguments
+    //     llvm::Argument *struct_ptr = ctor->getArg(0);
+    //     struct_ptr->setName("this");
+
+    //     // init each property with its initializer expression if available
+    //     for (size_t i = 0; i < node.properties.size(); ++i) {
+    //         const auto &prop = node.properties[i];
+    //         if (prop->init_expr) {
+    //             // visit the initializer expression to generate its value
+    //             prop->init_expr->accept(*this);
+    //             llvm::Value *init_value = value_stack.top();
+    //             value_stack.pop();
+
+    //             // get the pointer to the field in the struct
+    //             std::vector<llvm::Value *> indices = {
+    //                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(*llvm_context), 0), // pointer to the struct
+    //                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(*llvm_context), i)  // field index
+    //             };
+    //             llvm::Value *field_ptr = llvm_builder->CreateGEP(llvm_struct_type, struct_ptr, indices);
+
+    //             llvm_builder->CreateStore(init_value, field_ptr);
+    //         }
+    //     }
+
+    //     llvm_builder->CreateRetVoid();
+    // }
+
+    // // restore the entry block
+    // llvm_builder->SetInsertPoint(entry_block);
+    // // _current_cmp_unit->struct_table.add_struct(struct_name, llvm_struct_type);
 }
 
 void LLVMCompiler::printIR(bool toFile)
