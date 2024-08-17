@@ -34,6 +34,10 @@ namespace Compiler::LLVM
 
         structure_id_t push_structure(const AST::StructDeclNode *structdecl, llvm::StructType *structtype);
 
+        // registers a generic struct instantiation, which has an interned ComplexType but no
+        // StructDeclNode of its own (the layout lives on the ComplexType).
+        structure_id_t push_structure(const AST::ComplexType *type, llvm::StructType *structtype);
+
         Structure &get_structure(structure_id_t id) {
             assert(id < _structures.size());
             return _structures[id];

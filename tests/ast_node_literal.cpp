@@ -15,7 +15,7 @@
 
 TEST_CASE( "node description", "[AST Literal]" ) 
 {
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "42 " // int literal
         "-42 " // int literal
         "3.14 " // double literal
@@ -39,7 +39,7 @@ TEST_CASE( "node description", "[AST Literal]" )
 
 TEST_CASE( "float value extraction", "[AST Literal]" ) 
 {
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "3.14 " // double literal
         "-3.14 " // double literal
         "3.14f " // float literal
@@ -74,7 +74,7 @@ TEST_CASE( "float value extraction", "[AST Literal]" )
 
 TEST_CASE( "float value with expectation", "[AST Literal]" ) 
 {
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "3.14 " // double literal
         "3.14f " // float literal
     );
@@ -102,7 +102,7 @@ TEST_CASE( "float value with expectation", "[AST Literal]" )
 
 TEST_CASE( "int value extraction", "[AST Literal]" ) 
 {
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "42 " // int literal
         "-42 " // int literal
     );

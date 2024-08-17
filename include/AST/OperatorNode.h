@@ -32,6 +32,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitOperator(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 };
 

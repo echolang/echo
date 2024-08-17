@@ -5,15 +5,27 @@
 #include "AST/StructNode.h"
 #include "Debugging.h"
 
-
 const std::string AST::ScopeNode::node_description()
 {
     std::string result = "Scope\n{\n";
+    result += DD::tabbify(node_description_inner(), 2);
+    result += "}\n";
+    return result;
+}
+
+const std::string AST::ScopeNode::node_description_inner()
+{
+    std::string result = "";
     for (auto &child : children) {
         if (!child.has()) continue;
-        result += DD::tabbify(child.node()->node_description(), 2) + "\n";
+        result += child.node()->node_description() + "\n";
     }
-    result += "}\n";
+
+    // trim away the last newline
+    if (!result.empty() && result.back() == '\n') {
+        result.pop_back();
+    }
+
     return result;
 }
 

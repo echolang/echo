@@ -31,10 +31,13 @@ namespace AST
         static constexpr NodeType node_type = NodeType::n_scope;
 
         const std::string node_description() override;
+        const std::string node_description_inner();
 
         void accept(Visitor& visitor) override {
             visitor.visitScope(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
         inline ScopeNode &parent() const {
             assert(parent_ptr);

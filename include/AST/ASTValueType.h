@@ -7,19 +7,25 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
+#include <unordered_map>
+#include <tuple>
 #include <optional>
 #include <cstdint>
 #include <cassert>
 #include <concepts>
+#include <iostream>
 
 namespace AST
 {   
     class ComplexType;
+    class TypeRegistry;
 
     enum class ValueTypeKind {
         t_primitive,
         t_class,
         t_struct,
+        t_generic,
         t_unknown
     };
 
@@ -78,6 +84,8 @@ namespace AST
 
     class ValueType 
     {
+        friend struct std::hash<ValueType>;
+        
     public:
 
         static ValueType make_void() {
@@ -92,12 +100,12 @@ namespace AST
             return ValueType(ValueTypePrimitive::t_void);
         }
 
-        static ValueType make_struct(ComplexType *complex_type) {
-            return ValueType(ValueTypeKind::t_struct, complex_type);
-        }
+        static ValueType make_struct(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
 
-        static ValueType make_class(ComplexType *complex_type) {
-            return ValueType(ValueTypeKind::t_class, complex_type);
+        static ValueType make_class(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
+
+        static ValueType make_type_param(size_t index) {
+            return ValueType(ValueTypeKind::t_generic, index);
         }
 
         static ValueType make_const(ValueType type) {
@@ -119,6 +127,23 @@ namespace AST
         inline ComplexType *get_complex_type() const {
             assert(is_struct() || is_class());
             return _complex_type;
+        }
+
+        bool is_type_param() const {
+            return kind == ValueTypeKind::t_generic;
+        }
+
+        size_t get_type_param_index() const {
+            assert(is_type_param());
+            return type_param_index;
+        }
+
+        ValueTypeKind get_kind() const {
+            return kind;
+        }
+
+        uint8_t get_type_flags() const {
+            return type_flags;
         }
 
         bool is_const() const {
@@ -259,11 +284,36 @@ namespace AST
 
         // compare two types
         bool operator==(const ValueType& other) const {
+            // First check if the kinds are different
+            if (kind != other.kind) {
+                return false;
+            }
+
+            // Check type flags (const, pointer, etc.)
+            if (type_flags != other.type_flags) {
+                return false;
+            }
+
+            // Compare based on the kind
             if (is_primitive() && other.is_primitive()) {
                 return primitive == other.primitive;
             }
 
-            assert(false && "Not implemented");
+            if ((is_struct() || is_class()) && (other.is_struct() || other.is_class())) {
+                // For struct and class types, compare the complex type pointers
+                // Two struct/class types are equal if they point to the same ComplexType
+                return _complex_type == other._complex_type;
+            }
+
+            if (is_type_param() && other.is_type_param()) {
+                return type_param_index == other.type_param_index;
+            }
+
+            if (kind == ValueTypeKind::t_unknown && other.kind == ValueTypeKind::t_unknown) {
+                return true;
+            }
+
+            return false;
         }
 
         std::string get_mangled_name() const;
@@ -271,10 +321,13 @@ namespace AST
         std::string get_type_desciption() const;
 
     private:
-        ValueTypeKind kind;
-        ValueTypePrimitive primitive;
+        // defaulted so a default-constructed ValueType is a well-defined `unknown`
+        // rather than carrying indeterminate kind/primitive.
+        ValueTypeKind kind = ValueTypeKind::t_unknown;
+        ValueTypePrimitive primitive = ValueTypePrimitive::t_void;
         uint8_t type_flags = 0;
         ComplexType *_complex_type = nullptr;
+        size_t type_param_index = 0;  // For t_generic kind: Index into ComplexType::type_parameters
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
         ValueType(ValueTypeKind kind, ComplexType *complex_type) : 
@@ -282,6 +335,8 @@ namespace AST
             primitive(ValueTypePrimitive::t_complex), 
             _complex_type(complex_type) 
         {}
+        ValueType(ValueTypeKind kind, size_t param_index) :
+            kind(kind), primitive(ValueTypePrimitive::t_void), type_param_index(param_index) {}
     };
     
     class ComplexType {
@@ -292,7 +347,15 @@ namespace AST
             ValueType type;
         };
 
+        struct TypeParam {
+            std::string name;  // e.g., "T"
+            // Future: ValueType constraint;
+        };
+
         std::optional<std::string> name;
+        std::vector<TypeParam> type_parameters;  // Empty for non-generics
+        ComplexType* template_ref = nullptr;  // Null for templates; points to original for instantiations
+        std::vector<ValueType> instantiation_args;  // Empty for non-instantiated
 
         ComplexType() = default;
         ComplexType(std::string name) : name(name) {}
@@ -301,7 +364,28 @@ namespace AST
             return name.has_value();
         }
 
+        bool is_generic() const {
+            return !type_parameters.empty();
+        }
+
+        bool is_instantiated() const {
+            return template_ref != nullptr;
+        }
+
+        std::optional<size_t> get_type_param_index(const std::string& name) const {
+            for (size_t i = 0; i < type_parameters.size(); ++i) {
+                if (type_parameters[i].name == name) return i;
+            }
+            return std::nullopt;
+        }
+
         void add_property(const std::string &name, ValueType type) {
+            // on a template, a `T`-typed property must index a declared type parameter.
+            // instantiations carry no type_parameters of their own, so the check only
+            // applies while a template is being built.
+            if (type.is_type_param() && !is_instantiated()) {
+                assert(type.get_type_param_index() < type_parameters.size());
+            }
             _properties.push_back(Property { _properties.size(), name, type });
             _property_map[name] = type;
         }
@@ -326,10 +410,83 @@ namespace AST
             return _properties.at(index);
         }
 
+        size_t property_count() const {
+            return _properties.size();
+        }
+
     private:
         std::vector<Property> _properties;
         std::unordered_map<std::string, ValueType> _property_map;
+
+        friend class TypeRegistry;  // Allow TypeRegistry to access _properties
     };
+
+}  // namespace AST
+
+// Hash support for ValueType to be used in unordered containers
+namespace std {
+    template<> struct hash<AST::ValueType> {
+        size_t operator()(const AST::ValueType& vt) const {
+            size_t h = static_cast<size_t>(vt.get_kind()) ^ vt.get_type_flags();
+            if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
+            else if (vt.is_struct() || vt.is_class()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
+            else if (vt.is_type_param()) h ^= vt.get_type_param_index();
+            return h;
+        }
+    };
+}  // namespace std
+
+namespace AST {
+
+    // Hash support for tuple used in TypeRegistry
+    struct TypeRegistryKeyHash {
+        size_t operator()(const std::tuple<ComplexType*, std::vector<ValueType>>& key) const {
+            size_t h1 = std::hash<ComplexType*>{}(std::get<0>(key));
+            size_t h2 = 0;
+            for (const auto& vt : std::get<1>(key)) {
+                h2 ^= std::hash<AST::ValueType>{}(vt) + 0x9e3779b9 + (h2 << 6) + (h2 >> 2);
+            }
+            return h1 ^ (h2 << 1);
+        }
+    };
+
+    // a substitution maps a generic's type-parameter indices to the (possibly still-generic)
+    // types they stand for. Used identically for function and struct type parameters.
+    using TypeSubstitution = std::vector<ValueType>;
+
+    // caches and owns every generic instantiation. Interning is by (template, args) identity,
+    // which is exactly what ValueType::operator== relies on (struct/class equality is ComplexType*
+    // pointer identity): equal argument lists always yield the same ComplexType*.
+    class TypeRegistry {
+    public:
+        // register a template so that (template, {}) resolves back to the template itself.
+        ComplexType* register_template(ComplexType* tmpl) {
+            assert(tmpl->is_generic() && !tmpl->is_instantiated());
+            auto key = std::make_tuple(tmpl, std::vector<ValueType>{});
+            auto [it, inserted] = _instantiations.emplace(key, tmpl);
+            return it->second;
+        }
+
+        // intern the instantiation of `tmpl` with `args`, substituting the template's properties
+        // through `args`. Implemented in ASTValueType.cpp so it can call the unified substitute_type.
+        ComplexType* get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args);
+
+    private:
+        std::string args_description(const std::vector<ValueType>& args) const;
+
+        // owns the instantiation ComplexTypes this registry creates. Templates are owned elsewhere
+        // (embedded on their StructDeclNode) and only appear here as map values, never in _owned.
+        std::vector<std::unique_ptr<ComplexType>> _owned;
+        std::unordered_map<std::tuple<ComplexType*, std::vector<ValueType>>, ComplexType*, TypeRegistryKeyHash> _instantiations;
+    };
+
+    // the single, unified type-substitution routine, shared by struct and function generics.
+    // - a type-parameter reference resolves to subst[index], carrying its const/pointer flags;
+    // - a generic application (a struct/class whose ComplexType is an instantiation) has its
+    //   arguments recursively substituted and is then re-interned via `registry` — this is what
+    //   makes nested generics such as Foo<Bar<T>> work;
+    // - primitives and already-concrete types are returned unchanged.
+    ValueType substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry);
 
 };
 

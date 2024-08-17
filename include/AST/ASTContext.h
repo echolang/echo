@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include "ASTModule.h"
 #include "ASTFile.h"
 #include "ASTCodeRef.h"
@@ -19,6 +20,9 @@ namespace AST
         Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
+        
+        // Type parameters for the current function being parsed (for generics)
+        std::vector<std::string> current_type_parameters;
 
         inline ScopeNode &scope() const {
             assert(scope_ptr);
@@ -28,6 +32,19 @@ namespace AST
         // push & pop the contexts scope
         void push_scope(ScopeNode &scope);
         void pop_scope();
+        
+        // Type parameter management for generic functions
+        void set_type_parameters(const std::vector<std::string>& params) {
+            current_type_parameters = params;
+        }
+        
+        void clear_type_parameters() {
+            current_type_parameters.clear();
+        }
+        
+        bool is_type_parameter(const std::string& name) const {
+            return std::find(current_type_parameters.begin(), current_type_parameters.end(), name) != current_type_parameters.end();
+        }
 
         template <typename T, typename... Args>
             requires NodeTypeProvider<T>

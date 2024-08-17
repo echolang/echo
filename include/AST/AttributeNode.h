@@ -36,6 +36,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitAttribute(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 
     class AttributeList

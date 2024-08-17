@@ -42,7 +42,7 @@ TEST_CASE( "expect float but got double", "[Parser Literal float]" )
     auto lit = Parser::parse_expr(env.payload, &expected);
 
     REQUIRE(env.collector->issues.size() == 0);
-    REQUIRE(lit->node_description() == "literal<float32>(42.0)");
+    REQUIRE(lit->node_description() == "literal<float32>(42.0f [42.0])");
 }
 
 TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float]" ) 
@@ -60,7 +60,7 @@ TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float
     REQUIRE(warning->severity == AST::IssueSeverity::Warning);
     REQUIRE(warning->message().find("loss of precision") != std::string::npos);
 
-    REQUIRE(lit->node_description() == "literal<float32>(123456.125000)");
+    REQUIRE(lit->node_description() == "literal<float32>(123456.125f [123456.123456])");
 }
 
 TEST_CASE( "expect double but got float", "[Parser Literal float]" ) 
@@ -73,7 +73,7 @@ TEST_CASE( "expect double but got float", "[Parser Literal float]" )
     auto lit = Parser::parse_expr(env.payload, &expected);
 
     REQUIRE(env.collector->issues.size() == 0);
-    REQUIRE(lit->node_description() == "literal<float64>(42.0f)");
+    REQUIRE(lit->node_description() == "literal<float64>(42.0 [42.0f])");
 }
 
 TEST_CASE( "expect int8 but got float", "[Parser Literal float]" ) 
@@ -88,7 +88,7 @@ TEST_CASE( "expect int8 but got float", "[Parser Literal float]" )
 
     REQUIRE(env.collector->issues.size() == 0);
     
-    REQUIRE(lit->node_description() == "literal<int8>(42)");
+    REQUIRE(lit->node_description() == "literal<int8>(42 [42.0f])");
     REQUIRE(lit->int8_value() == 42);
 }
 

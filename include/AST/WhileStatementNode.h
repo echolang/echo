@@ -37,6 +37,8 @@ namespace AST
             visitor.visitWhileStatement(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
     };

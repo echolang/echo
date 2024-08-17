@@ -38,9 +38,24 @@ namespace AST
             return _type;
         }
 
+        // declares this struct's generic type parameters (e.g. the T, U in `struct Foo<T, U>`).
+        // replaces any previously set list so the symbol pass and full parse stay idempotent.
+        void set_type_parameters(const std::vector<std::string> &names) {
+            _complex_type.type_parameters.clear();
+            for (const auto &name : names) {
+                _complex_type.type_parameters.push_back(ComplexType::TypeParam{name});
+            }
+        }
+
+        bool is_generic() const {
+            return _complex_type.is_generic();
+        }
+
         void accept(Visitor& visitor) override {
             visitor.visitStructDecl(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
         void add_property(VarDeclNode *property);
 

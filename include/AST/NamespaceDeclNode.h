@@ -31,6 +31,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitNamespaceDecl(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 };
 

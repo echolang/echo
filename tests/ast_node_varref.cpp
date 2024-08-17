@@ -8,11 +8,11 @@
 
 TEST_CASE( "int value extraction", "[AST VarRef]" ) 
 {
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "$foo"
     );
 
     // test a var ref
-    auto &lit0 = tm.nodes.emplace_back<AST::VarRefNode
+    // auto &lit0 = tm.nodes.emplace_back<AST::VarRefNode
 
 }

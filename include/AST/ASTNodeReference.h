@@ -28,8 +28,12 @@ namespace AST
             return parent_ptr;
         }
 
-        inline bool has() const { 
-            return parent_ptr != nullptr; 
+        inline NodeType type() const {
+            return parent_type;
+        }
+
+        inline bool has() const {
+            return parent_ptr != nullptr;
         }
         
         template <typename T>
@@ -50,6 +54,20 @@ namespace AST
         inline T *get_ptr() const {
             assert(has_type<T>());
             return static_cast<T*>(parent_ptr);
+        }
+
+        inline bool is_expression_node() const {
+            assert(has());
+            return parent_type == NodeType::n_expr_binary ||
+                   parent_type == NodeType::n_expr_unary ||
+                   parent_type == NodeType::n_expr_call ||
+                   parent_type == NodeType::n_varref ||
+                   parent_type == NodeType::n_expr_varptr ||
+                   parent_type == NodeType::n_expr_void ||
+                   parent_type == NodeType::n_literal_float ||
+                   parent_type == NodeType::n_literal_int ||
+                   parent_type == NodeType::n_literal_bool ||
+                   parent_type == NodeType::n_literal_string;
         }
 
         template <typename T>

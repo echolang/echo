@@ -32,6 +32,11 @@ namespace AST
 
         Iterator begin() { return Iterator(_files.begin()); }
         Iterator end() { return Iterator(_files.end()); }
+
+        File *first() {
+            if (_files.empty()) return nullptr;
+            return _files.front().get();
+        }
     };
 
     class File

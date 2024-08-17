@@ -29,6 +29,8 @@ namespace AST
             visitor.visitReturn(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
     };

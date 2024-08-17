@@ -13,7 +13,7 @@ TEST_CASE( "predefined token operators", "[AST Ops]" )
 {
     auto registry = AST::OperatorRegistry();
 
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "= "  // t_assign
         "|| " // t_logical_or
         "&& " // t_logical_and
@@ -61,7 +61,7 @@ TEST_CASE( "custom token operators", "[AST Ops]" )
 {
     auto registry = AST::OperatorRegistry();
  
-    auto tm = EchoTests::tests_make_module_with_content(
+    auto tm = EchoTests::tests_make_tokenized_module(
         "<=>" 
     );
 

@@ -41,6 +41,8 @@ namespace AST
             visitor.visitVarMut(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
         NodeReference _target_node;

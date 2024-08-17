@@ -36,7 +36,12 @@ namespace AST
         }
 
         const std::string node_description() override {
-            return "literal<" + result_type().get_type_desciption() + ">(" + effective_token_literal_value() + ")";
+            auto effective_value = effective_token_literal_value();
+            if (effective_value != token_literal.value()) {
+                return "literal<" + result_type().get_type_desciption() + ">(" + effective_value + " [" + token_literal.value() + "])";
+            }
+
+            return "literal<" + result_type().get_type_desciption() + ">(" + effective_value + ")";
         }
     };
 
@@ -75,6 +80,8 @@ namespace AST
             visitor.visitLiteralFloatExpr(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
         std::string get_fvalue_string() const {
             if (is_double_precision()) {
                 return effective_token_literal_value();
@@ -82,7 +89,6 @@ namespace AST
                 return effective_token_literal_value().substr(0, token_literal.value().size() - 1);
             }
         }
-
 
         float float_value() const {
             assert(get_effective_primitive_type() == ValueTypePrimitive::t_float32);
@@ -127,6 +133,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitLiteralIntExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
         int8_t int8_value() const {
             return std::stoi(effective_token_literal_value());
@@ -181,6 +189,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitLiteralBoolExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 
     class LiteralStringExprNode : public ExprNode
@@ -196,12 +206,14 @@ namespace AST
         ~LiteralStringExprNode() {};
 
         ValueType result_type() const override {
-            return ValueType::make_void(); // @TODO
+            return ValueType::make_unknown(); // String type not yet implemented
         }
 
         void accept(Visitor& visitor) override {
             visitor.visitLiteralStringExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
         const std::string node_description() override {
             return "literal<string>(\"" + token_literal.value() + "\")";

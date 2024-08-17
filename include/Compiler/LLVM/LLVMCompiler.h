@@ -41,6 +41,7 @@ namespace AST {
     class File;
     class VarDeclNode;
     class VarMutNode;
+    class MemberMutNode;
     class AttributeNode;
 };
 
@@ -56,6 +57,10 @@ class LLVMCompiler : public AST::Visitor
 
     llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
     llvm::StructType *create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+
+    // lowers a generic struct instantiation (an interned ComplexType with concrete property
+    // types) to an llvm struct on first use, registering it in the compilation unit.
+    llvm::StructType *create_llvm_struct_for_instance(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit);
     
     void build_function_maps(const AST::Bundle &bundle);
     void build_struct_maps(const AST::Bundle &bundle);
@@ -79,7 +84,6 @@ public:
     void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
     void visitLiteralStringExpr(AST::LiteralStringExprNode &node);
     void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
-    void visitVarRefExpr(AST::VarRefExprNode &node);
     void visitVarPtrExpr(AST::VarPtrExprNode &node);
     void visitBinaryExpr(AST::BinaryExprNode &node);
     void visitUnaryExpr(AST::UnaryExprNode &node);
@@ -97,6 +101,7 @@ public:
     void visitMemberAccess(AST::MemberAccessNode &node);
     void visitVar(AST::VarNode &node);
     void visitVarMember(AST::VarMemberNode &node);
+    void visitMemberMut(AST::MemberMutNode &node);
 
     llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
     llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);

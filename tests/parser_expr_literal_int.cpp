@@ -41,7 +41,7 @@ TEST_CASE( "expect float literal int", "[Parser Literal int]" )
     auto lit = Parser::parse_expr(env.payload, &expected);
 
     REQUIRE(env.collector->issues.size() == 0);
-    REQUIRE(lit->node_description() == "literal<float32>(42)");
+    REQUIRE(lit->node_description() == "literal<float32>(42.0f [42])");
 }
 
 TEST_CASE( "expect int8 literal int", "[Parser Literal int]" ) 

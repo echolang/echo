@@ -24,6 +24,9 @@ namespace AST
             
         std::optional<TokenReference> name_token;
         std::vector<VarDeclNode*> args;
+        
+        // Generic type parameters (e.g., <T, U> in function<T, U> name(...))
+        std::vector<std::string> type_parameters;
 
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
@@ -47,6 +50,14 @@ namespace AST
 
         inline bool is_anonymous() const {
             return !name_token.has_value();
+        }
+
+        inline bool is_generic() const {
+            return !type_parameters.empty();
+        }
+
+        inline size_t type_parameter_count() const {
+            return type_parameters.size();
         }
 
         const std::string func_name() const {
@@ -84,6 +95,8 @@ namespace AST
         void accept(Visitor &visitor) override {
             visitor.visitFunctionDecl(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
     private:
 

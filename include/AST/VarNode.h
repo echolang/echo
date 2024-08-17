@@ -42,6 +42,8 @@ namespace AST
             visitor.visitVar(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
         inline VarDeclNode &decl() const {
             assert(_decl);
             return *_decl;

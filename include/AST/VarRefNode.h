@@ -37,15 +37,26 @@ namespace AST
             return _target_node.has_type<VarMemberNode>();
         }
 
+        inline VarNode& get_var() const {
+            return _target_node.get<VarNode>();
+        }
+
+        inline VarMemberNode& get_varmember() const {
+            return _target_node.get<VarMemberNode>();
+        }
+
         ValueType result_type() const override;
         
         const std::string node_description() override {
-            return "varref(" + _target_node.node()->node_description() + ")";
+            // return "varref(" + _target_node.node()->node_description() + ")";
+            return "varref<" + result_type().get_type_desciption() + ">(" + _target_node.node()->node_description() + ")";
         }
 
         void accept(Visitor& visitor) override {
             visitor.visitVarRef(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
 
     private:
         NodeReference _target_node;

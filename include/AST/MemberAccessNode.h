@@ -19,18 +19,29 @@ namespace AST
         ~MemberAccessNode() {}
 
         const std::string node_description() override {
-            return _base_node.node()->node_description() + " -> " + _member_name.value();
+            return "ma<" + result_type().get_type_desciption() + ">(" + _base_node.node()->node_description() + "->" + _member_name.value() + ")";
         }
 
         void accept(Visitor& visitor) override {
             visitor.visitMemberAccess(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
         ValueType result_type() const override;
+        
+        inline NodeReference& get_base_node() const { 
+            return const_cast<NodeReference&>(_base_node); 
+        }
+        
+        inline TokenReference& get_member_name() const { 
+            return const_cast<TokenReference&>(_member_name); 
+        }
+        
     private: 
         NodeReference _base_node;
         TokenReference _member_name;
-        size_t _member_index;
+        size_t _member_index = 0;
     };
 };
 

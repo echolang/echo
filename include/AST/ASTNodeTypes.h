@@ -30,7 +30,6 @@ namespace AST
         n_expr_binary,
         n_expr_unary,
         n_expr_call,
-        n_expr_varref,
         n_expr_varptr,
         n_expr_void,
         n_func_decl,
@@ -43,6 +42,7 @@ namespace AST
         n_attribute,
         n_struct_decl,
         n_member_access,
+        n_membermut,
     };
 
     template<typename T>

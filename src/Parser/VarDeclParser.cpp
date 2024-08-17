@@ -2,6 +2,10 @@
 
 #include "AST/VarDeclNode.h"
 #include "AST/VarMutNode.h"
+#include "AST/MemberMutNode.h"
+#include "AST/MemberAccessNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
@@ -30,6 +34,24 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     if (can_parse_type(payload))  {
         type = parse_type(payload);
         is_const = type->is_const;
+        
+        // Check for reference modifier after the type
+        if (cursor.is_type(Token::Type::t_ref)) {
+            cursor.skip(); // skip the '&'
+            
+            // Create a new ValueType with the pointer flag set
+            auto updated_value_type = type->type;
+            updated_value_type.set_pointer(true);
+            
+            // Create a new TypeNode with the updated ValueType
+            if (type->type_token.has_value()) {
+                type = &payload.context.emplace_node<AST::TypeNode>(updated_value_type, type->type_token.value());
+            } else {
+                type = &payload.context.emplace_node<AST::TypeNode>(updated_value_type);
+            }
+            type->is_const = is_const;
+            type->is_pointer = true;
+        }
     }
 
     // special case is "const" but type must be inferred
@@ -76,6 +98,75 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             return nullptr;
         }
 
+        // Check if this is a member access mutation ($var->member = value)
+        if (payload.cursor.is_type(Token::Type::t_accessorlr)) {
+            // Parse the member access pattern
+            auto var_node = &payload.context.emplace_node<AST::VarNode>(prev_vardecl);
+            auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
+            auto current_ref = AST::make_ref(*var_ref);
+            
+            // Parse the first member access
+            cursor.skip(); // skip the '->' token
+            
+            if (!cursor.is_type(Token::Type::t_identifier)) {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+            
+            auto member_token = cursor.current();
+            cursor.skip(); // skip the member name
+            
+            // Create a MemberAccessNode
+            auto member_access = &payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
+            current_ref = AST::make_ref(*member_access);
+            
+            // Check for chained member access ($var->member1->member2)
+            if (cursor.is_type(Token::Type::t_accessorlr)) {
+                cursor.skip(); // skip the second '->' token
+                
+                if (!cursor.is_type(Token::Type::t_identifier)) {
+                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+                    cursor.try_skip_to_next_statement();
+                    return nullptr;
+                }
+                
+                auto second_member_token = cursor.current();
+                cursor.skip(); // skip the second member name
+                
+                // Create a chained MemberAccessNode
+                member_access = &payload.context.emplace_node<AST::MemberAccessNode>(current_ref, second_member_token);
+            }
+            
+            // Now expect the assignment operator
+            if (!payload.cursor.is_type(Token::Type::t_assign)) {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+            
+            cursor.skip(); // skip the '=' token
+            
+            // Parse the value expression
+            auto expr = parse_expr(payload, nullptr); // We'll infer the type from the member
+            
+            // Create the member mutation node
+            auto member_mut = &payload.context.emplace_node<AST::MemberMutNode>(member_access, expr);
+            
+            // Skip the end of the statement
+            if (is_vardecl_end_token(cursor)) {
+                if (should_skip_vardecl_end_token(cursor)) {
+                    cursor.skip();
+                }
+            }
+            
+            // Add the member mutation to the scope
+            payload.context.scope().children.push_back(AST::make_ref(member_mut));
+            
+            return nullptr; // Don't return a VarDeclNode since this is a mutation
+        }
+        
+        // Regular variable assignment ($var = value)
         if (!payload.cursor.is_type(Token::Type::t_assign)) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
             cursor.try_skip_to_next_statement();
@@ -140,7 +231,8 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         else {
             vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type()));
             vardecl->type_node()->is_const = is_const;
-            vardecl->type_node()->is_pointer = vardecl->type_node()->type.is_pointer();
+            // For inferred pointer types, don't set is_pointer = true since the ValueType already has the pointer flag
+            vardecl->type_node()->is_pointer = false;
         }
     }
 

@@ -43,6 +43,8 @@ namespace AST
             visitor.visitType(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
     };

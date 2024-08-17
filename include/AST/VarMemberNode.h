@@ -29,14 +29,21 @@ namespace AST
         const StructDeclNode *struct_decl() const;
         const ComplexType::Property &property() const;
 
+        inline VarRefNode& get_ref() const {
+            assert(_ref != nullptr);
+            return *_ref;
+        }
+
         void accept(Visitor& visitor) override {
             visitor.visitVarMember(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
         std::optional<TokenReference> _token_member;
         VarRefNode *_ref;
-        size_t _member_index;
+        size_t _member_index = 0;
     };
 };
 

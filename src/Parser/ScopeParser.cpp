@@ -100,7 +100,17 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         }
 
         else if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
-            parse_funccall(payload);
+            if (auto *funccall_node = parse_funccall(payload)) {
+                scope_node.children.push_back(AST::make_ref(funccall_node));
+                
+                // expect a semicolon after function call statement
+                if (!cursor.is_type(Token::Type::t_semicolon)) {
+                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(context.code_ref(cursor.current()), Token::Type::t_semicolon, cursor.current().type());
+                    cursor.try_skip_to_next_statement();
+                } else {
+                    cursor.skip(); // consume the semicolon
+                }
+            }
         }
 
         else {

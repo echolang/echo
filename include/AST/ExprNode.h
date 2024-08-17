@@ -11,9 +11,11 @@
 
 #include <optional>
 
-namespace AST 
+namespace AST
 {
     class FunctionDeclNode;
+    class VarRefNode;
+    class TypeNode;
 
     class ExprNode : public Node
     {
@@ -50,6 +52,8 @@ namespace AST
 
         // void goes into the void
         void accept(Visitor& visitor) override {}
+
+        Node *clone(CloneContext &cc) const override;
     };
 
     class FunctionCallExprNode : public ExprNode
@@ -59,6 +63,10 @@ namespace AST
 
         TokenReference token_function_name;
         std::vector<ExprNode*> arguments;
+
+        // explicit type arguments written at the call site, e.g. foo<int>(...). Empty when the
+        // call relies on inference. The monomorphizer prefers these over inferred type args.
+        std::vector<TypeNode*> explicit_type_args;
 
         FunctionDeclNode *decl = nullptr;
 
@@ -73,10 +81,20 @@ namespace AST
         const std::string decorated_func_name() const;
 
         const std::string node_description() override;
+        
+    private:
+        // Helper methods for generic function display
+        std::string get_instantiated_function_name() const;
+        AST::ValueType get_inferred_return_type() const;
+        std::map<std::string, AST::ValueType> infer_type_parameters() const;
+        
+    public:
 
         void accept(Visitor& visitor) override {
             visitor.visitFunctionCallExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 
     class BinaryExprNode : public ExprNode
@@ -110,6 +128,8 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitBinaryExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
     };
 
     class UnaryExprNode : public ExprNode
@@ -134,6 +154,34 @@ namespace AST
         void accept(Visitor& visitor) override {
             visitor.visitUnaryExpr(*this);
         }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    class VarPtrExprNode : public ExprNode
+    {
+    public:
+        static constexpr NodeType node_type = NodeType::n_expr_varptr;
+
+        VarRefNode *var_ref;
+
+        VarPtrExprNode(VarRefNode *var_ref) :
+            var_ref(var_ref)
+        {
+            assert(var_ref != nullptr && "VarPtrExprNode requires a valid VarRefNode");
+        };
+
+        ~VarPtrExprNode() {}
+
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor& visitor) override {
+            visitor.visitVarPtrExpr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
     };
 
 };

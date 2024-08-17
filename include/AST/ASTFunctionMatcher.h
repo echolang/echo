@@ -49,8 +49,6 @@ namespace AST
 
         std::vector<function_handle_t> find_function_by_signature(const std::string &name, const AST::Namespace *ns = nullptr) const;
 
-
-
     private:
 
         std::vector<FunctionDeclNode *> _functions;

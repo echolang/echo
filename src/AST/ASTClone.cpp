@@ -1,0 +1,281 @@
+// deep-clone implementations for every concrete AST node.
+//
+// these are gathered in one translation unit (rather than scattered inline across the
+// header-only node classes) so the whole clone contract is reviewable in one place and so
+// each node header only needs a one-line `clone(...) override` declaration. Node::clone is
+// pure-virtual, so a new concrete node that forgets to implement it here fails to compile —
+// that compile-time exhaustiveness is exactly what the monomorphizer relies on.
+//
+// conventions used below:
+//   cc.shallow(this)  copy-construct a shallow copy (all scalar/token/enum fields) and record
+//                     the old->new mapping, then fix up edges/types in place.
+//   cc.make<T>(this,) construct a fresh T from ctor args (used when a field is const, e.g. TypeNode).
+//   cc.child(ptr)     deep-clone an owned child (recurses through clone()).
+//   cc.rebind(ptr)    a cross-reference: clone if it was cloned in this subtree, else the original.
+//   cc.clone_ref(ref) deep-clone an owned NodeReference target, preserving its type tag.
+//   cc.substitute(t)  run the type through the active TypeSubstitution.
+
+#include "AST/ASTClone.h"
+
+#include "AST/ScopeNode.h"
+#include "AST/OperatorNode.h"
+#include "AST/LiteralValueNode.h"
+#include "AST/VarDeclNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
+#include "AST/VarMemberNode.h"
+#include "AST/VarMutNode.h"
+#include "AST/TypeNode.h"
+#include "AST/TypeCastNode.h"
+#include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
+#include "AST/ReturnNode.h"
+#include "AST/IfStatementNode.h"
+#include "AST/WhileStatementNode.h"
+#include "AST/MemberAccessNode.h"
+#include "AST/MemberMutNode.h"
+#include "AST/NullNode.h"
+#include "AST/NamespaceDeclNode.h"
+#include "AST/NamespaceNode.h"
+#include "AST/AttributeNode.h"
+#include "AST/StructNode.h"
+
+namespace AST
+{
+
+// ---------------------------------------------------------------------------
+// leaves — no owned children, no types to substitute. A shallow copy is enough.
+// ---------------------------------------------------------------------------
+
+Node *OperatorNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *NullNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *VoidExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *LiteralFloatExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *LiteralIntExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *LiteralBoolExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *LiteralStringExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *NamespaceDeclNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *NamespaceNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+
+// ---------------------------------------------------------------------------
+// types — TypeNode::type is const, so the substituted type must be set at construction.
+// ---------------------------------------------------------------------------
+
+Node *TypeNode::clone(CloneContext &cc) const
+{
+    TypeNode *c = type_token.has_value()
+        ? cc.make<TypeNode>(this, cc.substitute(type), type_token.value())
+        : cc.make<TypeNode>(this, cc.substitute(type));
+    c->is_const = is_const;
+    c->is_pointer = is_pointer;
+    return c;
+}
+
+Node *TypeCastNode::clone(CloneContext &cc) const
+{
+    TypeCastNode *c = cc.shallow(this);
+    c->cast_to = cc.substitute(c->cast_to);
+    c->expr = cc.child(c->expr);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// expressions
+// ---------------------------------------------------------------------------
+
+Node *FunctionCallExprNode::clone(CloneContext &cc) const
+{
+    FunctionCallExprNode *c = cc.shallow(this);
+    for (auto &arg : c->arguments) arg = cc.child(arg);
+    for (auto &ta : c->explicit_type_args) ta = cc.child(ta);
+    // decl points at the (generic) declaration; the monomorphizer repoints it at the
+    // concrete instance afterwards. rebind keeps self-recursive calls correct in the meantime.
+    c->decl = cc.rebind(c->decl);
+    return c;
+}
+
+Node *BinaryExprNode::clone(CloneContext &cc) const
+{
+    BinaryExprNode *c = cc.shallow(this);
+    c->op_node = cc.child(c->op_node);
+    c->lhs = cc.child(c->lhs);
+    c->rhs = cc.child(c->rhs);
+    return c;
+}
+
+Node *UnaryExprNode::clone(CloneContext &cc) const
+{
+    UnaryExprNode *c = cc.shallow(this);
+    c->expr = cc.child(c->expr);
+    return c;
+}
+
+Node *VarPtrExprNode::clone(CloneContext &cc) const
+{
+    VarPtrExprNode *c = cc.shallow(this);
+    c->var_ref = cc.child(c->var_ref);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// variables & references
+// ---------------------------------------------------------------------------
+
+Node *VarNode::clone(CloneContext &cc) const
+{
+    // _decl is a cross-reference: the cloned decl if it lived inside the cloned subtree
+    // (a parameter or local), otherwise the original (a captured outer variable).
+    if (_token_varname.has_value()) {
+        return cc.make<VarNode>(this, cc.rebind(_decl), _token_varname.value());
+    }
+    return cc.make<VarNode>(this, cc.rebind(_decl));
+}
+
+Node *VarRefNode::clone(CloneContext &cc) const
+{
+    if (_target_node.has_type<VarNode>()) {
+        return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
+    }
+    return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarMemberNode>()));
+}
+
+Node *VarMemberNode::clone(CloneContext &cc) const
+{
+    VarMemberNode *c = cc.shallow(this);
+    c->_ref = cc.child(c->_ref);
+    return c;
+}
+
+Node *VarMutNode::clone(CloneContext &cc) const
+{
+    VarMutNode *c = cc.shallow(this);
+    c->value_expr = cc.child(c->value_expr);
+    c->var_decl = cc.rebind(c->var_decl);
+    c->_target_node = cc.rebind_ref(c->_target_node);
+    return c;
+}
+
+Node *VarDeclNode::clone(CloneContext &cc) const
+{
+    VarDeclNode *c = cc.shallow(this);
+    c->_type_node = cc.child(c->_type_node);
+    c->init_expr = cc.child(c->init_expr);
+    c->points_to = cc.rebind(c->points_to);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// member access / mutation
+// ---------------------------------------------------------------------------
+
+Node *MemberAccessNode::clone(CloneContext &cc) const
+{
+    MemberAccessNode *c = cc.shallow(this);
+    c->_base_node = cc.clone_ref(_base_node);
+    return c;
+}
+
+Node *MemberMutNode::clone(CloneContext &cc) const
+{
+    MemberMutNode *c = cc.shallow(this);
+    c->member_access = cc.child(c->member_access);
+    c->value_expr = cc.child(c->value_expr);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// statements & scopes
+// ---------------------------------------------------------------------------
+
+Node *ReturnNode::clone(CloneContext &cc) const
+{
+    ReturnNode *c = cc.shallow(this);
+    c->expr = cc.child(c->expr);
+    return c;
+}
+
+Node *IfStatementNode::clone(CloneContext &cc) const
+{
+    IfStatementNode *c = cc.shallow(this);
+    c->condition = cc.child(c->condition);
+    c->if_scope = cc.child(c->if_scope);
+    c->else_scope = cc.child(c->else_scope);
+    return c;
+}
+
+Node *WhileStatementNode::clone(CloneContext &cc) const
+{
+    WhileStatementNode *c = cc.shallow(this);
+    c->condition = cc.child(c->condition);
+    c->loop_scope = cc.child(c->loop_scope);
+    return c;
+}
+
+Node *ScopeNode::clone(CloneContext &cc) const
+{
+    // start from a fresh scope (rather than a shallow copy) so the child list and the
+    // name->decl lookup maps are rebuilt from clones. Recorded before recursing so child
+    // scopes that point back at this one via parent_ptr rebind correctly.
+    ScopeNode *c = cc.make<ScopeNode>(this);
+    c->parent_ptr = cc.rebind(parent_ptr);
+
+    for (const auto &ref : children) {
+        c->children.push_back(cc.clone_ref(ref));
+    }
+
+    for (const auto &[name, decl] : _declared_variables) c->_declared_variables[name] = cc.rebind(decl);
+    for (const auto &[name, decl] : _declared_functions) c->_declared_functions[name] = cc.rebind(decl);
+    for (const auto &[name, decl] : _declared_structs) c->_declared_structs[name] = cc.rebind(decl);
+    for (auto *attr : _attribute_stack) c->_attribute_stack.push_back(cc.rebind(attr));
+
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// declarations
+// ---------------------------------------------------------------------------
+
+Node *FunctionDeclNode::clone(CloneContext &cc) const
+{
+    FunctionDeclNode *c = cc.shallow(this);
+    c->type_parameters.clear();   // a clone is a concrete instance, never a template
+
+    // parameters first, so the map is populated before the body rebinds its VarNodes to them.
+    for (auto &arg : c->args) arg = cc.child(arg);
+    c->return_type = cc.child(c->return_type);
+    c->body = cc.child(c->body);
+    return c;
+}
+
+Node *StructDeclNode::clone(CloneContext &cc) const
+{
+    StructDeclNode *c = cc.shallow(this);
+
+    // rebuild the embedded complex type with substituted property types and no type
+    // parameters (a clone is concrete). Phase 4 reconciles this with the registry's
+    // canonical application ComplexType for codegen identity; for now the clone owns
+    // its own substituted layout.
+    ComplexType substituted(c->_complex_type.name.value_or(""));
+    for (size_t i = 0; i < c->_complex_type.property_count(); ++i) {
+        const auto &prop = c->_complex_type.get_property(i);
+        substituted.add_property(prop.name, cc.substitute(prop.type));
+    }
+    c->_complex_type = substituted;
+    c->_type = ValueType::make_struct(&c->_complex_type);
+
+    for (auto &prop : c->_properties) prop = cc.child(prop);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
+// attributes
+// ---------------------------------------------------------------------------
+
+Node *AttributeNode::clone(CloneContext &cc) const
+{
+    AttributeNode *c = cc.shallow(this);
+    for (auto &expr_ref : c->attribute_exprs) expr_ref = cc.clone_ref(expr_ref);
+    return c;
+}
+
+}  // namespace AST

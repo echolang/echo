@@ -14,6 +14,22 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 {
     auto &cursor = payload.cursor;
 
+    // RAII guard to clear type parameters when function exits
+    struct TypeParameterGuard {
+        AST::Context& context;
+        bool active = false;
+        
+        TypeParameterGuard(AST::Context& ctx) : context(ctx) {}
+        
+        void activate() { active = true; }
+        
+        ~TypeParameterGuard() {
+            if (active) {
+                context.clear_type_parameters();
+            }
+        }
+    } guard(payload.context);
+
     if (!cursor.is_type(Token::Type::t_function)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_function, cursor.current().type());
         cursor.try_skip_to_next_statement();
@@ -33,6 +49,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // fetch the function name and skip it
     auto nametoken = cursor.current();
     cursor.skip();
+
+    // check for optional generic type parameters: <T, U, ...>
+    std::vector<std::string> type_parameters = parse_type_param_list(payload);
 
     // next token needs to be an open parenthesis
     if (!cursor.is_type(Token::Type::t_open_paren)) {
@@ -61,6 +80,13 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // set the namespace of the function
     funcdecl->ast_namespace = payload.context.current_namespace;
+
+    // set the type parameters
+    funcdecl->type_parameters = type_parameters;
+    
+    // Set type parameters in context for parsing function arguments
+    payload.context.set_type_parameters(type_parameters);
+    guard.activate(); // Activate the RAII guard to clear type parameters on exit
 
     // skip the open parenthesis
     cursor.skip();

@@ -84,6 +84,27 @@ AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
     };
 }
 
+// Implementation of new static factory methods
+AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+    if (!args.empty()) {
+        assert(complex_type->is_generic());
+        if (registry) {
+            complex_type = registry->get_or_create_instantiation(complex_type, args);
+        }
+    }
+    return ValueType(ValueTypeKind::t_struct, complex_type);
+}
+
+AST::ValueType AST::ValueType::make_class(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+    if (!args.empty()) {
+        assert(complex_type->is_generic());
+        if (registry) {
+            complex_type = registry->get_or_create_instantiation(complex_type, args);
+        }
+    }
+    return ValueType(ValueTypeKind::t_class, complex_type);
+}
+
 bool AST::ValueType::will_fit_into(ValueType other) const
 {
     if (!(is_primitive() && other.is_primitive())) {
@@ -143,9 +164,15 @@ std::string AST::ValueType::get_mangled_name() const
     if (is_primitive()) {
         mangled_name += "P"; // primitive type
         mangled_name += get_primitive_id_char(primitive);
-    } else {
+    } else if (is_type_param()) {
+        mangled_name += "T"; // type parameter
+        mangled_name += std::to_string(type_param_index);
+    } else if (is_struct() || is_class()) {
         mangled_name += "C"; // complex type @TODO
         mangled_name += get_complex_type()->name.value_or("A");
+    } else {
+        mangled_name += "U"; // unknown type
+        mangled_name += "A";
     }
 
     return mangled_name;
@@ -160,5 +187,105 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + get_primitive_name(primitive) + pointer;
     }
 
-    return get_complex_type()->name.value_or("[unknown]") + pointer;
+    if (is_type_param()) {
+        return prefix + "T" + std::to_string(type_param_index) + pointer;
+    }
+
+    if (is_struct() || is_class()) {
+        ComplexType* ct = get_complex_type();
+        std::string type_name = ct->name.value_or("[unknown]");
+
+        // If this is an instantiated generic type, the name already includes template args
+        // from the TypeRegistry's args_description method
+        return prefix + type_name + pointer;
+    }
+
+    // Handle unknown or other types
+    return prefix + "[unknown]" + pointer;
+}
+
+AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args)
+{
+    assert(tmpl->is_generic() && tmpl->type_parameters.size() == args.size());
+
+    auto key = std::make_tuple(tmpl, args);
+    if (auto it = _instantiations.find(key); it != _instantiations.end()) {
+        ComplexType* inst = it->second;
+        // refresh if the template gained properties after this instance was interned — this
+        // happens when an application (e.g. a return type) is parsed during the symbol pass,
+        // before the struct body populates the template's properties.
+        if (inst != tmpl && inst->property_count() < tmpl->property_count()) {
+            inst->_properties.clear();
+            inst->_property_map.clear();
+            for (const auto& prop : tmpl->_properties) {
+                inst->add_property(prop.name, substitute_type(prop.type, args, *this));
+            }
+        }
+        return inst;
+    }
+
+    auto owned = std::make_unique<ComplexType>();
+    ComplexType* instantiated = owned.get();
+    _owned.push_back(std::move(owned));
+
+    if (tmpl->name) {
+        instantiated->name = tmpl->name.value() + "<" + args_description(args) + ">";
+    }
+    instantiated->template_ref = tmpl;
+    instantiated->instantiation_args = args;
+
+    // insert into the cache BEFORE substituting properties, so a self-referential generic
+    // (e.g. a property of type ptr<Self<T>>) resolves back to this in-progress instance
+    // instead of recursing forever.
+    _instantiations[key] = instantiated;
+
+    for (const auto& prop : tmpl->_properties) {
+        ValueType subst = substitute_type(prop.type, args, *this);
+        instantiated->add_property(prop.name, subst);
+    }
+
+    return instantiated;
+}
+
+std::string AST::TypeRegistry::args_description(const std::vector<ValueType>& args) const
+{
+    std::string desc;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (i > 0) desc += ",";
+        desc += args[i].get_type_desciption();
+    }
+    return desc;
+}
+
+AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry)
+{
+    // a type-parameter reference resolves to its bound type, carrying the reference's flags.
+    if (type.is_type_param()) {
+        size_t idx = type.get_type_param_index();
+        assert(idx < subst.size());
+        ValueType resolved = subst[idx];
+        if (type.is_const()) resolved.set_const(true);
+        if (type.is_pointer()) resolved.set_pointer(true);
+        return resolved;
+    }
+
+    // a generic application: recursively substitute its arguments, then re-intern.
+    if (type.is_struct() || type.is_class()) {
+        ComplexType* ct = type.get_complex_type();
+        if (ct && ct->is_instantiated()) {
+            std::vector<ValueType> resolved_args;
+            resolved_args.reserve(ct->instantiation_args.size());
+            for (const auto& arg : ct->instantiation_args) {
+                resolved_args.push_back(substitute_type(arg, subst, registry));
+            }
+            ComplexType* inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
+            ValueType result = type.is_struct() ? ValueType::make_struct(inst) : ValueType::make_class(inst);
+            if (type.is_const()) result.set_const(true);
+            if (type.is_pointer()) result.set_pointer(true);
+            return result;
+        }
+    }
+
+    // primitives and already-concrete types are unchanged.
+    return type;
 }

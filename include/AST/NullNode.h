@@ -23,6 +23,8 @@ namespace AST
             visitor.visitNull(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
     };

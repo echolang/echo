@@ -76,6 +76,8 @@ namespace AST
             visitor.visitVarDecl(*this);
         }
 
+        Node *clone(CloneContext &cc) const override;
+
     private:
 
     };

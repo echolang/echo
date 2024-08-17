@@ -11,6 +11,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTModuleEmbedder.h"
+#include "AST/ASTMonomorphizer.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
@@ -122,9 +123,10 @@ int main_run(argparse::ArgumentParser &cli)
         .collector = bundle.collector
     };
 
-    if (handle_parse(parser, stdlib_input)) {
-        throw std::runtime_error("Failed to parse the echo standard library.");
-    }
+    // TODO ENABLE AGAIN
+    // if (handle_parse(parser, stdlib_input)) {
+    //     throw std::runtime_error("Failed to parse the echo standard library.");
+    // }
 
     // dump the stdlib module into an embedabble cpp file
     AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
@@ -163,6 +165,9 @@ int main_run(argparse::ArgumentParser &cli)
             std::cout << "Module: " << mod->debug_description() << std::endl;
         }
     }
+
+    // resolve generics into concrete instances before compilation
+    AST::Monomorphizer(bundle).run();
 
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {
@@ -228,6 +233,9 @@ int main_build(argparse::ArgumentParser &cli)
     if (cli.get<bool>("--print-ast")) {
         std::cout << "Module: " << module.debug_description() << std::endl;
     }
+
+    // resolve generics into concrete instances before compilation
+    AST::Monomorphizer(bundle).run();
 
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {

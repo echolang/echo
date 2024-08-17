@@ -32,6 +32,7 @@ namespace AST
     class MemberAccessNode;
     class VarNode;
     class VarMemberNode;
+    class MemberMutNode;
 
     class Visitor
     {
@@ -48,7 +49,6 @@ namespace AST
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
         virtual void visitLiteralStringExpr(LiteralStringExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
-        virtual void visitVarRefExpr(VarRefExprNode &node) = 0;
         virtual void visitVarPtrExpr(VarPtrExprNode &node) = 0;
         virtual void visitBinaryExpr(BinaryExprNode &node) = 0;
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
@@ -66,6 +66,7 @@ namespace AST
         virtual void visitMemberAccess(MemberAccessNode &node) = 0;
         virtual void visitVar(VarNode &node) = 0;
         virtual void visitVarMember(VarMemberNode &node) = 0;
+        virtual void visitMemberMut(MemberMutNode &node) = 0;
     };
 }
 

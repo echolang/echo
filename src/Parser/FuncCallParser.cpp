@@ -1,11 +1,27 @@
 #include "Parser/FuncCallParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/TypeParser.h"
 
 #include "AST/FunctionDeclNode.h"
+#include "AST/VarDeclNode.h"
+#include "AST/TypeNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarMemberNode.h"
+#include "AST/VarRefNode.h"
+#include "AST/ReturnNode.h"
+#include "AST/ScopeNode.h"
+#include "AST/LiteralValueNode.h"
+#include "AST/OperatorNode.h"
+#include "AST/TypeCastNode.h"
+#include <map>
+#include <functional>
+#include <unordered_map>
 
 AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace)
 {
-    if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren})) {
+    // a call is `name(` or, with explicit type arguments, `name<...>(`
+    if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren}) &&
+        !payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_angle})) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_identifier, payload.cursor.current().type());
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
@@ -15,6 +31,38 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
 
     // skip the function name
     payload.cursor.skip();
+
+    // optional explicit type arguments: name<int, float>(...)
+    std::vector<AST::TypeNode *> explicit_type_args;
+    if (payload.cursor.is_type(Token::Type::t_open_angle)) {
+        payload.cursor.skip(); // skip '<'
+
+        while (!payload.cursor.is_type(Token::Type::t_close_angle)) {
+            if (payload.cursor.is_done()) {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(funcname_token), Token::Type::t_close_angle, Token::Type::t_unknown);
+                payload.cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+
+            auto *type_node = parse_type(payload);
+            if (type_node) {
+                explicit_type_args.push_back(type_node);
+            }
+
+            if (payload.cursor.is_type(Token::Type::t_comma)) {
+                payload.cursor.skip();
+            }
+        }
+
+        payload.cursor.skip(); // skip '>'
+    }
+
+    // the open parenthesis is required
+    if (!payload.cursor.is_type(Token::Type::t_open_paren)) {
+        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_paren, payload.cursor.current().type());
+        payload.cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
 
     // skip the open parenthesis
     payload.cursor.skip();
@@ -40,6 +88,7 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     payload.cursor.skip();
 
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(funcname_token, args);
+    funcall.explicit_type_args = explicit_type_args;
 
     // try to find the function declaration
     funcall.decl = payload.context.scope().find_funcdecl_by_name(funcname_token.value());
@@ -62,6 +111,31 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     if (funcall.decl == nullptr) {
         payload.collector.collect_issue<AST::Issue::UnknownFunction>(payload.context.code_ref(funcname_token), funcname_token.value());
         return nullptr;
+    }
+
+    // generic calls keep pointing at the template here; the monomorphizer resolves the
+    // concrete instance and rewrites funcall.decl (and inserts casts) after parsing.
+    // coerce arguments only for non-generic decls, whose parameter types are concrete
+    if (!funcall.decl->is_generic()) {
+        for (size_t i = 0; i < args.size() && i < funcall.decl->args.size(); ++i) {
+            auto expected = funcall.decl->args[i]->type();
+            auto *expr = args[i];
+            auto actual = expr->result_type();
+
+            auto coerce_expr = [&](AST::ExprNode *source, const AST::ValueType &from, const AST::ValueType &to) -> AST::ExprNode * {
+                if (from == to) {
+                    return source;
+                }
+
+                // Insert an implicit cast node for any remaining mismatches
+                auto &cast = payload.context.emplace_node<AST::TypeCastNode>(to, source, true);
+                return &cast;
+            };
+
+            auto *coerced = coerce_expr(expr, actual, expected);
+            args[i] = coerced;
+            funcall.arguments[i] = coerced;
+        }
     }
     
     return &funcall;

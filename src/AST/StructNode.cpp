@@ -38,5 +38,5 @@ const std::string AST::StructDeclNode::node_description()
 void AST::StructDeclNode::add_property(VarDeclNode *property)
 {
     _properties.push_back(property);
-    _complex_type.add_property(property->name_full(), property->type_node()->type);
+    _complex_type.add_property(property->name(), property->type_node()->type);
 }
