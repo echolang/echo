@@ -94,6 +94,9 @@ public:
     void visitNamespace(AST::NamespaceNode &node);
     void visitAttribute(AST::AttributeNode &node);
     void visitStructDecl(AST::StructDeclNode &node);
+    void visitMemberAccess(AST::MemberAccessNode &node);
+    void visitVar(AST::VarNode &node);
+    void visitVarMember(AST::VarMemberNode &node);
 
     llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
     llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);

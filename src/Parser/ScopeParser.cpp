@@ -92,10 +92,11 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
             cursor.is_type(Token::Type::t_const) || // const keyword always starts a vardecl
             cursor.is_type(Token::Type::t_ptr) || // ptr keyword also indicates a vardecl
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_accessorlr }) ||
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) || 
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
         ) {
-            parse_vardecl(payload, &scope_node);
+            parse_varexpr(payload, &scope_node);
         }
 
         else if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {

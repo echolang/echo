@@ -68,10 +68,10 @@ namespace AST
                 return return_type->node_description();
             }
 
-            return "[unknown]";
+            return "void";
         }
 
-        const ValueType get_return_type() {
+        const ValueType get_return_type() const {
             if (return_type) {
                 return return_type->type;
             }

@@ -330,48 +330,48 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             return AST::make_void_ref();
         }
 
-        auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
+        // auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
 
-        if (!is_creating_ptr) {
-            auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
+        // if (!is_creating_ptr) {
+        //     auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
 
-            cursor.skip();
+        //     cursor.skip();
 
-            // if there is a expected type, we have to check if it matches the variable type
-            if (expected_type != nullptr) {
-                if (vardecl->type_node()->type != expected_type->type) {
+        //     // if there is a expected type, we have to check if it matches the variable type
+        //     if (expected_type != nullptr) {
+        //         if (vardecl->type_node()->type != expected_type->type) {
                     
-                    // create a cast node and return it
-                    auto &cast_node = payload.context.emplace_node<AST::TypeCastNode>(expected_type->type, &node, true);
+        //             // create a cast node and return it
+        //             auto &cast_node = payload.context.emplace_node<AST::TypeCastNode>(expected_type->type, &node, true);
 
-                    // check if the cast could cause a loss of precision
-                    auto source_size = AST::get_integer_size(vardecl->type_node()->type.get_primitive_type());
-                    auto target_size = AST::get_integer_size(expected_type->type.get_primitive_type());
+        //             // check if the cast could cause a loss of precision
+        //             auto source_size = AST::get_integer_size(vardecl->type_node()->type.get_primitive_type());
+        //             auto target_size = AST::get_integer_size(expected_type->type.get_primitive_type());
 
-                    if (source_size.size > target_size.size) {
-                        payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
-                            payload.context.code_ref(varref.token_varname), 
-                            std::format(
-                                "The variable '{}' is casted from '{}' to '{}' which will result in a loss of precision.", 
-                                vardecl->name(),
-                                AST::get_primitive_name(vardecl->type_node()->type.get_primitive_type()),
-                                AST::get_primitive_name(expected_type->type.get_primitive_type())
-                            )
-                        );
-                    }
+        //             if (source_size.size > target_size.size) {
+        //                 payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
+        //                     payload.context.code_ref(varref.token_varname), 
+        //                     std::format(
+        //                         "The variable '{}' is casted from '{}' to '{}' which will result in a loss of precision.", 
+        //                         vardecl->name(),
+        //                         AST::get_primitive_name(vardecl->type_node()->type.get_primitive_type()),
+        //                         AST::get_primitive_name(expected_type->type.get_primitive_type())
+        //                     )
+        //                 );
+        //             }
 
-                    return AST::make_ref(cast_node);
-                }
-            }
+        //             return AST::make_ref(cast_node);
+        //         }
+        //     }
             
-            return AST::make_ref(node);
-        }
-        else 
-        {
-            auto &node = payload.context.emplace_node<AST::VarPtrExprNode>(&varref);
-            cursor.skip();
-            return AST::make_ref(node);
-        }
+        //     return AST::make_ref(node);
+        // }
+        // else 
+        // {
+        //     auto &node = payload.context.emplace_node<AST::VarPtrExprNode>(&varref);
+        //     cursor.skip();
+        //     return AST::make_ref(node);
+        // }
     }
 
     // there might be a namespace used 

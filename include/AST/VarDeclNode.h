@@ -58,6 +58,10 @@ namespace AST
             return _type_node;
         }
 
+        inline ValueType type() const {
+            return _type_node->type;
+        }
+
         inline bool has_type() const {
             return _type_node != nullptr;
         }

@@ -18,12 +18,11 @@ namespace AST
         Namespace *ast_namespace = nullptr;
         
         std::optional<TokenReference> name_token;
-        std::vector<VarDeclNode *> properties;
 
         StructDeclNode(TokenReference name_token) :
             name_token(name_token)
         {
-            _complex_type = ComplexType();
+            _complex_type = ComplexType(name_token.value());
             _type = ValueType::make_struct(&_complex_type);
         };
 
@@ -43,9 +42,16 @@ namespace AST
             visitor.visitStructDecl(*this);
         }
 
+        void add_property(VarDeclNode *property);
+
+        const std::vector<VarDeclNode *> &properties() const {
+            return _properties;
+        }
+
     private:
         ValueType _type;
         ComplexType _complex_type;
+        std::vector<VarDeclNode *> _properties;
     };
 };
 

@@ -18,7 +18,7 @@ bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
     return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma);
 }
 
-AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode *scope)
+AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode *scope)
 {
     auto &cursor = payload.cursor;
 
@@ -55,6 +55,8 @@ AST::VarDeclNode *Parser::parse_vardecl(Parser::Payload &payload, AST::ScopeNode
     if (scope != nullptr) {
         prev_vardecl = scope->find_vardecl_by_name(nametoken.value());
     }
+
+    // if the next token is a accessor this is a member reference
 
     // we have a previous declaration, this might be a mutable variable
     if (prev_vardecl != nullptr) 

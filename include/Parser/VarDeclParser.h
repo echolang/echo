@@ -11,7 +11,7 @@
 
 namespace Parser
 {
-    AST::VarDeclNode *parse_vardecl(Payload &payload, AST::ScopeNode *scope = nullptr);
+    AST::VarDeclNode *parse_varexpr(Payload &payload, AST::ScopeNode *scope = nullptr);
 };
 
 #endif

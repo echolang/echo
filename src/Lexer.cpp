@@ -273,6 +273,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_colon);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_comma);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_dot);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_accessorlr);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_and);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_or);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_eq);

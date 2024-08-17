@@ -115,9 +115,10 @@ struct TokenCollection {
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
 
-    void push(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
+    size_t push(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
         tokens.emplace_back(type, line, char_offset);
         token_values.push_back(value);
+        return tokens.size() - 1;
     }
 
     void clear() {

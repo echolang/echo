@@ -28,9 +28,15 @@ const std::string AST::StructDeclNode::node_description()
 {
     std::string result = "struct " + namespaced_struct_name() + "\n{\n";
     result += "properties:\n";
-    for (auto prop : properties) {
+    for (auto prop : _properties) {
         result += DD::tabbify(prop->node_description(), 2) + "\n";
     }
     result += "}\n";
     return result;
+}
+
+void AST::StructDeclNode::add_property(VarDeclNode *property)
+{
+    _properties.push_back(property);
+    _complex_type.add_property(property->name_full(), property->type_node()->type);
 }

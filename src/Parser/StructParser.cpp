@@ -82,11 +82,11 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) || 
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
         ) {
-            auto var = parse_vardecl(payload, &structscope);
+            auto var = parse_varexpr(payload, &structscope);
 
             // append the var as a property of the struct
             if (var) {
-                struct_node->properties.push_back(var);
+                struct_node->add_property(var);
             }
         }
         else if (cursor.is_type(Token::Type::t_close_brace)) {
@@ -116,8 +116,6 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
     // create a type node
     auto &type_node = payload.context.emplace_node<AST::TypeNode>(struct_node->value_type());
-
-    // the function return type is the struct type
     default_ctor.return_type = &type_node;
 
     // the function body is struct that initializes the properties of the struct 
@@ -125,9 +123,18 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
     default_ctor.body = &ctor_body;
 
-    // add a return statement to the function body
-    auto return_stmt = payload.context.emplace_nodep<AST::ReturnNode>(nullptr);
-    default_ctor.body->children.push_back(AST::make_ref(return_stmt));
+    // allocate "$this" 
+    auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
+    auto this_var = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, &type_node);
+    default_ctor.body->children.push_back(AST::make_ref(this_var));
+
+    // auto &this_ref = payload.context.emplace_node<AST::VarRefNode>(this_var);
+
+    // // return a "$this"
+    // auto return_stmt = payload.context.emplace_nodep<AST::ReturnNode>(
+    //     payload.context.emplace_nodep<AST::VarRefExprNode>(&this_ref)
+    // );
+    // default_ctor.body->children.push_back(AST::make_ref(return_stmt));
 
     // append the contstructor to the current context as a function
     payload.context.scope().add_funcdecl(default_ctor);

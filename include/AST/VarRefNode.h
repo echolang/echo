@@ -6,29 +6,41 @@
 #include "ASTNode.h"
 #include "ASTValueType.h"
 #include "../Lexer.h"
-#include "VarDeclNode.h"
+#include "VarNode.h"
+#include "VarMemberNode.h"
+#include "ExprNode.h"
 
 namespace AST 
 {
-    class VarRefNode : public Node
+    class VarRefNode : public ExprNode
     {
     public:
-        TokenReference token_varname;
-        VarDeclNode *decl;
+        static constexpr NodeType node_type = NodeType::n_varref;
 
-        VarRefNode(TokenReference token_varname, VarDeclNode *decl) :
-            token_varname(token_varname), decl(decl)
+        VarRefNode(VarNode *varnode) :
+            _target_node(make_ref(varnode))
         {
-            assert(decl != nullptr && "VarRefNode: decl is null");
+        };
+
+        VarRefNode(VarMemberNode *varnode) :
+            _target_node(make_ref(varnode))
+        {
         };
 
         ~VarRefNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_varref;
+        inline bool is_var() const {
+            return _target_node.has_type<VarNode>();
+        }
+
+        inline bool is_varmember() const {
+            return _target_node.has_type<VarMemberNode>();
+        }
+
+        ValueType result_type() const override;
         
         const std::string node_description() override {
-
-            return "varref<"+ decl->type_node()->node_description() +">(" + decl->name_full() + ")";
+            return "varref(" + _target_node.node()->node_description() + ")";
         }
 
         void accept(Visitor& visitor) override {
@@ -36,7 +48,8 @@ namespace AST
         }
 
     private:
-
+        NodeReference _target_node;
+        
     };
 };
 

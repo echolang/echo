@@ -43,6 +43,9 @@ namespace AST
 
     private:
 
+        NodeReference _target_node;
+        
+
     };
 };
 

@@ -268,16 +268,7 @@ namespace AST
 
         std::string get_mangled_name() const;
 
-        std::string get_type_desciption() const {
-            std::string prefix = is_const() ? "const " : "";
-            std::string pointer = is_pointer() ? "*" : "";
-
-            // if (is_named()) {
-            //     return prefix + name.value() + pointer;
-            // }
-
-            return prefix + get_primitive_name(primitive) + pointer;
-        }
+        std::string get_type_desciption() const;
 
     private:
         ValueTypeKind kind;
@@ -295,10 +286,49 @@ namespace AST
     
     class ComplexType {
     public:
+        struct Property {
+            size_t index;
+            std::string name;
+            ValueType type;
+        };
+
         std::optional<std::string> name;
 
+        ComplexType() = default;
+        ComplexType(std::string name) : name(name) {}
+
+        bool is_named() const {
+            return name.has_value();
+        }
+
+        void add_property(const std::string &name, ValueType type) {
+            _properties.push_back(Property { _properties.size(), name, type });
+            _property_map[name] = type;
+        }
+
+        bool has_property(const std::string &name) const {
+            return _property_map.find(name) != _property_map.end();
+        }
+
+        bool has_property(size_t index) const {
+            return index < _properties.size();
+        }
+
+        const ValueType &get_property_type(const std::string &name) const {
+            return _property_map.at(name);
+        }
+
+        const ValueType &get_property_type(size_t index) const {
+            return _properties.at(index).type;
+        }
+
+        const Property &get_property(size_t index) const {
+            return _properties.at(index);
+        }
+
     private:
-        std::map<std::string, ValueType> _properties;
+        std::vector<Property> _properties;
+        std::unordered_map<std::string, ValueType> _property_map;
     };
 
 };

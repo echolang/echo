@@ -21,7 +21,9 @@ namespace AST
         n_literal_bool,
         n_literal_string,
         n_vardecl,
+        n_var,
         n_varref,
+        n_varmember,
         n_varmut,
         n_type,
         n_type_cast,
@@ -39,7 +41,8 @@ namespace AST
         n_namespace_decl,
         n_namespace,
         n_attribute,
-        n_struct_decl
+        n_struct_decl,
+        n_member_access,
     };
 
     template<typename T>

@@ -57,6 +57,18 @@ namespace AST
 
             return CodeRef { &module, file.file, tokenref.make_slice() };
         }
+
+        TokenReference make_virtual_token(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
+            auto ti = module.tokens.push(value, type, line, char_offset);
+            return module.tokens[ti];
+        }
+
+        /**
+         * Creates a virtual token with the same position as the reference token
+         */
+        TokenReference make_virtual_token(const std::string &value, Token::Type type, const TokenReference &ref) {
+            return make_virtual_token(value, type, ref.line(), ref.char_offset());
+        }
     };
 };
 #endif

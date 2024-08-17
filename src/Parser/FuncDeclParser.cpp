@@ -76,7 +76,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
             return nullptr;
         }
 
-        auto vardecl = parse_vardecl(payload, &funcscope);
+        auto vardecl = parse_varexpr(payload, &funcscope);
         funcdecl->args.push_back(vardecl);
     }
 

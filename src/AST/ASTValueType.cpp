@@ -144,9 +144,21 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "P"; // primitive type
         mangled_name += get_primitive_id_char(primitive);
     } else {
-        mangled_name += "C"; // complex type
-        assert(false && "Not implemented");
+        mangled_name += "C"; // complex type @TODO
+        mangled_name += get_complex_type()->name.value_or("A");
     }
 
     return mangled_name;
+}
+
+std::string AST::ValueType::get_type_desciption() const
+{
+    std::string prefix = is_const() ? "const " : "";
+    std::string pointer = is_pointer() ? "*" : "";
+
+    if (is_primitive()) {
+        return prefix + get_primitive_name(primitive) + pointer;
+    }
+
+    return get_complex_type()->name.value_or("[unknown]") + pointer;
 }

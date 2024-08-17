@@ -15,7 +15,6 @@ namespace AST
     class LiteralBoolExprNode;
     class LiteralStringExprNode;
     class FunctionCallExprNode;
-    class VarRefExprNode;
     class VarPtrExprNode;
     class BinaryExprNode;
     class UnaryExprNode;
@@ -30,6 +29,9 @@ namespace AST
     class NamespaceNode;
     class AttributeNode;
     class StructDeclNode;
+    class MemberAccessNode;
+    class VarNode;
+    class VarMemberNode;
 
     class Visitor
     {
@@ -61,6 +63,9 @@ namespace AST
         virtual void visitNamespace(NamespaceNode &node) = 0;
         virtual void visitAttribute(AttributeNode &node) = 0;
         virtual void visitStructDecl(StructDeclNode &node) = 0;
+        virtual void visitMemberAccess(MemberAccessNode &node) = 0;
+        virtual void visitVar(VarNode &node) = 0;
+        virtual void visitVarMember(VarMemberNode &node) = 0;
     };
 }
 

@@ -7,7 +7,6 @@
 #include "ASTValueType.h"
 #include "../Token.h"
 
-#include "VarRefNode.h"
 #include "OperatorNode.h"
 
 #include <optional>
@@ -51,60 +50,6 @@ namespace AST
 
         // void goes into the void
         void accept(Visitor& visitor) override {}
-    };
-
-    class VarRefExprNode : public ExprNode
-    {
-    public:
-        static constexpr NodeType node_type = NodeType::n_expr_varref;
-
-        VarRefNode *var_ref;
-
-        VarRefExprNode(VarRefNode *var_ref) :
-            var_ref(var_ref)
-        {};
-
-        ~VarRefExprNode() {};
-
-        ValueType result_type() const override {
-            assert(var_ref->decl);
-            return var_ref->decl->type_node()->type;
-        }
-
-        const std::string node_description() override {
-            return "varexp(" + var_ref->node_description() + ")";
-        }
-
-        void accept(Visitor& visitor) override {
-            visitor.visitVarRefExpr(*this);
-        }
-    };
-
-    class VarPtrExprNode : public ExprNode
-    {
-    public:
-        static constexpr NodeType node_type = NodeType::n_expr_varptr;
-
-        VarRefNode *var_ref;
-
-        VarPtrExprNode(VarRefNode *var_ref) :
-            var_ref(var_ref)
-        {};
-
-        ~VarPtrExprNode() {};
-
-        ValueType result_type() const override {
-            assert(var_ref->decl);
-            return ValueType::make_pointer(var_ref->decl->type_node()->type);
-        }
-
-        const std::string node_description() override {
-            return "varptr(" + var_ref->node_description() + ")";
-        }
-
-        void accept(Visitor& visitor) override {
-            visitor.visitVarPtrExpr(*this);
-        }
     };
 
     class FunctionCallExprNode : public ExprNode

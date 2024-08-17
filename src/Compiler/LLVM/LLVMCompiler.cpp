@@ -113,13 +113,19 @@ llvm::Intrinsic::IndependentIntrinsics get_intrinsic_for_string(const std::strin
 llvm::Function *LLVMCompiler::create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
 {
     auto func_name = AST::mangle_function_name(node);
-    auto func_type = node->return_type->type;
+    auto func_type = node->get_return_type();
 
     // function arguments
     // @TODO support complex types
     std::vector<llvm::Type *> arg_types;
     for (auto &arg : node->args) {
-        arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+        auto &arg_type = arg->type_node()->type;
+
+        if (arg_type.get_complex_type()) {
+            arg_types.push_back(get_llvm_type(arg_type, cmp_unit));
+        } else {
+            arg_types.push_back(get_llvm_type(arg->type_node()->type.get_primitive_type()));
+        }
     }
 
     // handle intrinsic functions
@@ -156,7 +162,7 @@ llvm::StructType *LLVMCompiler::create_llvm_struct_decl(const AST::StructDeclNod
 
     // make the prop types
     std::vector<llvm::Type *> member_types;
-    for (const auto &prop : node->properties) {
+    for (const auto &prop : node->properties()) {
         llvm::Type *llvm_type = get_llvm_type(prop->type_node()->type.get_primitive_type());
         if (!llvm_type) {
             assert(false);
@@ -482,6 +488,8 @@ llvm::Type *LLVMCompiler::get_llvm_type(const AST::ValueType &type, const Compil
 llvm::Type *LLVMCompiler::get_llvm_type(const AST::ValueTypePrimitive type)
 {
     switch (type) {
+        case AST::ValueTypePrimitive::t_void:
+            return llvm::Type::getVoidTy(*llvm_context);
         case AST::ValueTypePrimitive::t_float32:
             return llvm::Type::getFloatTy(*llvm_context);
         case AST::ValueTypePrimitive::t_float64:
@@ -835,31 +843,31 @@ void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node)
 
 void LLVMCompiler::visitVarRefExpr(AST::VarRefExprNode &node)
 {
-    auto var_ref = node.var_ref;
-    llvm::AllocaInst *var = var_map[var_ref->decl];
-    llvm::Type *type = get_llvm_type(var_ref->decl->type_node()->type.get_primitive_type());
+    // auto var_ref = node.var_ref;
+    // llvm::AllocaInst *var = var_map[var_ref->decl];
+    // llvm::Type *type = get_llvm_type(var_ref->decl->type_node()->type, *_current_cmp_unit);
 
-    // handle pointer dereference
-    if (var_ref->decl->type_node()->is_pointer) {
-        // load the pointer first 
-        llvm::Type *ptr_type = llvm::PointerType::get(type, 0);
-        llvm::Value *ptr_val = llvm_builder->CreateLoad(ptr_type, var, var->getName());
-        // load the value from the pointer
-        llvm::Value *varval = llvm_builder->CreateLoad(type, ptr_val, var->getName());
-        value_stack.push(varval);
-    } else {
-        llvm::Value* varval = llvm_builder->CreateLoad(type, var, var->getName());
-        value_stack.push(varval);
-    }
+    // // handle pointer dereference
+    // if (var_ref->decl->type_node()->is_pointer) {
+    //     // load the pointer first 
+    //     llvm::Type *ptr_type = llvm::PointerType::get(type, 0);
+    //     llvm::Value *ptr_val = llvm_builder->CreateLoad(ptr_type, var, var->getName());
+    //     // load the value from the pointer
+    //     llvm::Value *varval = llvm_builder->CreateLoad(type, ptr_val, var->getName());
+    //     value_stack.push(varval);
+    // } else {
+    //     llvm::Value* varval = llvm_builder->CreateLoad(type, var, var->getName());
+    //     value_stack.push(varval);
+    // }
 }
 
 void LLVMCompiler::visitVarPtrExpr(AST::VarPtrExprNode &node)
 {
-    // should create a pointer to the variable being referenced
-    auto var_ref = node.var_ref;
-    llvm::AllocaInst *var = var_map[var_ref->decl];
+    // // should create a pointer to the variable being referenced
+    // auto var_ref = node.var_ref;
+    // llvm::AllocaInst *var = var_map[var_ref->decl];
 
-    value_stack.push(var);
+    // value_stack.push(var);
 }
 
 void LLVMCompiler::visitNull(AST::NullNode &node)
@@ -874,16 +882,7 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node)
 {
     // sanity checks 
 
-    // 1. must have a return type
-    if (!node.return_type) {
-        assert(false);
-        throw make_internal_compiler_error(fmt::format(
-            "Function '{}' has no return type associated with it.", 
-            node.func_name()
-        ));
-    }
-
-    // 2. must have a body
+    // 1. must have a body
     if (!node.body) {
         // if its an intrinsic function we can skip this
         if (node.intrinsic) {
@@ -1183,6 +1182,14 @@ void LLVMCompiler::visitStructDecl(AST::StructDeclNode &node)
     // // _current_cmp_unit->struct_table.add_struct(struct_name, llvm_struct_type);
 }
 
+void LLVMCompiler::visitMemberAccess(AST::MemberAccessNode &node)
+{
+}
+
+void LLVMCompiler::visitVar(AST::VarNode &node)
+{
+}
+
 void LLVMCompiler::printIR(bool toFile)
 { 
     auto main = get_main_cmpu();
@@ -1228,7 +1235,7 @@ void LLVMCompiler::run_code() {
     llvm::GenericValue gv = EE->runFunction(func, noargs);
 
     delete EE;
-    llvm::llvm_shutdown();
+    // llvm::llvm_shutdown();
 }
 
 void LLVMCompiler::make_exec(std::string executable_name)
