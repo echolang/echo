@@ -71,7 +71,7 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::S
     cursor.skip(); // skip '<'
 
     std::vector<AST::ValueType> args;
-    while (!cursor.is_type(Token::Type::t_close_angle)) {
+    while (!cursor.is_generic_close()) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(name_token), Token::Type::t_close_angle, Token::Type::t_unknown);
             return AST::ValueType::make_unknown();
@@ -85,13 +85,13 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::S
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
-        } else if (!cursor.is_type(Token::Type::t_close_angle)) {
+        } else if (!cursor.is_generic_close()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_angle, cursor.current().type());
             return AST::ValueType::make_unknown();
         }
     }
 
-    cursor.skip(); // skip '>'
+    cursor.consume_generic_close(); // consume '>' (splitting a '>>' if present)
 
     if (!template_ct->is_generic() || template_ct->type_parameters.size() != args.size()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(

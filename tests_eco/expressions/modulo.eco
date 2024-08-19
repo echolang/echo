@@ -1,0 +1,2 @@
+// modulo operator
+echo 5 % 2;

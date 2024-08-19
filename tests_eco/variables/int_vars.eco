@@ -1,0 +1,4 @@
+// integer variable declaration and use
+int $x = 5;
+int $y = 7;
+echo $x + $y;

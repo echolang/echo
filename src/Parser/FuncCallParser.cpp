@@ -37,7 +37,7 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     if (payload.cursor.is_type(Token::Type::t_open_angle)) {
         payload.cursor.skip(); // skip '<'
 
-        while (!payload.cursor.is_type(Token::Type::t_close_angle)) {
+        while (!payload.cursor.is_generic_close()) {
             if (payload.cursor.is_done()) {
                 payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(funcname_token), Token::Type::t_close_angle, Token::Type::t_unknown);
                 payload.cursor.try_skip_to_next_statement();
@@ -54,7 +54,7 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
             }
         }
 
-        payload.cursor.skip(); // skip '>'
+        payload.cursor.consume_generic_close(); // consume '>' (splitting a '>>' if present)
     }
 
     // the open parenthesis is required

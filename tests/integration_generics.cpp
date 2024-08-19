@@ -119,6 +119,76 @@ TEST_CASE("generic struct instantiation resolves to a concrete layout", "[generi
     REQUIRE(ret.get_complex_type()->get_property_type("value") == prim(ValueTypePrimitive::t_int32));
 }
 
+TEST_CASE("nested generic struct closing with '>>' parses and monomorphizes", "[generics]")
+{
+    // the trailing '>>' lexes as a single t_op_shr token; the parser must split it
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { T $value; }\n"
+        "$b = Box<Box<int>>(Box<int>(7));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "Box");
+    REQUIRE(calls.size() >= 1);
+
+    // the outer Box<Box<int>> constructor: a concrete struct whose 'value' property is
+    // itself a concrete Box<int> struct, whose own 'value' is int
+    bool found_nested = false;
+    for (auto *call : calls) {
+        if (!call->decl || call->decl->is_generic()) continue;
+        auto ret = call->decl->get_return_type();
+        if (!ret.is_struct()) continue;
+        auto inner = ret.get_complex_type()->get_property_type("value");
+        if (inner.is_struct() &&
+            inner.get_complex_type()->get_property_type("value") == prim(ValueTypePrimitive::t_int32)) {
+            found_nested = true;
+        }
+    }
+    REQUIRE(found_nested);
+}
+
+TEST_CASE("triple-nested generic struct closing with '>>>' parses", "[generics]")
+{
+    // '>>>' lexes as [t_op_shr, t_close_angle]; each level consumes one '>' in order
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { T $value; }\n"
+        "$b = Box<Box<Box<int>>>(Box<Box<int>>(Box<int>(7)));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(calls_to(m, "Box").size() >= 1);
+}
+
+TEST_CASE("generic struct with multiple args closing with '>>' parses", "[generics]")
+{
+    // comma-separated args followed by a '>>' close (int then Box<int>)
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { T $value; }\n"
+        "struct Pair<A, B> { A $first; B $second; }\n"
+        "$p = Pair<int, Box<int>>(3, Box<int>(7));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "Pair");
+    REQUIRE(calls.size() >= 1);
+
+    bool found = false;
+    for (auto *call : calls) {
+        if (!call->decl || call->decl->is_generic()) continue;
+        auto ret = call->decl->get_return_type();
+        if (!ret.is_struct()) continue;
+        auto *ct = ret.get_complex_type();
+        if (ct->get_property_type("first") == prim(ValueTypePrimitive::t_int32) &&
+            ct->get_property_type("second").is_struct()) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
 TEST_CASE("generic call with wrong explicit arity reports an issue", "[generics]")
 {
     EchoTests::assert_code_emits_issue(

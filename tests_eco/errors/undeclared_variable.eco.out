@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 2:6
+The variable '$undefined' is not declared in the current scope
+Begin: '$undefined'
+End: '$undefined'
+Code excerpt:
+ [1]> // using a variable that was never declared must fail to compile
+ [2]> echo $undefined;
+           ^
+ [3]> 
+
+Critical issues found, cannot compile.

@@ -14,26 +14,32 @@ namespace Parser
         size_t _index = 0;
         size_t _end = 0;
 
+        // index of a '>>' (t_op_shr) token whose first '>' has already been consumed as a
+        // generic close; the second '>' is still pending at that same index. (size_t)-1 = none
+        size_t _shr_split_index = (size_t)-1;
+
     public:
         struct Snapshot {
             size_t index;
             size_t end;
+            size_t shr_split_index;
         };
 
         const TokenCollection &tokens;
 
-        Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = 0) : 
+        Cursor(const TokenCollection &tokens, size_t start = 0, size_t end = 0) :
             _index(start), _end(end), tokens(tokens)
         {}
         ~Cursor() {};
 
         inline Snapshot snapshot() const {
-            return { _index, _end };
+            return { _index, _end, _shr_split_index };
         }
 
         inline void restore(const Snapshot &snapshot) {
             _index = snapshot.index;
             _end = snapshot.end;
+            _shr_split_index = snapshot.shr_split_index;
         }
 
         // returns a slices from the given start and end snapshot
@@ -113,6 +119,32 @@ namespace Parser
         inline void skip(size_t offset = 1) {
             _index += offset;
             _index = std::min(_index, range_size());
+        }
+
+        // true when the current token can close a single generic level: a plain '>'
+        // (t_close_angle) or a '>>' (t_op_shr), the latter closing one level and leaving
+        // a '>' for the enclosing level (the standard C++ nested-generics token split)
+        inline bool is_generic_close() const {
+            return is_type(Token::Type::t_close_angle) || is_type(Token::Type::t_op_shr);
+        }
+
+        // consume a single closing '>' of a generic argument list. a '>>' is split in place:
+        // the first call consumes one '>' without advancing (leaving the token for the outer
+        // level), the second call at the same token fully consumes it
+        inline void consume_generic_close() {
+            if (is_type(Token::Type::t_op_shr)) {
+                if (_shr_split_index == _index) {
+                    // second '>' of this '>>' — done with it
+                    _shr_split_index = (size_t)-1;
+                    skip();
+                } else {
+                    // first '>' of this '>>' — leave the token in place for the outer level
+                    _shr_split_index = _index;
+                }
+                return;
+            }
+
+            skip(); // plain '>'
         }
 
         inline void skip_until(Token::Type type) {

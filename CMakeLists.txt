@@ -105,3 +105,16 @@ file(GLOB TEST_SOURCES "tests/*.cpp")
 add_executable(tests ${TEST_SOURCES})
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(tests PRIVATE ${LIBNAME})
+
+# e2e (tests_eco): always run against a freshly built compiler and tell the runner
+# where the binary and the corpus live
+add_dependencies(tests ${APPNAME})
+target_compile_definitions(tests PRIVATE
+    "ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
+    "ECO_E2E_TESTS_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\"")
+
+# ctest integration
+enable_testing()
+list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
+include(Catch)
+catch_discover_tests(tests)

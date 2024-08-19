@@ -1,0 +1,6 @@
+// if / else branch selection
+if (1 < 2) {
+    echo 42;
+} else {
+    echo 0;
+}

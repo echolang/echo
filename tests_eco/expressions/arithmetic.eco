@@ -1,0 +1,5 @@
+// basic integer arithmetic
+echo 1 + 1;
+echo 2 * 3;
+echo 10 - 4;
+echo 8 / 2;
