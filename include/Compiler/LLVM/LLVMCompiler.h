@@ -8,69 +8,23 @@
 #include "AST/ASTVisitor.h"
 
 #include "Compiler/CompilerException.h"
-#include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/ExprCodegen.h"
+#include "Compiler/LLVM/Codegen/StmtCodegen.h"
+#include "Compiler/LLVM/Codegen/StructCodegen.h"
+#include "Compiler/LLVM/Codegen/Backend.h"
 
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
-#include "llvm/TargetParser/Host.h"
-
-#include <map>
-#include <memory>
 #include <string>
-#include <stack>
-#include <unordered_map>
 
-namespace AST {
-    class File;
-    class VarDeclNode;
-    class VarMutNode;
-    class MemberMutNode;
-    class AttributeNode;
-};
-
+// the compiler facade and the sole AST::Visitor. it owns the shared CodegenContext and the codegen
+// subsystems, orchestrates the compile of a bundle, and forwards each visit to the subsystem that
+// owns that node kind. the actual lowering logic lives in the Codegen/ subsystems, not here.
 class LLVMCompiler : public AST::Visitor
 {
-    std::string get_llvm_err_str();
-
-
-    llvm::Module *curr_llvm_module() {
-        return _current_cmp_unit->llvm_module.get();
-    }
-
-
-    llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
-    llvm::StructType *create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
-
-    // lowers a generic struct instantiation (an interned ComplexType with concrete property
-    // types) to an llvm struct on first use, registering it in the compilation unit.
-    llvm::StructType *create_llvm_struct_for_instance(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit);
-    
-    void build_function_maps(const AST::Bundle &bundle);
-    void build_struct_maps(const AST::Bundle &bundle);
-
-
 public:
     LLVMCompiler();
     ~LLVMCompiler();
-
-    Compiler::InternalCompilerException make_internal_compiler_error(std::string message);
 
     void compile_bundle(const AST::Bundle &bundle);
 
@@ -103,32 +57,19 @@ public:
     void visitVarMember(AST::VarMemberNode &node);
     void visitMemberMut(AST::MemberMutNode &node);
 
-    llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
-    llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
-
     void optimize();
     void printIR(bool toFile);
     void run_code();
     void make_exec(std::string executable_name);
 
 private:
+    Compiler::LLVM::CodegenContext _ctx;
 
-    Compiler::LLVM::CmpUnit *get_main_cmpu();
-
-    void create_cmp_units(const AST::Bundle &bundle);
-
-    std::vector<std::unique_ptr<Compiler::LLVM::CmpUnit>> _cmp_units;
-    std::unordered_map<std::string, Compiler::LLVM::CmpUnit *> _cmp_unit_map;
-
-    Compiler::LLVM::CmpUnit *_current_cmp_unit = nullptr;
-    AST::File *_current_file = nullptr;
-
-    std::unique_ptr<llvm::LLVMContext> llvm_context;
-    std::unique_ptr<llvm::IRBuilder<>> llvm_builder;
-    
-    std::stack<llvm::Value *> value_stack;
-    std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
-
+    Compiler::LLVM::TypeLowering _types;
+    Compiler::LLVM::ExprCodegen _expr;
+    Compiler::LLVM::StmtCodegen _stmt;
+    Compiler::LLVM::StructCodegen _struct;
+    Compiler::LLVM::Backend _backend;
 };
 
 #endif
