@@ -5,7 +5,6 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/MemberAccessNode.h"
-#include "AST/VarMemberNode.h"
 #include "AST/VarNode.h"
 #include "AST/StructNode.h"
 #include "AST/MemberMutNode.h"
@@ -73,7 +72,8 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
             value = _ctx.builder->CreateUIToFP(value, new_llvm_type);
         }
         else {
-            throw std::runtime_error("Unsupported type cast");
+            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
+                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
         }
     }
 
@@ -85,29 +85,29 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
                 value = _ctx.builder->CreateFPToUI(value, new_llvm_type);
             }
         }
-        // cast to another integer type 
+        // cast to another integer type
         else if (old_type.is_integer_type()) {
             // any int -> signed int
             if (new_type.is_signed_integer()) {
                 // uint -> int
                 if (old_type.is_same_size(new_type) && old_type.is_unsigned_integer()) {
                     value = _ctx.builder->CreateIntCast(value, new_llvm_type, true);
-                } 
+                }
                 // int8 -> int32 (smaller -> larger)
                 else if (old_type.will_fit_into(new_type)) {
                     value = _ctx.builder->CreateSExt(value, new_llvm_type);
-                } 
+                }
                 // int32 -> int8 (larger -> smaller)
                 else {
                     value = _ctx.builder->CreateTrunc(value, new_llvm_type);
                 }
-            } 
+            }
             // any int -> unsigned int
             else {
                 // int -> uint
                 if (old_type.is_same_size(new_type) && old_type.is_signed_integer()) {
                     value = _ctx.builder->CreateIntCast(value, new_llvm_type, false);
-                } 
+                }
                 // uint8 -> uint32 (smaller -> larger)
                 else if (old_type.will_fit_into(new_type)) {
                     value = _ctx.builder->CreateZExt(value, new_llvm_type);
@@ -123,7 +123,8 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
             value = _ctx.builder->CreateZExt(value, new_llvm_type);
         }
         else {
-            throw std::runtime_error("Unsupported type cast");
+            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
+                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
         }
     }
 
@@ -135,7 +136,8 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
             value = _ctx.builder->CreateFCmpONE(value, llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(0.0)));
         }
         else {
-            throw std::runtime_error("Unsupported type cast");
+            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
+                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
         }
     }
 
@@ -152,27 +154,27 @@ void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
     if (node.is_var()) {
         // Handle regular variable reference
         auto &var_node = node.get_var();
-        
+
         // Get the LLVM value for this variable (should be an alloca instruction)
         auto it = _ctx.var_map.find(&var_node.decl());
         if (it == _ctx.var_map.end()) {
             throw _ctx.error(fmt::format(
                 "Variable '{}' not found in variable map", var_node.decl().name()));
         }
-        
+
         llvm::Value *var_ptr = it->second;
-        
+
         // Check if this is a pointer variable using ValueType.is_pointer()
         if (var_node.decl().type_node()->type.is_pointer()) {
             // For pointer variables, load the pointer first, then load the value it points to
             llvm::Type *pointer_type = _ctx.types->get_llvm_type(var_node.decl().type_node()->type, *_ctx.current_cmp_unit);
             llvm::Value *pointer_value = _ctx.builder->CreateLoad(pointer_type, var_ptr, var_node.decl().name() + "_ptr");
-            
+
             // Get the target type (what the pointer points to)
             AST::ValueType target_type = var_node.decl().type_node()->type;
             target_type.set_pointer(false); // Remove pointer flag to get target type
             llvm::Type *target_llvm_type = _ctx.types->get_llvm_type(target_type, *_ctx.current_cmp_unit);
-            
+
             // Dereference the pointer to get the actual value
             llvm::Value *dereferenced_value = _ctx.builder->CreateLoad(target_llvm_type, pointer_value, var_node.decl().name());
             _ctx.value_stack.push(dereferenced_value);
@@ -182,27 +184,6 @@ void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
             llvm::Value *loaded_value = _ctx.builder->CreateLoad(var_type, var_ptr, var_node.decl().name());
             _ctx.value_stack.push(loaded_value);
         }
-    }
-    else if (node.is_varmember()) {
-        // Handle struct member reference
-        auto &var_member_node = node.get_varmember();
-        
-        // Visit the var member node to get the pointer to the member
-        var_member_node.accept(*_ctx.visitor);
-        
-        if (_ctx.value_stack.empty()) {
-            throw _ctx.error("No member pointer on stack");
-        }
-        
-        llvm::Value *member_ptr = _ctx.value_stack.top();
-        _ctx.value_stack.pop();
-        
-        // Get the member type and load its value
-        auto &property = var_member_node.property();
-        llvm::Type *member_type = _ctx.types->get_llvm_type(property.type, *_ctx.current_cmp_unit);
-        
-        llvm::Value *member_value = _ctx.builder->CreateLoad(member_type, member_ptr, property.name);
-        _ctx.value_stack.push(member_value);
     }
     else {
         throw _ctx.error("Unknown VarRef target type");
@@ -255,7 +236,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     auto left = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    if (lhsret.is_integer_type() && rhsret.is_integer_type()) 
+    if (lhsret.is_integer_type() && rhsret.is_integer_type())
     {
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
@@ -310,10 +291,12 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.value_stack.push(_ctx.builder->CreateICmpSLE(left, right));
                 break;
             default:
-                throw std::runtime_error("Unsupported binary operator");
+                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
+                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
+                    rhsret.get_type_desciption(), _ctx.function_context()));
         }
     }
-    else if (lhsret.is_boolean_type() && rhsret.is_boolean_type()) 
+    else if (lhsret.is_boolean_type() && rhsret.is_boolean_type())
     {
         switch (node.op_node->op->type) {
             case Token::Type::t_logical_and:
@@ -323,7 +306,9 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
                 break;
             default:
-                throw std::runtime_error("Unsupported binary operator");
+                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
+                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
+                    rhsret.get_type_desciption(), _ctx.function_context()));
         }
     }
     else if (lhsret.is_floating_type() || rhsret.is_floating_type())
@@ -385,9 +370,11 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.value_stack.push(_ctx.builder->CreateFCmpOLE(left, right));
                 break;
 
-            
+
             default:
-                throw std::runtime_error("Unsupported binary operator");
+                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
+                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
+                    rhsret.get_type_desciption(), _ctx.function_context()));
         }
     }
     else {
@@ -416,7 +403,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
 
 
             if (
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int8) || 
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int8) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int16) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int32)
             ) {
@@ -428,7 +415,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 ArgsV.push_back(arg_value);
             }
             else if (
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint8) || 
+                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint8) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint16) ||
                 result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint32)
             ) {
@@ -452,16 +439,18 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 ArgsV.push_back(arg_value);
             }
             else {
-                throw std::runtime_error("Unsupported argument type for 'echo'");
+                throw _ctx.error(fmt::format(
+                    "Unsupported argument type '{}' for 'echo' {}",
+                    result_type.get_type_desciption(), _ctx.function_context()));
             }
 
             _ctx.builder->CreateCall(_ctx.current_module()->getFunction("printf"), ArgsV);
         }
     }
 
-    else 
+    else
     {
-        // locate the function 
+        // locate the function
         auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(node.decl);
         llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
 
@@ -482,52 +471,26 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         }
 
         if (!func) {
-            throw std::runtime_error("Function not found");
+            throw _ctx.error(fmt::format(
+                "No generated function found for call to '{}' {}",
+                node.decl ? node.decl->func_name() : node.token_function_name.value(),
+                _ctx.function_context()));
         }
 
+        // evaluate every argument uniformly. arguments bound to pointer parameters were
+        // already rewritten into VarPtrExprNode by the coercion pass (FuncCallParser /
+        // Monomorphizer), so accepting them leaves the variable's address on the stack —
+        // no per-argument kind sniffing needed here
         std::vector<llvm::Value *> args;
-        for (size_t i = 0; i < node.arguments.size(); ++i) {
-            auto &arg = node.arguments[i];
-            auto &param = node.decl->args[i];
-
-            // Check if the parameter expects a pointer/reference
-            if (param->type_node()->type.is_pointer()) {
-                // For pointer parameters, we need to pass the address
-                // Check if the argument is a variable reference that we can get the address of
-                if (auto var_ref_node = dynamic_cast<AST::VarRefNode*>(arg)) {
-                    if (var_ref_node->is_var()) {
-                        // Get the pointer (alloca) to the variable from the variable map
-                        auto &var_node = var_ref_node->get_var();
-                        auto it = _ctx.var_map.find(&var_node.decl());
-                        if (it == _ctx.var_map.end()) {
-                            throw _ctx.error(fmt::format(
-                                "Variable '{}' not found in variable map", var_node.decl().name()));
-                        }
-                        args.push_back(it->second);
-                    } else {
-                        // For other VarRef types (like member access), evaluate and get address
-                        arg->accept(*_ctx.visitor);
-                        args.push_back(_ctx.value_stack.top());
-                        _ctx.value_stack.pop();
-                    }
-                } else {
-                    // For other expressions, evaluate them and then get address
-                    // This might need more sophisticated handling
-                    arg->accept(*_ctx.visitor);
-                    args.push_back(_ctx.value_stack.top());
-                    _ctx.value_stack.pop();
-                }
-            } else {
-                // For value parameters, evaluate normally
-                arg->accept(*_ctx.visitor);
-                args.push_back(_ctx.value_stack.top());
-                _ctx.value_stack.pop();
-            }
+        for (auto &arg : node.arguments) {
+            arg->accept(*_ctx.visitor);
+            args.push_back(_ctx.value_stack.top());
+            _ctx.value_stack.pop();
         }
 
         llvm::Value *ret = _ctx.builder->CreateCall(func, args);
         _ctx.value_stack.push(ret);
-    
+
     }
 }
 
@@ -535,34 +498,20 @@ void ExprCodegen::gen_var_ptr(AST::VarPtrExprNode &node)
 {
     // Get a pointer to the variable referenced by var_ref
     // We need to handle different types of variable references
-    
+
     if (node.var_ref->is_var()) {
         // Handle regular variable reference - get the pointer (alloca)
         auto &var_node = node.var_ref->get_var();
-        
+
         // Get the LLVM alloca instruction for this variable
         auto it = _ctx.var_map.find(&var_node.decl());
         if (it == _ctx.var_map.end()) {
             throw _ctx.error(fmt::format(
                 "Variable '{}' not found in variable map", var_node.decl().name()));
         }
-        
+
         // Push the alloca instruction (pointer to the variable) onto the stack
         _ctx.value_stack.push(it->second);
-    }
-    else if (node.var_ref->is_varmember()) {
-        // Handle struct member reference - get pointer to the member
-        auto &var_member_node = node.var_ref->get_varmember();
-        
-        // Visit the var member node to get the pointer to the member
-        var_member_node.accept(*_ctx.visitor);
-        
-        if (_ctx.value_stack.empty()) {
-            throw _ctx.error("No member pointer on stack");
-        }
-        
-        // The member pointer is already on the stack, no need to load the value
-        // since we want the pointer, not the value
     }
     else {
         throw _ctx.error("Unknown VarRef target type in VarPtrExpr");

@@ -13,7 +13,7 @@ namespace AST
         NullNode() {};
         ~NullNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_null;
+        ECO_AST_NODE_TYPE(n_null);
 
         const std::string node_description() override {
             return "NULL";

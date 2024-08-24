@@ -9,6 +9,12 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
+#include "AST/ASTArgumentCoercion.h"
+#include "Debugging.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
 
 namespace AST
 {
@@ -53,6 +59,7 @@ namespace AST
     Monomorphizer::Monomorphizer(Bundle &bundle)
         : _bundle(bundle), _collector(bundle.collector)
     {
+        _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
 
     CodeRef Monomorphizer::code_ref_for(Module &mod, const TokenReference &token)
@@ -146,11 +153,10 @@ namespace AST
     {
         std::string key = instance_key(tmpl, args);
         if (auto it = _func_instances.find(key); it != _func_instances.end()) {
+            if (_trace) {
+                std::cout << "[mono]   reuse existing instance of '" << tmpl->func_name() << "'" << std::endl;
+            }
             return it->second;
-        }
-
-        if (++_instance_count > MAX_INSTANCES) {
-            return nullptr;
         }
 
         auto module_it = _decl_module.find(tmpl);
@@ -158,6 +164,24 @@ namespace AST
             return nullptr;
         }
         Module *home = module_it->second;
+
+        // runaway guard: hitting the instance cap means instantiation is not converging (e.g. a
+        // generic recursing on an ever-growing type). report it once, located at the template, so
+        // it surfaces as a diagnostic instead of a silent stall.
+        if (++_instance_count > MAX_INSTANCES) {
+            if (!_instance_cap_reported && tmpl->name_token.has_value()) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(*home, tmpl->name_token.value()),
+                    "instantiation limit (" + std::to_string(MAX_INSTANCES) + ") hit resolving generic '"
+                        + tmpl->func_name() + "' — likely non-terminating generic instantiation");
+                _instance_cap_reported = true;
+            }
+            return nullptr;
+        }
+
+        if (_trace) {
+            std::cout << "[mono]   create new instance of '" << tmpl->func_name() << "'" << std::endl;
+        }
 
         // clone the template into its home module, substituting T -> concrete throughout
         CloneContext cc(home->nodes, args, _collector.type_registry);
@@ -177,6 +201,9 @@ namespace AST
     {
         for (size_t i = 0; i < call->arguments.size() && i < instance->args.size(); i++) {
             ValueType expected = instance->args[i]->type();
+            // wrap an lvalue variable in a VarPtrExprNode when the parameter is a pointer,
+            // same as the non-generic path in FuncCallParser (keeps codegen uniform)
+            call->arguments[i] = coerce_arg_to_pointer_param(mod.nodes, call->arguments[i], expected);
             ValueType actual = call->arguments[i]->result_type();
             if (!(actual == expected)) {
                 auto &cast = mod.nodes.emplace_back<TypeCastNode>(expected, call->arguments[i], true);
@@ -202,6 +229,25 @@ namespace AST
         while (progressed) {
             progressed = false;
             if (++rounds > MAX_ROUNDS) {
+                // the fixpoint did not converge. locate the report at any generic call still
+                // unresolved so the user has a concrete site to look at rather than a silent stall.
+                bool reported = false;
+                for (auto &module_ptr : _bundle.modules) {
+                    if (reported) {
+                        break;
+                    }
+                    Module &mod = *module_ptr;
+                    for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
+                        if (call->decl && call->decl->is_generic() && !_processed.count(call)) {
+                            _collector.collect_issue<Issue::GenericError>(
+                                code_ref_for(mod, call->token_function_name),
+                                "monomorphization did not converge after " + std::to_string(MAX_ROUNDS)
+                                    + " rounds — generic '" + call->decl->func_name() + "' could not be resolved");
+                            reported = true;
+                            break;
+                        }
+                    }
+                }
                 break;
             }
 
@@ -235,6 +281,15 @@ namespace AST
 
                 _processed.insert(call);
 
+                if (_trace) {
+                    std::string arg_desc;
+                    for (size_t i = 0; i < args->size(); i++) {
+                        arg_desc += (i > 0 ? ", " : "") + (*args)[i].get_type_desciption();
+                    }
+                    std::cout << "[mono] round " << rounds << ": resolve '" << call->decl->func_name()
+                              << "' with <" << arg_desc << ">" << std::endl;
+                }
+
                 FunctionDeclNode *instance = get_or_create_function_instance(call->decl, *args);
                 if (instance) {
                     call->decl = instance;
@@ -267,5 +322,90 @@ namespace AST
                 }
             }
         }
+    }
+
+    namespace
+    {
+        // "name(int32, float64) -> Box<int32>" for a resolved instance
+        std::string describe_signature(const FunctionDeclNode *fn)
+        {
+            std::string result = fn->func_name() + "(";
+            for (size_t i = 0; i < fn->args.size(); i++) {
+                if (i > 0) {
+                    result += ", ";
+                }
+                result += fn->args[i]->type().get_type_desciption();
+            }
+            result += ") -> " + fn->get_return_type().get_type_desciption();
+            return result;
+        }
+    }
+
+    std::string Monomorphizer::debug_dump_instances() const
+    {
+        // instances created: the concrete clones the fixpoint produced from generic templates
+        std::vector<std::string> instance_lines;
+        std::unordered_set<const FunctionDeclNode *> instances;
+        for (const auto &[key, instance] : _func_instances) {
+            instances.insert(instance);
+            instance_lines.push_back("- " + describe_signature(instance));
+        }
+
+        // rewired call sites: calls whose decl now points at one of those instances
+        std::vector<std::string> call_lines;
+        for (auto &module_ptr : _bundle.modules) {
+            Module &mod = *module_ptr;
+            for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
+                if (!call->decl || !instances.count(call->decl)) {
+                    continue;
+                }
+                std::string line = "- " + call->token_function_name.value() + "(";
+                for (size_t i = 0; i < call->arguments.size(); i++) {
+                    if (i > 0) {
+                        line += ", ";
+                    }
+                    line += call->arguments[i]->result_type().get_type_desciption();
+                }
+                line += ") => " + describe_signature(call->decl);
+                call_lines.push_back(line);
+            }
+        }
+
+        // struct instantiations: the concrete ComplexTypes interned by the type registry. skip any
+        // that still mention a type parameter (Box<T0>) — those are template-body artifacts, not the
+        // concrete instantiations (Box<int32>) the user cares about.
+        std::vector<std::string> struct_lines;
+        for (const ComplexType *ct : _collector.type_registry.instantiations()) {
+            bool concrete = true;
+            for (const auto &arg : ct->instantiation_args) {
+                if (contains_type_param(arg)) {
+                    concrete = false;
+                    break;
+                }
+            }
+            if (concrete) {
+                struct_lines.push_back("- " + ct->name.value_or("[anonymous]"));
+            }
+        }
+
+        // deterministic output so the dump can be diffed and cross-checked against -a
+        std::sort(instance_lines.begin(), instance_lines.end());
+        std::sort(call_lines.begin(), call_lines.end());
+        std::sort(struct_lines.begin(), struct_lines.end());
+
+        auto section = [](const std::string &title, const std::vector<std::string> &lines) {
+            std::string body = lines.empty() ? "  (none)\n" : "";
+            for (const auto &line : lines) {
+                body += DD::tabbify(line, 2) + "\n";
+            }
+            return title + "\n" + body;
+        };
+
+        std::string result = "Monomorphization instances\n{\n";
+        result += DD::tabbify(section("Instances created:", instance_lines), 2);
+        result += DD::tabbify(section("Rewired call sites:", call_lines), 2);
+        result += DD::tabbify(section("Struct instantiations:", struct_lines), 2);
+        result += "}\n";
+        return result;
     }
 }

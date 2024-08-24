@@ -11,7 +11,7 @@ namespace AST
     class ReturnNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_func_return;
+        ECO_AST_NODE_TYPE(n_func_return);
 
         ExprNode *expr = nullptr;
 

@@ -612,6 +612,29 @@ bool is_expr_token(Parser::Cursor &cursor)
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
 }
 
+const AST::NodeReference Parser::parse_member_chain(Parser::Payload &payload, AST::NodeReference base)
+{
+    auto &cursor = payload.cursor;
+    auto current_ref = base;
+
+    while (cursor.is_type(Token::Type::t_accessorlr)) {
+        cursor.skip(); // skip the '->' token
+
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+            return AST::make_void_ref();
+        }
+
+        auto member_token = cursor.current();
+        cursor.skip(); // skip the member name
+
+        auto &member_access = payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
+        current_ref = AST::make_ref(member_access);
+    }
+
+    return current_ref;
+}
+
 const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
@@ -668,38 +691,10 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         auto &varref = payload.context.emplace_node<AST::VarRefNode>(&varnode);
         auto current_ref = AST::make_ref(varref);
         
-        // Check if there's a member access operator
-        if (cursor.is_type(Token::Type::t_accessorlr)) {
-            cursor.skip(); // skip the '->' token
-            
-            if (!cursor.is_type(Token::Type::t_identifier)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
-                return AST::make_void_ref();
-            }
-            
-            auto member_token = cursor.current();
-            cursor.skip(); // skip the member name
-            
-            // Create a MemberAccessNode with the current reference as base
-            auto &member_access = payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
-            current_ref = AST::make_ref(member_access);
-            
-            // Check for chained member access (only one level for now to avoid infinite loops)
-            if (cursor.is_type(Token::Type::t_accessorlr)) {
-                cursor.skip(); // skip the second '->' token
-                
-                if (!cursor.is_type(Token::Type::t_identifier)) {
-                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
-                    return AST::make_void_ref();
-                }
-                
-                auto second_member_token = cursor.current();
-                cursor.skip(); // skip the second member name
-                
-                // Create another MemberAccessNode with the first member access as base
-                auto &second_member_access = payload.context.emplace_node<AST::MemberAccessNode>(current_ref, second_member_token);
-                current_ref = AST::make_ref(second_member_access);
-            }
+        // wrap the base in a MemberAccessNode for each `->member` in the chain
+        current_ref = Parser::parse_member_chain(payload, current_ref);
+        if (!current_ref.has()) {
+            return AST::make_void_ref();
         }
 
         if (is_creating_ptr) {

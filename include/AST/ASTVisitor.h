@@ -31,7 +31,6 @@ namespace AST
     class StructDeclNode;
     class MemberAccessNode;
     class VarNode;
-    class VarMemberNode;
     class MemberMutNode;
 
     class Visitor
@@ -65,7 +64,6 @@ namespace AST
         virtual void visitStructDecl(StructDeclNode &node) = 0;
         virtual void visitMemberAccess(MemberAccessNode &node) = 0;
         virtual void visitVar(VarNode &node) = 0;
-        virtual void visitVarMember(VarMemberNode &node) = 0;
         virtual void visitMemberMut(MemberMutNode &node) = 0;
     };
 }

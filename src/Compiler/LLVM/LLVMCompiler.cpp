@@ -161,7 +161,6 @@ void LLVMCompiler::visitOperator(AST::OperatorNode &node) { _expr.gen_operator(n
 void LLVMCompiler::visitStructDecl(AST::StructDeclNode &node) { _struct.gen_struct_decl(node); }
 void LLVMCompiler::visitMemberAccess(AST::MemberAccessNode &node) { _struct.gen_member_access(node); }
 void LLVMCompiler::visitVar(AST::VarNode &node) { _struct.gen_var(node); }
-void LLVMCompiler::visitVarMember(AST::VarMemberNode &node) { _struct.gen_var_member(node); }
 void LLVMCompiler::visitMemberMut(AST::MemberMutNode &node) { _struct.gen_member_mut(node); }
 
 // structural nodes with no codegen of their own

@@ -1,0 +1,18 @@
+// passing a variable to a reference (pointer) parameter passes its address, so the
+// callee mutates the caller's variable. the compiler wraps the bare argument in a
+// VarPtrExprNode during argument coercion (see ASTArgumentCoercion.h), and an explicit
+// &$a — already a pointer expression — is passed through unchanged; both behave the same
+
+function inc(int &$x) : void {
+    $x = $x + 1;
+}
+
+$a = 5;
+
+// bare variable: coerced to its address
+inc($a);
+echo $a;
+
+// explicit address-of: identical effect
+inc(&$a);
+echo $a;

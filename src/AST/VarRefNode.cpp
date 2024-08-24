@@ -5,12 +5,16 @@ AST::ValueType AST::VarRefNode::result_type() const
 {
     if (is_var())
     {
-        return _target_node.get<VarNode>().decl().type();
+        auto &decl = _target_node.get<VarNode>().decl();
+
+        // a decl whose type inference failed (e.g. its initializer had an error)
+        // never gets a type node; report unknown rather than dereferencing null
+        if (!decl.has_type()) {
+            return ValueType::make_unknown();
+        }
+
+        return decl.type();
     }
-    else if (is_varmember())
-    {
-        return _target_node.get<VarMemberNode>().property().type;
-    }
-    
+
     throw AST::LogicException::UnexpectedNodeReferenceType();
 }

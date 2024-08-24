@@ -21,12 +21,13 @@
 namespace Compiler::LLVM
 {
 void Backend::print_ir(bool to_file)
-{ 
+{
     auto main = _ctx.main_cmp_unit();
     main->llvm_module->print(llvm::outs(), nullptr);
 }
 
-void Backend::run_code() {
+void Backend::run_code()
+{
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
@@ -132,7 +133,8 @@ void Backend::make_exec(std::string executable_name)
     llvm::outs() << "Executable \"" << executable_name << "\" created successfully\n";
 }
 
-void Backend::optimize() {
+void Backend::optimize()
+{
     if (!_ctx.current_module()) {
         llvm::errs() << "Module is not initialized.\n";
         return;
@@ -143,7 +145,7 @@ void Backend::optimize() {
     llvm::FunctionAnalysisManager functionAM;
     llvm::CGSCCAnalysisManager cgsccAM;
     llvm::ModuleAnalysisManager moduleAM;
-    
+
     passBuilder.registerModuleAnalyses(moduleAM);
     passBuilder.registerCGSCCAnalyses(cgsccAM);
     passBuilder.registerFunctionAnalyses(functionAM);
@@ -154,7 +156,7 @@ void Backend::optimize() {
     llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
     modulePM.addPass(llvm::ModuleInlinerPass(llvm::getInlineParams(3, 0), llvm::InliningAdvisorMode::Default,
                                   llvm::ThinOrFullLTOPhase::None));
-    
+
     modulePM.run(*_ctx.current_module(), moduleAM);
 }
 }

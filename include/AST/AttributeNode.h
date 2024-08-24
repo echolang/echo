@@ -13,7 +13,7 @@ namespace AST
     class AttributeNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_attribute;
+        ECO_AST_NODE_TYPE(n_attribute);
         
         TokenSlice attribute_tokens;
         TokenReference attribute_id;

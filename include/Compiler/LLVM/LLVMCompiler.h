@@ -54,7 +54,6 @@ public:
     void visitStructDecl(AST::StructDeclNode &node);
     void visitMemberAccess(AST::MemberAccessNode &node);
     void visitVar(AST::VarNode &node);
-    void visitVarMember(AST::VarMemberNode &node);
     void visitMemberMut(AST::MemberMutNode &node);
 
     void optimize();

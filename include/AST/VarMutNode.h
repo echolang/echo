@@ -29,7 +29,7 @@ namespace AST
 
         ~VarMutNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_varmut;
+        ECO_AST_NODE_TYPE(n_varmut);
 
         const std::string &name_full() const {
             return token_varname.value();

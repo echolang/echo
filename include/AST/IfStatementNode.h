@@ -12,7 +12,7 @@ namespace AST
     class IfStatementNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_if_statement;
+        ECO_AST_NODE_TYPE(n_if_statement);
 
         ExprNode *condition;
         ScopeNode *if_scope;

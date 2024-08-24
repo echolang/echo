@@ -10,16 +10,13 @@ namespace AST
 {   
     /**
      * A var is basically just a reference to a declaration and a token
-     * But do not confuse this with the "VarRefNode" which can either contain:
-     *  - a "VarNode" meaning a reference to a whole variable
-     *  - a "VarMemberNode" meaning a reference to a member of a variable
-     *  - a "VarRefNode" meaning an intend to reference a value of a variable
-     *    which can target both a "VarNode" or a "VarMemberNode"
+     * But do not confuse this with the "VarRefNode", which wraps a "VarNode"
+     * to express an intent to reference the value of a variable
      */
     class VarNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_var;
+        ECO_AST_NODE_TYPE(n_var);
 
         VarNode(VarDeclNode *decl) :
             _decl(decl)

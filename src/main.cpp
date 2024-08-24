@@ -12,6 +12,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
+#include "AST/ASTTypeChecker.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
@@ -167,7 +168,16 @@ int main_run(argparse::ArgumentParser &cli)
     }
 
     // resolve generics into concrete instances before compilation
-    AST::Monomorphizer(bundle).run();
+    AST::Monomorphizer monomorphizer(bundle);
+    monomorphizer.run();
+
+    if (cli.get<bool>("--print-instances")) {
+        std::cout << monomorphizer.debug_dump_instances() << std::endl;
+    }
+
+    // semantic analysis on the concrete AST: resolves member accesses and call arguments and
+    // records located issues, so type errors surface here instead of deep in codegen.
+    AST::TypeChecker(bundle).run();
 
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {
@@ -235,7 +245,16 @@ int main_build(argparse::ArgumentParser &cli)
     }
 
     // resolve generics into concrete instances before compilation
-    AST::Monomorphizer(bundle).run();
+    AST::Monomorphizer monomorphizer(bundle);
+    monomorphizer.run();
+
+    if (cli.get<bool>("--print-instances")) {
+        std::cout << monomorphizer.debug_dump_instances() << std::endl;
+    }
+
+    // semantic analysis on the concrete AST: resolves member accesses and call arguments and
+    // records located issues, so type errors surface here instead of deep in codegen.
+    AST::TypeChecker(bundle).run();
 
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {
@@ -310,7 +329,12 @@ int main(int argc, char *argv[])
             .help("Print the registered symbol table to the console.")
             .default_value(false)
             .implicit_value(true);
-        
+
+        command.get().add_argument("-pi", "--print-instances")
+            .help("Print the monomorphizer's instances, rewired call sites and struct instantiations.")
+            .default_value(false)
+            .implicit_value(true);
+
         command.get().add_argument("-O", "--optimize")
             .help("Sets the optimization level to 3, makes your code go brrrrrr.")
             .default_value(false)

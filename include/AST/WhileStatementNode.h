@@ -12,7 +12,7 @@ namespace AST
     class WhileStatementNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_while_statement;
+        ECO_AST_NODE_TYPE(n_while_statement);
 
         ExprNode *condition;
         ScopeNode *loop_scope;

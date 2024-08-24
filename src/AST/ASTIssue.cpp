@@ -64,3 +64,18 @@ ISSUE_MESSAGE_FNC(IntegerUnderflow)
 {
     return std::format("Integer underflow: {}", _message);
 }
+
+ISSUE_MESSAGE_FNC(UnknownMember)
+{
+    return std::format("The struct '{}' has no member named '{}'", struct_name, member_name);
+}
+
+ISSUE_MESSAGE_FNC(ArgumentTypeMismatch)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(UnresolvedTypeParameter)
+{
+    return _message;
+}

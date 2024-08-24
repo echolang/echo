@@ -471,6 +471,18 @@ namespace AST {
         // through `args`. Implemented in ASTValueType.cpp so it can call the unified substitute_type.
         ComplexType* get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args);
 
+        // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
+        // register_template maps to themselves. used by the --print-instances dump.
+        std::vector<ComplexType*> instantiations() const {
+            std::vector<ComplexType*> result;
+            for (const auto &[key, ct] : _instantiations) {
+                if (ct->is_instantiated()) {
+                    result.push_back(ct);
+                }
+            }
+            return result;
+        }
+
     private:
         std::string args_description(const std::vector<ValueType>& args) const;
 

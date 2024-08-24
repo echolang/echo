@@ -23,7 +23,6 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
-#include "AST/VarMemberNode.h"
 #include "AST/VarMutNode.h"
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
@@ -133,17 +132,7 @@ Node *VarNode::clone(CloneContext &cc) const
 
 Node *VarRefNode::clone(CloneContext &cc) const
 {
-    if (_target_node.has_type<VarNode>()) {
-        return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
-    }
-    return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarMemberNode>()));
-}
-
-Node *VarMemberNode::clone(CloneContext &cc) const
-{
-    VarMemberNode *c = cc.shallow(this);
-    c->_ref = cc.child(c->_ref);
-    return c;
+    return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
 }
 
 Node *VarMutNode::clone(CloneContext &cc) const

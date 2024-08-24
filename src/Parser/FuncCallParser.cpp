@@ -6,8 +6,8 @@
 #include "AST/VarDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
-#include "AST/VarMemberNode.h"
 #include "AST/VarRefNode.h"
+#include "AST/ASTArgumentCoercion.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/LiteralValueNode.h"
@@ -77,6 +77,12 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
         }
 
         auto arg = parse_expr(payload);
+        if (arg == nullptr) {
+            // an issue was already collected by the failed sub-parse; abort this call
+            // rather than propagating a null argument into the funccall node
+            payload.cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
         args.push_back(arg);
 
         if (payload.cursor.is_type(Token::Type::t_comma)) {
@@ -119,7 +125,9 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     if (!funcall.decl->is_generic()) {
         for (size_t i = 0; i < args.size() && i < funcall.decl->args.size(); ++i) {
             auto expected = funcall.decl->args[i]->type();
-            auto *expr = args[i];
+            // a variable passed to a pointer parameter is coerced to its address here, so
+            // codegen sees a uniform VarPtrExprNode instead of sniffing the argument's kind
+            auto *expr = AST::coerce_arg_to_pointer_param(payload.context.module.nodes, args[i], expected);
             auto actual = expr->result_type();
 
             auto coerce_expr = [&](AST::ExprNode *source, const AST::ValueType &from, const AST::ValueType &to) -> AST::ExprNode * {

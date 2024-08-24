@@ -23,7 +23,6 @@ namespace AST
         n_vardecl,
         n_var,
         n_varref,
-        n_varmember,
         n_varmut,
         n_type,
         n_type_cast,
@@ -50,5 +49,12 @@ namespace AST
         { T::node_type } -> std::same_as<const NodeType&>;
     };
 };
+
+// declares a node's compile-time NodeType tag together with the matching runtime accessor
+// (get_node_type), so a bare Node* can rejoin the has_type<T>() idiom without RTTI. use inside
+// the public section of every concrete AST::Node subclass, e.g. ECO_AST_NODE_TYPE(n_varref)
+#define ECO_AST_NODE_TYPE(kind) \
+    static constexpr AST::NodeType node_type = AST::NodeType::kind; \
+    AST::NodeType get_node_type() const override { return node_type; }
 
 #endif

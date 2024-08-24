@@ -24,6 +24,6 @@ namespace Compiler::LLVM
     private:
         CodegenContext &_ctx;
     };
-}
+};
 
 #endif

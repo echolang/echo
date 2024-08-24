@@ -14,7 +14,7 @@ namespace AST
     class TypeCastNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_type_cast;
+        ECO_AST_NODE_TYPE(n_type_cast);
         
         ValueType cast_to;
         ExprNode* expr;

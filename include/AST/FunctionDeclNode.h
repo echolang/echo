@@ -20,7 +20,7 @@ namespace AST
     class FunctionDeclNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_func_decl;
+        ECO_AST_NODE_TYPE(n_func_decl);
             
         std::optional<TokenReference> name_token;
         std::vector<VarDeclNode*> args;

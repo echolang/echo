@@ -15,7 +15,7 @@ namespace AST
     class MemberMutNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_membermut;
+        ECO_AST_NODE_TYPE(n_membermut);
 
         MemberAccessNode *member_access;
         ExprNode *value_expr;

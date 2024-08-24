@@ -28,7 +28,7 @@ namespace AST
         ScopeNode() {};
         ~ScopeNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_scope;
+        ECO_AST_NODE_TYPE(n_scope);
 
         const std::string node_description() override;
         const std::string node_description_inner();

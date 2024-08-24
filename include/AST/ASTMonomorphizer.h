@@ -30,6 +30,12 @@ namespace AST
 
         void run();
 
+        // a human-readable dump of what monomorphization produced: every concrete instance created,
+        // every call site rewired to an instance, and every struct instantiation interned. reuses
+        // the same type descriptions as --print-ast so the two can be cross-checked. drives
+        // --print-instances; call after run().
+        std::string debug_dump_instances() const;
+
     private:
         Bundle &_bundle;
         Collector &_collector;
@@ -45,6 +51,14 @@ namespace AST
         std::unordered_set<const FunctionCallExprNode *> _processed;
 
         size_t _instance_count = 0;
+
+        // set once the instance cap fires, so the runaway-instantiation diagnostic is reported a
+        // single time rather than for every subsequent over-cap request.
+        bool _instance_cap_reported = false;
+
+        // when true (env ECO_TRACE_MONO set) the pass prints its per-round resolution decisions to
+        // stdout, replacing the add/remove-fprintf loop the retrospective flagged as its own cost.
+        bool _trace = false;
 
         // returns the concrete type arguments for a generic call, or nullopt when the call
         // cannot be resolved yet (it sits in an un-instantiated template body) or is invalid

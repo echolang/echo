@@ -24,6 +24,7 @@ namespace AST
     class File;
     class Visitor;
     class VarDeclNode;
+    class FunctionDeclNode;
 };
 
 namespace Compiler::LLVM
@@ -45,6 +46,10 @@ namespace Compiler::LLVM
 
         CmpUnit *current_cmp_unit = nullptr;
         AST::File *current_file = nullptr;
+
+        // the function declaration currently being generated, set/restored around each function
+        // body so codegen errors can name their enclosing function. null at global scope.
+        AST::FunctionDeclNode *current_function = nullptr;
 
         std::stack<llvm::Value *> value_stack;
         std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
@@ -76,8 +81,12 @@ namespace Compiler::LLVM
 
         std::string llvm_err_str();
 
+        // a human-readable description of the current codegen location, e.g. "in function 'foo'"
+        // or "at global scope", suffixed onto codegen error messages.
+        std::string function_context() const;
+
         Compiler::InternalCompilerException error(std::string message);
     };
-}
+};
 
 #endif

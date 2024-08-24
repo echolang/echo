@@ -37,7 +37,7 @@ namespace AST
     class VoidExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_expr_void;
+        ECO_AST_NODE_TYPE(n_expr_void);
 
         VoidExprNode() {};
         ~VoidExprNode() {};
@@ -59,7 +59,7 @@ namespace AST
     class FunctionCallExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_expr_call;
+        ECO_AST_NODE_TYPE(n_expr_call);
 
         TokenReference token_function_name;
         std::vector<ExprNode*> arguments;
@@ -100,7 +100,7 @@ namespace AST
     class BinaryExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_expr_binary;
+        ECO_AST_NODE_TYPE(n_expr_binary);
 
         OperatorNode *op_node;
         ExprNode *lhs = nullptr;
@@ -135,7 +135,7 @@ namespace AST
     class UnaryExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_expr_unary;
+        ECO_AST_NODE_TYPE(n_expr_unary);
 
         TokenReference token_operator;
 
@@ -161,7 +161,7 @@ namespace AST
     class VarPtrExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_expr_varptr;
+        ECO_AST_NODE_TYPE(n_expr_varptr);
 
         VarRefNode *var_ref;
 

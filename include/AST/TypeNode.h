@@ -31,7 +31,7 @@ namespace AST
         {};
         ~TypeNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_type;
+        ECO_AST_NODE_TYPE(n_type);
 
         const std::string node_description() override {
             std::string const_str = is_const ? "const " : "";

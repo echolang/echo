@@ -13,7 +13,7 @@ namespace AST
     class StructDeclNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_struct_decl;
+        ECO_AST_NODE_TYPE(n_struct_decl);
         
         Namespace *ast_namespace = nullptr;
         

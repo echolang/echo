@@ -38,7 +38,7 @@ namespace AST
 
         ~VarDeclNode() {};
 
-        static constexpr NodeType node_type = NodeType::n_vardecl;
+        ECO_AST_NODE_TYPE(n_vardecl);
 
         const std::string &name_full() const {
             return token_varname.value();

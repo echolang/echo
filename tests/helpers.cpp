@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTMonomorphizer.h>
+#include <AST/ASTTypeChecker.h>
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
 {
@@ -64,6 +65,9 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string con
 
     // resolve generics into concrete instances, matching the real compile pipeline
     AST::Monomorphizer(*bundle).run();
+
+    // run semantic analysis, matching the real compile pipeline
+    AST::TypeChecker(*bundle).run();
 
     return bundle;
 }

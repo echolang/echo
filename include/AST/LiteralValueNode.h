@@ -12,7 +12,7 @@ namespace AST
     class LiteralPrimitiveExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal;
+        ECO_AST_NODE_TYPE(n_literal);
 
         TokenReference token_literal;
 
@@ -48,7 +48,7 @@ namespace AST
     class LiteralFloatExprNode : public LiteralPrimitiveExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal_float;
+        ECO_AST_NODE_TYPE(n_literal_float);
         
         LiteralFloatExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
@@ -105,7 +105,7 @@ namespace AST
     class LiteralIntExprNode : public LiteralPrimitiveExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal_int;
+        ECO_AST_NODE_TYPE(n_literal_int);
 
         LiteralIntExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
@@ -172,7 +172,7 @@ namespace AST
     class LiteralBoolExprNode : public LiteralPrimitiveExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal_bool;
+        ECO_AST_NODE_TYPE(n_literal_bool);
     
         LiteralBoolExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
@@ -196,7 +196,7 @@ namespace AST
     class LiteralStringExprNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_literal_string;
+        ECO_AST_NODE_TYPE(n_literal_string);
 
         TokenReference token_literal;
     

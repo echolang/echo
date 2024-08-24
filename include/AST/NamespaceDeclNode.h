@@ -12,7 +12,7 @@ namespace AST
     class NamespaceDeclNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_namespace_decl;
+        ECO_AST_NODE_TYPE(n_namespace_decl);
         
         TokenSlice namespace_tokens;
         const Namespace* namespace_decl;

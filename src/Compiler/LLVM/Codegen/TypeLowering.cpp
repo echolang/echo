@@ -41,7 +41,7 @@ namespace Compiler::LLVM
 {
 void TypeLowering::create_cmp_units(const AST::Bundle &bundle)
 {
-    for (auto &module : bundle.modules) 
+    for (auto &module : bundle.modules)
     {
         // check if the module is already in the map which is not allowed
         if (_ctx.cmp_unit_map.find(module->name) != _ctx.cmp_unit_map.end()) {
@@ -89,12 +89,12 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
         } else {
             param_type = get_llvm_type(arg->type_node()->type.get_primitive_type());
         }
-        
+
         // If the parameter is a pointer/reference, wrap it in a pointer type
         if (arg_type.is_pointer()) {
             param_type = llvm::PointerType::get(param_type, 0);
         }
-        
+
         arg_types.push_back(param_type);
     }
 
@@ -125,7 +125,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::StructDeclNod
     // if (_ctx.current_cmp_unit->struct_table.is_defined(struct_name)) {
     //     assert(false);
     //     throw _ctx.error(fmt::format(
-    //         "Struct '{}' is already defined.", 
+    //         "Struct '{}' is already defined.",
     //         struct_name
     //     ));
     // }
@@ -137,7 +137,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::StructDeclNod
         if (!llvm_type) {
             assert(false);
             throw _ctx.error(fmt::format(
-                "Unknown type for field '{}' in struct '{}'.", 
+                "Unknown type for field '{}' in struct '{}'.",
                 prop->name(), struct_name
             ));
         }
@@ -186,11 +186,11 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
         }
     }
 
-    // then go through all function calls inside each module 
+    // then go through all function calls inside each module
     // to decide which declarations to link in
     for (auto &cmp_unit : _ctx.cmp_units) {
         _ctx.current_cmp_unit = cmp_unit.get();
-        
+
         for (auto fnccall : cmp_unit->ast_module->nodes.of_type<AST::FunctionCallExprNode>()) {
             // if there is no matching llvm function for the call inside of the module
             // we copy the declaration from another module
@@ -213,9 +213,9 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
 
 void TypeLowering::build_struct_maps(const AST::Bundle &bundle)
 {
-    // for now we do dump implementation which just copies all 
-    // struct types between all compilation units, this obviosly 
-    // should in the future only happen if a compilation unit actually 
+    // for now we do dump implementation which just copies all
+    // struct types between all compilation units, this obviosly
+    // should in the future only happen if a compilation unit actually
     // references the structure
     for (auto &cmp_unit : _ctx.cmp_units) {
         for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::StructDeclNode>()) {
@@ -248,7 +248,11 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         }
 
         if (!struct_id) {
-            throw std::runtime_error("Trying to get a non declared struct in compilation unit");
+            throw _ctx.error(fmt::format(
+                "Struct '{}' is not declared in compilation unit '{}' ({})",
+                complex ? complex->name.value_or("<anonymous>") : "<null>",
+                cmp_unit.ast_module ? cmp_unit.ast_module->name : "<unknown>",
+                _ctx.function_context()));
         }
 
         base_type = cmp_unit.structure_table->get_structure(struct_id).llvm_struct;
@@ -256,10 +260,14 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     else if (type.is_type_param()) {
         // a resolved instance never carries a type parameter; reaching here is a compiler bug
         // (a template escaped monomorphization) rather than a user error.
-        throw std::runtime_error("Cannot compile generic functions with unresolved type parameters. Generic functions must be instantiated with concrete types before compilation.");
+        throw _ctx.error(fmt::format(
+            "Cannot lower unresolved generic type parameter '{}' {} — generics must be "
+            "instantiated with concrete types before compilation",
+            type.get_type_desciption(), _ctx.function_context()));
     }
     else {
-        throw std::runtime_error("Unsupported type");
+        throw _ctx.error(fmt::format(
+            "Unsupported type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
     }
 
     // If the ValueType has the pointer flag set, wrap it in a pointer type
@@ -298,7 +306,9 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
         case AST::ValueTypePrimitive::t_bool:
             return llvm::Type::getInt1Ty(*_ctx.llvm_context);
         default:
-            throw std::runtime_error("Unsupported variable type");
+            throw _ctx.error(fmt::format(
+                "Unsupported primitive type '{}' {}",
+                AST::get_primitive_name(type), _ctx.function_context()));
     }
 }
 }

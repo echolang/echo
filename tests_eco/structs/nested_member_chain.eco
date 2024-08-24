@@ -1,0 +1,19 @@
+// deep member-access chains: read and write nested struct fields
+// beyond the previous two-level limit (see todo/B5)
+
+struct vec2 { int $x; int $y; }
+struct frame { vec2 $position; vec2 $size; }
+struct window { frame $bounds; }
+struct app { window $main; }
+
+$a = app(window(frame(vec2(1, 2), vec2(3, 4))));
+
+// three-level read
+echo $a->main->bounds->size->x;
+
+// three-level write, then read back
+$a->main->bounds->size->x = 42;
+echo $a->main->bounds->size->x;
+
+// the other branch still reads correctly
+echo $a->main->bounds->position->y;

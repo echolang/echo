@@ -13,7 +13,7 @@ namespace AST
     class OperatorNode : public Node
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_operator;
+        ECO_AST_NODE_TYPE(n_operator);
         
         TokenReference token_literal;
         const Operator *op;

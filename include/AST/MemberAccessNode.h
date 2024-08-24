@@ -13,7 +13,7 @@ namespace AST
     class MemberAccessNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_member_access;
+        ECO_AST_NODE_TYPE(n_member_access);
         
         MemberAccessNode(NodeReference base, TokenReference member_name);
         ~MemberAccessNode() {}

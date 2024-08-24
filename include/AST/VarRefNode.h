@@ -7,7 +7,6 @@
 #include "ASTValueType.h"
 #include "../Lexer.h"
 #include "VarNode.h"
-#include "VarMemberNode.h"
 #include "ExprNode.h"
 
 namespace AST 
@@ -15,14 +14,9 @@ namespace AST
     class VarRefNode : public ExprNode
     {
     public:
-        static constexpr NodeType node_type = NodeType::n_varref;
+        ECO_AST_NODE_TYPE(n_varref);
 
         VarRefNode(VarNode *varnode) :
-            _target_node(make_ref(varnode))
-        {
-        };
-
-        VarRefNode(VarMemberNode *varnode) :
             _target_node(make_ref(varnode))
         {
         };
@@ -33,16 +27,8 @@ namespace AST
             return _target_node.has_type<VarNode>();
         }
 
-        inline bool is_varmember() const {
-            return _target_node.has_type<VarMemberNode>();
-        }
-
         inline VarNode& get_var() const {
             return _target_node.get<VarNode>();
-        }
-
-        inline VarMemberNode& get_varmember() const {
-            return _target_node.get<VarMemberNode>();
         }
 
         ValueType result_type() const override;

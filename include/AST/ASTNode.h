@@ -30,6 +30,11 @@ namespace AST
 
         virtual void accept(Visitor &visitor) = 0;
 
+        // runtime dual of the per-class `static constexpr node_type`; lets a bare Node*
+        // rejoin the NodeType-tag idiom (make_ref/has_type<T>) without RTTI. pure-virtual
+        // for the same exhaustiveness reason as accept()/clone()
+        virtual NodeType get_node_type() const = 0;
+
         // deep-copies this node (and the subtree it owns) into cc's target NodeCollection,
         // substituting types through cc's TypeSubstitution and rebinding intra-subtree
         // references to their clones. Pure-virtual so the compiler forces every concrete
@@ -37,6 +42,13 @@ namespace AST
         // implemented in src/AST/ASTClone.cpp.
         virtual Node *clone(CloneContext &cc) const = 0;
     };
+
+    // re-tag a bare Node* into a NodeReference using its runtime kind, so a raw pointer
+    // can rejoin the has_type<T>()/get_ptr<T>() idiom instead of reaching for RTTI. defined
+    // here (not in ASTNodeReference.h) because it needs the complete Node type
+    inline const NodeReference make_ref(Node *node) {
+        return node ? NodeReference(node->get_node_type(), node) : make_void_ref();
+    }
 
     typedef std::vector<std::unique_ptr<Node>> NodeList;
 

@@ -104,40 +104,17 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             auto var_node = &payload.context.emplace_node<AST::VarNode>(prev_vardecl);
             auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
             auto current_ref = AST::make_ref(*var_ref);
-            
-            // Parse the first member access
-            cursor.skip(); // skip the '->' token
-            
-            if (!cursor.is_type(Token::Type::t_identifier)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+
+            // wrap the base in a MemberAccessNode for each `->member` in the chain.
+            // this block is only entered on a leading `->`, so at least one level
+            // runs and the final node is always a MemberAccessNode
+            current_ref = Parser::parse_member_chain(payload, current_ref);
+            if (!current_ref.has()) {
                 cursor.try_skip_to_next_statement();
                 return nullptr;
             }
-            
-            auto member_token = cursor.current();
-            cursor.skip(); // skip the member name
-            
-            // Create a MemberAccessNode
-            auto member_access = &payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
-            current_ref = AST::make_ref(*member_access);
-            
-            // Check for chained member access ($var->member1->member2)
-            if (cursor.is_type(Token::Type::t_accessorlr)) {
-                cursor.skip(); // skip the second '->' token
-                
-                if (!cursor.is_type(Token::Type::t_identifier)) {
-                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
-                    cursor.try_skip_to_next_statement();
-                    return nullptr;
-                }
-                
-                auto second_member_token = cursor.current();
-                cursor.skip(); // skip the second member name
-                
-                // Create a chained MemberAccessNode
-                member_access = &payload.context.emplace_node<AST::MemberAccessNode>(current_ref, second_member_token);
-            }
-            
+            auto member_access = current_ref.get_ptr<AST::MemberAccessNode>();
+
             // Now expect the assignment operator
             if (!payload.cursor.is_type(Token::Type::t_assign)) {
                 payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
