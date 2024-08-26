@@ -3,7 +3,7 @@
 // these are gathered in one translation unit (rather than scattered inline across the
 // header-only node classes) so the whole clone contract is reviewable in one place and so
 // each node header only needs a one-line `clone(...) override` declaration. Node::clone is
-// pure-virtual, so a new concrete node that forgets to implement it here fails to compile —
+// pure-virtual, so a new concrete node that forgets to implement it here fails to compile;
 // that compile-time exhaustiveness is exactly what the monomorphizer relies on.
 //
 // conventions used below:
@@ -43,7 +43,7 @@ namespace AST
 {
 
 // ---------------------------------------------------------------------------
-// leaves — no owned children, no types to substitute. A shallow copy is enough.
+// leaves - no owned children, no types to substitute. A shallow copy is enough.
 // ---------------------------------------------------------------------------
 
 Node *OperatorNode::clone(CloneContext &cc) const { return cc.shallow(this); }
@@ -57,7 +57,7 @@ Node *NamespaceDeclNode::clone(CloneContext &cc) const { return cc.shallow(this)
 Node *NamespaceNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 
 // ---------------------------------------------------------------------------
-// types — TypeNode::type is const, so the substituted type must be set at construction.
+// types - TypeNode::type is const, so the substituted type must be set at construction.
 // ---------------------------------------------------------------------------
 
 Node *TypeNode::clone(CloneContext &cc) const
@@ -227,7 +227,12 @@ Node *ScopeNode::clone(CloneContext &cc) const
 Node *FunctionDeclNode::clone(CloneContext &cc) const
 {
     FunctionDeclNode *c = cc.shallow(this);
-    c->type_parameters.clear();   // a clone is a concrete instance, never a template
+
+    // a clone is a concrete instance, never a template. this also has to happen because the
+    // shallow copy carried the template's TypeParamDecl pointers, whose owner back-reference
+    // still names the template - the declarations themselves stay owned by the registry arena,
+    // so dropping the pointers frees nothing and dangles nothing
+    c->type_parameters.clear();
 
     // parameters first, so the map is populated before the body rebinds its VarNodes to them.
     for (auto &arg : c->args) arg = cc.child(arg);
@@ -241,9 +246,10 @@ Node *StructDeclNode::clone(CloneContext &cc) const
     StructDeclNode *c = cc.shallow(this);
 
     // rebuild the embedded complex type with substituted property types and no type
-    // parameters (a clone is concrete). Phase 4 reconciles this with the registry's
-    // canonical application ComplexType for codegen identity; for now the clone owns
-    // its own substituted layout.
+    // parameters (a clone is concrete, and the shallow copy's parameter declarations would
+    // otherwise still point their owner back at the template). Phase 4 reconciles this with the
+    // registry's canonical application ComplexType for codegen identity; for now the clone owns
+    // its own substituted layout - see todo/A5-reconcile-instantiation-identity.md.
     ComplexType substituted(c->_complex_type.name.value_or(""));
     for (size_t i = 0; i < c->_complex_type.property_count(); ++i) {
         const auto &prop = c->_complex_type.get_property(i);

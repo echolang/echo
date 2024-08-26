@@ -14,11 +14,11 @@
 // discovers every `*.eco` under ECO_E2E_TESTS_DIR recursively, runs it through the
 // real `echoc run` binary (ECHOC_BINARY), captures stdout+stderr and compares it to the
 // sibling `*.eco.out` golden file. both successful programs and deliberately broken ones
-// are matched the same way — the compiler prints its diagnostics to stdout, so an error
+// are matched the same way - the compiler prints its diagnostics to stdout, so an error
 // test's golden simply contains the expected diagnostic text.
 //
 // the corpus is data driven: adding `.eco`/`.eco.out` pairs (in arbitrarily nested
-// subdirs) needs no CMake reconfigure — discovery happens at runtime.
+// subdirs) needs no CMake reconfigure - discovery happens at runtime.
 
 #ifndef ECHOC_BINARY
 #define ECHOC_BINARY "echoc"
@@ -50,7 +50,7 @@ namespace
             out.append(buf.data(), n);
         }
 
-        // exit code is intentionally ignored — the captured output is the contract
+        // exit code is intentionally ignored - the captured output is the contract
         pclose(pipe);
         return out;
     }
@@ -102,7 +102,7 @@ TEST_CASE("eco end-to-end golden output", "[e2e]")
         {
             if (!fs::exists(expected))
             {
-                FAIL("missing golden file: " << rel << ".out — create it with: ./build/echoc run \"" << eco.string() << "\" > \"" << expected.string() << "\"");
+                FAIL("missing golden file: " << rel << ".out, create it with: ./build/echoc run \"" << eco.string() << "\" > \"" << expected.string() << "\"");
             }
 
             std::string actual = normalize(run_echoc(eco));

@@ -53,7 +53,7 @@ TEST_CASE("Clone reproduces a function body structurally and independently", "[c
     }
 
     // ...that is structurally identical (node_description recurses through every child,
-    // so equality here means the whole subtree — if/while/unary/mutation included — cloned).
+    // so equality here means the whole subtree (if/while/unary/mutation included) cloned).
     REQUIRE(clone->body->node_description() == fn->body->node_description());
     REQUIRE(clone->node_description() == fn->node_description());
 }

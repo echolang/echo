@@ -28,6 +28,13 @@ namespace AST
 
         ~StructDeclNode() {};
 
+        // assigns the declaring namespace. the complex type has to learn it too, so its mangled
+        // name and description can be fully qualified - always set it through here
+        void set_namespace(Namespace *ns) {
+            ast_namespace = ns;
+            _complex_type.ast_namespace = ns;
+        }
+
         const std::string struct_name() const;
 
         const std::string namespaced_struct_name() const;
@@ -38,13 +45,14 @@ namespace AST
             return _type;
         }
 
-        // declares this struct's generic type parameters (e.g. the T, U in `struct Foo<T, U>`).
-        // replaces any previously set list so the symbol pass and full parse stay idempotent.
-        void set_type_parameters(const std::vector<std::string> &names) {
-            _complex_type.type_parameters.clear();
-            for (const auto &name : names) {
-                _complex_type.type_parameters.push_back(ComplexType::TypeParam{name});
-            }
+        // the embedded complex type, which owns this struct's generic type parameters (the T, U
+        // in `struct Foo<T, U>`). exposed so the parser's declaring step can install them
+        ComplexType &complex_type() {
+            return _complex_type;
+        }
+
+        const std::vector<TypeParamDecl *> &type_parameters() const {
+            return _complex_type.type_parameters;
         }
 
         bool is_generic() const {

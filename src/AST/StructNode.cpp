@@ -16,8 +16,9 @@ const std::string AST::StructDeclNode::struct_name() const
 const std::string AST::StructDeclNode::namespaced_struct_name() const
 {
     if (ast_namespace) {
-        if (!ast_namespace->is_root()) {
-            return ast_namespace->name() + "::" + struct_name();
+        std::string ns = ast_namespace->full_name();
+        if (!ns.empty()) {
+            return ns + ECO_NAMESPACE_SEPARATOR + struct_name();
         }
     }
 

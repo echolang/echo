@@ -26,34 +26,6 @@ namespace AST
         constexpr size_t MAX_INSTANCES = 4096;
         constexpr size_t MAX_ROUNDS = 256;
 
-        std::string instance_key(const FunctionDeclNode *tmpl, const std::vector<ValueType> &args)
-        {
-            std::string key = std::to_string(reinterpret_cast<uintptr_t>(tmpl));
-            for (const auto &arg : args) {
-                key += "|" + arg.get_mangled_name();
-            }
-            return key;
-        }
-
-        // true if the type still mentions a type parameter (directly, or as an argument of a
-        // generic application), i.e. it has not been fully resolved to a concrete type yet.
-        bool contains_type_param(const ValueType &type)
-        {
-            if (type.is_type_param()) {
-                return true;
-            }
-            if (type.is_struct() || type.is_class()) {
-                ComplexType *ct = type.get_complex_type();
-                if (ct && ct->is_instantiated()) {
-                    for (const auto &arg : ct->instantiation_args) {
-                        if (contains_type_param(arg)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-            return false;
-        }
     }
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
@@ -68,15 +40,11 @@ namespace AST
         return CodeRef{&mod, file, token.make_slice()};
     }
 
-    void Monomorphizer::unify(const ValueType &param, const ValueType &arg, std::vector<ValueType> &out, std::vector<bool> &resolved)
+    void Monomorphizer::unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out)
     {
         // a bare type parameter binds directly to the argument type
         if (param.is_type_param()) {
-            size_t idx = param.get_type_param_index();
-            if (idx < out.size()) {
-                out[idx] = arg;
-                resolved[idx] = true;
-            }
+            out.bind(param.get_type_param(), arg);
             return;
         }
 
@@ -88,7 +56,7 @@ namespace AST
                 && pct->template_ref == act->template_ref
                 && pct->instantiation_args.size() == act->instantiation_args.size()) {
                 for (size_t i = 0; i < pct->instantiation_args.size(); i++) {
-                    unify(pct->instantiation_args[i], act->instantiation_args[i], out, resolved);
+                    unify(pct->instantiation_args[i], act->instantiation_args[i], out);
                 }
             }
         }
@@ -121,27 +89,65 @@ namespace AST
                 return std::nullopt;
             }
 
-            std::vector<ValueType> out(n, ValueType::make_unknown());
-            std::vector<bool> resolved(n, false);
+            // unify binds in *argument* order; the type-argument list has to come back out in
+            // *declaration* order, because that order is what identifies the instantiation
+            TypeSubstitution inferred;
             for (size_t i = 0; i < call->arguments.size(); i++) {
-                unify(tmpl->args[i]->type(), call->arguments[i]->result_type(), out, resolved);
+                unify(tmpl->args[i]->type(), call->arguments[i]->result_type(), inferred);
             }
-            for (size_t i = 0; i < n; i++) {
-                if (!resolved[i]) {
-                    return std::nullopt;
+
+            // an unbound parameter is only retryable while the call still sits in a template body
+            // that has not been instantiated. once every argument type is concrete, nothing later
+            // can bind it, so this is a real "cannot infer" rather than a not-yet
+            bool arguments_concrete = true;
+            for (auto *argument : call->arguments) {
+                ValueType arg_type = argument->result_type();
+                if (contains_type_param(arg_type) || arg_type.is_void()
+                    || arg_type.get_kind() == ValueTypeKind::t_unknown) {
+                    arguments_concrete = false;
+                    break;
                 }
             }
-            args = std::move(out);
+
+            for (const auto *param : tmpl->type_parameters) {
+                const ValueType *bound = inferred.lookup(param);
+                if (!bound) {
+                    if (arguments_concrete) {
+                        _collector.collect_issue<Issue::UnresolvedTypeParameter>(
+                            code_ref_for(mod, call->token_function_name),
+                            "Cannot infer type parameter '" + param->name + "' of generic '"
+                                + tmpl->func_name() + "' from the call arguments; specify it explicitly, e.g. "
+                                + tmpl->func_name() + "<...>(...)");
+                        is_error = true;
+                    }
+                    return std::nullopt;
+                }
+                args.push_back(*bound);
+            }
         }
 
         // if any argument is still non-concrete, this call lives inside an un-instantiated
         // template body (its type arguments mention the enclosing template's parameters, or an
         // operand's type is still void/unknown). skip it silently and revisit once the enclosing
         // template is instantiated, which substitutes those to concrete types. this guard is why
-        // e.g. the inner Box<T>(...) in a generic factory is not instantiated as Box<T> — only as
+        // e.g. the inner Box<T>(...) in a generic factory is not instantiated as Box<T> - only as
         // Box<int> after the factory is cloned for int.
         for (const auto &arg : args) {
             if (contains_type_param(arg) || arg.is_void() || arg.get_kind() == ValueTypeKind::t_unknown) {
+                return std::nullopt;
+            }
+        }
+
+        // enforce any type-parameter constraints (e.g. `<T: numeric>`). both the explicit
+        // and inferred paths converge on `args`, so this single check covers both.
+        for (size_t i = 0; i < n; i++) {
+            const auto *param = tmpl->type_parameters[i];
+            if (param->is_constrained() && !param->allows(args[i])) {
+                _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(code_ref_for(mod, call->token_function_name),
+                    "Type parameter '" + param->name + "' of '" + tmpl->func_name() +
+                    "' is constrained to '" + param->constraint_spelling +
+                    "' but was given '" + args[i].get_type_desciption() + "'");
+                is_error = true;
                 return std::nullopt;
             }
         }
@@ -151,7 +157,7 @@ namespace AST
 
     FunctionDeclNode *Monomorphizer::get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args)
     {
-        std::string key = instance_key(tmpl, args);
+        InstanceKey key = std::make_tuple(static_cast<const FunctionDeclNode *>(tmpl), args);
         if (auto it = _func_instances.find(key); it != _func_instances.end()) {
             if (_trace) {
                 std::cout << "[mono]   reuse existing instance of '" << tmpl->func_name() << "'" << std::endl;
@@ -173,7 +179,7 @@ namespace AST
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(*home, tmpl->name_token.value()),
                     "instantiation limit (" + std::to_string(MAX_INSTANCES) + ") hit resolving generic '"
-                        + tmpl->func_name() + "' — likely non-terminating generic instantiation");
+                        + tmpl->func_name() + "': likely non-terminating generic instantiation");
                 _instance_cap_reported = true;
             }
             return nullptr;
@@ -183,8 +189,15 @@ namespace AST
             std::cout << "[mono]   create new instance of '" << tmpl->func_name() << "'" << std::endl;
         }
 
-        // clone the template into its home module, substituting T -> concrete throughout
-        CloneContext cc(home->nodes, args, _collector.type_registry);
+        // clone the template into its home module, substituting T -> concrete throughout.
+        // an instance must be fully concrete, so every one of the template's parameters has to be
+        // bound: positional() asserts the arity, and the loop below asserts nothing is left over
+        TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
+        for (const auto *param : tmpl->type_parameters) {
+            assert(subst.covers(param) && "instantiating a template with an incomplete substitution");
+        }
+
+        CloneContext cc(home->nodes, subst, _collector.type_registry);
         auto *instance = static_cast<FunctionDeclNode *>(tmpl->clone(cc));
         _func_instances[key] = instance;
 
@@ -242,7 +255,7 @@ namespace AST
                             _collector.collect_issue<Issue::GenericError>(
                                 code_ref_for(mod, call->token_function_name),
                                 "monomorphization did not converge after " + std::to_string(MAX_ROUNDS)
-                                    + " rounds — generic '" + call->decl->func_name() + "' could not be resolved");
+                                    + " rounds: generic '" + call->decl->func_name() + "' could not be resolved");
                             reported = true;
                             break;
                         }
@@ -348,7 +361,24 @@ namespace AST
         std::unordered_set<const FunctionDeclNode *> instances;
         for (const auto &[key, instance] : _func_instances) {
             instances.insert(instance);
-            instance_lines.push_back("- " + describe_signature(instance));
+
+            // the key carries what the signature alone cannot: which template this came from and
+            // which parameter took which type. without it a dump of `Box(int32) -> Box<int32>`
+            // never says it is an instance of Box<T> at all
+            const FunctionDeclNode *tmpl = std::get<0>(key);
+            const std::vector<ValueType> &args = std::get<1>(key);
+
+            std::string bindings;
+            for (size_t i = 0; i < args.size(); i++) {
+                if (i > 0) {
+                    bindings += ", ";
+                }
+                bindings += (i < tmpl->type_parameters.size() ? tmpl->type_parameters[i]->name : "?")
+                    + " = " + args[i].get_type_desciption();
+            }
+
+            instance_lines.push_back("- " + describe_signature(instance)
+                + "  [" + tmpl->func_name() + "<" + bindings + ">]");
         }
 
         // rewired call sites: calls whose decl now points at one of those instances
@@ -372,7 +402,7 @@ namespace AST
         }
 
         // struct instantiations: the concrete ComplexTypes interned by the type registry. skip any
-        // that still mention a type parameter (Box<T0>) — those are template-body artifacts, not the
+        // that still mention a type parameter (Box<T>) - those are template-body artifacts, not the
         // concrete instantiations (Box<int32>) the user cares about.
         std::vector<std::string> struct_lines;
         for (const ComplexType *ct : _collector.type_registry.instantiations()) {

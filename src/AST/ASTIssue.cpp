@@ -79,3 +79,8 @@ ISSUE_MESSAGE_FNC(UnresolvedTypeParameter)
 {
     return _message;
 }
+
+ISSUE_MESSAGE_FNC(UnsatisfiedTypeConstraint)
+{
+    return _message;
+}

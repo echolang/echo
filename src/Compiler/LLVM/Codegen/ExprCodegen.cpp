@@ -384,6 +384,30 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
 void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
 {
+    node.expr->accept(*_ctx.visitor);
+
+    auto value = _ctx.value_stack.top();
+    _ctx.value_stack.pop();
+
+    auto type = node.expr->result_type();
+
+    switch (node.token_operator.type()) {
+        case Token::Type::t_op_sub:
+            if (type.is_floating_type()) {
+                _ctx.value_stack.push(_ctx.builder->CreateFNeg(value));
+            }
+            else if (type.is_integer_type()) {
+                _ctx.value_stack.push(_ctx.builder->CreateNeg(value));
+            }
+            else {
+                throw _ctx.error(fmt::format("unary '-' is not supported for operand type '{}' {}",
+                    type.get_type_desciption(), _ctx.function_context()));
+            }
+            break;
+        default:
+            throw _ctx.error(fmt::format("unsupported unary operator '{}' {}",
+                node.token_operator.value(), _ctx.function_context()));
+    }
 }
 
 void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
@@ -479,8 +503,8 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
 
         // evaluate every argument uniformly. arguments bound to pointer parameters were
         // already rewritten into VarPtrExprNode by the coercion pass (FuncCallParser /
-        // Monomorphizer), so accepting them leaves the variable's address on the stack —
-        // no per-argument kind sniffing needed here
+        // Monomorphizer), so accepting them leaves the variable's address on the stack,
+        // so no per-argument kind sniffing is needed here
         std::vector<llvm::Value *> args;
         for (auto &arg : node.arguments) {
             arg->accept(*_ctx.visitor);

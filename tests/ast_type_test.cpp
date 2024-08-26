@@ -1,11 +1,22 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <AST/ASTNamespace.h>
+#include <AST/ASTTypeParam.h>
 #include <AST/ASTValueType.h>
 
 using namespace AST;
 
 namespace {
     ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
+
+    // declares a type parameter on `owner`, the way the parser's declaring step does, so the
+    // ordinal and the owner back-reference stay consistent
+    TypeParamDecl *declare_param(TypeParamRegistry &params, ComplexType &owner, const std::string &name)
+    {
+        TypeParamDecl *decl = params.declare(name, owner.type_parameters.size());
+        owner.add_type_parameter(decl);
+        return decl;
+    }
 }
 
 TEST_CASE("Default-constructed ValueType is well-defined unknown", "[types]")
@@ -21,18 +32,26 @@ TEST_CASE("Default-constructed ValueType is well-defined unknown", "[types]")
 TEST_CASE("substitute_type resolves a bare type parameter", "[types][generics]")
 {
     TypeRegistry reg;
-    TypeSubstitution subst{ prim(ValueTypePrimitive::t_int32) };
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = declare_param(params, box, "T");
 
-    ValueType resolved = substitute_type(ValueType::make_type_param(0), subst, reg);
+    TypeSubstitution subst = TypeSubstitution::positional(box.type_parameters, { prim(ValueTypePrimitive::t_int32) });
+
+    ValueType resolved = substitute_type(ValueType::make_type_param(t), subst, reg);
     REQUIRE(resolved == prim(ValueTypePrimitive::t_int32));
 }
 
 TEST_CASE("substitute_type carries const/pointer flags onto the resolved type", "[types][generics]")
 {
     TypeRegistry reg;
-    TypeSubstitution subst{ prim(ValueTypePrimitive::t_int32) };
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = declare_param(params, box, "T");
 
-    ValueType param = ValueType::make_pointer(ValueType::make_type_param(0));
+    TypeSubstitution subst = TypeSubstitution::positional(box.type_parameters, { prim(ValueTypePrimitive::t_int32) });
+
+    ValueType param = ValueType::make_pointer(ValueType::make_type_param(t));
     param.set_const(true);
 
     ValueType resolved = substitute_type(param, subst, reg);
@@ -44,7 +63,7 @@ TEST_CASE("substitute_type carries const/pointer flags onto the resolved type", 
 TEST_CASE("substitute_type leaves primitives and concrete types unchanged", "[types][generics]")
 {
     TypeRegistry reg;
-    TypeSubstitution subst{ prim(ValueTypePrimitive::t_float64) };
+    TypeSubstitution subst;
 
     REQUIRE(substitute_type(prim(ValueTypePrimitive::t_bool), subst, reg)
             == prim(ValueTypePrimitive::t_bool));
@@ -59,9 +78,10 @@ TEST_CASE("TypeRegistry interns instantiations by (template, args) identity", "[
 {
     TypeRegistry reg;
 
+    TypeParamRegistry params;
     ComplexType box("Box");               // struct Box<T> { T value; }
-    box.type_parameters.push_back({"T"});
-    box.add_property("value", ValueType::make_type_param(0));
+    TypeParamDecl *t = declare_param(params, box, "T");
+    box.add_property("value", ValueType::make_type_param(t));
 
     ComplexType* box_i1 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
     ComplexType* box_i2 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
@@ -88,16 +108,17 @@ TEST_CASE("substitute_type resolves nested generic applications", "[types][gener
     TypeRegistry reg;
 
     // struct Bar<U> { U u; }
+    TypeParamRegistry params;
     ComplexType bar("Bar");
-    bar.type_parameters.push_back({"U"});
-    bar.add_property("u", ValueType::make_type_param(0));
-
-    // the application Bar<T> (T = the enclosing param, index 0).
-    ComplexType* bar_of_T = reg.get_or_create_instantiation(&bar, { ValueType::make_type_param(0) });
+    TypeParamDecl *u = declare_param(params, bar, "U");
+    bar.add_property("u", ValueType::make_type_param(u));
 
     // struct Foo<T> { Bar<T> inner; }
     ComplexType foo("Foo");
-    foo.type_parameters.push_back({"T"});
+    TypeParamDecl *t = declare_param(params, foo, "T");
+
+    // the application Bar<T>, i.e. Bar instantiated with Foo's own parameter
+    ComplexType* bar_of_T = reg.get_or_create_instantiation(&bar, { ValueType::make_type_param(t) });
     foo.add_property("inner", ValueType::make_struct(bar_of_T));
 
     // instantiate Foo<int32>: inner must become Bar<int32>, whose own property is int32.
@@ -115,4 +136,96 @@ TEST_CASE("substitute_type resolves nested generic applications", "[types][gener
     // the Bar<int32> reached through Foo<int32> is the same interned type as one built directly.
     ComplexType* bar_int_direct = reg.get_or_create_instantiation(&bar, { prim(ValueTypePrimitive::t_int32) });
     REQUIRE(inner_ct == bar_int_direct);
+}
+
+TEST_CASE("Mangled names distinguish same-named types from different namespaces", "[types]")
+{
+    NamespaceManager namespaces;
+
+    ComplexType foo_a("Foo");
+    foo_a.ast_namespace = &namespaces.retrieve("a");
+
+    ComplexType foo_b("Foo");
+    foo_b.ast_namespace = &namespaces.retrieve("b");
+
+    ValueType type_a = ValueType::make_struct(&foo_a);
+    ValueType type_b = ValueType::make_struct(&foo_b);
+
+    REQUIRE(type_a.get_mangled_name() != type_b.get_mangled_name());
+
+    // the mangled name is stable, nothing about it is derived from the type's address
+    REQUIRE(type_a.get_mangled_name() == ValueType::make_struct(&foo_a).get_mangled_name());
+
+    // the namespace also shows up in diagnostics
+    REQUIRE(type_a.get_type_desciption() == "a::Foo");
+    REQUIRE(type_b.get_type_desciption() == "b::Foo");
+}
+
+TEST_CASE("Mangled names are unambiguous across namespace depths", "[types]")
+{
+    NamespaceManager namespaces;
+
+    // a::b::Foo, a::Foo and a root struct literally named "a_b_Foo" must all stay distinct,
+    // which is what the length prefixes in the mangled token buy us
+    ComplexType nested("Foo");
+    nested.ast_namespace = &namespaces.retrieve("a::b");
+
+    ComplexType shallow("Foo");
+    shallow.ast_namespace = &namespaces.retrieve("a");
+
+    ComplexType flat("a_b_Foo");
+    flat.ast_namespace = &namespaces.root();
+
+    std::string nested_mangled = ValueType::make_struct(&nested).get_mangled_name();
+    std::string shallow_mangled = ValueType::make_struct(&shallow).get_mangled_name();
+    std::string flat_mangled = ValueType::make_struct(&flat).get_mangled_name();
+
+    REQUIRE(nested_mangled != shallow_mangled);
+    REQUIRE(nested_mangled != flat_mangled);
+    REQUIRE(shallow_mangled != flat_mangled);
+
+    REQUIRE(ValueType::make_struct(&nested).get_type_desciption() == "a::b::Foo");
+
+    // a type in the root namespace mangles like an unqualified one, no namespace wrapper
+    ComplexType rootless("Foo");
+    REQUIRE(flat_mangled == "MLC7a_b_Foo");
+    REQUIRE(ValueType::make_struct(&rootless).get_mangled_name() == "MLC3Foo");
+    REQUIRE(ValueType::make_struct(&rootless).get_type_desciption() == "Foo");
+}
+
+TEST_CASE("Generic instantiations mangle their arguments recursively", "[types][generics]")
+{
+    NamespaceManager namespaces;
+    TypeRegistry reg;
+
+    ComplexType foo_a("Foo");
+    foo_a.ast_namespace = &namespaces.retrieve("a");
+
+    ComplexType foo_b("Foo");
+    foo_b.ast_namespace = &namespaces.retrieve("b");
+
+    ComplexType box("Box");
+    box.ast_namespace = &namespaces.retrieve("c");
+    TypeParamRegistry params;
+    TypeParamDecl *t = declare_param(params, box, "T");
+    box.add_property("item", ValueType::make_type_param(t));
+
+    ComplexType *box_of_a = reg.get_or_create_instantiation(&box, { ValueType::make_struct(&foo_a) });
+    ComplexType *box_of_b = reg.get_or_create_instantiation(&box, { ValueType::make_struct(&foo_b) });
+
+    std::string mangled_a = ValueType::make_struct(box_of_a).get_mangled_name();
+    std::string mangled_b = ValueType::make_struct(box_of_b).get_mangled_name();
+
+    // Box<a::Foo> and Box<b::Foo> are different types - the monomorphizer keys its instance
+    // cache on these strings, so a collision here would hand out the wrong instance
+    REQUIRE(mangled_a != mangled_b);
+
+    // an instantiation inherits its template's namespace
+    REQUIRE(box_of_a->ast_namespace == box.ast_namespace);
+    REQUIRE(ValueType::make_struct(box_of_a).get_type_desciption() == "c::Box<a::Foo>");
+
+    // the display name is no longer what gets mangled, so no symbol-hostile characters leak in
+    for (auto illegal : { '<', '>', ',', ' ', '*', ':' }) {
+        REQUIRE(mangled_a.find(illegal) == std::string::npos);
+    }
 }

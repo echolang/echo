@@ -1,0 +1,35 @@
+// namespace-qualified type names: a type from another namespace can be named explicitly
+// as a parameter, a return type, a property and a generic argument (see todo/B7)
+
+namespace geometry;
+
+struct Point { int $x; int $y; }
+
+function make(int $x, int $y) : Point
+{
+    return Point($x, $y);
+}
+
+namespace app;
+
+struct Box<T> { T $item; }
+
+struct Canvas { geometry::Point $origin; }
+
+function manhattan(geometry::Point $p) : int
+{
+    return $p->x + $p->y;
+}
+
+function boxed_manhattan(geometry::Point $p) : int
+{
+    $box = Box<geometry::Point>($p);
+    return $box->item->x + $box->item->y;
+}
+
+geometry::Point $p = geometry::make(3, 4);
+echo manhattan($p);
+echo boxed_manhattan($p);
+
+Canvas $canvas = Canvas($p);
+echo $canvas->origin->y;

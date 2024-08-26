@@ -21,7 +21,7 @@ namespace AST
     struct CloneContext
     {
         NodeCollection &nodes;              // where cloned nodes are emplaced (owner)
-        const TypeSubstitution &subst;      // type-parameter index -> concrete type
+        const TypeSubstitution &subst;      // type-parameter declaration -> concrete type
         TypeRegistry &registry;             // interns generic applications during substitution
 
         std::unordered_map<const Node *, Node *> map;  // original -> clone
@@ -40,7 +40,7 @@ namespace AST
         }
 
         // construct a fresh T from explicit constructor arguments (used where a shallow copy
-        // won't do — e.g. TypeNode's type is const and must be set at construction). Records
+        // won't do - e.g. TypeNode's type is const and must be set at construction). Records
         // the old->new mapping against `from`.
         template <class T, class... Args>
         T *make(const Node *from, Args &&...args) {

@@ -8,6 +8,7 @@
 #include "ASTFile.h"
 #include "ASTCodeRef.h"
 #include "ASTNamespace.h"
+#include "ASTValueType.h"
 
 namespace AST
 {  
@@ -21,8 +22,11 @@ namespace AST
 
         ScopeNode *scope_ptr = nullptr;
         
-        // Type parameters for the current function being parsed (for generics)
-        std::vector<std::string> current_type_parameters;
+        // innermost-last stack of the generic type parameters currently in scope. a stack rather
+        // than one flat list so a generic member of a generic struct sees both its own parameters
+        // and its owner's — lookup walks outward, and leaving an inner scope restores the outer
+        // one instead of wiping everything
+        std::vector<std::vector<TypeParamDecl *>> type_param_scopes;
 
         inline ScopeNode &scope() const {
             assert(scope_ptr);
@@ -33,18 +37,22 @@ namespace AST
         void push_scope(ScopeNode &scope);
         void pop_scope();
         
-        // Type parameter management for generic functions
-        void set_type_parameters(const std::vector<std::string>& params) {
-            current_type_parameters = params;
+        // enters a nested type-parameter scope. pushing an empty scope is fine and normal — a
+        // non-generic member of a generic owner still needs its own frame so leaving it cannot
+        // disturb the owner's parameters
+        void push_type_param_scope(const std::vector<TypeParamDecl *>& params) {
+            type_param_scopes.push_back(params);
         }
-        
-        void clear_type_parameters() {
-            current_type_parameters.clear();
+
+        void pop_type_param_scope() {
+            assert(!type_param_scopes.empty());
+            type_param_scopes.pop_back();
         }
-        
-        bool is_type_parameter(const std::string& name) const {
-            return std::find(current_type_parameters.begin(), current_type_parameters.end(), name) != current_type_parameters.end();
-        }
+
+        // resolves a name against the type parameters in scope, innermost first, so an inner
+        // parameter shadows an outer one of the same name. null when the name is not a type
+        // parameter here. defined out of line because it reads TypeParamDecl::name
+        const TypeParamDecl *find_type_param(const std::string& name) const;
 
         template <typename T, typename... Args>
             requires NodeTypeProvider<T>
@@ -85,6 +93,27 @@ namespace AST
          */
         TokenReference make_virtual_token(const std::string &value, Token::Type type, const TokenReference &ref) {
             return make_virtual_token(value, type, ref.line(), ref.char_offset());
+        }
+    };
+
+    // scopes a type-parameter frame to a parser function, so every early return unwinds it.
+    // the one guard for all declaration parsers — a hand-rolled copy per parser is how the
+    // previous flat list ended up being cleared instead of restored
+    struct TypeParamScope
+    {
+        Context &context;
+
+        TypeParamScope(Context &context, const std::vector<TypeParamDecl *> &params) :
+            context(context)
+        {
+            context.push_type_param_scope(params);
+        }
+
+        TypeParamScope(const TypeParamScope &) = delete;
+        TypeParamScope &operator=(const TypeParamScope &) = delete;
+
+        ~TypeParamScope() {
+            context.pop_type_param_scope();
         }
     };
 };

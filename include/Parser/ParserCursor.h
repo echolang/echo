@@ -134,11 +134,11 @@ namespace Parser
         inline void consume_generic_close() {
             if (is_type(Token::Type::t_op_shr)) {
                 if (_shr_split_index == _index) {
-                    // second '>' of this '>>' — done with it
+                    // second '>' of this '>>' - done with it
                     _shr_split_index = (size_t)-1;
                     skip();
                 } else {
-                    // first '>' of this '>>' — leave the token in place for the outer level
+                    // first '>' of this '>>' - leave the token in place for the outer level
                     _shr_split_index = _index;
                 }
                 return;

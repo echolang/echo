@@ -259,11 +259,21 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     }
     else if (type.is_type_param()) {
         // a resolved instance never carries a type parameter; reaching here is a compiler bug
-        // (a template escaped monomorphization) rather than a user error.
+        // (a template escaped monomorphization) rather than a user error. name the parameter and
+        // where it was declared, so the report points at the generic that failed to instantiate
+        // instead of leaving the reader to guess which type carried it
+        const AST::TypeParamDecl *param = type.get_type_param();
+
+        std::string declared_at;
+        if (param->name_token.has_value()) {
+            declared_at = fmt::format(" declared at {}:{}",
+                param->name_token.value().line(), param->name_token.value().char_offset());
+        }
+
         throw _ctx.error(fmt::format(
-            "Cannot lower unresolved generic type parameter '{}' {} — generics must be "
+            "Cannot lower unresolved generic type parameter '{}'{} {}: generics must be "
             "instantiated with concrete types before compilation",
-            type.get_type_desciption(), _ctx.function_context()));
+            param->describe(), declared_at, _ctx.function_context()));
     }
     else {
         throw _ctx.error(fmt::format(

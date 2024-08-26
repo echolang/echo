@@ -20,6 +20,15 @@ namespace {
         }
         return out;
     }
+
+    bool has_issue_containing(const Bundle &bundle, const std::string &needle) {
+        for (const auto &issue : bundle.collector.issues) {
+            if (issue->message().find(needle) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 // the parsed bundle is monomorphized by the test harness, so these assert the post-pass shape:
@@ -195,4 +204,141 @@ TEST_CASE("generic call with wrong explicit arity reports an issue", "[generics]
         "function id<T>(T $x): T { return $x; }\n"
         "echo id<int, float>(5);\n",
         "Wrong number of type arguments for generic function 'id'");
+}
+
+TEST_CASE("constrained type parameter accepts an allowed type", "[generics]")
+{
+    // `numeric` admits every integer and floating type, so int and float both resolve
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function id<T: numeric>(T $x): T { return $x; }\n"
+        "echo id(5);\n"
+        "echo id(2.5);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "id");
+    REQUIRE(calls.size() == 2);
+    REQUIRE(calls[0]->decl != calls[1]->decl);
+}
+
+TEST_CASE("constrained type parameter rejects a disallowed type", "[generics]")
+{
+    // bool is not numeric, so the call must fail the constraint
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function id<T: numeric>(T $x): T { return $x; }\n"
+        "echo id(true);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Type parameter 'T' of 'id' is constrained to 'numeric'"));
+}
+
+TEST_CASE("union constraint admits each listed atom exactly", "[generics]")
+{
+    // float|float64 accepts both floats but rejects int (exact match, no widening)
+    auto ok = EchoTests::tests_make_parsed_bundle(
+        "function f<T: float | float64>(T $x): T { return $x; }\n"
+        "echo f(2.5);\n");
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
+
+    auto bad = EchoTests::tests_make_parsed_bundle(
+        "function f<T: float | float64>(T $x): T { return $x; }\n"
+        "echo f(5);\n");
+    REQUIRE(bad->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bad, "constrained to 'float|float64'"));
+}
+
+TEST_CASE("explicit type argument is constraint-checked", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f<T: floating>(T $x): T { return $x; }\n"
+        "echo f<int>(5);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "constrained to 'floating'"));
+}
+
+TEST_CASE("unknown constraint atom is a parse error", "[generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f<T: bogus>(T $x): T { return $x; }\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "Unknown type or alias 'bogus'"));
+}
+
+TEST_CASE("constrained generic struct rejects a disallowed argument", "[generics]")
+{
+    auto ok = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T: numeric> { T $value; }\n"
+        "$b = Box<int>(5);\n");
+    REQUIRE_FALSE(ok->collector.has_critical_issues());
+
+    auto bad = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T: numeric> { T $value; }\n"
+        "$b = Box<bool>(true);\n");
+    REQUIRE(bad->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bad, "Type parameter 'T' of 'Box' is constrained to 'numeric'"));
+}
+
+TEST_CASE("prefix unary negation resolves in a generic function", "[generics]")
+{
+    // a generic body using prefix '-' used to hand the shunting yard a null lhs
+    // and crash; it must now monomorphize cleanly for both int and float args
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function abs<T>(T $value): T {\n"
+        "    if ($value < 0) { return -$value; }\n"
+        "    return $value;\n"
+        "}\n"
+        "echo abs(-5);\n"
+        "echo abs(-3.5);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("Two generic structs in one program keep their type parameters apart", "[generics]")
+{
+    // Box<T> and Pair<A, B> both declare a first type parameter. under an ordinal-only
+    // representation those compared equal, so this is the end-to-end lock on decl identity
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T> { T $value; }\n"
+        "struct Pair<A, B> { A $first; B $second; }\n"
+        "$p = Pair<Box<int>, Box<float>>(Box<int>(1), Box<float>(2.5));\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "Pair");
+    REQUIRE(calls.size() >= 1);
+
+    auto *ctor = calls[0]->decl;
+    REQUIRE(ctor != nullptr);
+    REQUIRE_FALSE(ctor->is_generic());
+
+    auto ret = ctor->get_return_type();
+    REQUIRE(ret.is_struct());
+
+    // the two members are distinct concrete Box instantiations, not one aliased type
+    auto *pair_ct = ret.get_complex_type();
+    REQUIRE(pair_ct->is_instantiated());
+
+    ValueType first = pair_ct->get_property_type("first");
+    ValueType second = pair_ct->get_property_type("second");
+    REQUIRE(first.is_struct());
+    REQUIRE(second.is_struct());
+    REQUIRE_FALSE(first == second);
+
+    REQUIRE(first.get_complex_type()->get_property_type("value") == prim(ValueTypePrimitive::t_int32));
+    REQUIRE(second.get_complex_type()->get_property_type("value") == prim(ValueTypePrimitive::t_float32));
+}
+
+TEST_CASE("An unresolvable generic parameter is named in the diagnostic", "[generics]")
+{
+    // a type parameter that inference cannot reach: nothing in the argument list mentions U.
+    // the message has to name U rather than a synthetic ordinal
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function pick<T, U>(T $x): T { return $x; }\n"
+        "$v = pick(1);\n");
+
+    REQUIRE(has_issue_containing(*bundle, "'U'"));
 }

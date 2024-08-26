@@ -9,6 +9,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTTypeParam.h"
 
 namespace AST
 {  
@@ -20,6 +21,7 @@ namespace AST
         OperatorRegistry operators = OperatorRegistry();
         NamespaceManager namespaces = NamespaceManager();
         TypeRegistry type_registry = TypeRegistry();
+        TypeParamRegistry type_params = TypeParamRegistry();
         
         // create a registry for the native scalar cast types
         

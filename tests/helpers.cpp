@@ -72,6 +72,31 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string con
     return bundle;
 }
 
+std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(const std::vector<std::string> &file_contents)
+{
+    auto bundle = std::make_unique<AST::Bundle>();
+    auto module_handle = bundle->modules.add_module("test");
+
+    std::vector<Parser::ModuleParser::InputFile> files;
+    for (size_t i = 0; i < file_contents.size(); i++) {
+        files.push_back(Parser::ModuleParser::InputFile("/tmp/testfile" + std::to_string(i) + ".eco", file_contents[i]));
+    }
+
+    auto input = Parser::ModuleParser::InputPayload {
+        .files = files,
+        .module = bundle->modules.get_module(module_handle),
+        .collector = bundle->collector
+    };
+
+    auto module_parser = Parser::ModuleParser();
+    module_parser.parse_input(input);
+
+    AST::Monomorphizer(*bundle).run();
+    AST::TypeChecker(*bundle).run();
+
+    return bundle;
+}
+
 std::string EchoTests::tests_make_node_description(std::string content)
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(content);

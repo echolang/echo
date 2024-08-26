@@ -3,6 +3,7 @@
 
 #include "Debugging.h"
 
+#include <algorithm>
 #include <vector>
 
 std::vector<std::string> split_namespace(const std::string &str) {
@@ -18,6 +19,34 @@ std::vector<std::string> split_namespace(const std::string &str) {
     parts.push_back(str.substr(start)); // add the last part
 
     return parts;
+}
+
+std::vector<std::string> AST::Namespace::path_segments() const
+{
+    std::vector<std::string> segments;
+
+    // the root carries an empty name and must not contribute a segment
+    for (const Namespace *ns = this; ns != nullptr && !ns->is_root(); ns = ns->parent()) {
+        segments.push_back(ns->_name);
+    }
+
+    std::reverse(segments.begin(), segments.end());
+
+    return segments;
+}
+
+std::string AST::Namespace::full_name() const
+{
+    std::string buffer;
+
+    for (const auto &segment : path_segments()) {
+        if (!buffer.empty()) {
+            buffer += ECO_NAMESPACE_SEPARATOR;
+        }
+        buffer += segment;
+    }
+
+    return buffer;
 }
 
 AST::Namespace &AST::NamespaceManager::retrieve(const std::string &name)

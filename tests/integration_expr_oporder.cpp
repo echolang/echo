@@ -88,3 +88,19 @@ TEST_CASE( "math operations", "[Integration][Expr][OpOrder]" )
         "binexp<int32>(literal<int32>(16) >> binexp<int32>(literal<int32>(1) + literal<int32>(1)))"
     );
 }
+
+TEST_CASE( "prefix unary negation", "[Integration][Expr][OpOrder]" )
+{
+    // prefix '-' on a parenthesized subexpression wraps the whole group
+    REQUIRE_NODE_DESC_EXPR(
+        "-(2 + 1);",
+        "unexp(-binexp<int32>(literal<int32>(2) + literal<int32>(1)))"
+    );
+
+    // a prefix '-' in operand position after a binary operator is unary, not a
+    // second binary operator with a missing left-hand side
+    REQUIRE_NODE_DESC_EXPR(
+        "3 * -(1 + 1);",
+        "binexp<int32>(literal<int32>(3) * unexp(-binexp<int32>(literal<int32>(1) + literal<int32>(1))))"
+    );
+}

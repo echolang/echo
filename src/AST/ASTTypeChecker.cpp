@@ -17,27 +17,6 @@
 namespace AST
 {
 
-// true if the type is, or structurally contains, an unresolved generic type parameter. after
-// monomorphization a concrete context should be free of these; anything left is a resolution bug
-// worth a located diagnostic rather than a silent void or a downstream codegen throw.
-static bool contains_type_param(const ValueType &type)
-{
-    if (type.is_type_param()) {
-        return true;
-    }
-    if (type.is_struct() || type.is_class()) {
-        ComplexType *ct = type.get_complex_type();
-        if (ct) {
-            for (const auto &arg : ct->instantiation_args) {
-                if (contains_type_param(arg)) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
 // resolves the value type of a member-access base (either a variable reference or a nested member
 // access). returns an unknown type for any other base kind, which callers treat as "don't check".
 static ValueType base_type_of(MemberAccessNode &node)

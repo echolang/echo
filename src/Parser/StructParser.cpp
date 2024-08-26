@@ -15,18 +15,6 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 {
     auto &cursor = payload.cursor;
 
-    // RAII guard to clear the struct's type parameters from the context on exit,
-    // mirroring the function-decl guard so property types resolve T -> t_generic.
-    struct TypeParameterGuard {
-        AST::Context &context;
-        bool active = false;
-        TypeParameterGuard(AST::Context &ctx) : context(ctx) {}
-        void activate() { active = true; }
-        ~TypeParameterGuard() {
-            if (active) context.clear_type_parameters();
-        }
-    } guard(payload.context);
-
     if (!cursor.is_type(Token::Type::t_struct)) {
         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_struct, cursor.current().type());
         cursor.try_skip_to_next_statement();
@@ -47,7 +35,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     cursor.skip();
 
     // optional generic type parameters: struct Foo<T, U> { ... }
-    std::vector<std::string> type_parameters = parse_type_param_list(payload);
+    std::vector<ParsedTypeParam> parsed_type_params = parse_type_param_list(payload);
 
     // next token needs to be an open brace
     if (!cursor.is_type(Token::Type::t_open_brace)) {
@@ -76,15 +64,13 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     }
 
     // create the struct node
-    struct_node->ast_namespace = payload.context.current_namespace;
+    struct_node->set_namespace(payload.context.current_namespace);
 
-    // record the generic type parameters (idempotent across the symbol + full passes) and,
+    // declare the generic type parameters (idempotent across the symbol + full passes) and,
     // when the struct is generic, make them resolvable while parsing its property types.
-    struct_node->set_type_parameters(type_parameters);
-    if (!type_parameters.empty()) {
-        payload.context.set_type_parameters(type_parameters);
-        guard.activate();
-    }
+    declare_type_parameters(payload, struct_node->complex_type(), parsed_type_params);
+    const std::vector<AST::TypeParamDecl *> &type_parameters = struct_node->type_parameters();
+    AST::TypeParamScope type_param_scope(payload.context, type_parameters);
 
     // the type a constructor returns: the plain struct for a non-generic one, or the
     // self-application Foo<T...> for a generic one. giving the constructor generic type
@@ -93,8 +79,8 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     if (struct_node->is_generic()) {
         auto *template_ct = ctor_return_type.get_complex_type();
         std::vector<AST::ValueType> self_args;
-        for (size_t i = 0; i < template_ct->type_parameters.size(); i++) {
-            self_args.push_back(AST::ValueType::make_type_param(i));
+        for (const auto *param : template_ct->type_parameters) {
+            self_args.push_back(AST::ValueType::make_type_param(param));
         }
         ctor_return_type = AST::ValueType::make_struct(
             payload.collector.type_registry.get_or_create_instantiation(template_ct, self_args));
@@ -122,8 +108,9 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             cursor.is_type(Token::Type::t_const) || // const keyword always starts a vardecl
             cursor.is_type(Token::Type::t_ptr) || // ptr keyword also indicates a vardecl
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) || 
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon }) ||
+            starts_qualified_vardecl(payload) // a::b::Foo $prop
         ) {
             auto var = parse_varexpr(payload, &structscope);
 
@@ -146,6 +133,10 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
             auto &ctor_decl = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
             ctor_decl.ast_namespace = payload.context.current_namespace;
+
+            // share the struct's parameter declarations rather than declaring its own: the ctor's
+            // return type is the struct's self-application Foo<T>, so a substitution built from
+            // this list has to bind the very same T that type mentions
             ctor_decl.type_parameters = type_parameters;
 
             auto &ctor_return = payload.context.emplace_node<AST::TypeNode>(ctor_return_type);
@@ -242,6 +233,8 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     // this constructor will take parameters for each property and initialize them
     auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
     default_ctor.ast_namespace = payload.context.current_namespace;
+
+    // shares the struct's parameter declarations, same reason as the explicit constructor above
     default_ctor.type_parameters = type_parameters;
 
     // create a type node for the return type

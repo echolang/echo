@@ -13,6 +13,7 @@
 #include "Parser/NamespaceParser.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/StructParser.h"
+#include "Parser/TypeParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
 {
@@ -93,8 +94,9 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
             cursor.is_type(Token::Type::t_ptr) || // ptr keyword also indicates a vardecl
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_accessorlr }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) || 
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon }) ||
+            starts_qualified_vardecl(payload) // a::b::Foo $foo
         ) {
             parse_varexpr(payload, &scope_node);
         }

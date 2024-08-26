@@ -97,11 +97,10 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             return;
         }
 
-        // Skip instantiated generic functions that don't have bodies yet
-        // This is a temporary measure while we implement proper body cloning
-        if (!node.is_generic() && node.type_parameters.empty()) {
-            // This is likely an instantiated generic function without a body
-            // Skip compilation for now
+        // skip instantiated generic functions that don't have bodies yet.
+        // this is a temporary measure while we implement proper body cloning
+        // (is_generic() is exactly !type_parameters.empty(), so one check covers it)
+        if (!node.is_generic()) {
             return;
         }
 

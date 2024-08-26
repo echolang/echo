@@ -20,6 +20,12 @@ namespace AST
 {   
     class ComplexType;
     class TypeRegistry;
+    class Namespace;
+
+    // everything this header does with a type parameter works on an incomplete type (store,
+    // compare and hash a pointer, hold a vector of them), which is what keeps ASTValueType.h
+    // free of any dependency on ASTTypeParam.h
+    class TypeParamDecl;
 
     enum class ValueTypeKind {
         t_primitive,
@@ -104,8 +110,9 @@ namespace AST
 
         static ValueType make_class(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
 
-        static ValueType make_type_param(size_t index) {
-            return ValueType(ValueTypeKind::t_generic, index);
+        static ValueType make_type_param(const TypeParamDecl *param) {
+            assert(param);
+            return ValueType(ValueTypeKind::t_generic, param);
         }
 
         static ValueType make_const(ValueType type) {
@@ -133,9 +140,9 @@ namespace AST
             return kind == ValueTypeKind::t_generic;
         }
 
-        size_t get_type_param_index() const {
+        const TypeParamDecl *get_type_param() const {
             assert(is_type_param());
-            return type_param_index;
+            return _type_param;
         }
 
         ValueTypeKind get_kind() const {
@@ -306,7 +313,10 @@ namespace AST
             }
 
             if (is_type_param() && other.is_type_param()) {
-                return type_param_index == other.type_param_index;
+                // identity is the declaration itself, mirroring how struct/class compare their
+                // ComplexType. so the T of `struct Box<T>` is not the A of `struct Pair<A, B>`
+                // even though both are the first parameter of their owner
+                return _type_param == other._type_param;
             }
 
             if (kind == ValueTypeKind::t_unknown && other.kind == ValueTypeKind::t_unknown) {
@@ -327,16 +337,20 @@ namespace AST
         ValueTypePrimitive primitive = ValueTypePrimitive::t_void;
         uint8_t type_flags = 0;
         ComplexType *_complex_type = nullptr;
-        size_t type_param_index = 0;  // For t_generic kind: Index into ComplexType::type_parameters
+
+        // for the t_generic kind: the declaration this type refers to. a pointer rather than an
+        // ordinal, so the parameter's name, constraint and declaration site travel with every
+        // use of it, and so parameters of different owners are distinct types
+        const TypeParamDecl *_type_param = nullptr;
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
-        ValueType(ValueTypeKind kind, ComplexType *complex_type) : 
-            kind(kind), 
-            primitive(ValueTypePrimitive::t_complex), 
-            _complex_type(complex_type) 
+        ValueType(ValueTypeKind kind, ComplexType *complex_type) :
+            kind(kind),
+            primitive(ValueTypePrimitive::t_complex),
+            _complex_type(complex_type)
         {}
-        ValueType(ValueTypeKind kind, size_t param_index) :
-            kind(kind), primitive(ValueTypePrimitive::t_void), type_param_index(param_index) {}
+        ValueType(ValueTypeKind kind, const TypeParamDecl *param) :
+            kind(kind), primitive(ValueTypePrimitive::t_void), _type_param(param) {}
     };
     
     class ComplexType {
@@ -347,13 +361,16 @@ namespace AST
             ValueType type;
         };
 
-        struct TypeParam {
-            std::string name;  // e.g., "T"
-            // Future: ValueType constraint;
-        };
-
         std::optional<std::string> name;
-        std::vector<TypeParam> type_parameters;  // Empty for non-generics
+
+        // the namespace the type was declared in, null when unknown or root. instantiations
+        // inherit it from their template, so a mangled name can always be fully qualified
+        const Namespace *ast_namespace = nullptr;
+
+        // this template's own generic parameters (the T, U in `struct Foo<T, U>`), owned by the
+        // collector's TypeParamRegistry. empty for non-generics and for instantiations. always
+        // append through add_type_parameter, which keeps the ordinal and owner consistent
+        std::vector<TypeParamDecl *> type_parameters;
         ComplexType* template_ref = nullptr;  // Null for templates; points to original for instantiations
         std::vector<ValueType> instantiation_args;  // Empty for non-instantiated
 
@@ -364,6 +381,14 @@ namespace AST
             return name.has_value();
         }
 
+        // the type name prefixed with its namespace path ("a::b::Foo"), the bare name when the
+        // type sits in the root namespace or none is known
+        std::string namespaced_name() const;
+
+        // the length prefixed, namespace qualified token this type contributes to a mangled
+        // symbol name. unambiguous and free of characters that are invalid in symbols
+        std::string mangled_token() const;
+
         bool is_generic() const {
             return !type_parameters.empty();
         }
@@ -372,19 +397,21 @@ namespace AST
             return template_ref != nullptr;
         }
 
-        std::optional<size_t> get_type_param_index(const std::string& name) const {
-            for (size_t i = 0; i < type_parameters.size(); ++i) {
-                if (type_parameters[i].name == name) return i;
-            }
-            return std::nullopt;
-        }
+        // appends a type parameter, stamping this type as its owner. asserts the ordinal matches
+        // the position it lands in, so the ordinal can never drift from the list order.
+        // defined out of line because it needs TypeParamDecl complete
+        void add_type_parameter(TypeParamDecl *param);
+
+        // true if `type` is a type parameter declared by this very type. the single place that
+        // knows how a t_generic ValueType maps back to a declaration
+        bool declares_type_param(const ValueType &type) const;
 
         void add_property(const std::string &name, ValueType type) {
-            // on a template, a `T`-typed property must index a declared type parameter.
-            // instantiations carry no type_parameters of their own, so the check only
+            // on a template, a `T`-typed property must reference one of this type's own declared
+            // parameters. instantiations carry no type_parameters of their own, so the check only
             // applies while a template is being built.
             if (type.is_type_param() && !is_instantiated()) {
-                assert(type.get_type_param_index() < type_parameters.size());
+                assert(declares_type_param(type));
             }
             _properties.push_back(Property { _properties.size(), name, type });
             _property_map[name] = type;
@@ -430,7 +457,7 @@ namespace std {
             size_t h = static_cast<size_t>(vt.get_kind()) ^ vt.get_type_flags();
             if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
             else if (vt.is_struct() || vt.is_class()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
-            else if (vt.is_type_param()) h ^= vt.get_type_param_index();
+            else if (vt.is_type_param()) h ^= reinterpret_cast<size_t>(vt.get_type_param());
             return h;
         }
     };
@@ -450,9 +477,69 @@ namespace AST {
         }
     };
 
-    // a substitution maps a generic's type-parameter indices to the (possibly still-generic)
-    // types they stand for. Used identically for function and struct type parameters.
-    using TypeSubstitution = std::vector<ValueType>;
+    // maps type-parameter declarations to the (possibly still-generic) types they stand for.
+    // used identically for function and struct type parameters.
+    //
+    // keyed by declaration rather than by position, which is what makes a *partial* substitution
+    // meaningful: substituting a generic member of a generic owner binds the owner's parameters
+    // and leaves the member's own alone. composing two substitutions is concatenating bindings.
+    //
+    // a vector rather than a hash map because a generic declares one to three parameters in
+    // practice, so a linear scan wins and the iteration order stays deterministic
+    struct TypeSubstitution
+    {
+        std::vector<std::pair<const TypeParamDecl *, ValueType>> bindings;
+
+        TypeSubstitution() = default;
+
+        // binds `params` to `args` positionally, the shape both a call site's resolved type
+        // arguments and a generic application arrive in. asserts the arity matches: this is the
+        // one place that check lives now that substitute_type tolerates unbound parameters
+        static TypeSubstitution positional(const std::vector<TypeParamDecl *>& params, const std::vector<ValueType>& args) {
+            assert(params.size() == args.size());
+
+            TypeSubstitution subst;
+            subst.bindings.reserve(params.size());
+            for (size_t i = 0; i < params.size(); i++) {
+                subst.bindings.emplace_back(params[i], args[i]);
+            }
+            return subst;
+        }
+
+        // rebinding an already bound parameter replaces it, so a later, better inference wins
+        void bind(const TypeParamDecl *param, const ValueType& type) {
+            assert(param);
+            for (auto& binding : bindings) {
+                if (binding.first == param) {
+                    binding.second = type;
+                    return;
+                }
+            }
+            bindings.emplace_back(param, type);
+        }
+
+        // null when the parameter is not bound here, which substitute_type reads as "leave it"
+        const ValueType *lookup(const TypeParamDecl *param) const {
+            for (const auto& binding : bindings) {
+                if (binding.first == param) {
+                    return &binding.second;
+                }
+            }
+            return nullptr;
+        }
+
+        bool covers(const TypeParamDecl *param) const {
+            return lookup(param) != nullptr;
+        }
+
+        bool empty() const {
+            return bindings.empty();
+        }
+
+        size_t size() const {
+            return bindings.size();
+        }
+    };
 
     // caches and owns every generic instantiation. Interning is by (template, args) identity,
     // which is exactly what ValueType::operator== relies on (struct/class equality is ComplexType*
@@ -495,10 +582,15 @@ namespace AST {
     // the single, unified type-substitution routine, shared by struct and function generics.
     // - a type-parameter reference resolves to subst[index], carrying its const/pointer flags;
     // - a generic application (a struct/class whose ComplexType is an instantiation) has its
-    //   arguments recursively substituted and is then re-interned via `registry` — this is what
+    //   arguments recursively substituted and is then re-interned via `registry` - this is what
     //   makes nested generics such as Foo<Bar<T>> work;
     // - primitives and already-concrete types are returned unchanged.
     ValueType substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry);
+
+    // true if the type is, or structurally contains, an unresolved type parameter - either directly
+    // or as an argument of a generic application. after monomorphization a concrete context should be
+    // free of these; anything left is a resolution bug rather than a legitimate type.
+    bool contains_type_param(const ValueType& type);
 
 };
 

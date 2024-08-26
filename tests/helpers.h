@@ -3,6 +3,8 @@
 #include <AST/ASTBundle.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #define REQUIRE_NODE_DESC(content, expected_desc) \
     REQUIRE(EchoTests::tests_make_node_description(content) == expected_desc)
@@ -25,6 +27,10 @@ namespace EchoTests
     AST::Module tests_make_tokenized_module(std::string content);
 
     std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(std::string content);
+
+    // parses several files into one module, mirroring a real multi file compile: every file's
+    // symbols are collected before any of them is fully parsed
+    std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(const std::vector<std::string> &file_contents);
 
     std::string tests_make_node_description(std::string content);
 

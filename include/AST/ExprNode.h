@@ -81,14 +81,6 @@ namespace AST
         const std::string decorated_func_name() const;
 
         const std::string node_description() override;
-        
-    private:
-        // Helper methods for generic function display
-        std::string get_instantiated_function_name() const;
-        AST::ValueType get_inferred_return_type() const;
-        std::map<std::string, AST::ValueType> infer_type_parameters() const;
-        
-    public:
 
         void accept(Visitor& visitor) override {
             visitor.visitFunctionCallExpr(*this);
@@ -146,6 +138,11 @@ namespace AST
         {};
 
         ~UnaryExprNode() {}
+
+        // negation preserves the operand type
+        ValueType result_type() const override {
+            return expr->result_type();
+        }
 
         const std::string node_description() override {
             return "unexp(" + token_operator.value() + expr->node_description() + ")";

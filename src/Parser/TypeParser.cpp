@@ -1,7 +1,13 @@
 #include "Parser/TypeParser.h"
+#include "Parser/NamespaceParser.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTNamespace.h"
+#include "AST/ASTTypeParam.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/StructNode.h"
+
 #include <algorithm>
+#include <fmt/core.h>
 
 
 bool Parser::can_parse_type(Parser::Payload &payload)
@@ -21,6 +27,28 @@ bool Parser::can_parse_type(Parser::Payload &payload)
     }
 
     return false;
+}
+
+bool Parser::starts_qualified_vardecl(Parser::Payload &payload)
+{
+    size_t offset = 0;
+    if (payload.cursor.is_type(Token::Type::t_const)) {
+        offset++;
+    }
+
+    // walk the `identifier ::` pairs of the namespace path, at least one is required
+    size_t pairs = 0;
+    while (payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        offset += 2;
+        pairs++;
+    }
+
+    if (pairs == 0) {
+        return false;
+    }
+
+    // the type name itself followed by the variable name
+    return payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_varname });
 }
 
 AST::ValueType get_primitive_type(const std::string &types_string)
@@ -58,6 +86,68 @@ AST::ValueType get_primitive_type(const std::string &types_string)
     }
 
     return AST::ValueType::make_unknown();
+}
+
+// expands a named constraint alias (e.g. `numeric`) into the set of concrete types it
+// covers, or nullopt if `name` is not a known alias. the sets are derived from the existing
+// ValueType category predicates so they stay in sync with the type system automatically.
+static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::string &name)
+{
+    // the primitives an alias may enumerate over (no void/complex)
+    static const AST::ValueTypePrimitive all_primitives[] = {
+        AST::ValueTypePrimitive::t_int8, AST::ValueTypePrimitive::t_int16,
+        AST::ValueTypePrimitive::t_int32, AST::ValueTypePrimitive::t_int64,
+        AST::ValueTypePrimitive::t_uint8, AST::ValueTypePrimitive::t_uint16,
+        AST::ValueTypePrimitive::t_uint32, AST::ValueTypePrimitive::t_uint64,
+        AST::ValueTypePrimitive::t_float32, AST::ValueTypePrimitive::t_float64,
+        AST::ValueTypePrimitive::t_bool,
+    };
+
+    bool (AST::ValueType::*pred)() const = nullptr;
+    if (name == "numeric") {
+        pred = &AST::ValueType::is_numeric_type;
+    } else if (name == "integer") {
+        pred = &AST::ValueType::is_integer_type;
+    } else if (name == "signed") {
+        pred = &AST::ValueType::is_signed_integer;
+    } else if (name == "unsigned") {
+        pred = &AST::ValueType::is_unsigned_integer;
+    } else if (name == "floating") {
+        pred = &AST::ValueType::is_floating_type;
+    } else {
+        return std::nullopt;
+    }
+
+    std::vector<AST::ValueType> out;
+    for (auto primitive : all_primitives) {
+        AST::ValueType value(primitive);
+        if ((value.*pred)()) {
+            out.push_back(value);
+        }
+    }
+    return out;
+}
+
+// resolves a single constraint atom to the set of concrete types it admits. an atom is an
+// alias, a primitive, or a user struct/class name. returns nullopt if it resolves to none.
+static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser::Payload &payload, const std::string &name)
+{
+    if (auto alias = expand_type_alias(name)) {
+        return alias;
+    }
+
+    auto primitive = get_primitive_type(name);
+    if (primitive.is_primitive()) {
+        return std::vector<AST::ValueType>{ primitive };
+    }
+
+    auto symbol = payload.collector.namespaces.find_symbol(name, *payload.context.current_namespace);
+    if (symbol && symbol->type() == AST::SymbolType::t_struct) {
+        auto *decl = symbol->node.unsafe_ptr<AST::StructDeclNode>();
+        return std::vector<AST::ValueType>{ decl->value_type() };
+    }
+
+    return std::nullopt;
 }
 
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
@@ -101,16 +191,32 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::S
         return AST::ValueType::make_unknown();
     }
 
+    // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>`
+    // where `Vec<T: numeric>`). skip args still mentioning a type parameter - those are
+    // resolved and re-checked once the enclosing template is instantiated.
+    for (size_t i = 0; i < args.size(); i++) {
+        const auto *param = template_ct->type_parameters[i];
+        if (param->is_constrained() && !args[i].is_type_param() && !param->allows(args[i])) {
+            payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
+                payload.context.code_ref(name_token),
+                "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
+                "' is constrained to '" + param->constraint_spelling +
+                "' but was given '" + args[i].get_type_desciption() + "'"
+            );
+            return AST::ValueType::make_unknown();
+        }
+    }
+
     auto *inst = payload.collector.type_registry.get_or_create_instantiation(template_ct, args);
     return template_decl->value_type().is_class()
         ? AST::ValueType::make_class(inst)
         : AST::ValueType::make_struct(inst);
 }
 
-std::vector<std::string> Parser::parse_type_param_list(Parser::Payload &payload)
+std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
-    std::vector<std::string> type_parameters;
+    std::vector<ParsedTypeParam> type_parameters;
 
     // no list present
     if (!cursor.is_type(Token::Type::t_open_angle)) {
@@ -131,8 +237,66 @@ std::vector<std::string> Parser::parse_type_param_list(Parser::Payload &payload)
             return type_parameters;
         }
 
-        type_parameters.push_back(cursor.current().value());
+        ParsedTypeParam param { cursor.current(), {}, "" };
+
+        // a repeated name would silently alias, since name resolution takes the first match and
+        // every later same-named parameter becomes unreachable
+        for (const auto &seen : type_parameters) {
+            if (seen.name() == param.name()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(param.name_token),
+                    fmt::format("Type parameter '{}' is already declared in this list", param.name())
+                );
+                cursor.try_skip_to_next_statement();
+                return type_parameters;
+            }
+        }
+
         cursor.skip();
+
+        // optional constraint: `: atom (| atom)*`
+        if (cursor.is_type(Token::Type::t_colon)) {
+            cursor.skip(); // skip ':'
+
+            while (true) {
+                if (!cursor.is_type(Token::Type::t_identifier)) {
+                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+                    cursor.try_skip_to_next_statement();
+                    return type_parameters;
+                }
+
+                auto atom_token = cursor.current();
+                auto atom_name = atom_token.value();
+
+                auto atom_types = resolve_constraint_atom(payload, atom_name);
+                if (!atom_types) {
+                    payload.collector.collect_issue<AST::Issue::GenericError>(
+                        payload.context.code_ref(atom_token),
+                        fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
+                    );
+                    cursor.try_skip_to_next_statement();
+                    return type_parameters;
+                }
+
+                for (const auto &type : *atom_types) {
+                    param.constraint.push_back(type);
+                }
+                if (!param.constraint_spelling.empty()) {
+                    param.constraint_spelling += "|";
+                }
+                param.constraint_spelling += atom_name;
+                cursor.skip();
+
+                // more atoms are separated by '|'
+                if (cursor.is_type(Token::Type::t_or)) {
+                    cursor.skip();
+                    continue;
+                }
+                break;
+            }
+        }
+
+        type_parameters.push_back(std::move(param));
 
         // comma separator or closing angle
         if (cursor.is_type(Token::Type::t_comma)) {
@@ -146,6 +310,59 @@ std::vector<std::string> Parser::parse_type_param_list(Parser::Payload &payload)
 
     cursor.skip(); // skip '>'
     return type_parameters;
+}
+
+// mints (or reuses) the owned declarations for a freshly parsed parameter list.
+//
+// reuse matters for correctness, not just allocation: a module is parsed twice — a symbol pass
+// then a full pass — each with a fresh Context, and both reach this point for the same list.
+// minting new declarations the second time would give the two passes distinct parameters, so a
+// generic struct's self-application Foo<T> would intern twice and the two Foo<T> would compare
+// unequal. reusing whenever the shape is unchanged keeps a single declaration per parameter.
+static std::vector<AST::TypeParamDecl *> declare_params(
+    Parser::Payload &payload,
+    const std::vector<AST::TypeParamDecl *> &existing,
+    const std::vector<Parser::ParsedTypeParam> &parsed)
+{
+    bool reusable = existing.size() == parsed.size();
+    for (size_t i = 0; reusable && i < parsed.size(); i++) {
+        reusable = existing[i]->name == parsed[i].name();
+    }
+
+    std::vector<AST::TypeParamDecl *> result;
+    result.reserve(parsed.size());
+
+    for (size_t i = 0; i < parsed.size(); i++) {
+        AST::TypeParamDecl *decl = reusable
+            ? existing[i]
+            : payload.collector.type_params.declare(parsed[i].name(), i, parsed[i].name_token);
+
+        // constraints are refreshed either way: the symbol pass may have parsed the list before
+        // the types a constraint atom names were resolvable
+        decl->constraint = parsed[i].constraint;
+        decl->constraint_spelling = parsed[i].constraint_spelling;
+        result.push_back(decl);
+    }
+
+    return result;
+}
+
+void Parser::declare_type_parameters(Payload &payload, AST::ComplexType &owner, const std::vector<ParsedTypeParam> &parsed)
+{
+    auto declared = declare_params(payload, owner.type_parameters, parsed);
+
+    owner.type_parameters.clear();
+    for (auto *decl : declared) {
+        owner.add_type_parameter(decl);
+    }
+}
+
+void Parser::declare_type_parameters(Payload &payload, AST::FunctionDeclNode &owner, const std::vector<ParsedTypeParam> &parsed)
+{
+    owner.type_parameters = declare_params(payload, owner.type_parameters, parsed);
+    for (auto *decl : owner.type_parameters) {
+        decl->set_owner(&owner);
+    }
 }
 
 AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
@@ -176,28 +393,44 @@ AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
         payload.cursor.skip();
     }
 
+    // a type may be namespace qualified: `a::b::Foo`. the prefix is consumed here so the name
+    // token below resolves in that namespace instead of the current one. a qualified name is
+    // never a primitive or a type parameter, so those lookups are skipped for it
+    const AST::Namespace *lookup_namespace = payload.context.current_namespace;
+    bool is_qualified = false;
+    if (payload.cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        auto *ns_node = parse_namespace(payload);
+        assert(ns_node != nullptr && "expected a namespace node");
+        lookup_namespace = ns_node->ast_namespace;
+        is_qualified = true;
+    }
+
     auto token = payload.cursor.current();
-    auto primitive_type = get_primitive_type(token.value());
+    auto primitive_type = is_qualified ? AST::ValueType::make_unknown() : get_primitive_type(token.value());
     AST::StructDeclNode *user_type_decl = nullptr;
 
     // if it's not a primitive type, check for type parameters first
     if (!primitive_type.is_primitive() && !primitive_type.is_struct() && !primitive_type.is_class()) {
-        // Check if this is a type parameter (generic type like T)
-        if (payload.context.is_type_parameter(token.value())) {
-            // Find the index of this type parameter
-            auto it = std::find(payload.context.current_type_parameters.begin(),
-                               payload.context.current_type_parameters.end(),
-                               token.value());
-            if (it != payload.context.current_type_parameters.end()) {
-                size_t index = std::distance(payload.context.current_type_parameters.begin(), it);
-                primitive_type = AST::ValueType::make_type_param(index);
-            }
+        // a generic type parameter in scope, e.g. the T of the enclosing `struct Box<T>`
+        const AST::TypeParamDecl *type_param = is_qualified ? nullptr : payload.context.find_type_param(token.value());
+
+        if (type_param) {
+            primitive_type = AST::ValueType::make_type_param(type_param);
         } else {
             // Check for user-defined types (structs/classes)
-            auto struct_symbol = payload.collector.namespaces.find_symbol(token.value(), *payload.context.current_namespace);
+            auto struct_symbol = payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace);
             if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_struct) {
                 user_type_decl = struct_symbol->node.unsafe_ptr<AST::StructDeclNode>();
                 primitive_type = user_type_decl->value_type();
+            }
+
+            // an unresolved qualified name can only be a mistake - the namespace lookup creates
+            // missing namespaces on demand, so it would silently degrade to an unknown type
+            else if (is_qualified) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(token),
+                    "Unknown type '" + lookup_namespace->full_name() + ECO_NAMESPACE_SEPARATOR + token.value() + "'"
+                );
             }
         }
     }

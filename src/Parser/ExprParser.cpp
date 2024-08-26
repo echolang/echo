@@ -718,7 +718,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         ast_namespace = ns_node->ast_namespace;
     }
 
-    // potential function call — `name(...)` or, with explicit type arguments, `name<...>(...)`.
+    // potential function call - `name(...)` or, with explicit type arguments, `name<...>(...)`.
     // a bare identifier is never a comparison operand (values are $-prefixed), so an identifier
     // followed by '<' here is a generic call, not a less-than.
     if (
@@ -730,6 +730,47 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     }
 
     assert(false && "unimplemented");
+}
+
+// parse an operand appearing in prefix position, consuming any leading unary
+// '-' / '+' operators and wrapping negations in a UnaryExprNode. unary '+' is
+// a no-op and returns the operand unchanged
+const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+
+    auto op = payload.collector.operators.get_operator(cursor.current());
+    if (op != nullptr && (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add)) {
+        auto op_token = cursor.current();
+        cursor.skip();
+
+        // recurse so chained prefixes like `- -$x` resolve right to left
+        auto operand = parse_prefix_unary(payload, expected_type);
+        if (!operand.has()) {
+            return AST::make_void_ref();
+        }
+
+        // unary plus carries no semantics
+        if (op->type == Token::Type::t_op_add) {
+            return operand;
+        }
+
+        auto &unary = payload.context.emplace_node<AST::UnaryExprNode>(
+            op_token, operand.unsafe_ptr<AST::ExprNode>());
+        return AST::make_ref(unary);
+    }
+
+    // a parenthesized subexpression, e.g. -(a + b)
+    if (cursor.is_type(Token::Type::t_open_paren)) {
+        cursor.skip();
+        auto inner = Parser::parse_expr_ref(payload, expected_type);
+        if (cursor.is_type(Token::Type::t_close_paren)) {
+            cursor.skip();
+        }
+        return inner;
+    }
+
+    return parse_expr_node(payload, expected_type);
 }
 
 struct ExprPart {
@@ -822,6 +863,25 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
         // try to parse an operator
         auto op = payload.collector.operators.get_operator(cursor.current());
+
+        // a '-' or '+' in operand position is a prefix unary operator, not a
+        // binary one. detect it and parse the operand it applies to, otherwise
+        // the shunting yard would hand parse_binary_expr a null lhs and crash
+        bool expects_operand = expr_parts.empty() ||
+            (expr_parts.back().opnode != nullptr &&
+             expr_parts.back().opnode->op->type != Token::Type::t_close_paren);
+
+        if (op != nullptr && expects_operand &&
+            (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add))
+        {
+            auto node = parse_prefix_unary(payload, expected_type);
+            if (!node.has()) {
+                return AST::make_void_ref();
+            }
+            expr_parts.emplace_back(node, nullptr);
+            continue;
+        }
+
         auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
 
         if (op != nullptr) {

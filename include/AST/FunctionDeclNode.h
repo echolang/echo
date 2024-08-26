@@ -25,8 +25,11 @@ namespace AST
         std::optional<TokenReference> name_token;
         std::vector<VarDeclNode*> args;
         
-        // Generic type parameters (e.g., <T, U> in function<T, U> name(...))
-        std::vector<std::string> type_parameters;
+        // this function's own generic type parameters (the T, U in `function name<T, U>(...)`),
+        // owned by the collector's TypeParamRegistry. a method of a generic struct shares the
+        // struct's declarations rather than copying them, so a substitution built from either
+        // list binds the same parameters. cleared on a clone, which is concrete by definition
+        std::vector<TypeParamDecl *> type_parameters;
 
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;

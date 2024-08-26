@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <vector>
 
 #include "ASTSymbol.h"
 
@@ -30,9 +31,15 @@ namespace AST
             return _parent == nullptr; 
         }
 
-        std::string name() const { 
-            return _name; 
+        std::string name() const {
+            return _name;
         }
+
+        // path segments from the root down, excluding the root itself
+        std::vector<std::string> path_segments() const;
+
+        // fully qualified path, root first ("a::b"), empty for the root namespace
+        std::string full_name() const;
 
         const Namespace *parent() const { 
             return _parent; 

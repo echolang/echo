@@ -125,9 +125,9 @@ int main_run(argparse::ArgumentParser &cli)
     };
 
     // TODO ENABLE AGAIN
-    // if (handle_parse(parser, stdlib_input)) {
-    //     throw std::runtime_error("Failed to parse the echo standard library.");
-    // }
+    if (handle_parse(parser, stdlib_input)) {
+        throw std::runtime_error("Failed to parse the echo standard library.");
+    }
 
     // dump the stdlib module into an embedabble cpp file
     AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");

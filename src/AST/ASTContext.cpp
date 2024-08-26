@@ -1,6 +1,22 @@
 #include "AST/ASTContext.h"
 
-void AST::Context::pop_scope() 
+#include "AST/ASTTypeParam.h"
+
+const AST::TypeParamDecl *AST::Context::find_type_param(const std::string &name) const
+{
+    // innermost scope first, so an inner parameter shadows an outer one of the same name
+    for (auto scope = type_param_scopes.rbegin(); scope != type_param_scopes.rend(); ++scope) {
+        for (const auto *param : *scope) {
+            if (param->name == name) {
+                return param;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+void AST::Context::pop_scope()
 {
     // we must have an active scope to pop
     assert(scope_ptr != nullptr);

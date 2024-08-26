@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -44,8 +45,24 @@ namespace AST
         // cloned into the template's module (keeping copied token references valid).
         std::unordered_map<const FunctionDeclNode *, Module *> _decl_module;
 
-        // interned function instances, keyed by (template, concrete args).
-        std::unordered_map<std::string, FunctionDeclNode *> _func_instances;
+        // interned function instances, keyed structurally by (template, concrete args) - the same
+        // identity TypeRegistry uses for struct instantiations. a rendered-string key would inherit
+        // whatever get_mangled_name() happens to lose (e.g. every anonymous complex type mangles
+        // alike), silently handing two distinct instantiations the same instance.
+        typedef std::tuple<const FunctionDeclNode *, std::vector<ValueType>> InstanceKey;
+
+        struct InstanceKeyHash {
+            size_t operator()(const InstanceKey &key) const {
+                size_t h1 = std::hash<const FunctionDeclNode *>{}(std::get<0>(key));
+                size_t h2 = 0;
+                for (const auto &vt : std::get<1>(key)) {
+                    h2 ^= std::hash<AST::ValueType>{}(vt) + 0x9e3779b9 + (h2 << 6) + (h2 >> 2);
+                }
+                return h1 ^ (h2 << 1);
+            }
+        };
+
+        std::unordered_map<InstanceKey, FunctionDeclNode *, InstanceKeyHash> _func_instances;
 
         // call sites already handled, so re-scans skip them.
         std::unordered_set<const FunctionCallExprNode *> _processed;
@@ -69,9 +86,11 @@ namespace AST
 
         void insert_argument_casts(FunctionCallExprNode *call, FunctionDeclNode *instance, Module &mod);
 
-        // matches a parameter type against a concrete argument type, capturing the type
-        // parameters it mentions (handles bare T and nested applications like Box<T>).
-        void unify(const ValueType &param, const ValueType &arg, std::vector<ValueType> &out, std::vector<bool> &resolved);
+        // matches a parameter type against a concrete argument type, binding the type parameters
+        // it mentions into `out` (handles bare T and nested applications like Box<T>). binds in
+        // argument order, so callers that need declaration order read `out` back through the
+        // template's parameter list rather than using the binding order directly.
+        void unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out);
 
         CodeRef code_ref_for(Module &mod, const TokenReference &token);
     };

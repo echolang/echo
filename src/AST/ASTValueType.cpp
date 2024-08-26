@@ -1,5 +1,7 @@
 #include "AST/ASTValueType.h"
 
+#include "AST/ASTNamespace.h"
+#include "AST/ASTTypeParam.h"
 #include "External/infint.h"
 
 #include <cassert>
@@ -142,6 +144,60 @@ bool AST::ValueType::is_same_size(ValueType other) const
     return get_primitive_size(primitive) == get_primitive_size(other.primitive);
 }
 
+std::string AST::ComplexType::namespaced_name() const
+{
+    std::string type_name = name.value_or("[anonymous]");
+
+    if (ast_namespace) {
+        std::string ns = ast_namespace->full_name();
+        if (!ns.empty()) {
+            return ns + ECO_NAMESPACE_SEPARATOR + type_name;
+        }
+    }
+
+    return type_name;
+}
+
+// length prefixed token, so concatenated parts can never be read back ambiguously
+// ("a" + "Foo" and "aFoo" both become distinct tokens)
+static std::string mangle_length_prefixed(const std::string &part)
+{
+    return std::to_string(part.size()) + part;
+}
+
+std::string AST::ComplexType::mangled_token() const
+{
+    // an instantiation's own name is the display string ("Box<int32>"), so the token is built
+    // from the template plus the recursively mangled arguments instead
+    if (is_instantiated() && template_ref) {
+        std::string token = template_ref->mangled_token() + "I";
+        for (const auto &arg : instantiation_args) {
+            token += arg.get_mangled_name();
+        }
+        return token + "E";
+    }
+
+    if (!name.has_value()) {
+        return "0";
+    }
+
+    std::vector<std::string> segments = ast_namespace ? ast_namespace->path_segments() : std::vector<std::string>{};
+
+    // unqualified types stay a plain token, the `N...E` wrapper only appears when there
+    // actually is a namespace path to separate from the name
+    if (segments.empty()) {
+        return mangle_length_prefixed(name.value());
+    }
+
+    std::string token = "N";
+    for (const auto &segment : segments) {
+        token += mangle_length_prefixed(segment);
+    }
+    token += mangle_length_prefixed(name.value());
+
+    return token + "E";
+}
+
 std::string AST::ValueType::get_mangled_name() const
 {
     std::string mangled_name = "";
@@ -165,11 +221,14 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "P"; // primitive type
         mangled_name += get_primitive_id_char(primitive);
     } else if (is_type_param()) {
+        // the ordinal, not the declaration's address: this feeds decorated_func_name and so the
+        // LLVM symbol table, which has to stay reproducible across runs. only a template mangles
+        // a type parameter at all, and a template is never emitted
         mangled_name += "T"; // type parameter
-        mangled_name += std::to_string(type_param_index);
+        mangled_name += std::to_string(_type_param->ordinal);
     } else if (is_struct() || is_class()) {
-        mangled_name += "C"; // complex type @TODO
-        mangled_name += get_complex_type()->name.value_or("A");
+        mangled_name += "C"; // complex type
+        mangled_name += get_complex_type()->mangled_token();
     } else {
         mangled_name += "U"; // unknown type
         mangled_name += "A";
@@ -187,17 +246,23 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + get_primitive_name(primitive) + pointer;
     }
 
+    // the name the user wrote, unqualified: this feeds the interned name of every generic
+    // application, so qualifying it here would render Box<int> as Box<Box::T> in the template.
+    // TypeParamDecl::describe() is the qualified form, for diagnostics
     if (is_type_param()) {
-        return prefix + "T" + std::to_string(type_param_index) + pointer;
+        return prefix + _type_param->name + pointer;
     }
 
     if (is_struct() || is_class()) {
         ComplexType* ct = get_complex_type();
-        std::string type_name = ct->name.value_or("[unknown]");
+        if (!ct->name.has_value()) {
+            return prefix + "[unknown]" + pointer;
+        }
 
         // If this is an instantiated generic type, the name already includes template args
-        // from the TypeRegistry's args_description method
-        return prefix + type_name + pointer;
+        // from the TypeRegistry's args_description method. the namespace is prepended here so
+        // two same-named types from different namespaces are distinguishable in diagnostics
+        return prefix + ct->namespaced_name() + pointer;
     }
 
     // Handle unknown or other types
@@ -211,14 +276,15 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
     auto key = std::make_tuple(tmpl, args);
     if (auto it = _instantiations.find(key); it != _instantiations.end()) {
         ComplexType* inst = it->second;
-        // refresh if the template gained properties after this instance was interned — this
+        // refresh if the template gained properties after this instance was interned - this
         // happens when an application (e.g. a return type) is parsed during the symbol pass,
         // before the struct body populates the template's properties.
         if (inst != tmpl && inst->property_count() < tmpl->property_count()) {
+            TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
             inst->_properties.clear();
             inst->_property_map.clear();
             for (const auto& prop : tmpl->_properties) {
-                inst->add_property(prop.name, substitute_type(prop.type, args, *this));
+                inst->add_property(prop.name, substitute_type(prop.type, subst, *this));
             }
         }
         return inst;
@@ -231,6 +297,7 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
     if (tmpl->name) {
         instantiated->name = tmpl->name.value() + "<" + args_description(args) + ">";
     }
+    instantiated->ast_namespace = tmpl->ast_namespace;
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = args;
 
@@ -239,9 +306,11 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
     // instead of recursing forever.
     _instantiations[key] = instantiated;
 
+    // one substitution for the whole layout: the arguments arrive positionally, matching the
+    // template's declared parameter order, and positional() is where that arity is checked
+    TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
     for (const auto& prop : tmpl->_properties) {
-        ValueType subst = substitute_type(prop.type, args, *this);
-        instantiated->add_property(prop.name, subst);
+        instantiated->add_property(prop.name, substitute_type(prop.type, subst, *this));
     }
 
     return instantiated;
@@ -257,13 +326,64 @@ std::string AST::TypeRegistry::args_description(const std::vector<ValueType>& ar
     return desc;
 }
 
+void AST::ComplexType::add_type_parameter(TypeParamDecl *param)
+{
+    assert(param);
+    assert(param->ordinal == type_parameters.size());
+    param->set_owner(this);
+    type_parameters.push_back(param);
+}
+
+bool AST::ComplexType::declares_type_param(const ValueType& type) const
+{
+    assert(type.is_type_param());
+
+    // pointer membership, which is a stronger check than the bounds test it replaces: a parameter
+    // of some *other* generic no longer passes just because the ordinals happen to line up
+    const TypeParamDecl *param = type.get_type_param();
+    for (const auto *declared : type_parameters) {
+        if (declared == param) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AST::contains_type_param(const ValueType& type)
+{
+    if (type.is_type_param()) {
+        return true;
+    }
+
+    // a generic application is unresolved if any of its arguments still is
+    if (type.is_struct() || type.is_class()) {
+        ComplexType* ct = type.get_complex_type();
+        if (ct && ct->is_instantiated()) {
+            for (const auto& arg : ct->instantiation_args) {
+                if (contains_type_param(arg)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry)
 {
     // a type-parameter reference resolves to its bound type, carrying the reference's flags.
+    // an *unbound* parameter is returned unchanged rather than asserting: that is what makes a
+    // partial substitution well defined, so a generic member of a generic owner can have the
+    // owner's parameters resolved while its own stay generic. the arity check that used to live
+    // here now sits in TypeSubstitution::positional, which knows what full coverage means
     if (type.is_type_param()) {
-        size_t idx = type.get_type_param_index();
-        assert(idx < subst.size());
-        ValueType resolved = subst[idx];
+        const ValueType *bound = subst.lookup(type.get_type_param());
+        if (!bound) {
+            return type;
+        }
+
+        ValueType resolved = *bound;
         if (type.is_const()) resolved.set_const(true);
         if (type.is_pointer()) resolved.set_pointer(true);
         return resolved;

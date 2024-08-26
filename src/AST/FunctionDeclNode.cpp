@@ -23,12 +23,12 @@ const std::string AST::FunctionDeclNode::decorated_func_name() const
 {
     std::string decorated_name = "_";
 
+    // root first, so a nested namespace reads in declaration order and the root contributes
+    // no empty segment
     if (ast_namespace) {
-        const AST::Namespace *ns = ast_namespace;
-        do {
-            decorated_name += ns->name() + "_";
-            ns = ns->parent();
-        } while (ns);
+        for (const auto &segment : ast_namespace->path_segments()) {
+            decorated_name += segment + "_";
+        }
     }
 
     decorated_name += func_name() + "Z";
@@ -43,7 +43,10 @@ const std::string AST::FunctionDeclNode::decorated_func_name() const
 const std::string AST::FunctionDeclNode::namespaced_func_name() const
 {
     if (ast_namespace) {
-        return ast_namespace->name() + "::" + func_name();
+        std::string ns = ast_namespace->full_name();
+        if (!ns.empty()) {
+            return ns + ECO_NAMESPACE_SEPARATOR + func_name();
+        }
     }
 
     return func_name();
