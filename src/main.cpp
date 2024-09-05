@@ -101,11 +101,49 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
     return 0;
 }
 
-int main_run(argparse::ArgumentParser &cli)
+// every .eco file the standard library is made of, sorted so the ordering is reproducible.
+//
+// globbed rather than listed, so adding a stdlib file does not need a C++ edit - the previous
+// hardcoded list had already fallen behind what is on disk.
+//
+// two directories are skipped. `build/` holds the generated embedded header rather than source.
+// `sketches/` holds Echo that describes a type the language cannot express yet (string, List) and
+// deliberately does not compile - it is design, kept in source form, and the directory name is
+// what says so
+static std::vector<std::filesystem::path> stdlib_source_files()
 {
-    auto bundle = AST::Bundle();
-    auto parser = Parser::ModuleParser();
+    std::vector<std::filesystem::path> files;
 
+    const std::filesystem::path root{STDLIB_SOURCE_DIR};
+    if (!std::filesystem::exists(root)) {
+        return files;
+    }
+
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(root)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".eco") {
+            continue;
+        }
+
+        const std::string path_string = entry.path().string();
+        if (path_string.find("/build/") != std::string::npos
+            || path_string.find("/sketches/") != std::string::npos) {
+            continue;
+        }
+
+        files.push_back(entry.path());
+    }
+
+    std::sort(files.begin(), files.end());
+
+    return files;
+}
+
+// builds the bundle both `run` and `build` compile: the stdlib module, then the main module with
+// the user's sources. one function rather than two copies, because the copies had already drifted
+// - `build` never created a stdlib module at all, so any program calling `mem::` or `math::`
+// compiled under `run` and failed under `build`
+static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Parser::ModuleParser &parser)
+{
     AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
     auto &stdlib = bundle.modules.get_module(stdlib_handle);
 
@@ -114,27 +152,27 @@ int main_run(argparse::ArgumentParser &cli)
     parser.parse_module(stdlib, bundle.collector);
 #else
     auto stdlib_input = Parser::ModuleParser::InputPayload {
-        .files = {
-            // symbolic
-            Parser::ModuleParser::InputFile(STDLIB_SOURCE_DIR "/symbolic/math.eco"),
-
-            // math
-            Parser::ModuleParser::InputFile(STDLIB_SOURCE_DIR "/math/functions.eco")
-        },
+        .files = {},
         .module = stdlib,
         .collector = bundle.collector
     };
 
-    // TODO ENABLE AGAIN
+    for (const auto &stdlib_file : stdlib_source_files()) {
+        stdlib_input.files.push_back(Parser::ModuleParser::InputFile(stdlib_file));
+    }
+
     if (handle_parse(parser, stdlib_input)) {
         throw std::runtime_error("Failed to parse the echo standard library.");
     }
-
-    // dump the stdlib module into an embedabble cpp file
-    AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
 #endif
 
-    AST::module_handle_t module_handle = bundle.modules.add_module("main");
+    // regenerating the embeddable header is a build step, not a compile step. it used to run on
+    // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
+    if (cli.is_used("--emit-stdlib-header")) {
+        AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
+    }
+
+    AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
     auto &module = bundle.modules.get_module(module_handle);
 
     auto input = Parser::ModuleParser::InputPayload {
@@ -143,7 +181,6 @@ int main_run(argparse::ArgumentParser &cli)
         .collector = bundle.collector
     };
 
-    // attach the files to the input
     auto source_files = get_file_list_from_args(cli, "source");
     if (source_files.empty()) {
         std::cerr << "No source files provided." << std::endl;
@@ -168,6 +205,14 @@ int main_run(argparse::ArgumentParser &cli)
         }
     }
 
+    return 0;
+}
+
+// the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
+// a pass added to one entry point and forgotten in the other is a silent behaviour difference.
+// tests/helpers.cpp mirrors this list and has to be updated alongside it
+static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundle)
+{
     // resolve generics into concrete instances before compilation
     AST::Monomorphizer monomorphizer(bundle);
     monomorphizer.run();
@@ -187,6 +232,22 @@ int main_run(argparse::ArgumentParser &cli)
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {
         std::cout << "Critical issues found, cannot compile." << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
+int main_run(argparse::ArgumentParser &cli)
+{
+    auto bundle = AST::Bundle();
+    auto parser = Parser::ModuleParser();
+
+    if (build_bundle(cli, bundle, parser) != 0) {
+        return 1;
+    }
+
+    if (run_semantic_passes(cli, bundle) != 0) {
         return 1;
     }
 
@@ -219,55 +280,13 @@ int main_run(argparse::ArgumentParser &cli)
 int main_build(argparse::ArgumentParser &cli)
 {
     auto bundle = AST::Bundle();
-
-    AST::module_handle_t module_handle = bundle.modules.add_module("main");
-    auto &module = bundle.modules.get_module(module_handle);
-
     auto parser = Parser::ModuleParser();
-    auto input = Parser::ModuleParser::InputPayload {
-        .files = {},
-        .module = module,
-        .collector = bundle.collector
-    };
 
-    // attach the files to the input
-    auto source_files = get_file_list_from_args(cli, "source");
-    if (source_files.empty()) {
-        std::cerr << "No source files provided." << std::endl;
+    if (build_bundle(cli, bundle, parser) != 0) {
         return 1;
     }
 
-    for (const auto& source_file : source_files) {
-        input.files.push_back(Parser::ModuleParser::InputFile(source_file));
-    }
-
-    if (handle_parse(parser, input)) {
-        return 1;
-    }
-
-    if (cli.get<bool>("--print-ast")) {
-        std::cout << "Module: " << module.debug_description() << std::endl;
-    }
-
-    // resolve generics into concrete instances before compilation
-    AST::Monomorphizer monomorphizer(bundle);
-    monomorphizer.run();
-
-    if (cli.get<bool>("--print-instances")) {
-        std::cout << monomorphizer.debug_dump_instances() << std::endl;
-    }
-
-    // semantic analysis on the concrete AST: resolves member accesses and call arguments and
-    // records located issues, so type errors surface here instead of deep in codegen.
-    // make the pointer transparency the language promises explicit in the tree: every pointer
-    // read in a value position gains a deref node, so from here on result_type() is honest
-    AST::PointerAdjuster(bundle).run();
-
-    AST::TypeChecker(bundle).run();
-
-    bundle.collector.print_issues();
-    if (bundle.collector.has_critical_issues()) {
-        std::cout << "Critical issues found, cannot compile." << std::endl;
+    if (run_semantic_passes(cli, bundle) != 0) {
         return 1;
     }
 
@@ -346,6 +365,13 @@ int main(int argc, char *argv[])
 
         command.get().add_argument("-O", "--optimize")
             .help("Sets the optimization level to 3, makes your code go brrrrrr.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // regenerating the embeddable stdlib header rewrites a tracked file, so it is opt-in
+        // rather than a side effect of every compile
+        command.get().add_argument("--emit-stdlib-header")
+            .help("Regenerate stdlib/build/stdlib_embedded.h from the standard library sources.")
             .default_value(false)
             .implicit_value(true);
     }

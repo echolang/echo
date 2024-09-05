@@ -20,20 +20,18 @@
 namespace AST
 {
 
-// resolves the value type of a member-access base (either a variable reference or a nested member
-// access). returns an unknown type for any other base kind, which callers treat as "don't check".
-// reached through target_type_of, because `->` sees through every pointer level to the struct it
-// ultimately addresses
-static ValueType base_type_of(MemberAccessNode &node)
+// the destinations that have no conversion to fall back on, and so have to be satisfied exactly:
+// a pointer's conversions are directional (`T&` widens to `ptr<T>`, never the reverse), and a
+// struct or class has none at all.
+//
+// primitive-to-primitive is deliberately *not* in here - fitting an int32 literal into a float64
+// slot is TypeLowering::coerce_value's job, which is why this is not simply
+// `!is_implicitly_convertible`. the struct half is what catches `Foo $x = 42;`: the parser used to
+// reject that while typing the literal, but a hint that cannot type a literal is now ignored there,
+// and coerce_value passes a non-primitive destination straight through
+static bool demands_exact_conversion(const ValueType &type)
 {
-    auto &base = node.get_base_node();
-    if (base.has_type<VarRefNode>()) {
-        return target_type_of(base.get<VarRefNode>().result_type());
-    }
-    if (base.has_type<MemberAccessNode>()) {
-        return target_type_of(base.get<MemberAccessNode>().result_type());
-    }
-    return ValueType::make_unknown();
+    return type.is_pointer() || type.is_struct() || type.is_class();
 }
 
 // names the storage an assignment target denotes, so a const diagnostic can say what the user
@@ -82,52 +80,6 @@ static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
         return arg.get_complex_type() == param.get_complex_type();
     }
     return false;
-}
-
-// the variable an expression ultimately reads from, walking through everything that only
-// re-addresses storage rather than naming new storage. `&$s->field` and `&$buf:$[3]` both root
-// at the variable whose lifetime actually governs the address
-static VarDeclNode *root_vardecl_of(ExprNode *expr)
-{
-    while (expr != nullptr)
-    {
-        switch (expr->get_node_type())
-        {
-            case NodeType::n_varref:
-            {
-                auto *var_ref = static_cast<VarRefNode *>(expr);
-                return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
-            }
-
-            case NodeType::n_expr_addrof:
-                expr = static_cast<AddrOfExprNode *>(expr)->operand;
-                break;
-
-            case NodeType::n_expr_deref:
-                expr = static_cast<DerefExprNode *>(expr)->operand;
-                break;
-
-            case NodeType::n_expr_peel:
-                expr = static_cast<PointerValueNode *>(expr)->operand;
-                break;
-
-            case NodeType::n_expr_index:
-                expr = static_cast<IndexExprNode *>(expr)->base;
-                break;
-
-            case NodeType::n_member_access:
-            {
-                auto &base = static_cast<MemberAccessNode *>(expr)->get_base_node();
-                expr = base.has() && base.is_expression_node() ? base.unsafe_ptr<ExprNode>() : nullptr;
-                break;
-            }
-
-            default:
-                return nullptr;
-        }
-    }
-
-    return nullptr;
 }
 
 // looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
@@ -193,24 +145,13 @@ void TypeChecker::visitReturn(ReturnNode &node)
         const ValueType declared = _current_function->get_return_type();
         const ValueType actual = node.expr->result_type();
 
-        // scoped to pointers for the same reason the declaration and assignment checks are:
-        // that is the surface where the conversions are directional, and where a mismatch is
-        // a hard llvm verifier failure rather than a silent widening
-        if ((declared.is_pointer() || actual.is_pointer())
-            && !declared.is_void() && !actual.is_void()
-            && node.expr->get_node_type() != NodeType::n_null
-            && !is_implicitly_convertible(actual, declared)) {
-            _collector.collect_issue<Issue::InvalidTypeConversion>(
-                code_ref_for(node.token_return.value()),
-                fmt::format("cannot return '{}' from a function declared '{}'",
-                    actual.get_type_desciption(), declared.get_type_desciption()));
-        }
+        check_destination_fits(Destination::t_return, declared, *node.expr, node.token_return.value());
 
         // the storage a local names is gone before the caller can read it, so handing back its
         // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes").
         // a parameter is the caller's storage and outlives the call, so it is the legal case
         if (declared.is_pointer() && actual.is_pointer()) {
-            VarDeclNode *root = root_vardecl_of(node.expr);
+            VarDeclNode *root = place_root_of(node.expr);
             if (root != nullptr) {
                 bool is_parameter = false;
                 for (auto *arg : _current_function->args) {
@@ -246,7 +187,10 @@ void TypeChecker::visitStructDecl(StructDeclNode &node)
 
 void TypeChecker::visitMemberAccess(MemberAccessNode &node)
 {
-    ValueType base_type = base_type_of(node);
+    // the node answers this itself now. it used to be a second copy of the switch in
+    // MemberAccessNode::result_type(), and the two drifted exactly as such pairs do: neither knew
+    // an index base, so a typo'd member behind `$items:$[0]->` went unreported
+    ValueType base_type = node.base_target_type();
     if (base_type.is_struct() || base_type.is_class()) {
         ComplexType *complex = base_type.get_complex_type();
         const std::string member = node.get_member_name().value();
@@ -455,6 +399,56 @@ void TypeChecker::check_const_target(AssignNode &node)
             : fmt::format("cannot assign to '{}' - it is declared const", name));
 }
 
+void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, const ExprNode &value, const TokenReference &at)
+{
+    const ValueType from = value.result_type();
+
+    // scoped to the destinations that have no conversion to fall back on: that is the surface where
+    // a mismatch is a real error rather than a widening. `T&` widens to `ptr<T>` freely while the
+    // narrowing back asserts non-nullness and needs the explicit cast
+    // (book/concept/pointers_and_refs_v2.md, "Two pointer types"), and a struct slot takes nothing
+    // but that struct. null answers to its own rules, and an undeterminable type to other diagnostics
+    if (to.is_void() || from.is_void()
+        || value.get_node_type() == NodeType::n_null
+        || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
+        || is_implicitly_convertible(from, to)) {
+        return;
+    }
+
+    // the hints are properties of the type pair rather than of the destination, so they are
+    // phrased once here
+    std::string hint;
+    if (!to.is_pointer() && from.is_pointer() && dest == Destination::t_assignment) {
+        hint = " - to change where a pointer points, assign to ':$'";
+    }
+    // only when the value is an address too: the cast the hint asks for narrows a nullable
+    // pointer to a borrow, and there is nothing to narrow if the value is not one
+    else if (from.is_pointer() && to.is_pointer() && !to.is_nullable()) {
+        hint = " - write the cast explicitly to assert it is not null";
+    }
+
+    std::string message;
+    switch (dest)
+    {
+        case Destination::t_declaration:
+            message = fmt::format("cannot implicitly convert '{}' to '{}'{}",
+                from.get_type_desciption(), to.get_type_desciption(), hint);
+            break;
+
+        case Destination::t_assignment:
+            message = fmt::format("cannot assign '{}' to '{}'{}",
+                from.get_type_desciption(), to.get_type_desciption(), hint);
+            break;
+
+        case Destination::t_return:
+            message = fmt::format("cannot return '{}' from a function declared '{}'{}",
+                from.get_type_desciption(), to.get_type_desciption(), hint);
+            break;
+    }
+
+    _collector.collect_issue<Issue::InvalidTypeConversion>(code_ref_for(at), message);
+}
+
 void TypeChecker::visit_assign(AssignNode &node)
 {
     // an initialization is the one write a const slot legitimately gets, so it is exempt
@@ -462,30 +456,15 @@ void TypeChecker::visit_assign(AssignNode &node)
         check_const_target(node);
     }
 
-    // the value has to fit the storage the target names. only checked when a pointer is
-    // involved, which is where the conversions are directional.
+    // the value has to fit the storage the target names, checked wherever a conversion cannot be
+    // synthesized for it (demands_exact_conversion).
     //
     // this is what rejects `$p = &$b`: after the adjustment pass the target is a deref of $p,
     // so the storage is an int32 while the value is an int32& - assigning an address into the
     // pointee's slot. re-seating is spelled `$p:$ = &$b`, whose target *is* the slot
     // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
     if (node.target && node.value_expr) {
-        ValueType target_type = node.target->result_type();
-        ValueType value_type = node.value_expr->result_type();
-
-        if ((target_type.is_pointer() || value_type.is_pointer())
-            && !target_type.is_void() && !value_type.is_void()
-            && node.value_expr->get_node_type() != NodeType::n_null
-            && !is_implicitly_convertible(value_type, target_type)) {
-            _collector.collect_issue<Issue::InvalidTypeConversion>(
-                code_ref_for(node.token_assign),
-                fmt::format("cannot assign '{}' to '{}'{}",
-                    value_type.get_type_desciption(),
-                    target_type.get_type_desciption(),
-                    !target_type.is_pointer() && value_type.is_pointer()
-                        ? " - to change where a pointer points, assign to ':$'"
-                        : ""));
-        }
+        check_destination_fits(Destination::t_assignment, node.target->result_type(), *node.value_expr, node.token_assign);
     }
 
     RecursiveVisitor::visit_assign(node);
@@ -502,23 +481,8 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
                 node.name()));
     }
 
-    // an initializer involving a pointer has to actually fit the slot. checked only when a
-    // pointer is involved because that is the surface where the conversions are directional:
-    // `T&` widens to `ptr<T>` freely, while the narrowing back asserts non-nullness and needs
-    // the explicit cast (book/concept/pointers_and_refs_v2.md, "Two pointer types")
-    if (node.init_expr && node.has_type()
-        && node.init_expr->get_node_type() != NodeType::n_null
-        && (node.type().is_pointer() || node.init_expr->result_type().is_pointer())
-        && !node.init_expr->result_type().is_void()
-        && !is_implicitly_convertible(node.init_expr->result_type(), node.type())) {
-        _collector.collect_issue<Issue::InvalidTypeConversion>(
-            code_ref_for(node.token_varname),
-            fmt::format("cannot implicitly convert '{}' to '{}'{}",
-                node.init_expr->result_type().get_type_desciption(),
-                node.type().get_type_desciption(),
-                node.type().is_pointer() && !node.type().is_nullable()
-                    ? " - write the cast explicitly to assert it is not null"
-                    : ""));
+    if (node.init_expr && node.has_type()) {
+        check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
     }
 
     // a borrow is the type that promises it is never null, so seeding one with null defeats

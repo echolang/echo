@@ -1,0 +1,33 @@
+// a member reached through an *element* of a heap array. `$items:$[0]` is an IndexExprNode base,
+// which MemberAccessNode::result_type() used to answer void for - so the write went untyped and
+// the read threw "Cannot access member 'x' of void type" in codegen (todo/B16)
+struct Point {
+    int32 $x;
+    float64 $y;
+}
+
+ptr<Point> $items = mem::alloc<Point>(2);
+
+$items:$[0]->x = 1;
+$items:$[0]->y = 2.5;
+$items:$[1]->x = 3;
+$items:$[1]->y = 4.5;
+
+echo $items:$[0]->x;
+echo $items:$[0]->y;
+echo $items:$[1]->x;
+echo $items:$[1]->y;
+
+// the field's type now reaches the expression, so the int32 gets its implicit cast to float64
+echo $items:$[0]->x * 2.5;
+
+// the step is typed from the field it moves
+$items:$[0]->x++;
+echo $items:$[0]->x;
+
+// the borrow spelling is the same storage, not a copy
+Point& $it = &$items:$[1];
+$it->x = 30;
+echo $items:$[1]->x;
+
+mem::free($items);

@@ -29,9 +29,7 @@ AST::ValueType AST::BinaryExprNode::result_type() const
             return AST::ValueType(AST::ValueTypePrimitive::t_int64);
         }
 
-        if (op == Token::Type::t_logical_eq || op == Token::Type::t_logical_neq
-            || op == Token::Type::t_open_angle || op == Token::Type::t_close_angle
-            || op == Token::Type::t_logical_leq || op == Token::Type::t_logical_geq) {
+        if (op_node->op->is_comparison()) {
             return AST::ValueType(AST::ValueTypePrimitive::t_bool);
         }
     }

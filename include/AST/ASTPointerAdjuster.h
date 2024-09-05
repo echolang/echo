@@ -30,7 +30,7 @@ namespace AST
     // RecursiveVisitor's descent.
     //
     // runs after monomorphization - a type parameter's pointer-ness is not known until it is
-    // substituted - and before the type checker, which can then compare types structurally.
+    // substituted - and before the type checker, which can then compare types structurally
     class PointerAdjuster
     {
     public:

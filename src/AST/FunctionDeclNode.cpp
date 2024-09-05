@@ -1,5 +1,6 @@
 #include "AST/FunctionDeclNode.h"
 
+#include "AST/ASTMangler.h"
 #include "AST/ASTNamespace.h"
 
 const std::string AST::FunctionDeclNode::node_description()
@@ -21,23 +22,10 @@ const std::string AST::FunctionDeclNode::node_description()
 
 const std::string AST::FunctionDeclNode::decorated_func_name() const
 {
-    std::string decorated_name = "_";
-
-    // root first, so a nested namespace reads in declaration order and the root contributes
-    // no empty segment
-    if (ast_namespace) {
-        for (const auto &segment : ast_namespace->path_segments()) {
-            decorated_name += segment + "_";
-        }
-    }
-
-    decorated_name += func_name() + "Z";
-
-    for (auto arg : args) {
-        decorated_name += "Z" + arg->type_node()->type.get_mangled_name();
-    }
-
-    return decorated_name;
+    // the mangling itself lives in AST::mangle_function_name, which is the single place that
+    // knows how a declaration becomes a symbol. this stays as the spelling every caller already
+    // uses
+    return AST::mangle_function_name(this);
 }
 
 const std::string AST::FunctionDeclNode::namespaced_func_name() const

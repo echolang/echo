@@ -12,6 +12,7 @@ namespace AST
     class Module;
     class File;
     class BinaryExprNode;
+    class ExprNode;
 
     // a semantic-analysis pass that runs after monomorphization and before codegen. it walks the
     // concrete AST resolving member accesses and call arguments, and records located issues on the
@@ -57,6 +58,21 @@ namespace AST
         const TokenReference *_context_token = nullptr;
 
         CodeRef code_ref_for(const TokenReference &token);
+
+        // the destinations that a value can be written into. only the phrasing of the diagnostic
+        // differs between them - the rule that decides whether the value fits does not
+        enum class Destination
+        {
+            t_declaration,
+            t_assignment,
+            t_return,
+        };
+
+        // the single "does this value fit this destination" rule, shared by a declaration's
+        // initializer, an assignment target and a return. it used to be written out at each of the
+        // three, and had already drifted: the return copy gated on "a pointer is involved" and so
+        // never checked a struct return at all
+        void check_destination_fits(Destination dest, const ValueType &to, const ExprNode &value, const TokenReference &at);
 
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value

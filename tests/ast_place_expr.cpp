@@ -18,7 +18,7 @@
 // pass deciding value versus place position, the type checker locating a diagnostic, and the
 // lvalue codegen's dispatch. when each kept its own switch they drifted, and member reads ended
 // up disagreeing with member writes (todo/B4). pinning the exact tag set here makes widening it a
-// deliberate act rather than a side effect.
+// deliberate act rather than a side effect
 
 using namespace AST;
 
@@ -84,6 +84,47 @@ TEST_CASE("An address, a literal and a call result are not places", "[AST][point
     REQUIRE_FALSE(is_place_expression(*addr));
     REQUIRE_FALSE(is_place_expression(*literal));
     REQUIRE_FALSE(is_place_expression(*call));
+}
+
+TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
+{
+    // is_assignable_target is deliberately one wider than is_place_expression: `$p:$ = &$b`
+    // re-seats the pointer, so the peel is a legal destination even though it has no address of
+    // its own. an address (`$p:$:$`) is not - there is nothing behind it to write into
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct P { int $a; }\n"
+        "function get() : int { return 1; }\n"
+        "$s = P(1);\n"
+        "ptr<int> $p = &$s->a;\n"
+        "echo $p:$[1];\n"
+        "echo $p;\n"
+        "echo ($p:$ == null);\n"
+        "echo get();\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *var_ref = first_of<VarRefNode>(*bundle);
+    auto *member = first_of<MemberAccessNode>(*bundle);
+    auto *index = first_of<IndexExprNode>(*bundle);
+    auto *deref = first_of<DerefExprNode>(*bundle);
+    auto *peel = first_of<PointerValueNode>(*bundle);
+    auto *addr = first_of<AddrOfExprNode>(*bundle);
+    auto *literal = first_of<LiteralIntExprNode>(*bundle);
+    auto *call = first_of<FunctionCallExprNode>(*bundle);
+
+    REQUIRE(peel != nullptr);
+    REQUIRE(addr != nullptr);
+    REQUIRE(literal != nullptr);
+    REQUIRE(call != nullptr);
+
+    REQUIRE(is_assignable_target(*var_ref));
+    REQUIRE(is_assignable_target(*member));
+    REQUIRE(is_assignable_target(*index));
+    REQUIRE(is_assignable_target(*deref));
+    REQUIRE(is_assignable_target(*peel));
+
+    REQUIRE_FALSE(is_assignable_target(*addr));
+    REQUIRE_FALSE(is_assignable_target(*literal));
+    REQUIRE_FALSE(is_assignable_target(*call));
 }
 
 TEST_CASE("value_result_type reads through a place and leaves a non-place alone", "[AST][pointer]")

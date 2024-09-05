@@ -37,8 +37,13 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
     if (payload.cursor.is_type(Token::Type::t_close_bracket)) {
         payload.cursor.skip(); // skip the closing square bracket
 
-        // create the attribute node
-        return &payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
+        // create the attribute node and register it on the scope, exactly like the valued form
+        // below. without the registration a valueless attribute parsed and was then dropped on
+        // the floor, so `#[inline]` never reached the declaration that followed it
+        auto &node = payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
+        payload.context.scope().add_attribute(node);
+
+        return &node;
     }
 
     // `#[name:$value]` now lexes its `:$` as the pointer-of operator - this is the one place in

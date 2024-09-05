@@ -13,6 +13,7 @@
 #include "Parser/NamespaceParser.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/StructParser.h"
+#include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
 
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
@@ -58,6 +59,10 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         {
             parse_struct(payload);
         }
+        else if (cursor.is_type(Token::Type::t_extern))
+        {
+            parse_extern_block(payload);
+        }
         else if (cursor.is_type(Token::Type::t_return))
         {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));
@@ -90,23 +95,31 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
         //   $bar = 
         //   const $ey
         else if (
-            cursor.is_type(Token::Type::t_const) || // const keyword always starts a vardecl
-            cursor.is_type(Token::Type::t_ptr) || // ptr keyword also indicates a vardecl
-            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
+            starts_vardecl(payload) ||
+            // a write through a place rather than into a bare name. these are statements only,
+            // so they are not part of what a declaration looks like: `$p:$ = ...` re-seats a
+            // pointer, `$s->x = ...` writes a member, and `$i++` desugars to an assignment
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_accessorlr }) ||
-            // `$p:$ = ...` re-seats a pointer, so the statement's left hand side is a place
-            // expression rather than a bare name
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_ptr_of }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon }) ||
-            starts_borrow_vardecl(payload) || // int32& $r = ..., either `&` spelling
-            starts_qualified_vardecl(payload) // a::b::Foo $foo
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
         ) {
             parse_varexpr(payload, &scope_node);
         }
 
-        else if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
-            if (auto *funccall_node = parse_funccall(payload)) {
+        // a call used as a statement. ordered after the vardecl branch above so that
+        // `a::b::Foo $foo` still reads as a declaration rather than a qualified call
+        else if (starts_call_statement(payload)) {
+            // consume a namespace prefix if there is one, so `mem::free($p);` resolves against
+            // `mem` rather than the enclosing namespace
+            const AST::Namespace *call_namespace = nullptr;
+            if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+                if (auto *ns_node = parse_namespace(payload)) {
+                    call_namespace = ns_node->ast_namespace;
+                }
+            }
+
+            if (auto *funccall_node = parse_funccall(payload, call_namespace)) {
                 scope_node.children.push_back(AST::make_ref(funccall_node));
                 
                 // expect a semicolon after function call statement

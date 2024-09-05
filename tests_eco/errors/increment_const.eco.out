@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 4:3
+Const violation: cannot assign to '$c' - it is declared const
+Begin: '++'
+End: '++'
+Code excerpt:
+ [3]> const int $c = 1;
+ [4]> $c++;
+        ^
+ [5]> 
+
+Critical issues found, cannot compile.

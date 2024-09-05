@@ -1,0 +1,20 @@
+// an unsigned field read out of an element. the conversion table is keyed on ValueType because
+// signedness does not survive lowering - and with the member's type answering void, coerce_value
+// used to get `from = void`, fall back to "assume signed" and sign extend a uint8
+struct Flags {
+    uint8 $a;
+    int8 $b;
+}
+
+ptr<Flags> $f = mem::alloc<Flags>(1);
+
+$f:$[0]->a = 200;
+$f:$[0]->b = 0 - 56;
+
+int32 $wide_unsigned = $f:$[0]->a;
+int32 $wide_signed = $f:$[0]->b;
+
+echo $wide_unsigned;
+echo $wide_signed;
+
+mem::free($f);

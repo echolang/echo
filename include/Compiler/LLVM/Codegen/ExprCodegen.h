@@ -46,6 +46,11 @@ namespace Compiler::LLVM
         void gen_binary_expr(AST::BinaryExprNode &node);
         void gen_unary_expr(AST::UnaryExprNode &node);
         void gen_function_call(AST::FunctionCallExprNode &node);
+
+        // answers a `#[builtin: ...]` call directly, as a constant, instead of emitting a call.
+        // the type being asked about comes from the instance's instantiation_args, which the
+        // monomorphizer stamped on when it resolved `size_of<int32>()` from `size_of<T>()`
+        void gen_builtin_call(AST::FunctionCallExprNode &node);
         void gen_addr_of(AST::AddrOfExprNode &node);
         void gen_deref(AST::DerefExprNode &node);
         void gen_index(AST::IndexExprNode &node);

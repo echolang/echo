@@ -1,0 +1,5 @@
+// `$p:$:$` is the address of the pointer slot, not the slot itself - there is nothing to write
+// the stepped value back into, so it cannot be incremented
+int $a = 1;
+ptr<int> $p = &$a;
+$p:$:$++;

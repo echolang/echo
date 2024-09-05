@@ -4,13 +4,39 @@
 #include "AST/TypeNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/ASTBuiltin.h"
 
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
 
-AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool symbol_only)
+#include <fmt/core.h>
+
+// reads the single string value out of an attribute like `#[intrinsic: "llvm.sin"]`, reporting a
+// located issue and answering nullopt when the attribute is malformed. shared by every attribute
+// whose payload is one string, so they cannot diverge in how they validate
+static std::optional<std::string> attribute_string_value(
+    Parser::Payload &payload, AST::AttributeNode *attribute, const std::string &attribute_name)
+{
+    if (attribute->attribute_exprs.size() != 1) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(attribute->attribute_tokens),
+            fmt::format("The '{}' attribute takes exactly one value.", attribute_name));
+        return std::nullopt;
+    }
+
+    if (!attribute->attribute_exprs[0].has_type<AST::LiteralStringExprNode>()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(attribute->attribute_tokens),
+            fmt::format("The '{}' attribute value must be a string.", attribute_name));
+        return std::nullopt;
+    }
+
+    return attribute->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>()->get_string_value();
+}
+
+AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool symbol_only, Parser::FuncDeclKind kind)
 {
     auto &cursor = payload.cursor;
 
@@ -28,6 +54,28 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         payload.collect_unexpected_token(Token::Type::t_identifier);
         cursor.try_skip_to_next_statement();
         return nullptr;
+    }
+
+    // inside an extern block the first identifier is the C symbol, and an optional `as` renames
+    // it for Echo callers: `function malloc as alloc_bytes(...)`. without the rename the symbol
+    // and the Echo name are the same.
+    //
+    // resolved before the name token is captured below, because the Echo name is what the symbol
+    // table, the namespace and every call site use - only extern_symbol reaches the linker
+    std::optional<std::string> extern_symbol;
+    if (kind == FuncDeclKind::t_extern) {
+        extern_symbol = cursor.current().value();
+
+        if (cursor.peek_is_type(1, Token::Type::t_as)) {
+            cursor.skip(); // the C symbol
+            cursor.skip(); // the `as` keyword
+
+            if (!cursor.is_type(Token::Type::t_identifier)) {
+                payload.collect_unexpected_token(Token::Type::t_identifier);
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+        }
     }
 
     // fetch the function name and skip it
@@ -111,6 +159,45 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     funcdecl->return_type = parse_type(payload);
 
+    // an extern declaration ends here, in both parser passes, so this is the single place that
+    // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass
+    // and the full pass build separate nodes for the same declaration, a cross-module call
+    // resolves through the symbol pass's node while codegen emits from the full pass's, and the
+    // two only agree because they mangle identically. if just one of them knew it was extern, the
+    // call would reference `_mem_alloc_bytesZZ...` while the definition was named `malloc`
+    if (kind == FuncDeclKind::t_extern) {
+        // a raw symbol has exactly one definition, so it cannot have one body per instantiation.
+        // this is why `mem::alloc<T>` is Echo code over a concrete `alloc_bytes` rather than an
+        // extern of its own
+        if (funcdecl->is_generic()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(nametoken),
+                "An extern function cannot be generic - a single C symbol has no per-instantiation body");
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        // the body lives in another object file. a body here would be compiled under the raw
+        // symbol and collide with the real definition at link time
+        if (!cursor.is_type(Token::Type::t_semicolon)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(nametoken),
+                "An extern function declaration cannot have a body - it must end with ';'");
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        cursor.skip(); // the semicolon
+
+        funcdecl->extern_symbol = extern_symbol;
+
+        if (!symbol_only) {
+            payload.context.scope().add_funcdecl(*funcdecl);
+        }
+
+        return funcdecl;
+    }
+
     // if we are only interested in the symbol, we are done
     if (symbol_only) {
         return funcdecl;
@@ -130,23 +217,31 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     if (cursor.is_type(Token::Type::t_semicolon)) {
         cursor.skip();
 
-        // bodyless function declaration might be intrinsic
-        // so we check the attributes for the intrinsic attribute
-        auto intrinsic_attr = funcdecl->attributes.get_first("intrinsic");
-        if (intrinsic_attr) {
-            // @todo properly implement the attribute value extratction instead of hardcoded offset
-            if (intrinsic_attr->attribute_exprs.size() != 1) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(intrinsic_attr->attribute_tokens), "Intrinsic attribute is malformed.");
+        // a bodyless declaration gets its implementation from one of two places: an LLVM
+        // intrinsic, which still becomes a real llvm::Function, or a compiler builtin, which has
+        // no symbol at all and whose call sites fold to a constant
+        if (auto *intrinsic_attr = funcdecl->attributes.get_first("intrinsic")) {
+            auto value = attribute_string_value(payload, intrinsic_attr, "intrinsic");
+            if (!value) {
+                return nullptr;
+            }
+            funcdecl->intrinsic = value;
+        }
+
+        if (auto *builtin_attr = funcdecl->attributes.get_first("builtin")) {
+            auto value = attribute_string_value(payload, builtin_attr, "builtin");
+            if (!value) {
                 return nullptr;
             }
 
-            if (!intrinsic_attr->attribute_exprs[0].has_type<AST::LiteralStringExprNode>()) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(intrinsic_attr->attribute_tokens), "Intrinsic attribute value is not a string.");
+            if (!AST::is_known_builtin(value.value())) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(builtin_attr->attribute_tokens),
+                    fmt::format("Unknown compiler builtin '{}'.", value.value()));
                 return nullptr;
             }
 
-            auto intrinsic_string_node = intrinsic_attr->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>();
-            funcdecl->intrinsic = intrinsic_string_node->get_string_value();
+            funcdecl->builtin = value;
         }
 
         return funcdecl;
@@ -165,7 +260,12 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // push the function scope
     payload.context.push_scope(funcscope);
 
-    funcdecl->body = &parse_scope(payload);
+    {
+        // the body's returns fit this type, exactly as a variable declaration's initializer fits
+        // the declared variable type. scoped so a declaration nested in the body restores it
+        AST::ReturnTypeScope return_scope(payload.context, funcdecl->return_type);
+        funcdecl->body = &parse_scope(payload);
+    }
 
     // we expect a closing brace
     if (!cursor.is_type(Token::Type::t_close_brace)) {

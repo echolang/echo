@@ -38,6 +38,36 @@ TEST_CASE("unknown struct member is a located diagnostic, not a silent void", "[
     REQUIRE(has_issue_containing(*bundle, "'point'"));
 }
 
+TEST_CASE("unknown member behind an element base is reported too", "[sema]")
+{
+    // the base here is an IndexExprNode, which neither the node's own result_type() nor the type
+    // checker's copy of the same switch knew about - so this went entirely unreported (todo/B16).
+    // one implementation answers both now
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct point { int $x; int $y; }\n"
+        "point $p = point(1, 2);\n"
+        "ptr<point> $ptr = &$p;\n"
+        "echo $ptr:$[0]->z;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "has no member named 'z'"));
+    REQUIRE(has_issue_containing(*bundle, "'point'"));
+}
+
+TEST_CASE("a const field written through an element base is rejected", "[sema]")
+{
+    // check_const_target keys on the target's storage type, which was void for this shape - so
+    // the guard silently did not fire
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct box { const int $v; }\n"
+        "box $b = box(1);\n"
+        "ptr<box> $p = &$b;\n"
+        "$p:$[0]->v = 2;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "const"));
+}
+
 TEST_CASE("valid struct member access produces no critical issues", "[sema]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -137,7 +167,7 @@ TEST_CASE("numeric binary operators are not flagged", "[sema]")
 // the same conditions are covered end-to-end in tests_eco/errors/, which pins the exact rendered
 // block. these are the cheap, precisely located counterparts - and they can assert the thing a
 // golden cannot: that a *legal* program produces no diagnostic at all. an over-eager pointer
-// check is as much a bug as a missing one, and only a negative control catches it.
+// check is as much a bug as a missing one, and only a negative control catches it
 
 TEST_CASE("assigning an address into a pointee is rejected", "[sema][pointer]")
 {
@@ -203,7 +233,7 @@ TEST_CASE("returning a value where a borrow is declared is rejected", "[sema][po
 
 // the four below are regression guards for crashes. each aborted or segfaulted the compiler
 // before, with no location and nothing the user could act on - the assertions here are as much
-// "this terminates and reports" as they are about the wording.
+// "this terminates and reports" as they are about the wording
 
 TEST_CASE("taking the address of something with no storage is a diagnostic", "[sema][pointer]")
 {

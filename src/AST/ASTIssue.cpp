@@ -1,7 +1,7 @@
 #include "AST/ASTIssue.h"
 #include "AST/VarDeclNode.h"
 
-#include <format>
+#include <fmt/core.h>
 
 #define ISSUE_MESSAGE_FNC(className) \
 std::string AST::Issue::className::message() const
@@ -29,50 +29,51 @@ ISSUE_MESSAGE_FNC(UnexpectedToken)
 
 ISSUE_MESSAGE_FNC(VariableRedeclaration)
 {
-    return std::format("The variable '{}' is already declared on line {} column {} and cannot be redeclared with a different type",
-        previous_declaration->name(), 
-        previous_declaration->token_varname.line(), 
+    return fmt::format(
+        "The variable '{}' is already declared on line {} column {} and cannot be redeclared with a different type",
+        previous_declaration->name(),
+        previous_declaration->token_varname.line(),
         previous_declaration->token_varname.column());
 }
 
 ISSUE_MESSAGE_FNC(UnknownVariable)
 {
-    return std::format("The variable '{}' is not declared in the current scope", variable_name);
+    return fmt::format("The variable '{}' is not declared in the current scope", variable_name);
 }
 
 ISSUE_MESSAGE_FNC(UnknownFunction)
 {
-    return std::format("The function '{}' could not be found", function_name);
+    return fmt::format("The function '{}' could not be found", function_name);
 }
 
 ISSUE_MESSAGE_FNC(LossOfPrecision)
 {
-    return std::format("This operation results in a loss of precision: {}", _message);
+    return fmt::format("This operation results in a loss of precision: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(InvalidTypeConversion)
 {
-    return std::format("Invalid type conversion: {}", _message);
+    return fmt::format("Invalid type conversion: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(ConstViolation)
 {
-    return std::format("Const violation: {}", _message);
+    return fmt::format("Const violation: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(IntegerOverflow)
 {
-    return std::format("Integer overflow: {}", _message);
+    return fmt::format("Integer overflow: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(IntegerUnderflow)
 {
-    return std::format("Integer underflow: {}", _message);
+    return fmt::format("Integer underflow: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(UnknownMember)
 {
-    return std::format("The struct '{}' has no member named '{}'", struct_name, member_name);
+    return fmt::format("The struct '{}' has no member named '{}'", struct_name, member_name);
 }
 
 ISSUE_MESSAGE_FNC(ArgumentTypeMismatch)

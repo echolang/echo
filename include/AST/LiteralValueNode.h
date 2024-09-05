@@ -83,11 +83,17 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
 
         std::string get_fvalue_string() const {
+            const std::string value = effective_token_literal_value();
+
             if (is_double_precision()) {
-                return effective_token_literal_value();
-            } else {
-                return effective_token_literal_value().substr(0, token_literal.value().size() - 1);
+                return value;
             }
+
+            // cut off the trailing "f". the length has to be measured on the effective value: an
+            // autocast literal carries an override that is longer than the source token it came
+            // from ("0.25" becomes "0.25f"), and measuring the token instead cut one character
+            // too many - a float32 0.25 reached codegen as 0.2
+            return value.substr(0, value.size() - 1);
         }
 
         float float_value() const {
@@ -122,7 +128,9 @@ namespace AST
                 expected == ValueTypePrimitive::t_uint8 ||
                 expected == ValueTypePrimitive::t_uint16 ||
                 expected == ValueTypePrimitive::t_uint32 ||
-                expected == ValueTypePrimitive::t_uint64
+                expected == ValueTypePrimitive::t_uint64 ||
+                expected == ValueTypePrimitive::t_usize ||
+                expected == ValueTypePrimitive::t_isize
             );
         };
 

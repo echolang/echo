@@ -1,0 +1,6 @@
+// `$p:$:$` collapses to `&$p` - an address, not storage. assigning to it has nothing to write
+// back into, which the parser says on the `=` rather than leaving it to a codegen throw
+int $a = 1;
+int $b = 2;
+ptr<int> $p = &$a;
+$p:$:$ = &$b;

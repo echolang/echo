@@ -1,5 +1,7 @@
 #include "AST/ASTValueType.h"
 
+#include "eco.h"
+
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 #include "External/infint.h"
@@ -18,6 +20,8 @@ std::string AST::get_primitive_name(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_uint16: return "uint16";
         case ValueTypePrimitive::t_uint32: return "uint32";
         case ValueTypePrimitive::t_uint64: return "uint64";
+        case ValueTypePrimitive::t_usize: return "usize";
+        case ValueTypePrimitive::t_isize: return "isize";
         case ValueTypePrimitive::t_float32: return "float32";
         case ValueTypePrimitive::t_float64: return "float64";
         case ValueTypePrimitive::t_bool: return "bool";
@@ -38,6 +42,9 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_uint16: return 2;
         case ValueTypePrimitive::t_uint32: return 4;
         case ValueTypePrimitive::t_uint64: return 8;
+        // pointer-width, from the one constant that knows the target
+        case ValueTypePrimitive::t_usize: return ECO_TARGET_POINTER_SIZE;
+        case ValueTypePrimitive::t_isize: return ECO_TARGET_POINTER_SIZE;
         case ValueTypePrimitive::t_float32: return 4;
         case ValueTypePrimitive::t_float64: return 8;
         case ValueTypePrimitive::t_bool: return 1;
@@ -46,9 +53,19 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
     };
 }
 
+// the character a primitive contributes to a mangled symbol name. every value must be distinct:
+// this reaches the LLVM symbol table through decorated_func_name, so two primitives sharing a
+// char means two functions sharing a symbol.
+//
+// deliberately exhaustive with no `default`. the default used to answer 'u' - the same char as
+// t_complex - so a newly added primitive silently collided instead of failing the build.
+// 'y' and 'z' are chosen because the surrounding grammar already reserves a lot: 'T' prefixes a
+// type parameter, 'C'/'M' mark const/mutable, 'L'/'R' mark leaf/ref, 'N'/'B' mark
+// nullable/borrow, 'G' marks a type argument, and decorated_func_name uses 'Z' as its separator
 char AST::get_primitive_id_char(ValueTypePrimitive primitive)
 {
     switch (primitive) {
+        case ValueTypePrimitive::t_complex: return 'u';
         case ValueTypePrimitive::t_int8: return 'c';
         case ValueTypePrimitive::t_int16: return 's';
         case ValueTypePrimitive::t_int32: return 'i';
@@ -57,13 +74,16 @@ char AST::get_primitive_id_char(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_uint16: return 'S';
         case ValueTypePrimitive::t_uint32: return 'I';
         case ValueTypePrimitive::t_uint64: return 'L';
+        case ValueTypePrimitive::t_usize: return 'y';
+        case ValueTypePrimitive::t_isize: return 'z';
         case ValueTypePrimitive::t_float32: return 'f';
         case ValueTypePrimitive::t_float64: return 'd';
         case ValueTypePrimitive::t_bool: return 'b';
         case ValueTypePrimitive::t_void: return 'v';
-
-        default: return 'u';
     };
+
+    assert(false && "unhandled primitive in get_primitive_id_char - every primitive needs a distinct mangling char");
+    return 'u';
 }
 
 AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
@@ -79,8 +99,10 @@ AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
         case ValueTypePrimitive::t_uint16: return AST::IntegerSize(size, false);
         case ValueTypePrimitive::t_uint32: return AST::IntegerSize(size, false);
         case ValueTypePrimitive::t_uint64: return AST::IntegerSize(size, false);
+        case ValueTypePrimitive::t_usize: return AST::IntegerSize(size, false);
+        case ValueTypePrimitive::t_isize: return AST::IntegerSize(size, true);
 
-        default: 
+        default:
             assert(false && "Invalid integer type");
             return AST::IntegerSize(0, false);
     };
@@ -248,7 +270,6 @@ std::string AST::ValueType::get_mangled_name() const
 std::string AST::ValueType::get_type_desciption() const
 {
     std::string prefix = is_const() ? "const " : "";
-    std::string pointer = "";
 
     // recursive rather than a prefix/suffix accumulator: an accumulator cannot render
     // `const ptr<const int32>`, where two different levels are each const
@@ -267,30 +288,30 @@ std::string AST::ValueType::get_type_desciption() const
     }
 
     if (is_primitive()) {
-        return prefix + get_primitive_name(primitive) + pointer;
+        return prefix + get_primitive_name(primitive);
     }
 
     // the name the user wrote, unqualified: this feeds the interned name of every generic
     // application, so qualifying it here would render Box<int> as Box<Box::T> in the template.
     // TypeParamDecl::describe() is the qualified form, for diagnostics
     if (is_type_param()) {
-        return prefix + _type_param->name + pointer;
+        return prefix + _type_param->name;
     }
 
     if (is_struct() || is_class()) {
         ComplexType* ct = get_complex_type();
         if (!ct->name.has_value()) {
-            return prefix + "[unknown]" + pointer;
+            return prefix + "[unknown]";
         }
 
         // If this is an instantiated generic type, the name already includes template args
         // from the TypeRegistry's args_description method. the namespace is prepended here so
         // two same-named types from different namespaces are distinguishable in diagnostics
-        return prefix + ct->namespaced_name() + pointer;
+        return prefix + ct->namespaced_name();
     }
 
     // Handle unknown or other types
-    return prefix + "[unknown]" + pointer;
+    return prefix + "[unknown]";
 }
 
 AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args)
@@ -373,12 +394,12 @@ bool AST::ComplexType::declares_type_param(const ValueType& type) const
     return false;
 }
 
-AST::ValueType AST::value_type_of(const ValueType& type)
+AST::ValueType AST::value_type_of(const ValueType &type)
 {
     return type.is_pointer() ? type.pointee() : type;
 }
 
-AST::ValueType AST::target_type_of(const ValueType& type)
+AST::ValueType AST::target_type_of(const ValueType &type)
 {
     ValueType target = type;
     while (target.is_pointer()) {
@@ -387,7 +408,7 @@ AST::ValueType AST::target_type_of(const ValueType& type)
     return target;
 }
 
-bool AST::is_implicitly_convertible(const ValueType& from, const ValueType& to)
+bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
 {
     ValueType bare_from = ValueType::make_mutable(from);
     ValueType bare_to = ValueType::make_mutable(to);
@@ -426,6 +447,11 @@ bool AST::is_implicitly_convertible(const ValueType& from, const ValueType& to)
     // allowing it here would instead accept `$p = &$b`, quietly storing an address into the
     // pointee's slot where the doc requires an error (L87)
     return false;
+}
+
+bool AST::can_type_a_literal(const ValueType &type)
+{
+    return type.is_primitive() && !type.is_void();
 }
 
 bool AST::contains_type_param(const ValueType& type)

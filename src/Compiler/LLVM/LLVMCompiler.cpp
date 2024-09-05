@@ -31,6 +31,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     _ctx.llvm_context = std::make_unique<llvm::LLVMContext>();
     _ctx.builder = std::make_unique<llvm::IRBuilder<>>(*_ctx.llvm_context);
 
+    // resolve the host target first: create_cmp_units stamps its data layout onto every module,
+    // and a compile-time size_of<T>() reads it
+    _backend.init_target();
+
     // initialize the compilation units
     _types.create_cmp_units(bundle);
 

@@ -221,6 +221,13 @@ namespace AST
 
         CloneContext cc(home->nodes, subst, _collector.type_registry);
         auto *instance = static_cast<FunctionDeclNode *>(tmpl->clone(cc));
+
+        // stamp the instantiation identity onto the instance. the mangled name is built from
+        // these, so without them two instantiations of a generic whose parameter shows up only
+        // in the return type share one symbol - see FunctionDeclNode::instantiation_args
+        instance->template_ref = tmpl;
+        instance->instantiation_args = args;
+
         _func_instances[key] = instance;
 
         // make the instance visible to codegen, which emits bodies from the file root children

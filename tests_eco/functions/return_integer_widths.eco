@@ -1,0 +1,85 @@
+// a return goes through the same conversion table as a declaration and an assignment, so the
+// extension follows the *source's* signedness and a narrowing return truncates. this walks every
+// integer width because the table is keyed on the AST type, not the lowered llvm type - an i8 and
+// a u8 are the same `i8` to llvm and only the ValueType says which extend to emit
+//
+// narrow returns are widened into an int32 before `echo` on purpose: passing an i8 straight into
+// a variadic printf is an unrelated echo bug (todo/B15), and this test is about the return
+
+function make_uint8(int32 $v) : uint8
+{
+    return $v;
+}
+
+function make_int8(int32 $v) : int8
+{
+    return $v;
+}
+
+function make_uint16(int32 $v) : uint16
+{
+    return $v;
+}
+
+function make_int64(int32 $v) : int64
+{
+    return $v;
+}
+
+function make_usize(int32 $v) : usize
+{
+    return $v;
+}
+
+function make_isize(int32 $v) : isize
+{
+    return $v;
+}
+
+// 300 truncates to 44, and a uint8 source zero-extends back
+int32 $u8 = make_uint8(300);
+echo $u8;
+
+// 200 truncates to -56 as an int8, and a signed source sign-extends back
+int32 $i8 = make_int8(200);
+echo $i8;
+
+// 70000 truncates to 4464 in 16 bits
+int32 $u16 = make_uint16(70000);
+echo $u16;
+
+// widening a negative sign-extends rather than filling with zeroes
+int64 $wide = make_int64(-5);
+echo $wide;
+
+usize $size = make_usize(40);
+echo $size;
+
+isize $signed_size = make_isize(-7);
+echo $signed_size;
+
+// a literal return picks up the declared width directly at parse time
+function big() : uint64
+{
+    return 4294967296;
+}
+
+echo big();
+
+// float32 is returned and widened before echo - `echo` of a float32 has its own variadic bug
+function quarter() : float32
+{
+    return 0.25;
+}
+
+float64 $q = quarter();
+echo $q;
+
+// an integer becomes a bool by comparing against zero, not by truncating to its low bit
+function truthy(int32 $v) : bool
+{
+    return $v;
+}
+
+echo truthy(2);
+echo truthy(0);

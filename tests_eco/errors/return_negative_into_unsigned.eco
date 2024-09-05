@@ -1,0 +1,9 @@
+// a returned literal is typed against the declared return type, so it gets the same diagnostics
+// `uint32 $x = -1;` gets rather than wrapping around silently
+
+function negative() : uint32
+{
+    return -1;
+}
+
+echo negative();

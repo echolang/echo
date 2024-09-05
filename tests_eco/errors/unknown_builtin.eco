@@ -1,0 +1,6 @@
+// #[builtin: ...] is rejected at the attribute when the name is not one the compiler knows, so
+// the error points at the declaration rather than failing later as an unresolved symbol
+#[builtin: "sizeof_but_misspelled"]
+function bogus<T>() : usize;
+
+echo bogus<int32>();

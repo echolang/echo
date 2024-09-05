@@ -1,0 +1,23 @@
+// usize and isize are pointer-width integer primitives, not aliases of uint64/int64. every
+// count, length and capacity in the stdlib is spelled with them, so a distinct type identity is
+// what keeps those signatures stable if the target width ever changes
+usize $count = 4;
+isize $delta = -3;
+usize $max = 18446744073709551615;
+
+echo $count;
+echo $delta;
+echo $max;
+
+function scale(usize $n) : usize
+{
+    return $n * 2;
+}
+
+echo scale(21);
+
+// usize is a distinct type from uint64, so mixing them is a conversion rather than an identity.
+// on a 64-bit target that conversion is a no-op, but the types stay separate
+uint64 $raw = 7;
+usize $converted = $raw;
+echo $converted;

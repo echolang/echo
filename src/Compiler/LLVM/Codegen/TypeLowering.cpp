@@ -1,6 +1,8 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "eco.h"
+
 #include "AST/ASTBundle.h"
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
@@ -57,6 +59,12 @@ void TypeLowering::create_cmp_units(const AST::Bundle &bundle)
         cmp_unit->ast_module = module.get();
         cmp_unit->llvm_module = std::make_unique<llvm::Module>(module->name, *_ctx.llvm_context);
 
+        // every module carries the host layout and triple from the moment it exists, so any
+        // question about type sizes during codegen gets the real target's answer, the optimizer
+        // has a layout to reason with, and the JIT and object paths cannot disagree
+        cmp_unit->llvm_module->setDataLayout(_ctx.layout());
+        cmp_unit->llvm_module->setTargetTriple(_ctx.target_triple);
+
         _ctx.cmp_unit_map[module->name] = cmp_unit.get();
     }
 
@@ -94,8 +102,58 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
         return intrinsic_llvm_func;
     }
 
-    llvm::FunctionType *llvm_fnc_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
-    llvm::Function *llvm_func = llvm::Function::Create(llvm_fnc_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
+    llvm::FunctionType *requested_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
+
+    // an extern declaration binds to a symbol that may already exist in this module - declared by
+    // another extern in a different file, or by the compiler itself. getOrInsertFunction is what
+    // unifies them instead of colliding.
+    //
+    // it hands back the *existing* global whenever the name is taken, though, and under opaque
+    // pointers a signature mismatch is invisible in the IR - so two declarations of `malloc` with
+    // different argument types would silently share one call sequence. compare the types and say
+    // so instead
+    if (node->extern_symbol.has_value()) {
+        auto callee = cmp_unit.llvm_module->getOrInsertFunction(func_name, requested_type);
+        auto *extern_llvm_func = llvm::dyn_cast<llvm::Function>(callee.getCallee());
+
+        if (!extern_llvm_func) {
+            throw _ctx.error(fmt::format(
+                "Extern symbol '{}' is already declared in module '{}' as something other than a function.",
+                func_name, cmp_unit.ast_module->name
+            ));
+        }
+
+        if (extern_llvm_func->getFunctionType() != requested_type) {
+            throw _ctx.error(fmt::format(
+                "Extern symbol '{}' is already declared in module '{}' with a different signature. "
+                "Every declaration of a C symbol must agree on its argument and return types.",
+                func_name, cmp_unit.ast_module->name
+            ));
+        }
+
+        cmp_unit.function_table.push_function(func_name, node, extern_llvm_func);
+        return extern_llvm_func;
+    }
+
+    // two declarations mangling to one name means the mangler lost information, and the failure
+    // is otherwise silent: push_function overwrites by name, gen_function_decl looks the function
+    // up by name, and Function::Create quietly renames the loser to "<name>.1" - so two bodies
+    // end up in one function. fail loudly instead
+    if (auto existing_id = cmp_unit.function_table.get_function_id(func_name); existing_id != 0) {
+        const auto *existing = cmp_unit.function_table.get_function(existing_id).ast_funcdecl;
+        if (existing != node) {
+            throw _ctx.error(fmt::format(
+                "Symbol '{}' is already declared in module '{}' (by '{}', now again by '{}'). "
+                "This is a name mangling defect, not a source error.",
+                func_name,
+                cmp_unit.ast_module->name,
+                existing ? existing->namespaced_func_name() : "<unknown>",
+                node->namespaced_func_name()
+            ));
+        }
+    }
+
+    llvm::Function *llvm_func = llvm::Function::Create(requested_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
 
     // store in the function map
     cmp_unit.function_table.push_function(func_name, node, llvm_func);
@@ -171,6 +229,11 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
             if (fncdecl->is_generic()) {
                 continue;
             }
+            // a builtin is answered at the call site and has no symbol, so declaring one would
+            // emit a `declare` nobody defines and the call would fail to resolve at link time
+            if (fncdecl->is_builtin()) {
+                continue;
+            }
             create_llvm_func_decl(fncdecl, *cmp_unit);
         }
     }
@@ -190,6 +253,11 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
 
             // Skip generic function templates
             if (decl->is_generic()) {
+                continue;
+            }
+
+            // as above: a builtin call folds to a constant, there is nothing to link
+            if (decl->is_builtin()) {
                 continue;
             }
 
@@ -236,9 +304,19 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         auto *complex = type.get_complex_type();
         auto struct_id = cmp_unit.structure_table->get_structure_id(complex);
 
-        // a generic struct instantiation (Box<int>) has no StructDeclNode, so it is not built
-        // during build_struct_maps; lower it lazily the first time it is needed here.
-        if (!struct_id && complex && complex->is_instantiated()) {
+        // lower the layout into this unit on demand. build_struct_maps only registers the structs
+        // each module declares itself, so two cases arrive here undeclared:
+        //
+        //  - a generic instantiation (Box<int>), which has no StructDeclNode at all;
+        //  - a struct declared in *another* module. `mem::alloc<Padded>(2)` is instantiated into
+        //    the stdlib module, because that is where the `alloc<T>` template lives, but `Padded`
+        //    is declared in main - so lowering that instance needs a layout the stdlib unit has
+        //    never seen. allocating a user struct on the heap is a headline use of mem::, so this
+        //    is the common case rather than a corner
+        //
+        // both are keyed on the ComplexType, so identity survives even though each unit ends up
+        // with its own llvm::StructType for the same Echo type
+        if (!struct_id && complex) {
             create_llvm_struct_for_instance(complex, cmp_unit);
             struct_id = cmp_unit.structure_table->get_structure_id(complex);
         }
@@ -304,6 +382,11 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
             return llvm::Type::getInt32Ty(*_ctx.llvm_context);
         case AST::ValueTypePrimitive::t_uint64:
             return llvm::Type::getInt64Ty(*_ctx.llvm_context);
+        // pointer-width integers. the width comes from the same constant AST::get_primitive_size
+        // answers from, so the ast-level size and the lowered llvm type cannot disagree
+        case AST::ValueTypePrimitive::t_usize:
+        case AST::ValueTypePrimitive::t_isize:
+            return llvm::Type::getIntNTy(*_ctx.llvm_context, ECO_TARGET_POINTER_SIZE * 8);
         case AST::ValueTypePrimitive::t_bool:
             return llvm::Type::getInt1Ty(*_ctx.llvm_context);
         default:
@@ -370,6 +453,16 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
                 ? _ctx.builder->CreateFPToSI(value, target_llvm)
                 : _ctx.builder->CreateFPToUI(value, target_llvm);
         }
+        // a bool is one bit that means 0 or 1, so it always widens *unsigned*. it needs its own
+        // row because is_integer_type() deliberately excludes bool, so the cast below never saw
+        // it - and if it had, source_signed would have sign extended `true` into -1. reached by
+        // `int32 $x = $b;` for a bool $b, and by a bool literal in a generic body whose T only
+        // becomes an integer at the instance. `int32 $x = true;` does *not* reach it: the bool
+        // literal parser converts that one at the destination, so both sides are already int32
+        if (source_is_bool || value->getType()->isIntegerTy(1)) {
+            return _ctx.builder->CreateIntCast(value, target_llvm, false);
+        }
+
         if (source_is_int) {
             // CreateIntCast picks extend or truncate from the widths, and takes the *source's*
             // signedness for the extend - which is what makes uint8 -> uint32 a zero extend

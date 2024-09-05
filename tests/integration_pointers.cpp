@@ -15,7 +15,7 @@
 // this is the layer between the unit suites (which pin one pass at a time) and tests_eco/ (which
 // pins observable output). what lives here is everything that is decided by the passes agreeing
 // with each other and is invisible in a program's output: what type an inferred declaration ends
-// up with, how many instances a generic produced, what reached a mangled name.
+// up with, how many instances a generic produced, what reached a mangled name
 
 using namespace AST;
 

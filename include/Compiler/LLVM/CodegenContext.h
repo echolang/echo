@@ -7,13 +7,16 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 
+#include <cassert>
 #include <memory>
+#include <optional>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -42,6 +45,18 @@ namespace Compiler::LLVM
         std::unique_ptr<llvm::LLVMContext> llvm_context;
         std::unique_ptr<llvm::IRBuilder<>> builder;
 
+        // the host target's data layout and triple, published by Backend::init_target before any
+        // module is created so that every module carries them from the start. this is what makes
+        // a compile-time `size_of<T>()` answer the same number the running program will see -
+        // asking a layout-less module gives LLVM's defaults, which match no real target
+        std::optional<llvm::DataLayout> data_layout;
+        std::string target_triple;
+
+        const llvm::DataLayout &layout() const {
+            assert(data_layout.has_value() && "target not initialized - Backend::init_target must run before codegen");
+            return data_layout.value();
+        }
+
         std::vector<std::unique_ptr<CmpUnit>> cmp_units;
         std::unordered_map<std::string, CmpUnit *> cmp_unit_map;
 
@@ -64,7 +79,7 @@ namespace Compiler::LLVM
         TypeLowering *types = nullptr;
 
         // the lvalue subsystem: the single place that turns an expression into an address.
-        // every read, write and address-of goes through it, so they cannot drift apart.
+        // every read, write and address-of goes through it, so they cannot drift apart
         LValueCodegen *lvalues = nullptr;
 
         llvm::Module *current_module() {

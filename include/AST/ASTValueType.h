@@ -54,6 +54,12 @@ namespace AST
         t_uint16,
         t_uint32,
         t_uint64,
+        // pointer-width integers, the width coming from ECO_TARGET_POINTER_SIZE. deliberately
+        // their own primitives rather than aliases of t_uint64/t_int64: every count, length and
+        // capacity in the stdlib is spelled with these, and a distinct type identity is what
+        // keeps those signatures stable when the width changes
+        t_usize,
+        t_isize,
         t_float32,
         t_float64,
         t_bool,
@@ -65,17 +71,25 @@ namespace AST
         bool is_signed;
 
         IntegerSize(uint8_t size, bool is_signed) : size(size), is_signed(is_signed) {}
-        
+
+        // the bounds are built by shifting a full mask *down* rather than shifting 1 *up* by the
+        // width. `1ULL << 64` is undefined behaviour, and because `size` arrives from a
+        // non-inlined switch it was a runtime shift: arm64 and x86 mask the count to 6 bits, so
+        // the widest unsigned type reported a maximum of 0 and rejected every literal assigned
+        // to a uint64. shifting down never reaches a width-sized shift count
         int64_t get_max_negative_value() const {
             if (!is_signed) return 0;
-            return -(1LL << (size * 8 - 1));
+            const unsigned bits = static_cast<unsigned>(size) * 8;
+            // -2^(bits-1), negated in unsigned space because negating the int64 minimum is
+            // itself signed overflow. unsigned wrap-around is defined, and so is the conversion
+            const uint64_t magnitude = 1ULL << (bits - 1);
+            return static_cast<int64_t>(~magnitude + 1);
         }
 
         uint64_t get_max_positive_value() const {
-            if (is_signed)
-                return (1ULL << (size * 8 - 1)) - 1;
-            else
-                return (1ULL << (size * 8)) - 1;
+            const unsigned bits = static_cast<unsigned>(size) * 8;
+            const unsigned value_bits = is_signed ? bits - 1 : bits;
+            return ~0ULL >> (64 - value_bits);
         }
     };
 
@@ -226,10 +240,12 @@ namespace AST
             case ValueTypePrimitive::t_uint16:
             case ValueTypePrimitive::t_uint32:
             case ValueTypePrimitive::t_uint64:
+            case ValueTypePrimitive::t_usize:
+            case ValueTypePrimitive::t_isize:
             case ValueTypePrimitive::t_float32:
             case ValueTypePrimitive::t_float64:
                 return true;
-            
+
             default:
                 return false;
             }
@@ -262,8 +278,9 @@ namespace AST
             case ValueTypePrimitive::t_int16:
             case ValueTypePrimitive::t_int32:
             case ValueTypePrimitive::t_int64:
+            case ValueTypePrimitive::t_isize:
                 return true;
-            
+
             default:
                 return false;
             }
@@ -280,8 +297,9 @@ namespace AST
             case ValueTypePrimitive::t_uint16:
             case ValueTypePrimitive::t_uint32:
             case ValueTypePrimitive::t_uint64:
+            case ValueTypePrimitive::t_usize:
                 return true;
-            
+
             default:
                 return false;
             }
@@ -443,8 +461,8 @@ namespace AST
             if (type.is_type_param() && !is_instantiated()) {
                 assert(declares_type_param(type));
             }
+            _property_map[name] = _properties.size();
             _properties.push_back(Property { _properties.size(), name, type });
-            _property_map[name] = type;
         }
 
         bool has_property(const std::string &name) const {
@@ -455,8 +473,16 @@ namespace AST
             return index < _properties.size();
         }
 
+        // the property a name denotes, or null. resolves the name once, so a caller that needs
+        // both the index and the type (codegen's GEP does) pays for one lookup rather than a
+        // has/get pair plus a linear scan to recover the index
+        const Property *find_property(const std::string &name) const {
+            auto it = _property_map.find(name);
+            return it == _property_map.end() ? nullptr : &_properties[it->second];
+        }
+
         const ValueType &get_property_type(const std::string &name) const {
-            return _property_map.at(name);
+            return _properties.at(_property_map.at(name)).type;
         }
 
         const ValueType &get_property_type(size_t index) const {
@@ -473,7 +499,7 @@ namespace AST
 
     private:
         std::vector<Property> _properties;
-        std::unordered_map<std::string, ValueType> _property_map;
+        std::unordered_map<std::string, size_t> _property_map;
 
         friend class TypeRegistry;  // Allow TypeRegistry to access _properties
     };
@@ -632,7 +658,7 @@ namespace AST {
     // behave like the value it points at, and the generic decay that binds T=int32 when a
     // ptr<int32> is passed to `function box<T>(T $v)`
     // (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
-    ValueType value_type_of(const ValueType& type);
+    ValueType value_type_of(const ValueType &type);
 
     // the type ultimately addressed, following every pointer level rather than one.
     //
@@ -640,7 +666,7 @@ namespace AST {
     // level. this is the `->` rule: a member lives on the struct, however many addresses deep
     // the base happens to be, so `ptr<ptr<Point>>` still finds Point's fields
     // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
-    ValueType target_type_of(const ValueType& type);
+    ValueType target_type_of(const ValueType &type);
 
     // true when a value of `from` may be used where `to` is expected without an explicit cast.
     //
@@ -650,7 +676,19 @@ namespace AST {
     // int32 parameter. the two differences here:
     //   - top level const is dropped
     //   - a non-nullable borrow T& widens to a nullable ptr<T>, never the reverse
-    bool is_implicitly_convertible(const ValueType& from, const ValueType& to);
+    bool is_implicitly_convertible(const ValueType &from, const ValueType &to);
+
+    // can this type decide what a number or bool literal is? only a concrete, non-void primitive
+    // can. every other kind reaches a literal as a hint that says nothing about it:
+    //   - a pointer hint belongs to the expression as a whole, not to the operand - in
+    //     `ptr<int> $q = $p:$ + 1` the literal is only the element offset;
+    //   - a type parameter says nothing until it is substituted;
+    //   - a struct or class has no conversion from a literal at all.
+    // in all of those the literal is typed on its own (int32 unless the value needs int64) and
+    // fitted at its destination by TypeLowering::coerce_value after monomorphization, the same way
+    // a `return` in a generic body is. treating them as hints instead made the autocast helpers
+    // report a bogus "unexpected token" at the literal
+    bool can_type_a_literal(const ValueType &type);
 
 };
 

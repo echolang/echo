@@ -1,0 +1,37 @@
+// the rest of the mem:: surface: realloc, zero, copy, size_of, align_of, and freeing null
+
+// realloc keeps the contents that still fit, and may move the block - so its result re-seats the
+// pointer with `:$` rather than being written through it
+ptr<int32> $a = mem::alloc<int32>(2);
+$a:$[0] = 11;
+$a:$[1] = 22;
+$a:$ = mem::realloc<int32>($a, 4);
+$a:$[2] = 33;
+echo $a:$[0];
+echo $a:$[1];
+echo $a:$[2];
+
+// zero fills whole elements, not bytes
+ptr<int32> $z = mem::alloc<int32>(3);
+mem::zero<int32>($z, 3);
+echo $z:$[0];
+echo $z:$[2];
+
+// copy counts elements too
+ptr<int32> $dst = mem::alloc<int32>(2);
+mem::copy<int32>($dst, $a, 2);
+echo $dst:$[0];
+echo $dst:$[1];
+
+echo mem::size_of<int32>();
+echo mem::align_of<float64>();
+
+mem::free($a);
+mem::free($z);
+mem::free($dst);
+
+// freeing null is a no-op, which libc's free already guarantees
+ptr<int32> $nothing = null;
+mem::free($nothing);
+
+echo 999;

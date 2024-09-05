@@ -1,0 +1,9 @@
+// an extern declaration names a body that lives in another object file, so it must end at the
+// semicolon. a body here would be compiled under the raw symbol and collide at link time
+extern {
+    function some_symbol() : void {
+        echo 1;
+    }
+}
+
+echo 1;

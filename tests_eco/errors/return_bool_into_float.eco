@@ -1,0 +1,11 @@
+// a bool literal is not a number. the neighbouring case matters as much: `return true;` from a
+// `: bool` function has to stay legal - it reported "the boolean literal 'true' cannot be
+// implicitly converted to the expected type 'bool'" until the expected type was compared to the
+// literal's own type first (see tests_eco/functions/return_integer_widths.eco for the working one)
+
+function not_a_number() : float64
+{
+    return true;
+}
+
+echo not_a_number();

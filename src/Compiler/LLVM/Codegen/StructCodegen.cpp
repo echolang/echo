@@ -75,8 +75,13 @@ void StructCodegen::gen_struct_decl(AST::StructDeclNode &node)
 
 void StructCodegen::gen_member_access(AST::MemberAccessNode &node)
 {
-    auto result_type = node.result_type();
-    if (result_type.is_void()) {
+    // the same lvalue path a member write uses, so a read and a write can never disagree
+    // about which field they mean (todo/A3). a pointer-typed field carries its own explicit
+    // deref node when it is read in value position. it also resolves the property, so the void
+    // guard below reads the answer off the place rather than walking the base chain a second time
+    auto place = _ctx.lvalues->gen_lvalue(node);
+
+    if (place.storage_type.is_void()) {
         // the type-check pass should have reported an unknown/void member before codegen; if we
         // reach here it slipped through, so surface it with as much context as we have.
         throw _ctx.error(fmt::format(
@@ -84,15 +89,7 @@ void StructCodegen::gen_member_access(AST::MemberAccessNode &node)
             node.get_member_name().value(), _ctx.function_context()));
     }
 
-    // the same lvalue path a member write uses, so a read and a write can never disagree
-    // about which field they mean (todo/A3). a pointer-typed field carries its own explicit
-    // deref node when it is read in value position
-    auto place = _ctx.lvalues->gen_lvalue(node);
-
-    _ctx.value_stack.push(_ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
-        place.address,
-        node.get_member_name().value()));
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(place, node.get_member_name().value().c_str()));
 }
 
 void StructCodegen::gen_var(AST::VarNode &node)

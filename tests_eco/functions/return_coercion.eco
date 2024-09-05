@@ -1,0 +1,29 @@
+// a return fits its value to the declared return type, the same way a variable declaration fits
+// its initializer. it used to fit it to nothing: a literal is typed where it is written and the
+// return parser passed no expected type down, so `return 0` below was an int32 and codegen handed
+// `ret i32 0` to a double-returning function - which the llvm verifier rejects outright
+
+function zero() : float64
+{
+    return 0;
+}
+
+// a non-literal that needs widening: this is a conversion, not a literal-typing trick
+function widen(int32 $v) : float64
+{
+    return $v;
+}
+
+// and narrowing truncates, following the source's signedness
+function narrow(int32 $v) : int8
+{
+    return $v;
+}
+
+echo zero();
+echo widen(3);
+
+// widened back before echo so the golden reads the truncated *value* rather than whatever an
+// i8 leaves in a variadic printf slot (an unrelated echo bug - see todo/B15)
+int32 $truncated = narrow(300);
+echo $truncated;

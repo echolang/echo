@@ -47,6 +47,14 @@ namespace Compiler::LLVM
         // variable's own slot, not the thing it points at. that is what `&E` and `E:$` want
         LValue gen_lvalue(AST::ExprNode &expr);
 
+        // reads the value out of a place. every read in the compiler goes through here, so the
+        // "which llvm type do I load" question - the one opaque pointers make unanswerable from
+        // the address alone - is answered from storage_type in exactly one place
+        llvm::Value *gen_load(const LValue &place, const char *name);
+
+        // gen_lvalue followed by gen_load: the ordinary "read this expression" path
+        llvm::Value *gen_load(AST::ExprNode &expr, const char *name);
+
         // gen_lvalue with one auto-deref applied when the storage holds a pointer, so the
         // result addresses the pointee. that is what a plain read or write of a transparent
         // pointer wants: `$p = 20` stores into the pointee, never into the slot.
@@ -57,12 +65,15 @@ namespace Compiler::LLVM
         LValue gen_place(AST::ExprNode &expr);
 
         // evaluates `expr` as a pointer-typed rvalue, i.e. the address it holds rather than
-        // the address it lives at. the seam pointer indexing and arithmetic need; unused until
-        // then, so it is declared here to keep the shape visible rather than defined
+        // the address it lives at. the seam pointer indexing and arithmetic need
         llvm::Value *gen_address_value(AST::ExprNode &expr);
 
     private:
         CodegenContext &_ctx;
+
+        // one level of transparency: loads the address out of a pointer-holding place, so the
+        // result addresses the pointee. returns `place` untouched when it holds no pointer
+        LValue deref_once(const LValue &place);
 
         // the address of the struct that a member access is reaching into, with any pointer
         // base already dereferenced

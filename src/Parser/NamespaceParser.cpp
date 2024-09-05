@@ -5,6 +5,14 @@ bool is_part_of_namespace_token(Token::Type type)
     return type == Token::Type::t_identifier || type == Token::Type::t_namespace_sep;
 }
 
+size_t Parser::peek_past_namespace_prefix(Payload &payload, size_t offset)
+{
+    while (payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        offset += 2;
+    }
+    return offset;
+}
+
 AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
 {
     std::vector<std::string> ns_parts;

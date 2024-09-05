@@ -1,0 +1,66 @@
+// the coercion is a property of the *destination*, not of the returned expression's shape, so
+// everything that can stand after `return` has to arrive fitted: a literal, a variable, an
+// arithmetic expression, another call's result, and a return from either arm of a branch
+
+// a binary expression whose operands differ answers void from result_type(), which is the one
+// case where the conversion reads the signedness off the value itself
+function mix(int32 $i, float64 $f) : float64
+{
+    return $i + $f;
+}
+
+// every return in the function answers to the same declared type, including the one inside a
+// branch - each is fitted where it is emitted rather than once at the end
+function step(int32 $n) : float64
+{
+    if ($n > 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
+// forwarding another call's result: the inner call is already a float64, so nothing is inserted
+function relay(int32 $n) : float64
+{
+    return step($n);
+}
+
+// a narrowing return out of a loop, to cover a return that is not the last statement
+function first_over(int32 $limit) : int8
+{
+    int32 $i = 0;
+
+    while ($i < 1000) {
+        if ($i > $limit) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return 0;
+}
+
+// a bare `return;` hands back nothing. this used to trip an assertion in the expression parser,
+// so a void function could not return early at all
+function only_positive(int32 $n) : void
+{
+    if ($n < 0) {
+        return;
+    }
+
+    echo $n;
+}
+
+echo mix(1, 0.5);
+echo step(1);
+echo step(-1);
+echo relay(4);
+
+int32 $truncated = first_over(300);
+echo $truncated;
+
+only_positive(7);
+only_positive(-7);
+echo 1;

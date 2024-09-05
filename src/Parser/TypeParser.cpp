@@ -41,15 +41,11 @@ bool Parser::starts_qualified_vardecl(Parser::Payload &payload)
     }
 
     // walk the `identifier ::` pairs of the namespace path, at least one is required
-    size_t pairs = 0;
-    while (payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
-        offset += 2;
-        pairs++;
-    }
-
-    if (pairs == 0) {
+    const size_t after_prefix = peek_past_namespace_prefix(payload, offset);
+    if (after_prefix == offset) {
         return false;
     }
+    offset = after_prefix;
 
     // the type name itself followed by the variable name
     return payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_varname });
@@ -63,9 +59,7 @@ bool Parser::starts_borrow_vardecl(Parser::Payload &payload)
     }
 
     // an optionally qualified type name, `a::b::Foo& $x`
-    while (payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
-        offset += 2;
-    }
+    offset = peek_past_namespace_prefix(payload, offset);
 
     if (!payload.cursor.peek_is_type(offset, Token::Type::t_identifier)) {
         return false;
@@ -79,6 +73,19 @@ bool Parser::starts_borrow_vardecl(Parser::Payload &payload)
     offset++;
 
     return payload.cursor.peek_is_type(offset, Token::Type::t_varname);
+}
+
+bool Parser::starts_vardecl(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    return cursor.is_type(Token::Type::t_const) // const keyword always starts a vardecl
+        || cursor.is_type(Token::Type::t_ptr) // ptr keyword also indicates a vardecl
+        || cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign })
+        || cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign })
+        || cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
+        || starts_borrow_vardecl(payload) // int32& $r, either `&` spelling
+        || starts_qualified_vardecl(payload); // a::b::Foo $foo
 }
 
 AST::ValueType get_primitive_type(const std::string &types_string)
@@ -103,6 +110,10 @@ AST::ValueType get_primitive_type(const std::string &types_string)
         return AST::ValueType(AST::ValueTypePrimitive::t_uint32);
     } else if (types_string == "uint64") {
         return AST::ValueType(AST::ValueTypePrimitive::t_uint64);
+    } else if (types_string == "usize") {
+        return AST::ValueType(AST::ValueTypePrimitive::t_usize);
+    } else if (types_string == "isize") {
+        return AST::ValueType(AST::ValueTypePrimitive::t_isize);
     } else if (types_string == "float") {
         return AST::ValueType(AST::ValueTypePrimitive::t_float32);
     } else if (types_string == "float32") {
@@ -129,6 +140,7 @@ static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::s
         AST::ValueTypePrimitive::t_int32, AST::ValueTypePrimitive::t_int64,
         AST::ValueTypePrimitive::t_uint8, AST::ValueTypePrimitive::t_uint16,
         AST::ValueTypePrimitive::t_uint32, AST::ValueTypePrimitive::t_uint64,
+        AST::ValueTypePrimitive::t_usize, AST::ValueTypePrimitive::t_isize,
         AST::ValueTypePrimitive::t_float32, AST::ValueTypePrimitive::t_float64,
         AST::ValueTypePrimitive::t_bool,
     };

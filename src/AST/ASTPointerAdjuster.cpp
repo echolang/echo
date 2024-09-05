@@ -102,10 +102,6 @@ ExprNode *PointerAdjuster::as_value_for(ExprNode *expr, const ValueType &wanted)
         return adjust_place(expr);
     }
 
-    if (wanted.is_pointer() && expr == nullptr) {
-        return nullptr;
-    }
-
     return as_value(expr);
 }
 
@@ -280,7 +276,12 @@ void PointerAdjuster::adjust(Node *node)
 
         case NodeType::n_member_access:
         {
-            // the base is wanted as a place; `->` reaching through a pointer is gen_place's job
+            // the base is wanted as a place; `->` reaching through a pointer is gen_place's job.
+            //
+            // adjusted in place, not reassigned: no shape reachable under a `->` needs replacing.
+            // a peel base is rejected in the parser (`$p:$->x`), and the index arm above rewrites
+            // its own base edge. anything that does need a replacement has to reseat the reference
+            // here - adjust() alone cannot be observed
             auto *access = static_cast<MemberAccessNode *>(node);
             adjust(access->get_base_node().node());
             break;

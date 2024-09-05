@@ -3,7 +3,10 @@
 #include "AST/VarDeclNode.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
+#include "AST/ExprNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/OperatorNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
@@ -20,6 +23,58 @@ bool is_vardecl_end_token(const Parser::Cursor &cursor)
 bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
 {
     return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma);
+}
+
+// the left hand side of an assignment statement: the variable itself, or any `->member`,
+// `[n]` or `:$` suffix hanging off it. the cursor has to sit right after the varname
+static AST::ExprNode *parse_assign_target(Parser::Payload &payload, AST::VarDeclNode *vardecl)
+{
+    auto var_node = &payload.context.emplace_node<AST::VarNode>(vardecl);
+    auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
+    auto target_ref = Parser::parse_postfix_chain(payload, AST::make_ref(*var_ref));
+
+    if (!target_ref.has()) {
+        return nullptr;
+    }
+
+    return target_ref.unsafe_ptr<AST::ExprNode>();
+}
+
+// `$i++` is a statement, not an expression - it desugars to `$i = $i + 1` here so that every
+// arithmetic rule (the element-scaled GEP for pointers, the value coercion, the const check)
+// keeps exactly one implementation. the caller has already parsed `operand` once and left the
+// cursor on the `++`/`--` token
+static AST::ExprNode *build_incdec_value(Parser::Payload &payload, AST::ExprNode *operand, const TokenReference &op_token)
+{
+    const bool is_increment = op_token.type() == Token::Type::t_op_inc;
+    const std::string symbol = is_increment ? "+" : "-";
+
+    // the step is typed from the storage it moves, so `$b++` on an int8 stays an int8 add and
+    // `$f++` on a float64 stays in floating point. a pointer operand gets the default int32,
+    // which is what the GEP offset wants
+    const AST::ValueType operand_type = AST::value_result_type(*operand);
+    AST::ExprNode *step = nullptr;
+
+    if (operand_type.is_floating_type()) {
+        // a float32 literal is spelled with the trailing `f`, the same shape autocast produces
+        const bool single_precision = operand_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float32);
+        auto step_token = payload.context.make_virtual_token(single_precision ? "1.0f" : "1.0", Token::Type::t_floating_literal, op_token);
+        step = &payload.context.emplace_node<AST::LiteralFloatExprNode>(step_token, operand_type.get_primitive_type());
+    }
+    else if (operand_type.is_integer_type()) {
+        auto step_token = payload.context.make_virtual_token("1", Token::Type::t_integer_literal, op_token);
+        step = &payload.context.emplace_node<AST::LiteralIntExprNode>(step_token, operand_type.get_primitive_type());
+    }
+    else {
+        auto step_token = payload.context.make_virtual_token("1", Token::Type::t_integer_literal, op_token);
+        step = &payload.context.emplace_node<AST::LiteralIntExprNode>(step_token);
+    }
+
+    auto arith_token = payload.context.make_virtual_token(symbol, is_increment ? Token::Type::t_op_add : Token::Type::t_op_sub, op_token);
+    auto op = payload.collector.operators.get_operator(symbol);
+    auto &op_node = payload.context.emplace_node<AST::OperatorNode>(arith_token, op);
+
+    return &payload.context.emplace_node<AST::BinaryExprNode>(&op_node, operand, step);
 }
 
 AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode *scope)
@@ -89,34 +144,72 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         // an assignment to an existing variable. the left hand side is a place expression:
         // the variable itself, or any `->member` chain hanging off it. both shapes produce the
         // same AssignNode, so codegen resolves them through one lvalue path
-        auto var_node = &payload.context.emplace_node<AST::VarNode>(prev_vardecl);
-        auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
-        auto target_ref = Parser::parse_postfix_chain(payload, AST::make_ref(*var_ref));
-        if (!target_ref.has()) {
+        const auto target_start = cursor.snapshot();
+
+        auto *target = parse_assign_target(payload, prev_vardecl);
+        if (target == nullptr) {
             cursor.try_skip_to_next_statement();
             return nullptr;
         }
 
-        auto *target = target_ref.unsafe_ptr<AST::ExprNode>();
+        AST::ExprNode *expr = nullptr;
+        TokenReference assign_token = cursor.current();
 
-        if (!payload.cursor.is_type(Token::Type::t_assign)) {
-            payload.collect_unexpected_token(Token::Type::t_assign);
-            cursor.try_skip_to_next_statement();
-            return nullptr;
+        // `$i++` / `$p:$--`. the statement carries no `=`, the step comes from the operator
+        if (cursor.is_type(Token::Type::t_op_inc) || cursor.is_type(Token::Type::t_op_dec))
+        {
+            // the operand of the arithmetic is the target parsed a *second* time rather than
+            // the same node under two parents: AST::PointerAdjuster rewrites edges in place,
+            // and a shared subtree would be adjusted twice - an index expression would collect
+            // a second deref on the way through
+            cursor.restore(target_start);
+            auto *operand = parse_assign_target(payload, prev_vardecl);
+            cursor.skip(); // the ++/-- token, re-reached by the second parse
+
+            // the same destination rule the `=` path applies - `$p:$` is legal, `$p:$:$++` is not
+            if (operand == nullptr || !AST::is_assignable_target(*target))
+            {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(assign_token),
+                    "'" + assign_token.value() + "' needs an expression with storage to step");
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+
+            expr = build_incdec_value(payload, operand, assign_token);
         }
 
-        auto assign_token = cursor.current();
-        cursor.skip();
+        else
+        {
+            if (!payload.cursor.is_type(Token::Type::t_assign)) {
+                payload.collect_unexpected_token(Token::Type::t_assign);
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
 
-        // the value is expected at the type the *storage* holds. for a pointer target that is
-        // the pointee, because assigning to a pointer writes through it - `$p = 20` never
-        // changes where $p points (book/concept/pointers_and_refs_v2.md, "Binding, writing,
-        // and re-seating"). a declaration is the other case and binds instead, which is why
-        // the init_expr path below keeps the full declared type
-        auto &expected = payload.context.emplace_node<AST::TypeNode>(
-            AST::value_result_type(*target));
+            // reported here, on the `=`, rather than left to the type checker or codegen. an
+            // address has no storage behind it, so `$p:$:$ = &$q` reached the lvalue codegen's
+            // "not addressable" throw with no location at all
+            if (!AST::is_assignable_target(*target)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(assign_token),
+                    "cannot assign to this expression - it has no storage to write into");
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
 
-        auto expr = parse_expr(payload, &expected);
+            cursor.skip();
+
+            // the value is expected at the type the *storage* holds. for a pointer target that is
+            // the pointee, because assigning to a pointer writes through it - `$p = 20` never
+            // changes where $p points (book/concept/pointers_and_refs_v2.md, "Binding, writing,
+            // and re-seating"). a declaration is the other case and binds instead, which is why
+            // the init_expr path below keeps the full declared type
+            auto &expected = payload.context.emplace_node<AST::TypeNode>(
+                AST::value_result_type(*target));
+
+            expr = parse_expr(payload, &expected);
+        }
 
         auto assign = &payload.context.emplace_node<AST::AssignNode>(target, expr, assign_token);
 

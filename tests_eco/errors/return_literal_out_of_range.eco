@@ -1,0 +1,10 @@
+// a returned literal is typed against the declared return type, so it gets the same bounds
+// diagnostic `int8 $x = 300;` gets. before the return parser passed that expected type down, the
+// literal was an int32 and the value silently truncated to 44 at codegen
+
+function too_big() : int8
+{
+    return 300;
+}
+
+echo too_big();

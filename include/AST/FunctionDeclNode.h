@@ -31,6 +31,23 @@ namespace AST
         // list binds the same parameters. cleared on a clone, which is concrete by definition
         std::vector<TypeParamDecl *> type_parameters;
 
+        // the mirror of ComplexType::template_ref / instantiation_args, for functions: on an
+        // instance created by the monomorphizer these name the template it came from and the
+        // concrete types it was instantiated with, in declaration order. empty on a template and
+        // on a plain non-generic function.
+        //
+        // load-bearing for the mangled name. `decorated_func_name` mangles the argument types
+        // only, so a generic whose parameter appears solely in the *return* type - which is
+        // exactly `mem::alloc<T>(usize) : ptr<T>` - produced one symbol for every instantiation.
+        // two bodies then landed in one llvm::Function. under opaque pointers every ptr<T>
+        // lowers to the same llvm type, so the IR verifier could not even see it
+        std::vector<ValueType> instantiation_args;
+        FunctionDeclNode *template_ref = nullptr;
+
+        inline bool is_instantiated() const {
+            return template_ref != nullptr;
+        }
+
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;
@@ -39,10 +56,30 @@ namespace AST
         AttributeList attributes;
 
         // A function can be marked as intrinsic, meaning it is implemented in the compiler
-        // the string represents the name of the intrinsic function to be called 
-        // those function must be mapped by the compiler, unknown intrinsic functions will 
+        // the string represents the name of the intrinsic function to be called
+        // those function must be mapped by the compiler, unknown intrinsic functions will
         // result in a compile error
         std::optional<std::string> intrinsic;
+
+        // declared inside an `extern { }` block: the function lives in another object file and
+        // this is the raw symbol to link against. it bypasses name mangling entirely - the whole
+        // point is that `malloc` is spelled `malloc` in the symbol table - so an extern
+        // declaration is necessarily non-generic and bodyless, both of which the parser enforces
+        std::optional<std::string> extern_symbol;
+
+        inline bool is_extern() const {
+            return extern_symbol.has_value();
+        }
+
+        // marked `#[builtin: "size_of"]`: the compiler answers a call to this function directly
+        // instead of emitting one. distinct from `intrinsic`, which names an *LLVM* intrinsic and
+        // therefore still produces an llvm::Function - a builtin has no symbol at all, and its
+        // call sites fold to a constant. the type it is asking about arrives in instantiation_args
+        std::optional<std::string> builtin;
+
+        inline bool is_builtin() const {
+            return builtin.has_value();
+        }
 
         FunctionDeclNode() {};
         FunctionDeclNode(TokenReference name_token) :

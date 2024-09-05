@@ -30,3 +30,11 @@ echo ($q:$ - $p:$);
 
 // and addresses order by position
 echo ($q:$ > $p:$);
+
+// `$p:$++` re-seats the pointer one *element* along - the same GEP as `$p:$ = $p:$ + 1`
+$p:$++;
+echo $p;
+echo ($p:$ == $q:$);
+
+$p:$--;
+echo $p;

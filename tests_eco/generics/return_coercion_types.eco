@@ -1,0 +1,63 @@
+// a template's body is parsed once, with T unsubstituted, so nothing in it can be typed against
+// the eventual return type: the literal below is an int32 in the template no matter how many
+// instances follow. every instance therefore leans on the return being fitted at codegen, which
+// is what this walks - one instance per shape the conversion table can take
+
+function zero_of<T>(int32 $ignored) : T
+{
+    return 0;
+}
+
+// a value that comes from a parameter rather than a literal, so the conversion is a real one
+function widen_of<T>(int32 $v) : T
+{
+    return $v;
+}
+
+// two returns in one instance body, both fitted
+function clamp_of<T>(int32 $v) : T
+{
+    if ($v < 0) {
+        return 0;
+    }
+
+    return $v;
+}
+
+// the int32 instance is the identity case: nothing is inserted
+int32 $i = zero_of<int32>(1);
+echo $i;
+
+float64 $f = zero_of<float64>(1);
+echo $f;
+
+// a bool instance compares against zero instead of truncating
+bool $b = zero_of<bool>(1);
+echo $b;
+
+// pointer-width and 64 bit instances
+usize $u = zero_of<usize>(1);
+echo $u;
+
+int64 $big = widen_of<int64>(-9);
+echo $big;
+
+float64 $wide = widen_of<float64>(3);
+echo $wide;
+
+// a narrowing instance: 300 truncates to 44 in 8 bits, widened again before echo
+uint8 $narrow = widen_of<uint8>(300);
+int32 $shown = $narrow;
+echo $shown;
+
+// both arms of the branch answer to the substituted type
+float64 $clamped_low = clamp_of<float64>(-4);
+echo $clamped_low;
+
+float64 $clamped_high = clamp_of<float64>(4);
+echo $clamped_high;
+
+// the same instance reused, to prove the cache hands back a working instance rather than a
+// half-fitted one
+float64 $again = zero_of<float64>(2);
+echo $again;

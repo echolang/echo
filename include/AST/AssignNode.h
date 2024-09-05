@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
-#include "../Lexer.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
+#include "Lexer.h"
 
 namespace AST
 {

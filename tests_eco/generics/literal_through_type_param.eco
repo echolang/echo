@@ -1,0 +1,45 @@
+// a literal in a generic body has no concrete type to be typed against: T says nothing until it is
+// substituted. it is therefore typed on its own (int32) and fitted at its destination by
+// TypeLowering::coerce_value once the instance exists - the same rule the return case already
+// followed (literal_return_coercion.eco). before that, the expected type reached
+// autocast_literal_int as a t_generic and every one of these was "Unexpected token
+// 'integer_literal' found" at parse time (todo/B11)
+
+// through a pointer: the assignment writes into the pointee, so the expected type is T itself
+function poke<T>(ptr<T> $v) : void
+{
+    $v = 42;
+}
+
+// a declaration whose slot is the bare type parameter
+function make<T>() : T
+{
+    T $x = 42;
+    return $x;
+}
+
+// the bool literal takes the same path, through a different autocast branch
+function truthy<T>() : T
+{
+    T $x = true;
+    return $x;
+}
+
+int32 $a = 1;
+float64 $b = 2.5;
+uint8 $c = 3;
+
+poke(&$a);
+poke(&$b);
+poke(&$c);
+
+echo $a;
+echo $b;
+echo $c;
+
+echo make<int32>();
+echo make<float64>();
+echo make<uint8>();
+
+echo truthy<bool>();
+echo truthy<int32>();

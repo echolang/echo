@@ -76,6 +76,8 @@ public:
         t_struct,                   // struct
         t_class,                    // class
         t_enum,                     // enum
+        t_extern,                   // extern
+        t_as,                       // as
         t_unknown
     };
 

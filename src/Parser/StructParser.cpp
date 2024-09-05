@@ -104,15 +104,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
     while (!cursor.is_done())
     {
-        if (
-            cursor.is_type(Token::Type::t_const) || // const keyword always starts a vardecl
-            cursor.is_type(Token::Type::t_ptr) || // ptr keyword also indicates a vardecl
-            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) ||
-            cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon }) ||
-            starts_borrow_vardecl(payload) || // int32& $prop, a borrow property
-            starts_qualified_vardecl(payload) // a::b::Foo $prop
-        ) {
+        if (starts_vardecl(payload)) {
             auto var = parse_varexpr(payload, &structscope);
 
             // append the var as a property of the struct
@@ -180,7 +172,12 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
             cursor.skip(); // skip "{"
             payload.context.push_scope(ctor_scope);
-            ctor_decl.body = &parse_scope(payload);
+
+            {
+                // same as a function body: a `return` inside the ctor fits the ctor's return type
+                AST::ReturnTypeScope return_scope(payload.context, &ctor_return);
+                ctor_decl.body = &parse_scope(payload);
+            }
 
             // ensure $this is part of the body scope tree
             ctor_decl.body->add_vardecl(*this_vardecl);

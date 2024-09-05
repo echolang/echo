@@ -1,0 +1,4 @@
+// stepping is a write, so it meets the same const check an assignment does - the desugar hands
+// AST::TypeChecker an ordinary AssignNode
+const int $c = 1;
+$c++;

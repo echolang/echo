@@ -15,6 +15,7 @@
 #include "AST/TypeCastNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/ASTBuiltin.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -33,6 +34,46 @@
 
 namespace Compiler::LLVM
 {
+
+// the printf conversion `echo` prints a value with, or null for a type it has no format for.
+// a table rather than an if-cascade so that adding a primitive is one line and cannot silently
+// reuse a neighbouring width - `usize`/`isize` print as their concrete 64 bit width, which is
+// what ECO_TARGET_POINTER_SIZE says on every target wired up today
+static const char *printf_format_for(const AST::ValueType &type)
+{
+    if (!type.is_primitive()) {
+        return nullptr;
+    }
+
+    switch (type.get_primitive_type())
+    {
+        case AST::ValueTypePrimitive::t_int8:
+        case AST::ValueTypePrimitive::t_int16:
+        case AST::ValueTypePrimitive::t_int32:
+        case AST::ValueTypePrimitive::t_bool:
+            return "%d\n";
+
+        case AST::ValueTypePrimitive::t_int64:
+        case AST::ValueTypePrimitive::t_isize:
+            return "%lld\n";
+
+        case AST::ValueTypePrimitive::t_uint8:
+        case AST::ValueTypePrimitive::t_uint16:
+        case AST::ValueTypePrimitive::t_uint32:
+            return "%u\n";
+
+        case AST::ValueTypePrimitive::t_uint64:
+        case AST::ValueTypePrimitive::t_usize:
+            return "%llu\n";
+
+        case AST::ValueTypePrimitive::t_float32:
+        case AST::ValueTypePrimitive::t_float64:
+            return "%f\n";
+
+        default:
+            return nullptr;
+    }
+}
 void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
 {
     // visit the expression
@@ -59,12 +100,7 @@ void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
     // gen_lvalue, not gen_place: any auto-deref this read needs is already an explicit
     // DerefExprNode above it, put there by the pointer adjustment pass. so a bare pointer
     // variable here means the pointer itself was asked for - which is what `$p:$` compiles to
-    auto place = _ctx.lvalues->gen_lvalue(node);
-
-    _ctx.value_stack.push(_ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
-        place.address,
-        node.is_var() ? node.get_var().decl().name() : "load"));
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, node.is_var() ? node.get_var().decl().name().c_str() : "load"));
 }
 
 void ExprCodegen::gen_literal_float(AST::LiteralFloatExprNode &node)
@@ -352,6 +388,13 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
 
 void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
 {
+    // a compiler builtin is answered here rather than called: it has no llvm::Function, so this
+    // has to come before the function-table lookup further down
+    if (node.decl && node.decl->is_builtin()) {
+        gen_builtin_call(node);
+        return;
+    }
+
     if (node.token_function_name.value() == "echo") {
 
         for (auto &arg : node.arguments) {
@@ -368,51 +411,17 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // has no format for one
             auto result_type = arg->result_type();
 
-            // printf each argument value
-            std::vector<llvm::Value *> ArgsV;
-
-
-            if (
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int8) ||
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int16) ||
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int32)
-            ) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%d\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_int64)) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%lld\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint8) ||
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint16) ||
-                result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint32)
-            ) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%u\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_uint64)) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%llu\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float32)) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%f\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_float64)) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%f\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else if (result_type.is_primitive_of_type(AST::ValueTypePrimitive::t_bool)) {
-                ArgsV.push_back(_ctx.builder->CreateGlobalStringPtr("%d\n"));
-                ArgsV.push_back(arg_value);
-            }
-            else {
+            const char *format = printf_format_for(result_type);
+            if (format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
                     result_type.get_type_desciption(), _ctx.function_context()));
             }
+
+            std::vector<llvm::Value *> ArgsV = {
+                _ctx.builder->CreateGlobalStringPtr(format),
+                arg_value
+            };
 
             _ctx.builder->CreateCall(_ctx.current_module()->getFunction("printf"), ArgsV);
         }
@@ -468,6 +477,44 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
     }
 }
 
+void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
+{
+    const AST::FunctionDeclNode *decl = node.decl;
+
+    // the builtin asks about a type, and that type is the instance's single type argument. an
+    // un-instantiated template reaching here means the monomorphizer never resolved the call,
+    // which is a compiler bug rather than a source error
+    if (decl->instantiation_args.size() != 1) {
+        throw _ctx.error(fmt::format(
+            "Builtin '{}' expects exactly one type argument, got {} {}",
+            decl->builtin.value(), decl->instantiation_args.size(), _ctx.function_context()));
+    }
+
+    const AST::ValueType &subject = decl->instantiation_args[0];
+    llvm::Type *llvm_subject = _ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit);
+
+    // the result is whatever the declaration promised - usize in the stdlib - so the constant
+    // lands with the type the caller's arithmetic already expects
+    llvm::Type *result_type = _ctx.types->get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
+
+    uint64_t value = 0;
+    switch (AST::builtin_kind_for(decl->builtin.value()))
+    {
+        case AST::BuiltinKind::t_size_of:
+            // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the
+            // stride between array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]`
+            // mean, and using the store size would under-allocate for any padded struct
+            value = _ctx.layout().getTypeAllocSize(llvm_subject);
+            break;
+
+        case AST::BuiltinKind::t_align_of:
+            value = _ctx.layout().getABITypeAlign(llvm_subject).value();
+            break;
+    }
+
+    _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
+}
+
 void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
 {
     // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
@@ -500,12 +547,7 @@ void ExprCodegen::gen_null_assert(llvm::Value *address)
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)
 {
-    auto place = _ctx.lvalues->gen_lvalue(node);
-
-    _ctx.value_stack.push(_ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
-        place.address,
-        "elem"));
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, "elem"));
 }
 
 void ExprCodegen::gen_deref(AST::DerefExprNode &node)
@@ -513,12 +555,7 @@ void ExprCodegen::gen_deref(AST::DerefExprNode &node)
     // gen_lvalue on the deref node itself resolves to the pointee's storage; loading it is
     // the read. keeping the address computation in LValueCodegen is what lets a deref appear
     // on the left of an assignment as readily as on the right
-    auto place = _ctx.lvalues->gen_lvalue(node);
-
-    _ctx.value_stack.push(_ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
-        place.address,
-        "deref"));
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, "deref"));
 }
 
 void ExprCodegen::gen_null(AST::NullNode &node)

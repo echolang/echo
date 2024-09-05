@@ -1,6 +1,7 @@
 #include "Parser/FuncCallParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/TypeParser.h"
+#include "Parser/NamespaceParser.h"
 
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
@@ -16,6 +17,25 @@
 #include <map>
 #include <functional>
 #include <unordered_map>
+
+bool Parser::starts_call_statement(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    // walk any number of `identifier ::` pairs, so `a::b::foo(` is recognised as readily as
+    // `foo(`. the namespace prefix is not consumed here - this only looks
+    const size_t offset = peek_past_namespace_prefix(payload);
+
+    if (!cursor.peek_is_type(offset, Token::Type::t_identifier)) {
+        return false;
+    }
+
+    // `(` is a plain call, `<` an explicitly parameterised one. a bare identifier is never a
+    // comparison operand - values carry a `$` - so `foo <` is unambiguous, the same reasoning
+    // parse_varexpr relies on
+    return cursor.peek_is_type(offset + 1, Token::Type::t_open_paren)
+        || cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
+}
 
 AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace)
 {

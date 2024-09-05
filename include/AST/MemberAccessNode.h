@@ -29,8 +29,14 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
 
         ValueType result_type() const override;
-        
-        inline NodeReference& get_base_node() const { 
+
+        // the struct the base ultimately addresses, reached through every pointer level. unknown
+        // when there is no base or it is not an expression - callers read that as "cannot tell",
+        // which is why this does not collapse to void: the type checker still has to distinguish
+        // "not a struct" from "a class" (todo/A1)
+        ValueType base_target_type() const;
+
+        inline NodeReference &get_base_node() const {
             return const_cast<NodeReference&>(_base_node); 
         }
         
@@ -41,7 +47,6 @@ namespace AST
     private: 
         NodeReference _base_node;
         TokenReference _member_name;
-        size_t _member_index = 0;
     };
 };
 

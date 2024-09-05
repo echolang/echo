@@ -51,7 +51,7 @@ namespace AST
         }
 
         // void goes into the void
-        void accept(Visitor& visitor) override {}
+        void accept(Visitor &visitor) override {}
 
         Node *clone(CloneContext &cc) const override;
     };
@@ -82,7 +82,7 @@ namespace AST
 
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitFunctionCallExpr(*this);
         }
 
@@ -117,7 +117,7 @@ namespace AST
             return "binexp<" + result_type().get_type_desciption() + ">(" + lhs_node_description() + " " + op_node->token_literal.value() + " " + rhs_node_description() + ")";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitBinaryExpr(*this);
         }
 
@@ -148,7 +148,7 @@ namespace AST
             return "unexp(" + token_operator.value() + expr->node_description() + ")";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitUnaryExpr(*this);
         }
 
@@ -181,7 +181,7 @@ namespace AST
 
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visit_addr_of_expr(*this);
         }
 
@@ -221,7 +221,7 @@ namespace AST
 
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visit_pointer_value(*this);
         }
 
@@ -257,7 +257,7 @@ namespace AST
 
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visit_index_expr(*this);
         }
 
@@ -289,7 +289,7 @@ namespace AST
 
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visit_deref_expr(*this);
         }
 

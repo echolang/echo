@@ -44,10 +44,21 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
         // a statement must leave the value stack exactly as it found it. every value pushed by
         // a subexpression belongs to the parent that asked for it, so anything still on the
         // stack here is a leak - and a leak silently feeds the wrong value to a later pop
-        [[maybe_unused]] const size_t depth_before = _ctx.value_stack.size();
+        const size_t depth_before = _ctx.value_stack.size();
 
         child.node()->accept(*_ctx.visitor);
 
+        // an expression statement discards its value: `mem::free($p);` is a whole statement even
+        // though the call has a result, and libc's memcpy/memset return a pointer nobody wants.
+        // this is the one place a pushed value legitimately has no parent to claim it, so drop
+        // it here rather than making callees lie about their return type
+        if (AST::make_ref(child.node()).is_expression_node()) {
+            while (_ctx.value_stack.size() > depth_before) {
+                _ctx.value_stack.pop();
+            }
+        }
+
+        // anything else leaving a value behind is still a genuine codegen bug
         assert(_ctx.value_stack.size() == depth_before && "statement leaked a value onto the stack");
 
         // after any return statement we need to terminate the block
@@ -198,12 +209,9 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
         return;
     }
 
-    // Always evaluate the return expression during compilation
-    // The stored result_type() may be void for generic expressions,
-    // but during LLVM compilation the expression will be properly typed
     node.expr->accept(*_ctx.visitor);
 
-    // Check if we actually got a value on the stack
+    // check if we actually got a value on the stack
     if (_ctx.value_stack.empty()) {
         _ctx.builder->CreateRetVoid();
         return;
@@ -211,6 +219,22 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
 
     llvm::Value *ret = _ctx.value_stack.top();
     _ctx.value_stack.pop();
+
+    // a return fits its value to the declared return type through the same conversion table a
+    // declaration, an assignment and a member write use - signedness lives on the ValueType and
+    // not on the lowered llvm type, so `i8 -> i32` is a sign extend for int8 and a zero extend
+    // for uint8. without it `return 0` in a `: float64` function reached CreateRet as an i32,
+    // because a literal is typed where it is written and nothing there knows the return type
+    //
+    // result_type() may answer void (a binary expression whose operands differ does), which
+    // coerce_value takes as "read the signedness off the value itself". a file-scope return has
+    // no signature to answer to, and a value handed back from a `void` function is a semantic
+    // error for the checker rather than a conversion to invent here
+    if (_ctx.current_function != nullptr && !_ctx.current_function->get_return_type().is_void()) {
+        ret = _ctx.types->coerce_value(
+            ret, node.expr->result_type(), _ctx.current_function->get_return_type(),
+            *_ctx.current_cmp_unit);
+    }
 
     _ctx.builder->CreateRet(ret);
 }

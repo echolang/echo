@@ -1,0 +1,90 @@
+namespace mem;
+
+/**
+ * Raw heap memory.
+ *
+ * Nothing here frees anything for you. Every `mem::alloc` needs a matching `mem::free`, and
+ * using memory after freeing it is undefined. See book/concept/pointers_and_refs_v2.md.
+ *
+ * Counts are always counts of *elements*, never bytes. The byte-level functions below are the
+ * single exception, and the only place a size in bytes appears at all.
+ */
+
+/**
+ * The C allocator, bound directly.
+ *
+ * This trio is the one choke point the whole namespace funnels through, which is what makes a
+ * different default allocator - an arena, a tracking allocator - a change to three function
+ * bodies rather than a change to every signature. Nothing outside this file should call them.
+ *
+ * `usize` stands in for C's `size_t` and `int32` for C's `int`; they agree on every target
+ * currently supported.
+ */
+extern {
+    function malloc as alloc_bytes(usize $bytes) : ptr<uint8>;
+    function realloc as realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
+    function free as free_bytes(ptr<uint8> $p) : void;
+    function memcpy as copy_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
+    function memset as set_bytes(ptr<uint8> $p, int32 $value, usize $bytes) : ptr<uint8>;
+}
+
+/**
+ * The size of one `T` in bytes, as a compile-time constant.
+ *
+ * This is the allocation stride, so it includes any tail padding - `size_of<T>() * $n` is exactly
+ * the room `$n` elements of `T` need, and `$p:$[n]` lands on element `n`.
+ */
+#[builtin: "size_of"]
+function size_of<T>() : usize;
+
+/**
+ * The alignment `T` requires, in bytes, as a compile-time constant.
+ */
+#[builtin: "align_of"]
+function align_of<T>() : usize;
+
+/**
+ * Allocates room for `$count` elements of `T`, uninitialized.
+ *
+ * Returns `null` when the allocation fails. Because the result is `ptr<T>` and not `T&`, the type
+ * system makes you acknowledge that before you can use it as a reference.
+ */
+function alloc<T>(usize $count) : ptr<T>
+{
+    return ptr<T>(alloc_bytes($count * size_of<T>()));
+}
+
+/**
+ * Resizes an allocation to `$count` elements, preserving as much of the contents as fits.
+ *
+ * May move the block, so the returned address is the one to keep - the old one is dead. Does not
+ * preserve any alignment stronger than the allocator's own.
+ */
+function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
+{
+    return ptr<T>(realloc_bytes(ptr<uint8>($p:$), $count * size_of<T>()));
+}
+
+/**
+ * Releases an allocation. Freeing `null` is a no-op.
+ */
+function free<T>(ptr<T> $p) : void
+{
+    free_bytes(ptr<uint8>($p:$));
+}
+
+/**
+ * Copies `$count` elements from `$src` to `$dst`. The two regions must not overlap.
+ */
+function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
+{
+    copy_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
+}
+
+/**
+ * Fills `$count` elements with zero bytes.
+ */
+function zero<T>(ptr<T> $p, usize $count) : void
+{
+    set_bytes(ptr<uint8>($p:$), 0, $count * size_of<T>());
+}

@@ -1,0 +1,22 @@
+// the widest integer types accept literals up to their real maximum.
+//
+// the bounds used to be computed as `1ULL << (size * 8)`, which is undefined behaviour at 64
+// bits. `size` came from a non-inlined switch, so it was a runtime shift, and arm64/x86 mask the
+// count to 6 bits - `1ULL << 0` - leaving uint64 with a reported maximum of 0. every literal
+// assigned to a uint64 was rejected as an overflow, which is why every count in `mem::` is
+// unusable without this fix
+uint64 $max_u64 = 18446744073709551615;
+int64 $min_i64 = -9223372036854775807;
+uint32 $max_u32 = 4294967295;
+uint16 $max_u16 = 65535;
+uint8 $max_u8 = 255;
+
+echo $max_u64;
+echo $min_i64;
+echo $max_u32;
+echo $max_u16;
+echo $max_u8;
+
+// a plain small literal in a 64-bit position, the case `mem::alloc<T>(4)` needs
+uint64 $count = 4;
+echo $count;

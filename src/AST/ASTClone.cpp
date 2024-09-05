@@ -243,6 +243,12 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // so dropping the pointers frees nothing and dangles nothing
     c->type_parameters.clear();
 
+    // likewise the instantiation identity: cc.shallow copy-constructs, so a nested
+    // instantiation would otherwise inherit the enclosing instance's type arguments and mangle
+    // under its symbol. the monomorphizer sets these on the instance right after cloning
+    c->instantiation_args.clear();
+    c->template_ref = nullptr;
+
     // parameters first, so the map is populated before the body rebinds its VarNodes to them.
     for (auto &arg : c->args) arg = cc.child(arg);
     c->return_type = cc.child(c->return_type);

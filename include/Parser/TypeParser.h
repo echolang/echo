@@ -29,6 +29,13 @@ namespace Parser
     // pure lookahead, the cursor is not moved
     bool starts_borrow_vardecl(Payload &payload);
 
+    // true when the cursor sits on a variable declaration in any of its spellings - inferred
+    // (`$x = ...`), typed (`int32 $x`), qualified, borrowed, const or ptr. the one owner of
+    // "what a declaration looks like", so a scope body and a struct body cannot disagree about
+    // it; they used to keep a token list each and the struct's silently lagged behind.
+    // pure lookahead, the cursor is not moved
+    bool starts_vardecl(Payload &payload);
+
     AST::TypeNode *parse_type(Payload &payload);
 
     // one type parameter exactly as written, before it becomes a declaration. parsing produces

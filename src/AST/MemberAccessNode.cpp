@@ -1,55 +1,43 @@
 #include "AST/MemberAccessNode.h"
 
-#include "AST/VarRefNode.h"
-
 AST::MemberAccessNode::MemberAccessNode(NodeReference base, TokenReference member_name)
     : _base_node(base), _member_name(member_name)
 {
 }
 
+AST::ValueType AST::MemberAccessNode::base_target_type() const
+{
+    // any expression can be a member base, so this asks the base for its type rather than
+    // switching on its node class. the old switch only knew a varref and a nested member access,
+    // so `$items:$[0]->x` - an IndexExprNode base - fell through to void and every consumer
+    // downstream silently degraded: the read threw, the write went untyped and no diagnostic fired
+    if (!_base_node.has() || !_base_node.is_expression_node()) {
+        return ValueType::make_unknown();
+    }
+
+    // `->` reaches through a pointer to any depth: a `ptr<Point>` base addresses a Point, and so
+    // does a `ptr<ptr<Point>>` - the member lives on the struct either way. target_type_of, not
+    // value_type_of, is what says "every level" (book/concept/pointers_and_refs_v2.md,
+    // "Structs and classes")
+    return target_type_of(_base_node.unsafe_ptr<AST::ExprNode>()->result_type());
+}
+
 AST::ValueType AST::MemberAccessNode::result_type() const
 {
-    if (_base_node.has_type<AST::VarRefNode>()) {
-        auto &var_ref = _base_node.get<AST::VarRefNode>();
-
-        // `->` reaches through a pointer to any depth: a `ptr<Point>` base addresses a Point,
-        // and so does a `ptr<ptr<Point>>` - the member lives on the struct either way
-        // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
-        auto var_type = target_type_of(var_ref.result_type());
-
-        // cannot extract type from primitive types
-        if (var_type.is_primitive()) {
-            return ValueType::void_type();
-        }
-        else if (var_type.is_struct()) {
-            auto complex = var_type.get_complex_type();
-
-            // if the property does not exit we return void
-            if (!complex->has_property(_member_name.value())) {
-                return ValueType::void_type();
-            }
-
-            return complex->get_property_type(_member_name.value());
-        }
-    }
-    else if (_base_node.has_type<AST::MemberAccessNode>()) {
-        auto &member_access = _base_node.get<AST::MemberAccessNode>();
-        auto base_type = target_type_of(member_access.result_type());
-
-        // Check if base type is a struct
-        if (base_type.is_struct()) {
-            auto complex = base_type.get_complex_type();
-            
-            // if the property does not exit we return void
-            if (!complex->has_property(_member_name.value())) {
-                return ValueType::void_type();
-            }
-
-            return complex->get_property_type(_member_name.value());
-        }
-        
+    // struct only. a class base would resolve here just as well, but the member would then fail
+    // one layer further down in gen_member_lvalue instead of the void guard in gen_member_access,
+    // which is no gain until classes exist (todo/A1)
+    auto base_type = base_target_type();
+    if (!base_type.is_struct()) {
         return ValueType::void_type();
     }
-    
-    return ValueType::void_type();
+
+    auto *complex = base_type.get_complex_type();
+
+    // an unknown member has no type of its own; the type checker reports it by name
+    if (complex == nullptr || !complex->has_property(_member_name.value())) {
+        return ValueType::void_type();
+    }
+
+    return complex->get_property_type(_member_name.value());
 }

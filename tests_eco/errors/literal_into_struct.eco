@@ -1,0 +1,21 @@
+// a struct slot takes nothing but that struct. the parser used to reject this while *typing* the
+// literal, with the same bogus "Unexpected token 'integer_literal' found" that made a literal
+// unwritable in a generic body (todo/B11) - a type it cannot type a literal against is now simply
+// not a hint, so the diagnostic belongs to the semantic pass, which is also the only place that
+// can answer it for the generic below: `T $x = 42;` is fine for T=int32 and wrong for T=Point
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+function make<T>() : T
+{
+    T $x = 42;
+    return $x;
+}
+
+Point $p = 42;
+
+Point $q = make<Point>();

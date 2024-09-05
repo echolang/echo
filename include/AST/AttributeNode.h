@@ -50,12 +50,22 @@ namespace AST
             _attributes[attribute->attribute_id.value()].push_back(attribute);
         }
 
+        // absent is not an error - asking whether a declaration carries an attribute is the
+        // normal case, and every caller already null-checks. `at()` threw std::out_of_range
+        // instead, which escaped as far as std::terminate for any bodyless function that did
+        // not happen to carry an `intrinsic` attribute
         const std::vector<AttributeNode *> &get(const std::string &attribute_id) const {
-            return _attributes.at(attribute_id);
+            static const std::vector<AttributeNode *> none;
+            auto it = _attributes.find(attribute_id);
+            return it == _attributes.end() ? none : it->second;
         }
 
         AttributeNode *get_first(const std::string &attribute_id) const {
-            return _attributes.at(attribute_id).front();
+            auto it = _attributes.find(attribute_id);
+            if (it == _attributes.end() || it->second.empty()) {
+                return nullptr;
+            }
+            return it->second.front();
         }
 
     private:

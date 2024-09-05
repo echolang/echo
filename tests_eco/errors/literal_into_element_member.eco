@@ -1,0 +1,10 @@
+// a literal is typed where it is written, from the destination. the destination here is a field
+// reached through an element, whose type used to answer void - so the expected type was dropped
+// and 300 truncated into an int8 in silence
+struct Small {
+    int8 $b;
+}
+
+ptr<Small> $s = mem::alloc<Small>(1);
+$s:$[0]->b = 300;
+mem::free($s);

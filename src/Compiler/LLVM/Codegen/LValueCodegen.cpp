@@ -82,21 +82,33 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
     }
 }
 
-LValue LValueCodegen::gen_place(AST::ExprNode &expr)
+llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
 {
-    LValue slot = gen_lvalue(expr);
-    if (!slot.storage_type.is_pointer()) {
-        return slot;
+    return _ctx.builder->CreateLoad(
+        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
+        place.address,
+        name);
+}
+
+llvm::Value *LValueCodegen::gen_load(AST::ExprNode &expr, const char *name)
+{
+    return gen_load(gen_lvalue(expr), name);
+}
+
+LValue LValueCodegen::deref_once(const LValue &place)
+{
+    if (!place.storage_type.is_pointer()) {
+        return place;
     }
 
     // exactly one level: load the address out of the slot, and the result addresses the
     // pointee. `ptr<ptr<uint8>>` still lands on a `ptr<uint8>`, never on the uint8
-    llvm::Value *address = _ctx.builder->CreateLoad(
-        _ctx.types->get_llvm_type(slot.storage_type, *_ctx.current_cmp_unit),
-        slot.address,
-        "deref");
+    return LValue{ gen_load(place, "deref"), AST::value_type_of(place.storage_type) };
+}
 
-    return LValue{ address, AST::value_type_of(slot.storage_type) };
+LValue LValueCodegen::gen_place(AST::ExprNode &expr)
+{
+    return deref_once(gen_lvalue(expr));
 }
 
 LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
@@ -118,13 +130,7 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     // - every other read is the single auto-deref the adjustment pass already made explicit
     LValue base_place = gen_place(static_cast<AST::ExprNode &>(*base));
     while (base_place.storage_type.is_pointer()) {
-        base_place = LValue{
-            _ctx.builder->CreateLoad(
-                _ctx.types->get_llvm_type(base_place.storage_type, *_ctx.current_cmp_unit),
-                base_place.address,
-                "deref"),
-            AST::value_type_of(base_place.storage_type)
-        };
+        base_place = deref_once(base_place);
     }
 
     if (!base_place.storage_type.is_struct() || !base_place.storage_type.get_complex_type()) {
@@ -136,20 +142,14 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     }
 
     auto *complex = base_place.storage_type.get_complex_type();
-    auto member_name = node.get_member_name().value();
+    const auto &member_name = node.get_member_name().value();
 
-    if (!complex->has_property(member_name)) {
+    // one resolution for both the GEP index and the resulting storage type
+    const AST::ComplexType::Property *member = complex->find_property(member_name);
+    if (member == nullptr) {
         throw _ctx.error(fmt::format(
             "Member '{}' not found in struct '{}' {}",
             member_name, complex->name.value_or("<anonymous>"), _ctx.function_context()));
-    }
-
-    size_t member_index = 0;
-    for (size_t i = 0; i < complex->property_count(); ++i) {
-        if (complex->get_property(i).name == member_name) {
-            member_index = i;
-            break;
-        }
     }
 
     auto struct_id = _ctx.current_cmp_unit->structure_table->get_structure_id(complex);
@@ -169,13 +169,13 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
 
     std::vector<llvm::Value *> indices = {
         llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), 0),
-        llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), member_index)
+        llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), member->index)
     };
 
     llvm::Value *address = _ctx.builder->CreateGEP(
         structure.llvm_struct, base_place.address, indices, member_name + "_ptr");
 
-    return LValue{ address, complex->get_property_type(member_name) };
+    return LValue{ address, member->type };
 }
 
 llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)
@@ -189,9 +189,7 @@ llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)
     // a place holding a pointer: load the slot to get the address it holds, with no deref.
     // anything else already evaluates to an address, so just let it push its value
     if (AST::is_place_expression(expr)) {
-        LValue slot = gen_lvalue(expr);
-        return _ctx.builder->CreateLoad(
-            _ctx.types->get_llvm_type(slot.storage_type, *_ctx.current_cmp_unit), slot.address, "addr");
+        return gen_load(expr, "addr");
     }
 
     expr.accept(*_ctx.visitor);

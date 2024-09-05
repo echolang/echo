@@ -16,10 +16,18 @@
 #include <llvm/Transforms/IPO/Inliner.h>
 #include <llvm/Analysis/InlineCost.h>
 
+#include <fmt/core.h>
+
 #include <cstdlib>
 
 namespace Compiler::LLVM
 {
+Backend::Backend(CodegenContext &ctx) : _ctx(ctx)
+{
+}
+
+Backend::~Backend() = default;
+
 void Backend::print_ir(bool to_file)
 {
     auto main = _ctx.main_cmp_unit();
@@ -69,37 +77,40 @@ void Backend::run_code()
     // llvm::llvm_shutdown();
 }
 
-void Backend::make_exec(std::string executable_name)
+void Backend::init_target()
 {
-    // llvm::InitializeAllTargetInfos();
-    // llvm::InitializeAllTargets();
-    // llvm::InitializeAllTargetMCs();
-    // llvm::InitializeAllAsmParsers();
-    // llvm::InitializeAllAsmPrinters();
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
 
+    _ctx.target_triple = llvm::sys::getDefaultTargetTriple();
 
-
-    auto TargetTriple = llvm::sys::getDefaultTargetTriple();
-    // auto TargetTriple = "aarch64-linux-gnu";
-
-    std::string Error;
-    auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
-    if (!Target) {
-        llvm::errs() << Error;
-        return;
+    std::string error;
+    auto *target = llvm::TargetRegistry::lookupTarget(_ctx.target_triple, error);
+    if (!target) {
+        throw Compiler::InternalCompilerException(fmt::format(
+            "Could not resolve the host target '{}': {}", _ctx.target_triple, error));
     }
 
-    auto CPU = "generic";
-    auto Features = "";
-
     llvm::TargetOptions opt;
-    auto TargetMachine = Target->createTargetMachine(TargetTriple, CPU, Features, opt, llvm::Reloc::PIC_);
+    _target_machine.reset(
+        target->createTargetMachine(_ctx.target_triple, "generic", "", opt, llvm::Reloc::PIC_));
+    if (!_target_machine) {
+        throw Compiler::InternalCompilerException(fmt::format(
+            "Could not create a target machine for '{}'", _ctx.target_triple));
+    }
 
-    _ctx.current_module()->setDataLayout(TargetMachine->createDataLayout());
-    _ctx.current_module()->setTargetTriple(TargetTriple);
+    _ctx.data_layout = _target_machine->createDataLayout();
+}
+
+void Backend::make_exec(std::string executable_name)
+{
+    // the same TargetMachine codegen took its data layout from (Backend::init_target), so the
+    // object can never be emitted for a target the IR was not laid out for
+    if (!_target_machine) {
+        llvm::errs() << "No target resolved - init_target must run before make_exec\n";
+        return;
+    }
 
     std::error_code EC;
     std::string objectFileName = executable_name + ".o";
@@ -113,7 +124,7 @@ void Backend::make_exec(std::string executable_name)
     llvm::legacy::PassManager pass;
     auto FileType = llvm::CodeGenFileType::ObjectFile;
 
-    if (TargetMachine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+    if (_target_machine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
         llvm::errs() << "TargetMachine can't emit a file of this type";
         return;
     }

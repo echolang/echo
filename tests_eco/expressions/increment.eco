@@ -1,0 +1,30 @@
+// `$i++` is a statement, not an expression - it desugars to `$i = $i + 1`, so it reaches the
+// same arithmetic, the same coercion and the same const check as a hand written assignment
+
+struct Counter {
+    int $hits;
+}
+
+$i = 5;
+$i++;
+echo $i;
+
+$i--;
+$i--;
+echo $i;
+
+// the step is typed from the storage it moves, so a narrow integer stays narrow
+int8 $b = 126;
+$b++;
+echo $b;
+
+// and a float steps in floating point
+float64 $f = 1.5;
+$f++;
+echo $f;
+
+// any place the postfix chain produces works, not just a bare name
+$c = Counter(0);
+$c->hits++;
+$c->hits++;
+echo $c->hits;

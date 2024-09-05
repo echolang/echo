@@ -11,7 +11,9 @@
 #include "ASTValueType.h"
 
 namespace AST
-{  
+{
+    class TypeNode;
+
     struct Context
     {
         Module &module;
@@ -21,7 +23,13 @@ namespace AST
         Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
-        
+
+        // the return type of the function body being parsed, null at file scope. this is the
+        // destination a `return` fits its expression to, the same way a variable declaration's
+        // type is - without it a `return 0` in a `: float64` function typed its literal against
+        // nothing and fell back to int32
+        TypeNode *return_type_ptr = nullptr;
+
         // innermost-last stack of the generic type parameters currently in scope. a stack rather
         // than one flat list so a generic member of a generic struct sees both its own parameters
         // and its owner's — lookup walks outward, and leaving an inner scope restores the outer
@@ -114,6 +122,28 @@ namespace AST
 
         ~TypeParamScope() {
             context.pop_type_param_scope();
+        }
+    };
+
+    // scopes the current return type to a function body, restoring the previous one rather than
+    // clearing it - a declaration nested inside another body must not leak its return type back
+    // out over the enclosing one
+    struct ReturnTypeScope
+    {
+        Context &context;
+        TypeNode *previous;
+
+        ReturnTypeScope(Context &context, TypeNode *return_type) :
+            context(context), previous(context.return_type_ptr)
+        {
+            context.return_type_ptr = return_type;
+        }
+
+        ReturnTypeScope(const ReturnTypeScope &) = delete;
+        ReturnTypeScope &operator=(const ReturnTypeScope &) = delete;
+
+        ~ReturnTypeScope() {
+            context.return_type_ptr = previous;
         }
     };
 };

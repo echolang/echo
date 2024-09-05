@@ -19,7 +19,7 @@
 //
 // the vocabulary, from src/AST/ExprNode.cpp: deref<T>(...) is the inserted auto-deref,
 // addrof<T&>(...) an address-of, index<T>(base[i]) an element, and peel<T>(...) the `:$` marker -
-// which must never survive, since codegen throws on one.
+// which must never survive, since codegen throws on one
 
 namespace {
     std::string desc(const std::string &code)
@@ -186,6 +186,59 @@ TEST_CASE("A borrow-typed struct member reads through, and its initializer binds
     // by the struct parser precisely so this deref is absent
     REQUIRE(contains(d, "ma<int32&>(varref<H>(var($this))->t) = varref<int32&>(var(t))"));
     REQUIRE_FALSE(contains(d, "deref<int32>(ma<int32&>(varref<H>(var($this))->t))"));
+}
+
+TEST_CASE("A member reached through an element is typed by the field", "[sema][pointer]")
+{
+    // `$p:$[0]->x` puts an IndexExprNode under the `->`. MemberAccessNode::result_type() used to
+    // switch on the base's node class and only knew a varref and a nested member access, so this
+    // shape answered void: the write went untyped, the read threw in codegen and no diagnostic
+    // fired anywhere in between (todo/B16)
+    auto d = desc(
+        "struct P { int $x; }\n"
+        "$pt = P(1);\n"
+        "ptr<P> $p = &$pt;\n"
+        "echo $p:$[0]->x;\n");
+
+    REQUIRE(contains(d, "ma<int32>(index<P>("));
+    REQUIRE_FALSE(contains(d, "ma<void>"));
+}
+
+TEST_CASE("A pointer-typed field through an element gains exactly one deref", "[sema][pointer]")
+{
+    // the widened result type reaches as_value(), which is what inserts the auto-deref. a field
+    // that is itself a pointer must gain one and only one - the same rule a varref base follows
+    auto d = desc(
+        "struct H { int& $t; }\n"
+        "$v = 7;\n"
+        "$h = H(&$v);\n"
+        "ptr<H> $p = &$h;\n"
+        "echo $p:$[0]->t;\n");
+
+    REQUIRE(contains(d, "deref<int32>(ma<int32&>(index<H>("));
+    REQUIRE_FALSE(contains(d, "deref<int32>(deref<"));
+}
+
+TEST_CASE("'->' on a peeled pointer is rejected rather than aliased", "[sema][pointer]")
+{
+    // `->` already reaches through every pointer level, so `$p:$->x` could only mean `$p->x`.
+    // it is an error instead: `:$` marks an operation on the address, and the pointer object has
+    // no members of its own (todo/B9 - the rule is the feature)
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct P { int $x; }\n"
+        "$pt = P(1);\n"
+        "ptr<P> $p = &$pt;\n"
+        "echo $p:$->x;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+
+    bool found = false;
+    for (const auto &issue : bundle->collector.issues) {
+        if (issue->message().find("names the pointer itself, which has no members") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
 }
 
 TEST_CASE("null takes the pointer type of what it is compared against", "[sema][pointer]")

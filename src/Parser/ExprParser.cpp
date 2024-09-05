@@ -18,7 +18,7 @@
 #include "Parser/TypeParser.h"
 #include "AST/TypeNode.h"
 
-#include <format>
+#include <fmt/core.h>
 #include <stack>
 
 bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
@@ -30,7 +30,7 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
     if (value > int_size.get_max_positive_value()) {
         payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
             payload.context.code_ref(literal_token), 
-            std::format(
+            fmt::format(
                 "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
                 literal,
                 AST::get_primitive_name(type.get_primitive_type()),
@@ -44,7 +44,7 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
     if (value < int_size.get_max_negative_value()) {
         payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
             payload.context.code_ref(literal_token), 
-            std::format(
+            fmt::format(
                 "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
                 literal,
                 AST::get_primitive_name(type.get_primitive_type()),
@@ -95,18 +95,16 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 {
     auto literal_token = node.token_literal;
 
-    // a pointer expected type says nothing about a number literal - it reaches here from a
-    // position like `ptr<int> $q = $p:$ + 1;`, where the hint belongs to the expression as a
-    // whole and the literal is only the element offset. leave it to be typed on its own
-    if (expected_type != nullptr && expected_type->is_pointer()) {
+    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
+    if (expected_type != nullptr && !AST::can_type_a_literal(*expected_type)) {
         expected_type = nullptr;
     }
 
     // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr) 
+    if (expected_type != nullptr)
     {
         // floats / doubles
-        if (expected_type->is_floating_type()) 
+        if (expected_type->is_floating_type())
         {
             // even if the number doesn't fit into the expected type, we can continue because the value is still valid
             // we just loose precision and the user gets a warning
@@ -125,7 +123,7 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
                 if (dliteral != dliteral2) {
                     payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
                         payload.context.code_ref(literal_token), 
-                        std::format(
+                        fmt::format(
                             "The literal '{}' is stored in 32bit float which will result in the effctive value {}", 
                             node.get_fvalue_string(),
                             fliteral
@@ -164,7 +162,7 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
             if (dliteral != dliteral_cmp) {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
                     payload.context.code_ref(literal_token), 
-                    std::format(
+                    fmt::format(
                         "The floating point number literal '{}' cannot be implicitly converted to an integer type due to non zero decimal values.", 
                         node.get_fvalue_string()
                     )
@@ -221,10 +219,8 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
     auto literal_token = node.token_literal;
     InfInt intvalue(literal_token.value());
 
-    // a pointer expected type says nothing about a number literal - it reaches here from a
-    // position like `ptr<int> $q = $p:$ + 1;`, where the hint belongs to the expression as a
-    // whole and the literal is only the element offset. leave it to be typed on its own
-    if (expected_type != nullptr && expected_type->is_pointer()) {
+    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
+    if (expected_type != nullptr && !AST::can_type_a_literal(*expected_type)) {
         expected_type = nullptr;
     }
 
@@ -250,7 +246,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             else {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
                     payload.context.code_ref(literal_token), 
-                    std::format(
+                    fmt::format(
                         "The integer literal '{}' cannot be implicitly converted to the expected type '{}'.", 
                         literal_token.value(),
                         expected_type->get_type_desciption()
@@ -275,7 +271,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             if (expected_type->is_unsigned_integer() && intvalue < 0) {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
                     payload.context.code_ref(literal_token), 
-                    std::format(
+                    fmt::format(
                         "The integer literal '{}' cannot be implicitly converted to an unsigned integer because it is negative.", 
                         literal_token.value()
                     )
@@ -292,7 +288,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             if (intvalue < lower_bound) {
                 payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
                     payload.context.code_ref(literal_token), 
-                    std::format(
+                    fmt::format(
                         "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
                         literal_token.value(),
                         AST::get_primitive_name(expected_type->get_primitive_type()),
@@ -306,7 +302,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             if (intvalue > upper_bound) {
                 payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
                     payload.context.code_ref(literal_token), 
-                    std::format(
+                    fmt::format(
                         "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
                         literal_token.value(),
                         AST::get_primitive_name(expected_type->get_primitive_type()),
@@ -461,25 +457,29 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
     auto current_token = cursor.current();
 
     if (current_token.type() != Token::Type::t_bool_literal) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-            payload.context.code_ref(current_token), 
-            Token::Type::t_bool_literal, 
-            current_token.type()
-        );
+        payload.collect_unexpected_token(Token::Type::t_bool_literal);
         return AST::make_void_ref();
     }
 
     auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(current_token);
     cursor.skip();
 
-    // a pointer expected type says nothing about a bool literal
-    if (expected_type != nullptr && expected_type->type.is_pointer()) {
+    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
+    if (expected_type != nullptr && !AST::can_type_a_literal(expected_type->type)) {
         expected_type = nullptr;
     }
 
     // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr) 
+    if (expected_type != nullptr)
     {
+        // the literal already is what was asked for. without this the branch below reported that
+        // the boolean literal 'true' cannot be converted to the expected type 'bool' - it was
+        // only reachable through a pointer destination before a `return` started supplying its
+        // declared type as the expected one
+        if (expected_type->type.is_boolean_type()) {
+            return AST::make_ref(node);
+        }
+
         // if we except a int type, we simply convert the boolean to an integer
         if (expected_type->type.is_integer_type())
         {
@@ -490,7 +490,7 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
         else {
             payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
                 payload.context.code_ref(current_token), 
-                std::format(
+                fmt::format(
                     "The boolean literal '{}' cannot be implicitly converted to the expected type '{}'.", 
                     current_token.value(),
                     expected_type->type.get_type_desciption()
@@ -534,7 +534,7 @@ AST::NodeReference try_implicit_cast(Parser::Payload &payload, AST::NodeReferenc
     else {
         // payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
         //     payload.context.code_ref(source.token_reference()), 
-        //     std::format(
+        //     fmt::format(
         //         "Cannot implicitly cast the expression of type '{}' to the expected type '{}'.", 
         //         source.result_type().get_type_desciption(),
         //         expected_type.get_type_desciption()
@@ -664,10 +664,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             }
 
             if (!cursor.is_type(Token::Type::t_close_bracket)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                    payload.context.code_ref(cursor.current()),
-                    Token::Type::t_close_bracket,
-                    cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_close_bracket);
                 return AST::make_void_ref();
             }
             cursor.skip();
@@ -706,10 +703,22 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             continue;
         }
 
+        auto accessor_token = cursor.current();
         cursor.skip(); // skip the '->' token
 
+        // `->` already reaches through every pointer level, so `$p:$->x` could only ever mean what
+        // `$p->x` means. it is rejected rather than aliased: `:$` marks an operation *on the
+        // address*, and the pointer object itself has no members
+        // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
+        if (current_ref.type() == AST::NodeType::n_expr_peel) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(accessor_token),
+                "':$' names the pointer itself, which has no members - drop the ':$' and write '->' directly");
+            return AST::make_void_ref();
+        }
+
         if (!cursor.is_type(Token::Type::t_identifier)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_identifier);
             return AST::make_void_ref();
         }
 
@@ -841,10 +850,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         if (!cursor.is_type(Token::Type::t_open_paren)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(cursor.current()),
-                Token::Type::t_open_paren,
-                cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_open_paren);
             return AST::make_void_ref();
         }
         cursor.skip();
@@ -855,10 +861,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         if (!cursor.is_type(Token::Type::t_close_paren)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(cursor.current()),
-                Token::Type::t_close_paren,
-                cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_close_paren);
             return AST::make_void_ref();
         }
         cursor.skip();
@@ -905,10 +908,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // nothing in the grammar starts an operand with this token. an assert here aborted the whole
     // compiler with no location and no message the user could act on - and in a release build,
     // where the assert is compiled out, it fell off the end of a function that has to return
-    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-        payload.context.code_ref(cursor.current()),
-        Token::Type::t_varname,
-        cursor.current().type());
+    payload.collect_unexpected_token(Token::Type::t_varname);
     cursor.try_skip_to_next_statement();
     return AST::make_void_ref();
 }
@@ -1145,17 +1145,17 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     // // print the postfix expression
     // for (auto &part : postfix_expr) {
     //     if (part.opnode != nullptr) {
-    //         std::cout << std::format("{} ", token_lit_symbol_string(part.opnode->op->type));
+    //         std::cout << fmt::format("{} ", token_lit_symbol_string(part.opnode->op->type));
     //     }
     //     else {
     //         if (part.node.has_type<AST::LiteralIntExprNode>()) {
-    //             std::cout << std::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
+    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
     //         } else if (part.node.has_type<AST::LiteralFloatExprNode>()) {
-    //             std::cout << std::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
+    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
     //         } else if (part.node.has_type<AST::LiteralBoolExprNode>()) {
-    //             std::cout << std::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
+    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
     //         } else {
-    //             std::cout << std::format("{} ", part.node.node()->node_description());
+    //             std::cout << fmt::format("{} ", part.node.node()->node_description());
     //         }
     //     }
     // }

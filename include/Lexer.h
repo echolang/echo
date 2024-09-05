@@ -361,6 +361,14 @@ public:
             return snippet;
         }
 
+        size_t get_line() const {
+            return line;
+        }
+
+        size_t get_char_offset() const {
+            return char_offset;
+        }
+
     private:
         std::string snippet;
         size_t line;

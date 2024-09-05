@@ -1,0 +1,23 @@
+// a generic whose type parameter appears ONLY in the return type must still get one symbol per
+// instantiation. this is the shape of `mem::alloc<T>(usize) : ptr<T>`.
+//
+// the mangled name is built from the argument types, so before instantiation arguments were
+// folded in, both instances below mangled identically: the function table overwrote by name and
+// two bodies were emitted into one llvm::Function. both instances return a pointer, and under
+// opaque pointers every pointer lowers to the same llvm type - so the IR verifier saw nothing
+// wrong and the program simply called the wrong instance
+function reinterpret<T>(ptr<uint8> $p) : ptr<T>
+{
+    return ptr<T>($p:$);
+}
+
+int32 $value = 424242;
+ptr<uint8> $raw = ptr<uint8>(&$value);
+
+ptr<int32> $as_int = reinterpret<int32>($raw);
+ptr<uint8> $as_byte = reinterpret<uint8>($raw);
+
+// the whole int32 through one instance, and its low byte through the other.
+// 424242 is 0x67932, so the low byte is 0x32 - 50
+echo $as_int;
+echo $as_byte;

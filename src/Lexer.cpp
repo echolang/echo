@@ -329,6 +329,8 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_struct);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_class);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_enum);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_extern);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_as);
 
     lx_functions.push_back(std::make_unique<LexerFunction::NumericLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
