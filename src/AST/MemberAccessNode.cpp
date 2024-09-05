@@ -12,8 +12,11 @@ AST::ValueType AST::MemberAccessNode::result_type() const
     if (_base_node.has_type<AST::VarRefNode>()) {
         auto &var_ref = _base_node.get<AST::VarRefNode>();
 
-        auto var_type = var_ref.result_type();
-        
+        // `->` reaches through a pointer to any depth: a `ptr<Point>` base addresses a Point,
+        // and so does a `ptr<ptr<Point>>` - the member lives on the struct either way
+        // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
+        auto var_type = target_type_of(var_ref.result_type());
+
         // cannot extract type from primitive types
         if (var_type.is_primitive()) {
             return ValueType::void_type();
@@ -31,8 +34,8 @@ AST::ValueType AST::MemberAccessNode::result_type() const
     }
     else if (_base_node.has_type<AST::MemberAccessNode>()) {
         auto &member_access = _base_node.get<AST::MemberAccessNode>();
-        auto base_type = member_access.result_type();
-        
+        auto base_type = target_type_of(member_access.result_type());
+
         // Check if base type is a struct
         if (base_type.is_struct()) {
             auto complex = base_type.get_complex_type();

@@ -1,0 +1,45 @@
+// a borrow inside if and while. conditions are value positions, so a pointer read in one
+// auto-derefs like any other read - the condition tests the pointee, never the address.
+//
+// worth its own case because the adjustment pass has to reach into a condition and into a loop
+// body separately from the surrounding scope, and a missed edge there does not fail loudly: an
+// un-derefed pointer in a condition is a non-zero address, so the branch simply always taken
+
+$counter = 3;
+int& $c = &$counter;
+
+// the condition reads through, so this tests 3 > 0 rather than "is the address non-null"
+if ($c > 0) {
+    echo 1;
+}
+
+// a borrow that points at zero must therefore take the else branch, which an address test
+// could never do - the address is non-zero
+$zero = 0;
+int& $z = &$zero;
+
+if ($z > 0) {
+    echo 111;
+}
+else {
+    echo 0;
+}
+
+// the loop both reads and writes through the borrow, and the write reaches the original
+while ($c > 0) {
+    $c = $c - 1;
+}
+
+echo $counter;
+echo $c;
+
+// mutating through a borrow inside a loop that a second borrow observes: both refer to the same
+// storage, so the observer sees every step
+int& $also = &$counter;
+$c = 3;
+
+while ($also > 0) {
+    $c = $c - 1;
+}
+
+echo $counter;

@@ -9,9 +9,41 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         return AST::ValueType::make_void();
     }
 
+    auto raw_left = lhs->result_type();
+    auto raw_right = rhs->result_type();
+
+    // arithmetic and comparison reached through `:$` operate on the address itself. these arms
+    // read the operands raw, before the value-position collapse below, because that is exactly
+    // the distinction `:$` draws: `$a:$ == $b:$` asks "same object?", `$a == $b` "same value?"
+    if (op_node != nullptr && (raw_left.is_pointer() || raw_right.is_pointer())) {
+        const auto op = op_node->op->type;
+
+        // offsetting an address stays an address, scaled by the pointee's size
+        if ((op == Token::Type::t_op_add || op == Token::Type::t_op_sub)
+            && raw_left.is_pointer() && !raw_right.is_pointer()) {
+            return raw_left;
+        }
+
+        // the distance between two addresses, in elements
+        if (op == Token::Type::t_op_sub && raw_left.is_pointer() && raw_right.is_pointer()) {
+            return AST::ValueType(AST::ValueTypePrimitive::t_int64);
+        }
+
+        if (op == Token::Type::t_logical_eq || op == Token::Type::t_logical_neq
+            || op == Token::Type::t_open_angle || op == Token::Type::t_close_angle
+            || op == Token::Type::t_logical_leq || op == Token::Type::t_logical_geq) {
+            return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+        }
+    }
+
+    // operands are read in value position, so a pointer contributes its pointee: `$ref + 1`
+    // adds to the int the reference points at, not to the address
+    auto left = value_type_of(raw_left);
+    auto right = value_type_of(raw_right);
+
     // if both left and right have the same type then the result type is the same
-    if (lhs->result_type() == rhs->result_type()) {
-        return lhs->result_type();
+    if (left == right) {
+        return left;
     }
 
     return AST::ValueType::make_void();
@@ -55,11 +87,42 @@ const std::string AST::FunctionCallExprNode::node_description()
     return desc;
 }
 
-AST::ValueType AST::VarPtrExprNode::result_type() const {
-    // Return a pointer version of the VarRefNode's type
-    return ValueType::make_pointer(var_ref->result_type());
+AST::ValueType AST::AddrOfExprNode::result_type() const {
+    // `&$x` yields the non-nullable borrow `T&`, which widens implicitly to `ptr<T>`. that one
+    // rule is what makes both `int32& $r = &$var;` and `ptr<int32> $p = &$var;` legal without a
+    // cast (book/concept/pointers_and_refs_v2.md, "Two pointer types").
+    //
+    // built over the operand's own result type, with no peeling: taking the address of a
+    // pointer variable must yield a pointer to that variable's slot
+    return ValueType::make_pointer(operand->result_type(), false);
 }
 
-const std::string AST::VarPtrExprNode::node_description() {
-    return "ptr<" + result_type().get_type_desciption() + ">(" + var_ref->node_description() + ")";
+const std::string AST::AddrOfExprNode::node_description() {
+    return "addrof<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+AST::ValueType AST::PointerValueNode::result_type() const {
+    // unpeeled: `$p:$` is the ptr<int32> that `$p` would otherwise read through
+    return operand->result_type();
+}
+
+const std::string AST::PointerValueNode::node_description() {
+    return "peel<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+AST::ValueType AST::IndexExprNode::result_type() const {
+    // indexing a ptr<T> yields a T, the element itself
+    return value_type_of(base->result_type());
+}
+
+const std::string AST::IndexExprNode::node_description() {
+    return "index<" + result_type().get_type_desciption() + ">(" + base->node_description() + "[" + index->node_description() + "])";
+}
+
+AST::ValueType AST::DerefExprNode::result_type() const {
+    return value_type_of(operand->result_type());
+}
+
+const std::string AST::DerefExprNode::node_description() {
+    return "deref<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }

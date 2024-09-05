@@ -32,12 +32,16 @@ namespace AST
         t_class,
         t_struct,
         t_generic,
+        t_pointer,
         t_unknown
     };
 
+    // flags apply to the level they sit on, which is what makes `ptr<const T>` (const pointee)
+    // and `const ptr<T>` (const pointer) distinct types. t_nullable only ever sits on a
+    // t_pointer level: set for `ptr<T>`, clear for the non-nullable borrow `T&`
     enum class ValueTypeFlags {
         t_const = 1 << 0,
-        t_pointer = 1 << 1,
+        t_nullable = 1 << 1,
     };
 
     enum class ValueTypePrimitive {
@@ -115,13 +119,27 @@ namespace AST
             return ValueType(ValueTypeKind::t_generic, param);
         }
 
+        // const applies to the level it is attached to, so make_const(make_pointer(t)) is
+        // `const ptr<T>` while make_pointer(make_const(t)) is `ptr<const T>`
         static ValueType make_const(ValueType type) {
-            type.set_const(true);
+            type.type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_const);
             return type;
         }
 
-        static ValueType make_pointer(ValueType type) {
-            type.set_pointer(true);
+        static ValueType make_mutable(ValueType type) {
+            type.type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_const);
+            return type;
+        }
+
+        // `nullable` picks the spelling: true is `ptr<T>`, false the non-nullable borrow `T&`.
+        // both are one machine address; nullability is the only thing the type system checks.
+        // deliberately NOT idempotent - make_pointer(make_pointer(int32)) is ptr<ptr<int32>>
+        static ValueType make_pointer(ValueType pointee, bool nullable) {
+            ValueType type(ValueTypeKind::t_pointer, ValueTypePrimitive::t_void);
+            type._pointee = std::make_shared<const ValueType>(std::move(pointee));
+            if (nullable) {
+                type.type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_nullable);
+            }
             return type;
         }
 
@@ -158,23 +176,19 @@ namespace AST
         }
 
         bool is_pointer() const {
-            return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_pointer);
+            return kind == ValueTypeKind::t_pointer;
         }
 
-        void set_const(bool is_const) {
-            if (is_const) {
-                type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_const);
-            } else {
-                type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_const);
-            }
+        // true for `ptr<T>`, false for the borrow `T&`. only meaningful on a pointer
+        bool is_nullable() const {
+            assert(is_pointer());
+            return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_nullable);
         }
 
-        void set_pointer(bool is_pointer) {
-            if (is_pointer) {
-                type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_pointer);
-            } else {
-                type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_pointer);
-            }
+        // the type one level down. `ptr<ptr<int32>>::pointee()` is `ptr<int32>`
+        const ValueType &pointee() const {
+            assert(is_pointer() && _pointee);
+            return *_pointee;
         }
 
         bool is_primitive() const {
@@ -285,7 +299,11 @@ namespace AST
 
         bool is_same_size(ValueType other) const;
         
+        // a pointer has no primitive of its own - reaching here with one means a caller wanted
+        // the pointee and forgot to say so. assert rather than silently answering t_void, which
+        // used to reach LLVM as PointerType::get(voidTy) and assert far from the actual mistake
         inline ValueTypePrimitive get_primitive_type() const {
+            assert(!is_pointer() && "use value_type_of() / pointee() to reach through a pointer");
             return primitive;
         }
 
@@ -304,6 +322,12 @@ namespace AST
             // Compare based on the kind
             if (is_primitive() && other.is_primitive()) {
                 return primitive == other.primitive;
+            }
+
+            // a pointer is structural: same nullability (already covered by the flag check
+            // above) and the same pointee, all the way down
+            if (is_pointer() && other.is_pointer()) {
+                return *_pointee == *other._pointee;
             }
 
             if ((is_struct() || is_class()) && (other.is_struct() || other.is_class())) {
@@ -342,6 +366,12 @@ namespace AST
         // ordinal, so the parameter's name, constraint and declaration site travel with every
         // use of it, and so parameters of different owners are distinct types
         const TypeParamDecl *_type_param = nullptr;
+
+        // for the t_pointer kind: the type one level down. shared rather than interned because
+        // a pointer carries no state beyond its pointee, so structural equality is enough -
+        // unlike ComplexType, which is a mutable, property-carrying object that must be shared
+        // by identity. shared_ptr keeps ValueType cheap to copy, which everything relies on
+        std::shared_ptr<const ValueType> _pointee = nullptr;
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
         ValueType(ValueTypeKind kind, ComplexType *complex_type) :
@@ -458,6 +488,9 @@ namespace std {
             if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
             else if (vt.is_struct() || vt.is_class()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
             else if (vt.is_type_param()) h ^= reinterpret_cast<size_t>(vt.get_type_param());
+            // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
+            // collide with int32, since the primitive component is identical
+            else if (vt.is_pointer()) h ^= (*this)(vt.pointee()) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
         }
     };
@@ -591,6 +624,33 @@ namespace AST {
     // or as an argument of a generic application. after monomorphization a concrete context should be
     // free of these; anything left is a resolution bug rather than a legitimate type.
     bool contains_type_param(const ValueType& type);
+
+    // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
+    // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`.
+    //
+    // one primitive behind two rules that are the same rule: the auto-deref that makes a pointer
+    // behave like the value it points at, and the generic decay that binds T=int32 when a
+    // ptr<int32> is passed to `function box<T>(T $v)`
+    // (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
+    ValueType value_type_of(const ValueType& type);
+
+    // the type ultimately addressed, following every pointer level rather than one.
+    //
+    // deliberately separate from value_type_of, which is the *read* rule and must stay at one
+    // level. this is the `->` rule: a member lives on the struct, however many addresses deep
+    // the base happens to be, so `ptr<ptr<Point>>` still finds Point's fields
+    // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
+    ValueType target_type_of(const ValueType& type);
+
+    // true when a value of `from` may be used where `to` is expected without an explicit cast.
+    //
+    // deliberately looser than operator==, which has to stay exact because it is the interning
+    // identity for TypeRegistry and the monomorphizer's instance cache - Box<int32> and
+    // Box<const int32> are different layouts even though an int32 argument satisfies a const
+    // int32 parameter. the two differences here:
+    //   - top level const is dropped
+    //   - a non-nullable borrow T& widens to a nullable ptr<T>, never the reverse
+    bool is_implicitly_convertible(const ValueType& from, const ValueType& to);
 
 };
 

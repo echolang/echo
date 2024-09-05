@@ -1,0 +1,4 @@
+// there is no transparency to strip off a plain value, so `:$` on one is an error. reported
+// after monomorphization, where a type parameter's pointer-ness is finally known
+$x = 5;
+$y = $x:$;

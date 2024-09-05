@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 9:6
+Const violation: cannot re-seat 'const ptr<int32>' - the pointer is const, only its pointee may be written
+Begin: '='
+End: '='
+Code excerpt:
+ [8]> 
+ [9]> $p:$ = &$b;
+           ^
+ [10]> 
+
+Critical issues found, cannot compile.

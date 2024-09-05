@@ -29,7 +29,7 @@ ISSUE_MESSAGE_FNC(UnexpectedToken)
 
 ISSUE_MESSAGE_FNC(VariableRedeclaration)
 {
-    return std::format("The const variable '{}' is already declared on line {} column {} and cannot be modified", 
+    return std::format("The variable '{}' is already declared on line {} column {} and cannot be redeclared with a different type",
         previous_declaration->name(), 
         previous_declaration->token_varname.line(), 
         previous_declaration->token_varname.column());
@@ -53,6 +53,11 @@ ISSUE_MESSAGE_FNC(LossOfPrecision)
 ISSUE_MESSAGE_FNC(InvalidTypeConversion)
 {
     return std::format("Invalid type conversion: {}", _message);
+}
+
+ISSUE_MESSAGE_FNC(ConstViolation)
+{
+    return std::format("Const violation: {}", _message);
 }
 
 ISSUE_MESSAGE_FNC(IntegerOverflow)

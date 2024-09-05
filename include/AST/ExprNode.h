@@ -155,27 +155,142 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    class VarPtrExprNode : public ExprNode
+    // `&E` - the address of the storage E denotes.
+    //
+    // deliberately takes the *storage* type, with no transparency peeling, so `&$buf` on a
+    // `ptr<uint8>` is a `ptr<ptr<uint8>>`: the address of $buf's own slot, not the address
+    // $buf holds (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+    class AddrOfExprNode : public ExprNode
     {
     public:
-        ECO_AST_NODE_TYPE(n_expr_varptr);
+        ECO_AST_NODE_TYPE(n_expr_addrof);
 
-        VarRefNode *var_ref;
+        // any place expression - see AST::is_place_expression. a variable, a member access,
+        // and later an index; not a temporary, which has no address to take
+        ExprNode *operand;
 
-        VarPtrExprNode(VarRefNode *var_ref) :
-            var_ref(var_ref)
+        AddrOfExprNode(ExprNode *operand) :
+            operand(operand)
         {
-            assert(var_ref != nullptr && "VarPtrExprNode requires a valid VarRefNode");
+            assert(operand != nullptr && "AddrOfExprNode requires an operand");
         };
 
-        ~VarPtrExprNode() {}
+        ~AddrOfExprNode() {}
 
         ValueType result_type() const override;
 
         const std::string node_description() override;
 
         void accept(Visitor& visitor) override {
-            visitor.visitVarPtrExpr(*this);
+            visitor.visit_addr_of_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `E:$` - the pointer itself, rather than the thing it points at.
+    //
+    // this emits no code. `E:$` is not an operation on a value: it is *exactly what E already
+    // is* before the transparency auto-deref, so the node's only job is to mark the position
+    // so the adjustment pass does not insert that deref. the pass then erases it.
+    //
+    // it exists as a node, rather than a flag on ExprNode, so `$x:$` on a non-pointer has a
+    // located object to report against after monomorphization - and because a flag on the
+    // expression base class would be the same mistake the pointer bit-flag was.
+    // reaching codegen is a compiler bug, and the visitor there says so
+    class PointerValueNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_peel);
+
+        ExprNode *operand;
+
+        // the `:$` token, so the "nothing to peel" diagnostic can point at it
+        TokenReference token_peel;
+
+        PointerValueNode(ExprNode *operand, TokenReference token_peel) :
+            operand(operand), token_peel(token_peel)
+        {
+            assert(operand != nullptr && "PointerValueNode requires an operand");
+        };
+
+        ~PointerValueNode() {}
+
+        // the pointer, unpeeled - the operand's own type
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor& visitor) override {
+            visitor.visit_pointer_value(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `E[n]` - the element n positions along from the address E holds.
+    //
+    // a place, so it reads and writes alike, and `$p:$[0]` is the same storage as `$p`. the
+    // offset is scaled by the size of the pointee, never by bytes: `$it:$ + 1` on a ptr<int32>
+    // advances four bytes (book/concept/pointers_and_refs_v2.md, "Pointer arithmetic")
+    class IndexExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_index);
+
+        // evaluated as a pointer-typed value: the address to offset from
+        ExprNode *base;
+        ExprNode *index;
+
+        TokenReference token_bracket;
+
+        IndexExprNode(ExprNode *base, ExprNode *index, TokenReference token_bracket) :
+            base(base), index(index), token_bracket(token_bracket)
+        {
+            assert(base != nullptr && "IndexExprNode requires a base");
+            assert(index != nullptr && "IndexExprNode requires an index");
+        };
+
+        ~IndexExprNode() {}
+
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor& visitor) override {
+            visitor.visit_index_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // one auto-deref: reads the operand's pointer and yields the value at it.
+    //
+    // never written by the user. the pointer adjustment pass inserts one wherever a pointer is
+    // read in value position, which is what lets every other node's result_type() be honest -
+    // before, a pointer variable's read claimed `ptr<int32>` while codegen had already produced
+    // an int32, and nothing downstream reconciled the two
+    class DerefExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_deref);
+
+        ExprNode *operand;
+
+        DerefExprNode(ExprNode *operand) :
+            operand(operand)
+        {
+            assert(operand != nullptr && "DerefExprNode requires an operand");
+        };
+
+        ~DerefExprNode() {}
+
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor& visitor) override {
+            visitor.visit_deref_expr(*this);
         }
 
         Node *clone(CloneContext &cc) const override;

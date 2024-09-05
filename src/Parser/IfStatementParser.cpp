@@ -20,7 +20,7 @@ bool is_ifstatement_start_token(const Parser::Cursor &cursor)
 //         condition = parse_expr(payload);
 
 //         if (!condition) {
-//             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_unknown, payload.cursor.current().type());
+//             payload.collect_unexpected_token(Token::Type::t_unknown);
 //             payload.cursor.try_skip_to_next_statement();
 //             return {condition, scope};
 //         }
@@ -28,7 +28,7 @@ bool is_ifstatement_start_token(const Parser::Cursor &cursor)
 
 //     // a opening brace is required to start the scope
 //     if (!payload.cursor.is_type(Token::Type::t_open_brace)) {
-//         payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_brace, payload.cursor.current().type());
+//         payload.collect_unexpected_token(Token::Type::t_open_brace);
 //         payload.cursor.try_skip_to_next_statement();
 //         return {condition, scope};
 //     }
@@ -44,7 +44,7 @@ bool is_ifstatement_start_token(const Parser::Cursor &cursor)
 AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
 {
     if (!payload.cursor.is_type(Token::Type::t_if)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_function, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_function);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -57,14 +57,14 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
     ifstatement.condition = parse_expr(payload);
 
     if (!ifstatement.condition) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_unknown, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_unknown);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
 
     // as long as we do not support one line if statements we need to have a scope
     if (!payload.cursor.is_type(Token::Type::t_open_brace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_brace, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_brace);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -75,7 +75,7 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
 
     // expect a closing brace
     if (!payload.cursor.is_type(Token::Type::t_close_brace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_close_brace, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_close_brace);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -91,7 +91,7 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
         auto is_end_else = !payload.cursor.is_type(Token::Type::t_if);
         if (is_end_else) {
             if (!payload.cursor.is_type(Token::Type::t_open_brace)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_brace, payload.cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_open_brace);
                 payload.cursor.try_skip_to_next_statement();
                 return nullptr;
             }
@@ -107,7 +107,7 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
         // expect a closing brace
         if (is_end_else) {
             if (!payload.cursor.is_type(Token::Type::t_close_brace)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_close_brace, payload.cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_close_brace);
                 payload.cursor.try_skip_to_next_statement();
                 return nullptr;
             }

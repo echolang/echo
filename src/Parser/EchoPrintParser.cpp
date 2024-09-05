@@ -27,7 +27,7 @@ AST::FunctionCallExprNode * Parser::parse_echo(Payload &payload)
 
     // next token should be a semicolon
     if (payload.cursor.current().type() != Token::Type::t_semicolon) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_semicolon, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
         payload.cursor.try_skip_to_next_statement();
     } else {
         payload.cursor.skip();

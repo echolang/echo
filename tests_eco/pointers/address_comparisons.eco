@@ -1,0 +1,33 @@
+// the six comparisons available on an address. all of them go through `:$`, because they ask
+// about the address rather than about the value at it - `$a == $b` is a different question and
+// a different answer (book/concept/pointers_and_refs_v2.md, "Pointer arithmetic")
+//
+// adjacent storage comes from a struct's two int32 fields, laid out at offset 0 and 4, since
+// there is no allocator yet
+
+struct Pair {
+    int $a;
+    int $b;
+}
+
+$s = Pair(1, 1);
+
+ptr<int> $p = &$s->a;
+ptr<int> $q = $p:$ + 1;
+
+echo ($p:$ == $q:$);
+echo ($p:$ != $q:$);
+echo ($p:$ < $q:$);
+echo ($p:$ > $q:$);
+echo ($p:$ <= $q:$);
+echo ($p:$ >= $q:$);
+
+// an address equals itself, so the reflexive cases pin the boundary of the strict comparisons
+echo ($p:$ == $p:$);
+echo ($p:$ <= $p:$);
+echo ($p:$ < $p:$);
+
+// the values are equal while the addresses are not, which is the whole reason the two spellings
+// have to stay distinct
+echo ($p == $q);
+echo ($p:$ == $q:$);

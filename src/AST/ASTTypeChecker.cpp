@@ -5,12 +5,15 @@
 #include "AST/ASTIssue.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/AssignNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/StructNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/ReturnNode.h"
+#include "AST/ASTPlaceExpr.h"
 
 #include <fmt/core.h>
 
@@ -19,16 +22,38 @@ namespace AST
 
 // resolves the value type of a member-access base (either a variable reference or a nested member
 // access). returns an unknown type for any other base kind, which callers treat as "don't check".
+// reached through target_type_of, because `->` sees through every pointer level to the struct it
+// ultimately addresses
 static ValueType base_type_of(MemberAccessNode &node)
 {
     auto &base = node.get_base_node();
     if (base.has_type<VarRefNode>()) {
-        return base.get<VarRefNode>().result_type();
+        return target_type_of(base.get<VarRefNode>().result_type());
     }
     if (base.has_type<MemberAccessNode>()) {
-        return base.get<MemberAccessNode>().result_type();
+        return target_type_of(base.get<MemberAccessNode>().result_type());
     }
     return ValueType::make_unknown();
+}
+
+// names the storage an assignment target denotes, so a const diagnostic can say what the user
+// wrote rather than only what its type is. empty for the shapes that have no name of their own
+static std::string place_description(const ExprNode &expr)
+{
+    switch (expr.get_node_type())
+    {
+        case NodeType::n_varref:
+        {
+            auto &ref = static_cast<const VarRefNode &>(expr);
+            return ref.is_var() ? ref.get_var().decl().name_full() : "";
+        }
+
+        case NodeType::n_member_access:
+            return static_cast<const MemberAccessNode &>(expr).get_member_name().value();
+
+        default:
+            return "";
+    }
 }
 
 // numeric/primitive conversions are inserted by the parser/monomorphizer as casts, so only a
@@ -42,6 +67,14 @@ static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
     if (arg.is_void()) {
         return true;
     }
+
+    // pointers match structurally on their pointee, with the borrow-widens-to-nullable rule.
+    // this arm is load bearing: a reference parameter used to reach the primitive arm below,
+    // because `int32&` was an int32 carrying a flag rather than a kind of its own
+    if (arg.is_pointer() || param.is_pointer()) {
+        return is_implicitly_convertible(arg, param);
+    }
+
     if (arg.is_primitive() && param.is_primitive()) {
         return true;
     }
@@ -49,6 +82,68 @@ static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
         return arg.get_complex_type() == param.get_complex_type();
     }
     return false;
+}
+
+// the variable an expression ultimately reads from, walking through everything that only
+// re-addresses storage rather than naming new storage. `&$s->field` and `&$buf:$[3]` both root
+// at the variable whose lifetime actually governs the address
+static VarDeclNode *root_vardecl_of(ExprNode *expr)
+{
+    while (expr != nullptr)
+    {
+        switch (expr->get_node_type())
+        {
+            case NodeType::n_varref:
+            {
+                auto *var_ref = static_cast<VarRefNode *>(expr);
+                return var_ref->is_var() ? &var_ref->get_var().decl() : nullptr;
+            }
+
+            case NodeType::n_expr_addrof:
+                expr = static_cast<AddrOfExprNode *>(expr)->operand;
+                break;
+
+            case NodeType::n_expr_deref:
+                expr = static_cast<DerefExprNode *>(expr)->operand;
+                break;
+
+            case NodeType::n_expr_peel:
+                expr = static_cast<PointerValueNode *>(expr)->operand;
+                break;
+
+            case NodeType::n_expr_index:
+                expr = static_cast<IndexExprNode *>(expr)->base;
+                break;
+
+            case NodeType::n_member_access:
+            {
+                auto &base = static_cast<MemberAccessNode *>(expr)->get_base_node();
+                expr = base.has() && base.is_expression_node() ? base.unsafe_ptr<ExprNode>() : nullptr;
+                break;
+            }
+
+            default:
+                return nullptr;
+        }
+    }
+
+    return nullptr;
+}
+
+// looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
+// expression the user actually wrote. `null` is the case that needs it: the null-specific rules
+// all test for the raw n_null tag, and a cast inserted to reconcile the argument with its
+// parameter hides that tag behind an n_type_cast
+static ExprNode *strip_implicit_casts(ExprNode *expr)
+{
+    while (expr != nullptr && expr->get_node_type() == NodeType::n_type_cast) {
+        auto *cast = static_cast<TypeCastNode *>(expr);
+        if (!cast->is_implcit) {
+            break;
+        }
+        expr = cast->expr;
+    }
+    return expr;
 }
 
 TypeChecker::TypeChecker(Bundle &bundle) :
@@ -82,7 +177,60 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     if (node.is_generic()) {
         return;
     }
+
+    FunctionDeclNode *prev = _current_function;
+    _current_function = &node;
     RecursiveVisitor::visitFunctionDecl(node);
+    _current_function = prev;
+}
+
+void TypeChecker::visitReturn(ReturnNode &node)
+{
+    // a return at file scope has no signature to answer to, and a synthesized return (the one
+    // the struct parser builds for a constructor) has no token to report against
+    if (_current_function != nullptr && node.expr != nullptr && node.token_return.has_value())
+    {
+        const ValueType declared = _current_function->get_return_type();
+        const ValueType actual = node.expr->result_type();
+
+        // scoped to pointers for the same reason the declaration and assignment checks are:
+        // that is the surface where the conversions are directional, and where a mismatch is
+        // a hard llvm verifier failure rather than a silent widening
+        if ((declared.is_pointer() || actual.is_pointer())
+            && !declared.is_void() && !actual.is_void()
+            && node.expr->get_node_type() != NodeType::n_null
+            && !is_implicitly_convertible(actual, declared)) {
+            _collector.collect_issue<Issue::InvalidTypeConversion>(
+                code_ref_for(node.token_return.value()),
+                fmt::format("cannot return '{}' from a function declared '{}'",
+                    actual.get_type_desciption(), declared.get_type_desciption()));
+        }
+
+        // the storage a local names is gone before the caller can read it, so handing back its
+        // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes").
+        // a parameter is the caller's storage and outlives the call, so it is the legal case
+        if (declared.is_pointer() && actual.is_pointer()) {
+            VarDeclNode *root = root_vardecl_of(node.expr);
+            if (root != nullptr) {
+                bool is_parameter = false;
+                for (auto *arg : _current_function->args) {
+                    if (arg == root) {
+                        is_parameter = true;
+                        break;
+                    }
+                }
+
+                if (!is_parameter) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(node.token_return.value()),
+                        fmt::format("cannot return the address of local '{}' - its storage ends with the call",
+                            root->name_full()));
+                }
+            }
+        }
+    }
+
+    RecursiveVisitor::visitReturn(node);
 }
 
 void TypeChecker::visitStructDecl(StructDeclNode &node)
@@ -130,6 +278,20 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 // where the illegal conversion actually lives.
                 ValueType arg_type = node.arguments[i]->result_type();
                 ValueType param_type = params[i]->type();
+
+                // a borrow promises it is never null, and the declaration site already refuses
+                // to seed one with null - the call site has to refuse too, or the promise only
+                // holds for locals. this was a segfault the moment the callee read through it
+                ExprNode *written = strip_implicit_casts(node.arguments[i]);
+                if (written != nullptr && written->get_node_type() == NodeType::n_null
+                    && param_type.is_pointer() && !param_type.is_nullable()) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(node.token_function_name),
+                        fmt::format("argument {} of '{}' is '{}', which cannot be null",
+                            i + 1, node.decl->func_name(), param_type.get_type_desciption()));
+                    continue;
+                }
+
                 if (!arg_assignable_to(arg_type, param_type)) {
                     _collector.collect_issue<Issue::ArgumentTypeMismatch>(
                         code_ref_for(node.token_function_name),
@@ -140,6 +302,22 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                             param_type.get_type_desciption(),
                             arg_type.get_type_desciption()));
                 }
+            }
+        }
+    }
+
+    // echo is a decl-less builtin, and its codegen has a format for every primitive and nothing
+    // else. an address is the case worth naming: after the adjustment pass a pointer here really
+    // is an address rather than a not-yet-dereferenced read, and printing one is almost always a
+    // missing `:$`-less read. reported here so it is a located diagnostic instead of the
+    // uncaught codegen throw it used to be
+    if (node.decl == nullptr && node.token_function_name.value() == "echo") {
+        for (auto *arg : node.arguments) {
+            if (arg != nullptr && arg->result_type().is_pointer()) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_function_name),
+                    fmt::format("cannot echo an address of type '{}' - echo prints values",
+                        arg->result_type().get_type_desciption()));
             }
         }
     }
@@ -181,6 +359,40 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
     if (node.lhs && node.rhs && node.op_node) {
         ValueType lhs = node.lhs->result_type();
         ValueType rhs = node.rhs->result_type();
+
+        // comparing against null only means something on an address. `$p == null` would read
+        // the int32 at address zero - exactly the crash the check is meant to prevent - so it
+        // is rejected and `$p:$ == null` is the way to ask
+        // (book/concept/pointers_and_refs_v2.md, "Nullability")
+        const bool lhs_null = node.lhs->get_node_type() == NodeType::n_null;
+        const bool rhs_null = node.rhs->get_node_type() == NodeType::n_null;
+
+        if (lhs_null != rhs_null) {
+            const ValueType &other = lhs_null ? rhs : lhs;
+            if (!other.is_pointer()) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.op_node->token_literal),
+                    fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
+                        other.get_type_desciption()));
+            }
+        }
+
+        // comparing an address against a non-address. codegen lowers a pointer comparison to an
+        // icmp over two pointers, and llvm asserts outright when the operand types differ - so
+        // without this the compiler aborted with "Both operands to ICmp instruction are not of
+        // the same type!" and no location at all.
+        //
+        // scoped to comparisons: `$p:$ + 1` mixes a pointer and an int legitimately, because
+        // arithmetic on an address is offsetting rather than comparing
+        if (!lhs_null && !rhs_null && lhs.is_pointer() != rhs.is_pointer()
+            && !lhs.is_void() && !rhs.is_void()
+            && node.op_node->op->is_comparison()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.op_node->token_literal),
+                fmt::format("cannot compare '{}' against '{}' - an address only compares against another address",
+                    lhs.get_type_desciption(), rhs.get_type_desciption()));
+        }
+
         if (lhs.is_struct() || lhs.is_class() || rhs.is_struct() || rhs.is_class()) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.op_node->token_literal),
@@ -194,6 +406,91 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
     RecursiveVisitor::visitBinaryExpr(node);
 }
 
+// `const` is a promise about the storage an assignment reaches, and after the adjustment pass the
+// target's shape says which level that is: a deref means the write goes *through* a pointer, so the
+// pointee's const decides it, while any other place names the slot itself. the parser cannot make
+// this call - writing through and re-seating are the same token sequence until the adjuster has
+// inserted the deref (book/concept/pointers_and_refs_v2.md, "Const")
+void TypeChecker::check_const_target(AssignNode &node)
+{
+    ExprNode &target = *node.target;
+
+    if (target.get_node_type() == NodeType::n_expr_deref) {
+        const ValueType pointer_type = static_cast<DerefExprNode &>(target).operand->result_type();
+
+        if (pointer_type.is_pointer() && pointer_type.pointee().is_const()) {
+            _collector.collect_issue<Issue::ConstViolation>(
+                code_ref_for(node.token_assign),
+                fmt::format("cannot write through '{}' - its pointee is const",
+                    pointer_type.get_type_desciption()));
+        }
+
+        return;
+    }
+
+    if (!is_place_expression(target)) {
+        return;
+    }
+
+    const ValueType storage = target.result_type();
+    if (!storage.is_const()) {
+        return;
+    }
+
+    // a const *pointer* still permits the write-through above - what it forbids is re-seating, and
+    // `$p:$` is the only spelling that reaches the slot, so arriving here with a pointer means that
+    if (storage.is_pointer()) {
+        _collector.collect_issue<Issue::ConstViolation>(
+            code_ref_for(node.token_assign),
+            fmt::format("cannot re-seat '{}' - the pointer is const, only its pointee may be written",
+                storage.get_type_desciption()));
+        return;
+    }
+
+    const std::string name = place_description(target);
+    _collector.collect_issue<Issue::ConstViolation>(
+        code_ref_for(node.token_assign),
+        name.empty()
+            ? fmt::format("cannot assign to const storage of type '{}'", storage.get_type_desciption())
+            : fmt::format("cannot assign to '{}' - it is declared const", name));
+}
+
+void TypeChecker::visit_assign(AssignNode &node)
+{
+    // an initialization is the one write a const slot legitimately gets, so it is exempt
+    if (node.target != nullptr && !node.is_initialization) {
+        check_const_target(node);
+    }
+
+    // the value has to fit the storage the target names. only checked when a pointer is
+    // involved, which is where the conversions are directional.
+    //
+    // this is what rejects `$p = &$b`: after the adjustment pass the target is a deref of $p,
+    // so the storage is an int32 while the value is an int32& - assigning an address into the
+    // pointee's slot. re-seating is spelled `$p:$ = &$b`, whose target *is* the slot
+    // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+    if (node.target && node.value_expr) {
+        ValueType target_type = node.target->result_type();
+        ValueType value_type = node.value_expr->result_type();
+
+        if ((target_type.is_pointer() || value_type.is_pointer())
+            && !target_type.is_void() && !value_type.is_void()
+            && node.value_expr->get_node_type() != NodeType::n_null
+            && !is_implicitly_convertible(value_type, target_type)) {
+            _collector.collect_issue<Issue::InvalidTypeConversion>(
+                code_ref_for(node.token_assign),
+                fmt::format("cannot assign '{}' to '{}'{}",
+                    value_type.get_type_desciption(),
+                    target_type.get_type_desciption(),
+                    !target_type.is_pointer() && value_type.is_pointer()
+                        ? " - to change where a pointer points, assign to ':$'"
+                        : ""));
+        }
+    }
+
+    RecursiveVisitor::visit_assign(node);
+}
+
 void TypeChecker::visitVarDecl(VarDeclNode &node)
 {
     if (node.has_type() && contains_type_param(node.type())) {
@@ -203,6 +500,35 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
                 "The type of variable '{}' could not be resolved to a concrete type "
                 "(unresolved generic type parameter)",
                 node.name()));
+    }
+
+    // an initializer involving a pointer has to actually fit the slot. checked only when a
+    // pointer is involved because that is the surface where the conversions are directional:
+    // `T&` widens to `ptr<T>` freely, while the narrowing back asserts non-nullness and needs
+    // the explicit cast (book/concept/pointers_and_refs_v2.md, "Two pointer types")
+    if (node.init_expr && node.has_type()
+        && node.init_expr->get_node_type() != NodeType::n_null
+        && (node.type().is_pointer() || node.init_expr->result_type().is_pointer())
+        && !node.init_expr->result_type().is_void()
+        && !is_implicitly_convertible(node.init_expr->result_type(), node.type())) {
+        _collector.collect_issue<Issue::InvalidTypeConversion>(
+            code_ref_for(node.token_varname),
+            fmt::format("cannot implicitly convert '{}' to '{}'{}",
+                node.init_expr->result_type().get_type_desciption(),
+                node.type().get_type_desciption(),
+                node.type().is_pointer() && !node.type().is_nullable()
+                    ? " - write the cast explicitly to assert it is not null"
+                    : ""));
+    }
+
+    // a borrow is the type that promises it is never null, so seeding one with null defeats
+    // the only guarantee it carries. use ptr<T> when the absence case is real (doc L59)
+    if (node.init_expr && node.init_expr->get_node_type() == NodeType::n_null
+        && node.has_type() && node.type().is_pointer() && !node.type().is_nullable()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_varname),
+            fmt::format("'{}' cannot be null - declare it as a nullable pointer instead",
+                node.type().get_type_desciption()));
     }
 
     // locate any implicit cast in the initializer at the declared variable.

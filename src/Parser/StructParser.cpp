@@ -3,7 +3,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/MemberAccessNode.h"
-#include "AST/MemberMutNode.h"
+#include "AST/AssignNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
@@ -16,7 +16,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     auto &cursor = payload.cursor;
 
     if (!cursor.is_type(Token::Type::t_struct)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_struct, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_struct);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -25,7 +25,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
     cursor.skip();
 
     if (!cursor.is_type(Token::Type::t_identifier)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_identifier);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -39,7 +39,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
     // next token needs to be an open brace
     if (!cursor.is_type(Token::Type::t_open_brace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_brace, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_brace);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -110,6 +110,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign }) ||
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign }) ||
             cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon }) ||
+            starts_borrow_vardecl(payload) || // int32& $prop, a borrow property
             starts_qualified_vardecl(payload) // a::b::Foo $prop
         ) {
             auto var = parse_varexpr(payload, &structscope);
@@ -124,7 +125,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
             // expect "("
             if (!cursor.is_type(Token::Type::t_open_paren)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_paren, cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_open_paren);
                 cursor.try_skip_to_next_statement();
                 continue;
             }
@@ -164,7 +165,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             }
 
             if (!cursor.is_type(Token::Type::t_close_paren)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_paren, cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_close_paren);
                 cursor.try_skip_to_next_statement();
                 continue;
             }
@@ -172,7 +173,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             cursor.skip(); // skip ")"
 
             if (!cursor.is_type(Token::Type::t_open_brace)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_brace, cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_open_brace);
                 cursor.try_skip_to_next_statement();
                 continue;
             }
@@ -185,7 +186,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             ctor_decl.body->add_vardecl(*this_vardecl);
 
             if (!cursor.is_type(Token::Type::t_close_brace)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_brace, cursor.current().type());
+                payload.collect_unexpected_token(Token::Type::t_close_brace);
                 cursor.try_skip_to_next_statement();
             } else {
                 cursor.skip(); // skip "}"
@@ -214,7 +215,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
         }
 
         else {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_unknown, cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_unknown);
 
             // when we encounter an unexpected token, we skip until we find a semicolon or a brace
             // in the hopes that there is    simply a typo in the code or something minor that we can recover from
@@ -270,13 +271,27 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
         // create $this->prop access
         auto member_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_identifier, prop->token_varname);
-        auto member_access = payload.context.emplace_nodep<AST::MemberAccessNode>(AST::make_ref(*this_ref), member_token);
+        AST::ExprNode *target = payload.context.emplace_nodep<AST::MemberAccessNode>(AST::make_ref(*this_ref), member_token);
+
+        // a pointer property is *bound* here, not written through. a plain assignment to a
+        // pointer means "store into the pointee", which for a field that has never been
+        // seated writes through uninitialized memory - so the synthesized initializer spells
+        // the re-seating form, `$this->prop:$ = $prop`, exactly as a user would
+        // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+        if (prop->has_type() && prop->type().is_pointer()) {
+            target = payload.context.emplace_nodep<AST::PointerValueNode>(target, member_token);
+        }
 
         // reference the matching constructor argument
         auto param_var = payload.context.emplace_nodep<AST::VarNode>(default_ctor.args[i]);
         auto param_ref = payload.context.emplace_nodep<AST::VarRefNode>(param_var);
 
-        auto member_mut = payload.context.emplace_nodep<AST::MemberMutNode>(member_access, param_ref);
+        auto member_mut = payload.context.emplace_nodep<AST::AssignNode>(target, param_ref, member_token);
+
+        // this is the one write a `const` property ever gets, so it is an initialization rather
+        // than a mutation and the const checks in AST::TypeChecker have to let it through
+        member_mut->is_initialization = true;
+
         default_ctor.body->children.push_back(AST::make_ref(member_mut));
     }
 

@@ -69,9 +69,13 @@ TEST_CASE("An unconstrained parameter allows anything, a constrained one only it
     REQUIRE(t->allows(ValueType(ValueTypePrimitive::t_int32)));
     REQUIRE_FALSE(t->allows(ValueType(ValueTypePrimitive::t_bool)));
 
-    // const/pointer flags are ignored when matching, so `const int` still satisfies `int`
+    // const is ignored when matching, so `const int` still satisfies `int`
     REQUIRE(t->allows(ValueType::make_const(ValueType(ValueTypePrimitive::t_int32))));
-    REQUIRE(t->allows(ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32))));
+
+    // pointerness is not: `T: int` must reject ptr<int> and int&. the decay that lets a
+    // pointer argument bind a bare T is a call-boundary rule in Monomorphizer::unify
+    REQUIRE_FALSE(t->allows(ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), true)));
+    REQUIRE_FALSE(t->allows(ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), false)));
 }
 
 TEST_CASE("Type parameters of different owners are distinct types", "[types][generics]")
@@ -196,8 +200,16 @@ TEST_CASE("A type parameter renders with the name the user wrote", "[types][gene
     ValueType plain = ValueType::make_type_param(t);
     REQUIRE(plain.get_type_desciption() == "T");
 
-    ValueType decorated = ValueType::make_const(ValueType::make_pointer(plain));
-    REQUIRE(decorated.get_type_desciption() == "const T*");
+    ValueType decorated = ValueType::make_const(ValueType::make_pointer(plain, true));
+    REQUIRE(decorated.get_type_desciption() == "const ptr<T>");
+
+    // const binds to the level it sits on, so these two are different types
+    ValueType const_pointee = ValueType::make_pointer(ValueType::make_const(plain), true);
+    REQUIRE(const_pointee.get_type_desciption() == "ptr<const T>");
+    REQUIRE(const_pointee != decorated);
+
+    // a borrow spells itself with a trailing &
+    REQUIRE(ValueType::make_pointer(plain, false).get_type_desciption() == "T&");
 
     // the mangled form stays the ordinal: it reaches the LLVM symbol table, which has to be
     // reproducible across runs rather than derived from the declaration's address

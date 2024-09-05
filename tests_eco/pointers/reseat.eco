@@ -1,0 +1,19 @@
+// the three rules of binding, writing and re-seating, from the doc's own example.
+//
+//   a declaration binds        ptr<int32> $p = &$a;
+//   a plain assignment writes  $p = 100;      -> into $a
+//   an assignment to $p:$      $p:$ = &$b;    -> replaces the address
+
+$a = 1;
+$b = 2;
+ptr<int> $p = &$a;
+
+$p = 100;
+echo $a;
+
+$p:$ = &$b;
+$p = 200;
+
+// $a keeps the value it had before the re-seat
+echo $a;
+echo $b;

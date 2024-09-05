@@ -17,7 +17,7 @@ namespace Parser
     // MemberAccessNode per level. returns `base` unchanged when there is no `->`.
     // on a malformed chain (missing identifier after `->`) it collects an
     // UnexpectedToken issue and returns make_void_ref(); callers do their own recovery
-    const AST::NodeReference parse_member_chain(Payload &payload, AST::NodeReference base);
+    const AST::NodeReference parse_postfix_chain(Payload &payload, AST::NodeReference base);
 };
 
 #endif

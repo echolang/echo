@@ -2,17 +2,21 @@
 
 #include "AST/ASTOps.h"
 #include "AST/ExprNode.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/NullNode.h"
 
 #include "External/infint.h"
 
 #include "Parser/FuncCallParser.h"
 #include "Parser/NamespaceParser.h"
+#include "Parser/TypeParser.h"
+#include "AST/TypeNode.h"
 
 #include <format>
 #include <stack>
@@ -90,6 +94,13 @@ std::string get_f32_string_literal(float value)
 const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::LiteralFloatExprNode &node, const AST::ValueType *expected_type)
 {
     auto literal_token = node.token_literal;
+
+    // a pointer expected type says nothing about a number literal - it reaches here from a
+    // position like `ptr<int> $q = $p:$ + 1;`, where the hint belongs to the expression as a
+    // whole and the literal is only the element offset. leave it to be typed on its own
+    if (expected_type != nullptr && expected_type->is_pointer()) {
+        expected_type = nullptr;
+    }
 
     // if there is a specified expected type, check if the literal fits the type
     if (expected_type != nullptr) 
@@ -210,7 +221,14 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
     auto literal_token = node.token_literal;
     InfInt intvalue(literal_token.value());
 
-    if (expected_type != nullptr) 
+    // a pointer expected type says nothing about a number literal - it reaches here from a
+    // position like `ptr<int> $q = $p:$ + 1;`, where the hint belongs to the expression as a
+    // whole and the literal is only the element offset. leave it to be typed on its own
+    if (expected_type != nullptr && expected_type->is_pointer()) {
+        expected_type = nullptr;
+    }
+
+    if (expected_type != nullptr)
     {
         // floats / doubles
         // if the expected type is a float, we can "safely" convert the integer to a float
@@ -454,6 +472,11 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
     auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(current_token);
     cursor.skip();
 
+    // a pointer expected type says nothing about a bool literal
+    if (expected_type != nullptr && expected_type->type.is_pointer()) {
+        expected_type = nullptr;
+    }
+
     // if there is a specified expected type, check if the literal fits the type
     if (expected_type != nullptr) 
     {
@@ -608,16 +631,81 @@ bool is_expr_token(Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_namespace_sep) ||
            cursor.is_type(Token::Type::t_string_literal) ||
            cursor.is_type(Token::Type::t_ref) ||
+           cursor.is_type(Token::Type::t_ptr_of) ||
+           cursor.is_type(Token::Type::t_null) ||
+           // `ptr<T>(...)` is a cast, so a type keyword can begin an expression
+           cursor.is_type(Token::Type::t_ptr) ||
+           cursor.is_type(Token::Type::t_open_bracket) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
 }
 
-const AST::NodeReference Parser::parse_member_chain(Parser::Payload &payload, AST::NodeReference base)
+const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, AST::NodeReference base)
 {
     auto &cursor = payload.cursor;
     auto current_ref = base;
 
-    while (cursor.is_type(Token::Type::t_accessorlr)) {
+    // one loop for every suffix that binds tighter than any operator. `->` and `:$` live here
+    // rather than in the shunting yard, which has no notion of a postfix operator and pops two
+    // operands for everything it sees. `[...]` joins them later
+    while (cursor.is_type(Token::Type::t_accessorlr)
+        || cursor.is_type(Token::Type::t_ptr_of)
+        || cursor.is_type(Token::Type::t_open_bracket)) {
+
+        if (cursor.is_type(Token::Type::t_open_bracket)) {
+            auto bracket_token = cursor.current();
+            cursor.skip();
+
+            auto *base = current_ref.unsafe_ptr<AST::ExprNode>();
+
+            auto *index = Parser::parse_expr(payload, nullptr);
+            if (index == nullptr) {
+                return AST::make_void_ref();
+            }
+
+            if (!cursor.is_type(Token::Type::t_close_bracket)) {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                    payload.context.code_ref(cursor.current()),
+                    Token::Type::t_close_bracket,
+                    cursor.current().type());
+                return AST::make_void_ref();
+            }
+            cursor.skip();
+
+            auto &index_expr = payload.context.emplace_node<AST::IndexExprNode>(base, index, bracket_token);
+            current_ref = AST::make_ref(index_expr);
+            continue;
+        }
+
+        if (cursor.is_type(Token::Type::t_ptr_of)) {
+            auto peel_token = cursor.current();
+            cursor.skip();
+
+            auto *operand = current_ref.unsafe_ptr<AST::ExprNode>();
+
+            // `:$` walks one level outward each time. applied to an already peeled expression
+            // there is no transparency left to strip, so it means the address of the slot -
+            // which makes `$out:$:$` identical to `&$out` rather than a special case
+            // (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+            if (operand->get_node_type() == AST::NodeType::n_expr_peel) {
+                auto &addr = payload.context.emplace_node<AST::AddrOfExprNode>(
+                    static_cast<AST::PointerValueNode *>(operand)->operand);
+                current_ref = AST::make_ref(addr);
+                continue;
+            }
+
+            if (!AST::is_place_expression(*operand)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(peel_token),
+                    "':$' needs an expression with storage to reach the pointer of");
+                return AST::make_void_ref();
+            }
+
+            auto &peel = payload.context.emplace_node<AST::PointerValueNode>(operand, peel_token);
+            current_ref = AST::make_ref(peel);
+            continue;
+        }
+
         cursor.skip(); // skip the '->' token
 
         if (!cursor.is_type(Token::Type::t_identifier)) {
@@ -659,6 +747,17 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return parse_literal_boolean(payload, expected_type);
     }
 
+    else if (cursor.is_type(Token::Type::t_null)) {
+        // null has no type of its own - it takes the one the position expects. an unbound null
+        // stays untyped here and is reported by the checker, which has the context to say so
+        auto &node = payload.context.emplace_node<AST::NullNode>(cursor.current());
+        if (expected_type != nullptr && expected_type->type.is_pointer()) {
+            node.bound_type = expected_type->type;
+        }
+        cursor.skip();
+        return AST::make_ref(node);
+    }
+
     else if (cursor.is_type(Token::Type::t_string_literal)) {
         auto &node = payload.context.emplace_node<AST::LiteralStringExprNode>(cursor.current());
         cursor.skip();
@@ -692,25 +791,87 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         auto current_ref = AST::make_ref(varref);
         
         // wrap the base in a MemberAccessNode for each `->member` in the chain
-        current_ref = Parser::parse_member_chain(payload, current_ref);
+        current_ref = Parser::parse_postfix_chain(payload, current_ref);
         if (!current_ref.has()) {
             return AST::make_void_ref();
         }
 
         if (is_creating_ptr) {
-            // Create a pointer expression node
-            auto &ptr_expr = payload.context.emplace_node<AST::VarPtrExprNode>(current_ref.get_ptr<AST::VarRefNode>());
+            // `&` applies to whatever the postfix chain produced, so `&$s->field` works and is
+            // not the assert it used to be - the old code took the address of a VarRefNode it
+            // had already replaced with a MemberAccessNode (todo/B4)
+            auto *target = current_ref.unsafe_ptr<AST::ExprNode>();
+            if (!AST::is_place_expression(*target)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(var_token),
+                    "Cannot take the address of an expression that has no storage");
+                return AST::make_void_ref();
+            }
+
+            auto &ptr_expr = payload.context.emplace_node<AST::AddrOfExprNode>(target);
             return AST::make_ref(ptr_expr);
         }
-        
+
         return current_ref;
     }
 
-    // there might be a namespace used 
-    // like 
+    // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an
+    // address as pointing at a different type, so its argument is almost always a `:$`
+    // expression (book/concept/pointers_and_refs_v2.md, "Casting").
+    //
+    // `ptr` always starts one; a plain identifier only does when a `&` and a `(` follow, which
+    // no other production spells - `Foo(...)` is a constructor call and `Foo &$x` a declaration
+    else if (
+        cursor.is_type_sequence(0, { Token::Type::t_ptr, Token::Type::t_open_angle }) ||
+        cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_ref, Token::Type::t_open_paren }) ||
+        cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_and, Token::Type::t_open_paren })
+    ) {
+        auto cast_token = cursor.current();
+
+        auto *cast_type = Parser::parse_type(payload);
+        if (cast_type == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        if (!cast_type->type.is_pointer()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cast_token),
+                "Only a pointer type can be written as a cast");
+            return AST::make_void_ref();
+        }
+
+        if (!cursor.is_type(Token::Type::t_open_paren)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(cursor.current()),
+                Token::Type::t_open_paren,
+                cursor.current().type());
+            return AST::make_void_ref();
+        }
+        cursor.skip();
+
+        auto *inner = Parser::parse_expr(payload, cast_type);
+        if (inner == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        if (!cursor.is_type(Token::Type::t_close_paren)) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(cursor.current()),
+                Token::Type::t_close_paren,
+                cursor.current().type());
+            return AST::make_void_ref();
+        }
+        cursor.skip();
+
+        auto &cast = payload.context.emplace_node<AST::TypeCastNode>(cast_type->type, inner, false);
+        return Parser::parse_postfix_chain(payload, AST::make_ref(cast));
+    }
+
+    // there might be a namespace used
+    // like
     //   math::sin(1.0)
     //   math::PI
-    //   math::$foo 
+    //   math::$foo
     const AST::Namespace *ast_namespace = nullptr;
     if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
         auto ns_node = parse_namespace(payload);
@@ -729,7 +890,27 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return AST::make_ref(fcall);
     }
 
-    assert(false && "unimplemented");
+    // `&` reached here means it was not followed by a variable name, so there is no storage to
+    // take the address of - `&5` and `&get()` are the two ways to spell that. reported with the
+    // same message the place check further up uses, rather than falling into the catch-all
+    // (book/concept/pointers_and_refs_v2.md, "Taking addresses")
+    if (cursor.is_type(Token::Type::t_ref) || cursor.is_type(Token::Type::t_and)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "Cannot take the address of an expression that has no storage");
+        cursor.try_skip_to_next_statement();
+        return AST::make_void_ref();
+    }
+
+    // nothing in the grammar starts an operand with this token. an assert here aborted the whole
+    // compiler with no location and no message the user could act on - and in a release build,
+    // where the assert is compiled out, it fell off the end of a function that has to return
+    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+        payload.context.code_ref(cursor.current()),
+        Token::Type::t_varname,
+        cursor.current().type());
+    cursor.try_skip_to_next_statement();
+    return AST::make_void_ref();
 }
 
 // parse an operand appearing in prefix position, consuming any leading unary
@@ -921,8 +1102,20 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     std::stack<AST::NodeReference> node_stack;
     for (auto &part : postfix_expr) 
     {
-        if (part.opnode != nullptr) 
+        if (part.opnode != nullptr)
         {
+            // a binary operator needs two operands. writing one where a value belongs -
+            // `&($a + $b)`, or a stray leading `*` - used to pop an empty stack and take the
+            // compiler down with it, so report it as the syntax error it is
+            if (node_stack.size() < 2) {
+                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                    payload.context.code_ref(part.opnode->token_literal),
+                    Token::Type::t_unknown,
+                    part.opnode->token_literal.type()
+                );
+                return AST::make_void_ref();
+            }
+
             auto right = node_stack.top();
             node_stack.pop();
 

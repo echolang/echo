@@ -15,6 +15,7 @@ public:
         t_identifier, 
         t_semicolon,                // ;
         t_colon,                    // :
+        t_ptr_of,                   // :$ - the address of a pointer expression
         t_comma,                    // ,
         t_dot,                      // .
         t_logical_and,              // &&
@@ -71,6 +72,7 @@ public:
         t_namespace,                // namespace
         t_namespace_sep,            // ::
         t_ptr,                      // ptr
+        t_null,                     // null
         t_struct,                   // struct
         t_class,                    // class
         t_enum,                     // enum

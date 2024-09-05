@@ -30,10 +30,22 @@ namespace AST
         const Token::Type type;
         const OpPrecedence precedence;
 
-        Operator(const Token::Type type, const OpPrecedence precedence) : 
+        Operator(const Token::Type type, const OpPrecedence precedence) :
             type(type),
-            precedence(precedence) 
+            precedence(precedence)
         {
+        }
+
+        // the operators that ask a question about two operands rather than combining them.
+        // the distinction matters for pointers: comparing an address against a non-address is
+        // a type error, while `$p:$ + 1` mixing an address and an int is ordinary offsetting
+        inline bool is_comparison() const {
+            return type == Token::Type::t_logical_eq
+                || type == Token::Type::t_logical_neq
+                || type == Token::Type::t_open_angle
+                || type == Token::Type::t_close_angle
+                || type == Token::Type::t_logical_leq
+                || type == Token::Type::t_logical_geq;
         }
 
         virtual ~Operator() = default;

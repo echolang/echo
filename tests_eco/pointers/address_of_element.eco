@@ -1,0 +1,37 @@
+// `&` applies to anything that has storage, and an element reached through `:$[n]` does
+// (book/concept/pointers_and_refs_v2.md, "Taking addresses" - `$p3 = &$buf:$[3]`)
+//
+// `$p:$[n]` is a genuine lvalue, so it can be read, written and addressed. taking its address
+// is the case that proves it: if indexing produced a value rather than a place, there would be
+// nothing to point at
+
+struct Pair {
+    int $a;
+    int $b;
+}
+
+$s = Pair(10, 20);
+ptr<int> $p = &$s->a;
+
+// the address of element 1 is the address of the second field
+ptr<int> $e = &$p:$[1];
+
+echo $e;
+
+// writing through it reaches that field
+$e = 77;
+echo $s->b;
+
+// element 0 is the same storage as $p itself, so its address is $p's address
+echo (&$p:$[0] == $p:$);
+
+// and the element address sits one int32 along, counted in elements rather than bytes
+echo ($e:$ - $p:$);
+
+// a borrow parameter borrows an element the same way it borrows a variable or a field
+function bump(int &$v) : void {
+    $v = $v + 1;
+}
+
+bump($p:$[1]);
+echo $s->b;

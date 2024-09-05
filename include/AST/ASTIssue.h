@@ -87,6 +87,9 @@ namespace AST
 
         MAKE_ISSUE_DEF1(LossOfPrecision, IssueSeverity::Warning, const std::string, _message);
         MAKE_ISSUE_DEF1(InvalidTypeConversion, IssueSeverity::Error, const std::string, _message);
+        // writing to storage the type says is read-only. not a conversion - the types match, the
+        // permission does not - so it does not belong under InvalidTypeConversion
+        MAKE_ISSUE_DEF1(ConstViolation, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(IntegerOverflow, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(IntegerUnderflow, IssueSeverity::Error, const std::string, _message);
 

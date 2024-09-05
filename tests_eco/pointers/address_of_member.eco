@@ -1,0 +1,25 @@
+// `&` applies to any expression that denotes storage, not just a bare variable. taking the
+// address of a struct field used to abort the compiler: the parser ran the member chain and
+// then asked for the result as a variable reference, which it no longer was (todo/B4)
+
+struct Point {
+    int $x;
+    int $y;
+}
+
+$p = Point(1, 2);
+
+// borrow the field, then write through the borrow
+int& $r = &$p->x;
+$r = 42;
+
+echo $p->x;
+echo $p->y;
+
+// a borrow parameter borrows a field implicitly, the same as it does a variable
+function bump(int &$v) : void {
+    $v = $v + 1;
+}
+
+bump($p->y);
+echo $p->y;

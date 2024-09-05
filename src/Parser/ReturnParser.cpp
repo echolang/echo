@@ -6,12 +6,14 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
 {
     // sanity check that the current token is a return keyword
     if (!payload.cursor.is_type(Token::Type::t_return)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_return, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_return);
         payload.cursor.try_skip_to_next_statement();
         auto &expr = payload.context.emplace_node<AST::VoidExprNode>();
 
         return payload.context.emplace_node<AST::ReturnNode>(&expr);
     }
+
+    auto return_token = payload.cursor.current();
 
     // skip the return keyword
     payload.cursor.skip();
@@ -21,12 +23,12 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
 
     // ensure we have a semicolon at the end of the return statement
     if (!payload.cursor.is_type(Token::Type::t_semicolon)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_semicolon, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
         payload.cursor.try_skip_to_next_statement();
     }
     else {
         payload.cursor.skip();
     }
 
-    return payload.context.emplace_node<AST::ReturnNode>(expr);
+    return payload.context.emplace_node<AST::ReturnNode>(expr, return_token);
 }

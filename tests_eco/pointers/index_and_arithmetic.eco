@@ -1,0 +1,32 @@
+// indexing and arithmetic both go through `:$`, because they are operations on the address
+// rather than on the value it stands for. offsets count *elements*, never bytes - the scaling
+// by the pointee's size is what GEP does for us.
+//
+// there is no allocator yet, so the adjacent storage here comes from a struct's two int32
+// fields, which llvm lays out at offset 0 and 4
+
+struct Pair {
+    int $a;
+    int $b;
+}
+
+$s = Pair(10, 20);
+ptr<int> $p = &$s->a;
+
+// `$p:$[0]` names the same storage as `$p` itself
+echo $p:$[0];
+echo $p:$[1];
+
+// offsetting produces a new address, one element along
+ptr<int> $q = $p:$ + 1;
+echo $q;
+
+// writing through it reaches the second field
+$q = 99;
+echo $s->b;
+
+// the distance between two addresses is counted in elements
+echo ($q:$ - $p:$);
+
+// and addresses order by position
+echo ($q:$ > $p:$);

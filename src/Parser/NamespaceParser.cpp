@@ -35,7 +35,7 @@ AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
 AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
 {
     if (!payload.cursor.is_type(Token::Type::t_namespace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_namespace, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_namespace);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -55,7 +55,7 @@ AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
 
     // we expect a semicolon
     if (!payload.cursor.is_type(Token::Type::t_semicolon)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_semicolon, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }

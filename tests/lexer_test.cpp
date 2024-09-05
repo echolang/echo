@@ -346,3 +346,108 @@ TEST_CASE( "Operator Prepass", "[lexer]" ) {
 
     REQUIRE( tokens.token_values[21] == "<=>" );
 }
+TEST_CASE( "The pointer-of operator lexes without disturbing colons", "[lexer][pointer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    // `:$` is a two character token sharing the trie's ':' node with the plain colon and with
+    // the namespace separator. a StringToken's priority is its length, so the longest match at
+    // that node wins and the three stay distinguishable
+    lexer.tokenize(tokens, "$p:$ a::b : c");
+
+    REQUIRE( tokens[0].type() == Token::Type::t_varname );
+    REQUIRE( tokens[1].type() == Token::Type::t_ptr_of );
+    REQUIRE( tokens[2].type() == Token::Type::t_identifier );
+    REQUIRE( tokens[3].type() == Token::Type::t_namespace_sep );
+    REQUIRE( tokens[4].type() == Token::Type::t_identifier );
+    REQUIRE( tokens[5].type() == Token::Type::t_colon );
+    REQUIRE( tokens[6].type() == Token::Type::t_identifier );
+}
+
+TEST_CASE( "The pointer-of operator chains", "[lexer][pointer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    // the trailing '$' is what makes this spellable at all - two bare colons back to back
+    // would always lex as the namespace separator
+    lexer.tokenize(tokens, "$pp:$:$");
+
+    REQUIRE( tokens[0].type() == Token::Type::t_varname );
+    REQUIRE( tokens[1].type() == Token::Type::t_ptr_of );
+    REQUIRE( tokens[2].type() == Token::Type::t_ptr_of );
+}
+
+TEST_CASE( "'&' is a reference only when it abuts a name", "[lexer][pointer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    // the whole disambiguation between bitwise-and and reference is one character of whitespace
+    // (book/concept/pointers_and_refs_v2.md, "Taking addresses"). the parser then has to accept
+    // both spellings wherever a `&` can only mean a reference - a type suffix or a cast - and
+    // exactly one of them where it could be either, which is expression position
+    lexer.tokenize(tokens, "$a & $b");
+
+    REQUIRE( tokens[0].type() == Token::Type::t_varname );
+    REQUIRE( tokens[1].type() == Token::Type::t_and );
+    REQUIRE( tokens[2].type() == Token::Type::t_varname );
+
+    TokenCollection tight;
+    lexer.tokenize(tight, "$a &$b");
+
+    REQUIRE( tight[0].type() == Token::Type::t_varname );
+    REQUIRE( tight[1].type() == Token::Type::t_ref );
+    REQUIRE( tight[2].type() == Token::Type::t_varname );
+}
+
+TEST_CASE( "'&&' is one token, not two references", "[lexer][pointer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    // why `int&& $x` cannot reach the type parser's "a reference cannot be taken twice"
+    // diagnostic: there is no second `&` token for it to see. the spaced `int& &` can
+    lexer.tokenize(tokens, "int&& $x");
+
+    REQUIRE( tokens[0].type() == Token::Type::t_identifier );
+    REQUIRE( tokens[1].type() == Token::Type::t_logical_and );
+}
+
+TEST_CASE( "An attribute needs a space before a '$' value", "[lexer][pointer]" )
+{
+    Lexer lexer;
+
+    // the one casualty of giving `:$` its own token: inside an attribute, `#[cache:$ttl]` now
+    // lexes the separator and the sigil together and the value is lost. the doc calls this out
+    // and requires the spaced form (book/concept/pointers_and_refs_v2.md, "Reaching the pointer
+    // itself"). pinned so the requirement is a decision rather than a surprise
+    TokenCollection glued;
+    lexer.tokenize(glued, "#[cache:$ttl]");
+
+    bool has_ptr_of = false;
+    for (size_t i = 0; i < glued.size(); i++) {
+        if (glued[i].type() == Token::Type::t_ptr_of) {
+            has_ptr_of = true;
+        }
+    }
+    REQUIRE( has_ptr_of );
+
+    // spaced, the colon stays a colon and the value is a varname again
+    TokenCollection spaced;
+    lexer.tokenize(spaced, "#[cache: $ttl]");
+
+    bool has_colon = false;
+    bool has_varname = false;
+    for (size_t i = 0; i < spaced.size(); i++) {
+        if (spaced[i].type() == Token::Type::t_colon) {
+            has_colon = true;
+        }
+        if (spaced[i].type() == Token::Type::t_varname) {
+            has_varname = true;
+        }
+    }
+    REQUIRE( has_colon );
+    REQUIRE( has_varname );
+}

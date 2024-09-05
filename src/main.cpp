@@ -12,6 +12,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTMonomorphizer.h"
+#include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTTypeChecker.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/CompilerException.h"
@@ -177,6 +178,10 @@ int main_run(argparse::ArgumentParser &cli)
 
     // semantic analysis on the concrete AST: resolves member accesses and call arguments and
     // records located issues, so type errors surface here instead of deep in codegen.
+    // make the pointer transparency the language promises explicit in the tree: every pointer
+    // read in a value position gains a deref node, so from here on result_type() is honest
+    AST::PointerAdjuster(bundle).run();
+
     AST::TypeChecker(bundle).run();
 
     bundle.collector.print_issues();
@@ -254,6 +259,10 @@ int main_build(argparse::ArgumentParser &cli)
 
     // semantic analysis on the concrete AST: resolves member accesses and call arguments and
     // records located issues, so type errors surface here instead of deep in codegen.
+    // make the pointer transparency the language promises explicit in the tree: every pointer
+    // read in a value position gains a deref node, so from here on result_type() is honest
+    AST::PointerAdjuster(bundle).run();
+
     AST::TypeChecker(bundle).run();
 
     bundle.collector.print_issues();

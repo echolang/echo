@@ -90,7 +90,14 @@ namespace AST
         // it mentions into `out` (handles bare T and nested applications like Box<T>). binds in
         // argument order, so callers that need declaration order read `out` back through the
         // template's parameter list rather than using the binding order directly.
-        void unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out);
+        //
+        // `allow_decay` carries the pointer decay rule, which is a statement about the argument
+        // as a whole rather than about every level of it: a pointer passed where a value is
+        // expected is read, so `box($p)` binds T=int32. once a `ptr<T>` parameter has matched a
+        // pointer argument structurally the caller has already opted out of that read, so the
+        // descent below it must bind exactly - otherwise `ptr<T>` against `ptr<ptr<int32>>`
+        // would bind T=int32 and hand the instance an argument two levels deep
+        void unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out, bool allow_decay = true);
 
         CodeRef code_ref_for(Module &mod, const TokenReference &token);
     };

@@ -10,11 +10,11 @@ bool AST::TypeParamDecl::allows(const ValueType &type) const
         return true;
     }
 
-    // constraint entries are bare concrete types; compare the given type with
-    // its const/pointer flags stripped so `const float` still matches `float`
-    ValueType bare = type;
-    bare.set_const(false);
-    bare.set_pointer(false);
+    // constraint entries are bare concrete types; compare with const stripped so `const float`
+    // still matches `float`. pointerness is deliberately NOT stripped - `Vec<T: numeric>` must
+    // reject `Vec<ptr<int32>>`, and the decay that makes a pointer argument bind a bare T is a
+    // call-boundary rule that lives in Monomorphizer::unify, not a constraint rule
+    ValueType bare = ValueType::make_mutable(type);
 
     for (const auto &allowed : constraint) {
         if (bare == allowed) {

@@ -1,0 +1,27 @@
+// the classic double pointer: a function that writes into the caller's *pointer*.
+//
+// inside, `$out` is the caller's ptr<int>, reached by one auto-deref, so assigning to it
+// replaces what the caller's pointer points at. the argument is `&$buf`, the address of the
+// caller's pointer variable itself - no transparency peeling
+// (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+
+function point_at(ptr<ptr<int>> $out, ptr<int> $target) : void {
+    $out = $target;
+}
+
+$a = 1;
+$b = 2;
+
+ptr<int> $buf = &$a;
+ptr<int> $other = &$b;
+
+point_at(&$buf, $other);
+
+// $buf now refers to $b
+echo $buf;
+
+$buf = 55;
+echo $b;
+
+// and $a was never touched
+echo $a;

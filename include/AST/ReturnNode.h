@@ -15,7 +15,14 @@ namespace AST
 
         ExprNode *expr = nullptr;
 
+        // the `return` keyword, so a mismatched return value has somewhere to be reported.
+        // unset on the returns the struct parser synthesizes for a constructor, which carry
+        // no source token of their own
+        std::optional<TokenReference> token_return;
+
         ReturnNode(ExprNode *expr) : expr(expr) {};
+        ReturnNode(ExprNode *expr, TokenReference token_return) :
+            expr(expr), token_return(token_return) {};
         ~ReturnNode() {};
 
         const std::string node_description() override {

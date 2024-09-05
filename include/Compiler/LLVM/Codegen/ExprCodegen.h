@@ -3,6 +3,11 @@
 
 #pragma once
 
+namespace llvm
+{
+    class Value;
+};
+
 namespace AST
 {
     class TypeCastNode;
@@ -14,7 +19,9 @@ namespace AST
     class BinaryExprNode;
     class UnaryExprNode;
     class FunctionCallExprNode;
-    class VarPtrExprNode;
+    class AddrOfExprNode;
+    class DerefExprNode;
+    class IndexExprNode;
     class NullNode;
     class OperatorNode;
 };
@@ -39,12 +46,19 @@ namespace Compiler::LLVM
         void gen_binary_expr(AST::BinaryExprNode &node);
         void gen_unary_expr(AST::UnaryExprNode &node);
         void gen_function_call(AST::FunctionCallExprNode &node);
-        void gen_var_ptr(AST::VarPtrExprNode &node);
+        void gen_addr_of(AST::AddrOfExprNode &node);
+        void gen_deref(AST::DerefExprNode &node);
+        void gen_index(AST::IndexExprNode &node);
         void gen_null(AST::NullNode &node);
         void gen_operator(AST::OperatorNode &node);
 
     private:
         CodegenContext &_ctx;
+
+        // traps when `address` is null. emitted where a nullable pointer is narrowed to a
+        // borrow, which is the one conversion that asserts rather than merely reinterprets.
+        // debug builds only - in release the narrowing is unchecked, as the doc says
+        void gen_null_assert(llvm::Value *address);
     };
 };
 

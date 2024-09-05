@@ -27,8 +27,9 @@ TEST_CASE( "Node References", "[AST]" )
     REQUIRE( !ref3.has_type<AST::ScopeNode>() );
 
     // resolve references
+    // null renders the type its context gave it; unbound it has none yet
     auto &ref1_node = ref1.get<AST::NullNode>();
-    REQUIRE( ref1_node.node_description() == "NULL" );
+    REQUIRE( ref1_node.node_description() == "null<[unknown]>" );
 }   
 
 TEST_CASE( "Node Reference List", "[AST]" ) 

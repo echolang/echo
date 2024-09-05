@@ -1,0 +1,17 @@
+// `:$` walks one level outward each time it is applied.
+//
+//   $out       the pointer $out holds, reached by one auto-deref
+//   $out:$     the address $out holds
+//   $out:$:$   the address of $out's own slot - identical to &$out
+//
+// the trailing '$' in the operator is what makes the chained form spellable at all: two bare
+// colons back to back would always lex as the namespace separator
+// (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+
+$a = 1;
+ptr<int> $p = &$a;
+ptr<ptr<int>> $out = &$p;
+
+echo ($out:$ == &$p);
+echo ($out:$:$ == &$out);
+echo ($out == $p:$);

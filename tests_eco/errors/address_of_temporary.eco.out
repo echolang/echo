@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 5:11
+Unexpected token 'and (&)' found
+Begin: '&'
+End: '&'
+Code excerpt:
+ [4]> $b = 2;
+ [5]> int& $r = &($a + $b);
+                ^
+ [6]> 
+
+Critical issues found, cannot compile.

@@ -1,0 +1,10 @@
+// `const int&` is a mutable borrow of a *const pointee*, so the const sits one level below the
+// variable's own type. a plain assignment to a pointer writes through it, which is exactly the
+// thing the const forbids (book/concept/pointers_and_refs_v2.md, "Const")
+const int $var = 10;
+
+const int& $ref = &$var;
+
+$ref = 20;
+
+echo $ref;

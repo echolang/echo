@@ -7,8 +7,12 @@
 #include "AST/StructNode.h"
 
 #include <algorithm>
+#include <optional>
 #include <fmt/core.h>
 
+// the type grammar is mutually recursive: a generic argument is a type, and a type may be a
+// generic application. both work on bare ValueTypes, only the public entry point makes a node
+static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload);
 
 bool Parser::can_parse_type(Parser::Payload &payload)
 {
@@ -49,6 +53,32 @@ bool Parser::starts_qualified_vardecl(Parser::Payload &payload)
 
     // the type name itself followed by the variable name
     return payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_varname });
+}
+
+bool Parser::starts_borrow_vardecl(Parser::Payload &payload)
+{
+    size_t offset = 0;
+    if (payload.cursor.is_type(Token::Type::t_const)) {
+        offset++;
+    }
+
+    // an optionally qualified type name, `a::b::Foo& $x`
+    while (payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        offset += 2;
+    }
+
+    if (!payload.cursor.peek_is_type(offset, Token::Type::t_identifier)) {
+        return false;
+    }
+    offset++;
+
+    if (!payload.cursor.peek_is_type(offset, Token::Type::t_ref)
+        && !payload.cursor.peek_is_type(offset, Token::Type::t_and)) {
+        return false;
+    }
+    offset++;
+
+    return payload.cursor.peek_is_type(offset, Token::Type::t_varname);
 }
 
 AST::ValueType get_primitive_type(const std::string &types_string)
@@ -167,16 +197,16 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::S
             return AST::ValueType::make_unknown();
         }
 
-        auto *arg_type_node = parse_type(payload);
-        if (!arg_type_node) {
+        auto arg_type = parse_value_type(payload);
+        if (!arg_type.has_value()) {
             return AST::ValueType::make_unknown();
         }
-        args.push_back(arg_type_node->type);
+        args.push_back(arg_type.value());
 
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
         } else if (!cursor.is_generic_close()) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_angle, cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_close_angle);
             return AST::ValueType::make_unknown();
         }
     }
@@ -232,7 +262,7 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
         }
 
         if (!cursor.is_type(Token::Type::t_identifier)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_identifier);
             cursor.try_skip_to_next_statement();
             return type_parameters;
         }
@@ -260,7 +290,7 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
 
             while (true) {
                 if (!cursor.is_type(Token::Type::t_identifier)) {
-                    payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+                    payload.collect_unexpected_token(Token::Type::t_identifier);
                     cursor.try_skip_to_next_statement();
                     return type_parameters;
                 }
@@ -302,7 +332,7 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
         } else if (!cursor.is_type(Token::Type::t_close_angle)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_angle, cursor.current().type());
+            payload.collect_unexpected_token(Token::Type::t_close_angle);
             cursor.try_skip_to_next_statement();
             return type_parameters;
         }
@@ -365,32 +395,76 @@ void Parser::declare_type_parameters(Payload &payload, AST::FunctionDeclNode &ow
     }
 }
 
-AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
+// consumes an optional trailing `&`, turning `T` into the non-nullable borrow `T&`.
+//
+// both t_ref and t_and are accepted. the lexer only emits t_ref when the `&` is immediately
+// followed by a name character (src/Lexer.cpp, LexerFunction::ReferenceFrom), so `int32 & $x`
+// arrives as t_and and used to lose its reference silently. in type position a following `&`
+// can never be a binary operator, so accepting both is unambiguous and needs no lexer change -
+// which matters, because the binary/reference distinction elsewhere depends on that rule
+static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type)
+{
+    if (!payload.cursor.is_type(Token::Type::t_ref) && !payload.cursor.is_type(Token::Type::t_and)) {
+        return type;
+    }
+
+    payload.cursor.skip();
+    auto borrowed = AST::ValueType::make_pointer(type, false);
+
+    // `T&&` means nothing in the language, and lexes as t_logical_and anyway
+    if (payload.cursor.is_type(Token::Type::t_ref) || payload.cursor.is_type(Token::Type::t_and)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(payload.cursor.current()),
+            "A reference cannot be taken twice, write 'ptr<" + type.get_type_desciption() + "&>' instead"
+        );
+        payload.cursor.skip();
+    }
+
+    return borrowed;
+}
+
+// parses one type, without emplacing a node. `parse_type` is the thin wrapper that turns the
+// result into the single TypeNode a caller expects - recursing through parse_type instead would
+// litter an orphan node into the collection for every nested level of a `ptr<ptr<T>>`
+static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 {
     bool is_const = false;
-    bool is_pointer = false;
 
     if (payload.cursor.is_type(Token::Type::t_const)) {
         is_const = true;
         payload.cursor.skip();
     }
 
+    // `ptr<T>` is a real type constructor, so it recurses: the pointee is an arbitrary type,
+    // which is what makes ptr<ptr<T>> and ptr<Box<int>> representable at all
     if (payload.cursor.is_type(Token::Type::t_ptr)) {
-        is_pointer = true;
         payload.cursor.skip();
 
-        // ptr have a generics like syntax ptr<T>
         if (!payload.cursor.is_type(Token::Type::t_open_angle)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(payload.cursor.current()),
-                Token::Type::t_open_angle,
-                payload.cursor.type()
-            );
+            payload.collect_unexpected_token(Token::Type::t_open_angle);
 
-            return nullptr;
+            return std::nullopt;
         }
 
         payload.cursor.skip();
+
+        auto pointee = parse_value_type(payload);
+        if (!pointee.has_value()) {
+            return std::nullopt;
+        }
+
+        // is_generic_close/consume_generic_close so a nested `ptr<ptr<int>>` closing as `>>`
+        // splits, exactly as it already does for nested generic applications
+        if (!payload.cursor.is_generic_close()) {
+            payload.collect_unexpected_token(Token::Type::t_close_angle);
+
+            return std::nullopt;
+        }
+
+        payload.cursor.consume_generic_close();
+
+        auto pointer_type = AST::ValueType::make_pointer(pointee.value(), true);
+        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(pointer_type) : pointer_type);
     }
 
     // a type may be namespace qualified: `a::b::Foo`. the prefix is consumed here so the name
@@ -437,33 +511,26 @@ AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
 
     payload.cursor.skip();
 
-    // generic application on a user type: `Name<Arg, Arg, ...>` (nested, e.g. Foo<Bar<int>>).
-    // only outside the hardcoded ptr<...> path, whose closing `>` we still own below.
-    if (!is_pointer && user_type_decl && payload.cursor.is_type(Token::Type::t_open_angle)) {
+    // generic application on a user type: `Name<Arg, Arg, ...>` (nested, e.g. Foo<Bar<int>>)
+    if (user_type_decl && payload.cursor.is_type(Token::Type::t_open_angle)) {
         primitive_type = parse_generic_application(payload, user_type_decl, token);
     }
 
-    primitive_type.set_const(is_const);
-    primitive_type.set_pointer(is_pointer);
-
-    auto &node = payload.context.emplace_node<AST::TypeNode>(primitive_type, token);
-    node.is_const = is_const;
-    node.is_pointer = is_pointer;
-
-    // on pointer types we need to close the generics
-    if (is_pointer) {
-        if (!payload.cursor.is_type(Token::Type::t_close_angle)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(payload.cursor.current()),
-                Token::Type::t_close_angle,
-                payload.cursor.type()
-            );
-
-            return nullptr;
-        }
-
-        payload.cursor.skip();
+    if (is_const) {
+        primitive_type = AST::ValueType::make_const(primitive_type);
     }
 
-    return &node;
+    return parse_ref_suffix(payload, primitive_type);
+}
+
+AST::TypeNode *Parser::parse_type(Parser::Payload &payload)
+{
+    auto token = payload.cursor.current();
+
+    auto type = parse_value_type(payload);
+    if (!type.has_value()) {
+        return nullptr;
+    }
+
+    return &payload.context.emplace_node<AST::TypeNode>(type.value(), token);
 }

@@ -131,6 +131,278 @@ TEST_CASE("numeric binary operators are not flagged", "[sema]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
+// ---------------------------------------------------------------------------
+// pointer diagnostics.
+//
+// the same conditions are covered end-to-end in tests_eco/errors/, which pins the exact rendered
+// block. these are the cheap, precisely located counterparts - and they can assert the thing a
+// golden cannot: that a *legal* program produces no diagnostic at all. an over-eager pointer
+// check is as much a bug as a missing one, and only a negative control catches it.
+
+TEST_CASE("assigning an address into a pointee is rejected", "[sema][pointer]")
+{
+    // `$p = &$b` is not a rebind: a plain assignment writes through, so this stores an address
+    // into the int32 that $p points at (book/concept/pointers_and_refs_v2.md, L87)
+    EchoTests::assert_code_emits_issue(
+        "$a = 1;\n$b = 2;\nptr<int> $p = &$a;\n$p = &$b;\n",
+        "Invalid type conversion: cannot assign 'int32&' to 'int32' - to change where a pointer points, assign to ':$'");
+}
+
+TEST_CASE("a nullable pointer does not narrow to a borrow on its own", "[sema][pointer]")
+{
+    EchoTests::assert_code_emits_issue(
+        "$a = 5;\nptr<int> $p = &$a;\nint& $r = $p:$;\n",
+        "Invalid type conversion: cannot implicitly convert 'ptr<int32>' to 'int32&' - write the cast explicitly to assert it is not null");
+}
+
+TEST_CASE("a borrow cannot be seeded with null", "[sema][pointer]")
+{
+    EchoTests::assert_code_emits_issue(
+        "int& $r = null;\n",
+        "'int32&' cannot be null - declare it as a nullable pointer instead");
+}
+
+TEST_CASE("a ptr<T> parameter does not auto-borrow", "[sema][pointer]")
+{
+    // only `T&` borrows implicitly. a nullable pointer parameter can be null, so taking an
+    // address is a decision the caller should be able to see in the source (doc L135)
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function maybe_inc(ptr<int> $x) : void { $x = $x + 1; }\n"
+        "$a = 5;\n"
+        "maybe_inc($a);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot implicitly convert 'int32' to 'ptr<int32>'"));
+}
+
+TEST_CASE("returning the address of a local is rejected", "[sema][pointer]")
+{
+    // the storage is gone before the caller sees it (doc, "Lifetimes, and how to get hurt")
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bad() : int& {\n"
+        "    $local = 5;\n"
+        "    return &$local;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return the address of local '$local'"));
+}
+
+TEST_CASE("returning a value where a borrow is declared is rejected", "[sema][pointer]")
+{
+    // this used to reach codegen and fail llvm's verifier with "Function return type does not
+    // match operand type of return inst", which named neither the function nor the line
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bad(int $x) : int& {\n"
+        "    return $x;\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot return 'int32' from a function declared 'int32&'"));
+}
+
+// the four below are regression guards for crashes. each aborted or segfaulted the compiler
+// before, with no location and nothing the user could act on - the assertions here are as much
+// "this terminates and reports" as they are about the wording.
+
+TEST_CASE("taking the address of something with no storage is a diagnostic", "[sema][pointer]")
+{
+    // both used to reach `assert(false && "unimplemented")` at the end of the operand
+    // production, aborting the compiler. note `&($a + $b)` takes a different path - the lexer
+    // never emits t_ref before `(` - which is why that case alone gave false confidence
+    EchoTests::assert_code_emits_issue(
+        "$a = 1;\nint& $r = &5;\n",
+        "Cannot take the address of an expression that has no storage");
+
+    EchoTests::assert_code_emits_issue(
+        "function get() : int { return 5; }\nint& $r = &get();\n",
+        "Cannot take the address of an expression that has no storage");
+}
+
+TEST_CASE("an address only compares against another address", "[sema][pointer]")
+{
+    // llvm asserts on an icmp whose operands differ in type, so this aborted inside codegen
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "$a = 1;\nptr<int> $p = &$a;\necho ($p:$ == 0);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot compare 'ptr<int32>' against 'int32'"));
+}
+
+TEST_CASE("pointer arithmetic still mixes an address with an integer", "[sema][pointer]")
+{
+    // the negative control for the case above: offsetting is not comparing, so the check must
+    // not widen to every binary operator
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct P { int $a; int $b; }\n"
+        "$s = P(1, 2);\n"
+        "ptr<int> $p = &$s->a;\n"
+        "ptr<int> $q = $p:$ + 1;\n"
+        "echo ($q:$ - $p:$);\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("unexpected issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("null cannot be passed to a borrow parameter", "[sema][pointer]")
+{
+    // the declaration site already refused this; the call site did not, and the callee
+    // segfaulted on the first read through the parameter. the null arrives wrapped in an
+    // implicit cast, so the check has to look through one to find the n_null tag
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f(int &$x) : void { $x = 1; }\n"
+        "f(null);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "argument 1 of 'f' is 'int32&', which cannot be null"));
+}
+
+TEST_CASE("null is still accepted by a nullable pointer parameter", "[sema][pointer]")
+{
+    // the negative control: only the non-null guarantee of a borrow is at stake
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f(ptr<int> $x) : void { }\n"
+        "f(null);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("legal pointer programs are left alone", "[sema][pointer]")
+{
+    // the negative control. every conversion here is one the doc permits, and each was at some
+    // point rejected by a check that was drawn too wide
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        // a borrow widens to a nullable pointer
+        "$a = 1;\n"
+        "$b = 2;\n"
+        "int& $r = &$a;\n"
+        "ptr<int> $p = $r:$;\n"
+        // re-seating through :$, and writing through without it
+        "$p:$ = &$b;\n"
+        "$p = 20;\n"
+        // null into a nullable pointer, and the address-side null check
+        "ptr<int> $empty = null;\n"
+        "echo ($empty:$ == null);\n"
+        // the explicit narrowing back
+        "int& $back = int&($p:$);\n"
+        // a read-only borrow parameter accepting a mutable argument
+        "function show(const int& $v) : void { echo $v; }\n"
+        "show($a);\n"
+        // a borrow returned from a borrow parameter
+        "function pick(int &$x) : int& { return $x; }\n"
+        "int& $picked = pick($a);\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("unexpected issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("writing through a pointer to const is rejected", "[sema][pointer][const]")
+{
+    // `const int&` is a *mutable borrow of a const pointee*, so the const sits one level below the
+    // variable's own type. the old check looked at the top level only and so never fired here
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "const int $var = 10;\n"
+        "const int& $ref = &$var;\n"
+        "$ref = 20;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot write through 'const int32&' - its pointee is const"));
+}
+
+TEST_CASE("writing through a ptr<const T> is rejected", "[sema][pointer][const]")
+{
+    // the nullable spelling of the same rule - const is independent of nullability
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "const int $a = 1;\n"
+        "ptr<const int> $p = &$a;\n"
+        "$p = 9;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot write through 'ptr<const int32>' - its pointee is const"));
+}
+
+TEST_CASE("re-seating a const pointer is rejected", "[sema][pointer][const]")
+{
+    // the mirror case: here the const is on the pointer level, so it is the slot that is frozen
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "$a = 1;\n"
+        "$b = 2;\n"
+        "const ptr<int> $p = &$a;\n"
+        "$p:$ = &$b;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot re-seat 'const ptr<int32>'"));
+}
+
+TEST_CASE("assigning to a const variable is rejected by the type checker", "[sema][const]")
+{
+    // this used to be a parser diagnostic reported as a "redeclaration" on the variable's name.
+    // it moved to the assignment target, which is the only place that can tell the four const
+    // cases apart, so it now reports at the `=` like every other assignment error
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "const int $v = 1;\n"
+        "$v = 2;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot assign to '$v' - it is declared const"));
+
+    // an inferred const carries the same promise
+    auto inferred = EchoTests::tests_make_parsed_bundle(
+        "const $c = 7;\n"
+        "$c = 8;\n");
+
+    REQUIRE(inferred->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*inferred, "cannot assign to '$c' - it is declared const"));
+}
+
+TEST_CASE("assigning to a const struct property is rejected", "[sema][const][struct]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point { const int $x; int $y; }\n"
+        "$p = Point(3, 4);\n"
+        "$p->x = 9;\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot assign to 'x' - it is declared const"));
+}
+
+TEST_CASE("legal const programs are left alone", "[sema][pointer][const]")
+{
+    // the negative control for the const rules. each of these is permitted by the doc's "Const"
+    // section and each is one half of a pair whose other half is rejected above - which is the
+    // point: the level the const sits on decides, so a check drawn at the wrong level breaks these
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "$a = 1;\n"
+        "$b = 2;\n"
+        // a const *pointer* may be written through - what it forbids is re-seating
+        "const ptr<int> $p = &$a;\n"
+        "$p = 5;\n"
+        // and a const *pointee* may be re-seated - what it forbids is the write-through
+        "const int $c = 1;\n"
+        "const int $d = 2;\n"
+        "const int& $view = &$c;\n"
+        "$view:$ = &$d;\n"
+        // reading through either is always fine
+        "echo $view;\n"
+        "echo $p;\n"
+        // a const property is written exactly once, by the constructor the parser synthesizes
+        "struct Point { const int $x; int $y; }\n"
+        "$pt = Point(3, 4);\n"
+        "echo $pt->x;\n"
+        // a mutable borrow is still writable
+        "int& $r = &$b;\n"
+        "$r = 20;\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("unexpected issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
 TEST_CASE("per-branch operator gaps are left to the codegen safety net", "[sema]")
 {
     // the sema check is intentionally scoped to struct operands; a primitive operator/operand gap

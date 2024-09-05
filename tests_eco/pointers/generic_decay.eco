@@ -1,0 +1,18 @@
+// generic inference decays a pointer to its pointee, so passing a borrow to `box<T>(T $v)`
+// binds T to int32 rather than to the pointer type. that keeps Box<int32> and Box<ptr<int32>>
+// from becoming two instantiations that behave identically
+// (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
+
+function box<T>(T $v) : T {
+    return $v;
+}
+
+$var = 7;
+int& $p = &$var;
+
+// T is int32 here, and the value read through $p is the int it points at
+$r = box($p);
+echo $r;
+
+// the same instance serves a plain int argument
+echo box($var);

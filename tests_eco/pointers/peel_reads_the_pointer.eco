@@ -1,0 +1,17 @@
+// `:$` reaches the pointer rather than the thing it points at, so a copy made through it is a
+// second pointer to the same storage - where a plain read copies the value
+
+$var = 10;
+int& $r = &$var;
+
+// a plain read auto-dereferences: $value is an int32 holding 10
+$value = $r;
+
+// through :$ the address is copied, so $alias still refers to $var
+ptr<int> $alias = $r:$;
+
+$var = 99;
+
+echo $value;
+echo $alias;
+echo $r;

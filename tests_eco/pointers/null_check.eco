@@ -1,0 +1,21 @@
+// null is the null address. it has no type of its own and takes the one of whatever it is
+// assigned to or compared against.
+//
+// the check goes on the *address*, through `:$`. comparing the value would auto-dereference
+// and read whatever sits at address zero - precisely the crash the check exists to avoid,
+// so the compiler rejects it (see tests_eco/errors/null_compare_value.eco)
+
+ptr<int> $empty = null;
+
+$a = 7;
+ptr<int> $set = &$a;
+
+echo ($empty:$ == null);
+echo ($set:$ == null);
+
+// two addresses compare by identity, which is a different question from comparing values
+$other = 7;
+ptr<int> $elsewhere = &$other;
+
+echo ($set:$ == $elsewhere:$);
+echo ($set == $elsewhere);

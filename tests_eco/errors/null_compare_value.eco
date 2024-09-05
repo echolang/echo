@@ -1,0 +1,4 @@
+// `$p == null` would auto-dereference $p and compare the int at that address against null.
+// on a null pointer that is the very crash the check was meant to catch, so it is rejected
+ptr<int> $p = null;
+echo ($p == null);

@@ -42,7 +42,7 @@ TEST_CASE("substitute_type resolves a bare type parameter", "[types][generics]")
     REQUIRE(resolved == prim(ValueTypePrimitive::t_int32));
 }
 
-TEST_CASE("substitute_type carries const/pointer flags onto the resolved type", "[types][generics]")
+TEST_CASE("substitute_type rebuilds the pointer around the resolved pointee", "[types][generics]")
 {
     TypeRegistry reg;
     TypeParamRegistry params;
@@ -51,13 +51,35 @@ TEST_CASE("substitute_type carries const/pointer flags onto the resolved type", 
 
     TypeSubstitution subst = TypeSubstitution::positional(box.type_parameters, { prim(ValueTypePrimitive::t_int32) });
 
-    ValueType param = ValueType::make_pointer(ValueType::make_type_param(t));
-    param.set_const(true);
+    // `const ptr<T>` - const sits on the pointer level, not on the pointee
+    ValueType param = ValueType::make_const(ValueType::make_pointer(ValueType::make_type_param(t), true));
 
     ValueType resolved = substitute_type(param, subst, reg);
     REQUIRE(resolved.is_pointer());
     REQUIRE(resolved.is_const());
-    REQUIRE(resolved.is_primitive_of_type(ValueTypePrimitive::t_int32));
+    REQUIRE(resolved.is_nullable());
+    REQUIRE(resolved.pointee().is_primitive_of_type(ValueTypePrimitive::t_int32));
+    REQUIRE_FALSE(resolved.pointee().is_const());
+}
+
+TEST_CASE("substitute_type nests a pointer argument instead of collapsing it", "[types][generics]")
+{
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType box("Box");
+    TypeParamDecl *t = declare_param(params, box, "T");
+
+    // T := ptr<int32>, substituted into ptr<T>. under the old idempotent pointer flag this
+    // collapsed to a single ptr<int32>
+    ValueType arg = ValueType::make_pointer(prim(ValueTypePrimitive::t_int32), true);
+    TypeSubstitution subst = TypeSubstitution::positional(box.type_parameters, { arg });
+
+    ValueType resolved = substitute_type(ValueType::make_pointer(ValueType::make_type_param(t), true), subst, reg);
+
+    REQUIRE(resolved.is_pointer());
+    REQUIRE(resolved.pointee().is_pointer());
+    REQUIRE(resolved.pointee().pointee().is_primitive_of_type(ValueTypePrimitive::t_int32));
+    REQUIRE(resolved != arg);
 }
 
 TEST_CASE("substitute_type leaves primitives and concrete types unchanged", "[types][generics]")

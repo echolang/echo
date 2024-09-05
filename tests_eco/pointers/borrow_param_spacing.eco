@@ -1,0 +1,19 @@
+// the lexer decides between bitwise-and and reference by looking at the character right after
+// `&`, so `int &$x` and `int & $x` arrive as different tokens. in type position a following `&`
+// can never be a binary operator, so both spell the same borrow. the spaced form used to parse
+// as a plain int and silently drop the reference, making the callee mutate a copy
+
+function inc_tight(int &$x) : void {
+    $x = $x + 1;
+}
+
+function inc_spaced(int & $x) : void {
+    $x = $x + 1;
+}
+
+$a = 5;
+inc_tight($a);
+echo $a;
+
+inc_spaced($a);
+echo $a;

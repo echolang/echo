@@ -22,7 +22,7 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     // a call is `name(` or, with explicit type arguments, `name<...>(`
     if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren}) &&
         !payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_angle})) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_identifier, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_identifier);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -59,7 +59,7 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
 
     // the open parenthesis is required
     if (!payload.cursor.is_type(Token::Type::t_open_paren)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_paren, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_paren);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -126,12 +126,14 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
         for (size_t i = 0; i < args.size() && i < funcall.decl->args.size(); ++i) {
             auto expected = funcall.decl->args[i]->type();
             // a variable passed to a pointer parameter is coerced to its address here, so
-            // codegen sees a uniform VarPtrExprNode instead of sniffing the argument's kind
+            // codegen sees a uniform AddrOfExprNode instead of sniffing the argument's kind
             auto *expr = AST::coerce_arg_to_pointer_param(payload.context.module.nodes, args[i], expected);
             auto actual = expr->result_type();
 
             auto coerce_expr = [&](AST::ExprNode *source, const AST::ValueType &from, const AST::ValueType &to) -> AST::ExprNode * {
-                if (from == to) {
+                // is_implicitly_convertible rather than ==, so a borrow passed where a nullable
+                // pointer is expected does not acquire a cast codegen has no lowering for
+                if (AST::is_implicitly_convertible(from, to)) {
                     return source;
                 }
 

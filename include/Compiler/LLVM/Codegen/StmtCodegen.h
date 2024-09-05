@@ -11,7 +11,7 @@ namespace AST
     class ReturnNode;
     class IfStatementNode;
     class WhileStatementNode;
-    class VarMutNode;
+    class AssignNode;
 };
 
 namespace Compiler::LLVM
@@ -31,7 +31,7 @@ namespace Compiler::LLVM
         void gen_return(AST::ReturnNode &node);
         void gen_if_statement(AST::IfStatementNode &node);
         void gen_while_statement(AST::WhileStatementNode &node);
-        void gen_var_mut(AST::VarMutNode &node);
+        void gen_assign(AST::AssignNode &node);
 
     private:
         CodegenContext &_ctx;

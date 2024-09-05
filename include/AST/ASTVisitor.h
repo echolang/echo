@@ -15,7 +15,10 @@ namespace AST
     class LiteralBoolExprNode;
     class LiteralStringExprNode;
     class FunctionCallExprNode;
-    class VarPtrExprNode;
+    class AddrOfExprNode;
+    class DerefExprNode;
+    class PointerValueNode;
+    class IndexExprNode;
     class BinaryExprNode;
     class UnaryExprNode;
     class NullNode;
@@ -24,14 +27,13 @@ namespace AST
     class ReturnNode;
     class IfStatementNode;
     class WhileStatementNode;
-    class VarMutNode;
+    class AssignNode;
     class NamespaceDeclNode;
     class NamespaceNode;
     class AttributeNode;
     class StructDeclNode;
     class MemberAccessNode;
     class VarNode;
-    class MemberMutNode;
 
     class Visitor
     {
@@ -48,7 +50,10 @@ namespace AST
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
         virtual void visitLiteralStringExpr(LiteralStringExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
-        virtual void visitVarPtrExpr(VarPtrExprNode &node) = 0;
+        virtual void visit_addr_of_expr(AddrOfExprNode &node) = 0;
+        virtual void visit_deref_expr(DerefExprNode &node) = 0;
+        virtual void visit_pointer_value(PointerValueNode &node) = 0;
+        virtual void visit_index_expr(IndexExprNode &node) = 0;
         virtual void visitBinaryExpr(BinaryExprNode &node) = 0;
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
         virtual void visitNull(NullNode &node) = 0;
@@ -57,14 +62,13 @@ namespace AST
         virtual void visitReturn(ReturnNode &node) = 0;
         virtual void visitIfStatement(IfStatementNode &node) = 0;
         virtual void visitWhileStatement(WhileStatementNode &node) = 0;
-        virtual void visitVarMut(VarMutNode &node) = 0;
+        virtual void visit_assign(AssignNode &node) = 0;
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;
         virtual void visitAttribute(AttributeNode &node) = 0;
         virtual void visitStructDecl(StructDeclNode &node) = 0;
         virtual void visitMemberAccess(MemberAccessNode &node) = 0;
         virtual void visitVar(VarNode &node) = 0;
-        virtual void visitMemberMut(MemberMutNode &node) = 0;
     };
 }
 

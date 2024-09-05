@@ -1,0 +1,34 @@
+// a struct property may be a borrow. two things had to be true for this to work, and neither
+// was: the struct body kept its own hand-rolled list of what starts a property declaration and
+// had no entry allowing the `&` suffix, so `int& $target;` did not parse at all; and the
+// synthesized constructor initialized properties with a plain assignment, which for a pointer
+// means "write through" - storing the caller's value into whatever address the never-seated
+// field happened to contain. that was a segfault for a ptr property too, not just a borrow.
+//
+// the constructor now spells the binding form, `$this->prop:$ = $prop`
+// (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+
+struct Holder {
+    int& $target;
+    int $count;
+}
+
+$v = 7;
+$h = Holder(&$v, 1);
+
+// reading the property auto-derefs, like reading any other pointer place
+echo $h->target;
+
+// writing through it reaches $v, because the field holds $v's address
+$h->target = 99;
+echo $v;
+
+// the neighbouring value property is untouched by any of it
+echo $h->count;
+
+// and re-seating the field points it somewhere else, leaving $v alone
+$other = 5;
+$h->target:$ = &$other;
+$h->target = 42;
+echo $v;
+echo $other;

@@ -15,7 +15,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     auto &cursor = payload.cursor;
 
     if (!cursor.is_type(Token::Type::t_function)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_function, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_function);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -25,7 +25,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // next token should be an identifier aka the function name
     if (!cursor.is_type(Token::Type::t_identifier)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_identifier);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -39,7 +39,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // next token needs to be an open parenthesis
     if (!cursor.is_type(Token::Type::t_open_paren)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_paren, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_paren);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -94,7 +94,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // next token should be ":" for the return type
     if (!cursor.is_type(Token::Type::t_colon)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_colon, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_colon);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -104,7 +104,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // parse the return type
     if (!can_parse_type(payload)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_identifier, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_identifier);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -154,7 +154,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // if the next token is an open brace, we parse the function body
     if (!cursor.is_type(Token::Type::t_open_brace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_open_brace, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_brace);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -169,7 +169,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // we expect a closing brace
     if (!cursor.is_type(Token::Type::t_close_brace)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_brace, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_close_brace);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }

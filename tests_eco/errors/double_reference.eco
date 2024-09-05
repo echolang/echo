@@ -1,0 +1,10 @@
+// a reference cannot be taken twice - `ptr<T&>` is the spelling for a pointer to a borrow.
+//
+// note the space: `int&&` lexes as a single logical-and token and never reaches the type
+// parser, so only the spaced form produces this diagnostic. the glued form is still rejected,
+// just as an unexpected token.
+//
+// the diagnostic appears twice because a module is parsed twice - once to collect symbols, once
+// in full - and a function signature is read in both passes. recorded here rather than hidden:
+// if issue collection ever learns to deduplicate, this golden is where it shows up
+function f(int& & $x) : void {}

@@ -10,6 +10,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/StructCodegen.h"
@@ -38,7 +39,10 @@ public:
     void visitLiteralBoolExpr(AST::LiteralBoolExprNode &node);
     void visitLiteralStringExpr(AST::LiteralStringExprNode &node);
     void visitFunctionCallExpr(AST::FunctionCallExprNode &node);
-    void visitVarPtrExpr(AST::VarPtrExprNode &node);
+    void visit_addr_of_expr(AST::AddrOfExprNode &node);
+    void visit_deref_expr(AST::DerefExprNode &node);
+    void visit_pointer_value(AST::PointerValueNode &node);
+    void visit_index_expr(AST::IndexExprNode &node);
     void visitBinaryExpr(AST::BinaryExprNode &node);
     void visitUnaryExpr(AST::UnaryExprNode &node);
     void visitNull(AST::NullNode &node);
@@ -47,14 +51,13 @@ public:
     void visitReturn(AST::ReturnNode &node);
     void visitIfStatement(AST::IfStatementNode &node);
     void visitWhileStatement(AST::WhileStatementNode &node);
-    void visitVarMut(AST::VarMutNode &node);
+    void visit_assign(AST::AssignNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
     void visitAttribute(AST::AttributeNode &node);
     void visitStructDecl(AST::StructDeclNode &node);
     void visitMemberAccess(AST::MemberAccessNode &node);
     void visitVar(AST::VarNode &node);
-    void visitMemberMut(AST::MemberMutNode &node);
 
     void optimize();
     void printIR(bool toFile);
@@ -65,6 +68,7 @@ private:
     Compiler::LLVM::CodegenContext _ctx;
 
     Compiler::LLVM::TypeLowering _types;
+    Compiler::LLVM::LValueCodegen _lvalues;
     Compiler::LLVM::ExprCodegen _expr;
     Compiler::LLVM::StmtCodegen _stmt;
     Compiler::LLVM::StructCodegen _struct;

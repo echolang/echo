@@ -1,0 +1,23 @@
+---- Issue ----
+Issue at 10:17
+A reference cannot be taken twice, write 'ptr<int32&>' instead
+Begin: '&'
+End: '&'
+Code excerpt:
+ [9]> // if issue collection ever learns to deduplicate, this golden is where it shows up
+ [10]> function f(int& & $x) : void {}
+                      ^
+ [11]> 
+
+---- Issue ----
+Issue at 10:17
+A reference cannot be taken twice, write 'ptr<int32&>' instead
+Begin: '&'
+End: '&'
+Code excerpt:
+ [9]> // if issue collection ever learns to deduplicate, this golden is where it shows up
+ [10]> function f(int& & $x) : void {}
+                      ^
+ [11]> 
+
+Critical issues found, cannot compile.

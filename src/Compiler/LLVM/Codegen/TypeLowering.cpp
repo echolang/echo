@@ -81,21 +81,10 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     // @TODO support complex types
     std::vector<llvm::Type *> arg_types;
     for (auto &arg : node->args) {
-        auto &arg_type = arg->type_node()->type;
-
-        llvm::Type *param_type = nullptr;
-        if ((arg_type.is_struct() || arg_type.is_class()) && arg_type.get_complex_type()) {
-            param_type = get_llvm_type(arg_type, cmp_unit);
-        } else {
-            param_type = get_llvm_type(arg->type_node()->type.get_primitive_type());
-        }
-
-        // If the parameter is a pointer/reference, wrap it in a pointer type
-        if (arg_type.is_pointer()) {
-            param_type = llvm::PointerType::get(param_type, 0);
-        }
-
-        arg_types.push_back(param_type);
+        // one lowering path for every parameter shape: get_llvm_type already handles structs,
+        // primitives and pointers. the old split called get_primitive_type() on anything
+        // non-struct, which for a pointer would answer t_void and then assert inside LLVM
+        arg_types.push_back(get_llvm_type(arg->type_node()->type, cmp_unit));
     }
 
     // handle intrinsic functions
@@ -233,6 +222,13 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
 {
     llvm::Type* base_type = nullptr;
 
+    // every pointer level is the same opaque `ptr` under LLVM's opaque pointer model, so the
+    // pointee is never lowered. that also sidesteps lowering a pointer to a struct that has
+    // not been declared in this compilation unit yet
+    if (type.is_pointer()) {
+        return llvm::PointerType::get(*_ctx.llvm_context, 0);
+    }
+
     if (type.is_primitive()) {
         base_type = get_llvm_type(type.get_primitive_type());
     }
@@ -280,11 +276,6 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
             "Unsupported type '{}' {}", type.get_type_desciption(), _ctx.function_context()));
     }
 
-    // If the ValueType has the pointer flag set, wrap it in a pointer type
-    if (type.is_pointer()) {
-        base_type = llvm::PointerType::get(base_type, 0);
-    }
-
     return base_type;
 }
 
@@ -320,5 +311,83 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueTypePrimitive type)
                 "Unsupported primitive type '{}' {}",
                 AST::get_primitive_name(type), _ctx.function_context()));
     }
+}
+
+llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const CmpUnit &cmp_unit)
+{
+    const AST::ValueType &source = from;
+    const AST::ValueType &target = to;
+
+    if (source == target) {
+        return value;
+    }
+
+    // an address is passed along as the address it is. reinterpreting one as pointing at a
+    // different type is free under opaque pointers, and narrowing a nullable pointer to a
+    // borrow is an assertion rather than a conversion - the trap for that is emitted by the
+    // cast itself, not here
+    if (target.is_pointer() || source.is_pointer()) {
+        return value;
+    }
+
+    if (!target.is_primitive()) {
+        return value;
+    }
+
+    llvm::Type *target_llvm = get_llvm_type(target, cmp_unit);
+    if (value->getType() == target_llvm) {
+        return value;
+    }
+
+    // BinaryExprNode::result_type() answers void whenever its operands differ, so `from` is
+    // frequently undeterminable at a decl/assign site. fall back to what the value actually
+    // is, and let the target supply the signedness
+    bool source_known = source.is_primitive() && !source.is_void();
+    bool source_is_float = source_known ? source.is_floating_type() : value->getType()->isFloatingPointTy();
+    bool source_is_int = source_known ? source.is_integer_type() : value->getType()->isIntegerTy();
+    bool source_is_bool = source_known && source.is_boolean_type();
+    bool source_signed = source_known ? source.is_signed_integer() : true;
+
+    if (target.is_floating_type()) {
+        if (source_is_int && !source_is_bool) {
+            return source_signed
+                ? _ctx.builder->CreateSIToFP(value, target_llvm)
+                : _ctx.builder->CreateUIToFP(value, target_llvm);
+        }
+        if (source_is_bool) {
+            return _ctx.builder->CreateUIToFP(value, target_llvm);
+        }
+        if (source_is_float) {
+            return value->getType()->getPrimitiveSizeInBits() < target_llvm->getPrimitiveSizeInBits()
+                ? _ctx.builder->CreateFPExt(value, target_llvm)
+                : _ctx.builder->CreateFPTrunc(value, target_llvm);
+        }
+    }
+
+    else if (target.is_integer_type()) {
+        if (source_is_float) {
+            return target.is_signed_integer()
+                ? _ctx.builder->CreateFPToSI(value, target_llvm)
+                : _ctx.builder->CreateFPToUI(value, target_llvm);
+        }
+        if (source_is_int) {
+            // CreateIntCast picks extend or truncate from the widths, and takes the *source's*
+            // signedness for the extend - which is what makes uint8 -> uint32 a zero extend
+            // where the old hand rolled cascades always sign extended
+            return _ctx.builder->CreateIntCast(value, target_llvm, source_signed);
+        }
+    }
+
+    else if (target.is_boolean_type()) {
+        if (source_is_float) {
+            return _ctx.builder->CreateFCmpONE(value, llvm::ConstantFP::get(value->getType(), 0.0));
+        }
+        if (source_is_int) {
+            return _ctx.builder->CreateICmpNE(value, llvm::ConstantInt::get(value->getType(), 0));
+        }
+    }
+
+    throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
+        from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
 }
 }

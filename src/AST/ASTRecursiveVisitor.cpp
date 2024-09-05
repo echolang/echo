@@ -9,7 +9,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
-#include "AST/VarMutNode.h"
+#include "AST/AssignNode.h"
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ExprNode.h"
@@ -18,7 +18,6 @@
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/MemberAccessNode.h"
-#include "AST/MemberMutNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
 #include "AST/NamespaceNode.h"
@@ -63,16 +62,9 @@ void RecursiveVisitor::visitVarDecl(VarDeclNode &node)
     }
 }
 
-void RecursiveVisitor::visitVarMut(VarMutNode &node)
+void RecursiveVisitor::visit_assign(AssignNode &node)
 {
-    if (node.value_expr) {
-        node.value_expr->accept(*this);
-    }
-}
-
-void RecursiveVisitor::visitMemberMut(MemberMutNode &node)
-{
-    if (node.member_access) node.member_access->accept(*this);
+    if (node.target) node.target->accept(*this);
     if (node.value_expr) node.value_expr->accept(*this);
 }
 
@@ -123,11 +115,25 @@ void RecursiveVisitor::visitUnaryExpr(UnaryExprNode &node)
     }
 }
 
-void RecursiveVisitor::visitVarPtrExpr(VarPtrExprNode &node)
+void RecursiveVisitor::visit_addr_of_expr(AddrOfExprNode &node)
 {
-    if (node.var_ref) {
-        node.var_ref->accept(*this);
-    }
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_deref_expr(DerefExprNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_pointer_value(PointerValueNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_index_expr(IndexExprNode &node)
+{
+    if (node.base) node.base->accept(*this);
+    if (node.index) node.index->accept(*this);
 }
 
 void RecursiveVisitor::visitVarRef(VarRefNode &node)

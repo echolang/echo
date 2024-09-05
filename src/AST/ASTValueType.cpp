@@ -209,12 +209,20 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "M"; // mutable
     }
 
-    // pointer or lvalue
+    // a pointer level recurses; anything else is a leaf. keeping the historical R/L slot and
+    // giving R a payload means every pointer-free signature mangles byte for byte as before,
+    // so only functions that actually take a pointer get a new symbol
+    //
+    //   <type> ::= [C|M] ( 'L' <leaf> | 'R' [N|B] <type> )
+    //
+    // N is a nullable ptr<T>, B a borrow T&. self delimiting and prefix free
     if (is_pointer()) {
-        mangled_name += "R"; // rvalue
-    } else {
-        mangled_name += "L"; // lvalue
+        mangled_name += "R";
+        mangled_name += is_nullable() ? "N" : "B";
+        return mangled_name + pointee().get_mangled_name();
     }
+
+    mangled_name += "L"; // lvalue
 
     // primitive type
     if (is_primitive()) {
@@ -240,7 +248,23 @@ std::string AST::ValueType::get_mangled_name() const
 std::string AST::ValueType::get_type_desciption() const
 {
     std::string prefix = is_const() ? "const " : "";
-    std::string pointer = is_pointer() ? "*" : "";
+    std::string pointer = "";
+
+    // recursive rather than a prefix/suffix accumulator: an accumulator cannot render
+    // `const ptr<const int32>`, where two different levels are each const
+    if (is_pointer()) {
+        if (is_nullable()) {
+            return prefix + "ptr<" + pointee().get_type_desciption() + ">";
+        }
+
+        // a borrow spells its pointee's const outward - `const int32&` is the read only
+        // borrow of the doc's "Const" section. a const borrow *level* has no spelling of
+        // its own, so parenthesise it rather than colliding with the pointee-const form
+        if (is_const()) {
+            return "const (" + pointee().get_type_desciption() + "&)";
+        }
+        return pointee().get_type_desciption() + "&";
+    }
 
     if (is_primitive()) {
         return prefix + get_primitive_name(primitive) + pointer;
@@ -349,10 +373,69 @@ bool AST::ComplexType::declares_type_param(const ValueType& type) const
     return false;
 }
 
+AST::ValueType AST::value_type_of(const ValueType& type)
+{
+    return type.is_pointer() ? type.pointee() : type;
+}
+
+AST::ValueType AST::target_type_of(const ValueType& type)
+{
+    ValueType target = type;
+    while (target.is_pointer()) {
+        target = target.pointee();
+    }
+    return target;
+}
+
+bool AST::is_implicitly_convertible(const ValueType& from, const ValueType& to)
+{
+    ValueType bare_from = ValueType::make_mutable(from);
+    ValueType bare_to = ValueType::make_mutable(to);
+
+    if (bare_from == bare_to) {
+        return true;
+    }
+
+    if (bare_from.is_pointer() && bare_to.is_pointer())
+    {
+        // the pointee has to be the same type, but the target may add const to it: a `const
+        // int32&` only promises to read, so every `int32&` satisfies it. going the other way
+        // would launder the promise away, so it stays an error. this is what makes the doc's
+        // recommended read-only parameter form usable at all (L229)
+        const ValueType from_pointee = bare_from.pointee();
+        const ValueType to_pointee = bare_to.pointee();
+
+        const bool pointee_compatible =
+            ValueType::make_mutable(from_pointee) == ValueType::make_mutable(to_pointee)
+            && (to_pointee.is_const() || !from_pointee.is_const());
+
+        if (!pointee_compatible) {
+            return false;
+        }
+
+        // a borrow widens to a nullable pointer over the same pointee: `T&` is a `ptr<T>` that
+        // happens to be known non-null, so the conversion only discards a guarantee. the
+        // reverse asserts non-nullness and needs the explicit cast
+        return bare_from.is_nullable() == bare_to.is_nullable() || bare_to.is_nullable();
+    }
+
+    // note there is deliberately no "a pointer converts to its pointee" rule. the auto-deref
+    // that makes a pointer usable where its pointee is expected is a *read*, and the pointer
+    // adjustment pass writes it into the tree as an explicit deref node - so by the time
+    // anything asks this question, a value-position pointer read already has the pointee type.
+    // allowing it here would instead accept `$p = &$b`, quietly storing an address into the
+    // pointee's slot where the doc requires an error (L87)
+    return false;
+}
+
 bool AST::contains_type_param(const ValueType& type)
 {
     if (type.is_type_param()) {
         return true;
+    }
+
+    if (type.is_pointer()) {
+        return contains_type_param(type.pointee());
     }
 
     // a generic application is unresolved if any of its arguments still is
@@ -377,16 +460,23 @@ AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitutio
     // partial substitution well defined, so a generic member of a generic owner can have the
     // owner's parameters resolved while its own stay generic. the arity check that used to live
     // here now sits in TypeSubstitution::positional, which knows what full coverage means
+    // a pointer substitutes through its pointee and is rebuilt, so `ptr<T>` with T := ptr<int>
+    // now yields ptr<ptr<int>> instead of collapsing onto a single idempotent flag
+    if (type.is_pointer()) {
+        ValueType inner = substitute_type(type.pointee(), subst, registry);
+        ValueType result = ValueType::make_pointer(inner, type.is_nullable());
+        return type.is_const() ? ValueType::make_const(result) : result;
+    }
+
     if (type.is_type_param()) {
         const ValueType *bound = subst.lookup(type.get_type_param());
         if (!bound) {
             return type;
         }
 
-        ValueType resolved = *bound;
-        if (type.is_const()) resolved.set_const(true);
-        if (type.is_pointer()) resolved.set_pointer(true);
-        return resolved;
+        // only const carries over: a type parameter reference can no longer itself be a
+        // pointer, the pointer level above handles that
+        return type.is_const() ? ValueType::make_const(*bound) : *bound;
     }
 
     // a generic application: recursively substitute its arguments, then re-intern.
@@ -400,9 +490,7 @@ AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitutio
             }
             ComplexType* inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
             ValueType result = type.is_struct() ? ValueType::make_struct(inst) : ValueType::make_class(inst);
-            if (type.is_const()) result.set_const(true);
-            if (type.is_pointer()) result.set_pointer(true);
-            return result;
+            return type.is_const() ? ValueType::make_const(result) : result;
         }
     }
 

@@ -40,8 +40,27 @@ namespace AST
         return CodeRef{&mod, file, token.make_slice()};
     }
 
-    void Monomorphizer::unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out)
+    void Monomorphizer::unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out, bool allow_decay)
     {
+        // generic inference decays a pointer argument to its pointee unless the parameter asks
+        // for a pointer explicitly, so `box($p)` yields Box<int32> rather than Box<ptr<int32>>
+        // (book/concept/pointers_and_refs_v2.md, "Pointers and generics"). stated over the
+        // whole param rather than only a bare `T`, so Box<T> against ptr<Box<int32>> decays too
+        // instead of silently binding nothing.
+        //
+        // only at the top level though: asking for `ptr<T>` is how the doc says to opt out of
+        // the decay, so everything below that match binds exactly
+        if (allow_decay && !param.is_pointer() && arg.is_pointer()) {
+            unify(param, value_type_of(arg), out, allow_decay);
+            return;
+        }
+
+        // pointer against pointer binds structurally, one level down
+        if (param.is_pointer() && arg.is_pointer()) {
+            unify(param.pointee(), arg.pointee(), out, false);
+            return;
+        }
+
         // a bare type parameter binds directly to the argument type
         if (param.is_type_param()) {
             out.bind(param.get_type_param(), arg);
@@ -55,8 +74,11 @@ namespace AST
             if (pct && act && pct->is_instantiated() && act->is_instantiated()
                 && pct->template_ref == act->template_ref
                 && pct->instantiation_args.size() == act->instantiation_args.size()) {
+                // exact, like the pointer descent above: `Box<int32&>` is a different layout
+                // from `Box<int32>`, so binding T by reading the borrow away would pick the
+                // wrong instance rather than a compatible one
                 for (size_t i = 0; i < pct->instantiation_args.size(); i++) {
-                    unify(pct->instantiation_args[i], act->instantiation_args[i], out);
+                    unify(pct->instantiation_args[i], act->instantiation_args[i], out, false);
                 }
             }
         }
@@ -214,11 +236,12 @@ namespace AST
     {
         for (size_t i = 0; i < call->arguments.size() && i < instance->args.size(); i++) {
             ValueType expected = instance->args[i]->type();
-            // wrap an lvalue variable in a VarPtrExprNode when the parameter is a pointer,
+            // wrap a place expression in an AddrOfExprNode when the parameter is a borrow,
             // same as the non-generic path in FuncCallParser (keeps codegen uniform)
             call->arguments[i] = coerce_arg_to_pointer_param(mod.nodes, call->arguments[i], expected);
             ValueType actual = call->arguments[i]->result_type();
-            if (!(actual == expected)) {
+            // mirrors FuncCallParser: a borrow widening to a nullable pointer needs no cast
+            if (!is_implicitly_convertible(actual, expected)) {
                 auto &cast = mod.nodes.emplace_back<TypeCastNode>(expected, call->arguments[i], true);
                 call->arguments[i] = &cast;
             }

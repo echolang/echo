@@ -1,0 +1,44 @@
+// three levels of pointer, exercised at each one. no new rules apply at depth - it is the same
+// three lines of binding, writing and re-seating, one level up each time
+// (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+//
+// nothing here echoes a raw address: a stack address is not reproducible across runs, so the
+// assertions are all relationships between addresses instead
+
+$a = 1;
+$b = 2;
+
+ptr<int> $p = &$a;
+ptr<ptr<int>> $pp = &$p;
+ptr<ptr<ptr<int>>> $ppp = &$pp;
+
+// a read is exactly one auto-deref at every level, so only the innermost lands on the int
+echo $p;
+
+// each peel walks one level outward, and the doc's identity holds at each
+echo ($pp:$ == &$p);
+echo ($ppp:$ == &$pp);
+echo ($pp:$:$ == &$pp);
+echo ($ppp:$:$ == &$ppp);
+
+// writing through $p reaches $a
+$p = 10;
+echo $a;
+
+// $pp names the caller's pointer, so writing through it re-points $p without touching $a
+$pp = &$b;
+echo $a;
+$p = 20;
+echo $b;
+
+// $ppp reaches one level further out: writing through it stores into $pp's own slot, so it
+// re-points $pp. the value has to be a ptr<ptr<int>>-shaped address, which is what `&$p` is -
+// note that `$ppp = &$a` is rejected, since an int32& does not fit a ptr<ptr<int32>> slot
+$ppp = &$p;
+echo ($pp:$ == &$p);
+
+// $pp points at $p again, so writing through two levels lands on whatever $p points at
+$pp = &$a;
+$p = 30;
+echo $a;
+echo $b;

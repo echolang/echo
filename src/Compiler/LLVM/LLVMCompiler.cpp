@@ -13,12 +13,13 @@
 #include <fmt/core.h>
 
 LLVMCompiler::LLVMCompiler()
-    : _types(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _backend(_ctx)
+    : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _backend(_ctx)
 {
     // wire the shared context back to the single visitor (for accept-recursion) and to the
     // type-lowering subsystem (reachable from every other subsystem).
     _ctx.visitor = this;
     _ctx.types = &_types;
+    _ctx.lvalues = &_lvalues;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -143,7 +144,7 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node) { _stmt.gen_fu
 void LLVMCompiler::visitReturn(AST::ReturnNode &node) { _stmt.gen_return(node); }
 void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node) { _stmt.gen_if_statement(node); }
 void LLVMCompiler::visitWhileStatement(AST::WhileStatementNode &node) { _stmt.gen_while_statement(node); }
-void LLVMCompiler::visitVarMut(AST::VarMutNode &node) { _stmt.gen_var_mut(node); }
+void LLVMCompiler::visit_assign(AST::AssignNode &node) { _stmt.gen_assign(node); }
 
 void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node) { _expr.gen_type_cast(node); }
 void LLVMCompiler::visitVarRef(AST::VarRefNode &node) { _expr.gen_var_ref(node); }
@@ -152,7 +153,15 @@ void LLVMCompiler::visitLiteralIntExpr(AST::LiteralIntExprNode &node) { _expr.ge
 void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node) { _expr.gen_literal_bool(node); }
 void LLVMCompiler::visitLiteralStringExpr(AST::LiteralStringExprNode &node) { _expr.gen_literal_string(node); }
 void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node) { _expr.gen_function_call(node); }
-void LLVMCompiler::visitVarPtrExpr(AST::VarPtrExprNode &node) { _expr.gen_var_ptr(node); }
+void LLVMCompiler::visit_addr_of_expr(AST::AddrOfExprNode &node) { _expr.gen_addr_of(node); }
+void LLVMCompiler::visit_deref_expr(AST::DerefExprNode &node) { _expr.gen_deref(node); }
+void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(node); }
+
+// a peel marker is erased by the pointer adjustment pass; one surviving to codegen means the
+// pass missed a position, which would otherwise silently emit the wrong number of loads
+void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node) {
+    throw _ctx.error("':$' survived the pointer adjustment pass");
+}
 void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node) { _expr.gen_binary_expr(node); }
 void LLVMCompiler::visitUnaryExpr(AST::UnaryExprNode &node) { _expr.gen_unary_expr(node); }
 void LLVMCompiler::visitNull(AST::NullNode &node) { _expr.gen_null(node); }
@@ -161,7 +170,6 @@ void LLVMCompiler::visitOperator(AST::OperatorNode &node) { _expr.gen_operator(n
 void LLVMCompiler::visitStructDecl(AST::StructDeclNode &node) { _struct.gen_struct_decl(node); }
 void LLVMCompiler::visitMemberAccess(AST::MemberAccessNode &node) { _struct.gen_member_access(node); }
 void LLVMCompiler::visitVar(AST::VarNode &node) { _struct.gen_var(node); }
-void LLVMCompiler::visitMemberMut(AST::MemberMutNode &node) { _struct.gen_member_mut(node); }
 
 // structural nodes with no codegen of their own
 void LLVMCompiler::visitType(AST::TypeNode &node) {}

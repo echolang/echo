@@ -1,0 +1,39 @@
+// `const int32& $r` is the read-only borrow, and the doc's recommended form for a parameter
+// that only needs to look at its argument (book/concept/pointers_and_refs_v2.md, "Const")
+//
+// it was unusable. `&$a` yields `int32&`, and implicit convertibility only ever dropped const at
+// the *top* level, so a mutable borrow did not satisfy a const one and every call site failed
+// with "cannot implicitly convert 'int32&' to 'const int32&'". adding const to the pointee is
+// safe - promising only to read is weaker than being allowed to write - so it is now allowed,
+// while removing it still is not
+
+function show(const int& $r) : void {
+    echo $r;
+}
+
+$a = 5;
+
+// the implicit borrow at the call site, and the explicit address, both satisfy it
+show($a);
+show(&$a);
+
+// a mutable borrow converts to the read-only form
+int& $r = &$a;
+show($r);
+
+// a nullable pointer does not, though: the const is independent of the nullability, and
+// narrowing to a non-null borrow still has to be written out
+ptr<int> $p = &$a;
+show(int&($p:$));
+
+// a const borrow local reads through exactly like a mutable one
+const int& $view = &$a;
+echo $view;
+
+// and it follows the storage: it is a borrow, not a copy
+$a = 9;
+echo $view;
+
+// the const is on the pointee, so the two spellings remain distinct types even though one
+// converts to the other
+echo ($view:$ == $r:$);

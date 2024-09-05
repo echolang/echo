@@ -1,0 +1,9 @@
+// the storage a local names is gone before the caller can read it, so handing back its address
+// is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes, and how to get hurt").
+// a parameter is the caller's storage and outlives the call, which is the legal case
+function bad() : int& {
+    $local = 5;
+    return &$local;
+}
+
+echo 1;

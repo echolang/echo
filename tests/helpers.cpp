@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTMonomorphizer.h>
+#include <AST/ASTPointerAdjuster.h>
 #include <AST/ASTTypeChecker.h>
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
@@ -67,6 +68,7 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string con
     AST::Monomorphizer(*bundle).run();
 
     // run semantic analysis, matching the real compile pipeline
+    AST::PointerAdjuster(*bundle).run();
     AST::TypeChecker(*bundle).run();
 
     return bundle;
@@ -92,6 +94,7 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(const std::vect
     module_parser.parse_input(input);
 
     AST::Monomorphizer(*bundle).run();
+    AST::PointerAdjuster(*bundle).run();
     AST::TypeChecker(*bundle).run();
 
     return bundle;

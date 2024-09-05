@@ -21,6 +21,14 @@ namespace Parser
     // from a qualified function call `a::foo()`. pure lookahead, the cursor is not moved
     bool starts_qualified_vardecl(Payload &payload);
 
+    // true when the cursor sits on a borrow declaration, `int32& $r` / `int32 & $r`. the lexer
+    // only emits t_ref when the `&` abuts a name character, so the spaced form arrives as
+    // t_and and both spellings have to be recognised. lives here, next to parse_ref_suffix,
+    // so every statement dispatch that has to spot a declaration asks the same question -
+    // the struct body used to keep its own list and silently rejected borrow properties.
+    // pure lookahead, the cursor is not moved
+    bool starts_borrow_vardecl(Payload &payload);
+
     AST::TypeNode *parse_type(Payload &payload);
 
     // one type parameter exactly as written, before it becomes a declaration. parsing produces

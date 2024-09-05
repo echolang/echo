@@ -36,6 +36,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_identifier: return "identifier";
         case Token::Type::t_semicolon: return "semicolon (;)";
         case Token::Type::t_colon: return "colon (:)";
+        case Token::Type::t_ptr_of: return "ptr_of (:$)";
         case Token::Type::t_comma: return "comma (,)";
         case Token::Type::t_dot: return "dot (.)";
         case Token::Type::t_logical_and: return "logical_and (&&)";
@@ -87,6 +88,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_namespace: return "namespace";
         case Token::Type::t_namespace_sep: return "namespace_sep (::)";
         case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
         case Token::Type::t_enum: return "enum";
@@ -105,6 +107,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_xor: return "^";
         case Token::Type::t_semicolon: return ";";
         case Token::Type::t_colon: return ":";
+        case Token::Type::t_ptr_of: return ":$";
         case Token::Type::t_comma: return ",";
         case Token::Type::t_dot: return ".";
         case Token::Type::t_logical_and: return "&&";
@@ -148,6 +151,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_namespace: return "namespace";
         case Token::Type::t_namespace_sep: return "::";
         case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
         case Token::Type::t_enum: return "enum";

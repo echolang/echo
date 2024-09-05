@@ -1,0 +1,5 @@
+// there is nothing to point at in a computed value, so taking its address is rejected rather
+// than crashing the compiler on an operator that never got its operands
+$a = 1;
+$b = 2;
+int& $r = &($a + $b);

@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 8:6
+Const violation: cannot write through 'const int32&' - its pointee is const
+Begin: '='
+End: '='
+Code excerpt:
+ [7]> 
+ [8]> $ref = 20;
+           ^
+ [9]> 
+
+Critical issues found, cannot compile.

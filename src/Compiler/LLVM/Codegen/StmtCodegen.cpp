@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
+#include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -9,7 +10,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
 #include "AST/StructNode.h"
-#include "AST/MemberMutNode.h"
+#include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
@@ -17,7 +18,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
-#include "AST/VarMutNode.h"
+#include "AST/ASTPlaceExpr.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -40,7 +41,14 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
             continue;
         }
 
+        // a statement must leave the value stack exactly as it found it. every value pushed by
+        // a subexpression belongs to the parent that asked for it, so anything still on the
+        // stack here is a leak - and a leak silently feeds the wrong value to a later pop
+        [[maybe_unused]] const size_t depth_before = _ctx.value_stack.size();
+
         child.node()->accept(*_ctx.visitor);
+
+        assert(_ctx.value_stack.size() == depth_before && "statement leaked a value onto the stack");
 
         // after any return statement we need to terminate the block
         if (child.has_type<AST::ReturnNode>()) {
@@ -67,17 +75,14 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
         assert(_ctx.value_stack.size() > 0 && "No value on the stack");
 
         llvm::Value* init_value = _ctx.value_stack.top();
-
-        // if the type is a float but our init_value is a double we need to convert it
-        if (type->isFloatTy() && init_value->getType()->isDoubleTy()) {
-            init_value = _ctx.builder->CreateFPTrunc(init_value, type);
-        }
-        else if (type->isDoubleTy() && init_value->getType()->isFloatTy()) {
-            init_value = _ctx.builder->CreateFPExt(init_value, type);
-        }
-
-        _ctx.builder->CreateStore(init_value, alloca);
         _ctx.value_stack.pop();
+
+        // the same conversion every assignment and member write uses. this path used to handle
+        // only float/double, so an initializer that widened an integer stored the narrow value
+        // straight into the wide slot and read back whatever else was in those bytes
+        _ctx.builder->CreateStore(
+            _ctx.types->coerce_value(init_value, node.init_expr->result_type(), node.type_node()->type, *_ctx.current_cmp_unit),
+            alloca);
     }
 }
 
@@ -218,6 +223,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
     // condition
     node.condition->accept(*_ctx.visitor);
     llvm::Value *condition = _ctx.value_stack.top();
+    _ctx.value_stack.pop();
 
     // if there is no else block we directly jump to the merge block
     if (!node.else_scope) {
@@ -292,83 +298,20 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     _ctx.builder->SetInsertPoint(merge_block);
 }
 
-void StmtCodegen::gen_var_mut(AST::VarMutNode &node)
+void StmtCodegen::gen_assign(AST::AssignNode &node)
 {
-    // Visit the value expression to get its LLVM IR value
     node.value_expr->accept(*_ctx.visitor);
 
-    // Get the value from the stack
-    llvm::Value* new_value = _ctx.value_stack.top();
+    llvm::Value *new_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    // Find the variable declaration
-    if (node.var_decl == nullptr) {
-        throw _ctx.error(fmt::format(
-            "No variable declaration resolved for mutation of '{}' {}",
-            node.name_full(), _ctx.function_context()));
-    }
+    // one path for every left hand side shape, addressing exactly what the target names.
+    // write-through is not decided here: `$p = 20` arrives as a deref of $p and lands on the
+    // pointee, `$p:$ = &$b` arrives as $p itself and lands on the slot, re-seating it
+    auto place = _ctx.lvalues->gen_lvalue(*node.target);
 
-    // Get the allocated variable from the map
-    auto var_iter = _ctx.var_map.find(node.var_decl);
-    if (var_iter == _ctx.var_map.end()) {
-        throw _ctx.error(fmt::format(
-            "Variable '{}' has no allocation in scope {}",
-            node.var_decl->name(), _ctx.function_context()));
-    }
-
-    llvm::AllocaInst* var = var_iter->second;
-    llvm::Value* target = var;
-
-    // Check if it's a pointer using ValueType.is_pointer()
-    if (node.var_decl->type_node()->type.is_pointer()) {
-        // For pointer variables, load the pointer first, then store through it
-        target = _ctx.builder->CreateLoad(var->getAllocatedType(), var);
-
-        // Get the target type (what the pointer points to) for type casting
-        AST::ValueType target_type = node.var_decl->type_node()->type;
-        target_type.set_pointer(false); // Remove pointer flag to get target type
-        llvm::Type *target_llvm_type = _ctx.types->get_llvm_type(target_type, *_ctx.current_cmp_unit);
-
-        // Cast the new value to the target type if necessary
-        if (target_llvm_type->isFloatTy() && new_value->getType()->isDoubleTy()) {
-            new_value = _ctx.builder->CreateFPTrunc(new_value, target_llvm_type);
-        } else if (target_llvm_type->isDoubleTy() && new_value->getType()->isFloatTy()) {
-            new_value = _ctx.builder->CreateFPExt(new_value, target_llvm_type);
-        } else if (target_llvm_type->isIntegerTy() && new_value->getType()->isFloatingPointTy()) {
-            new_value = _ctx.builder->CreateFPToSI(new_value, target_llvm_type);
-        } else if (target_llvm_type->isFloatingPointTy() && new_value->getType()->isIntegerTy()) {
-            new_value = _ctx.builder->CreateSIToFP(new_value, target_llvm_type);
-        } else if (target_llvm_type->isIntegerTy() && new_value->getType()->isIntegerTy() &&
-                   target_llvm_type->getIntegerBitWidth() != new_value->getType()->getIntegerBitWidth()) {
-            if (target_llvm_type->getIntegerBitWidth() > new_value->getType()->getIntegerBitWidth()) {
-                new_value = _ctx.builder->CreateSExt(new_value, target_llvm_type);
-            } else {
-                new_value = _ctx.builder->CreateTrunc(new_value, target_llvm_type);
-            }
-        }
-    } else {
-        // For non-pointer variables, cast to the variable type
-        llvm::Type* var_type = var->getAllocatedType();
-
-        if (var_type->isFloatTy() && new_value->getType()->isDoubleTy()) {
-            new_value = _ctx.builder->CreateFPTrunc(new_value, var_type);
-        } else if (var_type->isDoubleTy() && new_value->getType()->isFloatTy()) {
-            new_value = _ctx.builder->CreateFPExt(new_value, var_type);
-        } else if (var_type->isIntegerTy() && new_value->getType()->isFloatingPointTy()) {
-            new_value = _ctx.builder->CreateFPToSI(new_value, var_type);
-        } else if (var_type->isFloatingPointTy() && new_value->getType()->isIntegerTy()) {
-            new_value = _ctx.builder->CreateSIToFP(new_value, var_type);
-        } else if (var_type->isIntegerTy() && new_value->getType()->isIntegerTy() &&
-                   var_type->getIntegerBitWidth() != new_value->getType()->getIntegerBitWidth()) {
-            if (var_type->getIntegerBitWidth() > new_value->getType()->getIntegerBitWidth()) {
-                new_value = _ctx.builder->CreateSExt(new_value, var_type);
-            } else {
-                new_value = _ctx.builder->CreateTrunc(new_value, var_type);
-            }
-        }
-    }
-
-    // Store the new value in the target
-    _ctx.builder->CreateStore(new_value, target);
+    _ctx.builder->CreateStore(
+        _ctx.types->coerce_value(new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit),
+        place.address);
 }
 }

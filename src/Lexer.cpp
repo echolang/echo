@@ -271,6 +271,11 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_MAKE_FNCLIST(lx_functions);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_semicolon);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_colon);
+    // `:$` reaches the pointer itself. a StringToken's priority is its length, so the two
+    // character match wins over the plain `:` sharing the trie's ':' node, and `::` keeps its
+    // own deeper node. the trailing '$' is what keeps `$pp:$:$` spellable - a bare `:` would
+    // lex two of them as the namespace separator
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_ptr_of);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_comma);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_dot);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_accessorlr);
@@ -320,6 +325,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace_sep);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_ptr);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_null);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_struct);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_class);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_enum);

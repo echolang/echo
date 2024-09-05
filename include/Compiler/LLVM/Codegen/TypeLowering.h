@@ -44,6 +44,19 @@ namespace Compiler::LLVM
         llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
 
+        // converts `value` from one echo type to another, emitting the widening, narrowing or
+        // int/float conversion the pair calls for. returns the value unchanged when no
+        // conversion is needed, and throws when the pair has no meaning.
+        //
+        // keyed on ValueType rather than llvm::Type because signedness does not survive
+        // lowering: i8 -> i32 is a sign extend for int8 and a zero extend for uint8, and the
+        // llvm types are identical either way.
+        //
+        // `from` may be void or unknown - BinaryExprNode::result_type() answers void whenever
+        // its operands differ - in which case the value's own llvm type stands in for it and
+        // `to` supplies the signedness
+        llvm::Value *coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
+
     private:
         CodegenContext &_ctx;
     };

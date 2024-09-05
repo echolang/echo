@@ -34,12 +34,18 @@ namespace AST
         void visitMemberAccess(MemberAccessNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visitVarDecl(VarDeclNode &node) override;
+        void visit_assign(AssignNode &node) override;
         void visitTypeCast(TypeCastNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
+        void visitReturn(ReturnNode &node) override;
 
     private:
         Bundle &_bundle;
         Collector &_collector;
+
+        // the function whose body is being walked, so a return knows what it has to fit and
+        // which variables are the caller's. null at file scope
+        FunctionDeclNode *_current_function = nullptr;
 
         // the module/file currently being walked, used to build located code references.
         Module *_current_module = nullptr;
@@ -51,6 +57,11 @@ namespace AST
         const TokenReference *_context_token = nullptr;
 
         CodeRef code_ref_for(const TokenReference &token);
+
+        // rejects an assignment that reaches const storage. split out of visit_assign because it
+        // asks a different question than the conversion check next to it: not "does the value
+        // fit" but "may this storage be written at all"
+        void check_const_target(AssignNode &node);
     };
 }
 

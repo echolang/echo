@@ -1,8 +1,8 @@
 #include "Parser/VarDeclParser.h"
 
 #include "AST/VarDeclNode.h"
-#include "AST/VarMutNode.h"
-#include "AST/MemberMutNode.h"
+#include "AST/ASTPlaceExpr.h"
+#include "AST/AssignNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -31,27 +31,15 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     bool is_const = false;
 
     // when we have an identifier we assume it to be the variable type
+    // the `&` suffix is part of the type grammar now, so parse_type returns the borrow already
+    // built and there is nothing to patch up here
     if (can_parse_type(payload))  {
         type = parse_type(payload);
-        is_const = type->is_const;
-        
-        // Check for reference modifier after the type
-        if (cursor.is_type(Token::Type::t_ref)) {
-            cursor.skip(); // skip the '&'
-            
-            // Create a new ValueType with the pointer flag set
-            auto updated_value_type = type->type;
-            updated_value_type.set_pointer(true);
-            
-            // Create a new TypeNode with the updated ValueType
-            if (type->type_token.has_value()) {
-                type = &payload.context.emplace_node<AST::TypeNode>(updated_value_type, type->type_token.value());
-            } else {
-                type = &payload.context.emplace_node<AST::TypeNode>(updated_value_type);
-            }
-            type->is_const = is_const;
-            type->is_pointer = true;
+        if (type == nullptr) {
+            cursor.try_skip_to_next_statement();
+            return nullptr;
         }
+        is_const = type->type.is_const();
     }
 
     // special case is "const" but type must be inferred
@@ -83,14 +71,14 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     // we have a previous declaration, this might be a mutable variable
     if (prev_vardecl != nullptr) 
     {    
-        // if the variable is a const, we cannot redeclare nor mutate it
-        if (!prev_vardecl->has_type() && prev_vardecl->type_node()->is_const) {
-            payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
-            cursor.try_skip_to_next_statement();
-            return nullptr;
-        }
+        // const is *not* checked here. it used to be, on the declared type's top level, which is
+        // the wrong level twice over: `const int& $r` is a mutable borrow of a const pointee, so
+        // the guard never fired on the write it should reject, while `const ptr<int> $p` is a const
+        // pointer whose pointee may legally be written, so it fired on a write it should allow.
+        // telling those apart needs the deref AST::PointerAdjuster inserts, so the check now lives
+        // in AST::TypeChecker::check_const_target, keyed on the assignment target's shape
 
-        // we do not allow to redefine the type of a variable, the type 
+        // we do not allow to redefine the type of a variable, the type
         // has to be either explictly set in the firt declaration or inferred
         if (!prev_vardecl->has_type() && type != nullptr) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
@@ -98,65 +86,39 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             return nullptr;
         }
 
-        // Check if this is a member access mutation ($var->member = value)
-        if (payload.cursor.is_type(Token::Type::t_accessorlr)) {
-            // Parse the member access pattern
-            auto var_node = &payload.context.emplace_node<AST::VarNode>(prev_vardecl);
-            auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
-            auto current_ref = AST::make_ref(*var_ref);
-
-            // wrap the base in a MemberAccessNode for each `->member` in the chain.
-            // this block is only entered on a leading `->`, so at least one level
-            // runs and the final node is always a MemberAccessNode
-            current_ref = Parser::parse_member_chain(payload, current_ref);
-            if (!current_ref.has()) {
-                cursor.try_skip_to_next_statement();
-                return nullptr;
-            }
-            auto member_access = current_ref.get_ptr<AST::MemberAccessNode>();
-
-            // Now expect the assignment operator
-            if (!payload.cursor.is_type(Token::Type::t_assign)) {
-                payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
-                cursor.try_skip_to_next_statement();
-                return nullptr;
-            }
-            
-            cursor.skip(); // skip the '=' token
-            
-            // Parse the value expression
-            auto expr = parse_expr(payload, nullptr); // We'll infer the type from the member
-            
-            // Create the member mutation node
-            auto member_mut = &payload.context.emplace_node<AST::MemberMutNode>(member_access, expr);
-            
-            // Skip the end of the statement
-            if (is_vardecl_end_token(cursor)) {
-                if (should_skip_vardecl_end_token(cursor)) {
-                    cursor.skip();
-                }
-            }
-            
-            // Add the member mutation to the scope
-            payload.context.scope().children.push_back(AST::make_ref(member_mut));
-            
-            return nullptr; // Don't return a VarDeclNode since this is a mutation
-        }
-        
-        // Regular variable assignment ($var = value)
-        if (!payload.cursor.is_type(Token::Type::t_assign)) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
+        // an assignment to an existing variable. the left hand side is a place expression:
+        // the variable itself, or any `->member` chain hanging off it. both shapes produce the
+        // same AssignNode, so codegen resolves them through one lvalue path
+        auto var_node = &payload.context.emplace_node<AST::VarNode>(prev_vardecl);
+        auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
+        auto target_ref = Parser::parse_postfix_chain(payload, AST::make_ref(*var_ref));
+        if (!target_ref.has()) {
             cursor.try_skip_to_next_statement();
             return nullptr;
         }
 
+        auto *target = target_ref.unsafe_ptr<AST::ExprNode>();
+
+        if (!payload.cursor.is_type(Token::Type::t_assign)) {
+            payload.collect_unexpected_token(Token::Type::t_assign);
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        auto assign_token = cursor.current();
         cursor.skip();
 
-        // parse the expression
-        auto expr = parse_expr(payload, prev_vardecl->type_node());
+        // the value is expected at the type the *storage* holds. for a pointer target that is
+        // the pointee, because assigning to a pointer writes through it - `$p = 20` never
+        // changes where $p points (book/concept/pointers_and_refs_v2.md, "Binding, writing,
+        // and re-seating"). a declaration is the other case and binds instead, which is why
+        // the init_expr path below keeps the full declared type
+        auto &expected = payload.context.emplace_node<AST::TypeNode>(
+            AST::value_result_type(*target));
 
-        // generate a var mutation node
-        auto varmut = &payload.context.emplace_node<AST::VarMutNode>(nametoken, expr, prev_vardecl);
+        auto expr = parse_expr(payload, &expected);
+
+        auto assign = &payload.context.emplace_node<AST::AssignNode>(target, expr, assign_token);
 
         // skip the end of the statement
         if (is_vardecl_end_token(cursor)) {
@@ -165,8 +127,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             }
         }
 
-        // add the varmut to the scope
-        payload.context.scope().children.push_back(AST::make_ref(varmut));
+        payload.context.scope().children.push_back(AST::make_ref(assign));
 
         return nullptr;
     }
@@ -187,7 +148,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     }
 
     if (!payload.cursor.is_type(Token::Type::t_assign)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_assign, cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_assign);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -206,10 +167,13 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             return nullptr;
         }
         else {
-            vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(vardecl->init_expr->result_type()));
-            vardecl->type_node()->is_const = is_const;
-            // For inferred pointer types, don't set is_pointer = true since the ValueType already has the pointer flag
-            vardecl->type_node()->is_pointer = false;
+            // the inferred type is the single source of truth, const included - there is no
+            // longer a separate node-level flag that could disagree with it.
+            // value_result_type, not result_type: `$copy = $r` over an `int32&` copies the int
+            // it refers to, so the copy is an int32 rather than a second reference
+            auto inferred = AST::value_result_type(*vardecl->init_expr);
+            vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+                is_const ? AST::ValueType::make_const(inferred) : inferred));
         }
     }
 

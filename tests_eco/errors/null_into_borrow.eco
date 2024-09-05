@@ -1,0 +1,3 @@
+// a borrow is the pointer type that promises it is never null, so seeding one with null
+// throws away the only guarantee it carries
+int& $r = null;

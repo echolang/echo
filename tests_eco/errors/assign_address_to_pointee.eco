@@ -1,0 +1,6 @@
+// `$p = &$b` is not a rebind. a plain assignment to a pointer writes *through* it, so this
+// asks to store an address into the int32 that $p points at. re-seating is `$p:$ = &$b`
+$a = 1;
+$b = 2;
+ptr<int> $p = &$a;
+$p = &$b;

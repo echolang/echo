@@ -1,0 +1,5 @@
+// a nullable pointer does not narrow to a borrow on its own - the borrow's whole promise is
+// that it is never null, and only an explicit cast asserts that
+$a = 5;
+ptr<int> $p = &$a;
+int& $r = $p:$;

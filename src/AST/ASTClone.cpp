@@ -23,7 +23,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
-#include "AST/VarMutNode.h"
+#include "AST/AssignNode.h"
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ExprNode.h"
@@ -32,7 +32,6 @@
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/MemberAccessNode.h"
-#include "AST/MemberMutNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
 #include "AST/NamespaceNode.h"
@@ -62,12 +61,9 @@ Node *NamespaceNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 
 Node *TypeNode::clone(CloneContext &cc) const
 {
-    TypeNode *c = type_token.has_value()
+    return type_token.has_value()
         ? cc.make<TypeNode>(this, cc.substitute(type), type_token.value())
         : cc.make<TypeNode>(this, cc.substitute(type));
-    c->is_const = is_const;
-    c->is_pointer = is_pointer;
-    return c;
 }
 
 Node *TypeCastNode::clone(CloneContext &cc) const
@@ -109,10 +105,32 @@ Node *UnaryExprNode::clone(CloneContext &cc) const
     return c;
 }
 
-Node *VarPtrExprNode::clone(CloneContext &cc) const
+Node *AddrOfExprNode::clone(CloneContext &cc) const
 {
-    VarPtrExprNode *c = cc.shallow(this);
-    c->var_ref = cc.child(c->var_ref);
+    AddrOfExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *PointerValueNode::clone(CloneContext &cc) const
+{
+    PointerValueNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *IndexExprNode::clone(CloneContext &cc) const
+{
+    IndexExprNode *c = cc.shallow(this);
+    c->base = cc.child(c->base);
+    c->index = cc.child(c->index);
+    return c;
+}
+
+Node *DerefExprNode::clone(CloneContext &cc) const
+{
+    DerefExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
     return c;
 }
 
@@ -135,12 +153,11 @@ Node *VarRefNode::clone(CloneContext &cc) const
     return cc.make<VarRefNode>(this, cc.child(_target_node.get_ptr<VarNode>()));
 }
 
-Node *VarMutNode::clone(CloneContext &cc) const
+Node *AssignNode::clone(CloneContext &cc) const
 {
-    VarMutNode *c = cc.shallow(this);
+    AssignNode *c = cc.shallow(this);
+    c->target = cc.child(c->target);
     c->value_expr = cc.child(c->value_expr);
-    c->var_decl = cc.rebind(c->var_decl);
-    c->_target_node = cc.rebind_ref(c->_target_node);
     return c;
 }
 
@@ -161,14 +178,6 @@ Node *MemberAccessNode::clone(CloneContext &cc) const
 {
     MemberAccessNode *c = cc.shallow(this);
     c->_base_node = cc.clone_ref(_base_node);
-    return c;
-}
-
-Node *MemberMutNode::clone(CloneContext &cc) const
-{
-    MemberMutNode *c = cc.shallow(this);
-    c->member_access = cc.child(c->member_access);
-    c->value_expr = cc.child(c->value_expr);
     return c;
 }
 

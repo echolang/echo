@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 5:5
+Invalid type conversion: cannot return 'int32' from a function declared 'int32&'
+Begin: 'return'
+End: 'return'
+Code excerpt:
+ [4]> function bad(int $x) : int& {
+ [5]>     return $x;
+          ^
+ [6]> }
+
+Critical issues found, cannot compile.

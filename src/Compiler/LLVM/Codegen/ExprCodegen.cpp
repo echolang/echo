@@ -1,4 +1,6 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
+#include "eco.h"
+#include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -7,7 +9,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
 #include "AST/StructNode.h"
-#include "AST/MemberMutNode.h"
+#include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
@@ -15,7 +17,8 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
-#include "AST/VarMutNode.h"
+#include "AST/ASTPlaceExpr.h"
+#include "AST/NullNode.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -35,159 +38,33 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     // visit the expression
     node.expr->accept(*_ctx.visitor);
 
-    // create a new value with the new type
-    auto new_type = node.result_type();
-    auto old_type = node.expr->result_type();
-
-    auto new_llvm_type = _ctx.types->get_llvm_type(new_type.get_primitive_type());
-
     auto value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    // if the types are identical we don't need to do anything
-    if (old_type == new_type) {
-        _ctx.value_stack.push(value);
-        return;
+    // narrowing a nullable pointer to a borrow asserts the thing a borrow promises. under
+    // opaque pointers the reinterpretation itself is free, so the trap is all there is to emit
+    if (node.result_type().is_pointer() && !node.result_type().is_nullable()
+        && node.expr->result_type().is_pointer() && node.expr->result_type().is_nullable()) {
+        gen_null_assert(value);
     }
 
-    // convert the value to a floating point type
-    if (new_type.is_floating_type()) {
-        if (old_type.is_integer_type()) {
-            if (old_type.is_signed_integer()) {
-                value = _ctx.builder->CreateSIToFP(value, new_llvm_type);
-            } else {
-                value = _ctx.builder->CreateUIToFP(value, new_llvm_type);
-            }
-        }
-        // cast to another floating point type simply requires an extension or truncation
-        else if (old_type.is_floating_type()) {
-            if (old_type.get_primitive_type() == AST::ValueTypePrimitive::t_float32) {
-                value = _ctx.builder->CreateFPExt(value, new_llvm_type);
-            } else {
-                value = _ctx.builder->CreateFPTrunc(value, new_llvm_type);
-            }
-        }
-        // cast to a boolean type
-        else if (old_type.is_boolean_type()) {
-            value = _ctx.builder->CreateUIToFP(value, new_llvm_type);
-        }
-        else {
-            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
-                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
-        }
-    }
-
-    else if (new_type.is_integer_type()) {
-        if (old_type.is_floating_type()) {
-            if (new_type.is_signed_integer()) {
-                value = _ctx.builder->CreateFPToSI(value, new_llvm_type);
-            } else {
-                value = _ctx.builder->CreateFPToUI(value, new_llvm_type);
-            }
-        }
-        // cast to another integer type
-        else if (old_type.is_integer_type()) {
-            // any int -> signed int
-            if (new_type.is_signed_integer()) {
-                // uint -> int
-                if (old_type.is_same_size(new_type) && old_type.is_unsigned_integer()) {
-                    value = _ctx.builder->CreateIntCast(value, new_llvm_type, true);
-                }
-                // int8 -> int32 (smaller -> larger)
-                else if (old_type.will_fit_into(new_type)) {
-                    value = _ctx.builder->CreateSExt(value, new_llvm_type);
-                }
-                // int32 -> int8 (larger -> smaller)
-                else {
-                    value = _ctx.builder->CreateTrunc(value, new_llvm_type);
-                }
-            }
-            // any int -> unsigned int
-            else {
-                // int -> uint
-                if (old_type.is_same_size(new_type) && old_type.is_signed_integer()) {
-                    value = _ctx.builder->CreateIntCast(value, new_llvm_type, false);
-                }
-                // uint8 -> uint32 (smaller -> larger)
-                else if (old_type.will_fit_into(new_type)) {
-                    value = _ctx.builder->CreateZExt(value, new_llvm_type);
-                }
-                // uint32 -> uint8 (larger -> smaller)
-                else {
-                    value = _ctx.builder->CreateTrunc(value, new_llvm_type);
-                }
-            }
-        }
-        // cast to a boolean type
-        else if (old_type.is_boolean_type()) {
-            value = _ctx.builder->CreateZExt(value, new_llvm_type);
-        }
-        else {
-            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
-                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
-        }
-    }
-
-    else if (new_type.is_boolean_type()) {
-        if (old_type.is_integer_type()) {
-            value = _ctx.builder->CreateICmpNE(value, llvm::ConstantInt::get(*_ctx.llvm_context, llvm::APInt(1, 0, false)));
-        }
-        else if (old_type.is_floating_type()) {
-            value = _ctx.builder->CreateFCmpONE(value, llvm::ConstantFP::get(*_ctx.llvm_context, llvm::APFloat(0.0)));
-        }
-        else {
-            throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
-                old_type.get_type_desciption(), new_type.get_type_desciption(), _ctx.function_context()));
-        }
-    }
-
-    else {
-        throw std::runtime_error("Unsupported type cast");
-    }
-
-    // push the new value on the stack
-    _ctx.value_stack.push(value);
+    // the conversion table lives on TypeLowering, shared with every declaration, assignment
+    // and member write, so all of them agree on signedness
+    _ctx.value_stack.push(_ctx.types->coerce_value(
+        value, node.expr->result_type(), node.result_type(), *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
 {
-    if (node.is_var()) {
-        // Handle regular variable reference
-        auto &var_node = node.get_var();
+    // gen_lvalue, not gen_place: any auto-deref this read needs is already an explicit
+    // DerefExprNode above it, put there by the pointer adjustment pass. so a bare pointer
+    // variable here means the pointer itself was asked for - which is what `$p:$` compiles to
+    auto place = _ctx.lvalues->gen_lvalue(node);
 
-        // Get the LLVM value for this variable (should be an alloca instruction)
-        auto it = _ctx.var_map.find(&var_node.decl());
-        if (it == _ctx.var_map.end()) {
-            throw _ctx.error(fmt::format(
-                "Variable '{}' not found in variable map", var_node.decl().name()));
-        }
-
-        llvm::Value *var_ptr = it->second;
-
-        // Check if this is a pointer variable using ValueType.is_pointer()
-        if (var_node.decl().type_node()->type.is_pointer()) {
-            // For pointer variables, load the pointer first, then load the value it points to
-            llvm::Type *pointer_type = _ctx.types->get_llvm_type(var_node.decl().type_node()->type, *_ctx.current_cmp_unit);
-            llvm::Value *pointer_value = _ctx.builder->CreateLoad(pointer_type, var_ptr, var_node.decl().name() + "_ptr");
-
-            // Get the target type (what the pointer points to)
-            AST::ValueType target_type = var_node.decl().type_node()->type;
-            target_type.set_pointer(false); // Remove pointer flag to get target type
-            llvm::Type *target_llvm_type = _ctx.types->get_llvm_type(target_type, *_ctx.current_cmp_unit);
-
-            // Dereference the pointer to get the actual value
-            llvm::Value *dereferenced_value = _ctx.builder->CreateLoad(target_llvm_type, pointer_value, var_node.decl().name());
-            _ctx.value_stack.push(dereferenced_value);
-        } else {
-            // For non-pointer variables, just load the value normally
-            llvm::Type *var_type = _ctx.types->get_llvm_type(var_node.decl().type_node()->type, *_ctx.current_cmp_unit);
-            llvm::Value *loaded_value = _ctx.builder->CreateLoad(var_type, var_ptr, var_node.decl().name());
-            _ctx.value_stack.push(loaded_value);
-        }
-    }
-    else {
-        throw _ctx.error("Unknown VarRef target type");
-    }
+    _ctx.value_stack.push(_ctx.builder->CreateLoad(
+        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
+        place.address,
+        node.is_var() ? node.get_var().decl().name() : "load"));
 }
 
 void ExprCodegen::gen_literal_float(AST::LiteralFloatExprNode &node)
@@ -228,6 +105,8 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     node.lhs->accept(*_ctx.visitor);
     node.rhs->accept(*_ctx.visitor);
 
+    // raw, not collapsed to the pointee: after the adjustment pass a pointer here means the
+    // address really was asked for, through `:$`, and the pointer arm below needs to see it
     auto lhsret = node.lhs->result_type();
     auto rhsret = node.rhs->result_type();
 
@@ -235,6 +114,67 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     _ctx.value_stack.pop();
     auto left = _ctx.value_stack.top();
     _ctx.value_stack.pop();
+
+    // everything reached through `:$` operates on the address itself: comparisons ask about
+    // identity, and arithmetic is scaled by the pointee's size, never by bytes
+    if (lhsret.is_pointer() || rhsret.is_pointer())
+    {
+        const bool both_pointers = lhsret.is_pointer() && rhsret.is_pointer();
+
+        switch (node.op_node->op->type) {
+            case Token::Type::t_logical_eq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
+                return;
+            case Token::Type::t_logical_neq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
+                return;
+            case Token::Type::t_open_angle:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpULT(left, right));
+                return;
+            case Token::Type::t_close_angle:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpUGT(left, right));
+                return;
+            case Token::Type::t_logical_leq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpULE(left, right));
+                return;
+            case Token::Type::t_logical_geq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpUGE(left, right));
+                return;
+
+            case Token::Type::t_op_add:
+            case Token::Type::t_op_sub:
+            {
+                if (both_pointers) {
+                    if (node.op_node->op->type != Token::Type::t_op_sub) {
+                        throw _ctx.error(fmt::format("two addresses cannot be added {}",
+                            _ctx.function_context()));
+                    }
+
+                    // the distance between two addresses, counted in elements
+                    _ctx.value_stack.push(_ctx.builder->CreatePtrDiff(
+                        _ctx.types->get_llvm_type(AST::value_type_of(lhsret), *_ctx.current_cmp_unit),
+                        left, right));
+                    return;
+                }
+
+                // GEP over the pointee type does the scaling, so the offset counts elements
+                llvm::Value *offset = right;
+                if (node.op_node->op->type == Token::Type::t_op_sub) {
+                    offset = _ctx.builder->CreateNeg(offset);
+                }
+
+                _ctx.value_stack.push(_ctx.builder->CreateGEP(
+                    _ctx.types->get_llvm_type(AST::value_type_of(lhsret), *_ctx.current_cmp_unit),
+                    left, { offset }, "ptroff"));
+                return;
+            }
+
+            default:
+                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
+                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
+                    rhsret.get_type_desciption(), _ctx.function_context()));
+        }
+    }
 
     if (lhsret.is_integer_type() && rhsret.is_integer_type())
     {
@@ -420,6 +360,12 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             auto arg_value = _ctx.value_stack.top();
             _ctx.value_stack.pop();
 
+            // the argument's own type, with no peeling. the adjustment pass already inserted the
+            // auto-deref for a pointer read, so a value-position read has the pointee's type by
+            // the time it gets here - reaching for value_type_of() as well peeled a second time
+            // and printed a genuine address (a call returning ptr<T>, say) as though it were the
+            // int at that address. anything still a pointer here really is an address, and echo
+            // has no format for one
             auto result_type = arg->result_type();
 
             // printf each argument value
@@ -502,7 +448,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         }
 
         // evaluate every argument uniformly. arguments bound to pointer parameters were
-        // already rewritten into VarPtrExprNode by the coercion pass (FuncCallParser /
+        // already rewritten into AddrOfExprNode by the coercion pass (FuncCallParser /
         // Monomorphizer), so accepting them leaves the variable's address on the stack,
         // so no per-argument kind sniffing is needed here
         std::vector<llvm::Value *> args;
@@ -513,37 +459,73 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         }
 
         llvm::Value *ret = _ctx.builder->CreateCall(func, args);
-        _ctx.value_stack.push(ret);
 
+        // a void call produces no value. pushing one anyway left a void-typed entry that no
+        // parent ever pops, so a `foo();` statement quietly grew the stack
+        if (!ret->getType()->isVoidTy()) {
+            _ctx.value_stack.push(ret);
+        }
     }
 }
 
-void ExprCodegen::gen_var_ptr(AST::VarPtrExprNode &node)
+void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
 {
-    // Get a pointer to the variable referenced by var_ref
-    // We need to handle different types of variable references
+    // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
+    // gen_place. so `&$buf` on a `ptr<uint8>` yields the address of $buf itself
+    _ctx.value_stack.push(_ctx.lvalues->gen_lvalue(*node.operand).address);
+}
 
-    if (node.var_ref->is_var()) {
-        // Handle regular variable reference - get the pointer (alloca)
-        auto &var_node = node.var_ref->get_var();
+void ExprCodegen::gen_null_assert(llvm::Value *address)
+{
+#if ECO_DONT_CATCH_EXCEPTIONS || !defined(NDEBUG)
+    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
 
-        // Get the LLVM alloca instruction for this variable
-        auto it = _ctx.var_map.find(&var_node.decl());
-        if (it == _ctx.var_map.end()) {
-            throw _ctx.error(fmt::format(
-                "Variable '{}' not found in variable map", var_node.decl().name()));
-        }
+    llvm::Value *is_null = _ctx.builder->CreateICmpEQ(
+        address,
+        llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0)),
+        "isnull");
 
-        // Push the alloca instruction (pointer to the variable) onto the stack
-        _ctx.value_stack.push(it->second);
-    }
-    else {
-        throw _ctx.error("Unknown VarRef target type in VarPtrExpr");
-    }
+    llvm::BasicBlock *trap_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "null_trap", fn);
+    llvm::BasicBlock *ok_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "not_null", fn);
+
+    _ctx.builder->CreateCondBr(is_null, trap_block, ok_block);
+
+    _ctx.builder->SetInsertPoint(trap_block);
+    _ctx.builder->CreateCall(llvm::Intrinsic::getDeclaration(_ctx.current_module(), llvm::Intrinsic::trap));
+    _ctx.builder->CreateUnreachable();
+
+    _ctx.builder->SetInsertPoint(ok_block);
+#endif
+}
+
+void ExprCodegen::gen_index(AST::IndexExprNode &node)
+{
+    auto place = _ctx.lvalues->gen_lvalue(node);
+
+    _ctx.value_stack.push(_ctx.builder->CreateLoad(
+        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
+        place.address,
+        "elem"));
+}
+
+void ExprCodegen::gen_deref(AST::DerefExprNode &node)
+{
+    // gen_lvalue on the deref node itself resolves to the pointee's storage; loading it is
+    // the read. keeping the address computation in LValueCodegen is what lets a deref appear
+    // on the left of an assignment as readily as on the right
+    auto place = _ctx.lvalues->gen_lvalue(node);
+
+    _ctx.value_stack.push(_ctx.builder->CreateLoad(
+        _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
+        place.address,
+        "deref"));
 }
 
 void ExprCodegen::gen_null(AST::NullNode &node)
 {
+    // every pointer is the same opaque `ptr` under llvm, so one null constant serves them all
+    _ctx.value_stack.push(llvm::ConstantPointerNull::get(
+        llvm::PointerType::get(*_ctx.llvm_context, 0)));
 }
 
 void ExprCodegen::gen_operator(AST::OperatorNode &node)

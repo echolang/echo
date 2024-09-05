@@ -23,13 +23,16 @@ namespace AST
         n_vardecl,
         n_var,
         n_varref,
-        n_varmut,
+        n_assign,
         n_type,
         n_type_cast,
         n_expr_binary,
         n_expr_unary,
         n_expr_call,
-        n_expr_varptr,
+        n_expr_addrof,
+        n_expr_deref,
+        n_expr_peel,
+        n_expr_index,
         n_expr_void,
         n_func_decl,
         n_func_return,
@@ -41,7 +44,6 @@ namespace AST
         n_attribute,
         n_struct_decl,
         n_member_access,
-        n_membermut,
     };
 
     template<typename T>

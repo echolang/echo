@@ -19,10 +19,6 @@ namespace AST
 
         std::optional<TokenReference> type_token;
 
-        bool is_const = false;
-
-        bool is_pointer = false;
-
         TypeNode(ValueType type, TokenReference type_token)
             : type(type), type_token(type_token)
         {};
@@ -33,10 +29,10 @@ namespace AST
 
         ECO_AST_NODE_TYPE(n_type);
 
+        // `type` is the single source of truth - it already renders its own const and pointer
+        // levels, so prefixing them again here produced `type<const const int32>`
         const std::string node_description() override {
-            std::string const_str = is_const ? "const " : "";
-            std::string prefix = is_pointer ? "ptr" : "type";
-            return prefix + "<" + const_str + type.get_type_desciption() + ">";
+            return "type<" + type.get_type_desciption() + ">";
         }
 
         void accept(Visitor& visitor) override {

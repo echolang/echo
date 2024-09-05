@@ -30,6 +30,7 @@ namespace AST
 namespace Compiler::LLVM
 {
     class TypeLowering;
+    class LValueCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -61,6 +62,10 @@ namespace Compiler::LLVM
         // the type-lowering subsystem, reachable from any subsystem that needs to map an
         // AST::ValueType to an llvm::Type.
         TypeLowering *types = nullptr;
+
+        // the lvalue subsystem: the single place that turns an expression into an address.
+        // every read, write and address-of goes through it, so they cannot drift apart.
+        LValueCodegen *lvalues = nullptr;
 
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();

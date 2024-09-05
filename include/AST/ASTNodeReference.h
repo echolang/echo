@@ -56,14 +56,22 @@ namespace AST
             return static_cast<T*>(parent_ptr);
         }
 
+        // every ExprNode subclass must be listed here. a missing entry is silent: the node still
+        // parses and lowers, it just stops being recognised as an expression, so it drops out of
+        // implicit conversion (try_implicit_cast) and out of anything else that gates on this.
+        // n_member_access was missing, which is why `$s->x * 3.14` never got its implicit cast
         inline bool is_expression_node() const {
             assert(has());
             return parent_type == NodeType::n_expr_binary ||
                    parent_type == NodeType::n_expr_unary ||
                    parent_type == NodeType::n_expr_call ||
                    parent_type == NodeType::n_varref ||
-                   parent_type == NodeType::n_expr_varptr ||
+                   parent_type == NodeType::n_expr_addrof ||
+                   parent_type == NodeType::n_expr_deref ||
+                   parent_type == NodeType::n_expr_peel ||
+                   parent_type == NodeType::n_expr_index ||
                    parent_type == NodeType::n_expr_void ||
+                   parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||
                    parent_type == NodeType::n_literal_bool ||

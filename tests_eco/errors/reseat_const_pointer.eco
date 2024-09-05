@@ -1,0 +1,9 @@
+// the mirror of write_through_const_pointee: here the const is on the *pointer* level, so it is
+// the slot that is frozen. `$p = 5` would be legal - it writes the mutable pointee - but `:$`
+// names the slot itself, which is the one thing a const pointer forbids
+$a = 1;
+$b = 2;
+
+const ptr<int> $p = &$a;
+
+$p:$ = &$b;

@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 10:12
+cannot compare 'ptr<int32>' against 'int32' - an address only compares against another address
+Begin: '=='
+End: '=='
+Code excerpt:
+ [9]> ptr<int> $p = &$a;
+ [10]> echo ($p:$ == 0);
+                 ^
+ [11]> 
+
+Critical issues found, cannot compile.

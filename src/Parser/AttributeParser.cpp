@@ -5,7 +5,7 @@
 AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
 {
     if (!payload.cursor.is_type(Token::Type::t_hash)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_hash, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_hash);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -14,7 +14,7 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
 
     // now we except an opening square bracket "["
     if (!payload.cursor.is_type(Token::Type::t_open_bracket)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_open_bracket, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_open_bracket);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -23,7 +23,7 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
 
     // now we expect an identifier
     if (!payload.cursor.is_type(Token::Type::t_identifier)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_identifier, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_identifier);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -41,9 +41,21 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
         return &payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
     }
 
+    // `#[name:$value]` now lexes its `:$` as the pointer-of operator - this is the one place in
+    // the grammar where a colon can be immediately followed by a `$`. a space disambiguates,
+    // and saying so beats letting the attribute fail as a mysteriously missing colon
+    if (payload.cursor.is_type(Token::Type::t_ptr_of)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(payload.cursor.current()),
+            "Write a space after ':' in an attribute value - ':$' is the pointer-of operator"
+        );
+        payload.cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
     // otherwise we expect a colon and a value
     if (!payload.cursor.is_type(Token::Type::t_colon)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_colon, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_colon);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -60,7 +72,7 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
 
     // next we expect a closing square bracket
     if (!payload.cursor.is_type(Token::Type::t_close_bracket)) {
-        payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(payload.cursor.current()), Token::Type::t_close_bracket, payload.cursor.current().type());
+        payload.collect_unexpected_token(Token::Type::t_close_bracket);
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }

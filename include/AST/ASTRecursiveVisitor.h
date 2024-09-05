@@ -28,7 +28,10 @@ namespace AST
         void visitLiteralBoolExpr(LiteralBoolExprNode &node) override;
         void visitLiteralStringExpr(LiteralStringExprNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
-        void visitVarPtrExpr(VarPtrExprNode &node) override;
+        void visit_addr_of_expr(AddrOfExprNode &node) override;
+        void visit_deref_expr(DerefExprNode &node) override;
+        void visit_pointer_value(PointerValueNode &node) override;
+        void visit_index_expr(IndexExprNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
         void visitNull(NullNode &node) override;
@@ -37,14 +40,13 @@ namespace AST
         void visitReturn(ReturnNode &node) override;
         void visitIfStatement(IfStatementNode &node) override;
         void visitWhileStatement(WhileStatementNode &node) override;
-        void visitVarMut(VarMutNode &node) override;
+        void visit_assign(AssignNode &node) override;
         void visitNamespaceDecl(NamespaceDeclNode &node) override;
         void visitNamespace(NamespaceNode &node) override;
         void visitAttribute(AttributeNode &node) override;
         void visitStructDecl(StructDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visitVar(VarNode &node) override;
-        void visitMemberMut(MemberMutNode &node) override;
     };
 };
 
