@@ -4,6 +4,8 @@
 #pragma once
 
 #include <algorithm>
+#include <stdexcept>
+
 #include "ASTModule.h"
 #include "ASTFile.h"
 #include "ASTCodeRef.h"

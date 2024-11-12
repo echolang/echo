@@ -11,6 +11,7 @@
 #include "../AST/ASTCollector.h"
 
 #include <memory>
+#include <exception>
 
 namespace Parser
 {

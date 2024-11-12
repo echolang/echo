@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <exception>
 
 #include "Token.h"
 #include "AST/ASTOps.h"

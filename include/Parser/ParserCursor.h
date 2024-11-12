@@ -4,6 +4,8 @@
 #pragma once
 
 #include <string>
+#include <algorithm>
+#include <initializer_list>
 #include <assert.h>
 #include "../Token.h"
 

@@ -2,6 +2,8 @@
 #include "Debugging.h"
 #include "Lexer.h"
 
+#include <stdexcept>
+
 std::string AST::Module::debug_description() const
 {
     std::string result = "[" + name + "]\n";

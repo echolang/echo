@@ -5,6 +5,8 @@
 
 #include "AST/ASTIssue.h"
 
+#include <exception>
+
 namespace AST
 {
     class File;

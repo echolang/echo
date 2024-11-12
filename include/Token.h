@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <cassert>
+#include <initializer_list>
 
 #include <cstdint>
 
