@@ -24,7 +24,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Setup LLVM
       uses: ZhongRuoyu/setup-llvm@v0
@@ -66,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
   
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
@@ -91,16 +91,16 @@ jobs:
   
       - name: Build release
         run: |
-          cmake --build ${{github.workspace}}/build --config Release --target echo
-          cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+          cmake --build ${{github.workspace}}/build --config Release --target echoc
+          cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
   
       - name: Upload release binary
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}
 
-  build_release_macos_x86_64:
+  build_release_macos_arm64:
     runs-on: macos-14
     needs: build_and_test
     env:
@@ -108,11 +108,11 @@ jobs:
       CC: clang
       CXX: clang++
       USE_CLANG: 1
-      BIN_NAME: echo-macos-x86_64
+      BIN_NAME: echo-macos-arm64
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
   
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
@@ -132,11 +132,11 @@ jobs:
   
       - name: Build release
         run: |
-          cmake --build ${{github.workspace}}/build --config Release --target echo
-          cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+          cmake --build ${{github.workspace}}/build --config Release --target echoc
+          cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
   
       - name: Upload release binary
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}
@@ -153,7 +153,7 @@ jobs:
 
   #   steps:
   #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v5
   
   #     - name: Setup LLVM
   #       uses: ZhongRuoyu/setup-llvm@v0
@@ -173,11 +173,11 @@ jobs:
   
   #     - name: Build release
   #       run: |
-  #         cmake --build ${{github.workspace}}/build --config Release --target echo
-  #         cp ${{github.workspace}}/build/echo ${{github.workspace}}/${{env.BIN_NAME}}
+  #         cmake --build ${{github.workspace}}/build --config Release --target echoc
+  #         cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
   
   #     - name: Upload release binary
-  #       uses: actions/upload-artifact@v2
+  #       uses: actions/upload-artifact@v4
   #       with:
   #         name: ${{env.BIN_NAME}}
   #         path: ${{github.workspace}}/${{env.BIN_NAME}}
