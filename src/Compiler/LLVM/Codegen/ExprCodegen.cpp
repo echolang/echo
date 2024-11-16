@@ -35,14 +35,32 @@
 namespace Compiler::LLVM
 {
 
-// the printf conversion `echo` prints a value with, or null for a type it has no format for.
-// a table rather than an if-cascade so that adding a primitive is one line and cannot silently
-// reuse a neighbouring width - `usize`/`isize` print as their concrete 64 bit width, which is
-// what ECO_TARGET_POINTER_SIZE says on every target wired up today
-static const char *printf_format_for(const AST::ValueType &type)
+// how `echo` prints one value: the printf conversion, and the primitive the value has to be
+// widened to before it is handed to a variadic call. both halves sit in one row because C's
+// default argument promotions are part of the conversion rather than a step after it - printf
+// reads exactly what the format says, so `%d` against a raw i8 reads four bytes where one was
+// passed, and `%f` against a raw float reads a double. only the AArch64 backend performs those
+// promotions on our behalf, which is why passing the value raw looked correct on arm64 macOS and
+// printed the untruncated int (300 for an int8 holding 44) and 0.000000 for a float32 on x86-64.
+//
+// the promoted type is chosen to agree with the format exactly - unsigned widens to uint32 under
+// `%u` rather than to the int32 C's integer promotion would strictly give - so the two cannot
+// drift apart. a table rather than an if-cascade so that adding a primitive is one row and cannot
+// silently reuse a neighbouring width: `usize`/`isize` print as their concrete 64 bit width, which
+// is what ECO_TARGET_POINTER_SIZE says on every target wired up today
+struct EchoConversion
 {
+    // null for a type echo has no conversion for
+    const char *format;
+    AST::ValueTypePrimitive promoted;
+};
+
+static EchoConversion printf_conversion_for(const AST::ValueType &type)
+{
+    constexpr EchoConversion unsupported{nullptr, AST::ValueTypePrimitive::t_void};
+
     if (!type.is_primitive()) {
-        return nullptr;
+        return unsupported;
     }
 
     switch (type.get_primitive_type())
@@ -51,27 +69,27 @@ static const char *printf_format_for(const AST::ValueType &type)
         case AST::ValueTypePrimitive::t_int16:
         case AST::ValueTypePrimitive::t_int32:
         case AST::ValueTypePrimitive::t_bool:
-            return "%d\n";
+            return {"%d\n", AST::ValueTypePrimitive::t_int32};
 
         case AST::ValueTypePrimitive::t_int64:
         case AST::ValueTypePrimitive::t_isize:
-            return "%lld\n";
+            return {"%lld\n", AST::ValueTypePrimitive::t_int64};
 
         case AST::ValueTypePrimitive::t_uint8:
         case AST::ValueTypePrimitive::t_uint16:
         case AST::ValueTypePrimitive::t_uint32:
-            return "%u\n";
+            return {"%u\n", AST::ValueTypePrimitive::t_uint32};
 
         case AST::ValueTypePrimitive::t_uint64:
         case AST::ValueTypePrimitive::t_usize:
-            return "%llu\n";
+            return {"%llu\n", AST::ValueTypePrimitive::t_uint64};
 
         case AST::ValueTypePrimitive::t_float32:
         case AST::ValueTypePrimitive::t_float64:
-            return "%f\n";
+            return {"%f\n", AST::ValueTypePrimitive::t_float64};
 
         default:
-            return nullptr;
+            return unsupported;
     }
 }
 void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
@@ -411,15 +429,22 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // has no format for one
             auto result_type = arg->result_type();
 
-            const char *format = printf_format_for(result_type);
-            if (format == nullptr) {
+            const EchoConversion conversion = printf_conversion_for(result_type);
+            if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
                     result_type.get_type_desciption(), _ctx.function_context()));
             }
 
+            // echo is a destination like any other, so the widening goes through the one
+            // conversion table rather than being hand rolled here: it takes the extend from the
+            // *source's* signedness, so int8 sign extends where uint8 zero extends, and it hands
+            // an already-wide value straight back - int32/int64/float64 emit no extra IR at all
+            arg_value = _ctx.types->coerce_value(
+                arg_value, result_type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit);
+
             std::vector<llvm::Value *> ArgsV = {
-                _ctx.builder->CreateGlobalStringPtr(format),
+                _ctx.builder->CreateGlobalStringPtr(conversion.format),
                 arg_value
             };
 
