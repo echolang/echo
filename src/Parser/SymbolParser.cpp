@@ -10,12 +10,13 @@ void Parser::parse_symbols(Parser::Payload &payload)
 {
     while (!payload.cursor.is_done())
     {
+        // functions do not become namespace symbols: a symbol slot holds one node per name, and a
+        // name denotes an overload *set*. parse_funcdecl registers them in
+        // Collector::functions instead, which is also why `struct Foo` and its constructor `Foo`
+        // no longer fight over the same slot
         if (payload.cursor.is_type(Token::Type::t_function))
         {
-            auto funcdecl = parse_funcdecl(payload, true);
-            if (funcdecl) {
-                payload.context.current_namespace->push_symbol(std::make_unique<AST::Symbol>(funcdecl));
-            }
+            parse_funcdecl(payload, true);
         }
         else if (payload.cursor.is_type(Token::Type::t_struct)) {
             auto structdecl = parse_struct(payload, true);
@@ -27,10 +28,9 @@ void Parser::parse_symbols(Parser::Payload &payload)
         {
             // walked in the symbol pass too, so the node it produces already knows it is extern.
             // otherwise a cross-module call would resolve to this node and mangle the Echo name
-            // while codegen emitted the raw C symbol - an undefined symbol at link time
-            for (auto *funcdecl : parse_extern_block(payload, true)) {
-                payload.context.current_namespace->push_symbol(std::make_unique<AST::Symbol>(funcdecl));
-            }
+            // while codegen emitted the raw C symbol - an undefined symbol at link time.
+            // registration happens inside parse_funcdecl, same as any other function
+            parse_extern_block(payload, true);
         }
         else if (payload.cursor.is_type(Token::Type::t_namespace)) 
         {

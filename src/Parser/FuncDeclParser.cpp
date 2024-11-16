@@ -92,21 +92,17 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    auto fncsymbol = payload.collector.namespaces.find_symbol(nametoken.value(), *payload.context.current_namespace);
-    AST::FunctionDeclNode *funcdecl = nullptr;
+    // a module is parsed twice - once for symbols, once in full - and both passes must land on
+    // *one* node per declaration, or the full pass's body is attached to a node no call resolves
+    // to. the two are matched on where the declaration is written rather than on its name: the
+    // name identifies an overload *set*, and this decision has to be made here, at the name
+    // token, before the parameter list that would tell the overloads apart has been parsed
+    AST::FunctionDeclNode *funcdecl = payload.collector.functions.find_by_declaration_site(nametoken);
 
-    if (fncsymbol != nullptr) {
-        auto symboldecl = fncsymbol->node.get_ptr<AST::FunctionDeclNode>();
-        if (symboldecl != nullptr) {
-            funcdecl = symboldecl;
-
-            // if the function is already defined, we reset the arguments
-            // and reparse them with the new context
-            funcdecl->args.clear();
-        }
-    }
-
-    if (funcdecl == nullptr) {
+    if (funcdecl != nullptr) {
+        // the arguments are rebuilt against this pass's context, so drop the previous pass's
+        funcdecl->args.clear();
+    } else {
         funcdecl = &payload.context.emplace_node<AST::FunctionDeclNode>(nametoken);
     }
 
@@ -158,6 +154,13 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     }
 
     funcdecl->return_type = parse_type(payload);
+
+    // the signature is complete, so this is the earliest point the declaration can join its
+    // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes
+    // the declaration visible to calls written above it and in other files, and the full pass
+    // finds its own declaration site already present and returns the same handle
+    payload.collector.functions.register_function(
+        payload.collector, payload.context.code_ref(nametoken), funcdecl);
 
     // an extern declaration ends here, in both parser passes, so this is the single place that
     // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass

@@ -1,0 +1,41 @@
+// a user-written `constructor(...)`. two things had to be true for this to work at all: `$this`
+// has to be the body's first declaration (allocas are emitted in child order, so a `$this` added
+// after the body was parsed had no storage when the statements above it wrote through it), and
+// the constructor has to be *reachable* - it shares its name with the synthesized field-wise one,
+// which used to win every lookup (todo/B2)
+
+struct Point {
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $v) {
+        $this->x = $v;
+        $this->y = $v * 2;
+    }
+}
+
+// the user's constructor
+Point $a = Point(3);
+echo $a->x;
+echo $a->y;
+
+// the field-wise one is still there - it is only suppressed when the user writes a constructor
+// with the very same parameter types, because Echo has no other way to build a struct
+Point $b = Point(7, 9);
+echo $b->x;
+echo $b->y;
+
+// reading and writing through $this inside the body, including a local
+struct Counter {
+    int32 $total;
+
+    constructor(int32 $start, int32 $step) {
+        int32 $sum = $start;
+        $sum = $sum + $step;
+        $this->total = $sum;
+        $this->total = $this->total + 1;
+    }
+}
+
+Counter $c = Counter(10, 5);
+echo $c->total;

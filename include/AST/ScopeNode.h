@@ -17,7 +17,6 @@ namespace AST
     class ScopeNode : public Node
     {
         std::unordered_map<std::string, VarDeclNode *> _declared_variables;
-        std::unordered_map<std::string, FunctionDeclNode *> _declared_functions;
         std::unordered_map<std::string, StructDeclNode *> _declared_structs;
 
     public:
@@ -71,7 +70,12 @@ namespace AST
         }
 
         void add_vardecl(VarDeclNode &vardecl);
+
+        // appends the declaration to the child list so codegen emits its body. it does *not*
+        // register the name - functions are looked up through AST::FunctionRegistry, which keys
+        // (namespace, name) to an overload set rather than to a single declaration
         void add_funcdecl(FunctionDeclNode &funcdecl);
+
         void add_structdecl(StructDeclNode &structdecl);
 
         void add_attribute(AttributeNode &attribute);
@@ -81,7 +85,6 @@ namespace AST
         bool is_varname_taken(const std::string &varname) const;
 
         VarDeclNode *find_vardecl_by_name(const std::string &varname) const;
-        FunctionDeclNode *find_funcdecl_by_name(const std::string &funcname) const;
 
     private:
 

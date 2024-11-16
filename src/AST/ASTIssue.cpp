@@ -90,3 +90,17 @@ ISSUE_MESSAGE_FNC(UnsatisfiedTypeConstraint)
 {
     return _message;
 }
+ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(NoMatchingOverload)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(AmbiguousCall)
+{
+    return _message;
+}

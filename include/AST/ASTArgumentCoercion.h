@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTNode.h"
-#include "AST/ASTPlaceExpr.h"
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
 
@@ -17,24 +17,12 @@ namespace AST
     // returns the possibly-wrapped argument
     inline ExprNode *coerce_arg_to_pointer_param(NodeCollection &nodes, ExprNode *arg, const ValueType &expected)
     {
-        // only a borrow parameter (`T&`) auto-borrows. a nullable `ptr<T>` parameter does not:
-        // taking an address is a decision the caller should be able to see in the source
-        // (book/concept/pointers_and_refs_v2.md, "Passing to functions")
-        if (!expected.is_pointer() || expected.is_nullable()) {
-            return arg;
-        }
-
-        // an argument that already fits is left alone. this used to be implicit in the pointer
-        // flag being idempotent; now wrapping a ptr<int32> for a ptr<int32> parameter would
-        // build a ptr<ptr<int32>>
-        if (is_implicitly_convertible(arg->result_type(), expected)) {
-            return arg;
-        }
-
-        // any place will do, not just a bare variable: `f($s->field)` borrows the field.
-        // an argument with no storage (a literal, a call result) is left alone and reported
-        // by the type checker rather than silently having an address invented for it
-        if (!is_place_expression(*arg)) {
+        // the whole rule - which parameters auto-borrow, which arguments can be borrowed, and
+        // that an argument which already fits is left alone - lives in argument_fit, because
+        // overload resolution has to predict this decision exactly. a candidate accepted there
+        // and then not wrapped here would reach codegen passing a value where an address is
+        // expected
+        if (argument_fit(arg->result_type(), arg, expected) != ArgumentFit::t_borrow) {
             return arg;
         }
 

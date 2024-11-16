@@ -108,6 +108,29 @@ namespace AST
             return "[anonymous]";
         }
 
+        // the declared parameter types, in order - the half of the signature overload resolution
+        // keys on. a parameter with no resolved type contributes an unknown, which the matcher
+        // reads as "says nothing" rather than as a mismatch
+        // the declared type of one parameter, unknown when it has none yet. the single spelling of
+        // "what type does this parameter have", so a caller comparing one parameter does not have
+        // to materialize the whole vector to get the same answer
+        inline ValueType parameter_type(size_t index) const {
+            return args[index]->has_type() ? args[index]->type() : ValueType::make_unknown();
+        }
+
+        inline std::vector<ValueType> parameter_types() const {
+            std::vector<ValueType> types;
+            types.reserve(args.size());
+            for (size_t i = 0; i < args.size(); i++) {
+                types.push_back(parameter_type(i));
+            }
+            return types;
+        }
+
+        // the signature as a reader wrote it - `a::foo(int32, float64)`. for diagnostics only;
+        // the symbol-table identity is decorated_func_name()
+        const std::string signature_description() const;
+
         // returns the decorated function name as it would appear in the symbol table
         // this is the name that is used to uniquely identify the function aka the mangled name
         const std::string decorated_func_name() const;

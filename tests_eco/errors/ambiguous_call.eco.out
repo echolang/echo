@@ -1,0 +1,14 @@
+---- Issue ----
+Issue at 6:6
+The call to 'f' is ambiguous. These overloads all match equally well:
+  f(int32, float64)
+  f(float64, int32)
+Begin: 'f'
+End: 'f'
+Code excerpt:
+ [5]> 
+ [6]> echo f(1, 2);
+           ^
+ [7]> 
+
+Critical issues found, cannot compile.

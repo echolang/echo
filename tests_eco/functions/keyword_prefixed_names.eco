@@ -1,0 +1,110 @@
+// a name that merely begins with a keyword is an ordinary name. keywords used to be matched as
+// prefixes in the lexer's trie, so `forward` lexed as `for` + `ward` and `constructor` as
+// `const` + `ructor` - which made a whole class of obvious names unusable (todo/B17)
+
+function forward(int32 $n) : int32 {
+    return $n;
+}
+
+function classify(int32 $n) : int32 {
+    return $n * 2;
+}
+
+function elsewhere() : int32 {
+    return 7;
+}
+
+function constant() : int32 {
+    return 11;
+}
+
+function iterate(int32 $n) : int32 {
+    return $n + 1;
+}
+
+function asset() : int32 {
+    return 13;
+}
+
+function breakpoint() : int32 {
+    return 17;
+}
+
+function continues() : int32 {
+    return 19;
+}
+
+function externals() : int32 {
+    return 23;
+}
+
+function functional() : int32 {
+    return 29;
+}
+
+function namespaces() : int32 {
+    return 31;
+}
+
+function echoing() : int32 {
+    return 37;
+}
+
+function whiles() : int32 {
+    return 41;
+}
+
+function returns() : int32 {
+    return 43;
+}
+
+function truely() : int32 {
+    return 47;
+}
+
+function falsehood() : int32 {
+    return 53;
+}
+
+function pointer() : int32 {
+    return 59;
+}
+
+function nullable() : int32 {
+    return 61;
+}
+
+struct structure {
+    int32 $enumerate;
+}
+
+int32 $iffy = 3;
+
+echo forward($iffy);
+echo classify($iffy);
+echo elsewhere();
+echo constant();
+echo iterate($iffy);
+echo asset();
+echo breakpoint();
+echo continues();
+echo externals();
+echo functional();
+echo namespaces();
+echo echoing();
+echo whiles();
+echo returns();
+echo truely();
+echo falsehood();
+echo pointer();
+echo nullable();
+
+structure $s = structure(67);
+echo $s->enumerate;
+
+// the bare keywords still lex as keywords, with and without surrounding whitespace
+if (true) {
+    echo 1;
+} else {
+    echo 0;
+}

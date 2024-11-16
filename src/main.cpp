@@ -196,7 +196,11 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
     }
 
     if (cli.get<bool>("--print-symbol-table")) {
+        // two stores, deliberately: the namespace tree holds the types, the function registry
+        // holds the overload sets
         std::cout << bundle.collector.namespaces.root().debug_dump_symbols() << std::endl;
+        std::cout << "[functions]" << std::endl;
+        std::cout << bundle.collector.functions.debug_dump() << std::endl;
     }
 
     if (cli.get<bool>("--print-ast")) {

@@ -37,11 +37,10 @@ void AST::ScopeNode::add_vardecl(VarDeclNode &vardecl)
 
 void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)
 {
+    // the child list only. a function is *found* through Collector::functions, which holds
+    // overload sets rather than one declaration per name; this list is what codegen walks to emit
+    // the bodies, so it stays
     children.push_back(AST::make_ref(funcdecl));
-
-    if (!funcdecl.is_anonymous()) {
-        _declared_functions[funcdecl.func_name()] = &funcdecl;
-    }
 }
 
 void AST::ScopeNode::add_structdecl(AST::StructDeclNode &structdecl)
@@ -99,17 +98,3 @@ AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varnam
     return nullptr;
 }
 
-AST::FunctionDeclNode *AST::ScopeNode::find_funcdecl_by_name(const std::string &funcname) const
-{
-    auto found = _declared_functions.find(funcname);
-    if (found != _declared_functions.end()) {
-        return found->second;
-    }
-
-    // if this is not the root scope, check the parent tree
-    if (!is_root()) {
-        return parent().find_funcdecl_by_name(funcname);
-    }
-
-    return nullptr;
-}

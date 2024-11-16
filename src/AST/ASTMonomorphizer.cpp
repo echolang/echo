@@ -40,50 +40,6 @@ namespace AST
         return CodeRef{&mod, file, token.make_slice()};
     }
 
-    void Monomorphizer::unify(const ValueType &param, const ValueType &arg, TypeSubstitution &out, bool allow_decay)
-    {
-        // generic inference decays a pointer argument to its pointee unless the parameter asks
-        // for a pointer explicitly, so `box($p)` yields Box<int32> rather than Box<ptr<int32>>
-        // (book/concept/pointers_and_refs_v2.md, "Pointers and generics"). stated over the
-        // whole param rather than only a bare `T`, so Box<T> against ptr<Box<int32>> decays too
-        // instead of silently binding nothing.
-        //
-        // only at the top level though: asking for `ptr<T>` is how the doc says to opt out of
-        // the decay, so everything below that match binds exactly
-        if (allow_decay && !param.is_pointer() && arg.is_pointer()) {
-            unify(param, value_type_of(arg), out, allow_decay);
-            return;
-        }
-
-        // pointer against pointer binds structurally, one level down
-        if (param.is_pointer() && arg.is_pointer()) {
-            unify(param.pointee(), arg.pointee(), out, false);
-            return;
-        }
-
-        // a bare type parameter binds directly to the argument type
-        if (param.is_type_param()) {
-            out.bind(param.get_type_param(), arg);
-            return;
-        }
-
-        // a generic application binds structurally, e.g. Box<T> against Box<int> binds T=int
-        if ((param.is_struct() || param.is_class()) && (arg.is_struct() || arg.is_class())) {
-            ComplexType *pct = param.get_complex_type();
-            ComplexType *act = arg.get_complex_type();
-            if (pct && act && pct->is_instantiated() && act->is_instantiated()
-                && pct->template_ref == act->template_ref
-                && pct->instantiation_args.size() == act->instantiation_args.size()) {
-                // exact, like the pointer descent above: `Box<int32&>` is a different layout
-                // from `Box<int32>`, so binding T by reading the borrow away would pick the
-                // wrong instance rather than a compatible one
-                for (size_t i = 0; i < pct->instantiation_args.size(); i++) {
-                    unify(pct->instantiation_args[i], act->instantiation_args[i], out, false);
-                }
-            }
-        }
-    }
-
     std::optional<std::vector<ValueType>> Monomorphizer::determine_type_args(FunctionCallExprNode *call, Module &mod, bool &is_error)
     {
         FunctionDeclNode *tmpl = call->decl;
@@ -115,7 +71,7 @@ namespace AST
             // *declaration* order, because that order is what identifies the instantiation
             TypeSubstitution inferred;
             for (size_t i = 0; i < call->arguments.size(); i++) {
-                unify(tmpl->args[i]->type(), call->arguments[i]->result_type(), inferred);
+                unify_type(tmpl->args[i]->type(), call->arguments[i]->result_type(), inferred);
             }
 
             // an unbound parameter is only retryable while the call still sits in a template body
@@ -123,9 +79,7 @@ namespace AST
             // can bind it, so this is a real "cannot infer" rather than a not-yet
             bool arguments_concrete = true;
             for (auto *argument : call->arguments) {
-                ValueType arg_type = argument->result_type();
-                if (contains_type_param(arg_type) || arg_type.is_void()
-                    || arg_type.get_kind() == ValueTypeKind::t_unknown) {
+                if (is_undetermined_type(argument->result_type())) {
                     arguments_concrete = false;
                     break;
                 }
@@ -155,7 +109,7 @@ namespace AST
         // e.g. the inner Box<T>(...) in a generic factory is not instantiated as Box<T> - only as
         // Box<int> after the factory is cloned for int.
         for (const auto &arg : args) {
-            if (contains_type_param(arg) || arg.is_void() || arg.get_kind() == ValueTypeKind::t_unknown) {
+            if (is_undetermined_type(arg)) {
                 return std::nullopt;
             }
         }
@@ -369,18 +323,11 @@ namespace AST
 
     namespace
     {
-        // "name(int32, float64) -> Box<int32>" for a resolved instance
+        // "name(int32, float64) -> Box<int32>" for a resolved instance. the signature itself is the
+        // declaration's own rendering; only the return-type suffix belongs to this dump
         std::string describe_signature(const FunctionDeclNode *fn)
         {
-            std::string result = fn->func_name() + "(";
-            for (size_t i = 0; i < fn->args.size(); i++) {
-                if (i > 0) {
-                    result += ", ";
-                }
-                result += fn->args[i]->type().get_type_desciption();
-            }
-            result += ") -> " + fn->get_return_type().get_type_desciption();
-            return result;
+            return fn->signature_description() + " -> " + fn->get_return_type().get_type_desciption();
         }
     }
 

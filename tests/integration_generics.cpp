@@ -8,28 +8,9 @@
 
 using namespace AST;
 
-namespace {
-    ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
-
-    std::vector<FunctionCallExprNode *> calls_to(Module &m, const std::string &name) {
-        std::vector<FunctionCallExprNode *> out;
-        for (auto *call : m.nodes.of_type<FunctionCallExprNode>()) {
-            if (call->token_function_name.value() == name) {
-                out.push_back(call);
-            }
-        }
-        return out;
-    }
-
-    bool has_issue_containing(const Bundle &bundle, const std::string &needle) {
-        for (const auto &issue : bundle.collector.issues) {
-            if (issue->message().find(needle) != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
-    }
-}
+using EchoTests::calls_to;
+using EchoTests::has_issue_containing;
+using EchoTests::prim;
 
 // the parsed bundle is monomorphized by the test harness, so these assert the post-pass shape:
 // generic call sites point at concrete instances and no type parameters survive.

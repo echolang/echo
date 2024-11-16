@@ -4,6 +4,7 @@
 #include <AST/ASTMonomorphizer.h>
 #include <AST/ASTPointerAdjuster.h>
 #include <AST/ASTTypeChecker.h>
+#include <AST/FunctionDeclNode.h>
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
 {
@@ -131,4 +132,41 @@ void EchoTests::assert_code_emits_issue(std::string content, std::string expecte
 
     // nothing found just compare against the first issue
     REQUIRE(bundle->collector.issues[0]->message() == expected_issue);
+}
+
+std::vector<AST::FunctionCallExprNode *> EchoTests::calls_to(AST::Module &m, const std::string &name)
+{
+    std::vector<AST::FunctionCallExprNode *> out;
+
+    for (auto *call : m.nodes.of_type<AST::FunctionCallExprNode>()) {
+        if (call->token_function_name.value() == name) {
+            out.push_back(call);
+        }
+    }
+
+    return out;
+}
+
+std::vector<AST::FunctionDeclNode *> EchoTests::decls_named(AST::Module &m, const std::string &name)
+{
+    std::vector<AST::FunctionDeclNode *> out;
+
+    for (auto *decl : m.nodes.of_type<AST::FunctionDeclNode>()) {
+        if (!decl->is_anonymous() && decl->func_name() == name) {
+            out.push_back(decl);
+        }
+    }
+
+    return out;
+}
+
+bool EchoTests::has_issue_containing(const AST::Bundle &bundle, const std::string &needle)
+{
+    for (const auto &issue : bundle.collector.issues) {
+        if (issue->message().find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+
+    return false;
 }

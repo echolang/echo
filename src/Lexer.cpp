@@ -263,6 +263,12 @@ void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, 
 #define ECHO_LEX_FNC_CUST_STRING(name, lit, type) \
     name.push_back(std::make_unique<LexerFunction::StringToken>(lit, type));
 
+#define ECHO_LEX_FNC_KEYWORD(name, type) \
+    name.push_back(std::make_unique<LexerFunction::KeywordToken>(token_lit_symbol_string(type), type));
+
+#define ECHO_LEX_FNC_CUST_KEYWORD(name, lit, type) \
+    name.push_back(std::make_unique<LexerFunction::KeywordToken>(lit, type));
+
 void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AST::OperatorRegistry *op_registry) 
 {   
     auto cursor = LexerCursor(input);
@@ -310,27 +316,35 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input, const AS
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_bracket);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_close_bracket);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_hash);
-    ECHO_LEX_FNC_CUST_STRING(lx_functions, "true", Token::Type::t_bool_literal);
-    ECHO_LEX_FNC_CUST_STRING(lx_functions, "false", Token::Type::t_bool_literal);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_const);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_echo);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_function);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_return);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_if);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_else);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_while);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_for);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_break);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_continue);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace);
+
+    // every keyword spelled out of identifier characters goes in as a KEYWORD rather than a
+    // STRING: a plain StringToken matches a prefix, so `const` ate the head of `constructor` and
+    // `for` the head of `forward`. the keyword variant is the same trie entry plus a one
+    // character look-ahead for a word boundary (todo/B17)
+    ECHO_LEX_FNC_CUST_KEYWORD(lx_functions, "true", Token::Type::t_bool_literal);
+    ECHO_LEX_FNC_CUST_KEYWORD(lx_functions, "false", Token::Type::t_bool_literal);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_const);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_echo);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_function);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_return);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_if);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_else);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_while);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_for);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_break);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_continue);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_namespace);
+
+    // not a word keyword - `::` cannot collide with an identifier, so it stays a plain string
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace_sep);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_ptr);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_null);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_struct);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_class);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_enum);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_extern);
-    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_as);
+
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_ptr);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_null);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_struct);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_class);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_enum);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_extern);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_as);
 
     lx_functions.push_back(std::make_unique<LexerFunction::NumericLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
@@ -607,6 +621,28 @@ bool LexerFunction::StringToken::parse(TokenCollection &tokens, LexerCursor &cur
     tokens.push(lit, type, cursor.line, cursor.char_offset);
     cursor.skip(lit.size());
     return true;
+}
+
+// --- KeywordToken ---
+// ----------------------------------------------------------------------------
+bool LexerFunction::KeywordToken::parse(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    if (!cursor.begins_with(lit)) {
+        return false;
+    }
+
+    // a keyword is a whole word, so the character that follows it must not be one an identifier
+    // could continue with. without this the match is a prefix match and eats the head of every
+    // identifier that happens to start with a keyword - `constructor` lexed as `const` +
+    // `ructor`, `forward` as `for` + `ward` (todo/B17). peek() answers '\0' past the end, which
+    // is not a varname character, so a keyword at EOF still matches
+    if (varname_lut[static_cast<unsigned char>(cursor.peek(lit.size()))]) {
+        return false;
+    }
+
+    // the boundary check is the only thing a keyword adds; how the token itself is emitted stays
+    // with the base
+    return StringToken::parse(tokens, cursor);
 }
 
 // --- NumericLiteral ---

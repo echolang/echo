@@ -1,0 +1,51 @@
+// function names resolve on the full signature, not just the name. before this, two same-named
+// declarations collapsed into a single AST node: the last signature and the last body won, and
+// the first body was silently dropped
+
+function describe(int32 $v) : int32 { return 1; }
+function describe(float64 $v) : int32 { return 2; }
+function describe(bool $v) : int32 { return 3; }
+function describe(int32 $a, int32 $b) : int32 { return 4; }
+
+// picked by argument type
+echo describe(1);
+echo describe(1.5);
+echo describe(true);
+
+// and by arity
+echo describe(1, 2);
+
+// the same, through variables rather than literals
+int32 $i = 9;
+float64 $f = 0.5;
+bool $b = false;
+echo describe($i);
+echo describe($f);
+echo describe($b);
+
+// an exact match beats one that would need a conversion
+function width(int64 $v) : int32 { return 10; }
+function width(float64 $v) : int32 { return 20; }
+int64 $big = 4;
+echo width($big);
+
+// with neither exact, a promotion beats a conversion: int32 into int64 keeps both the value and
+// the family, where int32 into float64 crosses families. these two used to rank identically and
+// the call was reported as ambiguous
+int32 $small = 4;
+float32 $narrow = 1.5f;
+echo width($small);     // int32 -> int64
+echo width($narrow);    // float32 -> float64
+
+// an exact match still beats a promotion
+function depth(int32 $v) : int32 { return 30; }
+function depth(int64 $v) : int32 { return 40; }
+echo depth($small);
+
+// the return type follows the overload that was chosen, so a declaration infers from it
+function produce(int32 $v) : float64 { return 1.5; }
+function produce(float64 $v) : int32 { return 7; }
+$from_int = produce(1);
+$from_float = produce(1.0);
+echo $from_int;
+echo $from_float;

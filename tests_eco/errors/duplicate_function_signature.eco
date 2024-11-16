@@ -1,0 +1,7 @@
+// overloads have to differ in their parameters. two declarations that mangle to the same symbol
+// are the same function twice, and the collision used to surface as an internal codegen throw
+// about "a name mangling defect" - or not at all, with the second body silently replacing the first
+function f(int32 $a) : int32 { return 1; }
+function f(int32 $b) : int32 { return 2; }
+
+echo f(1);

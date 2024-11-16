@@ -451,3 +451,74 @@ TEST_CASE( "An attribute needs a space before a '$' value", "[lexer][pointer]" )
     REQUIRE( has_colon );
     REQUIRE( has_varname );
 }
+
+TEST_CASE( "Keywords are whole words", "[lexer]" )
+{
+    Lexer lexer;
+
+    // an identifier that merely begins with a keyword is one identifier. this used to split at
+    // the keyword boundary, because keywords were matched as prefixes in the lexer's trie:
+    // `constructor` came out as `const` + `ructor` and `forward` as `for` + `ward` (todo/B17)
+    for (const auto &name : {
+        "constructor", "constant", "forward", "format", "classify", "elsewhere",
+        "enumerate", "structure", "nullable", "pointer", "iterate", "asset",
+        "breakpoint", "continues", "externals", "returns", "iffy", "whiles",
+        "functional", "namespaces", "echoing", "truely", "falsehood",
+    }) {
+        TokenCollection tokens;
+        lexer.tokenize(tokens, name);
+
+        REQUIRE( tokens.size() == 1 );
+        REQUIRE( tokens[0].type() == Token::Type::t_identifier );
+        REQUIRE( tokens[0].value() == name );
+    }
+
+    // the bare keywords still lex as keywords
+    const std::vector<std::pair<const char *, Token::Type>> keywords = {
+        { "const", Token::Type::t_const },
+        { "echo", Token::Type::t_echo },
+        { "function", Token::Type::t_function },
+        { "return", Token::Type::t_return },
+        { "if", Token::Type::t_if },
+        { "else", Token::Type::t_else },
+        { "while", Token::Type::t_while },
+        { "for", Token::Type::t_for },
+        { "break", Token::Type::t_break },
+        { "continue", Token::Type::t_continue },
+        { "namespace", Token::Type::t_namespace },
+        { "ptr", Token::Type::t_ptr },
+        { "null", Token::Type::t_null },
+        { "struct", Token::Type::t_struct },
+        { "class", Token::Type::t_class },
+        { "enum", Token::Type::t_enum },
+        { "extern", Token::Type::t_extern },
+        { "as", Token::Type::t_as },
+        { "true", Token::Type::t_bool_literal },
+        { "false", Token::Type::t_bool_literal },
+    };
+
+    for (const auto &[spelling, type] : keywords) {
+        TokenCollection tokens;
+        lexer.tokenize(tokens, spelling);
+
+        REQUIRE( tokens.size() == 1 );
+        REQUIRE( tokens[0].type() == type );
+    }
+
+    // a keyword still terminates on a non-identifier character rather than needing whitespace
+    TokenCollection tight;
+    lexer.tokenize(tight, "if(true){}else{}");
+
+    // if ( true ) { } else { }
+    REQUIRE( tight[0].type() == Token::Type::t_if );
+    REQUIRE( tight[2].type() == Token::Type::t_bool_literal );
+    REQUIRE( tight[6].type() == Token::Type::t_else );
+
+    // the symbol keywords never went through the word path and are unaffected
+    TokenCollection symbols;
+    lexer.tokenize(symbols, "a::b");
+
+    REQUIRE( symbols[0].type() == Token::Type::t_identifier );
+    REQUIRE( symbols[1].type() == Token::Type::t_namespace_sep );
+    REQUIRE( symbols[2].type() == Token::Type::t_identifier );
+}

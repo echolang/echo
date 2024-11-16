@@ -1,0 +1,14 @@
+---- Issue ----
+Issue at 6:6
+No overload of 'f' accepts these arguments. Candidates are:
+  f(int32)
+  f(float64)
+Begin: 'f'
+End: 'f'
+Code excerpt:
+ [5]> 
+ [6]> echo f(1, 2, 3);
+           ^
+ [7]> 
+
+Critical issues found, cannot compile.

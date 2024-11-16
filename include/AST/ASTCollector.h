@@ -6,6 +6,7 @@
 #include "AST/ASTValueTypeCollection.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTContext.h"
+#include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTValueType.h"
@@ -22,6 +23,11 @@ namespace AST
         NamespaceManager namespaces = NamespaceManager();
         TypeRegistry type_registry = TypeRegistry();
         TypeParamRegistry type_params = TypeParamRegistry();
+
+        // every function declaration in the bundle, as overload sets. `namespaces` holds the
+        // types; this holds the functions, which is what lets a struct `Foo` and its constructor
+        // `Foo` coexist under one name
+        FunctionRegistry functions = FunctionRegistry();
         
         // create a registry for the native scalar cast types
         

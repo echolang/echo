@@ -217,6 +217,13 @@ namespace AST
             return is_primitive_of_type(ValueTypePrimitive::t_void);
         }
 
+        // no type has been determined yet. distinct from void, which is a type: an unknown is a
+        // question nothing has answered, and every consumer reads it as "says nothing" rather
+        // than as a mismatch
+        bool is_unknown() const {
+            return kind == ValueTypeKind::t_unknown;
+        }
+
         bool is_struct() const {
             return kind == ValueTypeKind::t_struct;
         }
@@ -650,6 +657,17 @@ namespace AST {
     // or as an argument of a generic application. after monomorphization a concrete context should be
     // free of these; anything left is a resolution bug rather than a legitimate type.
     bool contains_type_param(const ValueType& type);
+
+    // true when nothing has answered what this type is yet: unknown, void, or still mentioning a
+    // type parameter that a substitution has not bound.
+    //
+    // the single spelling of "no information", because every pass that reasons about types before
+    // they are all known needs the same three-way distinction - a wrong type, a right type, and no
+    // type yet. overload ranking reads it as neutral, generic inference as "cannot bind from this,
+    // ask again later", and both used to say it in their own words
+    inline bool is_undetermined_type(const ValueType &type) {
+        return type.is_unknown() || type.is_void() || contains_type_param(type);
+    }
 
     // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
     // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`.

@@ -9,11 +9,15 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/ASTArgumentCoercion.h"
+#include "AST/ASTFunctionMatcher.h"
+#include "AST/ASTTypeUnify.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/TypeCastNode.h"
+#include <fmt/core.h>
+
 #include <map>
 #include <functional>
 #include <unordered_map>
@@ -116,32 +120,124 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(funcname_token, args);
     funcall.explicit_type_args = explicit_type_args;
 
-    // try to find the function declaration
-    funcall.decl = payload.context.scope().find_funcdecl_by_name(funcname_token.value());
-
-    // if no function declaration was found, try to locate an external symbol
-    if (funcall.decl == nullptr) {
-        
-        // if a namespace was provided, try to find the symbol in that namespace
-        if (!requested_namespace) {
-            requested_namespace = payload.context.current_namespace;
-        }
-
-        auto symbol = payload.collector.namespaces.find_symbol(funcname_token.value(), *requested_namespace);
-        if (symbol) {
-            funcall.decl = symbol->node.get_ptr<AST::FunctionDeclNode>();
-        }
+    // a qualified call names the namespace to look in; an unqualified one starts at the one it is
+    // written in and the registry walks outward from there
+    if (!requested_namespace) {
+        requested_namespace = payload.context.current_namespace;
     }
 
-    // if no function declaration was found, we have an issue
-    if (funcall.decl == nullptr) {
+    // one lookup, against one store. this used to be two - the enclosing scope chain first and
+    // the namespace symbol table as a fallback - which meant `a::foo()` preferred a same-named
+    // entry from the scope chain over the namespace it explicitly asked for
+    const auto candidates = payload.collector.functions.overloads(funcname_token.value(), *requested_namespace);
+
+    // a name with no declarations anywhere is a different error from a name whose declarations
+    // do not answer this call, and only the first one is UnknownFunction
+    if (candidates.empty()) {
         payload.collector.collect_issue<AST::Issue::UnknownFunction>(payload.context.code_ref(funcname_token), funcname_token.value());
+        return nullptr;
+    }
+
+    std::vector<AST::FunctionCandidate> match_candidates;
+    match_candidates.reserve(candidates.size());
+
+    std::vector<AST::ValueType> argument_types;
+    argument_types.reserve(args.size());
+
+    for (auto *arg : args) {
+        argument_types.push_back(arg->result_type());
+    }
+
+    // with a single candidate there is nothing to choose between, so it is taken as written and
+    // every judgement about it is left to the passes that specialise in one: the monomorphizer
+    // reports an unsatisfied constraint by name, the type checker reports which argument is
+    // wrong. pre-filtering here would replace both with "no overload accepts these arguments".
+    // the same reasoning as the arity short-circuit inside match_function
+    const bool choosing = candidates.size() > 1;
+
+    for (auto *candidate : candidates) {
+        auto parameter_types = candidate->parameter_types();
+
+        if (choosing && candidate->is_generic()) {
+            // score a template against the parameters it would actually be instantiated with,
+            // not against the bare `T`. an unsubstituted parameter is undetermined, which the
+            // matcher treats as neutral - so `pick<T>(T)` would tie with `pick(int32)` for a
+            // float64 argument and lose the non-generic tiebreak, calling the concrete overload
+            // through a narrowing conversion when the template matched exactly
+            AST::TypeSubstitution inferred;
+            const auto fit = AST::can_instantiate(candidate, argument_types, inferred);
+
+            // the template cannot be instantiated for these arguments at all, so it is not a
+            // candidate. this is also how a type constraint filters an overload set
+            if (fit == AST::InstantiationFit::t_no) {
+                continue;
+            }
+
+            // t_maybe leaves the parameters as written, still mentioning `T`, which the matcher
+            // reads as undetermined - the honest answer while the call sits in a template body
+            // whose own parameters are not bound yet
+            if (fit == AST::InstantiationFit::t_yes) {
+                for (auto &parameter_type : parameter_types) {
+                    parameter_type = AST::substitute_type(parameter_type, inferred, payload.collector.type_registry);
+                }
+            }
+        }
+
+        match_candidates.push_back(AST::FunctionCandidate {
+            .decl = candidate,
+            .parameter_types = std::move(parameter_types),
+            .is_generic = candidate->is_generic(),
+        });
+    }
+
+    const auto match = AST::match_function(match_candidates, argument_types, args);
+
+    switch (match.outcome) {
+    case AST::FunctionMatch::Outcome::t_resolved:
+        funcall.decl = match.decl;
+        break;
+
+    case AST::FunctionMatch::Outcome::t_undecidable:
+        // several candidates fit and the arguments that would separate them have no type yet - an
+        // unbound `null`, a string literal, a variable typed from a generic call. reported rather
+        // than left unresolved: a null decl would travel silently to codegen, and no program
+        // could reach this before overloads existed, so a clear error costs nobody anything. the
+        // real answer is to re-run this match from the monomorphizer once those types exist
+        payload.collector.collect_issue<AST::Issue::AmbiguousCall>(
+            payload.context.code_ref(funcname_token),
+            fmt::format(
+                "The call to '{}' cannot be resolved: the types of its arguments are not known "
+                "here, and these overloads all remain possible:{}\nAn explicit cast on the "
+                "argument picks one.",
+                funcname_token.value(), AST::describe_candidates(match.tied)));
+        return nullptr;
+
+    case AST::FunctionMatch::Outcome::t_ambiguous:
+        payload.collector.collect_issue<AST::Issue::AmbiguousCall>(
+            payload.context.code_ref(funcname_token),
+            fmt::format(
+                "The call to '{}' is ambiguous. These overloads all match equally well:{}",
+                funcname_token.value(), AST::describe_candidates(match.tied)));
+        return nullptr;
+
+    case AST::FunctionMatch::Outcome::t_no_viable:
+    case AST::FunctionMatch::Outcome::t_no_candidates:
+        // t_no_candidates here means generic instantiation filtered every candidate out, so nothing
+        // reached the matcher for it to have tied - the declarations that were tried are what the
+        // user needs to see either way
+        payload.collector.collect_issue<AST::Issue::NoMatchingOverload>(
+            payload.context.code_ref(funcname_token),
+            fmt::format(
+                "No overload of '{}' accepts these arguments. Candidates are:{}",
+                funcname_token.value(),
+                AST::describe_candidates(match.tied.empty() ? candidates : match.tied)));
         return nullptr;
     }
 
     // generic calls keep pointing at the template here; the monomorphizer resolves the
     // concrete instance and rewrites funcall.decl (and inserts casts) after parsing.
-    // coerce arguments only for non-generic decls, whose parameter types are concrete
+    // coerce arguments only for non-generic decls, whose parameter types are concrete.
+    // an undecidable call has no decl yet and gets both from the monomorphizer instead
     if (!funcall.decl->is_generic()) {
         for (size_t i = 0; i < args.size() && i < funcall.decl->args.size(); ++i) {
             auto expected = funcall.decl->args[i]->type();

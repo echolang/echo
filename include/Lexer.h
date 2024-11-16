@@ -241,6 +241,17 @@ namespace LexerFunction
         bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
     };
 
+    // a StringToken that only matches when the literal is a complete word. every keyword spelled
+    // out of identifier characters is one of these; the symbol keywords (`::`, `:$`, `#`, ...)
+    // stay plain StringTokens, since no identifier can start with them
+    class KeywordToken : public StringToken
+    {
+    public:
+        KeywordToken(const std::string lit, const Token::Type type) : StringToken(lit, type) {}
+
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
     class NumericLiteral : public Base
     {
     public:

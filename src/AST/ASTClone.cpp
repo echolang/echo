@@ -222,7 +222,6 @@ Node *ScopeNode::clone(CloneContext &cc) const
     }
 
     for (const auto &[name, decl] : _declared_variables) c->_declared_variables[name] = cc.rebind(decl);
-    for (const auto &[name, decl] : _declared_functions) c->_declared_functions[name] = cc.rebind(decl);
     for (const auto &[name, decl] : _declared_structs) c->_declared_structs[name] = cc.rebind(decl);
     for (auto *attr : _attribute_stack) c->_attribute_stack.push_back(cc.rebind(attr));
 

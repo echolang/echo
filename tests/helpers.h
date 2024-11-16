@@ -1,6 +1,7 @@
 #include <Parser/ParserCursor.h>
 #include <Parser/ModuleParser.h>
 #include <AST/ASTBundle.h>
+#include <AST/ExprNode.h>
 
 #include <memory>
 #include <string>
@@ -37,6 +38,23 @@ namespace EchoTests
     std::string tests_make_node_description_expr(std::string content);
 
     void assert_code_emits_issue(std::string content, std::string expected_issue);
+
+    // shorthand for a primitive type, which every type-level assertion needs
+    inline AST::ValueType prim(AST::ValueTypePrimitive p) {
+        return AST::ValueType(p);
+    }
+
+    // every call site in `m` written with this name, in tree order. the name rather than the decl,
+    // because a test usually asks what a *call* resolved to
+    std::vector<AST::FunctionCallExprNode *> calls_to(AST::Module &m, const std::string &name);
+
+    // every non-anonymous declaration of this name - a set, not one node, since a name denotes an
+    // overload set
+    std::vector<AST::FunctionDeclNode *> decls_named(AST::Module &m, const std::string &name);
+
+    // did any diagnostic mention this? the loose counterpart to assert_code_emits_issue, which
+    // compares a whole message
+    bool has_issue_containing(const AST::Bundle &bundle, const std::string &needle);
 }
 
 

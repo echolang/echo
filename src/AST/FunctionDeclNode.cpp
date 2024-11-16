@@ -2,6 +2,7 @@
 
 #include "AST/ASTMangler.h"
 #include "AST/ASTNamespace.h"
+#include "AST/ASTTypeParam.h"
 
 const std::string AST::FunctionDeclNode::node_description()
 {
@@ -16,6 +17,27 @@ const std::string AST::FunctionDeclNode::node_description()
     if (body) {
         buffer += body->node_description();
     }
+
+    return buffer;
+}
+
+const std::string AST::FunctionDeclNode::signature_description() const
+{
+    std::string buffer = namespaced_func_name();
+
+    if (is_generic()) {
+        buffer += "<";
+        for (size_t i = 0; i < type_parameters.size(); i++) {
+            buffer += (i > 0 ? ", " : "") + type_parameters[i]->name;
+        }
+        buffer += ">";
+    }
+
+    buffer += "(";
+    for (size_t i = 0; i < args.size(); i++) {
+        buffer += (i > 0 ? ", " : "") + args[i]->type().get_type_desciption();
+    }
+    buffer += ")";
 
     return buffer;
 }

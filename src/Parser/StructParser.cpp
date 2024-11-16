@@ -124,7 +124,13 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
             cursor.skip(); // skip "("
 
-            auto &ctor_decl = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
+            // a constructor is named after its struct but is not *declared* at the struct's name
+            // token, and the function registry keys a declaration on where it is written. sharing
+            // the struct's token would make every constructor of a struct the same declaration
+            auto ctor_name_token = payload.context.make_virtual_token(
+                name_token.value(), Token::Type::t_identifier, name_token);
+
+            auto &ctor_decl = payload.context.emplace_node<AST::FunctionDeclNode>(ctor_name_token);
             ctor_decl.ast_namespace = payload.context.current_namespace;
 
             // share the struct's parameter declarations rather than declaring its own: the ctor's
@@ -138,10 +144,10 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             // ctor argument + body scope
             auto &ctor_scope = payload.context.emplace_node<AST::ScopeNode>();
 
-            // predeclare "$this" so member access works in body
+            // predeclare "$this" so member access works in body. it is seeded into the *body*
+            // rather than this argument scope below, once the body node exists
             auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
             auto this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, &ctor_return);
-            ctor_scope.add_vardecl(*this_vardecl);
             auto this_var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
             auto this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
 
@@ -171,16 +177,24 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             }
 
             cursor.skip(); // skip "{"
+
+            // the body opens with an implicit `Foo $this;`, exactly as the synthesized default
+            // constructor below does. seeding it here rather than appending it after the body is
+            // parsed is what makes it the first child, and the first child is the only position
+            // that works: gen_scope allocas in child order, so a `$this` declared last has no
+            // alloca yet when the statements above it read it, and CloneContext::rebind resolves
+            // to the *original* for anything not yet cloned, so an instantiated generic ctor
+            // would bind its `$this` reads to the template's declaration
+            auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
+            ctor_body.add_vardecl(*this_vardecl);
+
             payload.context.push_scope(ctor_scope);
 
             {
                 // same as a function body: a `return` inside the ctor fits the ctor's return type
                 AST::ReturnTypeScope return_scope(payload.context, &ctor_return);
-                ctor_decl.body = &parse_scope(payload);
+                ctor_decl.body = &parse_scope(payload, &ctor_body);
             }
-
-            // ensure $this is part of the body scope tree
-            ctor_decl.body->add_vardecl(*this_vardecl);
 
             if (!cursor.is_type(Token::Type::t_close_brace)) {
                 payload.collect_unexpected_token(Token::Type::t_close_brace);
@@ -205,6 +219,8 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
             }
 
             payload.context.scope().add_funcdecl(ctor_decl);
+            payload.collector.functions.register_function(
+                payload.collector, payload.context.code_ref(name_token), &ctor_decl);
         }
         else if (cursor.is_type(Token::Type::t_close_brace)) {
             cursor.skip();
@@ -227,9 +243,28 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
         }
     }
 
-    // we also generate an implict constructor for the struct
-    // this constructor will take parameters for each property and initialize them
-    auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
+    // the field-wise constructor, synthesized for every struct: it takes one parameter per
+    // property and initializes them in order.
+    //
+    // it is *not* suppressed merely because the user wrote a constructor of their own. Echo has
+    // no other syntax for building a struct, so taking it away the moment a convenience
+    // constructor appears would silently break every `Foo(...)` elsewhere in the program. It is
+    // suppressed only when the user's own constructor already occupies the same signature, which
+    // is checked once the parameter list below is built
+    std::vector<AST::ValueType> default_ctor_params;
+    for (const auto &prop : struct_node->properties()) {
+        default_ctor_params.push_back(prop->type_node()->type);
+    }
+
+    if (payload.collector.functions.find_by_signature(
+            name_token.value(), *payload.context.current_namespace, default_ctor_params)) {
+        return struct_node;
+    }
+
+    auto default_ctor_name_token = payload.context.make_virtual_token(
+        name_token.value(), Token::Type::t_identifier, name_token);
+
+    auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(default_ctor_name_token);
     default_ctor.ast_namespace = payload.context.current_namespace;
 
     // shares the struct's parameter declarations, same reason as the explicit constructor above
@@ -303,6 +338,8 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload, bool symbol_only)
 
     // append the contstructor to the current context as a function
     payload.context.scope().add_funcdecl(default_ctor);
+    payload.collector.functions.register_function(
+        payload.collector, payload.context.code_ref(name_token), &default_ctor);
 
     return struct_node;
 }

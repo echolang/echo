@@ -1,0 +1,21 @@
+// a template and a concrete function can share a name. which one a call picks is decided by how
+// well the arguments fit *first* - the template is scored against the parameters it would be
+// instantiated with, not against the bare `T` - and only then by preferring the concrete one
+
+function pick<T>(T $v) : int32 { return 1; }
+function pick(int32 $v) : int32 { return 2; }
+
+// both fit exactly, so the concrete one wins: it was written for this call
+echo pick(5);
+
+// the concrete one would narrow a float64 to int32; the template matches exactly and wins
+echo pick(1.5);
+echo pick(true);
+
+// a constrained template drops out of the overload set rather than erroring, so the concrete
+// overload answers a call the template cannot
+function only_numbers<T: numeric>(T $v) : int32 { return 1; }
+function only_numbers(bool $v) : int32 { return 2; }
+
+echo only_numbers(3);
+echo only_numbers(true);

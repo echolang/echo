@@ -1,0 +1,6 @@
+// candidates exist but none of them accepts these arguments. distinct from an undeclared name,
+// which is still reported as UnknownFunction
+function f(int32 $a) : int32 { return 1; }
+function f(float64 $a) : int32 { return 2; }
+
+echo f(1, 2, 3);

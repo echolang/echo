@@ -16,12 +16,12 @@
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
 
-AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload)
+AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *into)
 {
     auto &cursor = payload.cursor;
     auto &context = payload.context;
 
-    auto &scope_node = context.emplace_node<AST::ScopeNode>();
+    auto &scope_node = into ? *into : context.emplace_node<AST::ScopeNode>();
 
     context.push_scope(scope_node);
 
