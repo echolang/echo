@@ -12,6 +12,7 @@
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/ScopeParser.h"
 
 bool is_vardecl_end_token(const Parser::Cursor &cursor)
 {
@@ -149,6 +150,15 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         auto *target = parse_assign_target(payload, prev_vardecl);
         if (target == nullptr) {
             cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        // `$obj->push(5);` reaches here because the statement dispatch routes anything starting
+        // `$var ->` to an assignment, and the postfix chain is what discovers the call. it is a
+        // statement in its own right, so there is no `=` to demand - the same shape the call
+        // statement branch in ScopeParser handles for a free function
+        if (target->get_node_type() == AST::NodeType::n_expr_call) {
+            finish_call_statement(payload, payload.context.scope(), target);
             return nullptr;
         }
 

@@ -16,6 +16,23 @@
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
 
+void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
+{
+    auto &cursor = payload.cursor;
+
+    // appended before the terminator is checked, so a missing semicolon costs a diagnostic and not
+    // the statement - errors accumulate here, they do not abort the parse
+    scope.children.push_back(AST::make_ref(call));
+
+    if (!cursor.is_type(Token::Type::t_semicolon)) {
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    cursor.skip(); // the semicolon
+}
+
 AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *into)
 {
     auto &cursor = payload.cursor;
@@ -120,15 +137,7 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
             }
 
             if (auto *funccall_node = parse_funccall(payload, call_namespace)) {
-                scope_node.children.push_back(AST::make_ref(funccall_node));
-                
-                // expect a semicolon after function call statement
-                if (!cursor.is_type(Token::Type::t_semicolon)) {
-                    payload.collect_unexpected_token(Token::Type::t_semicolon);
-                    cursor.try_skip_to_next_statement();
-                } else {
-                    cursor.skip(); // consume the semicolon
-                }
+                finish_call_statement(payload, scope_node, funccall_node);
             }
         }
 

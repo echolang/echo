@@ -57,6 +57,14 @@ namespace AST
         // set already holds is reported on the collector as a duplicate.
         void register_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl);
 
+        // registers a *member* function on its owning type. reconcilable across the two parse
+        // passes by declaration site and duplicate-checked against the owner's existing methods,
+        // exactly as register_function is - but deliberately never entered into the (namespace,
+        // name) overload sets, because a method is reached through its receiver. a bare `push(...)`
+        // therefore does not resolve to `Stack::push`, and AST::find_member_functions is the only
+        // way to it.
+        void register_member_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
+
         // the overload set for a name, searched from `ns` outward. the first namespace holding
         // any candidate for the name answers - an outer namespace does not extend an inner one's
         // set, it is hidden by it. empty when the name is unknown everywhere.
@@ -74,6 +82,17 @@ namespace AST
             const std::vector<ValueType> &parameter_types,
             const FunctionDeclNode *ignore = nullptr) const;
 
+        // the member counterpart: does `owner` already declare a method with `decl`'s name and
+        // exactly its parameter types (the receiver included)? `ignore` is skipped so a declaration
+        // can ask without matching itself.
+        //
+        // takes the declaration rather than a name and a type vector, so neither side has to be
+        // materialized to ask - the comparison stops at the first differing parameter
+        FunctionDeclNode *find_member_by_signature(
+            const ComplexType &owner,
+            const FunctionDeclNode *decl,
+            const FunctionDeclNode *ignore = nullptr) const;
+
         // every registered declaration, in declaration order
         inline const std::vector<FunctionDeclNode *> &get_all() const {
             return _functions;
@@ -82,6 +101,19 @@ namespace AST
         std::string debug_dump() const;
 
     private:
+
+        // the site key a name token denotes. the one spelling of the identity, so the registration
+        // paths and the lookup cannot construct it differently
+        static DeclarationSite make_site(const TokenReference &name_token) {
+            return DeclarationSite { &name_token.get_collection_ref(), name_token.get_handle() };
+        }
+
+        // takes ownership of `decl`'s declaration site: appends it to `_functions`, keys it in
+        // `_by_decl_site` and answers whether the caller should carry on registering it. false for a
+        // declaration that cannot be looked up (null or anonymous) and for the second parse pass
+        // reaching a site already claimed - the shared prologue of both register_ entry points, so
+        // the two-pass idempotency rule is stated exactly once
+        bool claim_declaration_site(FunctionDeclNode *decl);
 
         // declaration order, so a diagnostic or a dump listing declarations is reproducible across
         // runs - the namespace and name maps are unordered and would not be

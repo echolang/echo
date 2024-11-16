@@ -242,6 +242,11 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     // so dropping the pointers frees nothing and dangles nothing
     c->type_parameters.clear();
 
+    // and with them the owner/own split, for the same reason: cc.shallow copy-constructs, so an
+    // instance would otherwise claim inherited parameters it no longer carries. owner_type does
+    // stay - an instance is still a member of its owner, and the mangler needs the segment
+    c->inherited_type_param_count = 0;
+
     // likewise the instantiation identity: cc.shallow copy-constructs, so a nested
     // instantiation would otherwise inherit the enclosing instance's type arguments and mangle
     // under its symbol. the monomorphizer sets these on the instance right after cloning
@@ -259,17 +264,13 @@ Node *StructDeclNode::clone(CloneContext &cc) const
 {
     StructDeclNode *c = cc.shallow(this);
 
-    // rebuild the embedded complex type with substituted property types and no type
-    // parameters (a clone is concrete, and the shallow copy's parameter declarations would
-    // otherwise still point their owner back at the template). Phase 4 reconciles this with the
-    // registry's canonical application ComplexType for codegen identity; for now the clone owns
-    // its own substituted layout - see todo/A5-reconcile-instantiation-identity.md.
-    ComplexType substituted(c->_complex_type.name.value_or(""));
-    for (size_t i = 0; i < c->_complex_type.property_count(); ++i) {
-        const auto &prop = c->_complex_type.get_property(i);
-        substituted.add_property(prop.name, cc.substitute(prop.type));
-    }
-    c->_complex_type = substituted;
+    // the embedded complex type with substituted property types and nothing left that identifies it
+    // as a template - ComplexType::substituted_copy owns that rule, so a field added to it survives
+    // here by default. Phase 4 reconciles this with the registry's canonical application ComplexType
+    // for codegen identity; for now the clone owns its own substituted layout -
+    // see todo/A5-reconcile-instantiation-identity.md.
+    c->_complex_type = c->_complex_type.substituted_copy(
+        [&cc](const ValueType &type) { return cc.substitute(type); });
     c->_type = ValueType::make_struct(&c->_complex_type);
 
     for (auto &prop : c->_properties) prop = cc.child(prop);

@@ -1,30 +1,92 @@
 #include "AST/ASTFunctionRegistry.h"
 
 #include "AST/ASTCollector.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <fmt/core.h>
 
-void AST::FunctionRegistry::register_function(
-    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
+namespace
 {
-    if (decl == nullptr || decl->is_anonymous()) {
-        return;
+    // "are these the same symbol", parameter by parameter.
+    //
+    // ValueType equality is exact by design (it is the interning identity the type registry and the
+    // monomorphizer's instance cache use), which is precisely what "the same signature" needs to
+    // mean. compared one parameter at a time so a mismatch stops at the first, rather than building
+    // a vector per candidate - this runs for every declaration in the bundle
+    bool signatures_match(const AST::FunctionDeclNode *candidate, const std::vector<AST::ValueType> &parameter_types)
+    {
+        if (candidate->args.size() != parameter_types.size()) {
+            return false;
+        }
+
+        for (size_t i = 0; i < parameter_types.size(); i++) {
+            if (!(candidate->parameter_type(i) == parameter_types[i])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    const auto &name_token = decl->name_token.value();
-    const DeclarationSite site { &name_token.get_collection_ref(), name_token.get_handle() };
+    // the same question between two declarations, so neither side has to materialize a type vector
+    // to ask it
+    bool signatures_match(const AST::FunctionDeclNode *candidate, const AST::FunctionDeclNode *decl)
+    {
+        if (candidate->args.size() != decl->args.size()) {
+            return false;
+        }
 
-    // the same declaration coming back around in the module's second parse pass. everything below
-    // has already happened for it, including any duplicate report - doing it again would both
-    // double the diagnostic and add the declaration to its own overload set twice
+        for (size_t i = 0; i < decl->args.size(); i++) {
+            if (!(candidate->parameter_type(i) == decl->parameter_type(i))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // "this symbol is already declared with these parameter types". one wording, so the free and the
+    // member path cannot drift apart the first time it is improved
+    void report_duplicate_signature(
+        AST::Collector &collector, const AST::CodeRef &at, const AST::FunctionDeclNode *previous)
+    {
+        collector.collect_issue<AST::Issue::DuplicateFunctionSignature>(
+            at,
+            fmt::format(
+                "'{}' is already declared with these parameter types. Overloads must differ in their parameters.",
+                previous->signature_description()));
+    }
+}
+
+bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
+{
+    if (decl == nullptr || decl->is_anonymous()) {
+        return false;
+    }
+
+    const DeclarationSite site = make_site(decl->name_token.value());
+
+    // the same declaration coming back around in the module's second parse pass. everything the
+    // caller would do next has already happened for it, including any duplicate report - doing it
+    // again would both double the diagnostic and add the declaration to its own overload set twice
     if (_by_decl_site.count(site) > 0) {
-        return;
+        return false;
     }
 
     _functions.push_back(decl);
     _by_decl_site[site] = decl;
+
+    return true;
+}
+
+void AST::FunctionRegistry::register_function(
+    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
+{
+    if (!claim_declaration_site(decl)) {
+        return;
+    }
 
     const Namespace *ns = decl->ast_namespace;
 
@@ -41,11 +103,7 @@ void AST::FunctionRegistry::register_function(
     // TypeLowering's "this is a name mangling defect, not a source error" throw into a located
     // source error the user can act on
     if (auto *previous = find_by_signature(name, *ns, decl->parameter_types(), decl)) {
-        collector.collect_issue<AST::Issue::DuplicateFunctionSignature>(
-            at,
-            fmt::format(
-                "'{}' is already declared with these parameter types. Overloads must differ in their parameters.",
-                previous->signature_description()));
+        report_duplicate_signature(collector, at, previous);
 
         // deliberately not added to the overload set: leaving it out keeps resolution
         // deterministic (the first declaration wins) instead of making every later call ambiguous
@@ -53,6 +111,48 @@ void AST::FunctionRegistry::register_function(
     }
 
     _by_name[ns][name].push_back(decl);
+}
+
+void AST::FunctionRegistry::register_member_function(
+    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl, AST::ComplexType &owner)
+{
+    // the declaration site is a real token here (a method is written where its name is written,
+    // unlike a constructor), so the two passes reconcile without a virtual token
+    if (!claim_declaration_site(decl)) {
+        return;
+    }
+
+    // duplicate detection against the owner rather than against a namespace, because that is where
+    // a method is reachable from. same diagnostic either way: a source error, not the mangling
+    // defect TypeLowering would otherwise throw
+    if (auto *previous = find_member_by_signature(owner, decl, decl)) {
+        report_duplicate_signature(collector, at, previous);
+
+        // not added, so the first declaration wins and resolution stays deterministic
+        return;
+    }
+
+    // deliberately not entered into _by_name: a method is reached through its receiver, so a bare
+    // `push(...)` must not resolve to it. that is the whole difference from register_function
+    owner.add_method(decl);
+}
+
+AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
+    const AST::ComplexType &owner,
+    const AST::FunctionDeclNode *decl,
+    const AST::FunctionDeclNode *ignore) const
+{
+    for (auto *candidate : find_member_functions(&owner, decl->func_name())) {
+        if (candidate == ignore) {
+            continue;
+        }
+
+        if (signatures_match(candidate, decl)) {
+            return candidate;
+        }
+    }
+
+    return nullptr;
 }
 
 std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
@@ -80,9 +180,7 @@ std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
 
 AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &name_token) const
 {
-    const DeclarationSite site { &name_token.get_collection_ref(), name_token.get_handle() };
-
-    const auto found = _by_decl_site.find(site);
+    const auto found = _by_decl_site.find(make_site(name_token));
     return found != _by_decl_site.end() ? found->second : nullptr;
 }
 
@@ -105,21 +203,11 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_by_signature(
     }
 
     for (auto *candidate : candidates->second) {
-        if (candidate == ignore || candidate->args.size() != parameter_types.size()) {
+        if (candidate == ignore) {
             continue;
         }
 
-        // ValueType equality is exact by design (it is the interning identity the type registry
-        // and the monomorphizer's instance cache use), which is precisely what "the same
-        // signature" needs to mean here. compared parameter by parameter, so a mismatch stops at
-        // the first one instead of building a vector per candidate - this runs for every
-        // declaration in the bundle
-        bool same_signature = true;
-        for (size_t i = 0; i < parameter_types.size() && same_signature; i++) {
-            same_signature = candidate->parameter_type(i) == parameter_types[i];
-        }
-
-        if (same_signature) {
+        if (signatures_match(candidate, parameter_types)) {
             return candidate;
         }
     }

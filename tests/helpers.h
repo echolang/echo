@@ -13,6 +13,11 @@
 #define REQUIRE_NODE_DESC_EXPR(content, expected_desc) \
     REQUIRE(EchoTests::tests_make_node_description_expr(content) == expected_desc)
 
+namespace AST
+{
+    class StructDeclNode;
+};
+
 namespace EchoTests
 {
     struct ParserEnv {
@@ -51,6 +56,10 @@ namespace EchoTests
     // every non-anonymous declaration of this name - a set, not one node, since a name denotes an
     // overload set
     std::vector<AST::FunctionDeclNode *> decls_named(AST::Module &m, const std::string &name);
+
+    // the StructDeclNode a bare name denotes, or null. scans the arena, so an instantiated clone
+    // would show up too
+    AST::StructDeclNode *struct_named(AST::Module &m, const std::string &name);
 
     // did any diagnostic mention this? the loose counterpart to assert_code_emits_issue, which
     // compares a whole message

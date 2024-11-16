@@ -15,6 +15,7 @@
 namespace AST
 {
     class TypeNode;
+    class StructDeclNode;
 
     struct Context
     {
@@ -37,6 +38,20 @@ namespace AST
         // and its owner's — lookup walks outward, and leaving an inner scope restores the outer
         // one instead of wiping everything
         std::vector<std::vector<TypeParamDecl *>> type_param_scopes;
+
+        // the struct whose body is being parsed, null everywhere else. this is what turns a
+        // `function` into a *method*: parse_funcdecl reads it to bind the receiver, prefix the
+        // owner's type parameters and register on the type rather than in the namespace.
+        //
+        // carried on the context rather than passed as an argument for the same reason
+        // return_type_ptr is: it flows downward through a parser that is a set of free functions
+        // calling each other, and only one of them in the chain cares
+        StructDeclNode *self_struct_ptr = nullptr;
+
+        // the receiver type `$this` binds to - the non-nullable borrow `Foo&`, or the borrow of the
+        // interned self-application `Foo<T>&` for a generic owner. held as a node so every method
+        // of one struct shares a single TypeNode, the way the constructor shares its return type
+        TypeNode *self_type_ptr = nullptr;
 
         inline ScopeNode &scope() const {
             assert(scope_ptr);
@@ -146,6 +161,35 @@ namespace AST
 
         ~ReturnTypeScope() {
             context.return_type_ptr = previous;
+        }
+    };
+
+    // scopes the enclosing struct to a struct body, so a `function` inside one parses as a method.
+    //
+    // saves and restores rather than clearing, like ReturnTypeScope, and for the sharper version of
+    // the same reason: parse_funcdecl opens a *null* frame around the body it parses, so a
+    // declaration nested inside a method does not inherit a receiver it has no business having
+    struct SelfScope
+    {
+        Context &context;
+        StructDeclNode *previous_struct;
+        TypeNode *previous_type;
+
+        SelfScope(Context &context, StructDeclNode *self_struct, TypeNode *self_type) :
+            context(context),
+            previous_struct(context.self_struct_ptr),
+            previous_type(context.self_type_ptr)
+        {
+            context.self_struct_ptr = self_struct;
+            context.self_type_ptr = self_type;
+        }
+
+        SelfScope(const SelfScope &) = delete;
+        SelfScope &operator=(const SelfScope &) = delete;
+
+        ~SelfScope() {
+            context.self_struct_ptr = previous_struct;
+            context.self_type_ptr = previous_type;
         }
     };
 };

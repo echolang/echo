@@ -31,6 +31,52 @@ namespace AST
         // list binds the same parameters. cleared on a clone, which is concrete by definition
         std::vector<TypeParamDecl *> type_parameters;
 
+        // set when this declaration is a *member* function: the type it was declared inside. a
+        // method is an ordinary function whose first parameter is `$this`, so this pointer is the
+        // only thing that tells the three consumers that need to know:
+        //
+        //  - the mangler, which appends an owner segment. without it a method `Foo::get()` and a
+        //    free `get(Foo& $f)` mangle identically, and since a method is deliberately absent
+        //    from the (namespace, name) overload sets, DuplicateFunctionSignature cannot catch it
+        //  - diagnostics, which must not count or render the implicit receiver
+        //  - the type parameter prefix, paired with inherited_type_param_count below
+        //
+        // kept on a clone: an instance is still a member of its owner
+        ComplexType *owner_type = nullptr;
+
+        inline bool is_member() const {
+            return owner_type != nullptr;
+        }
+
+        // how many leading `args` entries the caller did not write. exactly the receiver, so 0 or
+        // 1 - spelled as a count rather than a bool because every consumer wants to offset an
+        // index by it
+        inline size_t implicit_arg_count() const {
+            return is_member() ? 1 : 0;
+        }
+
+        // the 1-based position a reader would count `args[index]` at. the implicit receiver is not
+        // something they wrote, so `argument 1` of a method is its first *written* parameter. one
+        // accessor rather than `index + 1 - implicit_arg_count()` at each diagnostic, so a second
+        // implicit parameter cannot leave some of them off by one
+        inline size_t user_arg_number(size_t index) const {
+            return index + 1 - implicit_arg_count();
+        }
+
+        // how many leading `type_parameters` entries belong to the *owner* rather than to this
+        // function. a method of `Box<T>` written `function map<U>(...)` carries [T, U], because
+        // one substitution has to bind both - the owner's T from the receiver argument, its own U
+        // from the rest - and TypeSubstitution::positional is positional over this whole list.
+        //
+        // the split matters in two places: an explicit `$b->map<float64>()` spells only the *own*
+        // parameters, and signature_description must not render the owner's. cleared on a clone,
+        // which is concrete and carries no parameters at all
+        size_t inherited_type_param_count = 0;
+
+        inline size_t own_type_param_count() const {
+            return type_parameters.size() - inherited_type_param_count;
+        }
+
         // the mirror of ComplexType::template_ref / instantiation_args, for functions: on an
         // instance created by the monomorphizer these name the template it came from and the
         // concrete types it was instantiated with, in declaration order. empty on a template and

@@ -1,5 +1,6 @@
 #include "AST/StructNode.h"
 
+#include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
 
 #include "Debugging.h"
@@ -32,6 +33,15 @@ const std::string AST::StructDeclNode::node_description()
     for (auto prop : _properties) {
         result += DD::tabbify(prop->node_description(), 2) + "\n";
     }
+    if (!methods().empty()) {
+        result += "methods:\n";
+        for (auto method : methods()) {
+            // the signature only. the body is emitted where the declaration lands, in the
+            // enclosing scope's children, so printing it here would print it twice
+            result += DD::tabbify(method->signature_description(), 2) + "\n";
+        }
+    }
+
     result += "}\n";
     return result;
 }

@@ -399,12 +399,34 @@ void Parser::declare_type_parameters(Payload &payload, AST::ComplexType &owner, 
     }
 }
 
-void Parser::declare_type_parameters(Payload &payload, AST::FunctionDeclNode &owner, const std::vector<ParsedTypeParam> &parsed)
+void Parser::declare_type_parameters(
+    Payload &payload,
+    AST::FunctionDeclNode &owner,
+    const std::vector<ParsedTypeParam> &parsed,
+    const std::vector<AST::TypeParamDecl *> &inherited)
 {
-    owner.type_parameters = declare_params(payload, owner.type_parameters, parsed);
-    for (auto *decl : owner.type_parameters) {
+    // the function's *own* parameters, with any inherited prefix taken off first. it has to come off:
+    // declare_params decides whether it can reuse the existing declarations by comparing list
+    // *sizes*, and the second parse pass reaches this node with the prefix already in place - left
+    // there the sizes would mismatch and the own parameters would be re-minted, giving the two
+    // passes distinct declarations, which is exactly what the reuse rule exists to prevent
+    std::vector<AST::TypeParamDecl *> own(
+        owner.type_parameters.begin() + owner.inherited_type_param_count,
+        owner.type_parameters.end());
+
+    own = declare_params(payload, own, parsed);
+    for (auto *decl : own) {
         decl->set_owner(&owner);
     }
+
+    // a method carries [owner params..., own params...] in one list, so that one TypeSubstitution
+    // binds both: the owner's T from the receiver argument, its own U from the rest. the inherited
+    // declarations are *shared* rather than re-declared - the same sharing a constructor does -
+    // because a TypeParamDecl has exactly one owner, and re-owning the struct's T would trip
+    // set_owner's single-owner assert
+    owner.type_parameters = inherited;
+    owner.type_parameters.insert(owner.type_parameters.end(), own.begin(), own.end());
+    owner.inherited_type_param_count = inherited.size();
 }
 
 // consumes an optional trailing `&`, turning `T` into the non-nullable borrow `T&`.

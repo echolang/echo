@@ -725,6 +725,30 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
         auto member_token = cursor.current();
         cursor.skip(); // skip the member name
 
+        // `->name(` is a method call rather than a member read. `->name<` may be either: unlike a
+        // free call, where a bare identifier can never be a comparison operand because values carry
+        // a `$`, a member *is* a legitimate operand and `$a->count < 3` has to keep working. so the
+        // type argument list is parsed speculatively and only committed when a `(` follows it
+        if (cursor.is_type(Token::Type::t_open_paren) || cursor.is_type(Token::Type::t_open_angle)) {
+            bool is_call = false;
+            auto *call = Parser::parse_member_call(
+                payload, current_ref.unsafe_ptr<AST::ExprNode>(), member_token, is_call);
+
+            if (call != nullptr) {
+                current_ref = AST::make_ref(*call);
+                continue;
+            }
+
+            // a call that failed to resolve has already reported. reinterpreting its tokens as a
+            // member read would report the same name a second time, from the type checker
+            if (is_call) {
+                return AST::make_void_ref();
+            }
+
+            // otherwise the `<` was a comparison: the cursor is back on it and this falls through to
+            // the member read below, which is what `$a->count < 3` needs
+        }
+
         auto &member_access = payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
         current_ref = AST::make_ref(member_access);
     }

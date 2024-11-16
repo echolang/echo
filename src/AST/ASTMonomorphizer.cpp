@@ -12,6 +12,8 @@
 #include "AST/ASTArgumentCoercion.h"
 #include "Debugging.h"
 
+#include <fmt/core.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -47,14 +49,40 @@ namespace AST
 
         std::vector<ValueType> args;
 
+        // a method carries its owner's parameters ahead of its own, and only the *own* ones can be
+        // spelled at the call site: `$b->map<float64>()` says nothing about Box's T, which the
+        // receiver already fixes. so the two halves are resolved from different places
+        const size_t inherited = tmpl->inherited_type_param_count;
+
         if (!call->explicit_type_args.empty()) {
             // explicit type arguments win: foo<int>(...)
-            if (call->explicit_type_args.size() != n) {
+            if (call->explicit_type_args.size() != tmpl->own_type_param_count()) {
                 _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
                     "Wrong number of type arguments for generic function '" + tmpl->func_name() + "'");
                 is_error = true;
                 return std::nullopt;
             }
+
+            // the owner's parameters come from the receiver, which is argument 0. inferred rather
+            // than read off the receiver's instantiation_args so there is one binding rule: the
+            // receiver parameter is `Box<T>&` and unify already descends a generic application
+            TypeSubstitution from_receiver;
+            if (inherited > 0 && !call->arguments.empty()) {
+                unify_type(tmpl->args[0]->type(), call->arguments[0]->result_type(), from_receiver);
+            }
+
+            for (size_t i = 0; i < inherited; i++) {
+                const ValueType *bound = from_receiver.lookup(tmpl->type_parameters[i]);
+
+                // the receiver's own type is not concrete yet - this call sits in a template
+                // body that has not been instantiated. retried, not reported
+                if (!bound) {
+                    return std::nullopt;
+                }
+
+                args.push_back(*bound);
+            }
+
             for (auto *type_node : call->explicit_type_args) {
                 args.push_back(type_node->type);
             }
@@ -62,7 +90,10 @@ namespace AST
             // otherwise infer from the call arguments
             if (call->arguments.size() != tmpl->args.size()) {
                 _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
-                    "Argument count mismatch for generic function '" + tmpl->func_name() + "'");
+                    fmt::format("Argument count mismatch for generic function '{}': it takes {}, {} given",
+                        tmpl->func_name(),
+                        tmpl->args.size() - tmpl->implicit_arg_count(),
+                        call->arguments.size() - tmpl->implicit_arg_count()));
                 is_error = true;
                 return std::nullopt;
             }

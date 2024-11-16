@@ -5,6 +5,7 @@
 #include <AST/ASTPointerAdjuster.h>
 #include <AST/ASTTypeChecker.h>
 #include <AST/FunctionDeclNode.h>
+#include <AST/StructNode.h>
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
 {
@@ -158,6 +159,17 @@ std::vector<AST::FunctionDeclNode *> EchoTests::decls_named(AST::Module &m, cons
     }
 
     return out;
+}
+
+AST::StructDeclNode *EchoTests::struct_named(AST::Module &m, const std::string &name)
+{
+    for (auto *decl : m.nodes.of_type<AST::StructDeclNode>()) {
+        if (decl->struct_name() == name) {
+            return decl;
+        }
+    }
+
+    return nullptr;
 }
 
 bool EchoTests::has_issue_containing(const AST::Bundle &bundle, const std::string &needle)

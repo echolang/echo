@@ -4,6 +4,7 @@
 #include "AST/TypeNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/StructNode.h"
 #include "AST/ASTBuiltin.h"
 
 #include "Parser/TypeParser.h"
@@ -109,10 +110,26 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // set the namespace of the function
     funcdecl->ast_namespace = payload.context.current_namespace;
 
+    // a `function` written inside a struct body is a method: the enclosing struct arrived on the
+    // context, and it is the only thing that distinguishes this from a free function
+    AST::StructDeclNode *owner_struct = payload.context.self_struct_ptr;
+    AST::TypeNode *self_type = payload.context.self_type_ptr;
+    const bool is_method = owner_struct != nullptr && self_type != nullptr;
+
+    // a method of a generic struct carries the owner's parameters ahead of its own, so that one
+    // TypeSubstitution binds both: the owner's T from the receiver argument, its own U from the rest.
+    // declare_type_parameters owns that shape - what is shared, what is re-declared, and where the
+    // split falls
+    std::vector<AST::TypeParamDecl *> inherited_params;
+    if (is_method && owner_struct->is_generic()) {
+        inherited_params = owner_struct->type_parameters();
+    }
+
     // declare the type parameters, then make them resolvable while the signature and body are
     // parsed. the scope is pushed unconditionally, even when empty, so that a non-generic
     // function nested in a generic owner leaves the owner's parameters visible
-    declare_type_parameters(payload, *funcdecl, parsed_type_params);
+    declare_type_parameters(payload, *funcdecl, parsed_type_params, inherited_params);
+
     AST::TypeParamScope type_param_scope(payload.context, funcdecl->type_parameters);
 
     // skip the open parenthesis
@@ -120,6 +137,26 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
 
     // create an empty base scope for the function and the arguments to sit in
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
+
+    // the receiver is a real parameter, ahead of everything the caller wrote. a *parameter* rather
+    // than a body-local the way a constructor's `$this` is, and that is the better shape: it makes
+    // a method an ordinary function, so mangling, cloning, the pointer adjuster and codegen all
+    // handle it with no special case - in particular FunctionDeclNode::clone clones args before the
+    // body precisely so the body's references rebind to the cloned declaration.
+    //
+    // its type is the non-nullable borrow `Foo&` (or `Foo<T>&`), so the method reads and writes the
+    // caller's storage rather than a copy, and the type node is shared by every method of the struct
+    if (is_method) {
+        auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, nametoken);
+        auto *this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, self_type);
+
+        funcdecl->args.push_back(this_vardecl);
+
+        // declared in the argument scope, not in the body, so `$this` resolves the same way every
+        // other parameter does. funcscope's children are never emitted - the body is a separate
+        // child scope and codegen allocas from `args` - so this costs no second slot
+        funcscope.add_vardecl(*this_vardecl);
+    }
 
     // parse the function arguments
     while (!cursor.is_type(Token::Type::t_close_paren)) {
@@ -159,8 +196,19 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes
     // the declaration visible to calls written above it and in other files, and the full pass
     // finds its own declaration site already present and returns the same handle
-    payload.collector.functions.register_function(
-        payload.collector, payload.context.code_ref(nametoken), funcdecl);
+    if (is_method) {
+        // a method joins its owner's method table instead, so it is reachable through a receiver
+        // and not as a free function of the enclosing namespace. owner_type is what tells the
+        // mangler and every diagnostic that the first parameter is not one the user wrote
+        funcdecl->owner_type = &owner_struct->complex_type();
+
+        payload.collector.functions.register_member_function(
+            payload.collector, payload.context.code_ref(nametoken), funcdecl, owner_struct->complex_type());
+    }
+    else {
+        payload.collector.functions.register_function(
+            payload.collector, payload.context.code_ref(nametoken), funcdecl);
+    }
 
     // an extern declaration ends here, in both parser passes, so this is the single place that
     // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass
@@ -267,6 +315,12 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         // the body's returns fit this type, exactly as a variable declaration's initializer fits
         // the declared variable type. scoped so a declaration nested in the body restores it
         AST::ReturnTypeScope return_scope(payload.context, funcdecl->return_type);
+
+        // the receiver reaches the body as an ordinary parameter, so the *body* is no longer inside
+        // a struct declaration. cleared rather than left standing so nothing declared in here
+        // inherits a receiver it has no business having
+        AST::SelfScope no_self(payload.context, nullptr, nullptr);
+
         funcdecl->body = &parse_scope(payload);
     }
 

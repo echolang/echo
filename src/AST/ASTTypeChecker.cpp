@@ -211,6 +211,10 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // resolved, non-generic callee has stable parameter types to check against.
     if (node.decl && !node.decl->is_generic()) {
         const auto &params = node.decl->args;
+
+        // every argument is checked, the receiver included - `$p->m()` on a null pointer is exactly
+        // the case the borrow guard below exists for - but the *number* a diagnostic reports is the
+        // one the reader can count to, which is what user_arg_number answers
         if (node.arguments.size() == params.size()) {
             for (size_t i = 0; i < params.size(); i++) {
                 if (!node.arguments[i] || !params[i]->has_type()) {
@@ -232,7 +236,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     _collector.collect_issue<Issue::GenericError>(
                         code_ref_for(node.token_function_name),
                         fmt::format("argument {} of '{}' is '{}', which cannot be null",
-                            i + 1, node.decl->func_name(), param_type.get_type_desciption()));
+                            node.decl->user_arg_number(i), node.decl->func_name(), param_type.get_type_desciption()));
                     continue;
                 }
 
@@ -241,7 +245,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                         code_ref_for(node.token_function_name),
                         fmt::format(
                             "Argument {} of '{}' expects type '{}' but got '{}'",
-                            i + 1,
+                            node.decl->user_arg_number(i),
                             node.decl->func_name(),
                             param_type.get_type_desciption(),
                             arg_type.get_type_desciption()));

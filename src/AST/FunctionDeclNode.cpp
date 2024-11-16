@@ -23,19 +23,31 @@ const std::string AST::FunctionDeclNode::node_description()
 
 const std::string AST::FunctionDeclNode::signature_description() const
 {
-    std::string buffer = namespaced_func_name();
+    // a method is rendered the way it is written, which means neither the implicit receiver nor the
+    // owner's type parameters appear: `Box<T>::map<U>(int32)`, not `map<T, U>(Box<T>&, int32)`. this
+    // string reaches NoMatchingOverload, AmbiguousCall, DuplicateFunctionSignature and the debug
+    // dumps, so a leaked `$this` would be visible in every one of them
+    std::string buffer;
 
-    if (is_generic()) {
+    if (owner_type != nullptr) {
+        buffer += owner_type->namespaced_name() + ECO_NAMESPACE_SEPARATOR;
+        buffer += func_name();
+    }
+    else {
+        buffer += namespaced_func_name();
+    }
+
+    if (own_type_param_count() > 0) {
         buffer += "<";
-        for (size_t i = 0; i < type_parameters.size(); i++) {
-            buffer += (i > 0 ? ", " : "") + type_parameters[i]->name;
+        for (size_t i = inherited_type_param_count; i < type_parameters.size(); i++) {
+            buffer += (i > inherited_type_param_count ? ", " : "") + type_parameters[i]->name;
         }
         buffer += ">";
     }
 
     buffer += "(";
-    for (size_t i = 0; i < args.size(); i++) {
-        buffer += (i > 0 ? ", " : "") + args[i]->type().get_type_desciption();
+    for (size_t i = implicit_arg_count(); i < args.size(); i++) {
+        buffer += (i > implicit_arg_count() ? ", " : "") + args[i]->type().get_type_desciption();
     }
     buffer += ")";
 

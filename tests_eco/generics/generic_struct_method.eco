@@ -1,0 +1,41 @@
+// methods on a generic struct. the receiver parameter is the borrow of the struct's *self
+// application* `Box<T>&`, which is what lets one unification bind T from the receiver at the call
+// site - no separate "instantiate this struct's members" step and no composed substitutions
+
+struct Box<T>
+{
+    T $value;
+
+    function get() : T
+    {
+        return $this->value;
+    }
+
+    function set(T $v) : void
+    {
+        $this->value = $v;
+    }
+
+    // a method that calls another method on $this. nothing can bind T here: this call resolves only
+    // once the enclosing method has been cloned for a concrete T
+    function twice() : T
+    {
+        return $this->get() + $this->get();
+    }
+}
+
+$a = Box(7);
+echo $a->get();
+$a->set(11);
+echo $a->get();
+echo $a->twice();
+
+// a second instantiation, so the two cannot be sharing one instance of any of the three methods
+$b = Box(2.5);
+echo $b->get();
+$b->set(4.25);
+echo $b->get();
+echo $b->twice();
+
+// the first instance still holds its own value
+echo $a->get();

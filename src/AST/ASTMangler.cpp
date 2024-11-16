@@ -24,6 +24,19 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
         }
     }
 
+    // a member function is qualified by the type it belongs to. without this a method
+    // `Foo::get()` and a free `get(Foo& $f)` mangle identically - and a method is deliberately
+    // absent from the (namespace, name) overload sets, so DuplicateFunctionSignature cannot see
+    // the clash and it would surface as TypeLowering's "this is a name mangling defect, not a
+    // source error" throw instead. 'M' for the same reason 'G' is not another 'Z': an owner
+    // segment can never be read as a namespace segment or a parameter.
+    //
+    // mangled_token() already carries the owner's namespace path and, for an instantiation, its
+    // type arguments - so `a::Box<int32>::get` and `b::Box<float64>::get` separate
+    if (func_decl->owner_type != nullptr) {
+        mangled_name += "M" + func_decl->owner_type->mangled_token() + "_";
+    }
+
     mangled_name += func_decl->func_name() + "Z";
 
     for (auto arg : func_decl->args) {

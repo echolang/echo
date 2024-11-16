@@ -71,6 +71,15 @@ namespace AST
             return _properties;
         }
 
+        // the member functions declared in this struct's body. unlike properties, which this node
+        // keeps as VarDeclNodes alongside the ComplexType's flattened layout, a method is the same
+        // pointer in both places - so it is stored once, on the type. the type is what a receiver
+        // names, and an instantiation has a ComplexType but no StructDeclNode of its own.
+        // FunctionRegistry::register_member_function is what appends
+        const std::vector<FunctionDeclNode *> &methods() const {
+            return _complex_type.methods();
+        }
+
     private:
         ValueType _type;
         ComplexType _complex_type;

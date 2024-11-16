@@ -1,0 +1,65 @@
+// the three things a method call has to get right beyond the simple case: a method declared *after*
+// the one that calls it (which only works because the symbol pass takes method signatures out of a
+// struct body), a receiver reached through a pointer, and an overload set on a member name
+
+struct Counter
+{
+    int32 $count;
+
+    function bump() : void
+    {
+        $this->count = $this->count + 1;
+
+        // `log` is written below this - a forward reference inside one struct body
+        $this->log();
+    }
+
+    function log() : void
+    {
+        echo $this->count;
+    }
+
+    // an overload set on a member name, resolved by the same rule a free function uses
+    function scaled(int32 $f) : int32
+    {
+        return $this->count * $f;
+    }
+
+    function scaled(float64 $f) : float64
+    {
+        return $this->count * $f;
+    }
+}
+
+$c = Counter(0);
+$c->bump();
+$c->bump();
+
+// `->count <` is a comparison, not the start of a type argument list. unlike a free call, a member
+// really can be a comparison operand, so the `<` is only read as type arguments when a `(` follows
+if ($c->count < 3) {
+    echo 111;
+}
+
+echo $c->scaled(4);
+echo $c->scaled(0.5);
+
+// `->` reaches through every pointer level to find the receiver, exactly as a member read does
+ptr<Counter> $p = &$c;
+$p->bump();
+echo $c->count;
+
+// and a receiver reached through a member chain
+struct Frame
+{
+    Counter $inner;
+
+    function inner_count() : int32
+    {
+        return $this->inner->scaled(1);
+    }
+}
+
+$f = Frame($c);
+echo $f->inner->scaled(2);
+echo $f->inner_count();

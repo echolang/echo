@@ -27,6 +27,11 @@ namespace AST
     // free of any dependency on ASTTypeParam.h
     class TypeParamDecl;
 
+    // a member function of a ComplexType, for the same reason: this header only ever stores and
+    // hands back the pointers. matching one by name needs the complete node, so that rule lives
+    // in ASTMemberLookup.h instead
+    class FunctionDeclNode;
+
     enum class ValueTypeKind {
         t_primitive,
         t_class,
@@ -504,9 +509,55 @@ namespace AST
             return _properties.size();
         }
 
+        // the member functions declared on this type, in declaration order. a name denotes an
+        // overload set here exactly as it does in the FunctionRegistry, so this is a flat list
+        // rather than a name map - AST::find_member_functions does the matching.
+        //
+        // only a *template* (or a plain non-generic struct) ever holds methods: an instantiation
+        // gets its members by instantiating the template's, per call site, so a lookup on
+        // `Box<int32>` redirects through template_ref rather than finding a list of its own
+        // appends a method. no dedup here: the two-pass idempotency belongs to
+        // FunctionRegistry::claim_declaration_site, which returns early before ever reaching this -
+        // a second guard would only invite a reader to believe the vector is the one that owns it
+        void add_method(FunctionDeclNode *decl) {
+            _methods.push_back(decl);
+        }
+
+        const std::vector<FunctionDeclNode *> &methods() const {
+            return _methods;
+        }
+
+        // a concrete copy of this type: every property type run through `substitute`, and nothing
+        // left that identifies it as a template or as somebody's instantiation.
+        //
+        // copy-then-modify rather than construct-then-refill, so a field added to ComplexType
+        // survives by default and only the deliberate *drops* are named here. the previous shape -
+        // a fresh ComplexType with the carried fields listed one by one - had already silently lost
+        // the namespace once and the methods once, each time far from the cause
+        template <typename Substitute>
+        ComplexType substituted_copy(Substitute substitute) const
+        {
+            ComplexType copy(*this);
+
+            // a copy is concrete: its parameter declarations would otherwise still point their
+            // owner back at the template, and the instantiation identity would name the enclosing
+            // instance's type arguments and mangle under its symbol
+            copy.type_parameters.clear();
+            copy.template_ref = nullptr;
+            copy.instantiation_args.clear();
+
+            // the property *names* are unchanged, so _property_map carries over as it is
+            for (auto &prop : copy._properties) {
+                prop.type = substitute(prop.type);
+            }
+
+            return copy;
+        }
+
     private:
         std::vector<Property> _properties;
         std::unordered_map<std::string, size_t> _property_map;
+        std::vector<FunctionDeclNode *> _methods;
 
         friend class TypeRegistry;  // Allow TypeRegistry to access _properties
     };

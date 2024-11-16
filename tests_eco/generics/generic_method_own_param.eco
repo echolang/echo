@@ -1,0 +1,50 @@
+// a generic method with its *own* type parameter on a generic owner - the case that needs both
+// resolved at once. the method carries [T, U]: T is the owner's, bound from the receiver argument,
+// and U is its own, either inferred from the arguments or spelled at the call site.
+//
+// only U can be spelled. `$a->pick<float64>(...)` says nothing about Box's T, which the receiver
+// already fixes, so the type argument list is arity-checked against the method's own parameters
+
+struct Box<T>
+{
+    T $value;
+
+    function get() : T
+    {
+        return $this->value;
+    }
+
+    // both parameters appear in the signature, so a wrong binding on either shows up in the result
+    function pick(bool $take_other, T $other) : T
+    {
+        if ($take_other) {
+            return $other;
+        }
+
+        return $this->value;
+    }
+
+    function widen<U>(U $other) : U
+    {
+        return $other;
+    }
+}
+
+$a = Box(7);
+
+// U inferred from the argument
+echo $a->widen(1.5);
+
+// U spelled explicitly - one type argument, not two
+echo $a->widen<int32>(9);
+
+// T still resolves from the receiver in the same call
+echo $a->pick(true, 3);
+echo $a->pick(false, 3);
+echo $a->get();
+
+// the same generic method on a differently instantiated owner
+$b = Box(0.25);
+echo $b->widen(4);
+echo $b->pick(true, 8.5);
+echo $b->get();
