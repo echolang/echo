@@ -105,8 +105,8 @@ jobs:
     needs: build_and_test
     env:
       BUILD_TYPE: Release
-      CC: clang
-      CXX: clang++
+      CC: /usr/bin/clang
+      CXX: /usr/bin/clang++
       USE_CLANG: 1
       BIN_NAME: echo-macos-arm64
 
@@ -122,14 +122,15 @@ jobs:
       - name: Install dependencies
         run: |
           brew install cmake ninja
-  
+
       - name: Configure CMake
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++
-  
+            -DCMAKE_C_COMPILER=/usr/bin/clang \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
+
       - name: Build release
         run: |
           cmake --build ${{github.workspace}}/build --config Release --target echoc
