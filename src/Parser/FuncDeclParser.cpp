@@ -37,9 +37,39 @@ static std::optional<std::string> attribute_string_value(
     return attribute->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>()->get_string_value();
 }
 
-AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool symbol_only, Parser::FuncDeclKind kind)
+bool Parser::parse_parameter_list(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    AST::ScopeNode &into,
+    const TokenReference &report_at)
 {
     auto &cursor = payload.cursor;
+
+    while (!cursor.is_type(Token::Type::t_close_paren)) {
+        if (cursor.is_done()) {
+            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
+                payload.context.code_ref(report_at), Token::Type::t_close_paren, Token::Type::t_unknown);
+            cursor.try_skip_to_next_statement();
+            return false;
+        }
+
+        decl.args.push_back(parse_varexpr(payload, &into));
+    }
+
+    // skip the close parenthesis
+    cursor.skip();
+
+    return true;
+}
+
+AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser::FuncDeclKind kind)
+{
+    auto &cursor = payload.cursor;
+
+    // the declaration pass stops once the signature is registered; the body pass carries on into the
+    // body. read off the payload rather than taken as an argument, so no caller in between has to
+    // know which pass it is forwarding
+    const bool symbol_only = payload.pass == Pass::t_declarations;
 
     if (!cursor.is_type(Token::Type::t_function)) {
         payload.collect_unexpected_token(Token::Type::t_function);
@@ -93,11 +123,10 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
         return nullptr;
     }
 
-    // a module is parsed twice - once for symbols, once in full - and both passes must land on
-    // *one* node per declaration, or the full pass's body is attached to a node no call resolves
-    // to. the two are matched on where the declaration is written rather than on its name: the
-    // name identifies an overload *set*, and this decision has to be made here, at the name
-    // token, before the parameter list that would tell the overloads apart has been parsed
+    // a module's passes must land on *one* node per declaration, or the body pass's body is attached
+    // to a node no call resolves to. they are matched on where the declaration is written rather than
+    // on its name: the name identifies an overload *set*, and this decision has to be made here, at
+    // the name token, before the parameter list that would tell the overloads apart has been parsed
     AST::FunctionDeclNode *funcdecl = payload.collector.functions.find_by_declaration_site(nametoken);
 
     if (funcdecl != nullptr) {
@@ -159,19 +188,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, bool sy
     }
 
     // parse the function arguments
-    while (!cursor.is_type(Token::Type::t_close_paren)) {
-        if (cursor.is_done()) {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(nametoken), Token::Type::t_close_paren, Token::Type::t_unknown);
-            cursor.try_skip_to_next_statement();
-            return nullptr;
-        }
-
-        auto vardecl = parse_varexpr(payload, &funcscope);
-        funcdecl->args.push_back(vardecl);
+    if (!parse_parameter_list(payload, *funcdecl, funcscope, nametoken)) {
+        return nullptr;
     }
-
-    // skip the close parenthesis
-    cursor.skip();
 
     // next token should be ":" for the return type
     if (!cursor.is_type(Token::Type::t_colon)) {

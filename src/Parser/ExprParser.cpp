@@ -978,6 +978,9 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
     return parse_expr_node(payload, expected_type);
 }
 
+// an aggregate, so it is appended with `push_back({...})` rather than `emplace_back(a, b)`: the
+// two-argument emplace needs C++20 parenthesized aggregate initialization (P0960), which AppleClang
+// does not implement. the braced temporary costs a copy of two words - do not "fix" it back
 struct ExprPart {
     // val node
     const AST::NodeReference node;
@@ -1083,7 +1086,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             if (!node.has()) {
                 return AST::make_void_ref();
             }
-            expr_parts.emplace_back(node, nullptr);
+            expr_parts.push_back({node, nullptr});
             continue;
         }
 
@@ -1091,7 +1094,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
         if (op != nullptr) {
             cursor.skip();
-            expr_parts.emplace_back(AST::make_void_ref(), &opnode);
+            expr_parts.push_back({AST::make_void_ref(), &opnode});
 
             // if the operator is a open parenthesis, we increase the depth
             if (op->type == Token::Type::t_open_paren) {
@@ -1111,7 +1114,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             return AST::make_void_ref();
         }
         
-        expr_parts.emplace_back(node, nullptr);
+        expr_parts.push_back({node, nullptr});
     }
 
     // if we have only one part, we can return it directly

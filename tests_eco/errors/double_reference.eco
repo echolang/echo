@@ -4,7 +4,7 @@
 // parser, so only the spaced form produces this diagnostic. the glued form is still rejected,
 // just as an unexpected token.
 //
-// the diagnostic appears twice because a module is parsed twice - once to collect symbols, once
-// in full - and a function signature is read in both passes. recorded here rather than hidden:
-// if issue collection ever learns to deduplicate, this golden is where it shows up
+// a module is parsed more than once and a function signature is read in every pass, so this used
+// to be reported once per pass. AST::Collector::collect_issue de-duplicates on kind + tokens +
+// message, so it appears once - this golden is where a regression in that would show up
 function f(int& & $x) : void {}

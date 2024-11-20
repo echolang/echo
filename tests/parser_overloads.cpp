@@ -98,6 +98,78 @@ TEST_CASE("an overload declared in another file is callable", "[overloads]")
     REQUIRE(calls[0]->decl != calls[1]->decl);
 }
 
+TEST_CASE("a struct declared in another file can be constructed", "[overloads]")
+{
+    // constructors used to be the one exception to that: they were synthesized in the *body* pass,
+    // so a `Point(...)` in a file parsed earlier had nothing to resolve against and the program
+    // compiled or not depending on the order the files were listed in. they are registered in the
+    // declaration pass now, like every other signature
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "$p = Point(1.0, 2.0);\necho $p->x;\n",
+        "struct Point { float64 $x; float64 $y; }\n",
+    });
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "Point");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->decl->args.size() == 2);
+}
+
+TEST_CASE("a user constructor written in another file still suppresses the field-wise one", "[overloads]")
+{
+    // the suppression rule asks whether one of *this struct's* constructors already occupies the
+    // signature. it used to ask the namespace's overload set for the struct's name, which is being
+    // filled as the module is parsed - and which also holds every free function of the same name
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "$p = Point(1.0, 2.0);\n",
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    float64 $y;\n"
+        "    constructor(float64 $a, float64 $b) { $this->x = $a; $this->y = $b; }\n"
+        "}\n",
+    });
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    // one declaration of the name, the user's - not two of the same signature
+    auto decls = decls_named(m, "Point");
+    REQUIRE(decls.size() == 1);
+    REQUIRE(decls[0]->args[0]->name() == "a");
+
+    auto calls = calls_to(m, "Point");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl == decls[0]);
+}
+
+TEST_CASE("a user constructor of a different signature leaves the field-wise one in place", "[overloads]")
+{
+    // Echo has no other syntax for building a struct, so a convenience constructor must not take the
+    // field-wise one away - both spellings resolve, from a file parsed before the struct's own
+    auto bundle = EchoTests::tests_make_parsed_bundle(std::vector<std::string>{
+        "$a = Point(3.0);\n$b = Point(1.0, 2.0);\n",
+        "struct Point {\n"
+        "    float64 $x;\n"
+        "    float64 $y;\n"
+        "    constructor(float64 $v) { $this->x = $v; $this->y = $v; }\n"
+        "}\n",
+    });
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(decls_named(m, "Point").size() == 2);
+
+    auto calls = calls_to(m, "Point");
+    REQUIRE(calls.size() == 2);
+    REQUIRE(calls[0]->decl->args.size() == 1);
+    REQUIRE(calls[1]->decl->args.size() == 2);
+}
+
 TEST_CASE("a struct's own constructor is reachable alongside the field-wise one", "[overloads]")
 {
     // the synthesized field-wise constructor is registered under the struct's name, exactly like

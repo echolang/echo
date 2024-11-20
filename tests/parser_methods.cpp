@@ -292,10 +292,9 @@ TEST_CASE("a method's rendered signature shows neither the receiver nor the owne
 
 TEST_CASE("a method can be called before it is declared", "[methods]")
 {
-    // methods are the one thing the symbol pass takes out of a struct body, so that `$this->log()`
+    // the declaration pass takes method signatures out of a struct body, so that `$this->log()`
     // resolves when `log` is written below its caller - the forward reference free functions and
-    // struct types already get. everything else in the body stays full-pass only, because a
-    // constructor is identified by a virtual token that would land at a different index per pass
+    // struct types already get
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Counter {\n"
         "    int32 $count;\n"
@@ -313,12 +312,13 @@ TEST_CASE("a method can be called before it is declared", "[methods]")
     REQUIRE(calls[0]->decl != nullptr);
 }
 
-TEST_CASE("taking method signatures in the symbol pass does not duplicate constructors", "[methods]")
+TEST_CASE("reaching a struct body in both parse passes does not duplicate constructors", "[methods]")
 {
-    // the hazard todo/A11 names: a constructor's declaration site is a *virtual* name token, minted
-    // where the struct's name is written, so reaching a struct body in both passes would mint two
-    // and register the same constructor twice as a duplicate signature. the symbol walk therefore
-    // consumes a constructor whole without parsing it
+    // the reason the declaration pass used to take *only* method signatures from a struct body:
+    // a constructor's declaration site was a name token minted where
+    // the struct's name is written, so a second pass minted a second one and registered the same
+    // constructor again as a duplicate signature. it is now the `constructor` keyword - a real token
+    // at a fixed index - and both passes walk the whole body.
     // two properties, so the field-wise constructor takes two arguments and is not suppressed by
     // the user's one-argument one - both have to be present, exactly once each
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -335,22 +335,17 @@ TEST_CASE("taking method signatures in the symbol pass does not duplicate constr
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
+    auto *point = struct_named(m, "Point");
+    REQUIRE(point != nullptr);
 
-    size_t one_arg = 0;
-    size_t two_arg = 0;
-    for (auto *decl : decls_named(m, "Point")) {
-        if (decl->body == nullptr) {
-            continue;
-        }
-        if (decl->args.size() == 1) {
-            one_arg++;
-        } else if (decl->args.size() == 2) {
-            two_arg++;
-        }
-    }
+    // the user's, exactly once - not one node per pass
+    REQUIRE(point->constructors().size() == 1);
+    REQUIRE(point->constructors()[0]->args.size() == 1);
+    REQUIRE(point->constructors()[0]->body != nullptr);
 
-    REQUIRE(one_arg == 1);
-    REQUIRE(two_arg == 1);
+    // and the field-wise one alongside it, taking both properties
+    REQUIRE(point->field_wise_constructor() != nullptr);
+    REQUIRE(point->field_wise_constructor()->args.size() == 2);
 }
 
 TEST_CASE("two methods with the same parameter types are rejected", "[methods]")

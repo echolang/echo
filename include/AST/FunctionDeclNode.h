@@ -23,8 +23,19 @@ namespace AST
         ECO_AST_NODE_TYPE(n_func_decl);
             
         std::optional<TokenReference> name_token;
+
+        // where this declaration is *written*, which is what a module's parse passes reconcile on
+        // (AST::FunctionRegistry::DeclarationSite). unset for everything the user spelled with a
+        // name, where the name token already is that position.
+        //
+        // a constructor needs the two apart: it is named after its struct, so `name_token` is the
+        // struct's name token and every constructor of one struct shares it, while each is declared
+        // at its own `constructor` keyword. both are real tokens at a fixed index, so the passes
+        // agree without anybody appending a throwaway token to the module to obtain an identity
+        std::optional<TokenReference> declaration_token;
+
         std::vector<VarDeclNode*> args;
-        
+
         // this function's own generic type parameters (the T, U in `function name<T, U>(...)`),
         // owned by the collector's TypeParamRegistry. a method of a generic struct shares the
         // struct's declarations rather than copying them, so a substitution built from either
@@ -132,10 +143,25 @@ namespace AST
             name_token(name_token)
         {};
 
+        // for a declaration whose name is written somewhere other than where it is declared - a
+        // constructor, which is named after its struct. TokenReference holds a reference, so the
+        // members are not assignable after the fact
+        FunctionDeclNode(TokenReference name_token, TokenReference declaration_token) :
+            name_token(name_token),
+            declaration_token(declaration_token)
+        {};
+
         ~FunctionDeclNode() {};
 
         inline bool is_anonymous() const {
             return !name_token.has_value();
+        }
+
+        // the token that identifies this declaration: where it is written, which is its own
+        // `declaration_token` when it has one and its name token otherwise. only valid when the
+        // declaration is not anonymous
+        inline const TokenReference &declaration_site_token() const {
+            return declaration_token.has_value() ? declaration_token.value() : name_token.value();
         }
 
         inline bool is_generic() const {

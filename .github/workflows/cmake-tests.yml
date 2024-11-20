@@ -105,8 +105,6 @@ jobs:
     needs: build_and_test
     env:
       BUILD_TYPE: Release
-      CC: /usr/bin/clang
-      CXX: /usr/bin/clang++
       USE_CLANG: 1
       BIN_NAME: echo-macos-arm64
 
@@ -117,7 +115,7 @@ jobs:
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:
-          llvm-version: 18
+          llvm-version: 20
 
       - name: Install dependencies
         run: |
@@ -127,8 +125,8 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER=/usr/bin/clang \
-            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
             -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
 
       - name: Build release

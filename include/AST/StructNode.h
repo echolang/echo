@@ -35,6 +35,20 @@ namespace AST
             _complex_type.ast_namespace = ns;
         }
 
+        // the token this struct is declared at. every parse pass walks identical token indices, so the
+        // position a declaration is *written* at identifies it - which the name cannot, because the
+        // name is exactly what two declarations of the same struct share. the same identity
+        // FunctionRegistry keys a function's declaration site on
+        const TokenReference &declaration_site_token() const {
+            return name_token.value();
+        }
+
+        bool is_declared_at(const TokenReference &token) const {
+            return name_token.has_value()
+                && token.belongs_to(name_token->get_collection_ref())
+                && token.get_handle() == name_token->get_handle();
+        }
+
         const std::string struct_name() const;
 
         const std::string namespaced_struct_name() const;
@@ -80,10 +94,52 @@ namespace AST
             return _complex_type.methods();
         }
 
+        // the constructors the user wrote, in declaration order. a constructor is a free function
+        // named after the struct rather than a member, so it is not in _complex_type - but the
+        // struct still has to know its own, because that is what the field-wise constructor's
+        // suppression rule compares against. never cleared between parse passes: the passes
+        // reconcile on the declaration site, so a second pass finds the same node
+        void add_constructor(FunctionDeclNode *constructor) {
+            _constructors.push_back(constructor);
+        }
+
+        const std::vector<FunctionDeclNode *> &constructors() const {
+            return _constructors;
+        }
+
+        // the synthesized field-wise constructor, or null until it is built. kept apart from the
+        // user's own so the suppression rule cannot compare it against itself
+        void set_field_wise_constructor(FunctionDeclNode *constructor) {
+            _field_wise_constructor = constructor;
+        }
+
+        FunctionDeclNode *field_wise_constructor() const {
+            return _field_wise_constructor;
+        }
+
+        // whether some pass has already taken this struct's properties. the body is walked in both
+        // parse passes with the same code - so the two cannot disagree about where a property ends,
+        // and a generic application in a property type is re-interned once every template layout is
+        // complete - but only the first walk may *keep* what it parsed, or the layout is doubled.
+        //
+        // a flag on the node rather than a check on the pass, so that a struct the declaration pass
+        // never reached (error recovery skipped past it) is still collected by the body pass instead
+        // of ending up with an empty layout
+        bool members_collected() const {
+            return _members_collected;
+        }
+
+        void mark_members_collected() {
+            _members_collected = true;
+        }
+
     private:
         ValueType _type;
         ComplexType _complex_type;
         std::vector<VarDeclNode *> _properties;
+        std::vector<FunctionDeclNode *> _constructors;
+        FunctionDeclNode *_field_wise_constructor = nullptr;
+        bool _members_collected = false;
     };
 };
 

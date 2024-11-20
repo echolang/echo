@@ -65,7 +65,13 @@ namespace Parser
         
         AST::TokenizedFile make_tokenized_file(AST::Module &module, AST::File &file) const;
 
-        Parser::Payload make_parser_payload(const AST::TokenizedFile &file, AST::Module &module, AST::Collector &collector) const;
+        // the payload one pass walks one file with. `pass` is on the payload rather than an argument
+        // to each parser, so the entry point below is the only place that has to name it
+        Parser::Payload make_parser_payload(
+            const AST::TokenizedFile &file,
+            AST::Module &module,
+            AST::Collector &collector,
+            Parser::Pass pass = Parser::Pass::t_bodies) const;
         
         void parse_input(const InputPayload &payload) const;
         void parse_module(AST::Module &module, AST::Collector &collector) const;

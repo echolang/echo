@@ -146,55 +146,21 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         _ctx.var_map[node.args[arg.getArgNo()]] = alloca;
     }
 
-    // Auto-synthesized struct constructor only when there is no user-provided body
-    bool is_struct_constructor = false;
-    llvm::StructType *struct_type = nullptr;
+    // a synthesized constructor arrives here like any other function - the struct parser builds its
+    // body out of the same nodes a user would write, which is what keeps one implementation of the
+    // member write and of the pointer re-seat
+    node.body->accept(*_ctx.visitor);
 
-    if (node.return_type && node.return_type->type.is_struct()) {
-        struct_type = llvm::dyn_cast<llvm::StructType>(func->getReturnType());
-        is_struct_constructor = (struct_type != nullptr && node.args.size() > 0 && node.body == nullptr);
-    }
-
-    if (is_struct_constructor) {
-        // Generate struct constructor body
-        // Allocate the struct on the stack
-        llvm::AllocaInst *struct_alloca = _ctx.builder->CreateAlloca(struct_type, nullptr, "result");
-
-        // Initialize struct fields with the constructor arguments
-        for (size_t i = 0; i < node.args.size(); ++i) {
-            // Get the argument variable
-            auto arg_var = _ctx.var_map[node.args[i]];
-            llvm::Value *arg_value = _ctx.builder->CreateLoad(arg_var->getAllocatedType(), arg_var);
-
-            // Get pointer to the struct field
-            std::vector<llvm::Value*> indices = {
-                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), 0),
-                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), i)
-            };
-            llvm::Value *field_ptr = _ctx.builder->CreateGEP(struct_type, struct_alloca, indices);
-
-            // Store the argument value in the field
-            _ctx.builder->CreateStore(arg_value, field_ptr);
-        }
-
-        // Load the struct and return it
-        llvm::Value *struct_value = _ctx.builder->CreateLoad(struct_type, struct_alloca);
-        _ctx.builder->CreateRet(struct_value);
-    } else {
-        // visit the function body for normal functions (including custom constructors)
-        node.body->accept(*_ctx.visitor);
-
-        // Add a terminator if the block doesn't already have one
-        if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
-            // If the function returns void, add a void return
-            if (func->getReturnType()->isVoidTy()) {
-                _ctx.builder->CreateRetVoid();
-            } else {
-                // For non-void functions without explicit return, this is an error
-                // but we'll add a dummy return to keep LLVM happy
-                llvm::Value *dummy_ret = llvm::UndefValue::get(func->getReturnType());
-                _ctx.builder->CreateRet(dummy_ret);
-            }
+    // Add a terminator if the block doesn't already have one
+    if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
+        // If the function returns void, add a void return
+        if (func->getReturnType()->isVoidTy()) {
+            _ctx.builder->CreateRetVoid();
+        } else {
+            // For non-void functions without explicit return, this is an error
+            // but we'll add a dummy return to keep LLVM happy
+            llvm::Value *dummy_ret = llvm::UndefValue::get(func->getReturnType());
+            _ctx.builder->CreateRet(dummy_ret);
         }
     }
 

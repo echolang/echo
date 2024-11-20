@@ -157,8 +157,8 @@ namespace Parser
 
         void skip_until(std::initializer_list<Token::Type> types);
 
-        // will skip to the end of the current scope / block, 
-        // will not skip the scope terminating "}" closing brace token 
+        // will skip to the end of the current scope / block, brace-depth aware, and *does* consume the
+        // scope terminating "}" closing brace token - so the cursor lands on the token after the block
         // Note: This function assumes that you are already inside of a scope
         void skip_till_end_of_scope();
 

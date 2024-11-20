@@ -36,6 +36,17 @@ ISSUE_MESSAGE_FNC(VariableRedeclaration)
         previous_declaration->token_varname.column());
 }
 
+ISSUE_MESSAGE_FNC(TypeRedeclaration)
+{
+    // naming the surviving declaration matters: every follow-on error the user sees comes from the
+    // first declaration's layout, not from the one they are looking at
+    return fmt::format(
+        "The type '{}' is already declared on line {} column {}. The first declaration is the one that is used",
+        type_name,
+        previous_declaration_token.line(),
+        previous_declaration_token.column());
+}
+
 ISSUE_MESSAGE_FNC(UnknownVariable)
 {
     return fmt::format("The variable '{}' is not declared in the current scope", variable_name);

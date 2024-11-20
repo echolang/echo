@@ -2,7 +2,7 @@
 
 #include "Parser/FuncDeclParser.h"
 
-std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(Parser::Payload &payload, bool symbol_only)
+std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
@@ -47,7 +47,7 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(Parser::Payload 
             continue;
         }
 
-        if (auto *funcdecl = parse_funcdecl(payload, symbol_only, FuncDeclKind::t_extern)) {
+        if (auto *funcdecl = parse_funcdecl(payload, FuncDeclKind::t_extern)) {
             declarations.push_back(funcdecl);
         }
     }

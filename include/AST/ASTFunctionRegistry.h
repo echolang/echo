@@ -17,6 +17,15 @@ namespace AST
     class FunctionDeclNode;
     class Namespace;
 
+    // "are these the same symbol", parameter by parameter - the identity question, as distinct from
+    // AST::argument_fit's "can this argument reach this parameter". ValueType equality is exact by
+    // design (it is the interning identity the type registry and the monomorphizer's instance cache
+    // use), which is precisely what "the same signature" has to mean.
+    //
+    // exposed because the struct parser asks it too, of a struct's own constructors, when deciding
+    // whether the field-wise constructor would duplicate one the user wrote
+    bool signatures_match(const FunctionDeclNode *candidate, const std::vector<ValueType> &parameter_types);
+
     // the single store of function declarations, bundle-wide, keyed by namespace and name to a
     // *set* of overloads rather than to one declaration.
     //
@@ -27,11 +36,14 @@ namespace AST
     class FunctionRegistry
     {
     public:
-        // the declaration a module's two parse passes agree on. a module is parsed twice - once
-        // for symbols, once in full - over the same tokens, so the name token's position is an
-        // exact identity for "this declaration" that is available *before* the parameter list is
-        // parsed. the name alone is not: with overloads it names a set, and the reuse decision
-        // has to happen at the name token, long before the signature is known
+        // the declaration a module's parse passes agree on. a module is tokenized once and every
+        // pass walks identical indices, so the position a declaration is *written* at is an exact
+        // identity for it that is available *before* the parameter list is parsed. the name alone is
+        // not: with overloads it names a set, and the reuse decision has to happen at the name
+        // token, long before the signature is known.
+        //
+        // which token that is, is FunctionDeclNode::declaration_site_token()'s answer - the name
+        // token for anything the user named, its own `constructor` keyword for a constructor
         struct DeclarationSite {
             const TokenCollection *tokens;
             size_t index;
@@ -70,9 +82,9 @@ namespace AST
         // set, it is hidden by it. empty when the name is unknown everywhere.
         std::vector<FunctionDeclNode *> overloads(const std::string &name, const Namespace &ns) const;
 
-        // the declaration already registered for this name token, or null on the first pass over
-        // it. this is the symbol-pass / full-pass reconciliation.
-        FunctionDeclNode *find_by_declaration_site(const TokenReference &name_token) const;
+        // the declaration already registered as written at this token, or null on the first pass
+        // over it. this is the declaration-pass / body-pass reconciliation.
+        FunctionDeclNode *find_by_declaration_site(const TokenReference &declaration_token) const;
 
         // does an overload with exactly these parameter types already exist for (ns, name)?
         // `ignore` is skipped, so a declaration can ask without matching itself.
@@ -102,10 +114,10 @@ namespace AST
 
     private:
 
-        // the site key a name token denotes. the one spelling of the identity, so the registration
-        // paths and the lookup cannot construct it differently
-        static DeclarationSite make_site(const TokenReference &name_token) {
-            return DeclarationSite { &name_token.get_collection_ref(), name_token.get_handle() };
+        // the site key a token denotes. the one spelling of the identity, so the registration paths
+        // and the lookup cannot construct it differently
+        static DeclarationSite make_site(const TokenReference &declaration_token) {
+            return DeclarationSite { &declaration_token.get_collection_ref(), declaration_token.get_handle() };
         }
 
         // takes ownership of `decl`'s declaration site: appends it to `_functions`, keys it in

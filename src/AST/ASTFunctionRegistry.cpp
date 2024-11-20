@@ -7,46 +7,27 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
+
+// compared one parameter at a time so a mismatch stops at the first, rather than building a vector
+// per candidate - this runs for every declaration in the bundle
+bool AST::signatures_match(const AST::FunctionDeclNode *candidate, const std::vector<AST::ValueType> &parameter_types)
+{
+    if (candidate->args.size() != parameter_types.size()) {
+        return false;
+    }
+
+    for (size_t i = 0; i < parameter_types.size(); i++) {
+        if (!(candidate->parameter_type(i) == parameter_types[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 namespace
 {
-    // "are these the same symbol", parameter by parameter.
-    //
-    // ValueType equality is exact by design (it is the interning identity the type registry and the
-    // monomorphizer's instance cache use), which is precisely what "the same signature" needs to
-    // mean. compared one parameter at a time so a mismatch stops at the first, rather than building
-    // a vector per candidate - this runs for every declaration in the bundle
-    bool signatures_match(const AST::FunctionDeclNode *candidate, const std::vector<AST::ValueType> &parameter_types)
-    {
-        if (candidate->args.size() != parameter_types.size()) {
-            return false;
-        }
-
-        for (size_t i = 0; i < parameter_types.size(); i++) {
-            if (!(candidate->parameter_type(i) == parameter_types[i])) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    // the same question between two declarations, so neither side has to materialize a type vector
-    // to ask it
-    bool signatures_match(const AST::FunctionDeclNode *candidate, const AST::FunctionDeclNode *decl)
-    {
-        if (candidate->args.size() != decl->args.size()) {
-            return false;
-        }
-
-        for (size_t i = 0; i < decl->args.size(); i++) {
-            if (!(candidate->parameter_type(i) == decl->parameter_type(i))) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     // "this symbol is already declared with these parameter types". one wording, so the free and the
     // member path cannot drift apart the first time it is improved
     void report_duplicate_signature(
@@ -66,12 +47,19 @@ bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
         return false;
     }
 
-    const DeclarationSite site = make_site(decl->name_token.value());
+    const DeclarationSite site = make_site(decl->declaration_site_token());
 
     // the same declaration coming back around in the module's second parse pass. everything the
     // caller would do next has already happened for it, including any duplicate report - doing it
     // again would both double the diagnostic and add the declaration to its own overload set twice
-    if (_by_decl_site.count(site) > 0) {
+    if (const auto claimed = _by_decl_site.find(site); claimed != _by_decl_site.end()) {
+        // ...and "the same declaration" means the very same node: every parser that can reach a
+        // declaration twice looks the site up first and carries on with what it finds, so a second
+        // node at one site would mean the identity is wrong. the failure would otherwise be silent,
+        // this path reading it as "the second pass came back around" and dropping the loser from
+        // its overload set
+        assert(claimed->second == decl && "two declarations claim one declaration site");
+
         return false;
     }
 
@@ -142,12 +130,16 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     const AST::FunctionDeclNode *decl,
     const AST::FunctionDeclNode *ignore) const
 {
+    // materialized once for the whole search rather than per candidate, which is what keeps
+    // signatures_match's parameter-at-a-time comparison worth having
+    const std::vector<ValueType> parameter_types = decl->parameter_types();
+
     for (auto *candidate : find_member_functions(&owner, decl->func_name())) {
         if (candidate == ignore) {
             continue;
         }
 
-        if (signatures_match(candidate, decl)) {
+        if (signatures_match(candidate, parameter_types)) {
             return candidate;
         }
     }
@@ -178,9 +170,9 @@ std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
     return {};
 }
 
-AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &name_token) const
+AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &declaration_token) const
 {
-    const auto found = _by_decl_site.find(make_site(name_token));
+    const auto found = _by_decl_site.find(make_site(declaration_token));
     return found != _by_decl_site.end() ? found->second : nullptr;
 }
 

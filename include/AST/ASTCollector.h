@@ -12,8 +12,12 @@
 #include "AST/ASTValueType.h"
 #include "AST/ASTTypeParam.h"
 
+#include <set>
+#include <tuple>
+#include <typeindex>
+
 namespace AST
-{  
+{
     class Collector
     {
     public:
@@ -34,14 +38,38 @@ namespace AST
         Collector();
         ~Collector();
 
+        // a module is parsed more than once - a declaration pass for the signatures, then a full
+        // pass for the bodies - and the passes are deliberately the same code, so a malformed
+        // declaration is reported once per pass. de-duplicated here, at the one place every issue
+        // travels through, rather than by teaching each reporting site which pass it is in
         template <typename T, typename... Args>
         void collect_issue(const CodeRef &code_ref, Args... args) {
-            issues.push_back(std::make_unique<T>(code_ref, args...));
+            auto issue = std::make_unique<T>(code_ref, args...);
+
+            // two issues are the same issue when they are the same kind, about the same tokens, and
+            // say the same thing. the token collection belongs in the key because indices are per
+            // module - the same shape FunctionRegistry::DeclarationSite keys a declaration on
+            const bool is_first = _reported.emplace(
+                std::type_index(typeid(T)),
+                &code_ref.token_slice.tokens,
+                code_ref.token_slice.start_index,
+                code_ref.token_slice.end_index,
+                issue->message()).second;
+
+            if (!is_first) {
+                return;
+            }
+
+            issues.push_back(std::move(issue));
         }
 
         void print_issues() const;
 
         bool has_critical_issues() const;
+
+    private:
+
+        std::set<std::tuple<std::type_index, const TokenCollection *, size_t, size_t, std::string>> _reported;
     };
 };
 
