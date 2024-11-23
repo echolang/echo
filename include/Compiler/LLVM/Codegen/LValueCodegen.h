@@ -19,7 +19,7 @@ namespace Compiler::LLVM
 {
     struct CodegenContext;
 
-    // an addressable location: where the storage lives, and what it holds.
+    // an addressable location: where the storage lives, and what it holds
     //
     // the type has to travel with the address. under llvm's opaque pointers every pointer is
     // the same `ptr`, so an llvm::Value alone says nothing about what it points at - and every
@@ -28,12 +28,12 @@ namespace Compiler::LLVM
     {
         llvm::Value *address = nullptr;
 
-        // st(E) in the model: the type of the thing *at* `address`, before any auto-deref.
+        // st(E) in the model: the type of the thing *at* `address`, before any auto-deref
         // for `ptr<int32> $p` this is ptr<int32>, and the address is $p's own slot
         AST::ValueType storage_type;
     };
 
-    // the one place that turns an expression into an address.
+    // the one place that turns an expression into an address
     //
     // before this existed the only address path was private to TypeDeclCodegen and hardcoded to
     // a two case switch over variable and member bases, which is why `&$s->x` could not be
@@ -57,7 +57,7 @@ namespace Compiler::LLVM
 
         // gen_lvalue with one auto-deref applied when the storage holds a pointer, so the
         // result addresses the pointee. that is what a plain read or write of a transparent
-        // pointer wants: `$p = 20` stores into the pointee, never into the slot.
+        // pointer wants: `$p = 20` stores into the pointee, never into the slot
         //
         // deliberately temporary. once an explicit deref node exists, every value position
         // carries its own deref in the tree and this collapses into

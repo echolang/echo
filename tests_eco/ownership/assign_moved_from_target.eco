@@ -1,0 +1,27 @@
+// a moved-from target owes no teardown: what is still sitting in its slot belongs to whoever the
+// value was handed to. so the assignment that re-seats it destroys nothing, and there are exactly two
+// destructor lines - the one inside `consume`, and the replacement's at scope exit.
+//
+// pins the empty branch of AssignNode::teardown_old. a third line here would be a double free
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $taken) : void
+{
+    echo 500;
+}
+
+$a = Buffer(1, mem::alloc<uint8>(1));
+consume(mv $a);
+$a = Buffer(2, mem::alloc<uint8>(1));
+echo 99;

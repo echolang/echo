@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTOps.h>
+
 #include "helpers.h"
 
 #define TEST_ASSERT_OP_LIT_TYPE(index, lit_type) \

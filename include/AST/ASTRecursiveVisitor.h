@@ -12,7 +12,7 @@ namespace AST
     // nothing else. subclass this for a pass that only cares about a few node kinds: override the
     // interesting visit* methods, do the work, then call the RecursiveVisitor:: base to continue the
     // descent. cross-reference edges (a VarNode's decl, a call's decl) are deliberately not followed
-    // so the walk stays a tree traversal and terminates.
+    // so the walk stays a tree traversal and terminates
     class RecursiveVisitor : public Visitor
     {
     public:

@@ -42,17 +42,14 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
 
     context.push_scope(scope_node);
 
-    while (!cursor.is_done())
-    {
+    while (!cursor.is_done()) {
         // deep scope
-        if (cursor.is_type(Token::Type::t_open_brace))
-        {
+        if (cursor.is_type(Token::Type::t_open_brace)) {
             cursor.skip();
             context.scope().add_child_scope(parse_scope(payload));
 
             // next token needs to be a closing brace
-            if (!cursor.is_type(Token::Type::t_close_brace))
-            {
+            if (!cursor.is_type(Token::Type::t_close_brace)) {
                 payload.collect_unexpected_token(Token::Type::t_close_brace);
                 cursor.try_skip_to_next_statement();
                 break;
@@ -60,36 +57,28 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
 
             cursor.skip();
         }
-        else if (cursor.is_type(Token::Type::t_close_brace))
-        {
+        else if (cursor.is_type(Token::Type::t_close_brace)) {
             break;
         }
-        else if (cursor.is_type(Token::Type::t_namespace))
-        {
+        else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
         }
-        else if (cursor.is_type(Token::Type::t_function))
-        {
+        else if (cursor.is_type(Token::Type::t_function)) {
             parse_funcdecl(payload);
         }
-        else if (starts_typedecl(cursor))
-        {
+        else if (starts_typedecl(cursor)) {
             parse_typedecl(payload);
         }
-        else if (cursor.is_type(Token::Type::t_extern))
-        {
+        else if (cursor.is_type(Token::Type::t_extern)) {
             parse_extern_block(payload);
         }
-        else if (cursor.is_type(Token::Type::t_return))
-        {
+        else if (cursor.is_type(Token::Type::t_return)) {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));
         }
-        else if (cursor.is_type(Token::Type::t_if))
-        {
+        else if (cursor.is_type(Token::Type::t_if)) {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
         }
-        else if (cursor.is_type(Token::Type::t_while))
-        {
+        else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
         }
         // print statement aka "echo $something"
@@ -101,8 +90,7 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
         // attribute definition
         //   #[attr]
         //   myfunc() {...
-        else if (cursor.is_type(Token::Type::t_hash))
-        {
+        else if (cursor.is_type(Token::Type::t_hash)) {
             parse_attribute(payload);
         }
 

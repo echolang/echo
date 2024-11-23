@@ -1,0 +1,28 @@
+// two identically-shaped copy constructors are already a duplicate signature, reported at the second
+// one's own `constructor` keyword - so recognition adds no diagnostic of its own here. pinned because
+// the copy-constructor slot must not turn that into something vaguer
+
+struct Box
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    constructor(Box& $other)
+    {
+        $this->tag = $other->tag;
+    }
+
+    constructor(Box& $another)
+    {
+        $this->tag = $another->tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}

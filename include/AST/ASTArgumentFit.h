@@ -45,12 +45,12 @@ namespace AST
     };
 
     // a numeric conversion that keeps the value intact *and* stays in its own family: a wider
-    // integer of the same signedness, or a wider float.
+    // integer of the same signedness, or a wider float
     //
     // crossing families is deliberately not a promotion even when no value is lost - int32 into
     // float64 is exact, but it is a bigger step than int32 into int64, and every language that
     // ranks conversions at all ranks it lower. a sign change is not one either: the bit pattern
-    // survives but the meaning does not.
+    // survives but the meaning does not
     //
     // spelled out here rather than reusing ValueType::will_fit_into, which answers a different
     // question - it accepts a bool into any numeric and rejects int32 into float64 as a side
@@ -74,7 +74,7 @@ namespace AST
     // the single rule for "does this argument answer this parameter", shared by overload
     // resolution and the implicit borrow in coerce_arg_to_pointer_param. those two agreeing is
     // what stops the matcher accepting a borrow parameter that the coercion right after it would
-    // then decline to wrap.
+    // then decline to wrap
     //
     // @TODO TypeChecker::arg_assignable_to is a third copy of the same question and should fold
     // onto this one; it answers only yes/no, so it needs `!= t_none` rather than the ranking.

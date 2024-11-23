@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -15,7 +15,7 @@ using EchoTests::type_named;
 
 // a module is parsed in three passes - type names, then declarations, then bodies - and each one runs
 // over every file before the next starts. what that buys is order independence: nothing a declaration
-// names has to be written above it, or in a file listed before it. these are the cases that pin it.
+// names has to be written above it, or in a file listed before it. these are the cases that pin it
 
 TEST_CASE("a property can be typed by a struct declared further down", "[structdecl]")
 {
@@ -111,7 +111,7 @@ TEST_CASE("a constructor is one declaration across both parse passes", "[structd
 TEST_CASE("a constructor that never receives a body is reported", "[structdecl]")
 {
     // the declaration pass skips a member body whole while the body pass parses it, so a malformed
-    // method can send the two to different places and leave a registered constructor without a body.
+    // method can send the two to different places and leave a registered constructor without a body
     // that has to be a located error: codegen *declares* every function in the module but emits a
     // body only for the ones in the file root, so it would otherwise link against nothing
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -128,9 +128,10 @@ TEST_CASE("a constructor that never receives a body is reported", "[structdecl]"
 // same-named struct declared somewhere *else* is not this pass revisiting the same struct - it is a
 // redeclaration, and it has to be reported rather than folded into the first one, which is what
 // members_collected() did on its own (silently keeping the first layout while the duplicate's methods
-// and its second field-wise constructor still landed on the first struct).
+// and its second field-wise constructor still landed on the first struct)
 
-namespace {
+namespace
+{
     // how many diagnostics mention a redeclaration. a count, not a predicate, because the point of
     // most of these cases is that three passes over the same tokens yield exactly one
     size_t redeclaration_issue_count(const AST::Bundle &bundle)

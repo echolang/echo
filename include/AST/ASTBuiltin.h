@@ -7,7 +7,7 @@
 
 namespace AST
 {
-    // the compiler builtins a function declaration can be bound to with `#[builtin: "..."]`.
+    // the compiler builtins a function declaration can be bound to with `#[builtin: "..."]`
     //
     // a builtin is answered by the compiler at the call site rather than being emitted as a
     // function, so it has no symbol and no body. that is what separates it from `intrinsic`,
@@ -16,7 +16,8 @@ namespace AST
     // the surface still lives in the stdlib (`function size_of<T>() : usize;` in `namespace mem`)
     // so that the name, the namespace, the documentation and the "unknown function" diagnostic all
     // come from Echo source rather than being hardcoded in the parser
-    enum class BuiltinKind {
+    enum class BuiltinKind
+    {
         t_size_of,
         t_align_of,
     };

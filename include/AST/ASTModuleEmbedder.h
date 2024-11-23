@@ -8,5 +8,5 @@
 namespace AST
 {
     void write_embedded_module(AST::Module &module, const std::string &output_path);
-}
+};
 #endif

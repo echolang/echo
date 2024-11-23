@@ -1,0 +1,31 @@
+// the drop for an assignment target belongs *after* the right-hand side, not ahead of the statement.
+// `replace($a)` takes a borrow, so nothing about this is a copy and no `mv` is involved - the old
+// value is simply still being read while the new one is built.
+//
+// two things are pinned. the *order*, by the `echo 500` inside replace; and that the read saw a live
+// value, by the tag: the destructor zeroes `$tag`, so a teardown that ran too early would make
+// replace compute 0 + 10 rather than 1 + 10. self-assignment is only the statically visible case of
+// this, which is why the fix is the general order rather than a check for `$a = $a`
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        $this->tag = 0;
+        mem::free($this->data);
+    }
+}
+
+function replace(Buffer& $old) : Buffer
+{
+    echo 500;
+    return Buffer($old->tag + 10, mem::alloc<uint8>(1));
+}
+
+$a = Buffer(1, mem::alloc<uint8>(1));
+$a = replace($a);
+echo 99;

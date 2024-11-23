@@ -6,15 +6,18 @@
 #define ISSUE_MESSAGE_FNC(className) \
 std::string AST::Issue::className::message() const
 
-ISSUE_MESSAGE_FNC(GenericError) {
+ISSUE_MESSAGE_FNC(GenericError)
+{
     return _message;
 }
 
-ISSUE_MESSAGE_FNC(GenericWarning) {
+ISSUE_MESSAGE_FNC(GenericWarning)
+{
     return _message;
 }
 
-ISSUE_MESSAGE_FNC(GenericInfo) {
+ISSUE_MESSAGE_FNC(GenericInfo)
+{
     return _message;
 }
 

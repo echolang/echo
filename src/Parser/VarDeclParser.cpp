@@ -125,12 +125,11 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     // if the next token is a accessor this is a member reference
 
     // we have a previous declaration, this might be a mutable variable
-    if (prev_vardecl != nullptr) 
-    {    
+    if (prev_vardecl != nullptr) {
         // const is *not* checked here. it used to be, on the declared type's top level, which is
         // the wrong level twice over: `const int& $r` is a mutable borrow of a const pointee, so
         // the guard never fired on the write it should reject, while `const ptr<int> $p` is a const
-        // pointer whose pointee may legally be written, so it fired on a write it should allow.
+        // pointer whose pointee may legally be written, so it fired on a write it should allow
         // telling those apart needs the deref AST::PointerAdjuster inserts, so the check now lives
         // in AST::TypeChecker::check_const_target, keyed on the assignment target's shape
 
@@ -166,8 +165,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         TokenReference assign_token = cursor.current();
 
         // `$i++` / `$p:$--`. the statement carries no `=`, the step comes from the operator
-        if (cursor.is_type(Token::Type::t_op_inc) || cursor.is_type(Token::Type::t_op_dec))
-        {
+        if (cursor.is_type(Token::Type::t_op_inc) || cursor.is_type(Token::Type::t_op_dec)) {
             // the operand of the arithmetic is the target parsed a *second* time rather than
             // the same node under two parents: AST::PointerAdjuster rewrites edges in place,
             // and a shared subtree would be adjusted twice - an index expression would collect
@@ -177,8 +175,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             cursor.skip(); // the ++/-- token, re-reached by the second parse
 
             // the same destination rule the `=` path applies - `$p:$` is legal, `$p:$:$++` is not
-            if (operand == nullptr || !AST::is_assignable_target(*target))
-            {
+            if (operand == nullptr || !AST::is_assignable_target(*target)) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(assign_token),
                     "'" + assign_token.value() + "' needs an expression with storage to step");
@@ -189,8 +186,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             expr = build_incdec_value(payload, operand, assign_token);
         }
 
-        else
-        {
+        else {
             if (!payload.cursor.is_type(Token::Type::t_assign)) {
                 payload.collect_unexpected_token(Token::Type::t_assign);
                 cursor.try_skip_to_next_statement();
@@ -222,6 +218,20 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         }
 
         auto assign = &payload.context.emplace_node<AST::AssignNode>(target, expr, assign_token);
+
+        // a constructor writing a field of its own `$this` binds that field for the first time. the
+        // slot is fresh - gen_var_decl zero-fills it - so there is no previous value owed a teardown,
+        // and a `const` property gets its one legitimate write. exactly what the synthesized
+        // field-wise constructor already says about its own writes, said here so the two agree
+        //
+        // decided in the parser because this is where knowing it is free: Context::ctor_this_ptr is
+        // the enclosing constructor's `$this`, and a later pass would have to reconstruct "are we
+        // inside a constructor, and is this that constructor's receiver" from the tree
+        if (payload.context.ctor_this_ptr != nullptr
+            && target->get_node_type() == AST::NodeType::n_member_access
+            && AST::place_root_of(target) == payload.context.ctor_this_ptr) {
+            assign->is_initialization = true;
+        }
 
         // skip the end of the statement
         if (is_vardecl_end_token(cursor)) {
@@ -271,7 +281,7 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         }
         else {
             // the inferred type is the single source of truth, const included - there is no
-            // longer a separate node-level flag that could disagree with it.
+            // longer a separate node-level flag that could disagree with it
             // value_result_type, not result_type: `$copy = $r` over an `int32&` copies the int
             // it refers to, so the copy is an int32 rather than a second reference
             auto inferred = AST::value_result_type(*vardecl->init_expr);

@@ -11,10 +11,8 @@ namespace AST
 
 VarDeclNode *place_root_of(ExprNode *expr)
 {
-    while (expr != nullptr)
-    {
-        switch (expr->get_node_type())
-        {
+    while (expr != nullptr) {
+        switch (expr->get_node_type()) {
             case NodeType::n_varref:
             {
                 auto *var_ref = static_cast<VarRefNode *>(expr);
@@ -52,4 +50,4 @@ VarDeclNode *place_root_of(ExprNode *expr)
     return nullptr;
 }
 
-}  // namespace AST
+};  // namespace AST

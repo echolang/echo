@@ -144,8 +144,7 @@ void PointerAdjuster::adjust(Node *node)
         return;
     }
 
-    switch (node->get_node_type())
-    {
+    switch (node->get_node_type()) {
         case NodeType::n_scope:
         {
             auto *scope = static_cast<ScopeNode *>(node);
@@ -182,16 +181,22 @@ void PointerAdjuster::adjust(Node *node)
         {
             auto *assign = static_cast<AssignNode *>(node);
             // the target goes through as_value like any other read: a plain pointer target
-            // gains the deref that write-through means, while `$p:$` keeps the slot it names.
+            // gains the deref that write-through means, while `$p:$` keeps the slot it names
             // that is the whole difference between writing through a pointer and re-seating it
             assign->target = as_value(assign->target);
 
-            // the value is then read to fit whatever storage the target turned out to name.
+            // the value is then read to fit whatever storage the target turned out to name
             // for `ptr<ptr<int>> $out`, `$out = $target` writes the caller's *pointer*, so the
             // value keeps its address instead of being read through
             assign->value_expr = as_value_for(
                 assign->value_expr,
                 assign->target != nullptr ? assign->target->result_type() : ValueType::make_unknown());
+
+            // and the old value's teardown, which is a scope of ordinary destructor calls hanging off
+            // this statement rather than sitting in the enclosing one's children. not cosmetic: a
+            // drop's receiver is `AddrOf(place)`, which the call arm below routes through adjust_place,
+            // so a member-path place with a pointer base would otherwise silently lose its deref
+            adjust(assign->teardown_old);
             break;
         }
 
@@ -364,4 +369,4 @@ void PointerAdjuster::adjust(Node *node)
     }
 }
 
-}
+};

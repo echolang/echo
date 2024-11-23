@@ -8,7 +8,8 @@
 
 using namespace AST;
 
-namespace {
+namespace
+{
     ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
 
     ValueType ptr_to(ValueType pointee) { return ValueType::make_pointer(pointee, true); }

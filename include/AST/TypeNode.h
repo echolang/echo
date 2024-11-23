@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTValueType.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 
 #include <optional>
 
@@ -35,7 +35,7 @@ namespace AST
             return "type<" + type.get_type_desciption() + ">";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitType(*this);
         }
 

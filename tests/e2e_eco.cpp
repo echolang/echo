@@ -15,10 +15,10 @@
 // real `echoc run` binary (ECHOC_BINARY), captures stdout+stderr and compares it to the
 // sibling `*.eco.out` golden file. both successful programs and deliberately broken ones
 // are matched the same way - the compiler prints its diagnostics to stdout, so an error
-// test's golden simply contains the expected diagnostic text.
+// test's golden simply contains the expected diagnostic text
 //
 // the corpus is data driven: adding `.eco`/`.eco.out` pairs (in arbitrarily nested
-// subdirs) needs no CMake reconfigure - discovery happens at runtime.
+// subdirs) needs no CMake reconfigure - discovery happens at runtime
 
 #ifndef ECHOC_BINARY
 #define ECHOC_BINARY "echoc"
@@ -45,8 +45,7 @@ namespace
         REQUIRE(pipe != nullptr);
 
         size_t n;
-        while ((n = fread(buf.data(), 1, buf.size(), pipe)) > 0)
-        {
+        while ((n = fread(buf.data(), 1, buf.size(), pipe)) > 0) {
             out.append(buf.data(), n);
         }
 
@@ -66,8 +65,7 @@ namespace
     // strip a single trailing newline so goldens don't have to be byte-perfect on the last \n
     std::string normalize(std::string s)
     {
-        if (!s.empty() && s.back() == '\n')
-        {
+        if (!s.empty() && s.back() == '\n') {
             s.pop_back();
         }
         return s;
@@ -79,10 +77,8 @@ TEST_CASE("eco end-to-end golden output", "[e2e]")
     const fs::path root = ECO_E2E_TESTS_DIR;
 
     std::vector<fs::path> cases;
-    for (auto &entry : fs::recursive_directory_iterator(root))
-    {
-        if (entry.is_regular_file() && entry.path().extension() == ".eco")
-        {
+    for (auto &entry : fs::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".eco") {
             cases.push_back(entry.path());
         }
     }
@@ -92,16 +88,14 @@ TEST_CASE("eco end-to-end golden output", "[e2e]")
 
     REQUIRE_FALSE(cases.empty());
 
-    for (const auto &eco : cases)
-    {
+    for (const auto &eco : cases) {
         fs::path expected = eco;
         expected += ".out";
         std::string rel = fs::relative(eco, root).string();
 
         DYNAMIC_SECTION("eco: " << rel)
         {
-            if (!fs::exists(expected))
-            {
+            if (!fs::exists(expected)) {
                 FAIL("missing golden file: " << rel << ".out, create it with: ./build/echoc run \"" << eco.string() << "\" > \"" << expected.string() << "\"");
             }
 

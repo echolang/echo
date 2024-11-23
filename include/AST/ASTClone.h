@@ -13,11 +13,11 @@ namespace AST
 {
     // toolkit threaded through a deep clone of an AST subtree. It is the single place that
     // knows how to (a) emit new nodes into the right NodeCollection, (b) substitute types,
-    // and (c) rebind references so that clones point at clones (not at the originals).
+    // and (c) rebind references so that clones point at clones (not at the originals)
     //
     // every node's clone() records its old->new mapping *before* recursing into children,
     // so self-referential edges (e.g. a recursive function calling itself) resolve to the
-    // in-progress clone instead of the original.
+    // in-progress clone instead of the original
     struct CloneContext
     {
         NodeCollection &nodes;              // where cloned nodes are emplaced (owner)
@@ -31,7 +31,7 @@ namespace AST
         {}
 
         // shallow copy-construct `from` into the collection and record the mapping. Callers
-        // then deep-clone owned children / rebind cross-references / substitute types in place.
+        // then deep-clone owned children / rebind cross-references / substitute types in place
         template <class T>
         T *shallow(const T *from) {
             T &copy = nodes.emplace_back<T>(*from);
@@ -49,7 +49,7 @@ namespace AST
             return &node;
         }
 
-        // deep-clone an owned child (dispatches through the virtual clone). Null-safe.
+        // deep-clone an owned child (dispatches through the virtual clone). Null-safe
         template <class T>
         T *child(T *old) {
             if (!old) return nullptr;
@@ -57,7 +57,7 @@ namespace AST
         }
 
         // resolve a cross-reference: the clone if the target was cloned in this subtree,
-        // otherwise the original (shared). Null-safe.
+        // otherwise the original (shared). Null-safe
         template <class T>
         T *rebind(T *old) const {
             if (!old) return old;
@@ -65,14 +65,14 @@ namespace AST
             return it != map.end() ? static_cast<T *>(it->second) : old;
         }
 
-        // deep-clone the node behind an owned NodeReference, preserving its type tag.
+        // deep-clone the node behind an owned NodeReference, preserving its type tag
         NodeReference clone_ref(const NodeReference &ref) {
             if (!ref.has()) return make_void_ref();
             Node *cloned = ref.node()->clone(*this);
             return NodeReference(ref.type(), cloned);
         }
 
-        // rebind the node behind a cross-reference NodeReference (target not owned here).
+        // rebind the node behind a cross-reference NodeReference (target not owned here)
         NodeReference rebind_ref(const NodeReference &ref) const {
             if (!ref.has()) return ref;
             auto it = map.find(ref.node());
@@ -83,6 +83,6 @@ namespace AST
             return substitute_type(type, subst, registry);
         }
     };
-}
+};
 
 #endif

@@ -28,7 +28,7 @@ namespace Compiler::LLVM
         // declaration order, and nothing else
         llvm::StructType *llvm_struct;
 
-        // a class only: the heap block wrapping that payload, and the per-class identity global.
+        // a class only: the heap block wrapping that payload, and the per-class identity global
         // both null for a struct, which has no block and no runtime metadata at all. see
         // Codegen/ClassLayout.h for the block's shape
         llvm::StructType *llvm_box = nullptr;
@@ -45,7 +45,7 @@ namespace Compiler::LLVM
         structure_id_t push_structure(const AST::TypeDeclNode *structdecl, llvm::StructType *structtype);
 
         // registers a generic struct instantiation, which has an interned ComplexType but no
-        // TypeDeclNode of its own (the layout lives on the ComplexType).
+        // TypeDeclNode of its own (the layout lives on the ComplexType)
         structure_id_t push_structure(const AST::ComplexType *type, llvm::StructType *structtype);
 
         Structure &get_structure(structure_id_t id) {
@@ -104,19 +104,19 @@ namespace Compiler::LLVM
             return id;
         }
 
-        Function& get_function(function_id_t id) {
+        Function &get_function(function_id_t id) {
             return _functions[id];
         }
 
-        const Function& get_function(function_id_t id) const {
+        const Function &get_function(function_id_t id) const {
             return _functions[id];
         }
 
-        llvm::Function* get_llvm_function(function_id_t id) {
+        llvm::Function *get_llvm_function(function_id_t id) {
             return _functions[id].llvm_func;
         }
 
-        const llvm::Function* get_llvm_function(function_id_t id) const {
+        const llvm::Function *get_llvm_function(function_id_t id) const {
             return _functions[id].llvm_func;
         }
 
@@ -146,7 +146,7 @@ namespace Compiler::LLVM
             return 0;
         }
     };
-}
+};
 
 
 #endif

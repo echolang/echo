@@ -30,7 +30,7 @@ namespace Compiler::LLVM
             structure_table = std::make_unique<StructureTable>();
         }
     };
-}
+};
 
 
 

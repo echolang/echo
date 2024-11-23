@@ -20,19 +20,19 @@ namespace AST
     // "are these the same symbol", parameter by parameter - the identity question, as distinct from
     // AST::argument_fit's "can this argument reach this parameter". ValueType equality is exact by
     // design (it is the interning identity the type registry and the monomorphizer's instance cache
-    // use), which is precisely what "the same signature" has to mean.
+    // use), which is precisely what "the same signature" has to mean
     //
     // exposed because the struct parser asks it too, of a struct's own constructors, when deciding
     // whether the field-wise constructor would duplicate one the user wrote
     bool signatures_match(const FunctionDeclNode *candidate, const std::vector<ValueType> &parameter_types);
 
     // the single store of function declarations, bundle-wide, keyed by namespace and name to a
-    // *set* of overloads rather than to one declaration.
+    // *set* of overloads rather than to one declaration
     //
     // it replaces two maps that were keyed on the bare name and silently overwrote each other:
     // ScopeNode::_declared_functions and the function half of Namespace::_symbols. Namespace
     // symbols are types only now, which is also what lets a struct `Foo` and its constructor
-    // `Foo` stop sharing one slot.
+    // `Foo` stop sharing one slot
     class FunctionRegistry
     {
     public:
@@ -40,11 +40,12 @@ namespace AST
         // pass walks identical indices, so the position a declaration is *written* at is an exact
         // identity for it that is available *before* the parameter list is parsed. the name alone is
         // not: with overloads it names a set, and the reuse decision has to happen at the name
-        // token, long before the signature is known.
+        // token, long before the signature is known
         //
         // which token that is, is FunctionDeclNode::declaration_site_token()'s answer - the name
         // token for anything the user named, its own `constructor` keyword for a constructor
-        struct DeclarationSite {
+        struct DeclarationSite
+        {
             const TokenCollection *tokens;
             size_t index;
 
@@ -53,7 +54,8 @@ namespace AST
             }
         };
 
-        struct DeclarationSiteHash {
+        struct DeclarationSiteHash
+        {
             size_t operator()(const DeclarationSite &site) const {
                 return std::hash<const TokenCollection *>{}(site.tokens) ^ (std::hash<size_t>{}(site.index) << 1);
             }
@@ -66,7 +68,7 @@ namespace AST
         // registers a declaration under its own namespace and name. re-registering the same
         // declaration site is a no-op rather than a duplicate, which is what makes the symbol
         // pass and the full pass idempotent. a *different* declaration with parameter types the
-        // set already holds is reported on the collector as a duplicate.
+        // set already holds is reported on the collector as a duplicate
         void register_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl);
 
         // registers a *member* function on its owning type. reconcilable across the two parse
@@ -74,7 +76,7 @@ namespace AST
         // exactly as register_function is - but deliberately never entered into the (namespace,
         // name) overload sets, because a method is reached through its receiver. a bare `push(...)`
         // therefore does not resolve to `Stack::push`, and AST::find_member_functions is the only
-        // way to it.
+        // way to it
         void register_member_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
 
         // registers the owner's destructor. reconciles across the parse passes by declaration site
@@ -89,15 +91,15 @@ namespace AST
 
         // the overload set for a name, searched from `ns` outward. the first namespace holding
         // any candidate for the name answers - an outer namespace does not extend an inner one's
-        // set, it is hidden by it. empty when the name is unknown everywhere.
+        // set, it is hidden by it. empty when the name is unknown everywhere
         std::vector<FunctionDeclNode *> overloads(const std::string &name, const Namespace &ns) const;
 
         // the declaration already registered as written at this token, or null on the first pass
-        // over it. this is the declaration-pass / body-pass reconciliation.
+        // over it. this is the declaration-pass / body-pass reconciliation
         FunctionDeclNode *find_by_declaration_site(const TokenReference &declaration_token) const;
 
         // does an overload with exactly these parameter types already exist for (ns, name)?
-        // `ignore` is skipped, so a declaration can ask without matching itself.
+        // `ignore` is skipped, so a declaration can ask without matching itself
         FunctionDeclNode *find_by_signature(
             const std::string &name,
             const Namespace &ns,
@@ -106,7 +108,7 @@ namespace AST
 
         // the member counterpart: does `owner` already declare a method with `decl`'s name and
         // exactly its parameter types (the receiver included)? `ignore` is skipped so a declaration
-        // can ask without matching itself.
+        // can ask without matching itself
         //
         // takes the declaration rather than a name and a type vector, so neither side has to be
         // materialized to ask - the comparison stops at the first differing parameter

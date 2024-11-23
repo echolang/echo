@@ -14,20 +14,20 @@ namespace AST
     class File;
     class ExprNode;
 
-    // inserts the auto-deref that a pointer's transparency implies, explicitly, into the tree.
+    // inserts the auto-deref that a pointer's transparency implies, explicitly, into the tree
     //
     // a pointer "behaves like the value it points to", and codegen has always honoured that by
     // emitting a second load when it read a pointer variable. the AST did not: a read of
     // `int32& $x` reported its type as `int32&` while the value produced was an `int32`, and
     // every consumer downstream - binary operand typing, the echo format dispatch, argument
-    // matching, generic inference - had to reach for value_type_of() to paper over it.
+    // matching, generic inference - had to reach for value_type_of() to paper over it
     //
     // this pass wraps every pointer read in a value position with a DerefExprNode, so after it
-    // runs `result_type()` means what it says and nobody has to compensate.
+    // runs `result_type()` means what it says and nobody has to compensate
     //
     // it is a *rewriter*, not a walker: it replaces the parent's edge to a child. that is why
     // it drives the traversal itself through adjust() rather than subclassing the read-only
-    // RecursiveVisitor's descent.
+    // RecursiveVisitor's descent
     //
     // runs after monomorphization - a type parameter's pointer-ness is not known until it is
     // substituted - and before the type checker, which can then compare types structurally
@@ -59,7 +59,7 @@ namespace AST
         ExprNode *as_value(ExprNode *expr);
 
         // adjust the expression subtree *without* making its root a value - used for the
-        // operand of an address-of, and for a member access base, both of which want the place.
+        // operand of an address-of, and for a member access base, both of which want the place
         // returns the possibly-replaced expression
         ExprNode *adjust_place(ExprNode *expr);
 
@@ -67,7 +67,7 @@ namespace AST
         // reading through it. shared by declarations and assignments so the two agree
         ExprNode *as_value_for(ExprNode *expr, const ValueType &wanted);
 
-        // erases a `:$` marker, leaving the operand as a place whose value is the pointer.
+        // erases a `:$` marker, leaving the operand as a place whose value is the pointer
         // reports here, where the type is finally concrete, when there is nothing to peel
         ExprNode *strip_peel(ExprNode *expr);
 

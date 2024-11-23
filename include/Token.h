@@ -10,15 +10,17 @@
 
 #include <cstdint>
 
-struct Token {
+struct Token
+{
 public:
-    enum class Type {
+    enum class Type
+    {
         t_identifier, 
         t_semicolon,                // ;
         t_colon,                    // :
         t_ptr_of,                   // :$ - the address of a pointer expression
         t_comma,                    // ,
-        t_dot,                      // .
+        t_dot,                      // 
         t_logical_and,              // &&
         t_logical_or,               // ||
         t_logical_eq,               // ==
@@ -118,7 +120,8 @@ const std::string token_lit_symbol_string(const Token::Type type);
 
 class TokenReference;
 struct TokenSlice;
-struct TokenCollection {
+struct TokenCollection
+{
 
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
@@ -143,7 +146,8 @@ struct TokenCollection {
     TokenSlice slice(size_t start, size_t end) const;
 };
 
-class TokenReference {
+class TokenReference
+{
     const TokenCollection &tokens;
     size_t index;
 
@@ -162,8 +166,8 @@ public:
     }
 
     // returns the handle to the token inside of its collection
-    // Keep in mind that token and its value is owned by the collection
-    // use carefully.
+    // keep in mind that token and its value is owned by the collection
+    // use carefully
     inline size_t get_handle() const {
         return index;
     }
@@ -226,7 +230,8 @@ public:
     }
 };
 
-struct TokenSlice {
+struct TokenSlice
+{
     const TokenCollection &tokens;
     const size_t start_index;
     const size_t end_index;
@@ -260,7 +265,8 @@ struct TokenSlice {
         return start_index + index < end_index;
     }
 
-    struct iterator {
+    struct iterator
+    {
         const TokenSlice &slice;
         size_t index;
 
@@ -290,7 +296,8 @@ struct TokenSlice {
     }
 };
 
-struct TokenList {
+struct TokenList
+{
     const TokenCollection &tokens;
     std::vector<size_t> indices;
 
@@ -311,7 +318,8 @@ struct TokenList {
     }
 
     // iterator for the token list
-    struct iterator {
+    struct iterator
+    {
         const TokenList &list;
         size_t index;
 

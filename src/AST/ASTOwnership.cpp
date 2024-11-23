@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
@@ -54,13 +55,50 @@ namespace
         return place_root_of(operand);
     }
 
+    // the declaration a place ultimately addresses, plus the member names between the two in
+    // declaration order - so `$this->a->b` answers `$this` and `["a", "b"]`.
+    //
+    // null when the place is not a plain member chain. an index is the case that matters: `$items[$i]`
+    // names storage picked at runtime, so there is no static identity to compare two writes on, and
+    // guessing one would either miss a leak or invent a diagnostic
+    VarDeclNode *member_path_of(ExprNode *expr, std::vector<std::string> &path)
+    {
+        if (expr == nullptr) {
+            return nullptr;
+        }
+
+        if (expr->get_node_type() == NodeType::n_varref) {
+            return place_root_of(expr);
+        }
+
+        if (expr->get_node_type() != NodeType::n_member_access) {
+            return nullptr;
+        }
+
+        auto *access = static_cast<MemberAccessNode *>(expr);
+        auto &base = access->get_base_node();
+
+        if (!base.has() || !base.is_expression_node()) {
+            return nullptr;
+        }
+
+        VarDeclNode *root = member_path_of(base.unsafe_ptr<ExprNode>(), path);
+
+        // pushed on the way *out* of the recursion, so the names come back outermost-last without a
+        // reverse. a member access nests base-first, which is the opposite of how it reads
+        if (root != nullptr) {
+            path.push_back(access->get_member_name().value());
+        }
+
+        return root;
+    }
+
     // a token to hang a diagnostic on for an expression that names no variable. every place shape
     // carries one somewhere, so this walks to whichever is nearest the surface rather than falling
     // back to the file's first token - a diagnostic at line 1 is worse than none
     const TokenReference &location_of(ExprNode *expr)
     {
-        switch (expr->get_node_type())
-        {
+        switch (expr->get_node_type()) {
             case NodeType::n_member_access:
                 return static_cast<MemberAccessNode *>(expr)->get_member_name();
 
@@ -162,6 +200,7 @@ void OwnershipPass::resolve_root(ScopeNode &root)
     _frames.clear();
     _moved.clear();
     _maybe_moved.clear();
+    _initialized_storage.clear();
 
     walk_scope(root);
 }
@@ -194,6 +233,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     _frames.clear();
     _moved.clear();
     _maybe_moved.clear();
+    _initialized_storage.clear();
 
     // a by-value parameter of an owning type owns what it was handed - "$items is ours; it is
     // destroyed at the end of this body". seeded into the *body's* frame rather than a frame of its
@@ -221,8 +261,7 @@ bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
             continue;
         }
 
-        switch (node->get_node_type())
-        {
+        switch (node->get_node_type()) {
             case NodeType::n_vardecl:
             {
                 auto *decl = static_cast<VarDeclNode *>(node);
@@ -278,7 +317,7 @@ bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
 
 void OwnershipPass::walk_scope(ScopeNode &scope)
 {
-    // the function body's frame is pushed by resolve_function, which seeds it with the parameters.
+    // the function body's frame is pushed by resolve_function, which seeds it with the parameters
     // every other scope opens its own
     const bool own_frame = _frames.empty() || _frames.back().scope != &scope;
 
@@ -294,7 +333,7 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
     for (auto &child : scope.children) {
         // what walk_statement hands back is what the scope keeps - normally the statement itself, but a
         // discarded owning temporary is replaced by the declaration that now owns it
-        const NodeReference kept = walk_statement(child, rebuilt);
+        const NodeReference kept = walk_statement(child);
 
         if (child.has_type<ReturnNode>()) {
             // a return leaves every enclosing scope at once, so it owes the drops of all of them,
@@ -327,7 +366,7 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
     }
 }
 
-NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeReferenceList &before)
+NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 {
     Node *node = child.node();
 
@@ -335,8 +374,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeRefe
         return child;
     }
 
-    switch (node->get_node_type())
-    {
+    switch (node->get_node_type()) {
         case NodeType::n_vardecl:
         {
             auto *decl = static_cast<VarDeclNode *>(node);
@@ -357,25 +395,37 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeRefe
         {
             auto *assign = static_cast<AssignNode *>(node);
 
-            walk_expression(assign->target);
+            // a whole-variable target is *written*, not read, so a moved-from variable being re-seated
+            // is not a use-after-move. the arm below already says so - it clears the moved state and
+            // notes "the variable is live again from here on" - but the walk got there first and
+            // reported the write as a read. any other target shape (`$a->f`, `$a[$i]`) genuinely does
+            // read `$a` to find the storage, so it is walked as usual
+            if (whole_variable_moved(assign->target) == nullptr) {
+                walk_expression(assign->target);
+            }
 
             const ValueType target_type =
                 assign->target != nullptr ? value_result_type(*assign->target) : ValueType::make_unknown();
 
+            // keyed on hands_over_value rather than on is_initialization, which it used to be. both are
+            // set by the synthesized field-wise constructor, but a *hand-written* constructor writes
+            // fresh storage too and its transfers stay visible - it says `$this->data = mv $data`. so
+            // its `$this->inner = $other->inner` is an ordinary assignment, and reaches the copy
+            // constructor rather than silently moving out of a borrowed source
             assign->value_expr = resolve_value_arrival(
                 assign->value_expr,
                 target_type,
                 nullptr,
-                assign->is_initialization
+                assign->hands_over_value
                     ? ValueDestination::t_initialization
                     : ValueDestination::t_assignment);
 
             // **a class target releases whatever it held, and codegen orders the sequence.** it cannot
-            // be a drop statement pushed ahead of the assignment the way a struct's is: with a retain
-            // now on the right-hand side, `$a = $a;` would lower to `release($a); $a = retain($a);` and
-            // read freed memory. so the flag says *that* the old reference is owed a release and
-            // gen_assign says *when* - retain the new value, read the old handle, store, release the old
-            // - which is self-assignment-safe by construction.
+            // be a node with a place of its own the way a struct's teardown is: the release needs the
+            // old handle out of the slot codegen has already addressed, and a class target may be
+            // `$node->next` or an element, whose index expression must not be evaluated twice. so the
+            // flag says *that* the old reference is owed a release and gen_assign says *when* - retain
+            // the new value, read the old handle, store, release the old
             //
             // it also lifts the whole-variable restriction below. writing an owning *struct* into a
             // field is the unspecified partial-ownership case, but a class field holds one handle and
@@ -406,6 +456,38 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeRefe
                 break;
             }
 
+            // an initialization owes no teardown - the storage is fresh - but that is only true of the
+            // *first* one. a constructor writing the same owning field twice would leak whatever the
+            // first write built, and nothing further down would notice, because both writes claim there
+            // was nothing there. so the claim is checked rather than trusted
+            if (assign->is_initialization && needs_destruction(target_type)) {
+                std::vector<std::string> path;
+
+                if (VarDeclNode *root = member_path_of(assign->target, path)) {
+                    // the declaration plus the names between it and the place is exactly what makes two
+                    // writes the same write. the pointer is in the key because two constructors of two
+                    // structs both spell their first property `$this->x`
+                    std::string key = fmt::format("{}", static_cast<const void *>(root));
+                    std::string description = root->name_full();
+
+                    for (const auto &segment : path) {
+                        key += "->" + segment;
+                        description += "->" + segment;
+                    }
+
+                    if (!_initialized_storage.insert(key).second) {
+                        _collector.collect_issue<Issue::GenericError>(
+                            code_ref_for(assign->token_assign),
+                            fmt::format(
+                                "'{}' is initialized twice, and '{}' owns a resource - the value the first "
+                                "write built would never be destroyed. Build it once, or assign the whole "
+                                "variable instead so the old value is torn down.",
+                                description,
+                                target_type.get_type_desciption()));
+                    }
+                }
+            }
+
             // "the old value is destroyed, the new one is built in place". only for a whole
             // variable: writing an owning value into a *field* is the partial-ownership case, whose
             // drop the enclosing struct's destructor would have to know about, and that is one of
@@ -426,11 +508,19 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeRefe
                 else {
                     // whatever the variable held is being replaced, so it is destroyed first -
                     // unless it holds nothing, having been moved out of already
-                    // `before` is the statement list walk_scope has built so far, so a drop pushed
-                    // here lands immediately ahead of this assignment
+                    //
+                    // carried *on* the assignment rather than pushed ahead of it: gen_assign runs
+                    // these after the right-hand side and before the store, which is the only window
+                    // in which both the old value and the new one exist. see AssignNode::teardown_old
                     if (_moved.count(root) == 0) {
+                        auto &teardown = _current_module->nodes.emplace_back<ScopeNode>();
+
                         std::vector<std::string> path;
-                        emit_drop(root, path, target_type, before);
+                        emit_drop(root, path, target_type, teardown.children);
+
+                        if (!teardown.children.empty()) {
+                            assign->teardown_old = &teardown;
+                        }
                     }
 
                     // the variable is live again from here on
@@ -549,7 +639,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child, NodeRefe
 
             // a statement that *is* an expression discards whatever it evaluated to. when that value
             // owns something - `Buffer(...);` or `Res(...);` written for its side effects - nothing
-            // would ever destroy it.
+            // would ever destroy it
             //
             // bound to a synthesized local rather than reported, because there is a correct answer and
             // it costs one node: the frame now owns it and drops it at the end of the scope, through
@@ -590,7 +680,7 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
     // the chapter's rule - "an `if` that moves on one side and not the other leaves the variable
     // unset afterwards" - settles *reading* the variable, and the merge above implements it. what it
     // does not answer is who destroys the value on the branch that did *not* move it: the variable is
-    // unset, so no drop is inserted, and on that path the resource simply leaks.
+    // unset, so no drop is inserted, and on that path the resource simply leaks
     //
     // making it work needs a runtime drop flag per conditionally-moved local, which is real machinery
     // and no part of the chapter. so a conditional move of an *owning* value is rejected rather than
@@ -614,8 +704,7 @@ void OwnershipPass::walk_expression(ExprNode *expr)
         return;
     }
 
-    switch (expr->get_node_type())
-    {
+    switch (expr->get_node_type()) {
         case NodeType::n_varref:
         {
             // reading a variable whose value has been handed somewhere else. the whole point of
@@ -789,7 +878,12 @@ ExprNode *OwnershipPass::resolve_value_arrival(
 
     // "a place is copied, a non-place is moved". a non-place - a call result, a constructor call -
     // is a value nobody else holds, so it needs no annotation and leaves nothing behind
-    if (!needs_destruction(wanted) || !is_place_expression(*expr)) {
+    //
+    // and a copy of a place is only this pass's business when it is not a copy of bytes:
+    // copy_needs_constructor answers that for both reasons it can be true - the type owns something,
+    // or the type has said what its copy is. every other copy in the language still happens the way it
+    // always did, with nothing inserted and nothing tracked
+    if (!is_place_expression(*expr) || !copy_needs_constructor(wanted)) {
         return expr;
     }
 
@@ -803,14 +897,14 @@ ExprNode *OwnershipPass::resolve_value_arrival(
 
     VarDeclNode *source = whole_variable_moved(expr);
 
-    // the two destinations that move a place without being told to - see ValueDestination.
+    // the two destinations that move a place without being told to - see ValueDestination
     //
     // **a returned local is moved, not copied.** "the caller's slot is the destination, the local is
     // about to die, so there is nothing to duplicate and nothing left behind to destroy", and no
     // `mv` is written because there is nothing else a returned local could be. this is the rule a
     // constructor rests on: its `$this` is a body-local of value type with an implicit
     // `return $this`, so without this `$a = Buffer(...)` frees the buffer twice - once when the
-    // constructor's `$this` goes out of scope and once when `$a` does.
+    // constructor's `$this` goes out of scope and once when `$a` does
     //
     // **an initialization moves too**, which is what lets a struct hold an owner at all: the
     // field-wise constructor's `$this->inner = inner` is the parameter being built into the struct,
@@ -819,7 +913,18 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     const bool moves_implicitly =
         destination == ValueDestination::t_return || destination == ValueDestination::t_initialization;
 
-    if (moves_implicitly && source != nullptr) {
+    // ...but only of a place that holds its own value. a place read *through* a borrow is not the owner
+    // of anything: `return $src` on a `Box& $src` hands the caller a duplicate of a value that stays
+    // alive behind the borrow, so marking the borrow moved would claim an ownership the callee never
+    // had - and then nothing destroys the original while the caller destroys the copy. so this is a
+    // copy, and it reaches the copy constructor below like any other
+    //
+    // reachable before copies existed too, where it was a silent bitwise copy of an owning struct and
+    // a double free waiting for the second destructor. now it is either a real copy or a located error
+    const bool source_owns_its_value =
+        source != nullptr && source->has_type() && !source->type().is_pointer();
+
+    if (moves_implicitly && source_owns_its_value) {
         _moved.insert(source);
         _maybe_moved.erase(source);
         return expr;
@@ -828,18 +933,45 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // **a class is copied by retaining it.** this is the one place the two storage classes part ways,
     // and it is the whole of the difference: a struct that owns something cannot be duplicated, because
     // there is no way to say what duplicating the thing it owns would mean - but a class value owns a
-    // *count*, and one more reference to the same object is exactly what a copy of it is.
+    // *count*, and one more reference to the same object is exactly what a copy of it is
     //
     // so where a struct gets the diagnostics below, a class gets a retain, and the destination it
     // arrives at owes the matching release: a local at its scope's end, a by-value parameter at the end
     // of the callee's body, a field when it is overwritten or its owner is torn down. an explicit `mv`
     // still works and is still cheaper - it hands the existing reference over instead of adding one -
-    // it is just no longer the only option.
+    // it is just no longer the only option
     //
     // note this is reached for a *place* only. a class-typed call result is already one reference
     // nobody else holds, and the early return above lets it through untouched
     if (wanted.is_class()) {
         return &_current_module->nodes.emplace_back<RetainExprNode>(expr);
+    }
+
+    // **a struct says what its copy is by declaring a constructor that takes a borrow of itself.**
+    // the type holding the raw pointer is the only one that knows what duplicating it means, and this
+    // is it saying so - which is the hole book/concept/ownership_and_moving.md's "Not yet specified"
+    // lists first, and the one the others hang off
+    //
+    // recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are the
+    // same declaration and there is one way to copy a value rather than two to keep in step. and
+    // nothing downstream needs to know: the result is a call, so it is not a place, and the callee's
+    // implicit `return $this` makes it an owner nobody else holds through the t_return move above.
+    //
+    // the position among its neighbours is all load-bearing. after the class retain, because a class's
+    // copy is one more reference and that stays true even when the class also declares a `Foo&`
+    // constructor - which builds a *new* object, a different operation. after the implicit moves,
+    // because a returned local and an initialization *move*, which is cheaper and always correct - and
+    // because a constructor's own `return $this` would otherwise call the copy constructor from inside
+    // the copy constructor. and ahead of both rejections below, because with a copy constructor a
+    // *field* source is legal and no longer belongs in the first of them
+    if (FunctionDeclNode *copy_ctor = copy_constructor_for(wanted)) {
+        // the type's own name, positioned at the copy rather than at the declaration: this is the call
+        // the author could have written by hand, and a diagnostic about it has to point at where the
+        // copy happens
+        const TokenReference &at =
+            virtual_token(copy_ctor->func_name(), Token::Type::t_identifier, location_of(expr));
+
+        return &emit_resolved_member_call(copy_ctor, at, expr);
     }
 
     // a *part* of a value arriving somewhere by copy, which no wording about `mv` would help with:
@@ -849,10 +981,13 @@ ExprNode *OwnershipPass::resolve_value_arrival(
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of(expr)),
             fmt::format(
-                "'{}' owns a resource, so this {} would copy a value that cannot be copied. Moving a "
-                "field or an element out of a value is not supported yet.",
+                "'{}' owns a resource, so this {} would copy a value that cannot be copied. Give '{}' a "
+                "copy constructor ('constructor({}& $other)') to say what a copy is - moving a field or "
+                "an element out of a value is not supported yet.",
                 wanted.get_type_desciption(),
-                describe(destination)));
+                describe(destination),
+                wanted.get_type_desciption(),
+                wanted.get_type_desciption()));
 
         return expr;
     }
@@ -861,10 +996,13 @@ ExprNode *OwnershipPass::resolve_value_arrival(
         code_ref_for(location_of(expr)),
         fmt::format(
             "'{}' owns a resource and cannot be copied implicitly at this {}. Write 'mv {}' to "
-            "transfer ownership, or take a borrow ('{}&') if the value is only being read.",
+            "transfer ownership, take a borrow ('{}&') if the value is only being read, or give '{}' a "
+            "copy constructor ('constructor({}& $other)').",
             wanted.get_type_desciption(),
             describe(destination),
             source->name_full(),
+            wanted.get_type_desciption(),
+            wanted.get_type_desciption(),
             wanted.get_type_desciption()));
 
     return expr;
@@ -902,7 +1040,7 @@ void OwnershipPass::emit_drop(
     // properties - those belong to the moment the count reaches zero, which may be now, may be later,
     // and may be from an entirely different scope. the release decides, and the class's deinit - built
     // out of the same two helpers this function uses below - is what it calls when it turns out to be
-    // the last.
+    // the last
     //
     // returning here rather than falling through is also what makes `class Node { Node $next; }`
     // terminate: recursing into the properties of a type that can contain itself has no bottom
@@ -920,6 +1058,37 @@ void OwnershipPass::emit_drop(
     emit_property_drops(root, path, ct, out);
 }
 
+FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
+    FunctionDeclNode *callee, const TokenReference &at, ExprNode *place)
+{
+    // the receiver is addressed here, exactly as the parser addresses a method's: the parameter is the
+    // borrow `Foo&`, and a value ranked against it would be no fit at all
+    //
+    // unless the place already *is* that address. that happens in exactly one situation - the `$this`
+    // of a synthesized class deinit, which is declared `Foo&` because a by-value class parameter would
+    // own a reference and be released at the end of the very function doing the releasing. addressing
+    // it again would hand the callee a ptr<ptr<Foo>>
+    ExprNode *receiver = place;
+
+    const ValueType place_type = place->result_type();
+    if (!place_type.is_pointer()) {
+        receiver = &_current_module->nodes.emplace_back<AddrOfExprNode>(place);
+    }
+
+    auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
+        at, std::vector<ExprNode *>{receiver});
+
+    // resolved already: there is no name to look up and no overload set to search. for an
+    // instantiation this is the *template's* declaration, and the monomorphizer's next round
+    // binds the owner's parameters from the receiver and rewires this call to the instance -
+    // which is the whole reason the pass runs inside that fixpoint
+    call.decl = callee;
+
+    _changed = true;
+
+    return call;
+}
+
 void OwnershipPass::emit_destructor_call(
     VarDeclNode *root,
     const std::vector<std::string> &path,
@@ -935,32 +1104,7 @@ void OwnershipPass::emit_destructor_call(
     const TokenReference &receiver_token =
         virtual_token("destructor", Token::Type::t_destructor, root->token_varname);
 
-    // the receiver is addressed here, exactly as the parser addresses a method's: the parameter is the
-    // borrow `Foo&`, and a value ranked against it would be no fit at all.
-    //
-    // unless the place already *is* that address. that happens in exactly one situation - the `$this`
-    // of a synthesized class deinit, which is declared `Foo&` because a by-value class parameter would
-    // own a reference and be released at the end of the very function doing the releasing. addressing
-    // it again would hand the destructor a ptr<ptr<Foo>>
-    ExprNode *place = make_place(root, path);
-    ExprNode *receiver = place;
-
-    const ValueType place_type = place->result_type();
-    if (!place_type.is_pointer()) {
-        receiver = &_current_module->nodes.emplace_back<AddrOfExprNode>(place);
-    }
-
-    auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
-        receiver_token, std::vector<ExprNode *>{receiver});
-
-    // resolved already: there is no name to look up and no overload set to search. for an
-    // instantiation this is the *template's* declaration, and the monomorphizer's next round
-    // binds the owner's parameters from the receiver and rewires this call to the instance -
-    // which is the whole reason the pass runs inside that fixpoint
-    call.decl = dtor;
-
-    out.push_back(make_ref(call));
-    _changed = true;
+    out.push_back(make_ref(emit_resolved_member_call(dtor, receiver_token, make_place(root, path))));
 }
 
 void OwnershipPass::emit_property_drops(
@@ -969,7 +1113,7 @@ void OwnershipPass::emit_property_drops(
     const ComplexType *ct,
     std::vector<NodeReference> &out)
 {
-    // a struct that contains an owner is itself an owner, and nothing had to be declared for it.
+    // a struct that contains an owner is itself an owner, and nothing had to be declared for it
     // inlined here rather than emitted as a synthesized destructor because whether a property needs
     // destroying is not answerable in the parser, where such a declaration would have to be built:
     // a generic property type is still open there
@@ -1065,4 +1209,4 @@ ExprNode *OwnershipPass::make_place(VarDeclNode *root, const std::vector<std::st
     return place;
 }
 
-}
+};

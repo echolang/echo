@@ -53,8 +53,7 @@ namespace AST
 
         const std::string severity_string() const
         {
-            switch (severity)
-            {
+            switch (severity) {
             case IssueSeverity::Error:
                 return "Error";
             case IssueSeverity::Warning:
@@ -109,6 +108,6 @@ namespace AST
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
 
-    }
+    };
 };
 #endif

@@ -4,8 +4,8 @@
 #pragma once
 
 #include "ParserCursor.h"
-#include "../AST/ASTContext.h"
-#include "../AST/ASTCollector.h"
+#include "AST/ASTContext.h"
+#include "AST/ASTCollector.h"
 
 namespace Parser
 {
@@ -41,7 +41,7 @@ namespace Parser
         // function you called - so every call site in between had to convert or forward it
         Pass pass = Pass::t_bodies;
 
-        // reports the token the cursor is sitting on as unexpected where `expected` was wanted.
+        // reports the token the cursor is sitting on as unexpected where `expected` was wanted
         // every parser needs this and all three of the pieces it takes - the cursor for the token,
         // the context to locate it, the collector to record it - already live here
         void collect_unexpected_token(Token::Type expected) {

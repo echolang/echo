@@ -19,7 +19,7 @@ TokenSlice Parser::Cursor::slice(const Snapshot &start, const Snapshot &end) con
 
 void Parser::Cursor::skip_till_end_of_scope()
 {
-    int depth = 0; // Count nested braces inside our scope
+    int depth = 0; // count nested braces inside our scope
     while (!is_done()) {
         if (current().type() == Token::Type::t_open_brace) {
             depth++;
@@ -27,7 +27,7 @@ void Parser::Cursor::skip_till_end_of_scope()
         else if (current().type() == Token::Type::t_close_brace) {
             if (depth == 0) {
                 // This is the closing brace of our scope
-                skip(); // Skip past the closing brace
+                skip(); // skip past the closing brace
                 return;
             } else {
                 depth--;

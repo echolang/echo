@@ -1,0 +1,38 @@
+// the same window, for a target whose teardown is more than one node. `Wrap` declares no destructor,
+// so what it owes is a drop per owning property in reverse declaration order - and all of them belong
+// after the right-hand side has read the value they are tearing down.
+//
+// the non-owning `$version` between the two buffers is skipped, as at any other drop site
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        $this->tag = 0;
+        mem::free($this->data);
+    }
+}
+
+struct Wrap
+{
+    Buffer $first;
+    usize $version;
+    Buffer $second;
+}
+
+function bump(Wrap& $old) : Wrap
+{
+    echo 500;
+    return Wrap(
+        Buffer($old->first->tag + 10, mem::alloc<uint8>(1)),
+        $old->version + 1,
+        Buffer($old->second->tag + 10, mem::alloc<uint8>(1)));
+}
+
+$w = Wrap(Buffer(1, mem::alloc<uint8>(1)), 7, Buffer(2, mem::alloc<uint8>(1)));
+$w = bump($w);
+echo 99;

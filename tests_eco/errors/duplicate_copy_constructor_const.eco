@@ -1,0 +1,29 @@
+// `Box&` beside `const Box&` are two different signatures, so they are not a duplicate signature and
+// register_function has nothing to say about them - but they are both the copy constructor, and a type
+// has one copy. nothing would decide which of the two an implicit `$b = $a` meant, so this is the one
+// case that needs its own diagnostic
+
+struct Box
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    constructor(Box& $other)
+    {
+        $this->tag = $other->tag;
+    }
+
+    constructor(const Box& $another)
+    {
+        $this->tag = $another->tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}

@@ -34,7 +34,7 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         }
     }
 
-    // a class handle is an address too, but it is not a t_pointer, so it needs saying separately.
+    // a class handle is an address too, but it is not a t_pointer, so it needs saying separately
     // `$a == $b` asks whether two references name one object, and `$a == null` whether one names
     // anything - both bool. every other operator on a class is rejected by the type checker, so
     // falling through to the "same type on both sides" rule below would answer `Counter` for a
@@ -95,67 +95,81 @@ const std::string AST::FunctionCallExprNode::node_description()
     return desc;
 }
 
-AST::ValueType AST::AddrOfExprNode::result_type() const {
+AST::ValueType AST::AddrOfExprNode::result_type() const
+{
     // `&$x` yields the non-nullable borrow `T&`, which widens implicitly to `ptr<T>`. that one
     // rule is what makes both `int32& $r = &$var;` and `ptr<int32> $p = &$var;` legal without a
-    // cast (book/concept/pointers_and_refs_v2.md, "Two pointer types").
+    // cast (book/concept/pointers_and_refs_v2.md, "Two pointer types")
     //
     // built over the operand's own result type, with no peeling: taking the address of a
     // pointer variable must yield a pointer to that variable's slot
     return ValueType::make_pointer(operand->result_type(), false);
 }
 
-const std::string AST::AddrOfExprNode::node_description() {
+const std::string AST::AddrOfExprNode::node_description()
+{
     return "addrof<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
-AST::ValueType AST::PointerValueNode::result_type() const {
+AST::ValueType AST::PointerValueNode::result_type() const
+{
     // unpeeled: `$p:$` is the ptr<int32> that `$p` would otherwise read through
     return operand->result_type();
 }
 
-const std::string AST::PointerValueNode::node_description() {
+const std::string AST::PointerValueNode::node_description()
+{
     return "peel<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
-AST::ValueType AST::MoveExprNode::result_type() const {
+AST::ValueType AST::MoveExprNode::result_type() const
+{
     // a move changes who owns the value, not what it is
     return operand->result_type();
 }
 
-const std::string AST::MoveExprNode::node_description() {
+const std::string AST::MoveExprNode::node_description()
+{
     return "move<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
-const std::string AST::ClassAllocExprNode::node_description() {
+const std::string AST::ClassAllocExprNode::node_description()
+{
     return "alloc<" + class_type.get_type_desciption() + ">()";
 }
 
-AST::ValueType AST::RetainExprNode::result_type() const {
+AST::ValueType AST::RetainExprNode::result_type() const
+{
     return operand->result_type();
 }
 
-const std::string AST::InstanceOfExprNode::node_description() {
+const std::string AST::InstanceOfExprNode::node_description()
+{
     return "instanceof<" + queried_type.get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
-const std::string AST::RetainExprNode::node_description() {
+const std::string AST::RetainExprNode::node_description()
+{
     return "retain<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
-AST::ValueType AST::IndexExprNode::result_type() const {
+AST::ValueType AST::IndexExprNode::result_type() const
+{
     // indexing a ptr<T> yields a T, the element itself
     return value_type_of(base->result_type());
 }
 
-const std::string AST::IndexExprNode::node_description() {
+const std::string AST::IndexExprNode::node_description()
+{
     return "index<" + result_type().get_type_desciption() + ">(" + base->node_description() + "[" + index->node_description() + "])";
 }
 
-AST::ValueType AST::DerefExprNode::result_type() const {
+AST::ValueType AST::DerefExprNode::result_type() const
+{
     return value_type_of(operand->result_type());
 }
 
-const std::string AST::DerefExprNode::node_description() {
+const std::string AST::DerefExprNode::node_description()
+{
     return "deref<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }

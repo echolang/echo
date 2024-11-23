@@ -38,8 +38,8 @@ namespace AST
         // deep-copies this node (and the subtree it owns) into cc's target NodeCollection,
         // substituting types through cc's TypeSubstitution and rebinding intra-subtree
         // references to their clones. Pure-virtual so the compiler forces every concrete
-        // node to provide one - the exhaustiveness the monomorphizer relies on.
-        // implemented in src/AST/ASTClone.cpp.
+        // node to provide one - the exhaustiveness the monomorphizer relies on
+        // implemented in src/AST/ASTClone.cpp
         virtual Node *clone(CloneContext &cc) const = 0;
     };
 

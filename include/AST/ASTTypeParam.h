@@ -17,7 +17,8 @@ namespace AST
 
     // which kind of declaration introduced a type parameter. derived from whichever owner
     // pointer is set, never stored, so the two can never disagree
-    enum class TypeParamOwnerKind {
+    enum class TypeParamOwnerKind
+    {
         t_none,
         t_type,
         t_function,
@@ -26,11 +27,11 @@ namespace AST
     // one generic type parameter as written at its declaration site - the `T` in `struct Box<T>`
     // or `function twice<T>(...)`. a ValueType of kind t_generic refers to one of these, so the
     // name, the declaration token and any constraint travel with every use of the parameter
-    // instead of having to be recovered from the owner by index.
+    // instead of having to be recovered from the owner by index
     //
     // owned by a TypeParamRegistry, referenced everywhere else by raw pointer. that is forced,
     // not preferred: CloneContext::shallow copy-constructs nodes and ComplexType is copy-assigned,
-    // so a unique_ptr member on either would break all cloning.
+    // so a unique_ptr member on either would break all cloning
     //
     // @TODO a non-type parameter (the `10` in FixedArray<int, 10>) would become a kind tag here
     class TypeParamDecl
@@ -67,7 +68,7 @@ namespace AST
             return !constraint.empty();
         }
 
-        // true if `type` satisfies the constraint (always true when unconstrained).
+        // true if `type` satisfies the constraint (always true when unconstrained)
         // const/pointer flags on `type` are ignored
         bool allows(const ValueType &type) const;
 

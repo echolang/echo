@@ -22,7 +22,7 @@
 
 // the width of a pointer on the target, in bytes. this is what `usize` and `isize` lower to,
 // and it is the single place that knows it: AST::get_primitive_size answers from here and
-// TypeLowering picks its llvm integer width from here, so the two can never disagree.
+// TypeLowering picks its llvm integer width from here, so the two can never disagree
 //
 // only 64-bit targets are wired up and tested today. this constant is why widening to a 32-bit
 // target is one edit rather than an api break across the whole stdlib

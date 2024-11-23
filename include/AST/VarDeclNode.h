@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTValueType.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 #include "TypeNode.h"
 
 namespace AST 
@@ -32,7 +32,7 @@ namespace AST
 
         // written `mv Buffer $items`: this *parameter* takes ownership of its argument, so a caller
         // handing it a place has to say `mv` at the call site. always false for a local, which owns
-        // whatever it is initialised with either way.
+        // whatever it is initialised with either way
         //
         // deliberately here and not on the ValueType. that struct is the interning identity for
         // TypeRegistry and for the monomorphizer's instance cache, so a flag on it would fork every
@@ -84,7 +84,7 @@ namespace AST
         
         const std::string node_description() override;
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitVarDecl(*this);
         }
 

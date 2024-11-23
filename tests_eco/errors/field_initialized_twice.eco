@@ -1,0 +1,34 @@
+// a constructor writing a field of its own `$this` owes the old value no teardown, because `$this` is a
+// fresh zero-filled slot - there is no old value. that is only true of the *first* write, though, and a
+// second one to the same owning field would leak whatever the first built.
+//
+// so the claim is checked rather than trusted. the honest alternative would be to tear the first value
+// down, which is the partial-ownership case the language does not answer yet
+
+struct Inner
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Outer
+{
+    Inner $inner;
+
+    constructor(usize $t)
+    {
+        $this->inner = Inner($t);
+        $this->inner = Inner($t + 1);
+    }
+}
+
+$a = Outer(5);

@@ -32,7 +32,7 @@ namespace AST
         const std::string node_description() override;
         const std::string node_description_inner();
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitScope(*this);
         }
 

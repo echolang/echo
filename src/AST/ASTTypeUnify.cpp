@@ -11,7 +11,7 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // for a pointer explicitly, so `box($p)` yields Box<int32> rather than Box<ptr<int32>>
     // (book/concept/pointers_and_refs_v2.md, "Pointers and generics"). stated over the
     // whole param rather than only a bare `T`, so Box<T> against ptr<Box<int32>> decays too
-    // instead of silently binding nothing.
+    // instead of silently binding nothing
     //
     // only at the top level though: asking for `ptr<T>` is how the doc says to opt out of
     // the decay, so everything below that match binds exactly

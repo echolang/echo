@@ -112,11 +112,11 @@ AST::FunctionMatch AST::match_function(
         return result;
     }
 
-    // 4. Pareto: keep the candidates nothing beats.
+    // 4. Pareto: keep the candidates nothing beats
     //
     // this comes *before* the generic tiebreak below, and the order matters. how well each
     // argument fits is a statement about the call; "concrete or template" is a statement about
-    // the declaration, and only gets a say once the call itself cannot tell them apart.
+    // the declaration, and only gets a say once the call itself cannot tell them apart
     // reversed, `pick<T>(T)` and `pick(int32)` called with a float64 would resolve to the
     // concrete one and silently narrow, when the template matched the argument exactly
     std::vector<const Viable *> best;

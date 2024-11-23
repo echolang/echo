@@ -85,7 +85,7 @@ namespace AST
             return _complex_type.is_generic();
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visit_type_decl(*this);
         }
 
@@ -100,7 +100,7 @@ namespace AST
         // the member functions declared in this struct's body. unlike properties, which this node
         // keeps as VarDeclNodes alongside the ComplexType's flattened layout, a method is the same
         // pointer in both places - so it is stored once, on the type. the type is what a receiver
-        // names, and an instantiation has a ComplexType but no TypeDeclNode of its own.
+        // names, and an instantiation has a ComplexType but no TypeDeclNode of its own
         // FunctionRegistry::register_member_function is what appends
         const std::vector<FunctionDeclNode *> &methods() const {
             return _complex_type.methods();
@@ -132,7 +132,7 @@ namespace AST
         // whether some pass has already taken this struct's properties. the body is walked in both
         // parse passes with the same code - so the two cannot disagree about where a property ends,
         // and a generic application in a property type is re-interned once every template layout is
-        // complete - but only the first walk may *keep* what it parsed, or the layout is doubled.
+        // complete - but only the first walk may *keep* what it parsed, or the layout is doubled
         //
         // a flag on the node rather than a check on the pass, so that a struct the declaration pass
         // never reached (error recovery skipped past it) is still collected by the body pass instead

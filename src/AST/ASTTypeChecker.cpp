@@ -22,7 +22,7 @@ namespace AST
 
 // the destinations that have no conversion to fall back on, and so have to be satisfied exactly:
 // a pointer's conversions are directional (`T&` widens to `ptr<T>`, never the reverse), and a
-// struct or class has none at all.
+// struct or class has none at all
 //
 // primitive-to-primitive is deliberately *not* in here - fitting an int32 literal into a float64
 // slot is TypeLowering::coerce_value's job, which is why this is not simply
@@ -38,8 +38,7 @@ static bool demands_exact_conversion(const ValueType &type)
 // wrote rather than only what its type is. empty for the shapes that have no name of their own
 static std::string place_description(const ExprNode &expr)
 {
-    switch (expr.get_node_type())
-    {
+    switch (expr.get_node_type()) {
         case NodeType::n_varref:
         {
             auto &ref = static_cast<const VarRefNode &>(expr);
@@ -56,7 +55,7 @@ static std::string place_description(const ExprNode &expr)
 
 // numeric/primitive conversions are inserted by the parser/monomorphizer as casts, so only a
 // fundamental kind mismatch (struct vs primitive, or two distinct struct identities) is a real
-// argument error here. undeterminable types (void/unknown) are left to other diagnostics.
+// argument error here. undeterminable types (void/unknown) are left to other diagnostics
 static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
 {
     if (arg.get_kind() == ValueTypeKind::t_unknown || param.get_kind() == ValueTypeKind::t_unknown) {
@@ -66,7 +65,7 @@ static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
         return true;
     }
 
-    // pointers match structurally on their pointee, with the borrow-widens-to-nullable rule.
+    // pointers match structurally on their pointee, with the borrow-widens-to-nullable rule
     // this arm is load bearing: a reference parameter used to reach the primitive arm below,
     // because `int32&` was an int32 carrying a flag rather than a kind of its own
     if (arg.is_pointer() || param.is_pointer()) {
@@ -125,7 +124,7 @@ void TypeChecker::run()
 void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
 {
     // a generic template's body legitimately mentions its type parameters; it is only
-    // meaningful once cloned into a concrete instance, which is checked separately.
+    // meaningful once cloned into a concrete instance, which is checked separately
     if (node.is_generic()) {
         return;
     }
@@ -140,15 +139,14 @@ void TypeChecker::visitReturn(ReturnNode &node)
 {
     // a return at file scope has no signature to answer to, and a synthesized return (the one
     // the struct parser builds for a constructor) has no token to report against
-    if (_current_function != nullptr && node.expr != nullptr && node.token_return.has_value())
-    {
+    if (_current_function != nullptr && node.expr != nullptr && node.token_return.has_value()) {
         const ValueType declared = _current_function->get_return_type();
         const ValueType actual = node.expr->result_type();
 
         check_destination_fits(Destination::t_return, declared, *node.expr, node.token_return.value());
 
         // the storage a local names is gone before the caller can read it, so handing back its
-        // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes").
+        // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes")
         // a parameter is the caller's storage and outlives the call, so it is the legal case
         if (declared.is_pointer() && actual.is_pointer()) {
             VarDeclNode *root = place_root_of(node.expr);
@@ -178,7 +176,7 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
 {
     // a generic struct template's property types legitimately mention its type parameters (the T
     // in `struct Box<T> { T $value; }`); it is only meaningful once instantiated with concrete
-    // types. concrete/non-generic struct declarations are still checked.
+    // types. concrete/non-generic struct declarations are still checked
     if (node.is_generic()) {
         return;
     }
@@ -202,7 +200,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
         }
     }
 
-    // reaching a member needs an address to reach it from, and a base with no storage has none.
+    // reaching a member needs an address to reach it from, and a base with no storage has none
     // reported here rather than left to gen_lvalue's contextless "Expression is not addressable",
     // which is what `$a->get()->x` used to abort with. binding the intermediate to a local is the
     // answer, and for a class it is also the answer to *who releases it* - which is why chaining
@@ -253,7 +251,7 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
 void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
     // generic templates are resolved to concrete instances by the monomorphizer; only a
-    // resolved, non-generic callee has stable parameter types to check against.
+    // resolved, non-generic callee has stable parameter types to check against
     if (node.decl && !node.decl->is_generic()) {
         const auto &params = node.decl->args;
 
@@ -268,7 +266,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 // a mismatched argument that the parser/monomorphizer could not reconcile with an
                 // implicit cast is caught here directly (e.g. two distinct struct types). arguments
                 // that were wrapped in an implicit cast are validated in visitTypeCast instead,
-                // where the illegal conversion actually lives.
+                // where the illegal conversion actually lives
                 ValueType arg_type = node.arguments[i]->result_type();
                 ValueType param_type = params[i]->type();
 
@@ -303,7 +301,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // nothing else. reported here so each gap is a located diagnostic instead of the uncaught codegen
     // throw it used to be. the `decl == nullptr` guard is what keeps this off a user-declared or
     // namespaced function that happens to be spelled `echo` - it has a signature, so the ordinary
-    // argument checks above are the ones that apply to it.
+    // argument checks above are the ones that apply to it
     //
     // two shapes are worth naming. an *address*, because after the adjustment pass a pointer here
     // really is an address rather than a not-yet-dereferenced read, so printing one is almost always
@@ -333,7 +331,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     }
 
     // walk arguments with this call's name token as the location context, so an illegal implicit
-    // cast inserted around an argument is reported at the call site.
+    // cast inserted around an argument is reported at the call site
     const TokenReference *prev = _context_token;
     _context_token = &node.token_function_name;
     RecursiveVisitor::visitFunctionCallExpr(node);
@@ -344,7 +342,7 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
 {
     // the parser/monomorphizer inserts implicit casts to reconcile types; if such a cast is not a
     // legal conversion (e.g. a struct where a primitive is expected) it would otherwise surface as
-    // a context-free "Unsupported type cast" deep in codegen. report it here, located.
+    // a context-free "Unsupported type cast" deep in codegen. report it here, located
     if (node.is_implcit && node.expr && _context_token) {
         ValueType from = node.expr->result_type();
         if (!arg_assignable_to(from, node.cast_to)) {
@@ -362,10 +360,10 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
 {
     // codegen (gen_binary_expr) lowers operators only over numeric and a narrow bool set; it
     // supports no operator on struct/class operands, where it would otherwise fall through to a
-    // context-free codegen throw. flag exactly that unambiguous case here, located at the operator.
+    // context-free codegen throw. flag exactly that unambiguous case here, located at the operator
     // undeterminable operands (unknown/void/type-param) are left to other diagnostics, and the rarer
     // per-branch primitive gaps (e.g. `%` on two bools) are left to the enriched codegen throw
-    // rather than re-encoding codegen's full operator matrix and risking false positives.
+    // rather than re-encoding codegen's full operator matrix and risking false positives
     if (node.lhs && node.rhs && node.op_node) {
         ValueType lhs = node.lhs->result_type();
         ValueType rhs = node.rhs->result_type();
@@ -396,7 +394,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         // comparing an address against a non-address. codegen lowers a pointer comparison to an
         // icmp over two pointers, and llvm asserts outright when the operand types differ - so
         // without this the compiler aborted with "Both operands to ICmp instruction are not of
-        // the same type!" and no location at all.
+        // the same type!" and no location at all
         //
         // scoped to comparisons: `$p:$ + 1` mixes a pointer and an int legitimately, because
         // arithmetic on an address is offsetting rather than comparing
@@ -451,6 +449,15 @@ void TypeChecker::check_const_target(AssignNode &node)
                     pointer_type.get_type_desciption()));
         }
 
+        return;
+    }
+
+    // an initialization is the one write a const *slot* legitimately gets, and the one re-seat a const
+    // *pointer* legitimately gets - both of which are decided below. what it is never entitled to is
+    // the write-*through* above: a `ptr<const T>` property means the pointee is not this constructor's
+    // to write, however fresh the slot holding the pointer is. so the exemption starts here rather
+    // than at the call site, which used to skip this function whole
+    if (node.is_initialization) {
         return;
     }
 
@@ -510,8 +517,7 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     }
 
     std::string message;
-    switch (dest)
-    {
+    switch (dest) {
         case Destination::t_declaration:
             message = fmt::format("cannot implicitly convert '{}' to '{}'{}",
                 from.get_type_desciption(), to.get_type_desciption(), hint);
@@ -533,13 +539,12 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
 
 void TypeChecker::visit_assign(AssignNode &node)
 {
-    // an initialization is the one write a const slot legitimately gets, so it is exempt
-    if (node.target != nullptr && !node.is_initialization) {
+    if (node.target != nullptr) {
         check_const_target(node);
     }
 
     // the value has to fit the storage the target names, checked wherever a conversion cannot be
-    // synthesized for it (demands_exact_conversion).
+    // synthesized for it (demands_exact_conversion)
     //
     // this is what rejects `$p = &$b`: after the adjustment pass the target is a deref of $p,
     // so the storage is an int32 while the value is an int32& - assigning an address into the
@@ -577,11 +582,11 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
                 node.type().get_type_desciption()));
     }
 
-    // locate any implicit cast in the initializer at the declared variable.
+    // locate any implicit cast in the initializer at the declared variable
     const TokenReference *prev = _context_token;
     _context_token = &node.token_varname;
     RecursiveVisitor::visitVarDecl(node);
     _context_token = prev;
 }
 
-}  // namespace AST
+};  // namespace AST

@@ -1,20 +1,20 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/ASTIssue.h>
-
 #include <string>
+
+#include "helpers.h"
 
 // the semantic/type-check pass runs inside tests_make_parsed_bundle (after monomorphization),
 // so these assert the diagnostics it records on the collector. errors that previously surfaced
-// as context-free codegen throws (or silent voids) now become located, gated issues here.
+// as context-free codegen throws (or silent voids) now become located, gated issues here
 
 using namespace AST;
 
-namespace {
-    // true if any recorded issue's message contains the given substring.
+namespace
+{
+    // true if any recorded issue's message contains the given substring
     bool has_issue_containing(Bundle &bundle, const std::string &needle) {
         for (const auto &issue : bundle.collector.issues) {
             if (issue->message().find(needle) != std::string::npos) {
@@ -41,7 +41,7 @@ TEST_CASE("unknown struct member is a located diagnostic, not a silent void", "[
 TEST_CASE("unknown member behind an element base is reported too", "[sema]")
 {
     // the base here is an IndexExprNode, which neither the node's own result_type() nor the type
-    // checker's copy of the same switch knew about - so this went entirely unreported (todo/B16).
+    // checker's copy of the same switch knew about - so this went entirely unreported (todo/B16)
     // one implementation answers both now
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct point { int $x; int $y; }\n"
@@ -82,7 +82,7 @@ TEST_CASE("wrong-type argument is a located diagnostic", "[sema]")
 {
     // passing a struct where an int parameter is expected: the implicit cast the parser inserts
     // is not a legal conversion, and is caught here instead of crashing codegen with
-    // "Unsupported type cast".
+    // "Unsupported type cast"
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct point { int $x; int $y; }\n"
         "function takes_int(int $n): int { return $n; }\n"
@@ -105,7 +105,7 @@ TEST_CASE("correct-type arguments produce no critical issues", "[sema]")
 TEST_CASE("numeric argument conversions are allowed", "[sema]")
 {
     // a float argument to an int parameter is a legal implicit numeric conversion and must not
-    // be flagged as a type error.
+    // be flagged as a type error
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function takes_int(int $n): int { return $n; }\n"
         "echo takes_int(3);\n");
@@ -138,7 +138,7 @@ TEST_CASE("a binary operator on struct operands is a located diagnostic", "[sema
 {
     // codegen supports no operator on struct operands; it would otherwise surface as a context-free
     // "unsupported binary operator" deep in codegen. the type-check pass catches it up-front, located
-    // at the operator.
+    // at the operator
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct point { int $x; int $y; }\n"
         "point $a = point(1, 2);\n"
@@ -162,7 +162,7 @@ TEST_CASE("numeric binary operators are not flagged", "[sema]")
 }
 
 // ---------------------------------------------------------------------------
-// pointer diagnostics.
+// pointer diagnostics
 //
 // the same conditions are covered end-to-end in tests_eco/errors/, which pins the exact rendered
 // block. these are the cheap, precisely located counterparts - and they can assert the thing a
@@ -370,7 +370,7 @@ TEST_CASE("re-seating a const pointer is rejected", "[sema][pointer][const]")
 
 TEST_CASE("assigning to a const variable is rejected by the type checker", "[sema][const]")
 {
-    // this used to be a parser diagnostic reported as a "redeclaration" on the variable's name.
+    // this used to be a parser diagnostic reported as a "redeclaration" on the variable's name
     // it moved to the assignment target, which is the only place that can tell the four const
     // cases apart, so it now reports at the `=` like every other assignment error
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -437,7 +437,7 @@ TEST_CASE("per-branch operator gaps are left to the codegen safety net", "[sema]
 {
     // the sema check is intentionally scoped to struct operands; a primitive operator/operand gap
     // (modulo on two bools) is deliberately NOT flagged here and instead surfaces at the enriched
-    // codegen throw. this pins that boundary so the scope is not silently widened.
+    // codegen throw. this pins that boundary so the scope is not silently widened
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "echo true % false;\n");
 

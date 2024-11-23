@@ -1,3 +1,8 @@
+#ifndef TESTS_HELPERS_H
+#define TESTS_HELPERS_H
+
+#pragma once
+
 #include <Parser/ParserCursor.h>
 #include <Parser/ModuleParser.h>
 #include <AST/ASTBundle.h>
@@ -20,7 +25,8 @@ namespace AST
 
 namespace EchoTests
 {
-    struct ParserEnv {
+    struct ParserEnv
+    {
         std::unique_ptr<AST::Module> module;
         AST::File &file;
         AST::TokenizedFile &tfile;
@@ -64,6 +70,6 @@ namespace EchoTests
     // did any diagnostic mention this? the loose counterpart to assert_code_emits_issue, which
     // compares a whole message
     bool has_issue_containing(const AST::Bundle &bundle, const std::string &needle);
-}
+};
 
-
+#endif

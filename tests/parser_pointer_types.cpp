@@ -1,14 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/FunctionDeclNode.h>
 #include <AST/VarDeclNode.h>
+
+#include "helpers.h"
 
 // the `ptr<T>` / `T&` type grammar. `ptr<...>` recurses into a full type rather than being a
 // flag with hardcoded angle brackets, which is what makes nesting and generic pointees work
 
-namespace {
+namespace
+{
     // the declared type of the named variable in the test module, or unknown when absent
     AST::ValueType decl_type(AST::Bundle &bundle, const std::string &varname)
     {

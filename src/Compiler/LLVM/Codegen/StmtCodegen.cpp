@@ -77,10 +77,10 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
 void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
 {
     auto varname = node.name();
-    llvm::Type* type = _ctx.types->get_llvm_type(node.type_node()->type, *_ctx.current_cmp_unit);
+    llvm::Type *type = _ctx.types->get_llvm_type(node.type_node()->type, *_ctx.current_cmp_unit);
 
     // alloc the variable on the stack
-    llvm::AllocaInst* alloca = _ctx.builder->CreateAlloca(type, nullptr, varname);
+    llvm::AllocaInst *alloca = _ctx.builder->CreateAlloca(type, nullptr, varname);
 
     // store the variable in the map
     _ctx.var_map[&node] = alloca;
@@ -106,7 +106,7 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
         // check that the visited node pushed a value on the stack
         assert(_ctx.value_stack.size() > 0 && "No value on the stack");
 
-        llvm::Value* init_value = _ctx.value_stack.top();
+        llvm::Value *init_value = _ctx.value_stack.top();
         _ctx.value_stack.pop();
 
         // the same conversion every assignment and member write uses. this path used to handle
@@ -120,7 +120,7 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
 
 void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
 {
-    // Skip compilation of generic function templates
+    // skip compilation of generic function templates
     if (node.is_generic()) {
         return;
     }
@@ -134,7 +134,7 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             return;
         }
 
-        // skip instantiated generic functions that don't have bodies yet.
+        // skip instantiated generic functions that don't have bodies yet
         // this is a temporary measure while we implement proper body cloning
         // (is_generic() is exactly !type_parameters.empty(), so one check covers it)
         if (!node.is_generic()) {
@@ -148,7 +148,7 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         ));
     }
 
-    // track the enclosing function so codegen errors can name it. restored before returning.
+    // track the enclosing function so codegen errors can name it. restored before returning
     AST::FunctionDeclNode *prev_function = _ctx.current_function;
     _ctx.current_function = &node;
 
@@ -172,13 +172,13 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     // member write and of the pointer re-seat
     node.body->accept(*_ctx.visitor);
 
-    // Add a terminator if the block doesn't already have one
+    // add a terminator if the block doesn't already have one
     if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
-        // If the function returns void, add a void return
+        // if the function returns void, add a void return
         if (func->getReturnType()->isVoidTy()) {
             _ctx.builder->CreateRetVoid();
         } else {
-            // For non-void functions without explicit return, this is an error
+            // for non-void functions without explicit return, this is an error
             // but we'll add a dummy return to keep LLVM happy
             llvm::Value *dummy_ret = llvm::UndefValue::get(func->getReturnType());
             _ctx.builder->CreateRet(dummy_ret);
@@ -315,23 +315,32 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
 
 void StmtCodegen::gen_assign(AST::AssignNode &node)
 {
+    // **the right-hand side first, always.** it may read the very value this assignment is about to
+    // tear down - `$a = $a` through a copy constructor, `$a = replace($a)` through a borrow - so
+    // nothing below may be hoisted above this line. it is also where a class's retain sits, as a node
+    // inside value_expr, which is what makes the release further down safe
     node.value_expr->accept(*_ctx.visitor);
 
     llvm::Value *new_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    // one path for every left hand side shape, addressing exactly what the target names.
+    // one path for every left hand side shape, addressing exactly what the target names - and
+    // addressing it once, which is why a class's release is not a node with a place of its own
     // write-through is not decided here: `$p = 20` arrives as a deref of $p and lands on the
     // pointee, `$p:$ = &$b` arrives as $p itself and lands on the slot, re-seating it
     auto place = _ctx.lvalues->gen_lvalue(*node.target);
 
-    // the reference being overwritten, read before the store destroys it. the order of the four steps
-    // is the whole point and it is fixed: the retain on the right-hand side has already run (it is a
-    // node inside value_expr), then the old handle is read, then the new one is stored, then the old is
-    // released. any other order breaks `$a = $a`, where the old and the new are the same block
+    // the reference being overwritten, read before the store destroys it and released after it. see
+    // AssignNode::teardown_old for why a class's teardown is a bool here and a struct's is a tree
     llvm::Value *old_handle = nullptr;
     if (node.releases_old) {
         old_handle = _ctx.lvalues->gen_load(place, "old");
+    }
+
+    // an owning struct is destroyed *in place*, so its teardown sits between the right-hand side and
+    // the store that overwrites those bytes. ordinary void destructor calls, exactly as at a scope end
+    if (node.teardown_old != nullptr) {
+        node.teardown_old->accept(*_ctx.visitor);
     }
 
     _ctx.builder->CreateStore(
@@ -342,4 +351,4 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
         _ctx.classes->gen_release(old_handle, place.storage_type);
     }
 }
-}
+};

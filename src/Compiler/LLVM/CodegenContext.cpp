@@ -37,4 +37,4 @@ namespace Compiler::LLVM
     {
         return Compiler::InternalCompilerException(message, current_file);
     }
-}
+};

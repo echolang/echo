@@ -11,7 +11,7 @@ namespace AST
     class VarDeclNode;
 
     // true when the expression denotes storage: it has an address, so `&E`, `E:$` and assigning
-    // to E are all meaningful.
+    // to E are all meaningful
     //
     // shared deliberately. four places have to agree on this question - the parser rejecting
     // `&($a + $b)`, the adjustment pass deciding value versus place position, the type checker
@@ -19,8 +19,7 @@ namespace AST
     // they drifted, which is how member reads and member writes ended up disagreeing (todo/A3)
     inline bool is_place_expression(const ExprNode &expr)
     {
-        switch (expr.get_node_type())
-        {
+        switch (expr.get_node_type()) {
             case NodeType::n_varref:
             case NodeType::n_member_access:
             case NodeType::n_expr_deref:
@@ -43,8 +42,8 @@ namespace AST
 
     // the variable an expression ultimately addresses, walking through everything that only
     // re-addresses existing storage rather than naming new storage: every place, plus `&E` and
-    // `E:$`, which change what is being said about an address without changing whose it is.
-    // null when the expression names no variable at all.
+    // `E:$`, which change what is being said about an address without changing whose it is
+    // null when the expression names no variable at all
     //
     // lives next to the predicates above because it encodes the same taxonomy. it used to be a
     // private switch in the type checker, so a new place kind updated the predicate and left the
@@ -52,7 +51,7 @@ namespace AST
     VarDeclNode *place_root_of(ExprNode *expr);
 
     // the type an expression yields when it is *read*, which is what an inferred declaration
-    // and an assignment target both want.
+    // and an assignment target both want
     //
     // reading a place that holds a pointer auto-dereferences it once, so `$copy = $r` over an
     // `int32&` infers int32 and copies the value. an expression that is not a place is already

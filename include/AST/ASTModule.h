@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "../Token.h"
+#include "Token.h"
 #include "ASTNode.h"
 #include "ASTFile.h"
 #include "ASTNodeReference.h"
@@ -80,8 +80,8 @@ namespace AST
         bool has_module(const std::string &name);
 
         // iterator
-        using iterator = std::vector<std::unique_ptr<Module>>::iterator;
-        using const_iterator = std::vector<std::unique_ptr<Module>>::const_iterator;
+        typedef std::vector<std::unique_ptr<Module>>::iterator iterator;
+        typedef std::vector<std::unique_ptr<Module>>::const_iterator const_iterator;
 
         iterator begin() { return _modules.begin(); }
         iterator end() { return _modules.end(); }

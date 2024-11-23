@@ -1,19 +1,19 @@
-// deep-clone implementations for every concrete AST node.
+// deep-clone implementations for every concrete AST node
 //
 // these are gathered in one translation unit (rather than scattered inline across the
 // header-only node classes) so the whole clone contract is reviewable in one place and so
 // each node header only needs a one-line `clone(...) override` declaration. Node::clone is
 // pure-virtual, so a new concrete node that forgets to implement it here fails to compile;
-// that compile-time exhaustiveness is exactly what the monomorphizer relies on.
+// that compile-time exhaustiveness is exactly what the monomorphizer relies on
 //
 // conventions used below:
 //   cc.shallow(this)  copy-construct a shallow copy (all scalar/token/enum fields) and record
 //                     the old->new mapping, then fix up edges/types in place.
-//   cc.make<T>(this,) construct a fresh T from ctor args (used when a field is const, e.g. TypeNode).
-//   cc.child(ptr)     deep-clone an owned child (recurses through clone()).
-//   cc.rebind(ptr)    a cross-reference: clone if it was cloned in this subtree, else the original.
-//   cc.clone_ref(ref) deep-clone an owned NodeReference target, preserving its type tag.
-//   cc.substitute(t)  run the type through the active TypeSubstitution.
+//   cc.make<T>(this,) construct a fresh T from ctor args (used when a field is const, e.g. TypeNode)
+//   cc.child(ptr)     deep-clone an owned child (recurses through clone())
+//   cc.rebind(ptr)    a cross-reference: clone if it was cloned in this subtree, else the original
+//   cc.clone_ref(ref) deep-clone an owned NodeReference target, preserving its type tag
+//   cc.substitute(t)  run the type through the active TypeSubstitution
 
 #include "AST/ASTClone.h"
 
@@ -43,7 +43,7 @@ namespace AST
 {
 
 // ---------------------------------------------------------------------------
-// leaves - no owned children, no types to substitute. A shallow copy is enough.
+// leaves - no owned children, no types to substitute. A shallow copy is enough
 // ---------------------------------------------------------------------------
 
 Node *OperatorNode::clone(CloneContext &cc) const { return cc.shallow(this); }
@@ -85,7 +85,7 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
     for (auto &arg : c->arguments) arg = cc.child(arg);
     for (auto &ta : c->explicit_type_args) ta = cc.child(ta);
     // decl points at the (generic) declaration; the monomorphizer repoints it at the
-    // concrete instance afterwards. rebind keeps self-recursive calls correct in the meantime.
+    // concrete instance afterwards. rebind keeps self-recursive calls correct in the meantime
     c->decl = cc.rebind(c->decl);
     return c;
 }
@@ -181,7 +181,7 @@ Node *DerefExprNode::clone(CloneContext &cc) const
 Node *VarNode::clone(CloneContext &cc) const
 {
     // _decl is a cross-reference: the cloned decl if it lived inside the cloned subtree
-    // (a parameter or local), otherwise the original (a captured outer variable).
+    // (a parameter or local), otherwise the original (a captured outer variable)
     if (_token_varname.has_value()) {
         return cc.make<VarNode>(this, cc.rebind(_decl), _token_varname.value());
     }
@@ -198,6 +198,13 @@ Node *AssignNode::clone(CloneContext &cc) const
     AssignNode *c = cc.shallow(this);
     c->target = cc.child(c->target);
     c->value_expr = cc.child(c->value_expr);
+
+    // always null in practice: only a template body is cloned, and AST::OwnershipPass skips a generic
+    // body entirely, so no teardown exists yet when the clone happens. cloned anyway because `clone`
+    // has to be total - the monomorphizer relies on that - and because the shallow copy above would
+    // otherwise leave two assignments pointing at one scope
+    c->teardown_old = cc.child(c->teardown_old);
+
     return c;
 }
 
@@ -253,7 +260,7 @@ Node *ScopeNode::clone(CloneContext &cc) const
 {
     // start from a fresh scope (rather than a shallow copy) so the child list and the
     // name->decl lookup maps are rebuilt from clones. Recorded before recursing so child
-    // scopes that point back at this one via parent_ptr rebind correctly.
+    // scopes that point back at this one via parent_ptr rebind correctly
     ScopeNode *c = cc.make<ScopeNode>(this);
     c->parent_ptr = cc.rebind(parent_ptr);
 
@@ -293,7 +300,7 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     c->instantiation_args.clear();
     c->template_ref = nullptr;
 
-    // parameters first, so the map is populated before the body rebinds its VarNodes to them.
+    // parameters first, so the map is populated before the body rebinds its VarNodes to them
     for (auto &arg : c->args) arg = cc.child(arg);
     c->return_type = cc.child(c->return_type);
     c->body = cc.child(c->body);
@@ -308,7 +315,7 @@ Node *TypeDeclNode::clone(CloneContext &cc) const
     // as a template - ComplexType::substituted_copy owns that rule, so a field added to it survives
     // here by default. Phase 4 reconciles this with the registry's canonical application ComplexType
     // for codegen identity; for now the clone owns its own substituted layout -
-    // see todo/A5-reconcile-instantiation-identity.md.
+    // see todo/A5-reconcile-instantiation-identity.md
     // no self-pointer to fix up afterwards: value_type() is computed from _complex_type, so the clone
     // answers with its own layout the moment this assignment lands
     c->_complex_type = c->_complex_type.substituted_copy(
@@ -329,4 +336,4 @@ Node *AttributeNode::clone(CloneContext &cc) const
     return c;
 }
 
-}  // namespace AST
+};  // namespace AST

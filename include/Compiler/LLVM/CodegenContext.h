@@ -40,7 +40,7 @@ namespace Compiler::LLVM
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
     // visitor recursion relies on. the subsystems (TypeLowering, ExprCodegen, StmtCodegen,
     // TypeDeclCodegen, Backend) all hold a reference to one of these and talk to the shared state
-    // exclusively through it.
+    // exclusively through it
     struct CodegenContext
     {
         std::unique_ptr<llvm::LLVMContext> llvm_context;
@@ -65,7 +65,7 @@ namespace Compiler::LLVM
         AST::File *current_file = nullptr;
 
         // the function declaration currently being generated, set/restored around each function
-        // body so codegen errors can name their enclosing function. null at global scope.
+        // body so codegen errors can name their enclosing function. null at global scope
         AST::FunctionDeclNode *current_function = nullptr;
 
         std::stack<llvm::Value *> value_stack;
@@ -79,7 +79,7 @@ namespace Compiler::LLVM
         // AST::ValueType to an llvm::Type.
         TypeLowering *types = nullptr;
 
-        // the lvalue subsystem: the single place that turns an expression into an address.
+        // the lvalue subsystem: the single place that turns an expression into an address
         // every read, write and address-of goes through it, so they cannot drift apart
         LValueCodegen *lvalues = nullptr;
 
@@ -107,7 +107,7 @@ namespace Compiler::LLVM
         std::string llvm_err_str();
 
         // a human-readable description of the current codegen location, e.g. "in function 'foo'"
-        // or "at global scope", suffixed onto codegen error messages.
+        // or "at global scope", suffixed onto codegen error messages
         std::string function_context() const;
 
         Compiler::InternalCompilerException error(std::string message);

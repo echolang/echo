@@ -5,10 +5,10 @@
 
 #include "ParserCursor.h"
 #include "ParserPayload.h"
-#include "../Token.h"
-#include "../Lexer.h"
-#include "../AST/ASTModule.h"
-#include "../AST/ASTCollector.h"
+#include "Token.h"
+#include "Lexer.h"
+#include "AST/ASTModule.h"
+#include "AST/ASTCollector.h"
 
 #include <memory>
 #include <exception>

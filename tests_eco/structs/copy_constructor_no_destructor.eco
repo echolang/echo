@@ -1,0 +1,43 @@
+// a copy constructor is honoured whether or not the type owns anything. `Point` has no destructor, so
+// nothing forces the compiler's hand here - it simply does what the author wrote down.
+//
+// the alternative was to consult a copy constructor only for owning types, which would have made the
+// meaning of `$b = $a` depend on whether the type happens to declare a destructor. a type that says how
+// it is copied is copied that way, and `Point($a)` and `$b = $a` stay one declaration.
+//
+// every other struct is unaffected: with no copy constructor and nothing owned, a copy is still a copy
+// of bytes and nothing is inserted
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x, int32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+
+    constructor(Point& $other)
+    {
+        echo 700;
+        $this->x = $other->x;
+        $this->y = $other->y;
+    }
+}
+
+struct Bare
+{
+    int32 $x;
+}
+
+$a = Point(3, 4);
+$b = $a;
+echo $b->x;
+echo $b->y;
+
+// no copy constructor, nothing owned: a plain copy, with no call and no diagnostic
+$c = Bare(5);
+$d = $c;
+echo $d->x;

@@ -131,7 +131,7 @@ AST::ValueType get_primitive_type(const std::string &types_string)
 
 // expands a named constraint alias (e.g. `numeric`) into the set of concrete types it
 // covers, or nullopt if `name` is not a known alias. the sets are derived from the existing
-// ValueType category predicates so they stay in sync with the type system automatically.
+// ValueType category predicates so they stay in sync with the type system automatically
 static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::string &name)
 {
     // the primitives an alias may enumerate over (no void/complex)
@@ -171,7 +171,7 @@ static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::s
 }
 
 // resolves a single constraint atom to the set of concrete types it admits. an atom is an
-// alias, a primitive, or a user struct/class name. returns nullopt if it resolves to none.
+// alias, a primitive, or a user struct/class name. returns nullopt if it resolves to none
 static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser::Payload &payload, const std::string &name)
 {
     if (auto alias = expand_type_alias(name)) {
@@ -194,7 +194,7 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
 // applied to `template_decl`, and returns the interned application ValueType. Arguments are
-// themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type.
+// themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
 static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::TypeDeclNode *template_decl, const TokenReference &name_token)
 {
     auto &cursor = payload.cursor;
@@ -235,7 +235,7 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::T
 
     // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>`
     // where `Vec<T: numeric>`). skip args still mentioning a type parameter - those are
-    // resolved and re-checked once the enclosing template is instantiated.
+    // resolved and re-checked once the enclosing template is instantiated
     for (size_t i = 0; i < args.size(); i++) {
         const auto *param = template_ct->type_parameters[i];
         if (param->is_constrained() && !args[i].is_type_param() && !param->allows(args[i])) {
@@ -354,13 +354,13 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
     return type_parameters;
 }
 
-// mints (or reuses) the owned declarations for a freshly parsed parameter list.
+// mints (or reuses) the owned declarations for a freshly parsed parameter list
 //
 // reuse matters for correctness, not just allocation: a module is parsed twice — a symbol pass
-// then a full pass — each with a fresh Context, and both reach this point for the same list.
+// then a full pass — each with a fresh Context, and both reach this point for the same list
 // minting new declarations the second time would give the two passes distinct parameters, so a
 // generic struct's self-application Foo<T> would intern twice and the two Foo<T> would compare
-// unequal. reusing whenever the shape is unchanged keeps a single declaration per parameter.
+// unequal. reusing whenever the shape is unchanged keeps a single declaration per parameter
 static std::vector<AST::TypeParamDecl *> declare_params(
     Parser::Payload &payload,
     const std::vector<AST::TypeParamDecl *> &existing,
@@ -429,7 +429,7 @@ void Parser::declare_type_parameters(
     owner.inherited_type_param_count = inherited.size();
 }
 
-// consumes an optional trailing `&`, turning `T` into the non-nullable borrow `T&`.
+// consumes an optional trailing `&`, turning `T` into the non-nullable borrow `T&`
 //
 // both t_ref and t_and are accepted. the lexer only emits t_ref when the `&` is immediately
 // followed by a name character (src/Lexer.cpp, LexerFunction::ReferenceFrom), so `int32 & $x`
@@ -525,7 +525,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         if (type_param) {
             primitive_type = AST::ValueType::make_type_param(type_param);
         } else {
-            // Check for user-defined types (structs/classes)
+            // check for user-defined types (structs/classes)
             auto struct_symbol = payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace);
             if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_type) {
                 user_type_decl = struct_symbol->node.unsafe_ptr<AST::TypeDeclNode>();

@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/FunctionDeclNode.h>
 #include <AST/ExprNode.h>
 #include <AST/TypeDeclNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -13,7 +13,7 @@ using EchoTests::has_issue_containing;
 using EchoTests::prim;
 
 // the parsed bundle is monomorphized by the test harness, so these assert the post-pass shape:
-// generic call sites point at concrete instances and no type parameters survive.
+// generic call sites point at concrete instances and no type parameters survive
 
 TEST_CASE("generic function call is monomorphized to a concrete instance", "[generics]")
 {

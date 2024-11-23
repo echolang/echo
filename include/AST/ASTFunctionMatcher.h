@@ -54,10 +54,10 @@ namespace AST
         std::vector<FunctionDeclNode *> tied;
     };
 
-    // picks the candidate a call resolves to.
+    // picks the candidate a call resolves to
     //
     // `argument_types` and `arguments` are parallel; `arguments` may hold nulls (or be shorter)
-    // when only the types are known, which is what keeps the matcher testable without a tree.
+    // when only the types are known, which is what keeps the matcher testable without a tree
     //
     // the rules, in order:
     //   1. arity must match exactly - Echo has no default parameters and no varargs

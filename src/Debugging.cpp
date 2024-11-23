@@ -1,6 +1,6 @@
 #include "Debugging.h"
 
-std::string DD::tabbify(const std::string& str, size_t n, char c) 
+std::string DD::tabbify(const std::string &str, size_t n, char c) 
 {
     std::string result;
     bool nl = true;

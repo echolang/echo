@@ -1,0 +1,54 @@
+// a constructor taking one non-nullable borrow of its own type *is* the copy constructor, and nothing
+// had to be added to the language for it to parse: a constructor is an ordinary function, a borrow an
+// ordinary parameter. what is new is that the ownership pass now recognises it and calls it wherever a
+// place arrives at a destination - a declaration, an argument, a return - instead of reporting that an
+// owning value cannot be copied.
+//
+// every copy adds one to the tag, so the goldens count the calls rather than just their existence:
+// three copies here, four values, four destructions
+
+struct Box
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+        $this->data:$ = mem::alloc<uint8>(1);
+    }
+
+    constructor(Box& $other)
+    {
+        $this->tag = $other->tag + 1;
+        $this->data:$ = mem::alloc<uint8>(1);
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+// a by-value parameter is a destination: the caller's value stays live, the callee's copy is destroyed
+// at the end of the body it was handed to
+function read(Box $taken) : void
+{
+    echo 800;
+}
+
+// and so is a return of something the function does not own - `$src` is a borrow, so handing back a
+// value means duplicating it
+function duplicate(Box& $src) : Box
+{
+    return $src;
+}
+
+$a = Box(10);
+
+$b = $a;
+read($a);
+$c = duplicate($a);
+
+echo 99;

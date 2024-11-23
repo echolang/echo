@@ -4,7 +4,7 @@
 #pragma once
 
 #include "ASTNode.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 
 namespace AST 
 {
@@ -29,7 +29,7 @@ namespace AST
             return "operator<" + token_literal.value() + ">";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitOperator(*this);
         }
 

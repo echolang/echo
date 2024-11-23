@@ -13,27 +13,27 @@ namespace Parser
     // picks one declaration out of `candidates` for an already-built call node, and everything that
     // follows from it: scoring a template against the types it would be instantiated with, the
     // Pareto match, the ambiguity and no-viable diagnostics, and the argument coercion a concrete
-    // callee needs. sets `call.decl` and answers true on success.
+    // callee needs. sets `call.decl` and answers true on success
     //
     // split out from parse_funccall so that a member call resolves by exactly the same rule. the two
     // differ only in where the candidate set comes from - the (namespace, name) overload sets for a
     // free call, the receiver's type for a member one - and in the diagnostic for an empty set,
     // which stays with each caller because "no such function" and "no such member" are different
-    // errors. everything after that is one implementation.
+    // errors. everything after that is one implementation
     //
     // the diagnostics anchor on `call.token_function_name` rather than on a token passed alongside,
-    // so a message cannot name a token the node it describes disagrees with.
+    // so a message cannot name a token the node it describes disagrees with
     bool resolve_funccall(
         Parser::Payload &payload,
         AST::FunctionCallExprNode &call,
         const std::vector<AST::FunctionDeclNode *> &candidates);
 
     // parses `->name(...)` / `->name<...>(...)` into an ordinary call whose first argument is the
-    // receiver's address. the cursor must sit on the `(` or `<` that follows the member name.
+    // receiver's address. the cursor must sit on the `(` or `<` that follows the member name
     //
     // a member call is not a node kind of its own: it is a FunctionCallExprNode with the receiver
     // prepended, which is why the monomorphizer, the pointer adjuster, the type checker and codegen
-    // all handle it without a special case.
+    // all handle it without a special case
     //
     // answers null two ways, and the caller has to tell them apart:
     //  - `is_call` false: the `<` was a comparison after all and the cursor has been restored to it,

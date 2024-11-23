@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTValueType.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 
 #include "ExprNode.h"
 
@@ -17,9 +17,9 @@ namespace AST
         ECO_AST_NODE_TYPE(n_type_cast);
         
         ValueType cast_to;
-        ExprNode* expr;
+        ExprNode *expr;
 
-        TypeCastNode(ValueType cast_to, ExprNode* expr, bool implicit = false) : 
+        TypeCastNode(ValueType cast_to, ExprNode *expr, bool implicit = false) : 
             ExprNode(implicit),
             cast_to(cast_to), 
             expr(expr)
@@ -34,7 +34,7 @@ namespace AST
         }
         
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitTypeCast(*this);
         }
 

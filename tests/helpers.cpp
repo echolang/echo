@@ -1,4 +1,3 @@
-#include "helpers.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTMonomorphizer.h>
@@ -6,6 +5,8 @@
 #include <AST/ASTTypeChecker.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
+
+#include "helpers.h"
 
 EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
 {

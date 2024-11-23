@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ExprNode.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 
 namespace AST 
 {
@@ -76,7 +76,7 @@ namespace AST
             return effective_token_literal_value().back() != 'f';
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitLiteralFloatExpr(*this);
         }
 
@@ -138,7 +138,7 @@ namespace AST
             return ValueType(expected_primitive_type.value_or(ValueTypePrimitive::t_int32));
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitLiteralIntExpr(*this);
         }
 
@@ -194,7 +194,7 @@ namespace AST
             return ValueType(ValueTypePrimitive::t_bool);
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitLiteralBoolExpr(*this);
         }
 
@@ -214,10 +214,10 @@ namespace AST
         ~LiteralStringExprNode() {};
 
         ValueType result_type() const override {
-            return ValueType::make_unknown(); // String type not yet implemented
+            return ValueType::make_unknown(); // string type not yet implemented
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitLiteralStringExpr(*this);
         }
 

@@ -19,7 +19,7 @@ namespace Compiler::LLVM
     struct CodegenContext;
 
     // lowers statements and control flow: scopes, variable declarations & mutations, returns,
-    // if/while blocks, and the bodies of concrete function declarations.
+    // if/while blocks, and the bodies of concrete function declarations
     class StmtCodegen
     {
     public:

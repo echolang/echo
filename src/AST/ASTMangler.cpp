@@ -8,7 +8,7 @@
 AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_decl)
 {
     // an extern declaration links against a symbol somebody else emitted, so it is the one kind
-    // of function whose name must survive untouched - no namespace prefix, no argument types.
+    // of function whose name must survive untouched - no namespace prefix, no argument types
     // checked first so nothing downstream can decorate it
     if (func_decl->extern_symbol.has_value()) {
         return func_decl->extern_symbol.value();
@@ -29,7 +29,7 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
     // absent from the (namespace, name) overload sets, so DuplicateFunctionSignature cannot see
     // the clash and it would surface as TypeLowering's "this is a name mangling defect, not a
     // source error" throw instead. 'M' for the same reason 'G' is not another 'Z': an owner
-    // segment can never be read as a namespace segment or a parameter.
+    // segment can never be read as a namespace segment or a parameter
     //
     // mangled_token() already carries the owner's namespace path and, for an instantiation, its
     // type arguments - so `a::Box<int32>::get` and `b::Box<float64>::get` separate

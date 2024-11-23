@@ -35,7 +35,7 @@ namespace AST
             return "var(" + _decl->name_full() + ")";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitVar(*this);
         }
 

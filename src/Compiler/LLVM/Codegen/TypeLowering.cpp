@@ -43,8 +43,7 @@ namespace Compiler::LLVM
 {
 void TypeLowering::create_cmp_units(const AST::Bundle &bundle)
 {
-    for (auto &module : bundle.modules)
-    {
+    for (auto &module : bundle.modules) {
         // check if the module is already in the map which is not allowed
         if (_ctx.cmp_unit_map.find(module->name) != _ctx.cmp_unit_map.end()) {
             throw Compiler::InternalCompilerException(fmt::format(
@@ -106,7 +105,7 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
 
     // an extern declaration binds to a symbol that may already exist in this module - declared by
     // another extern in a different file, or by the compiler itself. getOrInsertFunction is what
-    // unifies them instead of colliding.
+    // unifies them instead of colliding
     //
     // it hands back the *existing* global whenever the name is taken, though, and under opaque
     // pointers a signature mismatch is invisible in the IR - so two declarations of `malloc` with
@@ -211,7 +210,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
     std::string type_name = type->name.value_or("anon");
 
     // create the struct opaque first and register it, so a self-referential instantiation
-    // (a property that mentions the same instantiation) resolves to this in-progress type.
+    // (a property that mentions the same instantiation) resolves to this in-progress type
     llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
     auto struct_id = cmp_unit.structure_table->push_structure(type, llvm_struct_type);
 
@@ -309,7 +308,7 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
     for (auto &cmp_unit : _ctx.cmp_units) {
         // first build all functions actually declared in the module
         for (auto fncdecl : cmp_unit->ast_module->nodes.of_type<AST::FunctionDeclNode>()) {
-            // Skip generic function templates during function map building
+            // skip generic function templates during function map building
             if (fncdecl->is_generic()) {
                 continue;
             }
@@ -335,7 +334,7 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
                 continue;
             }
 
-            // Skip generic function templates
+            // skip generic function templates
             if (decl->is_generic()) {
                 continue;
             }
@@ -372,7 +371,7 @@ void TypeLowering::build_struct_maps(const AST::Bundle &bundle)
 
 llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
-    llvm::Type* base_type = nullptr;
+    llvm::Type *base_type = nullptr;
 
     // every pointer level is the same opaque `ptr` under LLVM's opaque pointer model, so the
     // pointee is never lowered. that also sidesteps lowering a pointer to a struct that has
@@ -575,4 +574,4 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
     throw _ctx.error(fmt::format("unsupported type cast from '{}' to '{}' {}",
         from.get_type_desciption(), to.get_type_desciption(), _ctx.function_context()));
 }
-}
+};

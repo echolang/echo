@@ -24,7 +24,7 @@ namespace Compiler::LLVM
     struct CmpUnit;
 
     // everything that is true of a class and of nothing else: allocating the heap block, moving the
-    // strong count, and tearing the block down when the count reaches zero.
+    // strong count, and tearing the block down when the count reaches zero
     //
     // it is all here rather than spread over the expression and statement subsystems because the three
     // share one invariant - the block layout in Codegen/ClassLayout.h - and because retain and release
@@ -36,7 +36,7 @@ namespace Compiler::LLVM
     public:
         ClassCodegen(CodegenContext &ctx) : _ctx(ctx) {};
 
-        // a fresh block: malloc, zero it whole, seat the strong count at 1, write the typeinfo.
+        // a fresh block: malloc, zero it whole, seat the strong count at 1, write the typeinfo
         // pushes the handle
         void gen_class_alloc(AST::ClassAllocExprNode &node);
 
@@ -65,7 +65,7 @@ namespace Compiler::LLVM
         // in the tree, so nothing outside decides to emit one
         llvm::Value *gen_retain(llvm::Value *handle, const AST::ValueType &class_type);
 
-        // the one release implementation per class per compilation unit, created on first use.
+        // the one release implementation per class per compilation unit, created on first use
         //
         //   void __eco_release_<mangled>(ptr handle)
         //

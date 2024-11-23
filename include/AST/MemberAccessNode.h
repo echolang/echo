@@ -6,7 +6,7 @@
 #include "ASTNode.h"
 #include "ASTNodeReference.h"
 #include "ExprNode.h"
-#include "../Token.h"
+#include "Token.h"
 
 namespace AST 
 {
@@ -22,7 +22,7 @@ namespace AST
             return "ma<" + result_type().get_type_desciption() + ">(" + _base_node.node()->node_description() + "->" + _member_name.value() + ")";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitMemberAccess(*this);
         }
 
@@ -40,7 +40,7 @@ namespace AST
             return const_cast<NodeReference&>(_base_node); 
         }
         
-        inline TokenReference& get_member_name() const { 
+        inline TokenReference &get_member_name() const { 
             return const_cast<TokenReference&>(_member_name); 
         }
         

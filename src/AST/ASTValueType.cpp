@@ -55,10 +55,10 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
 
 // the character a primitive contributes to a mangled symbol name. every value must be distinct:
 // this reaches the LLVM symbol table through decorated_func_name, so two primitives sharing a
-// char means two functions sharing a symbol.
+// char means two functions sharing a symbol
 //
 // deliberately exhaustive with no `default`. the default used to answer 'u' - the same char as
-// t_complex - so a newly added primitive silently collided instead of failing the build.
+// t_complex - so a newly added primitive silently collided instead of failing the build
 // 'y' and 'z' are chosen because the surrounding grammar already reserves a lot: 'T' prefixes a
 // type parameter, 'C'/'M' mark const/mutable, 'L'/'R' mark leaf/ref, 'N'/'B' mark
 // nullable/borrow, 'G' marks a type argument, and decorated_func_name uses 'Z' as its separator
@@ -111,7 +111,8 @@ AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
 // the one factory. the kind comes off the ComplexType, so a t_class ValueType can only ever name a
 // layout that was declared as a class - which is what lets everything downstream trust the tag on
 // either the type or its layout and get the same answer
-AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std::vector<ValueType> &args, TypeRegistry *registry)
+{
     if (!args.empty()) {
         assert(complex_type->is_generic());
         if (registry) {
@@ -126,13 +127,15 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
         complex_type);
 }
 
-AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType> &args, TypeRegistry *registry)
+{
     ValueType type = make_complex(complex_type, args, registry);
     assert(type.is_struct() && "make_struct over a class layout - use make_complex");
     return type;
 }
 
-AST::ValueType AST::ValueType::make_class(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+AST::ValueType AST::ValueType::make_class(ComplexType *complex_type, const std::vector<ValueType> &args, TypeRegistry *registry)
+{
     ValueType type = make_complex(complex_type, args, registry);
     assert(type.is_class() && "make_class over a struct layout - use make_complex");
     return type;
@@ -308,36 +311,36 @@ std::string AST::ValueType::get_type_desciption() const
     }
 
     if (has_complex_type()) {
-        ComplexType* ct = get_complex_type();
+        ComplexType *ct = get_complex_type();
         if (!ct->name.has_value()) {
             return prefix + "[unknown]";
         }
 
-        // If this is an instantiated generic type, the name already includes template args
+        // if this is an instantiated generic type, the name already includes template args
         // from the TypeRegistry's args_description method. the namespace is prepended here so
         // two same-named types from different namespaces are distinguishable in diagnostics
         return prefix + ct->namespaced_name();
     }
 
-    // Handle unknown or other types
+    // handle unknown or other types
     return prefix + "[unknown]";
 }
 
-AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args)
+AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args)
 {
     assert(tmpl->is_generic() && tmpl->type_parameters.size() == args.size());
 
     auto key = std::make_tuple(tmpl, args);
     if (auto it = _instantiations.find(key); it != _instantiations.end()) {
-        ComplexType* inst = it->second;
+        ComplexType *inst = it->second;
         // refresh if the template gained properties after this instance was interned - this
         // happens when an application (e.g. a return type) is parsed during the symbol pass,
-        // before the struct body populates the template's properties.
+        // before the struct body populates the template's properties
         if (inst != tmpl && inst->property_count() < tmpl->property_count()) {
             TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
             inst->_properties.clear();
             inst->_property_map.clear();
-            for (const auto& prop : tmpl->_properties) {
+            for (const auto &prop : tmpl->_properties) {
                 inst->add_property(prop.name, substitute_type(prop.type, subst, *this));
             }
         }
@@ -345,7 +348,7 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
     }
 
     auto owned = std::make_unique<ComplexType>();
-    ComplexType* instantiated = owned.get();
+    ComplexType *instantiated = owned.get();
     _owned.push_back(std::move(owned));
 
     if (tmpl->name) {
@@ -360,20 +363,20 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
 
     // insert into the cache BEFORE substituting properties, so a self-referential generic
     // (e.g. a property of type ptr<Self<T>>) resolves back to this in-progress instance
-    // instead of recursing forever.
+    // instead of recursing forever
     _instantiations[key] = instantiated;
 
     // one substitution for the whole layout: the arguments arrive positionally, matching the
     // template's declared parameter order, and positional() is where that arity is checked
     TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
-    for (const auto& prop : tmpl->_properties) {
+    for (const auto &prop : tmpl->_properties) {
         instantiated->add_property(prop.name, substitute_type(prop.type, subst, *this));
     }
 
     return instantiated;
 }
 
-std::string AST::TypeRegistry::args_description(const std::vector<ValueType>& args) const
+std::string AST::TypeRegistry::args_description(const std::vector<ValueType> &args) const
 {
     std::string desc;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -391,7 +394,7 @@ void AST::ComplexType::add_type_parameter(TypeParamDecl *param)
     type_parameters.push_back(param);
 }
 
-bool AST::ComplexType::declares_type_param(const ValueType& type) const
+bool AST::ComplexType::declares_type_param(const ValueType &type) const
 {
     assert(type.is_type_param());
 
@@ -429,8 +432,7 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
         return true;
     }
 
-    if (bare_from.is_pointer() && bare_to.is_pointer())
-    {
+    if (bare_from.is_pointer() && bare_to.is_pointer()) {
         // the pointee has to be the same type, but the target may add const to it: a `const
         // int32&` only promises to read, so every `int32&` satisfies it. going the other way
         // would launder the promise away, so it stays an error. this is what makes the doc's
@@ -455,7 +457,7 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
     // note there is deliberately no "a pointer converts to its pointee" rule. the auto-deref
     // that makes a pointer usable where its pointee is expected is a *read*, and the pointer
     // adjustment pass writes it into the tree as an explicit deref node - so by the time
-    // anything asks this question, a value-position pointer read already has the pointee type.
+    // anything asks this question, a value-position pointer read already has the pointee type
     // allowing it here would instead accept `$p = &$b`, quietly storing an address into the
     // pointee's slot where the doc requires an error (L87)
     return false;
@@ -466,7 +468,7 @@ bool AST::can_type_a_literal(const ValueType &type)
     return type.is_primitive() && !type.is_void();
 }
 
-bool AST::contains_type_param(const ValueType& type)
+bool AST::contains_type_param(const ValueType &type)
 {
     if (type.is_type_param()) {
         return true;
@@ -478,9 +480,9 @@ bool AST::contains_type_param(const ValueType& type)
 
     // a generic application is unresolved if any of its arguments still is
     if (type.has_complex_type()) {
-        ComplexType* ct = type.get_complex_type();
+        ComplexType *ct = type.get_complex_type();
         if (ct && ct->is_instantiated()) {
-            for (const auto& arg : ct->instantiation_args) {
+            for (const auto &arg : ct->instantiation_args) {
                 if (contains_type_param(arg)) {
                     return true;
                 }
@@ -491,9 +493,9 @@ bool AST::contains_type_param(const ValueType& type)
     return false;
 }
 
-AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry)
+AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitution &subst, TypeRegistry &registry)
 {
-    // a type-parameter reference resolves to its bound type, carrying the reference's flags.
+    // a type-parameter reference resolves to its bound type, carrying the reference's flags
     // an *unbound* parameter is returned unchanged rather than asserting: that is what makes a
     // partial substitution well defined, so a generic member of a generic owner can have the
     // owner's parameters resolved while its own stay generic. the arity check that used to live
@@ -517,21 +519,21 @@ AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitutio
         return type.is_const() ? ValueType::make_const(*bound) : *bound;
     }
 
-    // a generic application: recursively substitute its arguments, then re-intern.
+    // a generic application: recursively substitute its arguments, then re-intern
     if (type.has_complex_type()) {
-        ComplexType* ct = type.get_complex_type();
+        ComplexType *ct = type.get_complex_type();
         if (ct && ct->is_instantiated()) {
             std::vector<ValueType> resolved_args;
             resolved_args.reserve(ct->instantiation_args.size());
-            for (const auto& arg : ct->instantiation_args) {
+            for (const auto &arg : ct->instantiation_args) {
                 resolved_args.push_back(substitute_type(arg, subst, registry));
             }
-            ComplexType* inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
+            ComplexType *inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
             ValueType result = ValueType::make_complex(inst);
             return type.is_const() ? ValueType::make_const(result) : result;
         }
     }
 
-    // primitives and already-concrete types are unchanged.
+    // primitives and already-concrete types are unchanged
     return type;
 }

@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/FunctionDeclNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/ScopeNode.h>
 #include <AST/ExprNode.h>
 #include <AST/VarDeclNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -16,7 +16,8 @@ using namespace AST;
 // float64 literal and an int32 literal converted at codegen print identically, but only the first
 // one gets the literal's own bounds diagnostics
 
-namespace {
+namespace
+{
     ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
 
     // the return expression of the named function's body. the module is parsed twice (symbol pass
@@ -107,7 +108,7 @@ TEST_CASE("the return type hint is only passed down when it can type a literal",
     SECTION("a type parameter is not a hint")
     {
         // T says nothing about a literal until it is substituted, and autocast_literal_int
-        // reports a bogus "unexpected token" for anything that is not float, integer or bool.
+        // reports a bogus "unexpected token" for anything that is not float, integer or bool
         // the instance's return is fitted by the conversion table at codegen instead
         auto bundle = EchoTests::tests_make_parsed_bundle("function f<T>() : T { return 0; }\n");
 

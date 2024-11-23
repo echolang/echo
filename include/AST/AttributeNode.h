@@ -33,7 +33,7 @@ namespace AST
             return "attr<" + attribute_id.value() + ">";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitAttribute(*this);
         }
 

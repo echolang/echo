@@ -1,7 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTNodeReference.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/ExprNode.h>
@@ -11,6 +9,8 @@
 #include <AST/VarDeclNode.h>
 #include <AST/VarNode.h>
 #include <AST/VarRefNode.h>
+
+#include "helpers.h"
 
 // AST::is_place_expression - "does this expression denote storage".
 //
@@ -22,7 +22,8 @@
 
 using namespace AST;
 
-namespace {
+namespace
+{
     // a parsed module gives us real nodes of each kind to ask about, rather than hand-built ones
     // whose edges would not match what the parser actually produces
     template <typename T>
@@ -174,12 +175,12 @@ TEST_CASE("A peel is not a place, so its own address cannot be taken twice over"
 
 TEST_CASE("null is deliberately not an expression node for conversion purposes", "[AST][pointer]")
 {
-    // NullNode is an ExprNode, but `n_null` is intentionally absent from is_expression_node().
+    // NullNode is an ExprNode, but `n_null` is intentionally absent from is_expression_node()
     //
     // that predicate gates try_implicit_cast (src/Parser/ExprParser.cpp), and null must not be
     // wrapped in a TypeCastNode: it has no type of its own, it acquires one through bound_type,
     // and the type checker's null-specific rules all test for the raw n_null tag. wrapping it
-    // would hide the tag and turn "cannot be null" into a silent conversion.
+    // would hide the tag and turn "cannot be null" into a silent conversion
     //
     // pinned because the omission looks exactly like the bug CLAUDE.md's "Adding an AST node"
     // step 9 warns about, and would otherwise be "fixed" into a regression

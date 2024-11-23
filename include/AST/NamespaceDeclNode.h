@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTNamespace.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 
 namespace AST 
 {
@@ -15,9 +15,9 @@ namespace AST
         ECO_AST_NODE_TYPE(n_namespace_decl);
         
         TokenSlice namespace_tokens;
-        const Namespace* namespace_decl;
+        const Namespace *namespace_decl;
 
-        NamespaceDeclNode(const TokenSlice& token_slice, const Namespace* ns) :
+        NamespaceDeclNode(const TokenSlice &token_slice, const Namespace *ns) :
             namespace_tokens(token_slice),
             namespace_decl(ns) 
         {};
@@ -28,7 +28,7 @@ namespace AST
             return "namespace " + namespace_decl->name();
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitNamespaceDecl(*this);
         }
 

@@ -1,0 +1,29 @@
+// inside `struct Box<T>`, the unqualified name `Box` resolves to the *template*, which is not a type any
+// value has - so `Box& $other` is not the borrow of `Box<T>` and is not the copy constructor.
+//
+// reported at the parameter rather than left silent, because the alternative is a diagnostic somewhere
+// else entirely: the copy would be rejected at its call site, naming a type whose author believes they
+// wrote a copy constructor for it
+
+struct Box<T>
+{
+    usize $tag;
+    ptr<T> $slot;
+
+    constructor(usize $t, ptr<T> $s)
+    {
+        $this->tag = $t;
+        $this->slot:$ = $s;
+    }
+
+    constructor(Box& $other)
+    {
+        $this->tag = $other->tag;
+        $this->slot:$ = $other->slot;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}

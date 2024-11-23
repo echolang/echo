@@ -4,7 +4,6 @@
 #include <AST/LiteralValueNode.h>
 #include <Parser/ExprParser.h>
 
-
 #include "helpers.h"
 
 #define TEST_ASSERT_LIT_DESC(index, type, desc) \

@@ -23,7 +23,8 @@ namespace AST
     // destructor takes nothing and returns nothing. it used to be readable off the tokens alone
     // (a constructor is the only thing whose name token differs from its declaration token), which
     // stopped being true the moment a second keyword-declared member existed
-    enum class MemberKind {
+    enum class MemberKind
+    {
         t_free,
         t_method,
         t_constructor,
@@ -39,7 +40,7 @@ namespace AST
 
         // where this declaration is *written*, which is what a module's parse passes reconcile on
         // (AST::FunctionRegistry::DeclarationSite). unset for everything the user spelled with a
-        // name, where the name token already is that position.
+        // name, where the name token already is that position
         //
         // a constructor needs the two apart: it is named after its struct, so `name_token` is the
         // struct's name token and every constructor of one struct shares it, while each is declared
@@ -118,7 +119,7 @@ namespace AST
         // the mirror of ComplexType::template_ref / instantiation_args, for functions: on an
         // instance created by the monomorphizer these name the template it came from and the
         // concrete types it was instantiated with, in declaration order. empty on a template and
-        // on a plain non-generic function.
+        // on a plain non-generic function
         //
         // load-bearing for the mangled name. `decorated_func_name` mangles the argument types
         // only, so a generic whose parameter appears solely in the *return* type - which is

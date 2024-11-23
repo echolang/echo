@@ -10,7 +10,7 @@
 namespace AST
 {
     class File;
-}
+};
 
 namespace Compiler
 {
@@ -21,14 +21,14 @@ namespace Compiler
         const AST::File *_file = nullptr;
 
     public:
-        CompilerException(const std::string& message) : _message(message) {}
-        CompilerException(const std::string& message, const AST::File *file) : _message(message), _file(file) {}
+        CompilerException(const std::string &message) : _message(message) {}
+        CompilerException(const std::string &message, const AST::File *file) : _message(message), _file(file) {}
 
-        virtual const char* what() const noexcept override {
+        virtual const char *what() const noexcept override {
             return _message.c_str();
         }
 
-        const AST::File* file() const {
+        const AST::File *file() const {
             return _file;
         }
     };
@@ -38,16 +38,16 @@ namespace Compiler
         const AST::IssueRecord &_issue;
 
     public:
-        ASTCompilerException(const AST::IssueRecord& issue) : 
+        ASTCompilerException(const AST::IssueRecord &issue) : 
             CompilerException(issue.message(), issue.code_ref.file),
             _issue(issue)
         {}
 
-        const AST::IssueRecord& issue() const {
+        const AST::IssueRecord &issue() const {
             return _issue;
         }
 
-        virtual const char* what() const noexcept override {   
+        virtual const char *what() const noexcept override {   
             return _message.c_str();
         }
     };
@@ -55,9 +55,9 @@ namespace Compiler
     class InternalCompilerException : public CompilerException
     {
     public:
-        InternalCompilerException(const std::string& message) : CompilerException(message) {}
-        InternalCompilerException(const std::string& message, const AST::File *file) : CompilerException(message, file) {}
+        InternalCompilerException(const std::string &message) : CompilerException(message) {}
+        InternalCompilerException(const std::string &message, const AST::File *file) : CompilerException(message, file) {}
     };
-}
+};
 
 #endif

@@ -16,6 +16,7 @@ namespace AST
 {
     class TypeNode;
     class TypeDeclNode;
+    class VarDeclNode;
 
     struct Context
     {
@@ -41,7 +42,7 @@ namespace AST
 
         // the struct whose body is being parsed, null everywhere else. this is what turns a
         // `function` into a *method*: parse_funcdecl reads it to bind the receiver, prefix the
-        // owner's type parameters and register on the type rather than in the namespace.
+        // owner's type parameters and register on the type rather than in the namespace
         //
         // carried on the context rather than passed as an argument for the same reason
         // return_type_ptr is: it flows downward through a parser that is a set of free functions
@@ -52,6 +53,18 @@ namespace AST
         // interned self-application `Foo<T>&` for a generic owner. held as a node so every method
         // of one struct shares a single TypeNode, the way the constructor shares its return type
         TypeNode *self_type_ptr = nullptr;
+
+        // the `$this` local of the *constructor* whose body is being parsed, null everywhere else -
+        // including inside a method, whose `$this` is a borrow parameter naming storage that already
+        // exists
+        //
+        // what it buys is one question answered where it is knowable: a write to a field of this
+        // declaration is the field's *first* write. a constructor's `$this` is a fresh slot
+        // gen_var_decl zero-fills, so there is no previous value owed a teardown and a `const`
+        // property gets its one legitimate write - exactly what AssignNode::is_initialization means,
+        // and exactly what the synthesized field-wise constructor already says about its own writes
+        // said by the tree so no later pass has to infer "we are inside a constructor"
+        VarDeclNode *ctor_this_ptr = nullptr;
 
         inline ScopeNode &scope() const {
             assert(scope_ptr);
@@ -65,7 +78,7 @@ namespace AST
         // enters a nested type-parameter scope. pushing an empty scope is fine and normal — a
         // non-generic member of a generic owner still needs its own frame so leaving it cannot
         // disturb the owner's parameters
-        void push_type_param_scope(const std::vector<TypeParamDecl *>& params) {
+        void push_type_param_scope(const std::vector<TypeParamDecl *> &params) {
             type_param_scopes.push_back(params);
         }
 
@@ -77,7 +90,7 @@ namespace AST
         // resolves a name against the type parameters in scope, innermost first, so an inner
         // parameter shadows an outer one of the same name. null when the name is not a type
         // parameter here. defined out of line because it reads TypeParamDecl::name
-        const TypeParamDecl *find_type_param(const std::string& name) const;
+        const TypeParamDecl *find_type_param(const std::string &name) const;
 
         template <typename T, typename... Args>
             requires NodeTypeProvider<T>
@@ -164,7 +177,7 @@ namespace AST
         }
     };
 
-    // scopes the enclosing struct to a struct body, so a `function` inside one parses as a method.
+    // scopes the enclosing struct to a struct body, so a `function` inside one parses as a method
     //
     // saves and restores rather than clearing, like ReturnTypeScope, and for the sharper version of
     // the same reason: parse_funcdecl opens a *null* frame around the body it parses, so a
@@ -190,6 +203,32 @@ namespace AST
         ~SelfScope() {
             context.self_struct_ptr = previous_struct;
             context.self_type_ptr = previous_type;
+        }
+    };
+
+    // scopes a constructor's `$this` to that constructor's body, so a write to one of its fields is
+    // recognised as the field's first write
+    //
+    // saves and restores for the same reason SelfScope does, and it matters here for a sharper case:
+    // a `function` declared inside a constructor body opens a *null* frame, so a write to some other
+    // struct's field in there is an ordinary replacement rather than an initialization
+    struct ConstructorScope
+    {
+        Context &context;
+        VarDeclNode *previous_this;
+
+        ConstructorScope(Context &context, VarDeclNode *ctor_this) :
+            context(context),
+            previous_this(context.ctor_this_ptr)
+        {
+            context.ctor_this_ptr = ctor_this;
+        }
+
+        ConstructorScope(const ConstructorScope &) = delete;
+        ConstructorScope &operator=(const ConstructorScope &) = delete;
+
+        ~ConstructorScope() {
+            context.ctor_this_ptr = previous_this;
         }
     };
 };

@@ -25,7 +25,7 @@ namespace AST
     {
         // runaway guards: real programs stay far below these; hitting them means a
         // pathological (e.g. recursively growing) instantiation, which we stop rather than
-        // spin on forever.
+        // spin on forever
         constexpr size_t MAX_INSTANCES = 4096;
         constexpr size_t MAX_ROUNDS = 256;
 
@@ -139,7 +139,7 @@ namespace AST
         // operand's type is still void/unknown). skip it silently and revisit once the enclosing
         // template is instantiated, which substitutes those to concrete types. this guard is why
         // e.g. the inner Box<T>(...) in a generic factory is not instantiated as Box<T> - only as
-        // Box<int> after the factory is cloned for int.
+        // Box<int> after the factory is cloned for int
         for (const auto &arg : args) {
             if (is_undetermined_type(arg)) {
                 return std::nullopt;
@@ -147,7 +147,7 @@ namespace AST
         }
 
         // enforce any type-parameter constraints (e.g. `<T: numeric>`). both the explicit
-        // and inferred paths converge on `args`, so this single check covers both.
+        // and inferred paths converge on `args`, so this single check covers both
         for (size_t i = 0; i < n; i++) {
             const auto *param = tmpl->type_parameters[i];
             if (param->is_constrained() && !param->allows(args[i])) {
@@ -181,7 +181,7 @@ namespace AST
 
         // runaway guard: hitting the instance cap means instantiation is not converging (e.g. a
         // generic recursing on an ever-growing type). report it once, located at the template, so
-        // it surfaces as a diagnostic instead of a silent stall.
+        // it surfaces as a diagnostic instead of a silent stall
         if (++_instance_count > MAX_INSTANCES) {
             if (!_instance_cap_reported && tmpl->name_token.has_value()) {
                 _collector.collect_issue<Issue::GenericError>(
@@ -252,14 +252,14 @@ namespace AST
         }
 
         // fixpoint: each round resolves the calls whose type arguments are now concrete;
-        // cloning a template exposes its body's calls (with concrete types) for the next round.
+        // cloning a template exposes its body's calls (with concrete types) for the next round
         bool progressed = true;
         size_t rounds = 0;
         while (progressed) {
             progressed = false;
             if (++rounds > MAX_ROUNDS) {
                 // the fixpoint did not converge. locate the report at any generic call still
-                // unresolved so the user has a concrete site to look at rather than a silent stall.
+                // unresolved so the user has a concrete site to look at rather than a silent stall
                 bool reported = false;
                 for (auto &module_ptr : _bundle.modules) {
                     if (reported) {
@@ -331,7 +331,7 @@ namespace AST
             // captured the template's un-substituted return type at parse time; now that the
             // call points at the concrete instance, re-derive the variable's type from its
             // initializer. this can unblock calls that take the variable as an argument (e.g.
-            // unwrap($b)), so it runs inside the fixpoint and reports progress.
+            // unwrap($b)), so it runs inside the fixpoint and reports progress
             for (auto &module_ptr : _bundle.modules) {
                 Module &mod = *module_ptr;
                 for (auto *decl : mod.nodes.of_type<VarDeclNode>()) {
@@ -421,7 +421,7 @@ namespace AST
 
         // struct instantiations: the concrete ComplexTypes interned by the type registry. skip any
         // that still mention a type parameter (Box<T>) - those are template-body artifacts, not the
-        // concrete instantiations (Box<int32>) the user cares about.
+        // concrete instantiations (Box<int32>) the user cares about
         std::vector<std::string> struct_lines;
         for (const ComplexType *ct : _collector.type_registry.instantiations()) {
             bool concrete = true;
@@ -456,4 +456,4 @@ namespace AST
         result += "}\n";
         return result;
     }
-}
+};

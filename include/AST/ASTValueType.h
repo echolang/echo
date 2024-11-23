@@ -32,7 +32,8 @@ namespace AST
     // in ASTMemberLookup.h instead
     class FunctionDeclNode;
 
-    enum class ValueTypeKind {
+    enum class ValueTypeKind
+    {
         t_primitive,
         t_class,
         t_struct,
@@ -45,7 +46,8 @@ namespace AST
     // everything else about the two is identical - one parser, one declaration node, one layout - so
     // it is a tag rather than a separate type. carried on ComplexType, since that is the only thing a
     // generic instantiation has
-    enum class ComplexTypeKind {
+    enum class ComplexTypeKind
+    {
         t_struct,
         t_class,
     };
@@ -53,12 +55,14 @@ namespace AST
     // flags apply to the level they sit on, which is what makes `ptr<const T>` (const pointee)
     // and `const ptr<T>` (const pointer) distinct types. t_nullable only ever sits on a
     // t_pointer level: set for `ptr<T>`, clear for the non-nullable borrow `T&`
-    enum class ValueTypeFlags {
+    enum class ValueTypeFlags
+    {
         t_const = 1 << 0,
         t_nullable = 1 << 1,
     };
 
-    enum class ValueTypePrimitive {
+    enum class ValueTypePrimitive
+    {
         t_complex,
         t_int8,
         t_int16,
@@ -80,7 +84,8 @@ namespace AST
         t_void,
     };
 
-    struct IntegerSize {
+    struct IntegerSize
+    {
         uint8_t size;
         bool is_signed;
 
@@ -141,14 +146,14 @@ namespace AST
         // the type of a named declaration, struct or class, taking the kind from the ComplexType
         // itself. this is the one that should be called: it cannot produce a t_class ValueType over a
         // struct's layout or the reverse, which the two spellings below can
-        static ValueType make_complex(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
+        static ValueType make_complex(ComplexType *complex_type, const std::vector<ValueType> &args = {}, TypeRegistry *registry = nullptr);
 
         // both assert the ComplexType agrees. kept because a caller that genuinely knows which kind it
         // is asking for reads better saying so, and because the assert catches the mismatch at the
         // construction site rather than wherever the wrong type later fails to lower
-        static ValueType make_struct(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
+        static ValueType make_struct(ComplexType *complex_type, const std::vector<ValueType> &args = {}, TypeRegistry *registry = nullptr);
 
-        static ValueType make_class(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
+        static ValueType make_class(ComplexType *complex_type, const std::vector<ValueType> &args = {}, TypeRegistry *registry = nullptr);
 
         static ValueType make_type_param(const TypeParamDecl *param) {
             assert(param);
@@ -167,7 +172,7 @@ namespace AST
             return type;
         }
 
-        // `nullable` picks the spelling: true is `ptr<T>`, false the non-nullable borrow `T&`.
+        // `nullable` picks the spelling: true is `ptr<T>`, false the non-nullable borrow `T&`
         // both are one machine address; nullability is the only thing the type system checks.
         // deliberately NOT idempotent - make_pointer(make_pointer(int32)) is ptr<ptr<int32>>
         static ValueType make_pointer(ValueType pointee, bool nullable) {
@@ -267,8 +272,7 @@ namespace AST
                 return false;
             }
 
-            switch (this->primitive)
-            {
+            switch (this->primitive) {
             case ValueTypePrimitive::t_int8:
             case ValueTypePrimitive::t_int16:
             case ValueTypePrimitive::t_int32:
@@ -293,8 +297,7 @@ namespace AST
                 return false;
             }
 
-            switch (this->primitive)
-            {
+            switch (this->primitive) {
             case ValueTypePrimitive::t_float32:
             case ValueTypePrimitive::t_float64:
                 return true;
@@ -309,8 +312,7 @@ namespace AST
                 return false;
             }
 
-            switch (this->primitive)
-            {
+            switch (this->primitive) {
             case ValueTypePrimitive::t_int8:
             case ValueTypePrimitive::t_int16:
             case ValueTypePrimitive::t_int32:
@@ -328,8 +330,7 @@ namespace AST
                 return false;
             }
 
-            switch (this->primitive)
-            {
+            switch (this->primitive) {
             case ValueTypePrimitive::t_uint8:
             case ValueTypePrimitive::t_uint16:
             case ValueTypePrimitive::t_uint32:
@@ -363,18 +364,18 @@ namespace AST
         }
 
         // compare two types
-        bool operator==(const ValueType& other) const {
-            // First check if the kinds are different
+        bool operator==(const ValueType &other) const {
+            // first check if the kinds are different
             if (kind != other.kind) {
                 return false;
             }
 
-            // Check type flags (const, pointer, etc.)
+            // check type flags (const, pointer, etc.)
             if (type_flags != other.type_flags) {
                 return false;
             }
 
-            // Compare based on the kind
+            // compare based on the kind
             if (is_primitive() && other.is_primitive()) {
                 return primitive == other.primitive;
             }
@@ -386,8 +387,8 @@ namespace AST
             }
 
             if (has_complex_type() && other.has_complex_type()) {
-                // For struct and class types, compare the complex type pointers
-                // Two struct/class types are equal if they point to the same ComplexType
+                // for struct and class types, compare the complex type pointers
+                // two struct/class types are equal if they point to the same ComplexType
                 return _complex_type == other._complex_type;
             }
 
@@ -411,7 +412,7 @@ namespace AST
 
     private:
         // defaulted so a default-constructed ValueType is a well-defined `unknown`
-        // rather than carrying indeterminate kind/primitive.
+        // rather than carrying indeterminate kind/primitive
         ValueTypeKind kind = ValueTypeKind::t_unknown;
         ValueTypePrimitive primitive = ValueTypePrimitive::t_void;
         uint8_t type_flags = 0;
@@ -438,9 +439,11 @@ namespace AST
             kind(kind), primitive(ValueTypePrimitive::t_void), _type_param(param) {}
     };
     
-    class ComplexType {
+    class ComplexType
+    {
     public:
-        struct Property {
+        struct Property
+        {
             size_t index;
             std::string name;
             ValueType type;
@@ -467,8 +470,8 @@ namespace AST
         // collector's TypeParamRegistry. empty for non-generics and for instantiations. always
         // append through add_type_parameter, which keeps the ordinal and owner consistent
         std::vector<TypeParamDecl *> type_parameters;
-        ComplexType* template_ref = nullptr;  // Null for templates; points to original for instantiations
-        std::vector<ValueType> instantiation_args;  // Empty for non-instantiated
+        ComplexType *template_ref = nullptr;  // null for templates; points to original for instantiations
+        std::vector<ValueType> instantiation_args;  // empty for non-instantiated
 
         ComplexType() = default;
         ComplexType(std::string name) : name(name) {}
@@ -494,7 +497,7 @@ namespace AST
         }
 
         // appends a type parameter, stamping this type as its owner. asserts the ordinal matches
-        // the position it lands in, so the ordinal can never drift from the list order.
+        // the position it lands in, so the ordinal can never drift from the list order
         // defined out of line because it needs TypeParamDecl complete
         void add_type_parameter(TypeParamDecl *param);
 
@@ -505,7 +508,7 @@ namespace AST
         void add_property(const std::string &name, ValueType type) {
             // on a template, a `T`-typed property must reference one of this type's own declared
             // parameters. instantiations carry no type_parameters of their own, so the check only
-            // applies while a template is being built.
+            // applies while a template is being built
             if (type.is_type_param() && !is_instantiated()) {
                 assert(declares_type_param(type));
             }
@@ -564,7 +567,7 @@ namespace AST
         }
 
         // this type's destructor, or null. at most one, so a slot rather than an overload set -
-        // it takes no parameters, which leaves nothing to overload on.
+        // it takes no parameters, which leaves nothing to overload on
         //
         // on the *type* rather than on TypeDeclNode for the same reason methods are: an
         // instantiation has a ComplexType and no TypeDeclNode, and the drop sites the ownership
@@ -579,9 +582,28 @@ namespace AST
             return _destructor;
         }
 
+        // this type's copy constructor - the constructor taking one non-nullable borrow of its own
+        // type - or null. at most one, so a slot beside the destructor above, and reached by type for
+        // the same reason: the copy sites AST::OwnershipPass inserts know the type of the value being
+        // copied and nothing else. only a template ever holds one; AST::find_copy_constructor
+        // redirects an instantiation through template_ref
+        //
+        // the one thing that makes it unlike a destructor: **the declaration is also in the ordinary
+        // overload set.** a destructor is deliberately kept out of FunctionRegistry::_by_name because
+        // `$x->destructor()` is not a call anyone may write - but `Foo($a)` is written all the time
+        // and already resolves, and it has to resolve to *this* declaration. so this slot says which
+        // of a type's constructors the copy is, and takes nothing away from the set
+        void set_copy_constructor(FunctionDeclNode *decl) {
+            _copy_constructor = decl;
+        }
+
+        FunctionDeclNode *copy_constructor() const {
+            return _copy_constructor;
+        }
+
         // a class only: the synthesized function that tears the payload down when the strong count
         // reaches zero - this type's own destructor first, then each owning property. null when the
-        // payload owns nothing, and null for every struct.
+        // payload owns nothing, and null for every struct
         //
         // a *synthesized* function rather than a sequence codegen builds, because it is built by the
         // very same AST::OwnershipPass::emit_drop recursion that a struct's scope exit uses. that is
@@ -596,7 +618,7 @@ namespace AST
         }
 
         // a concrete copy of this type: every property type run through `substitute`, and nothing
-        // left that identifies it as a template or as somebody's instantiation.
+        // left that identifies it as a template or as somebody's instantiation
         //
         // copy-then-modify rather than construct-then-refill, so a field added to ComplexType
         // survives by default and only the deliberate *drops* are named here. the previous shape -
@@ -627,17 +649,19 @@ namespace AST
         std::unordered_map<std::string, size_t> _property_map;
         std::vector<FunctionDeclNode *> _methods;
         FunctionDeclNode *_destructor = nullptr;
+        FunctionDeclNode *_copy_constructor = nullptr;
         FunctionDeclNode *_deinit = nullptr;
 
-        friend class TypeRegistry;  // Allow TypeRegistry to access _properties
+        friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };
 
-}  // namespace AST
+};  // namespace AST
 
-// Hash support for ValueType to be used in unordered containers
-namespace std {
+// hash support for ValueType to be used in unordered containers
+namespace std
+{
     template<> struct hash<AST::ValueType> {
-        size_t operator()(const AST::ValueType& vt) const {
+        size_t operator()(const AST::ValueType &vt) const {
             size_t h = static_cast<size_t>(vt.get_kind()) ^ vt.get_type_flags();
             if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
             else if (vt.has_complex_type()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
@@ -648,28 +672,30 @@ namespace std {
             return h;
         }
     };
-}  // namespace std
+};  // namespace std
 
-namespace AST {
+namespace AST
+{
 
-    // Hash support for tuple used in TypeRegistry
-    struct TypeRegistryKeyHash {
-        size_t operator()(const std::tuple<ComplexType*, std::vector<ValueType>>& key) const {
+    // hash support for tuple used in TypeRegistry
+    struct TypeRegistryKeyHash
+    {
+        size_t operator()(const std::tuple<ComplexType*, std::vector<ValueType>> &key) const {
             size_t h1 = std::hash<ComplexType*>{}(std::get<0>(key));
             size_t h2 = 0;
-            for (const auto& vt : std::get<1>(key)) {
+            for (const auto &vt : std::get<1>(key)) {
                 h2 ^= std::hash<AST::ValueType>{}(vt) + 0x9e3779b9 + (h2 << 6) + (h2 >> 2);
             }
             return h1 ^ (h2 << 1);
         }
     };
 
-    // maps type-parameter declarations to the (possibly still-generic) types they stand for.
-    // used identically for function and struct type parameters.
+    // maps type-parameter declarations to the (possibly still-generic) types they stand for
+    // used identically for function and struct type parameters
     //
     // keyed by declaration rather than by position, which is what makes a *partial* substitution
     // meaningful: substituting a generic member of a generic owner binds the owner's parameters
-    // and leaves the member's own alone. composing two substitutions is concatenating bindings.
+    // and leaves the member's own alone. composing two substitutions is concatenating bindings
     //
     // a vector rather than a hash map because a generic declares one to three parameters in
     // practice, so a linear scan wins and the iteration order stays deterministic
@@ -682,7 +708,7 @@ namespace AST {
         // binds `params` to `args` positionally, the shape both a call site's resolved type
         // arguments and a generic application arrive in. asserts the arity matches: this is the
         // one place that check lives now that substitute_type tolerates unbound parameters
-        static TypeSubstitution positional(const std::vector<TypeParamDecl *>& params, const std::vector<ValueType>& args) {
+        static TypeSubstitution positional(const std::vector<TypeParamDecl *> &params, const std::vector<ValueType> &args) {
             assert(params.size() == args.size());
 
             TypeSubstitution subst;
@@ -694,9 +720,9 @@ namespace AST {
         }
 
         // rebinding an already bound parameter replaces it, so a later, better inference wins
-        void bind(const TypeParamDecl *param, const ValueType& type) {
+        void bind(const TypeParamDecl *param, const ValueType &type) {
             assert(param);
-            for (auto& binding : bindings) {
+            for (auto &binding : bindings) {
                 if (binding.first == param) {
                     binding.second = type;
                     return;
@@ -707,7 +733,7 @@ namespace AST {
 
         // null when the parameter is not bound here, which substitute_type reads as "leave it"
         const ValueType *lookup(const TypeParamDecl *param) const {
-            for (const auto& binding : bindings) {
+            for (const auto &binding : bindings) {
                 if (binding.first == param) {
                     return &binding.second;
                 }
@@ -730,11 +756,12 @@ namespace AST {
 
     // caches and owns every generic instantiation. Interning is by (template, args) identity,
     // which is exactly what ValueType::operator== relies on (struct/class equality is ComplexType*
-    // pointer identity): equal argument lists always yield the same ComplexType*.
-    class TypeRegistry {
+    // pointer identity): equal argument lists always yield the same ComplexType*
+    class TypeRegistry
+    {
     public:
         // register a template so that (template, {}) resolves back to the template itself.
-        ComplexType* register_template(ComplexType* tmpl) {
+        ComplexType *register_template(ComplexType *tmpl) {
             assert(tmpl->is_generic() && !tmpl->is_instantiated());
             auto key = std::make_tuple(tmpl, std::vector<ValueType>{});
             auto [it, inserted] = _instantiations.emplace(key, tmpl);
@@ -742,11 +769,11 @@ namespace AST {
         }
 
         // intern the instantiation of `tmpl` with `args`, substituting the template's properties
-        // through `args`. Implemented in ASTValueType.cpp so it can call the unified substitute_type.
-        ComplexType* get_or_create_instantiation(ComplexType* tmpl, const std::vector<ValueType>& args);
+        // through `args`. Implemented in ASTValueType.cpp so it can call the unified substitute_type
+        ComplexType *get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args);
 
         // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
-        // register_template maps to themselves. used by the --print-instances dump.
+        // register_template maps to themselves. used by the --print-instances dump
         std::vector<ComplexType*> instantiations() const {
             std::vector<ComplexType*> result;
             for (const auto &[key, ct] : _instantiations) {
@@ -758,29 +785,29 @@ namespace AST {
         }
 
     private:
-        std::string args_description(const std::vector<ValueType>& args) const;
+        std::string args_description(const std::vector<ValueType> &args) const;
 
         // owns the instantiation ComplexTypes this registry creates. Templates are owned elsewhere
-        // (embedded on their TypeDeclNode) and only appear here as map values, never in _owned.
+        // (embedded on their TypeDeclNode) and only appear here as map values, never in _owned
         std::vector<std::unique_ptr<ComplexType>> _owned;
         std::unordered_map<std::tuple<ComplexType*, std::vector<ValueType>>, ComplexType*, TypeRegistryKeyHash> _instantiations;
     };
 
-    // the single, unified type-substitution routine, shared by struct and function generics.
+    // the single, unified type-substitution routine, shared by struct and function generics
     // - a type-parameter reference resolves to subst[index], carrying its const/pointer flags;
     // - a generic application (a struct/class whose ComplexType is an instantiation) has its
     //   arguments recursively substituted and is then re-interned via `registry` - this is what
     //   makes nested generics such as Foo<Bar<T>> work;
-    // - primitives and already-concrete types are returned unchanged.
-    ValueType substitute_type(const ValueType& type, const TypeSubstitution& subst, TypeRegistry& registry);
+    // - primitives and already-concrete types are returned unchanged
+    ValueType substitute_type(const ValueType &type, const TypeSubstitution &subst, TypeRegistry &registry);
 
     // true if the type is, or structurally contains, an unresolved type parameter - either directly
     // or as an argument of a generic application. after monomorphization a concrete context should be
     // free of these; anything left is a resolution bug rather than a legitimate type.
-    bool contains_type_param(const ValueType& type);
+    bool contains_type_param(const ValueType &type);
 
     // true when nothing has answered what this type is yet: unknown, void, or still mentioning a
-    // type parameter that a substitution has not bound.
+    // type parameter that a substitution has not bound
     //
     // the single spelling of "no information", because every pass that reasons about types before
     // they are all known needs the same three-way distinction - a wrong type, a right type, and no
@@ -791,7 +818,7 @@ namespace AST {
     }
 
     // the type a value-position read of `type` yields: the pointee for a pointer, the type itself
-    // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`.
+    // otherwise. exactly one level, never more - `ptr<ptr<uint8>>` reads as `ptr<uint8>`
     //
     // one primitive behind two rules that are the same rule: the auto-deref that makes a pointer
     // behave like the value it points at, and the generic decay that binds T=int32 when a
@@ -799,7 +826,7 @@ namespace AST {
     // (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
     ValueType value_type_of(const ValueType &type);
 
-    // the type ultimately addressed, following every pointer level rather than one.
+    // the type ultimately addressed, following every pointer level rather than one
     //
     // deliberately separate from value_type_of, which is the *read* rule and must stay at one
     // level. this is the `->` rule: a member lives on the struct, however many addresses deep
@@ -807,7 +834,7 @@ namespace AST {
     // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
     ValueType target_type_of(const ValueType &type);
 
-    // true when a value of `from` may be used where `to` is expected without an explicit cast.
+    // true when a value of `from` may be used where `to` is expected without an explicit cast
     //
     // deliberately looser than operator==, which has to stay exact because it is the interning
     // identity for TypeRegistry and the monomorphizer's instance cache - Box<int32> and
@@ -822,7 +849,7 @@ namespace AST {
     //   - a pointer hint belongs to the expression as a whole, not to the operand - in
     //     `ptr<int> $q = $p:$ + 1` the literal is only the element offset;
     //   - a type parameter says nothing until it is substituted;
-    //   - a struct or class has no conversion from a literal at all.
+    //   - a struct or class has no conversion from a literal at all
     // in all of those the literal is typed on its own (int32 unless the value needs int64) and
     // fitted at its destination by TypeLowering::coerce_value after monomorphization, the same way
     // a `return` in a generic body is. treating them as hints instead made the autocast helpers

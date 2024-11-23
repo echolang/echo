@@ -18,7 +18,8 @@ namespace AST
     struct ASTException : public std::exception {};
     struct ASTLogicException : public ASTException {};
 
-    struct GenericASTLogicException : public ASTLogicException {
+    struct GenericASTLogicException : public ASTLogicException
+    {
         GenericASTLogicException(const std::string &message) : _message(message) {}
 
         const char *what() const noexcept override  {
@@ -28,13 +29,14 @@ namespace AST
         std::string _message;
     };
 
-    namespace LogicException {
+    namespace LogicException
+    {
         MAKE_AST_LOGIC_EXCEPTION(UnexpectedPrimitiveType, "Expected a complex type, but got a primitive type");
         MAKE_AST_LOGIC_EXCEPTION(UnexpectedComplexType, "Expected a primitive type, but got a complex type");
         MAKE_AST_LOGIC_EXCEPTION(UnresolableComplexType, "Complex type could not be resolved");
         MAKE_AST_LOGIC_EXCEPTION(InvalidMemberIndex, "Invalid member index");
         MAKE_AST_LOGIC_EXCEPTION(UnexpectedNodeReferenceType, "The referenced node is of an unexpected type");
-    }
+    };
 };
 
 #endif

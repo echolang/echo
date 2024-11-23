@@ -1,7 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/ASTMemberLookup.h>
 #include <AST/ExprNode.h>
@@ -10,6 +8,8 @@
 #include <AST/TypeDeclNode.h>
 #include <AST/TypeNode.h>
 #include <AST/VarDeclNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -318,7 +318,7 @@ TEST_CASE("reaching a struct body in both parse passes does not duplicate constr
     // a constructor's declaration site was a name token minted where
     // the struct's name is written, so a second pass minted a second one and registered the same
     // constructor again as a duplicate signature. it is now the `constructor` keyword - a real token
-    // at a fixed index - and both passes walk the whole body.
+    // at a fixed index - and both passes walk the whole body
     // two properties, so the field-wise constructor takes two arguments and is not suppressed by
     // the user's one-argument one - both have to be present, exactly once each
     auto bundle = EchoTests::tests_make_parsed_bundle(

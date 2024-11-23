@@ -170,4 +170,4 @@ void Backend::optimize()
 
     modulePM.run(*_ctx.current_module(), moduleAM);
 }
-}
+};

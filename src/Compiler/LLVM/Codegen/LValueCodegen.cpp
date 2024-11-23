@@ -21,8 +21,7 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 {
     // dispatch on the node tag rather than rtti, matching the has_type<T>() idiom used
     // everywhere else in the tree
-    switch (expr.get_node_type())
-    {
+    switch (expr.get_node_type()) {
         case AST::NodeType::n_varref:
         {
             auto &var_ref = static_cast<AST::VarRefNode &>(expr);
@@ -123,7 +122,7 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     }
 
     // gen_place, not gen_lvalue: `->` reaches through a pointer base, so a `ptr<Point>`
-    // addresses the Point it points at. a value base addresses itself.
+    // addresses the Point it points at. a value base addresses itself
     //
     // then keep going: the member lives on the struct however many addresses deep the base is,
     // so a `ptr<ptr<Point>>` loads twice. this is the one place that peels more than one level
@@ -201,7 +200,7 @@ llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)
             expr.result_type().get_type_desciption(), _ctx.function_context()));
     }
 
-    // a place holding a pointer: load the slot to get the address it holds, with no deref.
+    // a place holding a pointer: load the slot to get the address it holds, with no deref
     // anything else already evaluates to an address, so just let it push its value
     if (AST::is_place_expression(expr)) {
         return gen_load(expr, "addr");
@@ -213,4 +212,4 @@ llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)
     return address;
 }
 
-}
+};

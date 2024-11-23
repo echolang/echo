@@ -6,7 +6,8 @@
 
 using namespace AST;
 
-namespace {
+namespace
+{
     ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
 
     // declares a type parameter on `owner`, the way the parser's declaring step does, so the
@@ -25,7 +26,7 @@ TEST_CASE("Default-constructed ValueType is well-defined unknown", "[types]")
     REQUIRE(vt.get_kind() == ValueTypeKind::t_unknown);
     REQUIRE_FALSE(vt.is_primitive());
     REQUIRE_FALSE(vt.is_struct());
-    // two default-constructed values compare equal (both unknown, no flags).
+    // two default-constructed values compare equal (both unknown, no flags)
     REQUIRE(vt == ValueType());
 }
 
@@ -105,21 +106,21 @@ TEST_CASE("TypeRegistry interns instantiations by (template, args) identity", "[
     TypeParamDecl *t = declare_param(params, box, "T");
     box.add_property("value", ValueType::make_type_param(t));
 
-    ComplexType* box_i1 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
-    ComplexType* box_i2 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
-    ComplexType* box_f  = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_float32) });
+    ComplexType *box_i1 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    ComplexType *box_i2 = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_int32) });
+    ComplexType *box_f  = reg.get_or_create_instantiation(&box, { prim(ValueTypePrimitive::t_float32) });
 
     // same args => same pointer (this is what ValueType struct equality relies on).
     REQUIRE(box_i1 == box_i2);
     // different args => distinct instantiation.
     REQUIRE(box_i1 != box_f);
 
-    // the property was substituted to the concrete type.
+    // the property was substituted to the concrete type
     REQUIRE(box_i1->property_count() == 1);
     REQUIRE(box_i1->get_property_type(0) == prim(ValueTypePrimitive::t_int32));
     REQUIRE(box_f->get_property_type(0) == prim(ValueTypePrimitive::t_float32));
 
-    // the instance records its origin.
+    // the instance records its origin
     REQUIRE(box_i1->is_instantiated());
     REQUIRE(box_i1->template_ref == &box);
     REQUIRE(box_i1->name.value() == "Box<int32>");
@@ -140,23 +141,23 @@ TEST_CASE("substitute_type resolves nested generic applications", "[types][gener
     TypeParamDecl *t = declare_param(params, foo, "T");
 
     // the application Bar<T>, i.e. Bar instantiated with Foo's own parameter
-    ComplexType* bar_of_T = reg.get_or_create_instantiation(&bar, { ValueType::make_type_param(t) });
+    ComplexType *bar_of_T = reg.get_or_create_instantiation(&bar, { ValueType::make_type_param(t) });
     foo.add_property("inner", ValueType::make_struct(bar_of_T));
 
-    // instantiate Foo<int32>: inner must become Bar<int32>, whose own property is int32.
-    ComplexType* foo_int = reg.get_or_create_instantiation(&foo, { prim(ValueTypePrimitive::t_int32) });
+    // instantiate Foo<int32>: inner must become Bar<int32>, whose own property is int32
+    ComplexType *foo_int = reg.get_or_create_instantiation(&foo, { prim(ValueTypePrimitive::t_int32) });
     REQUIRE(foo_int->property_count() == 1);
 
     ValueType inner = foo_int->get_property_type(0);
     REQUIRE(inner.is_struct());
 
-    ComplexType* inner_ct = inner.get_complex_type();
+    ComplexType *inner_ct = inner.get_complex_type();
     REQUIRE(inner_ct->is_instantiated());
     REQUIRE(inner_ct->template_ref == &bar);
     REQUIRE(inner_ct->get_property_type(0) == prim(ValueTypePrimitive::t_int32));
 
-    // the Bar<int32> reached through Foo<int32> is the same interned type as one built directly.
-    ComplexType* bar_int_direct = reg.get_or_create_instantiation(&bar, { prim(ValueTypePrimitive::t_int32) });
+    // the Bar<int32> reached through Foo<int32> is the same interned type as one built directly
+    ComplexType *bar_int_direct = reg.get_or_create_instantiation(&bar, { prim(ValueTypePrimitive::t_int32) });
     REQUIRE(inner_ct == bar_int_direct);
 }
 

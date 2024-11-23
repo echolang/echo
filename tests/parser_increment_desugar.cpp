@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/AssignNode.h>
 #include <AST/ExprNode.h>
+
+#include "helpers.h"
 
 // `$i++` is a statement, never an expression: it is desugared in the parser into the AssignNode
 // the language already has, so pointer arithmetic, value coercion and the const check keep one
@@ -12,7 +12,8 @@
 
 using namespace AST;
 
-namespace {
+namespace
+{
     AssignNode *first_assign(Bundle &bundle)
     {
         auto &module = bundle.modules.find_module("test");

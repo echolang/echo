@@ -3,8 +3,7 @@
 
 AST::ValueType AST::VarRefNode::result_type() const
 {
-    if (is_var())
-    {
+    if (is_var()) {
         auto &decl = _target_node.get<VarNode>().decl();
 
         // a decl whose type inference failed (e.g. its initializer had an error)

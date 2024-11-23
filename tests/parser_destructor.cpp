@@ -1,7 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/ASTDestruction.h>
 #include <AST/ASTMangler.h>
@@ -12,6 +10,8 @@
 #include <AST/TypeNode.h>
 #include <AST/VarDeclNode.h>
 
+#include "helpers.h"
+
 using namespace AST;
 
 using EchoTests::has_issue_containing;
@@ -20,7 +20,7 @@ using EchoTests::type_named;
 namespace
 {
     // the smallest owning type: a raw pointer plus a destructor. the leaf case of every owning type
-    // in the language, and the one the copy rule turns on.
+    // in the language, and the one the copy rule turns on
     //
     // the destructor bodies here are deliberately free of library calls: the unit-test harness parses
     // a single file with no stdlib module, so a `mem::` call would be an unknown function and every

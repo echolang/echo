@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTValueType.h"
-#include "../Token.h"
+#include "Token.h"
 
 #include "OperatorNode.h"
 
@@ -65,7 +65,7 @@ namespace AST
         std::vector<ExprNode*> arguments;
 
         // explicit type arguments written at the call site, e.g. foo<int>(...). Empty when the
-        // call relies on inference. The monomorphizer prefers these over inferred type args.
+        // call relies on inference. The monomorphizer prefers these over inferred type args
         std::vector<TypeNode*> explicit_type_args;
 
         FunctionDeclNode *decl = nullptr;
@@ -155,7 +155,7 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `&E` - the address of the storage E denotes.
+    // `&E` - the address of the storage E denotes
     //
     // deliberately takes the *storage* type, with no transparency peeling, so `&$buf` on a
     // `ptr<uint8>` is a `ptr<ptr<uint8>>`: the address of $buf's own slot, not the address
@@ -188,15 +188,15 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `E:$` - the pointer itself, rather than the thing it points at.
+    // `E:$` - the pointer itself, rather than the thing it points at
     //
     // this emits no code. `E:$` is not an operation on a value: it is *exactly what E already
     // is* before the transparency auto-deref, so the node's only job is to mark the position
-    // so the adjustment pass does not insert that deref. the pass then erases it.
+    // so the adjustment pass does not insert that deref. the pass then erases it
     //
     // it exists as a node, rather than a flag on ExprNode, so `$x:$` on a non-pointer has a
     // located object to report against after monomorphization - and because a flag on the
-    // expression base class would be the same mistake the pointer bit-flag was.
+    // expression base class would be the same mistake the pointer bit-flag was
     // reaching codegen is a compiler bug, and the visitor there says so
     class PointerValueNode : public ExprNode
     {
@@ -228,14 +228,14 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `mv E` - take the value out of E, leaving E unset.
+    // `mv E` - take the value out of E, leaving E unset
     //
     // like `:$` this emits no code, and for the same reason: a move *is* the copy that would
     // otherwise have been there, minus the leaving-behind. so the node's only job is to mark the
     // position, and AST::OwnershipPass then reads it twice - to skip the copy diagnostic, and to add
     // E's root variable to the moved set - before erasing it. nothing about a move survives into the
     // IR except the absence of the copy (book/concept/ownership_and_moving.md, "`mv` should erase
-    // itself").
+    // itself")
     //
     // deliberately *not* a place expression: the whole point is that E has stopped holding the
     // value, so `&(mv $a)` and `mv $a = ...` are nonsense. reaching codegen is a compiler bug, and
@@ -271,7 +271,7 @@ namespace AST
     };
 
     // a fresh, zeroed heap block for a class, with its strong count seated at 1 and its typeinfo
-    // written - the value a class constructor's `$this` is initialized with.
+    // written - the value a class constructor's `$this` is initialized with
     //
     // there is no syntax for this and there is not meant to be: `Foo(...)` builds either storage class,
     // and which one it is, is the declaration's business rather than the call site's. so the node is
@@ -315,13 +315,13 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // one more strong reference to what E names, yielding E's own value.
+    // one more strong reference to what E names, yielding E's own value
     //
     // wrapped around a class-typed *place* read wherever the value arrives somewhere that will owe a
     // release for it - a declaration, an assignment, a by-value argument. a class-typed value that is
     // not a place needs none: a constructor call or a function result is already one reference nobody
     // else holds, which is the same "a place is copied, a non-place is moved" rule the ownership pass
-    // applies to structs.
+    // applies to structs
     //
     // in the tree rather than folded into codegen for the reason every implicit thing in this compiler
     // is: --print-resolved-ast shows exactly where the counting happens, which is the only practical
@@ -358,7 +358,7 @@ namespace AST
     // runtime type word and a struct carries nothing at all (CONCEPT.md, "structs do not have any
     // runtime meta data"). that asymmetry is the whole feature: the question is only answerable for a
     // value that brought its own answer along, so a *struct* operand is a compile error rather than a
-    // `false`.
+    // `false`
     //
     // there is no inheritance, so "exactly T" is the only reading there is - the lowering is one
     // pointer comparison against the class's identity global
@@ -398,7 +398,7 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `E[n]` - the element n positions along from the address E holds.
+    // `E[n]` - the element n positions along from the address E holds
     //
     // a place, so it reads and writes alike, and `$p:$[0]` is the same storage as `$p`. the
     // offset is scaled by the size of the pointee, never by bytes: `$it:$ + 1` on a ptr<int32>
@@ -434,7 +434,7 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // one auto-deref: reads the operand's pointer and yields the value at it.
+    // one auto-deref: reads the operand's pointer and yields the value at it
     //
     // never written by the user. the pointer adjustment pass inserts one wherever a pointer is
     // read in value position, which is what lets every other node's result_type() be honest -

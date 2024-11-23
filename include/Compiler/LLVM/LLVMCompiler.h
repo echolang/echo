@@ -21,7 +21,7 @@
 
 // the compiler facade and the sole AST::Visitor. it owns the shared CodegenContext and the codegen
 // subsystems, orchestrates the compile of a bundle, and forwards each visit to the subsystem that
-// owns that node kind. the actual lowering logic lives in the Codegen/ subsystems, not here.
+// owns that node kind. the actual lowering logic lives in the Codegen/ subsystems, not here
 class LLVMCompiler : public AST::Visitor
 {
 public:

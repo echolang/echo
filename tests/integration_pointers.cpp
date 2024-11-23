@@ -1,16 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
-
 #include <set>
 #include <string>
 
-// whole-pipeline pointer behaviour, observed on the resolved tree.
+#include "helpers.h"
+
+// whole-pipeline pointer behaviour, observed on the resolved tree
 //
 // this is the layer between the unit suites (which pin one pass at a time) and tests_eco/ (which
 // pins observable output). what lives here is everything that is decided by the passes agreeing
@@ -19,7 +18,8 @@
 
 using namespace AST;
 
-namespace {
+namespace
+{
     ValueType decl_type(Bundle &bundle, const std::string &varname)
     {
         auto &module = bundle.modules.find_module("test");

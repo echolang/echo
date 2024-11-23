@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 30:22
+'$this->inner' is initialized twice, and 'Inner' owns a resource - the value the first write built would never be destroyed. Build it once, or assign the whole variable instead so the old value is torn down.
+Begin: '='
+End: '='
+Code excerpt:
+ [29]>         $this->inner = Inner($t);
+ [30]>         $this->inner = Inner($t + 1);
+                           ^
+ [31]>     }
+
+Critical issues found, cannot compile.

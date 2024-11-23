@@ -25,8 +25,8 @@
 #include <functional>
 #include <unordered_map>
 
-// an optional explicit type-argument list, `<int32, float64>`, consumed through its closing `>`.
-// answers true when there was none to read at all, false when the tokens are not a list after all.
+// an optional explicit type-argument list, `<int32, float64>`, consumed through its closing `>`
+// answers true when there was none to read at all, false when the tokens are not a list after all
 //
 // `speculative` is the only difference between the two call forms, and it is a reporting policy, not
 // a second grammar: a bare identifier is never a comparison operand so `foo <` is unambiguously a
@@ -80,7 +80,7 @@ static bool parse_explicit_type_args(
 }
 
 // the argument list of a call, from just past the `(` through the `)`. answers false having reported,
-// leaving the recovery to the caller.
+// leaving the recovery to the caller
 //
 // shared by both call forms so the "unterminated argument list" diagnostic and the optional-comma
 // rule exist once - anything the argument grammar grows later (defaults, named arguments) is written
@@ -328,7 +328,7 @@ bool Parser::resolve_funccall(
     // with a single candidate there is nothing to choose between, so it is taken as written and
     // every judgement about it is left to the passes that specialise in one: the monomorphizer
     // reports an unsatisfied constraint by name, the type checker reports which argument is
-    // wrong. pre-filtering here would replace both with "no overload accepts these arguments".
+    // wrong. pre-filtering here would replace both with "no overload accepts these arguments"
     // the same reasoning as the arity short-circuit inside match_function
     const bool choosing = candidates.size() > 1;
 
@@ -412,8 +412,8 @@ bool Parser::resolve_funccall(
     }
 
     // generic calls keep pointing at the template here; the monomorphizer resolves the
-    // concrete instance and rewrites funcall.decl (and inserts casts) after parsing.
-    // coerce arguments only for non-generic decls, whose parameter types are concrete.
+    // concrete instance and rewrites funcall.decl (and inserts casts) after parsing
+    // coerce arguments only for non-generic decls, whose parameter types are concrete
     // an undecidable call has no decl yet and gets both from the monomorphizer instead
     if (!funcall.decl->is_generic()) {
         for (size_t i = 0; i < args.size() && i < funcall.decl->args.size(); ++i) {
@@ -430,7 +430,7 @@ bool Parser::resolve_funccall(
                     return source;
                 }
 
-                // Insert an implicit cast node for any remaining mismatches
+                // insert an implicit cast node for any remaining mismatches
                 auto &cast = payload.context.emplace_node<AST::TypeCastNode>(to, source, true);
                 return &cast;
             };

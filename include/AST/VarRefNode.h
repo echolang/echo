@@ -5,7 +5,7 @@
 
 #include "ASTNode.h"
 #include "ASTValueType.h"
-#include "../Lexer.h"
+#include "Lexer.h"
 #include "VarNode.h"
 #include "ExprNode.h"
 
@@ -27,7 +27,7 @@ namespace AST
             return _target_node.has_type<VarNode>();
         }
 
-        inline VarNode& get_var() const {
+        inline VarNode &get_var() const {
             return _target_node.get<VarNode>();
         }
 
@@ -38,7 +38,7 @@ namespace AST
             return "varref<" + result_type().get_type_desciption() + ">(" + _target_node.node()->node_description() + ")";
         }
 
-        void accept(Visitor& visitor) override {
+        void accept(Visitor &visitor) override {
             visitor.visitVarRef(*this);
         }
 

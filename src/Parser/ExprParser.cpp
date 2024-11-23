@@ -101,11 +101,9 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
     }
 
     // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr)
-    {
+    if (expected_type != nullptr) {
         // floats / doubles
-        if (expected_type->is_floating_type())
-        {
+        if (expected_type->is_floating_type()) {
             // even if the number doesn't fit into the expected type, we can continue because the value is still valid
             // we just loose precision and the user gets a warning
             auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(literal_token, expected_type->get_primitive_type());
@@ -151,11 +149,10 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
         }
 
         // integers
-        else if (expected_type->is_integer_type()) 
-        {
+        else if (expected_type->is_integer_type()) {
             // determine if the literal has any decimal values besides 0
             // if so, we emit a error (not just a warning) because the user highly likely made a mistake
-            // or is expecting a wrong type.
+            // or is expecting a wrong type
             double dliteral = std::stod(node.get_fvalue_string());
             double dliteral_cmp = (double) (long long) dliteral;
 
@@ -224,22 +221,18 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
         expected_type = nullptr;
     }
 
-    if (expected_type != nullptr)
-    {
+    if (expected_type != nullptr) {
         // floats / doubles
         // if the expected type is a float, we can "safely" convert the integer to a float
-        if (expected_type->is_floating_type()) 
-        {
+        if (expected_type->is_floating_type()) {
             // we can safely convert the integer to a float
             auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(literal_token, expected_type->get_primitive_type());
 
-            if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float32) 
-            {
+            if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float32) {
                 float val = casted_node.float_value();
                 casted_node.override_literal_value.emplace(get_f32_string_literal(val));
             } 
-            else if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64) 
-            {
+            else if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64) {
                 double val = casted_node.double_value();
                 casted_node.override_literal_value.emplace(get_f64_string_literal(val));
             } 
@@ -262,8 +255,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
         }
 
         // integers
-        else if (expected_type->is_integer_type())
-        {
+        else if (expected_type->is_integer_type()) {
             auto &expected_node = payload.context.emplace_node<AST::LiteralIntExprNode>(literal_token, expected_type->get_primitive_type());
 
             // check if the expected type is unsigned and the literal is negative
@@ -318,8 +310,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
         }
 
         // booleans
-        else if (expected_type->is_boolean_type()) 
-        {
+        else if (expected_type->is_boolean_type()) {
             // we can convert to a boolean, we consider 0 as false and everything else as true
             auto &casted_node = payload.context.emplace_node<AST::LiteralBoolExprNode>(literal_token);
             casted_node.override_literal_value.emplace(intvalue == 0 ? "false" : "true");
@@ -470,8 +461,7 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
     }
 
     // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr)
-    {
+    if (expected_type != nullptr) {
         // the literal already is what was asked for. without this the branch below reported that
         // the boolean literal 'true' cannot be converted to the expected type 'bool' - it was
         // only reachable through a pointer destination before a `return` started supplying its
@@ -481,8 +471,7 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
         }
 
         // if we except a int type, we simply convert the boolean to an integer
-        if (expected_type->type.is_integer_type())
-        {
+        if (expected_type->type.is_integer_type()) {
             auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
             casted_node.override_literal_value.emplace(node.get_bool_value() ? "1" : "0");
             return AST::make_ref(casted_node);
@@ -584,7 +573,7 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     }
     // two integer types? we cast to the larger one
     // basically the same as above, i could merge it, but in the back of my mind
-    // i think there will be some special rules.
+    // i think there will be some special rules
     else if (
         lhs_type.is_integer_type() && rhs_type.is_integer_type() && 
         (lhs_type.get_primitive_type() != rhs_type.get_primitive_type())
@@ -827,7 +816,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // `mv E` - take the value out of E. one parse site covers every position a move can appear in
     // (`$b = mv $a`, `consume(mv $a)`, `return mv $a`), because all three arrive here through
-    // parse_expr.
+    // parse_expr
     //
     // the operand is parsed by recursing into this function rather than by requiring a variable, so
     // `mv $doc->body` reaches AST::OwnershipPass as a real tree and gets the "partial moves are not
@@ -884,7 +873,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
         cursor.skip(); // skip the variable name
         
-        // Create the base variable reference
+        // create the base variable reference
         auto &varnode = payload.context.emplace_node<AST::VarNode>(vardecl, var_token);
         auto &varref = payload.context.emplace_node<AST::VarRefNode>(&varnode);
         auto current_ref = AST::make_ref(varref);
@@ -916,7 +905,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an
     // address as pointing at a different type, so its argument is almost always a `:$`
-    // expression (book/concept/pointers_and_refs_v2.md, "Casting").
+    // expression (book/concept/pointers_and_refs_v2.md, "Casting")
     //
     // `ptr` always starts one; a plain identifier only does when a `&` and a `(` follow, which
     // no other production spells - `Foo(...)` is a constructor call and `Foo &$x` a declaration
@@ -972,9 +961,9 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         ast_namespace = ns_node->ast_namespace;
     }
 
-    // potential function call - `name(...)` or, with explicit type arguments, `name<...>(...)`.
+    // potential function call - `name(...)` or, with explicit type arguments, `name<...>(...)`
     // a bare identifier is never a comparison operand (values are $-prefixed), so an identifier
-    // followed by '<' here is a generic call, not a less-than.
+    // followed by '<' here is a generic call, not a less-than
     if (
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren }) ||
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
@@ -1047,7 +1036,8 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
 // an aggregate, so it is appended with `push_back({...})` rather than `emplace_back(a, b)`: the
 // two-argument emplace needs C++20 parenthesized aggregate initialization (P0960), which AppleClang
 // does not implement. the braced temporary costs a copy of two words - do not "fix" it back
-struct ExprPart {
+struct ExprPart
+{
     // val node
     const AST::NodeReference node;
     // operator node
@@ -1062,21 +1052,16 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
     auto output = std::vector<ExprPart>();
     auto operator_stack = std::stack<AST::OperatorNode *>();
 
-    for(auto part : expr_parts)
-    {
+    for(auto part : expr_parts) {
         // if its a literal, variable etc. (not an operator)
-        if (part.opnode == nullptr) 
-        {
+        if (part.opnode == nullptr) {
             output.push_back(part);
         }
-        else if (part.opnode->op->type == Token::Type::t_open_paren)
-        {
+        else if (part.opnode->op->type == Token::Type::t_open_paren) {
             operator_stack.push(part.opnode);
         }
-        else if (part.opnode->op->type == Token::Type::t_close_paren)
-        {
-            while (!operator_stack.empty() && operator_stack.top()->op->type != Token::Type::t_open_paren)
-            {
+        else if (part.opnode->op->type == Token::Type::t_close_paren) {
+            while (!operator_stack.empty() && operator_stack.top()->op->type != Token::Type::t_open_paren) {
                 output.push_back({AST::make_void_ref(), operator_stack.top()});
                 operator_stack.pop();
             }
@@ -1085,8 +1070,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
             assert(operator_stack.top()->op->type == Token::Type::t_open_paren);
             operator_stack.pop();
         }
-        else
-        {
+        else {
             while (
                 !operator_stack.empty() &&
                 // O2Prec.assoc != AST::OpAssociativity::left &&
@@ -1107,8 +1091,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
         }        
     }
 
-    while (!operator_stack.empty())
-    {
+    while (!operator_stack.empty()) {
         output.push_back({AST::make_void_ref(), operator_stack.top()});
         operator_stack.pop();
     }
@@ -1127,8 +1110,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     auto token = cursor.current();
     auto tvalue = token.value();
 
-    while(is_expr_token(cursor))
-    {
+    while(is_expr_token(cursor)) {
         // if we have a closing parenthesis and the depth is 0, we can break the loop
         // because we have reached the end of the expression
         if (cursor.is_type(Token::Type::t_close_paren) && depth == 0) {
@@ -1193,10 +1175,8 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
     // build expressions nodes
     std::stack<AST::NodeReference> node_stack;
-    for (auto &part : postfix_expr) 
-    {
-        if (part.opnode != nullptr)
-        {
+    for (auto &part : postfix_expr) {
+        if (part.opnode != nullptr) {
             // a binary operator needs two operands. writing one where a value belongs -
             // `&($a + $b)`, or a stray leading `*` - used to pop an empty stack and take the
             // compiler down with it, so report it as the syntax error it is
@@ -1225,8 +1205,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
                 right
             ));
         }
-        else 
-        {
+        else {
             node_stack.push(part.node);
         }
     }
@@ -1234,72 +1213,4 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     // sanity check
     assert(node_stack.size() == 1);
     return node_stack.top();
-
-    // // print the postfix expression
-    // for (auto &part : postfix_expr) {
-    //     if (part.opnode != nullptr) {
-    //         std::cout << fmt::format("{} ", token_lit_symbol_string(part.opnode->op->type));
-    //     }
-    //     else {
-    //         if (part.node.has_type<AST::LiteralIntExprNode>()) {
-    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralIntExprNode>().effective_token_literal_value());
-    //         } else if (part.node.has_type<AST::LiteralFloatExprNode>()) {
-    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralFloatExprNode>().effective_token_literal_value());
-    //         } else if (part.node.has_type<AST::LiteralBoolExprNode>()) {
-    //             std::cout << fmt::format("{} ", part.node.get<AST::LiteralBoolExprNode>().effective_token_literal_value());
-    //         } else {
-    //             std::cout << fmt::format("{} ", part.node.node()->node_description());
-    //         }
-    //     }
-    // }
-
-
-    // // determine the token range of the expression
-    // while (!cursor.is_done()) {
-    //     if (!is_expr_token(cursor)) {
-    //         break;
-    //     }
-    //     cursor.skip();
-    // }
-
-    // auto cursor_after = cursor.snapshot();
-    // auto expr_slice = cursor.slice(cursor_before, cursor_after);
-    // cursor.restore(cursor_before);
-
-    // // collect the tokens in range and perform the shunting yard algorithm
-    // // to create a postfix expression
-    // auto postfix_expr = AST::Operator::shunting_yard(expr_slice);
-
-
-    // if (cursor.is_type(Token::Type::t_floating_literal)) {
-    //     return parse_literal_float(payload, expected_type);
-    // }
-
-    // if (cursor.is_type(Token::Type::t_integer_literal)) {
-    //     return parse_literal_int(payload, expected_type);
-    // }
-
-    // if (cursor.is_type(Token::Type::t_bool_literal)) {
-    //     auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(cursor.current());
-    //     cursor.skip();
-    //     return AST::make_ref(node);
-    // }
-
-    // if (cursor.is_type(Token::Type::t_varname)) {
-    //     auto vardecl = payload.context.scope().find_vardecl_by_name(cursor.current().value());
-
-    //     if (!vardecl) {
-    //         payload.collector.collect_issue<AST::Issue::UnknownVariable>(payload.context.code_ref(cursor.current()), cursor.current().value());
-    //         cursor.skip();
-    //         return AST::make_void_ref();
-    //     }   
-
-    //     auto &varref = payload.context.emplace_node<AST::VarRefNode>(cursor.current(), vardecl);
-    //     auto &node = payload.context.emplace_node<AST::VarRefExprNode>(&varref);
-    //     cursor.skip();
-        
-    //     return AST::make_ref(node);
-    // }
-
-    assert(false && "unimplemented");
 }

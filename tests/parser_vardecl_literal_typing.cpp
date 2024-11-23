@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/FunctionDeclNode.h>
 #include <AST/ScopeNode.h>
 #include <AST/ExprNode.h>
 #include <AST/VarDeclNode.h>
 #include <AST/AssignNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -16,7 +16,8 @@ using namespace AST;
 // int32 literal fitted at codegen prints the same as one that was typed at the destination, but
 // only the second carries the literal's own bounds diagnostics
 
-namespace {
+namespace
+{
     ValueType prim(ValueTypePrimitive p) { return ValueType(p); }
 
     // the module is parsed twice (symbol pass then full pass) and the monomorphizer clones a

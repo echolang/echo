@@ -93,13 +93,13 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
 #endif
     }
 
-    // three passes over the same tokens, each one only naming what the next one needs.
+    // three passes over the same tokens, each one only naming what the next one needs
     //
     // the split exists because a declaration can name anything the module declares, in any file and
     // on any line: a type name has to be known before a signature that mentions it is read, and a
     // signature has to be registered before a body that calls it is read. one pass per level of that
     // dependency, applied to *every* file before the next level starts, is what makes the whole
-    // thing independent of the order the files were given on the command line.
+    // thing independent of the order the files were given on the command line
 
     // types first: just the names, so that a property or a parameter can be typed by a struct
     // declared further down or in another file

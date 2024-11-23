@@ -1,16 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTTypeParam.h>
 #include <AST/ASTValueType.h>
 #include <AST/TypeDeclNode.h>
-
 #include <unordered_set>
+
+#include "helpers.h"
 
 using namespace AST;
 
-namespace {
+namespace
+{
     TypeParamDecl *declare_param(TypeParamRegistry &params, ComplexType &owner, const std::string &name)
     {
         TypeParamDecl *decl = params.declare(name, owner.type_parameters.size());
@@ -280,7 +280,7 @@ TEST_CASE("An empty inner scope leaves the enclosing parameters visible", "[pars
 
 TEST_CASE("Re-parsing a generic struct reuses its type parameter declarations", "[parser][generics]")
 {
-    // a module is parsed twice — a symbol pass then a full pass — each with a fresh Context.
+    // a module is parsed twice — a symbol pass then a full pass — each with a fresh Context
     // if the second pass minted new declarations, the struct's self-application Foo<T> would
     // intern a second time and the two would compare unequal
     auto bundle = EchoTests::tests_make_parsed_bundle("struct Box<T> { T $value; }\n");

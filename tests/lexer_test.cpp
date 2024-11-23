@@ -4,24 +4,6 @@
 
 #include <Lexer.h>
 
-// TEST_CASE( "test matching signature", "[lexer]" ) 
-// {
-//     REQUIRE( true );
-    
-//     try {
-//         throw Lexer::UnterminatedStringException("snippet", 1, 1);
-//     } catch (const Lexer::TokenException &e) {
-//         REQUIRE( std::string(e.what()) == "Unterminated string at line 1 offset 1 near: snippet" );
-//     }
-
-//     try {
-//         throw Lexer::UnterminatedStringException("snippet", 1, 1);
-//     } catch (const Lexer::UnterminatedStringException &e) {
-//         REQUIRE( std::string(e.what()) == "Unterminated string at line 1 offset 1 near: snippet" );
-//         REQUIRE( e.get_snippet() == "snippet" );
-//     }
-// }
-
 
 TEST_CASE( "Token References", "[lexer]" ) {
 

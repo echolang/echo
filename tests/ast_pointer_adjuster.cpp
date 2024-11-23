@@ -1,17 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/ASTIssue.h>
-
 #include <string>
+
+#include "helpers.h"
 
 // AST::PointerAdjuster - the pass that writes every auto-deref into the tree explicitly.
 //
 // a pointer "behaves like the value it points to", and codegen honoured that by emitting a second
 // load. the AST did not, so a read of `int32& $x` claimed int32& while the value produced was an
-// int32. this pass reconciles the two, and after it result_type() means what it says.
+// int32. this pass reconciles the two, and after it result_type() means what it says
 //
 // the pass is invisible in `echoc run -a`, which prints before it runs, so these descriptions are
 // the only place its output is observable. tests_make_parsed_bundle runs the real pipeline
@@ -21,7 +20,8 @@
 // addrof<T&>(...) an address-of, index<T>(base[i]) an element, and peel<T>(...) the `:$` marker -
 // which must never survive, since codegen throws on one
 
-namespace {
+namespace
+{
     std::string desc(const std::string &code)
     {
         return EchoTests::tests_make_node_description(code);
@@ -75,7 +75,7 @@ TEST_CASE("'&' takes the slot's address without reading through it", "[sema][poi
 
 TEST_CASE("A declaration binds a pointer target and reads a value target", "[sema][pointer]")
 {
-    // as_value_for: a pointer-shaped destination wants the address, anything else reads through.
+    // as_value_for: a pointer-shaped destination wants the address, anything else reads through
     // the same rule serves declarations and assignments, which is what keeps binding and
     // write-through from drifting apart
     auto binds = desc("$var = 10;\nint& $r = &$var;\nptr<int> $p = $r:$;\n");

@@ -51,14 +51,14 @@ std::vector<std::filesystem::path> get_file_list_from_args(argparse::ArgumentPar
 
     std::vector<std::filesystem::path> files;
 
-    for (const auto& path_string : path_strings) {
+    for (const auto &path_string : path_strings) {
         std::filesystem::path path{path_string};
 
         // check for wildcards
         if (path_string.find('*') != std::string::npos) {
             auto paths = glob::glob(path_string);
 
-            for (const auto& p : paths) {
+            for (const auto &p : paths) {
                 if (std::filesystem::exists(p) && std::filesystem::is_regular_file(p)) {
                     files.push_back(p);
                 }
@@ -73,7 +73,8 @@ std::vector<std::filesystem::path> get_file_list_from_args(argparse::ArgumentPar
     return files;
 }
 
-void print_critical_error(std::string title, std::string message) {
+void print_critical_error(std::string title, std::string message)
+{
     std::cout << SH_COLOR_BOLD(SH_COLOR_FRED( << title <<) ) << std::endl;
 
     for (size_t i = 0; i < title.size(); i++) {
@@ -101,12 +102,12 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
     return 0;
 }
 
-// every .eco file the standard library is made of, sorted so the ordering is reproducible.
+// every .eco file the standard library is made of, sorted so the ordering is reproducible
 //
 // globbed rather than listed, so adding a stdlib file does not need a C++ edit - the previous
-// hardcoded list had already fallen behind what is on disk.
+// hardcoded list had already fallen behind what is on disk
 //
-// two directories are skipped. `build/` holds the generated embedded header rather than source.
+// two directories are skipped. `build/` holds the generated embedded header rather than source
 // `sketches/` holds Echo that describes a type the language cannot express yet (string, List) and
 // deliberately does not compile - it is design, kept in source form, and the directory name is
 // what says so
@@ -187,7 +188,7 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
         return 1;
     }
 
-    for (const auto& source_file : source_files) {
+    for (const auto &source_file : source_files) {
         input.files.push_back(Parser::ModuleParser::InputFile(source_file));
     }
 
@@ -204,7 +205,7 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
     }
 
     if (cli.get<bool>("--print-ast")) {
-        for (const auto& mod : bundle.modules) {
+        for (const auto &mod : bundle.modules) {
             std::cout << "Module: " << mod->debug_description() << std::endl;
         }
     }
@@ -214,7 +215,7 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
 
 // the same dump, after the semantic passes have rewritten the tree. its own flag rather than a
 // replacement for -a, because the two answer different questions and both get asked: -a is what the
-// parser produced, and this is what codegen will actually walk.
+// parser produced, and this is what codegen will actually walk
 //
 // that difference is not cosmetic. every implicit thing in this language is made explicit by a pass -
 // each auto-deref by AST::PointerAdjuster, each destructor call, retain and release by
@@ -226,13 +227,13 @@ static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundl
         return;
     }
 
-    for (const auto& mod : bundle.modules) {
+    for (const auto &mod : bundle.modules) {
         std::cout << "Module: " << mod->debug_description() << std::endl;
     }
 }
 
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
-// a pass added to one entry point and forgotten in the other is a silent behaviour difference.
+// a pass added to one entry point and forgotten in the other is a silent behaviour difference
 // tests/helpers.cpp mirrors this list and has to be updated alongside it
 static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundle)
 {
@@ -245,7 +246,7 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
     }
 
     // semantic analysis on the concrete AST: resolves member accesses and call arguments and
-    // records located issues, so type errors surface here instead of deep in codegen.
+    // records located issues, so type errors surface here instead of deep in codegen
     // make the pointer transparency the language promises explicit in the tree: every pointer
     // read in a value position gains a deref node, so from here on result_type() is honest
     AST::PointerAdjuster(bundle).run();
@@ -367,7 +368,7 @@ int main(int argc, char *argv[])
         .help("Output file name.");
 
     // add IR & AST printing flag
-    for (auto& command : {std::ref(run_command), std::ref(build_command)}) {
+    for (auto &command : {std::ref(run_command), std::ref(build_command)}) {
         command.get().add_argument("-p", "--print-ir")
             .help("Print the LLVM IR to the console.")
             .default_value(false)
@@ -412,7 +413,7 @@ int main(int argc, char *argv[])
     try {
         cli.parse_args(argc, argv);
     }
-    catch (const std::exception& err) {
+    catch (const std::exception &err) {
         std::cerr << err.what() << std::endl;
         std::cerr << cli;
         return 1;

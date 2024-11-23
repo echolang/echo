@@ -12,13 +12,13 @@ namespace AST
     class FunctionDeclNode;
 
     // binds the type parameters `param` mentions to the matching parts of `arg`, returning false
-    // when the two shapes cannot be reconciled at all.
+    // when the two shapes cannot be reconciled at all
     //
     // the bool is what lets overload resolution use this: with a single generic candidate it is
     // enough to bind what you can and notice afterwards that a parameter came out unbound, which
     // is all the monomorphizer ever needed. choosing *between* candidates needs to know that a
     // template does not apply, and "nothing bound" cannot say that - `at<T>(ptr<T>, usize)` binds
-    // T fine from its first argument while its second is nonsense.
+    // T fine from its first argument while its second is nonsense
     //
     // `allow_decay` carries the pointer decay rule, which is a statement about the argument as a
     // whole rather than about every level of it: a pointer passed where a value is expected is
@@ -46,12 +46,12 @@ namespace AST
 
     // "could a call with these argument types instantiate this template?" - unify_type over every
     // parameter, plus every one of the template's own type parameters coming out bound and
-    // satisfying its constraint.
+    // satisfying its constraint
     //
     // side-effect free by design: it reports nothing and records no issue, which is what
     // separates it from Monomorphizer::determine_type_args. a candidate that fails here is simply
     // not in the overload set, so a type constraint reads as an overload filter rather than as an
-    // error the user has to work around.
+    // error the user has to work around
     //
     // the three-way answer is what keeps it usable during parsing: rejecting on "not everything
     // bound" would throw out every recursive call in a generic body, where the arguments still

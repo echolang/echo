@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <assert.h>
-#include "../Token.h"
+#include "Token.h"
 
 namespace Parser
 {
@@ -21,7 +21,8 @@ namespace Parser
         size_t _shr_split_index = (size_t)-1;
 
     public:
-        struct Snapshot {
+        struct Snapshot
+        {
             size_t index;
             size_t end;
             size_t shr_split_index;

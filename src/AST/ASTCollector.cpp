@@ -13,8 +13,7 @@ AST::Collector::~Collector()
 
 void AST::Collector::print_issues() const
 {
-    for (const auto &issue : issues)
-    {
+    for (const auto &issue : issues) {
         std::cout << "---- Issue ----" << std::endl;
         std::cout << "Issue at " << issue->code_ref.token_slice.startt().line << ":" << issue->code_ref.token_slice.startt().char_offset << std::endl;
         std::cout << issue->message() << std::endl;

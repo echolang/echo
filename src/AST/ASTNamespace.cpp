@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <vector>
 
-std::vector<std::string> split_namespace(const std::string &str) {
+std::vector<std::string> split_namespace(const std::string &str)
+{
     std::string delimiter = ECO_NAMESPACE_SEPARATOR;
     std::vector<std::string> parts;
     size_t start = 0, end = 0;
@@ -63,8 +64,7 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &
     auto current = &_root;
 
     // iterate over the parts and find the namespace
-    for (const auto &part : parts)
-    {
+    for (const auto &part : parts) {
         if (current->_children.find(part) == current->_children.end()) {
             current->_children[part] = std::make_unique<Namespace>(part);
             current->_children[part]->_parent = current;
@@ -90,8 +90,7 @@ const AST::Namespace *AST::NamespaceManager::get(const std::vector<std::string> 
     auto current = &_root;
 
     // iterate over the parts and find the namespace
-    for (const auto &part : parts)
-    {
+    for (const auto &part : parts) {
         if (current->_children.find(part) == current->_children.end()) {
             return nullptr;
         }

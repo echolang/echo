@@ -30,7 +30,7 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     }
 
     // parse the expression that follows the return keyword, typed against the declared return
-    // type the same way a variable declaration's initializer is typed against its variable.
+    // type the same way a variable declaration's initializer is typed against its variable
     //
     // only a concrete primitive is a useful hint though - the literal parsers apply the same rule
     // to themselves, this one keeps the hint from reaching the rest of the expression too

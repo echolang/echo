@@ -31,7 +31,7 @@ namespace Compiler::LLVM
     struct CodegenContext;
 
     // lowers expression nodes (literals, casts, arithmetic/logical operators, calls, variable and
-    // pointer references) to llvm values, leaving the produced value on the context value stack.
+    // pointer references) to llvm values, leaving the produced value on the context value stack
     class ExprCodegen
     {
     public:
@@ -47,7 +47,7 @@ namespace Compiler::LLVM
         void gen_unary_expr(AST::UnaryExprNode &node);
         void gen_function_call(AST::FunctionCallExprNode &node);
 
-        // answers a `#[builtin: ...]` call directly, as a constant, instead of emitting a call.
+        // answers a `#[builtin: ...]` call directly, as a constant, instead of emitting a call
         // the type being asked about comes from the instance's instantiation_args, which the
         // monomorphizer stamped on when it resolved `size_of<int32>()` from `size_of<T>()`
         void gen_builtin_call(AST::FunctionCallExprNode &node);
@@ -61,7 +61,7 @@ namespace Compiler::LLVM
         CodegenContext &_ctx;
 
         // traps when `address` is null. emitted where a nullable pointer is narrowed to a
-        // borrow, which is the one conversion that asserts rather than merely reinterprets.
+        // borrow, which is the one conversion that asserts rather than merely reinterprets
         // debug builds only - in release the narrowing is unchecked, as the doc says
         void gen_null_assert(llvm::Value *address);
     };

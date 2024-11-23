@@ -16,7 +16,7 @@ LLVMCompiler::LLVMCompiler()
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx), _backend(_ctx)
 {
     // wire the shared context back to the single visitor (for accept-recursion) and to the
-    // type-lowering subsystem (reachable from every other subsystem).
+    // type-lowering subsystem (reachable from every other subsystem)
     _ctx.visitor = this;
     _ctx.types = &_types;
     _ctx.lvalues = &_lvalues;
@@ -51,22 +51,6 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
             llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*_ctx.llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0), true) 
         );
     }
-
-    // fetch and build all structs in the module
-    // for (auto &cmpu : _ctx.cmp_units) {
-    //     _ctx.current_cmp_unit = cmpu.get();
-
-    //     for (auto &file : _ctx.current_cmp_unit->ast_module->files()) {
-    //         _ctx.current_file = &file;
-
-    //         for (auto &node : file.root->children) {
-    //             if (node.has_type<AST::TypeDeclNode>()) {
-    //                 auto struct_decl = node.get<AST::TypeDeclNode>();
-    //                 struct_decl.accept(*this);
-    //             }
-    //         }
-    //     }
-    // }
 
     // fetch all function declarations inside of the module
     for (auto &cmpu : _ctx.cmp_units) {
@@ -106,7 +90,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     // terminate the function
     _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
 
-    // Verify the main module before linking
+    // verify the main module before linking
     std::string error_str;
     llvm::raw_string_ostream error_stream(error_str);
     if (llvm::verifyModule(*main_cmp_unit->llvm_module, &error_stream)) {
@@ -141,7 +125,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
 
 // -- visitor facade -----------------------------------------------------------
 // each visit forwards to the subsystem that owns the node kind; the structural no-ops below emit
-// nothing on purpose.
+// nothing on purpose
 
 void LLVMCompiler::visitScope(AST::ScopeNode &node) { _stmt.gen_scope(node); }
 void LLVMCompiler::visitVarDecl(AST::VarDeclNode &node) { _stmt.gen_var_decl(node); }
@@ -164,13 +148,15 @@ void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(
 
 // a peel marker is erased by the pointer adjustment pass; one surviving to codegen means the
 // pass missed a position, which would otherwise silently emit the wrong number of loads
-void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node) {
+void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node)
+{
     throw _ctx.error("':$' survived the pointer adjustment pass");
 }
 // same contract as the peel marker above: AST::OwnershipPass erases every `mv` once it has read
 // it. one reaching codegen would mean a move was never resolved, and the copy it was meant to
 // replace is still there
-void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node) {
+void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node)
+{
     throw _ctx.error("'mv' survived the ownership pass");
 }
 void LLVMCompiler::visit_class_alloc_expr(AST::ClassAllocExprNode &node) { _classes.gen_class_alloc(node); }

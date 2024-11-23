@@ -16,7 +16,7 @@ namespace Compiler::LLVM
     struct CodegenContext;
 
     // the output stage of the compiler: runs the optimization pipeline, prints the module IR,
-    // JIT-executes the main module, and emits a native executable (via clang).
+    // JIT-executes the main module, and emits a native executable (via clang)
     class Backend
     {
     public:
@@ -25,7 +25,7 @@ namespace Compiler::LLVM
 
         // resolves the host target and publishes its data layout on the context, so every
         // llvm::Module can be created with a layout already attached. must run before
-        // create_cmp_units.
+        // create_cmp_units
         //
         // the layout used to be set only in make_exec, i.e. after all IR had been built and never
         // at all on the JIT path - so anything asking "how big is this type" during codegen got

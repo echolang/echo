@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/ASTDestruction.h>
+#include <AST/ASTMemberLookup.h>
+#include <AST/AssignNode.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/ExprNode.h>
 #include <AST/IfStatementNode.h>
@@ -12,6 +12,8 @@
 #include <AST/ScopeNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
@@ -394,4 +396,235 @@ TEST_CASE("a value that owns nothing may still be moved, and may still be copied
         "}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+// --- the copy constructor, and where the old value's teardown lands -------------------------------
+
+namespace
+{
+    // the same owning type with a copy constructor, so a place arriving at a destination has somewhere
+    // to go other than a diagnostic
+    const char *k_copyable =
+        "struct Box {\n"
+        "    usize $tag;\n"
+        "    ptr<uint8> $data;\n"
+        "    constructor(usize $t, ptr<uint8> $d) { $this->tag = $t; $this->data:$ = $d; }\n"
+        "    constructor(Box& $other) { $this->tag = $other->tag; $this->data:$ = $other->data; }\n"
+        "    destructor() { $this->data = null; }\n"
+        "}\n";
+
+    // every copy the pass inserted into a scope's declarations, in order. a copy is an ordinary call
+    // whose declaration is the type's copy constructor, which is the same bargain a drop makes
+    std::vector<FunctionCallExprNode *> copies_in(ScopeNode &scope)
+    {
+        std::vector<FunctionCallExprNode *> found;
+
+        for (auto &child : scope.children) {
+            ExprNode *value = nullptr;
+
+            if (child.has_type<VarDeclNode>()) {
+                value = child.get<VarDeclNode>().init_expr;
+            }
+            else if (child.has_type<AssignNode>()) {
+                value = child.get<AssignNode>().value_expr;
+            }
+
+            if (value == nullptr || value->get_node_type() != NodeType::n_expr_call) {
+                continue;
+            }
+
+            auto *call = static_cast<FunctionCallExprNode *>(value);
+            if (call->decl != nullptr && call->decl->is_constructor()
+                && call->decl == find_copy_constructor(call->decl->get_return_type().get_complex_type())) {
+                found.push_back(call);
+            }
+        }
+
+        return found;
+    }
+
+    AssignNode *first_assign_in(ScopeNode &scope)
+    {
+        for (auto &child : scope.children) {
+            if (child.has_type<AssignNode>()) {
+                return &child.get<AssignNode>();
+            }
+        }
+        return nullptr;
+    }
+}
+
+TEST_CASE("an implicit copy is a resolved call to the type's copy constructor", "[ownership]")
+{
+    // the same bargain every drop makes: the tree says what happens, so codegen needs nothing, -ar
+    // shows it, and the type checker validates what the pass inserted
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "function f() : void {\n"
+        "    $a = Box(1, null);\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *expected = find_copy_constructor(&type_named(m, "Box")->complex_type());
+    REQUIRE(expected != nullptr);
+
+    auto copies = copies_in(body_of(m, "f"));
+    REQUIRE(copies.size() == 1);
+
+    // resolved at insertion: there is no name to look up and no overload set to search
+    REQUIRE(copies[0]->decl == expected);
+
+    // and the receiver is the address of the source place, exactly as a drop's is
+    REQUIRE(copies[0]->arguments.size() == 1);
+    REQUIRE(copies[0]->arguments[0]->get_node_type() == NodeType::n_expr_addrof);
+    REQUIRE(place_root_of(copies[0]->arguments[0]) != nullptr);
+
+    // the source stays live, which is the whole difference between a copy and a move: it is still
+    // dropped at the end of its scope, alongside the copy
+    REQUIRE(drops_in(body_of(m, "f")).size() == 2);
+}
+
+TEST_CASE("the explicit copy call resolves to the same declaration", "[ownership]")
+{
+    // the reason recognition beats a new spelling - asserted rather than assumed, since `Box($a)` was
+    // an ordinary overload resolution long before any of this existed
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "function f() : void {\n"
+        "    $a = Box(1, null);\n"
+        "    $b = Box($a);\n"
+        "    $c = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto copies = copies_in(body_of(m, "f"));
+
+    REQUIRE(copies.size() == 2);
+    REQUIRE(copies[0]->decl == copies[1]->decl);
+}
+
+TEST_CASE("a `mv` parameter given an unmarked place still errors, copy constructor or not", "[ownership]")
+{
+    // the annotation is a contract that the value is handed over. quietly copying instead would make it
+    // mean nothing, so this check sits ahead of the copy hook and keeps winning
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "function consume(mv Box $taken) : void { }\n"
+        "function f() : void {\n"
+        "    $a = Box(1, null);\n"
+        "    consume($a);\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "takes ownership of this argument"));
+}
+
+TEST_CASE("an assignment carries the old value's teardown instead of pushing it ahead", "[ownership]")
+{
+    // the drop used to be pushed into the statement list *before* the assignment, so a right-hand side
+    // that read the target copied from a destroyed value. carried on the assignment, gen_assign orders
+    // it: evaluate the right-hand side, tear the old value down, store
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "function f() : void {\n"
+        "    $a = Box(1, null);\n"
+        "    $a = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto &body = body_of(m, "f");
+
+    auto *assign = first_assign_in(body);
+    REQUIRE(assign != nullptr);
+    REQUIRE(assign->teardown_old != nullptr);
+    REQUIRE(assign->teardown_old->children.size() == 1);
+
+    // and *not* in the statement list: the only drop standing on its own is the scope-exit one
+    REQUIRE(drops_in(body).size() == 1);
+}
+
+TEST_CASE("a moved-from assignment target owes no teardown", "[ownership]")
+{
+    // what is still sitting in the slot belongs to whoever the value was handed to. re-seating it is
+    // also not a use-after-move: the target is written, not read
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "function consume(mv Box $taken) : void { }\n"
+        "function f() : void {\n"
+        "    $a = Box(1, null);\n"
+        "    consume(mv $a);\n"
+        "    $a = Box(2, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *assign = first_assign_in(body_of(m, "f"));
+
+    REQUIRE(assign != nullptr);
+    REQUIRE(assign->teardown_old == nullptr);
+}
+
+TEST_CASE("the class path carries a flag rather than nodes", "[ownership]")
+{
+    // pinned deliberately. one concept - the old value's teardown - but a class's release cannot be a
+    // node: it needs the old handle out of the slot codegen has already addressed, and a class target
+    // may be a field or an element whose subscript must not be evaluated twice. a later tidy-up that
+    // collapses the two has to argue with this test
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Res { usize $tag; }\n"
+        "function f() : void {\n"
+        "    $a = Res(1);\n"
+        "    $a = Res(2);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *assign = first_assign_in(body_of(m, "f"));
+
+    REQUIRE(assign != nullptr);
+    REQUIRE(assign->releases_old);
+    REQUIRE(assign->teardown_old == nullptr);
+}
+
+TEST_CASE("a constructor's write to its own `$this` is that field's first write", "[ownership]")
+{
+    // `$this` is a fresh zero-filled slot, so there is no old value owed a teardown - which is what
+    // makes a copy constructor for a nested owner writable at all. deliberately not a
+    // t_initialization *destination*, so a place source still reaches the copy hook rather than being
+    // silently moved
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(usize $t) { $this->inner = Box($t, null); }\n"
+        "    constructor(Outer& $other) { $this->inner = $other->inner; }\n"
+        "}\n"
+        "function f() : void {\n"
+        "    $a = Outer(1);\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("an owning field initialized twice in one constructor is reported", "[ownership]")
+{
+    // the first write's value would never be destroyed, and nothing further down could notice, because
+    // both writes claim the storage was fresh
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_copyable) +
+        "struct Outer {\n"
+        "    Box $inner;\n"
+        "    constructor(usize $t) { $this->inner = Box($t, null); $this->inner = Box($t, null); }\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
 }

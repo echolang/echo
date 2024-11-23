@@ -25,7 +25,7 @@ namespace Parser
     // only emits t_ref when the `&` abuts a name character, so the spaced form arrives as
     // t_and and both spellings have to be recognised. lives here, next to parse_ref_suffix,
     // so every statement dispatch that has to spot a declaration asks the same question -
-    // the struct body used to keep its own list and silently rejected borrow properties.
+    // the struct body used to keep its own list and silently rejected borrow properties
     // pure lookahead, the cursor is not moved
     bool starts_borrow_vardecl(Payload &payload);
 
@@ -52,17 +52,17 @@ namespace Parser
         }
     };
 
-    // Parses an optional generic type-parameter list `<T, U, ...>` (the declaration side,
+    // parses an optional generic type-parameter list `<T, U, ...>` (the declaration side,
     // e.g. on a function or struct). Each parameter may carry a constraint
     // `T: atom (| atom)*` where an atom is a primitive, an alias (e.g. `numeric`) or a
     // user type. Returns the parsed parameters, or an empty vector if the cursor is not
-    // positioned at a `<`. Consumes through the closing `>`.
+    // positioned at a `<`. Consumes through the closing `>`
     std::vector<ParsedTypeParam> parse_type_param_list(Payload &payload);
 
     // turns parsed parameters into owned declarations installed on their owner, stamping each
     // one's ordinal and owner. idempotent across the symbol and full parser passes: an unchanged
     // list reuses the declarations already installed, so a parameter has exactly one declaration
-    // no matter how often its owner is re-parsed.
+    // no matter how often its owner is re-parsed
     //
     // a constructor of a generic struct must NOT call this — it shares the struct's declarations by
     // copying the pointer vector, which is what lets one substitution bind the parameters mentioned
@@ -71,7 +71,7 @@ namespace Parser
 
     // the function overload owns the whole `[inherited..., own...]` shape of
     // FunctionDeclNode::type_parameters, inherited_type_param_count included: a method of a generic
-    // struct passes the owner's declarations as `inherited` and they are shared, not re-declared.
+    // struct passes the owner's declarations as `inherited` and they are shared, not re-declared
     // stripping the prefix before declaring and re-prefixing after lives here rather than at the call
     // site, because the reuse rule that forces it is here — see the implementation
     void declare_type_parameters(

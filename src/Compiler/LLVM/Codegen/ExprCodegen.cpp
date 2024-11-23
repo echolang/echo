@@ -41,7 +41,7 @@ namespace Compiler::LLVM
 // reads exactly what the format says, so `%d` against a raw i8 reads four bytes where one was
 // passed, and `%f` against a raw float reads a double. only the AArch64 backend performs those
 // promotions on our behalf, which is why passing the value raw looked correct on arm64 macOS and
-// printed the untruncated int (300 for an int8 holding 44) and 0.000000 for a float32 on x86-64.
+// printed the untruncated int (300 for an int8 holding 44) and 0.000000 for a float32 on x86-64
 //
 // the promoted type is chosen to agree with the format exactly - unsigned widens to uint32 under
 // `%u` rather than to the int32 C's integer promotion would strictly give - so the two cannot
@@ -63,8 +63,7 @@ static EchoConversion printf_conversion_for(const AST::ValueType &type)
         return unsupported;
     }
 
-    switch (type.get_primitive_type())
-    {
+    switch (type.get_primitive_type()) {
         case AST::ValueTypePrimitive::t_int8:
         case AST::ValueTypePrimitive::t_int16:
         case AST::ValueTypePrimitive::t_int32:
@@ -172,8 +171,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     // two class handles, or a handle against null. the only operators a class answers, and the type
     // checker has already rejected the rest - so this is a plain address comparison over two opaque
     // pointers, ahead of the pointer arm because a class type is not a t_pointer
-    if (lhsret.is_class() || rhsret.is_class())
-    {
+    if (lhsret.is_class() || rhsret.is_class()) {
         // which operators those are is Operator::is_identity_comparison, the same predicate the type
         // checker rejects the rest with - so the two passes read the rule off one function rather than
         // each enumerating it
@@ -192,8 +190,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
     // everything reached through `:$` operates on the address itself: comparisons ask about
     // identity, and arithmetic is scaled by the pointee's size, never by bytes
-    if (lhsret.is_pointer() || rhsret.is_pointer())
-    {
+    if (lhsret.is_pointer() || rhsret.is_pointer()) {
         const bool both_pointers = lhsret.is_pointer() && rhsret.is_pointer();
 
         switch (node.op_node->op->type) {
@@ -251,8 +248,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         }
     }
 
-    if (lhsret.is_integer_type() && rhsret.is_integer_type())
-    {
+    if (lhsret.is_integer_type() && rhsret.is_integer_type()) {
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
                 _ctx.value_stack.push(_ctx.builder->CreateAdd(left, right));
@@ -311,8 +307,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     rhsret.get_type_desciption(), _ctx.function_context()));
         }
     }
-    else if (lhsret.is_boolean_type() && rhsret.is_boolean_type())
-    {
+    else if (lhsret.is_boolean_type() && rhsret.is_boolean_type()) {
         switch (node.op_node->op->type) {
             case Token::Type::t_logical_and:
                 _ctx.value_stack.push(_ctx.builder->CreateAnd(left, right));
@@ -326,9 +321,8 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     rhsret.get_type_desciption(), _ctx.function_context()));
         }
     }
-    else if (lhsret.is_floating_type() || rhsret.is_floating_type())
-    {
-        // Promote both sides to a common floating type (double if any operand is double)
+    else if (lhsret.is_floating_type() || rhsret.is_floating_type()) {
+        // promote both sides to a common floating type (double if any operand is double)
         bool use_double = lhsret.is_primitive_of_type(AST::ValueTypePrimitive::t_float64) ||
                           rhsret.is_primitive_of_type(AST::ValueTypePrimitive::t_float64);
 
@@ -473,8 +467,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         }
     }
 
-    else
-    {
+    else {
         // locate the function
         auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(node.decl);
         llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
@@ -544,8 +537,7 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
     llvm::Type *result_type = _ctx.types->get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
 
     uint64_t value = 0;
-    switch (AST::builtin_kind_for(decl->builtin.value()))
-    {
+    switch (AST::builtin_kind_for(decl->builtin.value())) {
         case AST::BuiltinKind::t_size_of:
             // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the
             // stride between array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]`
@@ -614,4 +606,4 @@ void ExprCodegen::gen_null(AST::NullNode &node)
 void ExprCodegen::gen_operator(AST::OperatorNode &node)
 {
 }
-}
+};

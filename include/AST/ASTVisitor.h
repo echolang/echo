@@ -80,6 +80,6 @@ namespace AST
         virtual void visitMemberAccess(MemberAccessNode &node) = 0;
         virtual void visitVar(VarNode &node) = 0;
     };
-}
+};
 
 #endif

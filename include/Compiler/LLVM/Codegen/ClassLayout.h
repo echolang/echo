@@ -11,13 +11,13 @@ namespace Compiler::LLVM
     // the heap block a class instance lives in. one llvm::StructType per class per compilation unit,
     // wrapping the *payload* - which is the exact layout a `struct` with the same body would have had,
     // built by the same code. that nesting is the whole trick: below the payload every member GEP is
-    // the struct path unchanged, so classes needed no second member-access implementation.
+    // the struct path unchanged, so classes needed no second member-access implementation
     //
     //     %Foo.box = { i64 __strong, ptr __typeinfo, %Foo }
     //
     // the strong count is at offset 0 so retain and release reach it without an offset. __typeinfo
     // holds the address of the class's own `@Foo.typeinfo` global, which is what `instanceof` compares
-    // - an address is exact identity across modules and needs no numbering scheme to keep stable.
+    // - an address is exact identity across modules and needs no numbering scheme to keep stable
     //
     // a class-typed value is *not* this type: it is an opaque `ptr` to a block of it. the layout is
     // only ever needed to size an allocation, to reach the payload, and to touch the count

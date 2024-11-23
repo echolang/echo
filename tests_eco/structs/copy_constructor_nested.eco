@@ -1,0 +1,74 @@
+// the case that shows the recursion bottoms out. the chapter's original member-wise deep copy had no
+// bottom, because ownership ends at a raw pointer the type system sees as owning nothing - so copying
+// member-wise would copy the address and leave two owners.
+//
+// here nothing recurses on its own: `Outer`'s copy constructor is *written*, and it says what copying
+// its owning field means. both spellings work - an explicit inner copy, and the plain field read, which
+// reaches `Inner`'s copy constructor through the very same hook.
+//
+// what had to change for this to compile at all: a write to a field of the enclosing constructor's own
+// `$this` is that field's first write, so it is not the "cannot assign into a field" partial-ownership
+// case. `$this` is a fresh zero-filled slot, so there is genuinely nothing there to tear down
+
+struct Inner
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        $this->tag = $t;
+    }
+
+    constructor(Inner& $other)
+    {
+        echo 300;
+        $this->tag = $other->tag + 1;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Outer
+{
+    Inner $inner;
+
+    constructor(usize $t)
+    {
+        $this->inner = Inner($t);
+    }
+
+    constructor(Outer& $other)
+    {
+        echo 700;
+        $this->inner = Inner($other->inner);
+    }
+}
+
+struct Plain
+{
+    Inner $inner;
+
+    constructor(usize $t)
+    {
+        $this->inner = Inner($t);
+    }
+
+    constructor(Plain& $other)
+    {
+        echo 900;
+        // no explicit copy written: the field read is an ordinary place arriving at a destination, so
+        // Inner's own copy constructor answers for it
+        $this->inner = $other->inner;
+    }
+}
+
+$a = Outer(10);
+$b = $a;
+
+$c = Plain(20);
+$d = $c;
+
+echo 99;

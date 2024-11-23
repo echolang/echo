@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 19:5
+'Box(Box&)' is already declared with these parameter types. Overloads must differ in their parameters.
+Begin: 'constructor'
+End: 'constructor'
+Code excerpt:
+ [18]> 
+ [19]>     constructor(Box& $another)
+          ^
+ [20]>     {
+
+Critical issues found, cannot compile.

@@ -6,8 +6,7 @@
 
 AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &type)
 {
-    switch (type)
-    {
+    switch (type) {
         // parantheses
         case Token::Type::t_open_paren:
         case Token::Type::t_close_paren:
@@ -69,80 +68,6 @@ AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &typ
             return {OpAssociativity::none, 0};
     };
 }
-
-// #define O1Prec get_precedence_for_token(token.type())
-// #define O2Prec get_precedence_for_token(tokens[operator_stack.top()].type())
-
-// TokenList AST::Operator::shunting_yard(TokenSlice &token_slice)
-// {
-//     auto &tokens = token_slice.tokens;
-
-//     auto output = TokenList(tokens);
-//     auto operator_stack = std::stack<size_t>();
-
-//     for(auto token : token_slice)
-//     {
-//         // auto &tokenval = token.value();
-
-//         if (token.token().is_one_of({
-//             Token::Type::t_string_literal,
-//             Token::Type::t_integer_literal,
-//             Token::Type::t_hex_literal,
-//             Token::Type::t_binary_literal,
-//             Token::Type::t_floating_literal,
-//             Token::Type::t_bool_literal,
-//             Token::Type::t_varname
-//         })) {
-//             output.push(token);   
-//         }
-//         else if (token.token().is_operator_type())
-//         {
-//             while (
-//                 !operator_stack.empty() &&
-//                 O2Prec.assoc == OpAssociativity::right &&
-//                 (
-//                     O2Prec.sequence > O1Prec.sequence ||
-//                     (
-//                         O1Prec.sequence == O2Prec.sequence &&
-//                         O1Prec.assoc == OpAssociativity::left
-//                     )
-//                 )
-//             ) {
-//                 output.push(tokens[operator_stack.top()]);
-//                 operator_stack.pop();
-//             }
-
-//             operator_stack.push(token.get_handle());
-//         }
-//         else if(token.type() == Token::Type::t_open_paren)
-//         {
-//             operator_stack.push(token.get_handle());
-//         }
-//         else if(token.type() == Token::Type::t_close_paren)
-//         {
-//             while(!operator_stack.empty() && tokens[operator_stack.top()].type() != Token::Type::t_open_paren)
-//             {
-//                 output.push(tokens[operator_stack.top()]);
-//                 operator_stack.pop();
-//             }
-
-//             // ensure we have the opening "(", otherwise something is off
-//             assert(tokens[operator_stack.top()].token().is_a(Token::Type::t_open_paren));
-//             operator_stack.pop();
-//         }
-//         else {
-//             throw std::runtime_error("Unknown token type");
-//         }
-//     }
-
-//     while (!operator_stack.empty())
-//     {
-//         output.push(tokens[operator_stack.top()]);
-//         operator_stack.pop();
-//     }
-
-//     return output;
-// }
 
 AST::OperatorRegistry::OperatorRegistry()
 {

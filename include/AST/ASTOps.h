@@ -12,18 +12,21 @@
 
 namespace AST
 {
-    enum class OpAssociativity {
+    enum class OpAssociativity
+    {
         left,
         right,
         none
     };
 
-    struct OpPrecedence {
+    struct OpPrecedence
+    {
         OpAssociativity assoc;
         int sequence;
     };
 
-    struct Operator {
+    struct Operator
+    {
         static OpPrecedence get_precedence_for_token(const Token::Type &type);
         static TokenList shunting_yard(TokenSlice &token_slice);
 
@@ -36,7 +39,7 @@ namespace AST
         {
         }
 
-        // the operators that ask a question about two operands rather than combining them.
+        // the operators that ask a question about two operands rather than combining them
         // the distinction matters for pointers: comparing an address against a non-address is
         // a type error, while `$p:$ + 1` mixing an address and an int is ordinary offsetting
         inline bool is_comparison() const {
@@ -58,14 +61,16 @@ namespace AST
         virtual ~Operator() = default;
     };
 
-    struct PredefinedTokenOperator : public Operator {
+    struct PredefinedTokenOperator : public Operator
+    {
         PredefinedTokenOperator(const Token::Type &type) : 
             Operator(type, get_precedence_for_token(type))
         {
         }
     };
 
-    struct CustomOperator : public Operator {
+    struct CustomOperator : public Operator
+    {
         const std::string name;
         CustomOperator(const std::string &name, const OpPrecedence precedence) : 
             Operator(Token::Type::t_op_custom, precedence),
@@ -96,6 +101,6 @@ namespace AST
         std::unordered_map<std::string, Operator *> _operator_symbol_map;
         std::array<Operator *, static_cast<size_t>(Token::Type::t_unknown)> _predefined_operator_map;
     };
-}
+};
 
 #endif

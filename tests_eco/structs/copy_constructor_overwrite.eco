@@ -1,0 +1,23 @@
+// the general order, with no copy involved at all: the right-hand side is a fresh construction, and the
+// old value is still torn down after it rather than before. nothing pinned this before - every owning
+// site in the corpus was a *declaration*, which never reaches the assignment path
+
+struct Box
+{
+    usize $tag;
+
+    constructor(usize $t)
+    {
+        echo $t;
+        $this->tag = $t;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+$a = Box(1);
+$a = Box(2);
+echo 99;

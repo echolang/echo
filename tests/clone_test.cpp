@@ -1,14 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTClone.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/ScopeNode.h>
 
+#include "helpers.h"
+
 using namespace AST;
 
-namespace {
+namespace
+{
     FunctionDeclNode *find_func(AST::Module &m, const std::string &name) {
         for (auto *f : m.nodes.of_type<FunctionDeclNode>()) {
             if (!f->is_anonymous() && f->func_name() == name) return f;
@@ -18,7 +19,7 @@ namespace {
 }
 
 // exercises the node kinds the old hand-rolled cloner silently shared instead of cloning
-// (if / while / var-mutation), plus params, locals and binary ops.
+// (if / while / var-mutation), plus params, locals and binary ops
 TEST_CASE("Clone reproduces a function body structurally and independently", "[clone]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -53,7 +54,7 @@ TEST_CASE("Clone reproduces a function body structurally and independently", "[c
     }
 
     // ...that is structurally identical (node_description recurses through every child,
-    // so equality here means the whole subtree (if/while/unary/mutation included) cloned).
+    // so equality here means the whole subtree (if/while/unary/mutation included) cloned)
     REQUIRE(clone->body->node_description() == fn->body->node_description());
     REQUIRE(clone->node_description() == fn->node_description());
 }

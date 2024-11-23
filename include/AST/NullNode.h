@@ -8,10 +8,10 @@
 
 namespace AST
 {
-    // the null address.
+    // the null address
     //
     // null has no type of its own; it takes the type of whatever it is assigned to or compared
-    // against, which the parser supplies from the expected type at the position it appears in.
+    // against, which the parser supplies from the expected type at the position it appears in
     // left unbound it stays a nullable pointer to nothing, and the type checker reports it
     class NullNode : public ExprNode
     {

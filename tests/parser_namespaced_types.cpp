@@ -1,15 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTNamespace.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 
+#include "helpers.h"
+
 // namespace qualified type names (`a::Foo`) and the mangling that keeps same-named types from
 // different namespaces apart. see todo/B7-complex-type-mangling.md
 
-namespace {
+namespace
+{
     // the struct declared under the given namespaced name, or null when there is none
     AST::TypeDeclNode *find_struct(AST::Bundle &bundle, const std::string &namespaced_name)
     {

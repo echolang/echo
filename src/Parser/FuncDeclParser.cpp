@@ -123,7 +123,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
     // inside an extern block the first identifier is the C symbol, and an optional `as` renames
     // it for Echo callers: `function malloc as alloc_bytes(...)`. without the rename the symbol
-    // and the Echo name are the same.
+    // and the Echo name are the same
     //
     // resolved before the name token is captured below, because the Echo name is what the symbol
     // table, the namespace and every call site use - only extern_symbol reaches the linker
@@ -180,7 +180,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     const bool is_method = owner_struct != nullptr && self_type != nullptr;
 
     // a method of a generic struct carries the owner's parameters ahead of its own, so that one
-    // TypeSubstitution binds both: the owner's T from the receiver argument, its own U from the rest.
+    // TypeSubstitution binds both: the owner's T from the receiver argument, its own U from the rest
     // declare_type_parameters owns that shape - what is shared, what is re-declared, and where the
     // split falls
     std::vector<AST::TypeParamDecl *> inherited_params;
@@ -257,7 +257,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // two only agree because they mangle identically. if just one of them knew it was extern, the
     // call would reference `_mem_alloc_bytesZZ...` while the definition was named `malloc`
     if (kind == FuncDeclKind::t_extern) {
-        // a raw symbol has exactly one definition, so it cannot have one body per instantiation.
+        // a raw symbol has exactly one definition, so it cannot have one body per instantiation
         // this is why `mem::alloc<T>` is Echo code over a concrete `alloc_bytes` rather than an
         // extern of its own
         if (funcdecl->is_generic()) {

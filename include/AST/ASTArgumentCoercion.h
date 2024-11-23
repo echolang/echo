@@ -13,7 +13,7 @@ namespace AST
     // when a callee parameter is a borrow and the argument is addressable, wrap it in an
     // AddrOfExprNode so its address is passed instead of a loaded value. this is the implicit
     // form of the address-of that `&$x` makes explicit; performing it here (in the pre-codegen
-    // coercion pass) keeps codegen from having to discriminate raw argument node kinds.
+    // coercion pass) keeps codegen from having to discriminate raw argument node kinds
     // returns the possibly-wrapped argument
     inline ExprNode *coerce_arg_to_pointer_param(NodeCollection &nodes, ExprNode *arg, const ValueType &expected)
     {

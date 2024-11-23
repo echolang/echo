@@ -1,6 +1,7 @@
 #include "Parser/TypeDeclParser.h"
 
 #include "AST/ASTFunctionRegistry.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/MemberAccessNode.h"
@@ -33,7 +34,7 @@ static bool expect_token(Parser::Payload &payload, Token::Type expected)
 }
 
 // consumes a member body the declaration pass did not parse: either a braced body or the bare `;` of
-// a declaration that has none. the one place that knows how a member body is skipped.
+// a declaration that has none. the one place that knows how a member body is skipped
 //
 // brace-depth aware rather than token-by-token, because a body's closing brace would otherwise read
 // as the end of the struct - silently truncating the type and losing every member written after it
@@ -53,10 +54,10 @@ static void skip_member_body(Parser::Payload &payload)
 }
 
 // the node a previous pass already registered for this declaration site, with its arguments dropped,
-// or null when the running pass is the first to reach it.
+// or null when the running pass is the first to reach it
 //
 // a module is parsed in several passes over identical token indices, so the declaration *site* is
-// exact - and unlike the name, which every overload of a set shares, it identifies one declaration.
+// exact - and unlike the name, which every overload of a set shares, it identifies one declaration
 // the arguments are rebuilt against the running pass's context rather than kept, because the body's
 // reads have to bind to declarations from the same pass
 static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, const TokenReference &site_token)
@@ -72,7 +73,7 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
 
 // opens a member body, and answers whether there is one to parse here. false means the caller is done
 // with this member: either the brace is missing and has been reported, or this is the declaration pass,
-// which takes the signature and skips the body whole.
+// which takes the signature and skips the body whole
 //
 // the one place that decides where a member body begins, shared by the constructor and destructor arms
 // so a change to the recovery or to which pass reads a body cannot reach only one of them
@@ -123,10 +124,90 @@ static void seat_this_storage(
         payload.context.emplace_nodep<AST::ClassAllocExprNode>(self_value_type, name_token);
 }
 
+// recognises the copy constructor among a struct's constructors, and reports the two ways of getting
+// it wrong. called from parse_constructor as soon as the signature is complete
+//
+// recognition rather than declaration: `constructor(Foo& $other)` already parses, registers and
+// resolves - `Foo($a)` calls it today - so all this does is publish *which* of a type's constructors
+// the copy is, for AST::OwnershipPass to reach by type when it inserts an implicit one. that is also
+// why the declaration stays in the overload set, unlike a destructor's: the explicit call and the
+// implicit copy have to be the same declaration or there are two ways to copy a value
+//
+// the synthesized field-wise constructor cannot be mistaken for one and needs no flag saying so,
+// because it never comes through here. worth being deliberate about: for
+// `struct Odd { Odd& $other; }` the two are signature-identical, and the field-wise one copies a
+// borrow rather than duplicating anything
+static void publish_copy_constructor(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *struct_node,
+    const AST::ValueType &self_value_type,
+    AST::FunctionDeclNode *ctor_decl,
+    const TokenReference &ctor_token)
+{
+    if (AST::is_copy_constructor(ctor_decl, self_value_type)) {
+        AST::FunctionDeclNode *existing = struct_node->complex_type().copy_constructor();
+
+        // asked of the *slot* and compared by identity, so the body pass arriving at the node the
+        // declaration pass registered is not a redeclaration - register_function's declaration-site
+        // claim is what tells those two apart. the same shape parse_destructor uses below
+        if (existing == nullptr || existing == ctor_decl) {
+            struct_node->complex_type().set_copy_constructor(ctor_decl);
+            return;
+        }
+
+        // an identically-shaped second one has already been reported at this very token, as
+        // register_function's DuplicateFunctionSignature. only a *differently* shaped one reaches
+        // here - `Foo&` beside `const Foo&`, which are two signatures and both answer the
+        // recognition rule - and that does need saying, because they are not overloads of anything:
+        // a type has one copy, and nothing would decide which of them an implicit copy meant
+        //
+        // and deliberately no skip_member_body/return, unlike the destructor's duplicate below.
+        // report_bodyless at the end of parse_typedecl iterates *every* constructor, so a body-less
+        // one would earn a second, confusing diagnostic; the destructor escapes that because
+        // report_bodyless asks only its slot
+        if (!AST::signatures_match(existing, ctor_decl->parameter_types())) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(ctor_token),
+                fmt::format("'{}' already has a copy constructor.", struct_node->type_name()));
+        }
+
+        return;
+    }
+
+    // `Box& $o` inside `struct Box<T>` is *not* the copy constructor and is almost certainly meant to
+    // be one. an unqualified name resolves to the template, which is not a type any value has, so the
+    // parameter cannot be the borrow of `Box<T>` and the recognition above rightly declines it
+    // reported here because the alternative is silence: nothing else would fire until an implicit copy
+    // is rejected somewhere else entirely, naming a type the author believes they wrote a copy for
+    if (!self_value_type.has_complex_type() || ctor_decl->args.size() != 1) {
+        return;
+    }
+
+    const AST::ComplexType *self_ct = self_value_type.get_complex_type();
+    const AST::ValueType param = ctor_decl->parameter_type(0);
+
+    if (self_ct->template_ref == nullptr || !param.is_pointer() || param.is_nullable()) {
+        return;
+    }
+
+    if (!param.pointee().has_complex_type() || param.pointee().get_complex_type() != self_ct->template_ref) {
+        return;
+    }
+
+    payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.context.code_ref(ctor_decl->args[0]->token_varname),
+        fmt::format(
+            "'{}' names the template rather than a type, so this is not a copy constructor for '{}'. "
+            "Write '{}&' to declare one.",
+            struct_node->type_name(),
+            self_value_type.get_type_desciption(),
+            self_value_type.get_type_desciption()));
+}
+
 // a `constructor(...)` written in a struct body. registered in the declaration pass and given its
 // body in the body pass, exactly as parse_funcdecl handles a function: the two passes reconcile on
 // the declaration site, and the arguments are rebuilt against whichever pass is running so the
-// body's reads bind to declarations from the same pass.
+// body's reads bind to declarations from the same pass
 static void parse_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
@@ -179,12 +260,18 @@ static void parse_constructor(
     // set. registering in both passes is intentional and cheap: the declaration pass makes the
     // constructor visible to a `Foo(...)` written above it or in another file - which is the whole
     // reason it happens here rather than in the body pass - and the body pass finds its own
-    // declaration site already claimed and carries on with the same node.
+    // declaration site already claimed and carries on with the same node
     //
     // reported at the `constructor` keyword rather than at the struct's name, so two constructors of
     // one struct do not both point at the same place
     payload.collector.functions.register_function(
         payload.collector, payload.context.code_ref(ctor_token), ctor_decl);
+
+    // after the registration, not instead of it: a copy constructor is a name a call site may spell,
+    // so it joins the overload set exactly as any other constructor does and the slot only records
+    // which one it is. both passes reach this and both compute the same answer, since the parameter
+    // list above was rebuilt identically
+    publish_copy_constructor(payload, struct_node, self_value_type, ctor_decl, ctor_token);
 
     if (!enter_member_body(payload)) {
         return;
@@ -213,6 +300,11 @@ static void parse_constructor(
     {
         // same as a function body: a `return` inside the ctor fits the ctor's return type
         AST::ReturnTypeScope return_scope(payload.context, ctor_decl->return_type);
+
+        // and `$this` is fresh storage for as long as this body lasts, so a write to one of its
+        // fields is that field's first write - see Context::ctor_this_ptr
+        AST::ConstructorScope ctor_this_scope(payload.context, this_vardecl);
+
         ctor_decl->body = &parse_scope(payload, &ctor_body);
     }
 
@@ -235,12 +327,12 @@ static void parse_constructor(
 // a `destructor()` written in a struct body. shaped like a *method*, not like a constructor: the
 // receiver is the borrow `Foo&` so the body mutates the caller's storage, the return type is void,
 // and it registers on the type rather than in a namespace overload set - which is also what keeps a
-// `destructor` out of every diagnostic about a name nobody declared.
+// `destructor` out of every diagnostic about a name nobody declared
 //
 // the two-pass reconciliation is the constructor's, keyed on the `destructor` keyword token. that
 // token is both the declaration site *and* the name token, so `func_name()` is "destructor" and the
 // mangled name reads `_MBuffer_destructorZ...` - unambiguous because `destructor` is a keyword and
-// no user member can be spelled it.
+// no user member can be spelled it
 //
 // nobody ever writes a call to one. it is reached only by the drop calls AST::OwnershipPass inserts,
 // which look it up through AST::find_destructor
@@ -289,7 +381,7 @@ static void parse_destructor(
     Parser::push_receiver_param(payload, *dtor_decl, dtor_scope, self_type_node, dtor_token);
 
     // parsed rather than required-empty so a parameter list gets a located error naming what is
-    // wrong, instead of "unexpected token" at whatever the first parameter happens to start with.
+    // wrong, instead of "unexpected token" at whatever the first parameter happens to start with
     // the receiver is already in `args`, so anything beyond it is the user's
     if (!parse_parameter_list(payload, *dtor_decl, dtor_scope, dtor_token)) {
         return;
@@ -364,7 +456,7 @@ static void parse_destructor(
 
 // the field-wise constructor, synthesized for every struct: it takes one parameter per property and
 // initializes them in order. built whole, so it is the same in either pass and belongs to whichever
-// one reaches the struct first.
+// one reaches the struct first
 static void synthesize_field_wise_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
@@ -381,7 +473,7 @@ static void synthesize_field_wise_constructor(
     // it is *not* suppressed merely because the user wrote a constructor of their own. Echo has no
     // other syntax for building a struct, so taking it away the moment a convenience constructor
     // appears would silently break every `Foo(...)` elsewhere in the program. It is suppressed only
-    // when one of the user's own already occupies this exact signature.
+    // when one of the user's own already occupies this exact signature
     //
     // asked of *this struct's* constructors rather than of the namespace's overload set for the
     // name. the set is the wrong question twice over: it is being filled as the module is parsed, so
@@ -459,6 +551,12 @@ static void synthesize_field_wise_constructor(
         // this is the one write a `const` property ever gets, so it is an initialization rather
         // than a mutation and the const checks in AST::TypeChecker have to let it through
         member_mut->is_initialization = true;
+
+        // and the parameter is *handed over*, not copied. the author wrote none of this, so there is
+        // nowhere to put a `mv` - and nothing ambiguous to say: the parameter was given to this
+        // constructor to be built into the struct it hands back. the only place in the language that
+        // sets this, which is why a hand-written constructor still has to spell its own transfers
+        member_mut->hands_over_value = true;
 
         default_ctor.body->children.push_back(AST::make_ref(member_mut));
     }
@@ -547,7 +645,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     struct_node->set_namespace(payload.context.current_namespace);
 
     // declare the generic type parameters (idempotent across the parse passes) and, when the struct
-    // is generic, make them resolvable while parsing its property types.
+    // is generic, make them resolvable while parsing its property types
     declare_type_parameters(payload, struct_node->complex_type(), parsed_type_params);
     const std::vector<AST::TypeParamDecl *> &type_parameters = struct_node->type_parameters();
     AST::TypeParamScope type_param_scope(payload.context, type_parameters);
@@ -556,7 +654,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // self-application Foo<T...> for a generic one. giving a constructor generic type parameters +
     // this return type lets the monomorphizer instantiate it alongside Foo<int>, and a method's
     // receiver is the borrow of the same thing - so the substitution a call site builds binds the
-    // very T that both mention.
+    // very T that both mention
     AST::ValueType self_value_type = struct_node->value_type();
     if (struct_node->is_generic()) {
         auto *template_ct = self_value_type.get_complex_type();
@@ -602,8 +700,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // discarded; the refresh is a side effect on the registry, which is global
     const bool collect_members = !struct_node->members_collected();
 
-    while (!cursor.is_done())
-    {
+    while (!cursor.is_done()) {
         if (starts_vardecl(payload)) {
             auto var = parse_varexpr(payload, &structscope);
 

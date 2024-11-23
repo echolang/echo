@@ -18,11 +18,11 @@ namespace AST
     // concrete AST resolving member accesses and call arguments, and records located issues on the
     // collector (never throws, so main() keeps gating on has_critical_issues()). this moves the
     // "missing member / wrong argument" diagnostics off the lazy codegen throw sites, where the
-    // error surfaced maximally far from its cause, to a point that still has full source context.
+    // error surfaced maximally far from its cause, to a point that still has full source context
     //
     // generic function templates are skipped: their bodies mention the template's type parameters
     // and are only meaningful once the monomorphizer has cloned them into concrete instances (which
-    // this pass does check).
+    // this pass does check)
     class TypeChecker : public RecursiveVisitor
     {
     public:
@@ -49,13 +49,13 @@ namespace AST
         // which variables are the caller's. null at file scope
         FunctionDeclNode *_current_function = nullptr;
 
-        // the module/file currently being walked, used to build located code references.
+        // the module/file currently being walked, used to build located code references
         Module *_current_module = nullptr;
         File *_current_file = nullptr;
 
         // the token of the statement currently being walked (call name, declared variable, ...),
         // used to locate diagnostics for nodes that carry no token of their own (e.g. the implicit
-        // casts the parser/monomorphizer inserts around mismatched arguments).
+        // casts the parser/monomorphizer inserts around mismatched arguments)
         const TokenReference *_context_token = nullptr;
 
         CodeRef code_ref_for(const TokenReference &token);
@@ -80,6 +80,6 @@ namespace AST
         // fit" but "may this storage be written at all"
         void check_const_target(AssignNode &node);
     };
-}
+};
 
 #endif

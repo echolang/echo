@@ -275,4 +275,4 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
     return thunk;
 }
 
-}
+};

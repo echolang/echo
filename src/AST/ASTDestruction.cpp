@@ -6,7 +6,7 @@ namespace
 {
     // "declares a destructor, or holds a property that needs destroying" - the one walk behind both
     // questions below, so a struct's teardown and a class payload's teardown can never disagree about
-    // what a body owes.
+    // what a body owes
     //
     // asked of the *instantiation's* properties rather than the template's: `Box<Buffer>` needs
     // destruction where `Box<int32>` does not, and only the instantiation's layout has the substituted

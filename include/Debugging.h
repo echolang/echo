@@ -8,6 +8,6 @@
 namespace DD
 {
     std::string tabbify(const std::string &str, size_t n, char c = ' ');
-}
+};
 
 #endif

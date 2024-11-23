@@ -15,6 +15,6 @@ namespace AST
 
     mangled_id_t mangle_function_name(const FunctionDeclNode *func_decl);
     mangled_id_t mangle_function_name(const FunctionCallExprNode *func_call);
-}
+};
 
 #endif

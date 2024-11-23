@@ -67,6 +67,11 @@ void RecursiveVisitor::visit_assign(AssignNode &node)
 {
     if (node.target) node.target->accept(*this);
     if (node.value_expr) node.value_expr->accept(*this);
+
+    // the old value's teardown is part of the statement, so it is part of the walk: this is what lets
+    // AST::TypeChecker validate the destructor calls AST::OwnershipPass inserted here, exactly as it
+    // validates the ones sitting in a scope's children
+    if (node.teardown_old) node.teardown_old->accept(*this);
 }
 
 void RecursiveVisitor::visitReturn(ReturnNode &node)
@@ -177,7 +182,7 @@ void RecursiveVisitor::visitMemberAccess(MemberAccessNode &node)
     }
 }
 
-// leaves and cross-reference-only nodes: nothing to descend into.
+// leaves and cross-reference-only nodes: nothing to descend into
 void RecursiveVisitor::visitType(TypeNode &node) {}
 void RecursiveVisitor::visitVar(VarNode &node) {}
 void RecursiveVisitor::visitLiteralFloatExpr(LiteralFloatExprNode &node) {}
@@ -190,4 +195,4 @@ void RecursiveVisitor::visitNamespaceDecl(NamespaceDeclNode &node) {}
 void RecursiveVisitor::visitNamespace(NamespaceNode &node) {}
 void RecursiveVisitor::visitAttribute(AttributeNode &node) {}
 
-}  // namespace AST
+};  // namespace AST

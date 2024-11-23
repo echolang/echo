@@ -21,7 +21,7 @@ namespace Compiler::LLVM
     struct CodegenContext;
 
     // lowers struct declarations and struct member access/mutation, including chained member
-    // access and pointer dereferencing to reach the addressed field.
+    // access and pointer dereferencing to reach the addressed field
     class TypeDeclCodegen
     {
     public:

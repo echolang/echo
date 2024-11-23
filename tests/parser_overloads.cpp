@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "helpers.h"
-
 #include <AST/ASTBundle.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/ExprNode.h>
 #include <AST/ScopeNode.h>
 #include <AST/VarDeclNode.h>
 #include <AST/VarNode.h>
+
+#include "helpers.h"
 
 using namespace AST;
 
