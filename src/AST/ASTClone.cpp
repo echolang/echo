@@ -36,7 +36,8 @@
 #include "AST/NamespaceDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/AttributeNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
+#include "AST/ReleaseNode.h"
 
 namespace AST
 {
@@ -116,6 +117,45 @@ Node *PointerValueNode::clone(CloneContext &cc) const
 {
     PointerValueNode *c = cc.shallow(this);
     c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *MoveExprNode::clone(CloneContext &cc) const
+{
+    MoveExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *InstanceOfExprNode::clone(CloneContext &cc) const
+{
+    InstanceOfExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    c->queried_type = cc.substitute(c->queried_type);
+    return c;
+}
+
+Node *RetainExprNode::clone(CloneContext &cc) const
+{
+    RetainExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *ReleaseNode::clone(CloneContext &cc) const
+{
+    ReleaseNode *c = cc.shallow(this);
+    c->target = cc.child(c->target);
+    return c;
+}
+
+Node *ClassAllocExprNode::clone(CloneContext &cc) const
+{
+    // the class type is the only edge, and it is a *type* - so it substitutes rather than being
+    // rebound. a generic class's constructor carries the self-application `Foo<T>` here, and this is
+    // what turns it into `Foo<int32>` in the instance
+    ClassAllocExprNode *c = cc.shallow(this);
+    c->class_type = cc.substitute(c->class_type);
     return c;
 }
 
@@ -222,7 +262,7 @@ Node *ScopeNode::clone(CloneContext &cc) const
     }
 
     for (const auto &[name, decl] : _declared_variables) c->_declared_variables[name] = cc.rebind(decl);
-    for (const auto &[name, decl] : _declared_structs) c->_declared_structs[name] = cc.rebind(decl);
+    for (const auto &[name, decl] : _declared_types) c->_declared_types[name] = cc.rebind(decl);
     for (auto *attr : _attribute_stack) c->_attribute_stack.push_back(cc.rebind(attr));
 
     return c;
@@ -260,18 +300,19 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     return c;
 }
 
-Node *StructDeclNode::clone(CloneContext &cc) const
+Node *TypeDeclNode::clone(CloneContext &cc) const
 {
-    StructDeclNode *c = cc.shallow(this);
+    TypeDeclNode *c = cc.shallow(this);
 
     // the embedded complex type with substituted property types and nothing left that identifies it
     // as a template - ComplexType::substituted_copy owns that rule, so a field added to it survives
     // here by default. Phase 4 reconciles this with the registry's canonical application ComplexType
     // for codegen identity; for now the clone owns its own substituted layout -
     // see todo/A5-reconcile-instantiation-identity.md.
+    // no self-pointer to fix up afterwards: value_type() is computed from _complex_type, so the clone
+    // answers with its own layout the moment this assignment lands
     c->_complex_type = c->_complex_type.substituted_copy(
         [&cc](const ValueType &type) { return cc.substitute(type); });
-    c->_type = ValueType::make_struct(&c->_complex_type);
 
     for (auto &prop : c->_properties) prop = cc.child(prop);
     return c;

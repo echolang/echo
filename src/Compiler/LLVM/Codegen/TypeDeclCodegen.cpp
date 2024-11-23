@@ -1,4 +1,4 @@
-#include "Compiler/LLVM/Codegen/StructCodegen.h"
+#include "Compiler/LLVM/Codegen/TypeDeclCodegen.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
@@ -7,7 +7,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
@@ -30,7 +30,7 @@
 
 namespace Compiler::LLVM
 {
-void StructCodegen::gen_struct_decl(AST::StructDeclNode &node)
+void TypeDeclCodegen::gen_type_decl(AST::TypeDeclNode &node)
 {
     // a generic struct template has type-parameter-typed properties and no concrete layout;
     // only its instantiations are lowered (lazily, in get_llvm_type).
@@ -38,42 +38,15 @@ void StructCodegen::gen_struct_decl(AST::StructDeclNode &node)
         return;
     }
 
-    if (!node.name_token.has_value()) {
-        assert(false);
-        throw _ctx.error("Anonymous struct declarations are not yet supported.");
-    }
-
-    auto struct_name = node.struct_name();
-
-    // Check if this struct is already defined in the structure table
-    if (_ctx.current_cmp_unit->structure_table->get_structure_id(&node) != 0) {
-        // Already defined, skip
-        return;
-    }
-
-    // Create an opaque struct type first and register it immediately
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, struct_name);
-    _ctx.current_cmp_unit->structure_table->push_structure(&node, llvm_struct_type);
-
-    // Now collect member types for LLVM struct (other structs should be resolvable now)
-    std::vector<llvm::Type *> member_types;
-    for (const auto &prop : node.properties()) {
-        llvm::Type *llvm_type = _ctx.types->get_llvm_type(prop->type_node()->type, *_ctx.current_cmp_unit);
-        if (!llvm_type) {
-            assert(false);
-            throw _ctx.error(fmt::format(
-                "Unknown type for field '{}' in struct '{}'.",
-                prop->name(), struct_name
-            ));
-        }
-        member_types.push_back(llvm_type);
-    }
-
-    // Set the body of the struct type
-    llvm_struct_type->setBody(member_types);
+    // one lowering of a TypeDeclNode, shared with build_struct_maps, which has normally already
+    // reached this declaration - create_llvm_struct_decl answers from the structure table then.
+    // going through it rather than repeating it is what keeps the two paths from disagreeing about
+    // what lowering a declaration means: a class also needs its heap block and its identity global,
+    // and a second copy of the property loop had no idea about either
+    _ctx.types->create_llvm_struct_decl(&node, *_ctx.current_cmp_unit);
 }
 
-void StructCodegen::gen_member_access(AST::MemberAccessNode &node)
+void TypeDeclCodegen::gen_member_access(AST::MemberAccessNode &node)
 {
     // the same lvalue path a member write uses, so a read and a write can never disagree
     // about which field they mean (todo/A3). a pointer-typed field carries its own explicit
@@ -92,7 +65,7 @@ void StructCodegen::gen_member_access(AST::MemberAccessNode &node)
     _ctx.value_stack.push(_ctx.lvalues->gen_load(place, node.get_member_name().value().c_str()));
 }
 
-void StructCodegen::gen_var(AST::VarNode &node)
+void TypeDeclCodegen::gen_var(AST::VarNode &node)
 {
     // Get the LLVM value for this variable (should be an alloca instruction)
     auto it = _ctx.var_map.find(&node.decl());

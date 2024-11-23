@@ -35,7 +35,7 @@ namespace Compiler::LLVM
 
     // the one place that turns an expression into an address.
     //
-    // before this existed the only address path was private to StructCodegen and hardcoded to
+    // before this existed the only address path was private to TypeDeclCodegen and hardcoded to
     // a two case switch over variable and member bases, which is why `&$s->x` could not be
     // spelled and why member access and member mutation drifted apart (todo/A3, todo/B4)
     class LValueCodegen

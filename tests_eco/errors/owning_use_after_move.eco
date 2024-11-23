@@ -1,0 +1,18 @@
+// after a move the source is unset: not empty, not null, not zero - it has no value, and any use of
+// it is a compile error rather than something discovered at runtime
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+$a = Buffer(1, mem::alloc<uint8>(1));
+$b = mv $a;
+
+echo $a->tag;

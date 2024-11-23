@@ -2,7 +2,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/AttributeNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "Debugging.h"
 
 const std::string AST::ScopeNode::node_description()
@@ -43,12 +43,12 @@ void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)
     children.push_back(AST::make_ref(funcdecl));
 }
 
-void AST::ScopeNode::add_structdecl(AST::StructDeclNode &structdecl)
+void AST::ScopeNode::add_typedecl(AST::TypeDeclNode &structdecl)
 {
     children.push_back(AST::make_ref(structdecl));
 
     if (structdecl.name_token.has_value()) {
-        _declared_structs[structdecl.name_token.value().value()] = &structdecl;
+        _declared_types[structdecl.name_token.value().value()] = &structdecl;
     }
 }
 

@@ -34,6 +34,16 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         }
     }
 
+    // a class handle is an address too, but it is not a t_pointer, so it needs saying separately.
+    // `$a == $b` asks whether two references name one object, and `$a == null` whether one names
+    // anything - both bool. every other operator on a class is rejected by the type checker, so
+    // falling through to the "same type on both sides" rule below would answer `Counter` for a
+    // comparison and hand echo a class where it expected a bool
+    if (op_node != nullptr && op_node->op->is_identity_comparison()
+        && (raw_left.is_class() || raw_right.is_class())) {
+        return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+    }
+
     // operands are read in value position, so a pointer contributes its pointee: `$ref + 1`
     // adds to the int the reference points at, not to the address
     auto left = value_type_of(raw_left);
@@ -106,6 +116,31 @@ AST::ValueType AST::PointerValueNode::result_type() const {
 
 const std::string AST::PointerValueNode::node_description() {
     return "peel<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+AST::ValueType AST::MoveExprNode::result_type() const {
+    // a move changes who owns the value, not what it is
+    return operand->result_type();
+}
+
+const std::string AST::MoveExprNode::node_description() {
+    return "move<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+const std::string AST::ClassAllocExprNode::node_description() {
+    return "alloc<" + class_type.get_type_desciption() + ">()";
+}
+
+AST::ValueType AST::RetainExprNode::result_type() const {
+    return operand->result_type();
+}
+
+const std::string AST::InstanceOfExprNode::node_description() {
+    return "instanceof<" + queried_type.get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+const std::string AST::RetainExprNode::node_description() {
+    return "retain<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
 AST::ValueType AST::IndexExprNode::result_type() const {

@@ -13,7 +13,8 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
-#include "Compiler/LLVM/Codegen/StructCodegen.h"
+#include "Compiler/LLVM/Codegen/TypeDeclCodegen.h"
+#include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
 #include <string>
@@ -42,6 +43,11 @@ public:
     void visit_addr_of_expr(AST::AddrOfExprNode &node);
     void visit_deref_expr(AST::DerefExprNode &node);
     void visit_pointer_value(AST::PointerValueNode &node);
+    void visit_move_expr(AST::MoveExprNode &node);
+    void visit_class_alloc_expr(AST::ClassAllocExprNode &node);
+    void visit_retain_expr(AST::RetainExprNode &node);
+    void visit_instanceof_expr(AST::InstanceOfExprNode &node);
+    void visit_release(AST::ReleaseNode &node);
     void visit_index_expr(AST::IndexExprNode &node);
     void visitBinaryExpr(AST::BinaryExprNode &node);
     void visitUnaryExpr(AST::UnaryExprNode &node);
@@ -55,7 +61,7 @@ public:
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
     void visitAttribute(AST::AttributeNode &node);
-    void visitStructDecl(AST::StructDeclNode &node);
+    void visit_type_decl(AST::TypeDeclNode &node);
     void visitMemberAccess(AST::MemberAccessNode &node);
     void visitVar(AST::VarNode &node);
 
@@ -71,7 +77,8 @@ private:
     Compiler::LLVM::LValueCodegen _lvalues;
     Compiler::LLVM::ExprCodegen _expr;
     Compiler::LLVM::StmtCodegen _stmt;
-    Compiler::LLVM::StructCodegen _struct;
+    Compiler::LLVM::TypeDeclCodegen _struct;
+    Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::Backend _backend;
 };
 

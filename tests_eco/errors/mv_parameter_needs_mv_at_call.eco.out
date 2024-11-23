@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 18:9
+'$b' takes ownership of this argument - write 'mv' in front of it, or the value would be handed over without the call site saying so.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [17]> $a = Buffer(mem::alloc<uint8>(1));
+ [18]> consume($a);
+              ^
+ [19]> 
+
+Critical issues found, cannot compile.

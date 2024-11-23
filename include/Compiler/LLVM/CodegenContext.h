@@ -34,11 +34,12 @@ namespace Compiler::LLVM
 {
     class TypeLowering;
     class LValueCodegen;
+    class ClassCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
     // visitor recursion relies on. the subsystems (TypeLowering, ExprCodegen, StmtCodegen,
-    // StructCodegen, Backend) all hold a reference to one of these and talk to the shared state
+    // TypeDeclCodegen, Backend) all hold a reference to one of these and talk to the shared state
     // exclusively through it.
     struct CodegenContext
     {
@@ -81,6 +82,10 @@ namespace Compiler::LLVM
         // the lvalue subsystem: the single place that turns an expression into an address.
         // every read, write and address-of goes through it, so they cannot drift apart
         LValueCodegen *lvalues = nullptr;
+
+        // the class subsystem: allocation and the two reference-count operations. reachable from the
+        // statement and expression subsystems, which is where the tree says a retain or a release goes
+        ClassCodegen *classes = nullptr;
 
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();

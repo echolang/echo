@@ -133,7 +133,7 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
         base_place = deref_once(base_place);
     }
 
-    if (!base_place.storage_type.is_struct() || !base_place.storage_type.get_complex_type()) {
+    if (!base_place.storage_type.has_complex_type() || !base_place.storage_type.get_complex_type()) {
         throw _ctx.error(fmt::format(
             "Cannot access member '{}' of '{}' {}",
             node.get_member_name().value(),
@@ -142,13 +142,28 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     }
 
     auto *complex = base_place.storage_type.get_complex_type();
+
+    // one more hop for a class: the peel loop above landed on the *slot* holding the handle, so load
+    // it and step into the block's payload. only the address moves - the property table below is the
+    // one on `complex` either way, and the GEP is over the payload struct type, which is the layout a
+    // struct with the same body would have had. that is the whole reason the block wraps a payload
+    // rather than prefixing the properties with header fields, which would have shifted every index
+    if (base_place.storage_type.is_class()) {
+        const ClassLayout layout = _ctx.types->get_or_create_class_layout(complex, *_ctx.current_cmp_unit);
+
+        llvm::Value *handle = gen_load(base_place, "obj");
+
+        base_place.address = _ctx.builder->CreateStructGEP(
+            layout.box, handle, ClassBox::payload_index, "payload");
+    }
+
     const auto &member_name = node.get_member_name().value();
 
     // one resolution for both the GEP index and the resulting storage type
     const AST::ComplexType::Property *member = complex->find_property(member_name);
     if (member == nullptr) {
         throw _ctx.error(fmt::format(
-            "Member '{}' not found in struct '{}' {}",
+            "Member '{}' not found in type '{}' {}",
             member_name, complex->name.value_or("<anonymous>"), _ctx.function_context()));
     }
 

@@ -1,0 +1,50 @@
+// the count, observed. a class instance is torn down when the *last* reference to it goes away -
+// not when the first one does, and not once per reference
+
+class Res
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+// one owner, one teardown, at the end of the scope that owns it
+function single() : void
+{
+    Res $a = Res(1);
+    echo 10;
+}
+
+// two owners of one object: one teardown, after both are gone
+function shared() : void
+{
+    Res $a = Res(2);
+    Res $b = $a;
+    echo 20;
+}
+
+// self-assignment must not free what it is about to store. the retain runs before the release
+function self_assign() : void
+{
+    Res $a = Res(3);
+    $a = $a;
+    echo 30;
+}
+
+// overwriting the last reference tears the old object down at the assignment, not at scope exit
+function overwrite() : void
+{
+    Res $a = Res(4);
+    Res $b = Res(5);
+    $a = $b;
+    echo 40;
+}
+
+single();
+shared();
+self_assign();
+overwrite();
+echo 99;

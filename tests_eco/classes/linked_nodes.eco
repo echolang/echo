@@ -1,0 +1,57 @@
+// a class may hold itself, which is the point of having one - and the reason a class's cleanup is a
+// *release* rather than a transitive walk over its properties. a struct cannot contain itself by
+// value, so the struct rule bottoms out on its own; a class needs the reference to be where the
+// recursion stops.
+//
+// dropping the head of a chain cascades: each link's count reaches zero only once the link above it
+// has been torn down
+
+class Node
+{
+    int32 $tag;
+    Node $next;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function chain() : void
+{
+    Node $c = Node(3, null);
+    Node $b = Node(2, $c);
+    Node $a = Node(1, $b);
+
+    echo $a->tag;
+    echo $a->next->tag;
+    echo $a->next->next->tag;
+
+    // a class is nullable, and the tail of a list is how you notice
+    echo $a->next->next->next == null;
+    echo 10;
+}
+
+// re-seating a field releases what it held. the tail is built inline, so the field is its only
+// owner and clearing the field tears it down there and then - before the `echo` below it
+function reseat_last_reference() : void
+{
+    Node $h = Node(5, Node(6, null));
+    $h->next = null;
+    echo 20;
+}
+
+// the same write, but a local still names the tail. one reference going away is not the last one, so
+// nothing is destroyed until that local goes out of scope too
+function reseat_shared() : void
+{
+    Node $t = Node(8, null);
+    Node $h = Node(7, $t);
+    $h->next = null;
+    echo 30;
+}
+
+chain();
+reseat_last_reference();
+reseat_shared();
+echo 99;

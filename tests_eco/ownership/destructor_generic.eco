@@ -1,0 +1,20 @@
+// a generic struct's destructor is instantiated per concrete type, by the ordinary monomorphizer
+// fixpoint: the drop the ownership pass inserts names the *template's* destructor, and the receiver
+// `Box<T>&` binds T from the local's type. two instantiations, two destructor bodies, no special case
+
+struct Box<T>
+{
+    usize $tag;
+    ptr<T> $slot;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free<T>($this->slot);
+    }
+}
+
+$i = Box<int32>(1, mem::alloc<int32>(1));
+$f = Box<float64>(2, mem::alloc<float64>(1));
+
+echo 0;

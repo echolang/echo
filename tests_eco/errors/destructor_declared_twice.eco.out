@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 13:5
+'Buffer' already has a destructor.
+Begin: 'destructor'
+End: 'destructor'
+Code excerpt:
+ [12]> 
+ [13]>     destructor()
+          ^
+ [14]>     {
+
+Critical issues found, cannot compile.

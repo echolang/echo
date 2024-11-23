@@ -10,7 +10,7 @@
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/FunctionDeclNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -31,7 +31,7 @@ namespace AST
 // and coerce_value passes a non-primitive destination straight through
 static bool demands_exact_conversion(const ValueType &type)
 {
-    return type.is_pointer() || type.is_struct() || type.is_class();
+    return type.is_pointer() || type.has_complex_type();
 }
 
 // names the storage an assignment target denotes, so a const diagnostic can say what the user
@@ -76,7 +76,7 @@ static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
     if (arg.is_primitive() && param.is_primitive()) {
         return true;
     }
-    if ((arg.is_struct() || arg.is_class()) && (param.is_struct() || param.is_class())) {
+    if (arg.has_complex_type() && param.has_complex_type()) {
         return arg.get_complex_type() == param.get_complex_type();
     }
     return false;
@@ -174,7 +174,7 @@ void TypeChecker::visitReturn(ReturnNode &node)
     RecursiveVisitor::visitReturn(node);
 }
 
-void TypeChecker::visitStructDecl(StructDeclNode &node)
+void TypeChecker::visit_type_decl(TypeDeclNode &node)
 {
     // a generic struct template's property types legitimately mention its type parameters (the T
     // in `struct Box<T> { T $value; }`); it is only meaningful once instantiated with concrete
@@ -182,7 +182,7 @@ void TypeChecker::visitStructDecl(StructDeclNode &node)
     if (node.is_generic()) {
         return;
     }
-    RecursiveVisitor::visitStructDecl(node);
+    RecursiveVisitor::visit_type_decl(node);
 }
 
 void TypeChecker::visitMemberAccess(MemberAccessNode &node)
@@ -191,7 +191,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     // MemberAccessNode::result_type(), and the two drifted exactly as such pairs do: neither knew
     // an index base, so a typo'd member behind `$items:$[0]->` went unreported
     ValueType base_type = node.base_target_type();
-    if (base_type.is_struct() || base_type.is_class()) {
+    if (base_type.has_complex_type()) {
         ComplexType *complex = base_type.get_complex_type();
         const std::string member = node.get_member_name().value();
         if (complex && !complex->has_property(member)) {
@@ -202,7 +202,52 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
         }
     }
 
+    // reaching a member needs an address to reach it from, and a base with no storage has none.
+    // reported here rather than left to gen_lvalue's contextless "Expression is not addressable",
+    // which is what `$a->get()->x` used to abort with. binding the intermediate to a local is the
+    // answer, and for a class it is also the answer to *who releases it* - which is why chaining
+    // through a call result stays out until temporaries have owners (todo/A13)
+    auto &base = node.get_base_node();
+    if (base.has() && base.is_expression_node()) {
+        auto *base_expr = base.unsafe_ptr<ExprNode>();
+        if (!is_place_expression(*base_expr) && base_expr->result_type().has_complex_type()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.get_member_name()),
+                fmt::format(
+                    "'{}' has no storage to read a member from - bind it to a variable first",
+                    base_expr->result_type().get_type_desciption()));
+        }
+    }
+
     RecursiveVisitor::visitMemberAccess(node);
+}
+
+void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
+{
+    const ValueType operand_type = node.operand->result_type();
+
+    // "structs do not have any runtime meta data ... you can also not perform any runtime reflection
+    // checks on them" (CONCEPT.md). the question is not merely false for a struct, it is unanswerable:
+    // there is no block and no identity word, so the value never carried an answer. a *class* operand
+    // against a struct type is a different matter and folds to false, which is why only the left side
+    // is checked here
+    if (!operand_type.is_class()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_instanceof),
+            fmt::format(
+                "'instanceof' needs a class on the left - a '{}' carries no runtime type to check",
+                operand_type.get_type_desciption()));
+    }
+
+    if (!node.queried_type.has_complex_type()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_instanceof),
+            fmt::format(
+                "'instanceof' needs a struct or a class on the right, not '{}'",
+                node.queried_type.get_type_desciption()));
+    }
+
+    RecursiveVisitor::visit_instanceof_expr(node);
 }
 
 void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
@@ -254,18 +299,35 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         }
     }
 
-    // echo is a decl-less builtin, and its codegen has a format for every primitive and nothing
-    // else. an address is the case worth naming: after the adjustment pass a pointer here really
-    // is an address rather than a not-yet-dereferenced read, and printing one is almost always a
-    // missing `:$`-less read. reported here so it is a located diagnostic instead of the
-    // uncaught codegen throw it used to be
+    // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
+    // nothing else. reported here so each gap is a located diagnostic instead of the uncaught codegen
+    // throw it used to be. the `decl == nullptr` guard is what keeps this off a user-declared or
+    // namespaced function that happens to be spelled `echo` - it has a signature, so the ordinary
+    // argument checks above are the ones that apply to it.
+    //
+    // two shapes are worth naming. an *address*, because after the adjustment pass a pointer here
+    // really is an address rather than a not-yet-dereferenced read, so printing one is almost always
+    // a missing read. and a *named type*, struct or class, for which there is no rendering to pick at
+    // all - giving them one is todo/B6
     if (node.decl == nullptr && node.token_function_name.value() == "echo") {
         for (auto *arg : node.arguments) {
-            if (arg != nullptr && arg->result_type().is_pointer()) {
+            if (arg == nullptr) {
+                continue;
+            }
+
+            const ValueType type = arg->result_type();
+
+            if (type.is_pointer()) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.token_function_name),
                     fmt::format("cannot echo an address of type '{}' - echo prints values",
-                        arg->result_type().get_type_desciption()));
+                        type.get_type_desciption()));
+            }
+            else if (type.has_complex_type()) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_function_name),
+                    fmt::format("'echo' has no way to print a '{}' - print its members instead",
+                        type.get_type_desciption()));
             }
         }
     }
@@ -317,11 +379,17 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
 
         if (lhs_null != rhs_null) {
             const ValueType &other = lhs_null ? rhs : lhs;
-            if (!other.is_pointer()) {
+            // a class handle is itself the address, so it is compared directly - there is no slot to
+            // peel to and `:$` on it would ask about the variable rather than the object. a struct has
+            // no runtime representation that could be absent, which is why only these two answer
+            if (!other.is_pointer() && !other.is_class()) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.op_node->token_literal),
-                    fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
-                        other.get_type_desciption()));
+                    other.is_struct()
+                        ? fmt::format("cannot compare '{}' against null - a struct is always there",
+                            other.get_type_desciption())
+                        : fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
+                            other.get_type_desciption()));
             }
         }
 
@@ -341,7 +409,17 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
                     lhs.get_type_desciption(), rhs.get_type_desciption()));
         }
 
-        if (lhs.is_struct() || lhs.is_class() || rhs.is_struct() || rhs.is_class()) {
+        // `==` and `!=` over two class handles is an address comparison, which codegen does lower -
+        // it is how two references are told apart and how a null one is detected. a null operand
+        // types as void here rather than as a class, so it is admitted the same way. everything
+        // else on a struct or a class operand still has no lowering at all
+        const bool class_identity =
+            node.op_node->op->is_identity_comparison()
+            && (lhs.is_class() || rhs.is_class())
+            && (lhs.is_class() || lhs_null)
+            && (rhs.is_class() || rhs_null);
+
+        if (!class_identity && (lhs.has_complex_type() || rhs.has_complex_type())) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.op_node->token_literal),
                 fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'",

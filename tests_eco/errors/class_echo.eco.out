@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 7:1
+'echo' has no way to print a 'Res' - print its members instead
+Begin: 'echo'
+End: 'echo'
+Code excerpt:
+ [6]> $a = Res(1);
+ [7]> echo $a;
+      ^
+ [8]> 
+
+Critical issues found, cannot compile.

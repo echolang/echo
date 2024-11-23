@@ -31,6 +31,11 @@ namespace AST
         void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visit_deref_expr(DerefExprNode &node) override;
         void visit_pointer_value(PointerValueNode &node) override;
+        void visit_move_expr(MoveExprNode &node) override;
+        void visit_class_alloc_expr(ClassAllocExprNode &node) override;
+        void visit_retain_expr(RetainExprNode &node) override;
+        void visit_instanceof_expr(InstanceOfExprNode &node) override;
+        void visit_release(ReleaseNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
@@ -44,7 +49,7 @@ namespace AST
         void visitNamespaceDecl(NamespaceDeclNode &node) override;
         void visitNamespace(NamespaceNode &node) override;
         void visitAttribute(AttributeNode &node) override;
-        void visitStructDecl(StructDeclNode &node) override;
+        void visit_type_decl(TypeDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visitVar(VarNode &node) override;
     };

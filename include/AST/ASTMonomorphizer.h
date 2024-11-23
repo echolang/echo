@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTOwnership.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ASTValueType.h"
 
@@ -30,6 +31,7 @@ namespace AST
     public:
         explicit Monomorphizer(Bundle &bundle);
 
+        // the fixpoint, which also drives AST::OwnershipPass - see the comment on the member below
         void run();
 
         // a human-readable dump of what monomorphization produced: every concrete instance created,
@@ -41,6 +43,14 @@ namespace AST
     private:
         Bundle &_bundle;
         Collector &_collector;
+
+        // single-ownership resolution: drop insertion, `mv` and the moved-state analysis. driven from
+        // *inside* this fixpoint rather than as a pass of its own, because the two feed each other -
+        // whether a `T $x` local owns anything is only answerable after substitution, and the drop
+        // the ownership pass then inserts for a `Box<int32>` local is a new generic call site that
+        // this fixpoint has to instantiate. it lives in its own translation unit; only the call is
+        // here
+        OwnershipPass _ownership;
 
         // every function declaration mapped to the module that owns it, so instances are
         // cloned into the template's module (keeping copied token references valid).

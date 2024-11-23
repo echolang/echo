@@ -1,7 +1,7 @@
 #include "AST/ASTSymbol.h"
 
 #include "AST/FunctionDeclNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 
 AST::Symbol::Symbol(AST::FunctionDeclNode *func) : 
     _type(SymbolType::t_function), 
@@ -10,9 +10,9 @@ AST::Symbol::Symbol(AST::FunctionDeclNode *func) :
 {
 }
 
-AST::Symbol::Symbol(StructDeclNode *strct) :
-    _type(SymbolType::t_struct),
-    _name(strct->struct_name()),
-    node(AST::make_ref(strct))
+AST::Symbol::Symbol(TypeDeclNode *type_decl) :
+    _type(SymbolType::t_type),
+    _name(type_decl->type_name()),
+    node(AST::make_ref(type_decl))
 {
 }

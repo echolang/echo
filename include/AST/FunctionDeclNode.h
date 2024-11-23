@@ -17,6 +17,19 @@ namespace AST
     class Namespace;
     class AttributeNode;
 
+    // which of the four species a declaration is. spelled out rather than inferred because there
+    // are now three member kinds, and each is a different shape: a method's `$this` is a borrow
+    // parameter, a constructor's is a body-local of value type and its name is the struct's, a
+    // destructor takes nothing and returns nothing. it used to be readable off the tokens alone
+    // (a constructor is the only thing whose name token differs from its declaration token), which
+    // stopped being true the moment a second keyword-declared member existed
+    enum class MemberKind {
+        t_free,
+        t_method,
+        t_constructor,
+        t_destructor,
+    };
+
     class FunctionDeclNode : public Node
     {
     public:
@@ -54,6 +67,20 @@ namespace AST
         //
         // kept on a clone: an instance is still a member of its owner
         ComplexType *owner_type = nullptr;
+
+        // which species this declaration is. kept on a clone: an instance of a destructor is still
+        // a destructor. note it is *not* redundant with owner_type - a constructor is a member of
+        // its struct in every sense a reader means, but deliberately has a null owner_type because
+        // it resolves through the namespace overload set as a free function named after the struct
+        MemberKind member_kind = MemberKind::t_free;
+
+        inline bool is_constructor() const {
+            return member_kind == MemberKind::t_constructor;
+        }
+
+        inline bool is_destructor() const {
+            return member_kind == MemberKind::t_destructor;
+        }
 
         inline bool is_member() const {
             return owner_type != nullptr;

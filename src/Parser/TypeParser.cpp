@@ -4,7 +4,7 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 
 #include <algorithm>
 #include <optional>
@@ -184,8 +184,8 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
     }
 
     auto symbol = payload.collector.namespaces.find_symbol(name, *payload.context.current_namespace);
-    if (symbol && symbol->type() == AST::SymbolType::t_struct) {
-        auto *decl = symbol->node.unsafe_ptr<AST::StructDeclNode>();
+    if (symbol && symbol->type() == AST::SymbolType::t_type) {
+        auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
         return std::vector<AST::ValueType>{ decl->value_type() };
     }
 
@@ -195,7 +195,7 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
 // applied to `template_decl`, and returns the interned application ValueType. Arguments are
 // themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type.
-static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::StructDeclNode *template_decl, const TokenReference &name_token)
+static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::TypeDeclNode *template_decl, const TokenReference &name_token)
 {
     auto &cursor = payload.cursor;
     AST::ComplexType *template_ct = template_decl->value_type().get_complex_type();
@@ -249,10 +249,10 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::S
         }
     }
 
+    // the instance carries the template's kind, so make_complex answers `Box<int32>` the same way it
+    // answers `Box` - no need to ask the declaration which it was
     auto *inst = payload.collector.type_registry.get_or_create_instantiation(template_ct, args);
-    return template_decl->value_type().is_class()
-        ? AST::ValueType::make_class(inst)
-        : AST::ValueType::make_struct(inst);
+    return AST::ValueType::make_complex(inst);
 }
 
 std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Payload &payload)
@@ -515,7 +515,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
     auto token = payload.cursor.current();
     auto primitive_type = is_qualified ? AST::ValueType::make_unknown() : get_primitive_type(token.value());
-    AST::StructDeclNode *user_type_decl = nullptr;
+    AST::TypeDeclNode *user_type_decl = nullptr;
 
     // if it's not a primitive type, check for type parameters first
     if (!primitive_type.is_primitive() && !primitive_type.is_struct() && !primitive_type.is_class()) {
@@ -527,8 +527,8 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         } else {
             // Check for user-defined types (structs/classes)
             auto struct_symbol = payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace);
-            if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_struct) {
-                user_type_decl = struct_symbol->node.unsafe_ptr<AST::StructDeclNode>();
+            if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_type) {
+                user_type_decl = struct_symbol->node.unsafe_ptr<AST::TypeDeclNode>();
                 primitive_type = user_type_decl->value_type();
             }
 

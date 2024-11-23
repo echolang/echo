@@ -82,7 +82,7 @@ namespace AST
         MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual);
         MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration);
         // a second declaration of a type name that is already declared in this namespace. carries a
-        // name and the previous declaration's token rather than a StructDeclNode *, so a `class` or
+        // name and the previous declaration's token rather than a TypeDeclNode *, so a `class` or
         // an `enum` can reuse the kind unchanged - hence the type-neutral name
         MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
@@ -98,7 +98,7 @@ namespace AST
         MAKE_ISSUE_DEF1(IntegerUnderflow, IssueSeverity::Error, const std::string, _message);
 
         // semantic analysis diagnostics (recorded by the type-check pass, never thrown)
-        MAKE_ISSUE_DEF2(UnknownMember, IssueSeverity::Error, const std::string, member_name, const std::string, struct_name);
+        MAKE_ISSUE_DEF2(UnknownMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
         MAKE_ISSUE_DEF1(ArgumentTypeMismatch, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvedTypeParameter, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnsatisfiedTypeConstraint, IssueSeverity::Error, const std::string, _message);

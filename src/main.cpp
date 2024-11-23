@@ -212,6 +212,25 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
     return 0;
 }
 
+// the same dump, after the semantic passes have rewritten the tree. its own flag rather than a
+// replacement for -a, because the two answer different questions and both get asked: -a is what the
+// parser produced, and this is what codegen will actually walk.
+//
+// that difference is not cosmetic. every implicit thing in this language is made explicit by a pass -
+// each auto-deref by AST::PointerAdjuster, each destructor call, retain and release by
+// AST::OwnershipPass - and none of them exists yet at -a time. checking that a reference count
+// balances means reading the tree *here*
+static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundle)
+{
+    if (!cli.get<bool>("--print-resolved-ast")) {
+        return;
+    }
+
+    for (const auto& mod : bundle.modules) {
+        std::cout << "Module: " << mod->debug_description() << std::endl;
+    }
+}
+
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference.
 // tests/helpers.cpp mirrors this list and has to be updated alongside it
@@ -232,6 +251,8 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
     AST::PointerAdjuster(bundle).run();
 
     AST::TypeChecker(bundle).run();
+
+    print_resolved_ast(cli, bundle);
 
     bundle.collector.print_issues();
     if (bundle.collector.has_critical_issues()) {
@@ -353,7 +374,12 @@ int main(int argc, char *argv[])
             .implicit_value(true);
 
         command.get().add_argument("-a", "--print-ast")
-            .help("Print the AST to the console.")
+            .help("Print the AST as parsed, before the semantic passes.")
+            .default_value(false)
+            .implicit_value(true);
+
+        command.get().add_argument("-ar", "--print-resolved-ast")
+            .help("Print the AST after the semantic passes: derefs, drops, retains and releases included.")
             .default_value(false)
             .implicit_value(true);
 

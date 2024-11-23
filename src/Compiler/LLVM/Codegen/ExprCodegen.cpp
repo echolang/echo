@@ -8,7 +8,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
@@ -168,6 +168,27 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     _ctx.value_stack.pop();
     auto left = _ctx.value_stack.top();
     _ctx.value_stack.pop();
+
+    // two class handles, or a handle against null. the only operators a class answers, and the type
+    // checker has already rejected the rest - so this is a plain address comparison over two opaque
+    // pointers, ahead of the pointer arm because a class type is not a t_pointer
+    if (lhsret.is_class() || rhsret.is_class())
+    {
+        // which operators those are is Operator::is_identity_comparison, the same predicate the type
+        // checker rejects the rest with - so the two passes read the rule off one function rather than
+        // each enumerating it
+        if (!node.op_node->op->is_identity_comparison()) {
+            throw _ctx.error(fmt::format(
+                "unsupported binary operator '{}' for operands '{}' and '{}' {}",
+                node.op_node->token_literal.value(), lhsret.get_type_desciption(),
+                rhsret.get_type_desciption(), _ctx.function_context()));
+        }
+
+        _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+            ? _ctx.builder->CreateICmpEQ(left, right)
+            : _ctx.builder->CreateICmpNE(left, right));
+        return;
+    }
 
     // everything reached through `:$` operates on the address itself: comparisons ask about
     // identity, and arithmetic is scaled by the pointee's size, never by bytes

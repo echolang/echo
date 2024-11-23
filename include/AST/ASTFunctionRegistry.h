@@ -77,6 +77,16 @@ namespace AST
         // way to it.
         void register_member_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
 
+        // registers the owner's destructor. reconciles across the parse passes by declaration site
+        // like the two above, but enters the declaration in *neither* lookup structure: the method
+        // table would make it an overload candidate, and it is not a name anyone can write - the
+        // drop sites AST::OwnershipPass inserts reach it through AST::find_destructor.
+        //
+        // there is nothing to duplicate-check here: a struct has one destructor slot and no parameters
+        // to overload on, so "already has a destructor" is the caller's report to make, where the
+        // struct's name is at hand - and the caller asks it of the slot, before registering
+        void register_destructor(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
+
         // the overload set for a name, searched from `ns` outward. the first namespace holding
         // any candidate for the name answers - an outer namespace does not extend an inner one's
         // set, it is hidden by it. empty when the name is unknown everywhere.

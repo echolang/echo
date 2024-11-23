@@ -228,6 +228,176 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
+    // `mv E` - take the value out of E, leaving E unset.
+    //
+    // like `:$` this emits no code, and for the same reason: a move *is* the copy that would
+    // otherwise have been there, minus the leaving-behind. so the node's only job is to mark the
+    // position, and AST::OwnershipPass then reads it twice - to skip the copy diagnostic, and to add
+    // E's root variable to the moved set - before erasing it. nothing about a move survives into the
+    // IR except the absence of the copy (book/concept/ownership_and_moving.md, "`mv` should erase
+    // itself").
+    //
+    // deliberately *not* a place expression: the whole point is that E has stopped holding the
+    // value, so `&(mv $a)` and `mv $a = ...` are nonsense. reaching codegen is a compiler bug, and
+    // the visitor there says so
+    class MoveExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_move);
+
+        ExprNode *operand;
+
+        // the `mv` token, so "you cannot move that" can point at the keyword
+        TokenReference token_move;
+
+        MoveExprNode(ExprNode *operand, TokenReference token_move) :
+            operand(operand), token_move(token_move)
+        {
+            assert(operand != nullptr && "MoveExprNode requires an operand");
+        };
+
+        ~MoveExprNode() {}
+
+        // the moved value's type - the operand's own. a move changes who owns it, not what it is
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_move_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // a fresh, zeroed heap block for a class, with its strong count seated at 1 and its typeinfo
+    // written - the value a class constructor's `$this` is initialized with.
+    //
+    // there is no syntax for this and there is not meant to be: `Foo(...)` builds either storage class,
+    // and which one it is, is the declaration's business rather than the call site's. so the node is
+    // synthesized by the type declaration parser, in exactly the place a struct constructor leaves
+    // `$this` uninitialized, and everything else about a constructor - the property writes, the
+    // implicit `return $this` - is the struct path unchanged.
+    //
+    // carries the class type rather than a ComplexType so result_type() can answer without help, which
+    // is what lets the ownership pass see the +1 without knowing this node exists
+    class ClassAllocExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_class_alloc);
+
+        // the class being allocated. a template's `$this` carries the self-application `Foo<T>`, which
+        // the monomorphizer substitutes like any other type on the node
+        ValueType class_type;
+
+        // the type name token, so a failure to lower the layout has somewhere to point
+        TokenReference token_type;
+
+        ClassAllocExprNode(ValueType class_type, TokenReference token_type) :
+            class_type(std::move(class_type)), token_type(std::move(token_type))
+        {
+            assert(class_type.is_class() && "ClassAllocExprNode requires a class type");
+        };
+
+        ~ClassAllocExprNode() {}
+
+        // the handle. a fresh block is +1 and belongs to whoever the value arrives at
+        ValueType result_type() const override {
+            return class_type;
+        }
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_class_alloc_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // one more strong reference to what E names, yielding E's own value.
+    //
+    // wrapped around a class-typed *place* read wherever the value arrives somewhere that will owe a
+    // release for it - a declaration, an assignment, a by-value argument. a class-typed value that is
+    // not a place needs none: a constructor call or a function result is already one reference nobody
+    // else holds, which is the same "a place is copied, a non-place is moved" rule the ownership pass
+    // applies to structs.
+    //
+    // in the tree rather than folded into codegen for the reason every implicit thing in this compiler
+    // is: --print-resolved-ast shows exactly where the counting happens, which is the only practical
+    // way to check a retain/release balance. AST::OwnershipPass decides, ClassCodegen emits
+    class RetainExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_retain);
+
+        ExprNode *operand;
+
+        RetainExprNode(ExprNode *operand) : operand(operand)
+        {
+            assert(operand != nullptr && "RetainExprNode requires an operand");
+        };
+
+        ~RetainExprNode() {}
+
+        // the operand's own type. a retain changes a count, not a value
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_retain_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `E instanceof T` - is the object E names an instance of exactly T?
+    //
+    // total over a class operand and constant-false against a struct, because a class block carries a
+    // runtime type word and a struct carries nothing at all (CONCEPT.md, "structs do not have any
+    // runtime meta data"). that asymmetry is the whole feature: the question is only answerable for a
+    // value that brought its own answer along, so a *struct* operand is a compile error rather than a
+    // `false`.
+    //
+    // there is no inheritance, so "exactly T" is the only reading there is - the lowering is one
+    // pointer comparison against the class's identity global
+    class InstanceOfExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_instanceof);
+
+        ExprNode *operand;
+
+        // the type on the right. a named type either way - the diagnostic for a struct operand is the
+        // *left* side's business, and a struct on the right is a legitimate question with the answer
+        // `false`
+        ValueType queried_type;
+
+        // the `instanceof` keyword, so a bad operand reports at the operator
+        TokenReference token_instanceof;
+
+        InstanceOfExprNode(ExprNode *operand, ValueType queried_type, TokenReference token_instanceof) :
+            operand(operand), queried_type(std::move(queried_type)), token_instanceof(std::move(token_instanceof))
+        {
+            assert(operand != nullptr && "InstanceOfExprNode requires an operand");
+        };
+
+        ~InstanceOfExprNode() {}
+
+        ValueType result_type() const override {
+            return ValueType(ValueTypePrimitive::t_bool);
+        }
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_instanceof_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
     // `E[n]` - the element n positions along from the address E holds.
     //
     // a place, so it reads and writes alike, and `$p:$[0]` is the same storage as `$p`. the

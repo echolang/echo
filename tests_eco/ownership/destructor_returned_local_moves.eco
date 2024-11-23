@@ -1,0 +1,26 @@
+// "a returned local is moved, not copied" - the rule the whole feature rests on. a constructor's
+// `$this` is a body-local of value type with an implicit `return $this`, so without the move
+// `$x = make(...)` would free the buffer twice: once when the constructor's `$this` goes out of
+// scope and once when `$x` does. exactly one destructor line proves it did not
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function make(usize $tag) : Buffer
+{
+    // built here, handed back: neither the constructor's `$this` nor this local is destroyed
+    $b = Buffer($tag, mem::alloc<uint8>(4));
+    return $b;
+}
+
+$x = make(7);
+echo 0;

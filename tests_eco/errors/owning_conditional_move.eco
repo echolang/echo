@@ -1,0 +1,21 @@
+// moved on one branch and not the other. the chapter's merge rule makes the variable unset
+// afterwards, which settles reading it - but nothing then destroys the value on the branch that kept
+// it, and a runtime drop flag is no part of the design. rejected rather than leaked
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $b) : void {}
+
+$a = Buffer(mem::alloc<uint8>(1));
+
+if (true) {
+    consume(mv $a);
+}

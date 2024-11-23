@@ -4,7 +4,7 @@
 
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
-#include <AST/StructNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
 
 #include <set>

@@ -4,18 +4,18 @@
 
 #include <AST/ASTNamespace.h>
 #include <AST/FunctionDeclNode.h>
-#include <AST/StructNode.h>
+#include <AST/TypeDeclNode.h>
 
 // namespace qualified type names (`a::Foo`) and the mangling that keeps same-named types from
 // different namespaces apart. see todo/B7-complex-type-mangling.md
 
 namespace {
     // the struct declared under the given namespaced name, or null when there is none
-    AST::StructDeclNode *find_struct(AST::Bundle &bundle, const std::string &namespaced_name)
+    AST::TypeDeclNode *find_struct(AST::Bundle &bundle, const std::string &namespaced_name)
     {
         auto &module = bundle.modules.find_module("test");
-        for (auto *strct : module.nodes.of_type<AST::StructDeclNode>()) {
-            if (strct->namespaced_struct_name() == namespaced_name) {
+        for (auto *strct : module.nodes.of_type<AST::TypeDeclNode>()) {
+            if (strct->namespaced_type_name() == namespaced_name) {
                 return strct;
             }
         }

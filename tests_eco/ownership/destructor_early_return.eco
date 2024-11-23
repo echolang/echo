@@ -1,0 +1,30 @@
+// a `return` leaves every enclosing scope at once, so it owes the drops of all of them - innermost
+// first. `return` is the only early exit in the language today, which is why there are exactly two
+// insertion points to get right
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function bail(bool $early) : usize
+{
+    $outer = Buffer(1, mem::alloc<uint8>(1));
+
+    if ($early) {
+        $inner = Buffer(2, mem::alloc<uint8>(1));
+        return 10;
+    }
+
+    return 20;
+}
+
+echo bail(true);
+echo bail(false);

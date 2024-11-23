@@ -1,0 +1,25 @@
+// a destructor runs when the owner's scope ends, and it runs exactly once. `$tag` is echoed by the
+// destructor so the order and the count are both visible in the output rather than inferred
+// (book/concept/ownership_and_moving.md, "Destruction")
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function scoped() : void
+{
+    $b = Buffer(1, mem::alloc<uint8>(8));
+    echo 100;
+    // $b is destroyed here
+}
+
+scoped();
+echo 200;

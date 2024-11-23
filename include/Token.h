@@ -79,6 +79,9 @@ public:
         t_enum,                     // enum
         t_extern,                   // extern
         t_as,                       // as
+        t_destructor,               // destructor
+        t_instanceof,               // instanceof
+        t_mv,                       // mv
         t_unknown
     };
 

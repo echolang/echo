@@ -13,13 +13,14 @@
 #include <fmt/core.h>
 
 LLVMCompiler::LLVMCompiler()
-    : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _backend(_ctx)
+    : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx), _backend(_ctx)
 {
     // wire the shared context back to the single visitor (for accept-recursion) and to the
     // type-lowering subsystem (reachable from every other subsystem).
     _ctx.visitor = this;
     _ctx.types = &_types;
     _ctx.lvalues = &_lvalues;
+    _ctx.classes = &_classes;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -59,8 +60,8 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     //         _ctx.current_file = &file;
 
     //         for (auto &node : file.root->children) {
-    //             if (node.has_type<AST::StructDeclNode>()) {
-    //                 auto struct_decl = node.get<AST::StructDeclNode>();
+    //             if (node.has_type<AST::TypeDeclNode>()) {
+    //                 auto struct_decl = node.get<AST::TypeDeclNode>();
     //                 struct_decl.accept(*this);
     //             }
     //         }
@@ -166,12 +167,22 @@ void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(
 void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node) {
     throw _ctx.error("':$' survived the pointer adjustment pass");
 }
+// same contract as the peel marker above: AST::OwnershipPass erases every `mv` once it has read
+// it. one reaching codegen would mean a move was never resolved, and the copy it was meant to
+// replace is still there
+void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node) {
+    throw _ctx.error("'mv' survived the ownership pass");
+}
+void LLVMCompiler::visit_class_alloc_expr(AST::ClassAllocExprNode &node) { _classes.gen_class_alloc(node); }
+void LLVMCompiler::visit_retain_expr(AST::RetainExprNode &node) { _classes.gen_retain_expr(node); }
+void LLVMCompiler::visit_instanceof_expr(AST::InstanceOfExprNode &node) { _classes.gen_instanceof(node); }
+void LLVMCompiler::visit_release(AST::ReleaseNode &node) { _classes.gen_release_stmt(node); }
 void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node) { _expr.gen_binary_expr(node); }
 void LLVMCompiler::visitUnaryExpr(AST::UnaryExprNode &node) { _expr.gen_unary_expr(node); }
 void LLVMCompiler::visitNull(AST::NullNode &node) { _expr.gen_null(node); }
 void LLVMCompiler::visitOperator(AST::OperatorNode &node) { _expr.gen_operator(node); }
 
-void LLVMCompiler::visitStructDecl(AST::StructDeclNode &node) { _struct.gen_struct_decl(node); }
+void LLVMCompiler::visit_type_decl(AST::TypeDeclNode &node) { _struct.gen_type_decl(node); }
 void LLVMCompiler::visitMemberAccess(AST::MemberAccessNode &node) { _struct.gen_member_access(node); }
 void LLVMCompiler::visitVar(AST::VarNode &node) { _struct.gen_var(node); }
 

@@ -1,5 +1,5 @@
-#ifndef STRUCTNODE_H
-#define STRUCTNODE_H
+#ifndef TYPEDECLNODE_H
+#define TYPEDECLNODE_H
 
 #pragma once
 
@@ -10,23 +10,23 @@
 
 namespace AST 
 {
-    class StructDeclNode : public Node
+    class TypeDeclNode : public Node
     {
     public:
-        ECO_AST_NODE_TYPE(n_struct_decl);
+        ECO_AST_NODE_TYPE(n_type_decl);
         
         Namespace *ast_namespace = nullptr;
         
         std::optional<TokenReference> name_token;
 
-        StructDeclNode(TokenReference name_token) :
+        TypeDeclNode(TokenReference name_token, ComplexTypeKind kind = ComplexTypeKind::t_struct) :
             name_token(name_token)
         {
             _complex_type = ComplexType(name_token.value());
-            _type = ValueType::make_struct(&_complex_type);
+            _complex_type.kind = kind;
         };
 
-        ~StructDeclNode() {};
+        ~TypeDeclNode() {};
 
         // assigns the declaring namespace. the complex type has to learn it too, so its mangled
         // name and description can be fully qualified - always set it through here
@@ -49,14 +49,26 @@ namespace AST
                 && token.get_handle() == name_token->get_handle();
         }
 
-        const std::string struct_name() const;
+        const std::string type_name() const;
 
-        const std::string namespaced_struct_name() const;
+        const std::string namespaced_type_name() const;
 
         const std::string node_description() override;
 
+        // computed rather than stored. a stored ValueType would have to point at the embedded
+        // _complex_type, and CloneContext::shallow copy-constructs this node - so the copy's stored
+        // type would point at the *original's* layout until something rebuilt it by hand, which is
+        // the hazard this avoids. there is nothing to keep in sync if there is nothing stored
         ValueType value_type() const {
-            return _type;
+            return ValueType::make_complex(const_cast<ComplexType *>(&_complex_type));
+        }
+
+        ComplexTypeKind kind() const {
+            return _complex_type.kind;
+        }
+
+        bool is_class() const {
+            return _complex_type.is_class_kind();
         }
 
         // the embedded complex type, which owns this struct's generic type parameters (the T, U
@@ -74,7 +86,7 @@ namespace AST
         }
 
         void accept(Visitor& visitor) override {
-            visitor.visitStructDecl(*this);
+            visitor.visit_type_decl(*this);
         }
 
         Node *clone(CloneContext &cc) const override;
@@ -88,7 +100,7 @@ namespace AST
         // the member functions declared in this struct's body. unlike properties, which this node
         // keeps as VarDeclNodes alongside the ComplexType's flattened layout, a method is the same
         // pointer in both places - so it is stored once, on the type. the type is what a receiver
-        // names, and an instantiation has a ComplexType but no StructDeclNode of its own.
+        // names, and an instantiation has a ComplexType but no TypeDeclNode of its own.
         // FunctionRegistry::register_member_function is what appends
         const std::vector<FunctionDeclNode *> &methods() const {
             return _complex_type.methods();
@@ -134,7 +146,6 @@ namespace AST
         }
 
     private:
-        ValueType _type;
         ComplexType _complex_type;
         std::vector<VarDeclNode *> _properties;
         std::vector<FunctionDeclNode *> _constructors;

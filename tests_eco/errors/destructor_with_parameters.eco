@@ -1,0 +1,12 @@
+// a destructor takes no parameters and you never call it, so there is nowhere for an argument to
+// come from
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor(usize $extra)
+    {
+        mem::free($this->data);
+    }
+}

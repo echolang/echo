@@ -1,11 +1,11 @@
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
 
 #include "Debugging.h"
 
-const std::string AST::StructDeclNode::struct_name() const
+const std::string AST::TypeDeclNode::type_name() const
 {
     if (name_token.has_value()) {
         return name_token.value().value();
@@ -14,21 +14,22 @@ const std::string AST::StructDeclNode::struct_name() const
     return "[anonymous]";
 }
 
-const std::string AST::StructDeclNode::namespaced_struct_name() const
+const std::string AST::TypeDeclNode::namespaced_type_name() const
 {
     if (ast_namespace) {
         std::string ns = ast_namespace->full_name();
         if (!ns.empty()) {
-            return ns + ECO_NAMESPACE_SEPARATOR + struct_name();
+            return ns + ECO_NAMESPACE_SEPARATOR + type_name();
         }
     }
 
-    return struct_name();
+    return type_name();
 }
 
-const std::string AST::StructDeclNode::node_description()
+const std::string AST::TypeDeclNode::node_description()
 {
-    std::string result = "struct " + namespaced_struct_name() + "\n{\n";
+    // the keyword the declaration was written with, so --print-ast says which storage class this is
+    std::string result = std::string(is_class() ? "class " : "struct ") + namespaced_type_name() + "\n{\n";
     result += "properties:\n";
     for (auto prop : _properties) {
         result += DD::tabbify(prop->node_description(), 2) + "\n";
@@ -42,11 +43,18 @@ const std::string AST::StructDeclNode::node_description()
         }
     }
 
+    // listed separately because it is not in the method table - it is not a name a call site can
+    // spell, and it must not read as one more overload candidate
+    if (auto *dtor = complex_type().destructor()) {
+        result += "destructor:\n";
+        result += DD::tabbify(dtor->signature_description(), 2) + "\n";
+    }
+
     result += "}\n";
     return result;
 }
 
-void AST::StructDeclNode::add_property(VarDeclNode *property)
+void AST::TypeDeclNode::add_property(VarDeclNode *property)
 {
     _properties.push_back(property);
     _complex_type.add_property(property->name(), property->type_node()->type);

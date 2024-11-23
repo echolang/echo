@@ -1,0 +1,23 @@
+---- Issue ----
+Issue at 7:6
+Invalid type conversion: cannot implicitly convert 'Res' to 'bool'
+Begin: '$less'
+End: '$less'
+Code excerpt:
+ [6]> $b = Res(2);
+ [7]> bool $less = $a < $b;
+           ^
+ [8]> 
+
+---- Issue ----
+Issue at 7:17
+operator '<' is not supported on operands of type 'Res' and 'Res'
+Begin: '<'
+End: '<'
+Code excerpt:
+ [6]> $b = Res(2);
+ [7]> bool $less = $a < $b;
+                      ^
+ [8]> 
+
+Critical issues found, cannot compile.

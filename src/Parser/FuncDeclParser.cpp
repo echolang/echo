@@ -4,7 +4,7 @@
 #include "AST/TypeNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/ASTBuiltin.h"
 
 #include "Parser/TypeParser.h"
@@ -37,6 +37,26 @@ static std::optional<std::string> attribute_string_value(
     return attribute->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>()->get_string_value();
 }
 
+void Parser::push_receiver_param(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    AST::ScopeNode &into,
+    AST::TypeNode *self_type,
+    const TokenReference &at)
+{
+    auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, at);
+    auto *this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, self_type);
+
+    // ahead of everything the caller wrote. FunctionDeclNode::clone clones args before the body
+    // precisely so the body's references rebind to the cloned declaration
+    decl.args.push_back(this_vardecl);
+
+    // declared in the argument scope, not in the body, so `$this` resolves the same way every other
+    // parameter does. the argument scope's children are never emitted - the body is a separate child
+    // scope and codegen allocas from `args` - so this costs no second slot
+    into.add_vardecl(*this_vardecl);
+}
+
 bool Parser::parse_parameter_list(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
@@ -53,7 +73,21 @@ bool Parser::parse_parameter_list(
             return false;
         }
 
-        decl.args.push_back(parse_varexpr(payload, &into));
+        // `mv Buffer $items` - this parameter takes ownership of its argument. read here rather than
+        // in parse_varexpr because it is a property of a *parameter*, not of a declaration: there is
+        // no `mv` on a local, and a local's owner is the scope it is declared in either way
+        const bool takes_ownership = cursor.is_type(Token::Type::t_mv);
+        if (takes_ownership) {
+            cursor.skip();
+        }
+
+        auto *param = parse_varexpr(payload, &into);
+
+        if (param != nullptr) {
+            param->takes_ownership = takes_ownership;
+        }
+
+        decl.args.push_back(param);
     }
 
     // skip the close parenthesis
@@ -141,7 +175,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
     // a `function` written inside a struct body is a method: the enclosing struct arrived on the
     // context, and it is the only thing that distinguishes this from a free function
-    AST::StructDeclNode *owner_struct = payload.context.self_struct_ptr;
+    AST::TypeDeclNode *owner_struct = payload.context.self_struct_ptr;
     AST::TypeNode *self_type = payload.context.self_type_ptr;
     const bool is_method = owner_struct != nullptr && self_type != nullptr;
 
@@ -167,24 +201,11 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // create an empty base scope for the function and the arguments to sit in
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
 
-    // the receiver is a real parameter, ahead of everything the caller wrote. a *parameter* rather
-    // than a body-local the way a constructor's `$this` is, and that is the better shape: it makes
-    // a method an ordinary function, so mangling, cloning, the pointer adjuster and codegen all
-    // handle it with no special case - in particular FunctionDeclNode::clone clones args before the
-    // body precisely so the body's references rebind to the cloned declaration.
-    //
-    // its type is the non-nullable borrow `Foo&` (or `Foo<T>&`), so the method reads and writes the
-    // caller's storage rather than a copy, and the type node is shared by every method of the struct
+    // the receiver is a real parameter, ahead of everything the caller wrote - see
+    // Parser::push_receiver_param, shared with the destructor arm
     if (is_method) {
-        auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, nametoken);
-        auto *this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, self_type);
-
-        funcdecl->args.push_back(this_vardecl);
-
-        // declared in the argument scope, not in the body, so `$this` resolves the same way every
-        // other parameter does. funcscope's children are never emitted - the body is a separate
-        // child scope and codegen allocas from `args` - so this costs no second slot
-        funcscope.add_vardecl(*this_vardecl);
+        funcdecl->member_kind = AST::MemberKind::t_method;
+        push_receiver_param(payload, *funcdecl, funcscope, self_type, nametoken);
     }
 
     // parse the function arguments

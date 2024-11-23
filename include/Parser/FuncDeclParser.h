@@ -35,6 +35,22 @@ namespace Parser
     // what a call resolves against
     bool parse_parameter_list(
         Payload &payload, AST::FunctionDeclNode &decl, AST::ScopeNode &into, const TokenReference &report_at);
+
+    // prepends the implicit `$this` receiver to `decl`, typed `self_type` - the non-nullable borrow
+    // `Foo&` (or `Foo<T>&`) every member of the struct shares - and declares it in `into` so it
+    // resolves exactly as any other parameter does.
+    //
+    // a *parameter* rather than a body-local the way a constructor's `$this` is, which is what makes
+    // a member an ordinary function: mangling, cloning, the pointer adjuster and codegen all handle
+    // it with no special case. shared by the method and destructor arms so the two receivers cannot
+    // drift - they are the same thing, and a destructor that borrowed differently would mutate a
+    // copy and free nothing
+    void push_receiver_param(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        AST::ScopeNode &into,
+        AST::TypeNode *self_type,
+        const TokenReference &at);
 };
 
 

@@ -130,8 +130,10 @@ void PointerAdjuster::bind_null_operand(ExprNode *maybe_null, ExprNode *other)
         return;
     }
 
+    // a class handle is an address too, and unlike a struct it can be absent - so `$obj == null` binds
+    // the null to the class type and the comparison lowers to an icmp over two handles
     ValueType other_type = other->result_type();
-    if (other_type.is_pointer()) {
+    if (other_type.is_pointer() || other_type.is_class()) {
         null_node->bound_type = other_type;
     }
 }
@@ -286,6 +288,38 @@ void PointerAdjuster::adjust(Node *node)
             adjust(access->get_base_node().node());
             break;
         }
+
+        case NodeType::n_expr_instanceof:
+        {
+            // the operand is read as a value: the question is about the object a handle names, and
+            // `$this instanceof Foo` inside a method holds a `Foo&`, so without the deref the
+            // comparison would be against the slot's address rather than the handle in it
+            auto *instance_of = static_cast<InstanceOfExprNode *>(node);
+            instance_of->operand = as_value(instance_of->operand);
+            break;
+        }
+
+        case NodeType::n_expr_retain:
+        {
+            // likewise a read: the retain touches the count in the block the *handle* names. the
+            // ownership pass wrapped a place here, and this is where that place stops being one
+            auto *retain = static_cast<RetainExprNode *>(node);
+            retain->operand = as_value(retain->operand);
+            break;
+        }
+
+        case NodeType::n_release:
+        {
+            // deliberately not adjusted. codegen reads the target's slot itself, because between the
+            // declaration and the release an assignment may have re-seated the variable - so the
+            // release wants the place, not a read of it. a borrow is never a release target anyway:
+            // needs_destruction is false for a pointer
+            break;
+        }
+
+        // a leaf: an allocation has no operand, only the class type it was synthesized for
+        case NodeType::n_expr_class_alloc:
+            break;
 
         case NodeType::n_type_cast:
         {

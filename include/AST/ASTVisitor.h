@@ -18,6 +18,11 @@ namespace AST
     class AddrOfExprNode;
     class DerefExprNode;
     class PointerValueNode;
+    class MoveExprNode;
+    class ClassAllocExprNode;
+    class RetainExprNode;
+    class InstanceOfExprNode;
+    class ReleaseNode;
     class IndexExprNode;
     class BinaryExprNode;
     class UnaryExprNode;
@@ -31,7 +36,7 @@ namespace AST
     class NamespaceDeclNode;
     class NamespaceNode;
     class AttributeNode;
-    class StructDeclNode;
+    class TypeDeclNode;
     class MemberAccessNode;
     class VarNode;
 
@@ -53,6 +58,11 @@ namespace AST
         virtual void visit_addr_of_expr(AddrOfExprNode &node) = 0;
         virtual void visit_deref_expr(DerefExprNode &node) = 0;
         virtual void visit_pointer_value(PointerValueNode &node) = 0;
+        virtual void visit_move_expr(MoveExprNode &node) = 0;
+        virtual void visit_class_alloc_expr(ClassAllocExprNode &node) = 0;
+        virtual void visit_retain_expr(RetainExprNode &node) = 0;
+        virtual void visit_instanceof_expr(InstanceOfExprNode &node) = 0;
+        virtual void visit_release(ReleaseNode &node) = 0;
         virtual void visit_index_expr(IndexExprNode &node) = 0;
         virtual void visitBinaryExpr(BinaryExprNode &node) = 0;
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
@@ -66,7 +76,7 @@ namespace AST
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;
         virtual void visitAttribute(AttributeNode &node) = 0;
-        virtual void visitStructDecl(StructDeclNode &node) = 0;
+        virtual void visit_type_decl(TypeDeclNode &node) = 0;
         virtual void visitMemberAccess(MemberAccessNode &node) = 0;
         virtual void visitVar(VarNode &node) = 0;
     };

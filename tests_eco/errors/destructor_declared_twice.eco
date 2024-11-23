@@ -1,0 +1,16 @@
+// a struct has one destructor. there are no parameters to overload on, so a second one is a
+// redeclaration rather than an overload
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+
+    destructor()
+    {
+    }
+}

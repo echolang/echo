@@ -635,6 +635,12 @@ bool is_expr_token(Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_null) ||
            // `ptr<T>(...)` is a cast, so a type keyword can begin an expression
            cursor.is_type(Token::Type::t_ptr) ||
+           // `mv E` is a prefix operator, so it begins one too. without this the shunting-yard loop
+           // never enters and the expression comes back empty
+           cursor.is_type(Token::Type::t_mv) ||
+           // `$a instanceof Foo` continues an expression that already began, so the loop must not
+           // stop at the keyword - parse_postfix_chain is what actually consumes it
+           cursor.is_type(Token::Type::t_instanceof) ||
            cursor.is_type(Token::Type::t_open_bracket) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
@@ -650,7 +656,28 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
     // operands for everything it sees. `[...]` joins them later
     while (cursor.is_type(Token::Type::t_accessorlr)
         || cursor.is_type(Token::Type::t_ptr_of)
+        || cursor.is_type(Token::Type::t_instanceof)
         || cursor.is_type(Token::Type::t_open_bracket)) {
+
+        // `E instanceof T`. here rather than in the shunting yard for a reason the other suffixes only
+        // share by accident: its right operand is a *type*, not an expression, so there is no operand
+        // for the yard to pop. binding as tightly as `->` also makes `$a instanceof Foo == true` read
+        // the way it looks, with the comparison applied to the answer
+        if (cursor.is_type(Token::Type::t_instanceof)) {
+            auto instanceof_token = cursor.current();
+            cursor.skip();
+
+            auto *queried = Parser::parse_type(payload);
+            if (queried == nullptr) {
+                return AST::make_void_ref();
+            }
+
+            auto &check = payload.context.emplace_node<AST::InstanceOfExprNode>(
+                current_ref.unsafe_ptr<AST::ExprNode>(), queried->type, instanceof_token);
+
+            current_ref = AST::make_ref(check);
+            continue;
+        }
 
         if (cursor.is_type(Token::Type::t_open_bracket)) {
             auto bracket_token = cursor.current();
@@ -784,7 +811,8 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         // null has no type of its own - it takes the one the position expects. an unbound null
         // stays untyped here and is reported by the checker, which has the context to say so
         auto &node = payload.context.emplace_node<AST::NullNode>(cursor.current());
-        if (expected_type != nullptr && expected_type->type.is_pointer()) {
+        if (expected_type != nullptr
+            && (expected_type->type.is_pointer() || expected_type->type.is_class())) {
             node.bound_type = expected_type->type;
         }
         cursor.skip();
@@ -795,6 +823,44 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         auto &node = payload.context.emplace_node<AST::LiteralStringExprNode>(cursor.current());
         cursor.skip();
         return AST::make_ref(node);
+    }
+
+    // `mv E` - take the value out of E. one parse site covers every position a move can appear in
+    // (`$b = mv $a`, `consume(mv $a)`, `return mv $a`), because all three arrive here through
+    // parse_expr.
+    //
+    // the operand is parsed by recursing into this function rather than by requiring a variable, so
+    // `mv $doc->body` reaches AST::OwnershipPass as a real tree and gets the "partial moves are not
+    // supported" diagnostic there - where the type is known - instead of an unexpected-token here
+    else if (cursor.is_type(Token::Type::t_mv)) {
+        auto move_token = cursor.current();
+        cursor.skip();
+
+        // the expected type flows through unchanged: `mv` says nothing about what E is, only about
+        // who owns it afterwards
+        auto operand_ref = parse_expr_node(payload, expected_type);
+
+        if (!operand_ref.has() || !operand_ref.is_expression_node()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(move_token),
+                "'mv' expects a value to move out of");
+            return AST::make_void_ref();
+        }
+
+        auto *operand = operand_ref.unsafe_ptr<AST::ExprNode>();
+
+        // only a place can be moved *out of*: there has to be storage left behind for the move to
+        // empty. a non-place is already a move - a call result is nobody else's - so writing `mv` on
+        // one is not an error to work around but a sign the author expected a copy to be happening
+        if (!AST::is_place_expression(*operand)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(move_token),
+                "'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own");
+            return AST::make_void_ref();
+        }
+
+        auto &move_expr = payload.context.emplace_node<AST::MoveExprNode>(operand, move_token);
+        return AST::make_ref(move_expr);
     }
 
     else if (

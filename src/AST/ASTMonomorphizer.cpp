@@ -10,6 +10,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/ASTArgumentCoercion.h"
+#include "AST/ASTOwnership.h"
 #include "Debugging.h"
 
 #include <fmt/core.h>
@@ -31,7 +32,7 @@ namespace AST
     }
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
-        : _bundle(bundle), _collector(bundle.collector)
+        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -348,6 +349,15 @@ namespace AST
                     decl->set_type_node(&type_node);
                     progressed = true;
                 }
+            }
+
+            // resolve ownership for every body that is concrete now: erase its `mv` markers, report
+            // the copies it cannot make, and insert its drops. inside the loop for the same reason
+            // the re-typing above is - it both *needs* the concrete types this round produced and
+            // *produces* new generic call sites (a drop of a `Box<int32>` local calls Box<T>'s
+            // destructor), which the next round instantiates through the ordinary path
+            if (_ownership.run_round()) {
+                progressed = true;
             }
         }
     }

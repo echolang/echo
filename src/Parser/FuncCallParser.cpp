@@ -277,11 +277,11 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     // the receiver's type says where to look - the type the deref walk above landed on, which is
     // AST::target_type_of by construction: `->` follows every pointer level, the same rule
     // MemberAccessNode resolves its base with
-    if (!receiver_type.is_struct()) {
+    if (!receiver_type.has_complex_type()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(member_token),
             fmt::format(
-                "'{}' has no members to call - only a struct has member functions",
+                "'{}' has no members to call - only a struct or a class has member functions",
                 receiver_type.get_type_desciption()));
         return nullptr;
     }

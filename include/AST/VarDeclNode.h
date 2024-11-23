@@ -30,6 +30,18 @@ namespace AST
         // the name of variable without the $ prefix
         std::string symbol_name;
 
+        // written `mv Buffer $items`: this *parameter* takes ownership of its argument, so a caller
+        // handing it a place has to say `mv` at the call site. always false for a local, which owns
+        // whatever it is initialised with either way.
+        //
+        // deliberately here and not on the ValueType. that struct is the interning identity for
+        // TypeRegistry and for the monomorphizer's instance cache, so a flag on it would fork every
+        // owning type in two and make `Buffer` and `mv Buffer` distinct types. the consequence is
+        // that `consume(mv Buffer)` and `consume(Buffer)` mangle identically and collide as a
+        // DuplicateFunctionSignature - which is correct: `mv` is a contract about the argument, not
+        // a distinction a call can be resolved on
+        bool takes_ownership = false;
+
         VarDeclNode(TokenReference token_varname, TypeNode *type) : 
             _type_node(type), token_varname(token_varname)
         {

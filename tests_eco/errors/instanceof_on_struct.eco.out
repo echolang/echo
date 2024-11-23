@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 8:9
+'instanceof' needs a class on the left - a 'Rock' carries no runtime type to check
+Begin: 'instanceof'
+End: 'instanceof'
+Code excerpt:
+ [7]> $r = Rock(1);
+ [8]> echo $r instanceof Rock;
+              ^
+ [9]> 
+
+Critical issues found, cannot compile.

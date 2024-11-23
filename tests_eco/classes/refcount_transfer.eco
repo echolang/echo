@@ -1,0 +1,63 @@
+// a reference crossing a function boundary. the caller retains for a by-value parameter and the
+// callee releases at the end of its body; `mv` hands the existing one over instead, and a returned
+// local moves - so the caller, not the callee, owes its release
+
+class Res
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function borrow_it(Res& $r) : int32 { return $r->tag; }
+function take_it(Res $r) : void { echo 60; }
+function consume_it(mv Res $r) : void { echo 70; }
+function make_it() : Res { Res $r = Res(3); return $r; }
+
+// a borrow keeps nothing alive and destroys nothing
+function borrowed() : void
+{
+    Res $a = Res(1);
+    echo borrow_it($a);
+    echo 10;
+}
+
+// by value: the caller adds a reference, the callee drops it. the object outlives the call
+function by_value() : void
+{
+    Res $a = Res(2);
+    take_it($a);
+    echo 20;
+}
+
+// a returned local is moved out - nothing is destroyed inside make_it
+function returned() : void
+{
+    Res $a = make_it();
+    echo 30;
+}
+
+// mv transfers the caller's reference, so the teardown happens inside the callee
+function moved() : void
+{
+    Res $a = Res(4);
+    consume_it(mv $a);
+    echo 40;
+}
+
+// a temporary nobody names is still owned by the scope it was written in
+function discarded() : void
+{
+    Res(5);
+    echo 50;
+}
+
+borrowed();
+by_value();
+returned();
+moved();
+discarded();
+echo 99;

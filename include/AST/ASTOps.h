@@ -40,12 +40,19 @@ namespace AST
         // the distinction matters for pointers: comparing an address against a non-address is
         // a type error, while `$p:$ + 1` mixing an address and an int is ordinary offsetting
         inline bool is_comparison() const {
-            return type == Token::Type::t_logical_eq
-                || type == Token::Type::t_logical_neq
+            return is_identity_comparison()
                 || type == Token::Type::t_open_angle
                 || type == Token::Type::t_close_angle
                 || type == Token::Type::t_logical_leq
                 || type == Token::Type::t_logical_geq;
+        }
+
+        // the two comparisons that ask "is this the same thing", rather than ordering it. the only
+        // operators a class handle answers: two handles compare as addresses, and a handle compares
+        // against null. every ordering operator on a class stays a type error
+        inline bool is_identity_comparison() const {
+            return type == Token::Type::t_logical_eq
+                || type == Token::Type::t_logical_neq;
         }
 
         virtual ~Operator() = default;

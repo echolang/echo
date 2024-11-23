@@ -1,0 +1,51 @@
+// a generic class instantiates like a generic struct - one interned type per argument list, one
+// layout, one set of methods per instance. what is new is that each instance needs its own heap
+// block and its own release, and `Box<Tracked>` needs a teardown where `Box<int32>` needs none
+
+class Box<T>
+{
+    T $value;
+
+    function get() : T { return $this->value; }
+    function set(T $v) : void { $this->value = $v; }
+}
+
+class Tracked
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function plain() : void
+{
+    $b = Box<int32>(5);
+    echo $b->get();
+    $b->set(9);
+    echo $b->get();
+    echo 10;
+}
+
+// the instance holds a class, so releasing the box releases what it holds
+function nested() : void
+{
+    $b = Box<Tracked>(Tracked(1));
+    echo $b->value->tag;
+    echo 20;
+}
+
+// a second reference to the inner object keeps it alive past the box
+function nested_shared() : void
+{
+    $b = Box<Tracked>(Tracked(2));
+    $inner = $b->get();
+    echo 30;
+}
+
+plain();
+nested();
+nested_shared();
+echo 99;

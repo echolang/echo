@@ -1,4 +1,4 @@
-#include "Parser/StructParser.h"
+#include "Parser/TypeDeclParser.h"
 
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ExprNode.h"
@@ -52,13 +52,84 @@ static void skip_member_body(Parser::Payload &payload)
     }
 }
 
+// the node a previous pass already registered for this declaration site, with its arguments dropped,
+// or null when the running pass is the first to reach it.
+//
+// a module is parsed in several passes over identical token indices, so the declaration *site* is
+// exact - and unlike the name, which every overload of a set shares, it identifies one declaration.
+// the arguments are rebuilt against the running pass's context rather than kept, because the body's
+// reads have to bind to declarations from the same pass
+static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, const TokenReference &site_token)
+{
+    AST::FunctionDeclNode *decl = payload.collector.functions.find_by_declaration_site(site_token);
+
+    if (decl != nullptr) {
+        decl->args.clear();
+    }
+
+    return decl;
+}
+
+// opens a member body, and answers whether there is one to parse here. false means the caller is done
+// with this member: either the brace is missing and has been reported, or this is the declaration pass,
+// which takes the signature and skips the body whole.
+//
+// the one place that decides where a member body begins, shared by the constructor and destructor arms
+// so a change to the recovery or to which pass reads a body cannot reach only one of them
+static bool enter_member_body(Parser::Payload &payload)
+{
+    if (!expect_token(payload, Token::Type::t_open_brace)) {
+        return false;
+    }
+
+    if (payload.pass == Parser::Pass::t_declarations) {
+        skip_member_body(payload);
+        return false;
+    }
+
+    payload.cursor.skip(); // skip "{"
+
+    return true;
+}
+
+// closes a member body: the brace, and the scope enter_member_body's caller pushed. reported and left
+// unconsumed when the brace is missing, which is what lets the enclosing struct walk recover
+static void leave_member_body(Parser::Payload &payload)
+{
+    if (expect_token(payload, Token::Type::t_close_brace)) {
+        payload.cursor.skip(); // skip "}"
+    }
+
+    payload.context.pop_scope();
+}
+
+// gives a constructor's `$this` its storage. a struct's is a plain stack slot that gen_var_decl
+// zero-fills; a class's is a fresh heap block with its strong count already at 1.
+//
+// that one initializer is the entire difference between constructing the two storage classes -
+// everything after it, the property writes and the implicit `return $this`, is shared code. shared by
+// both the user-written and the synthesized constructor so the two cannot diverge
+static void seat_this_storage(
+    Parser::Payload &payload,
+    AST::VarDeclNode *this_vardecl,
+    const AST::ValueType &self_value_type,
+    const TokenReference &name_token)
+{
+    if (!self_value_type.is_class()) {
+        return;
+    }
+
+    this_vardecl->init_expr =
+        payload.context.emplace_nodep<AST::ClassAllocExprNode>(self_value_type, name_token);
+}
+
 // a `constructor(...)` written in a struct body. registered in the declaration pass and given its
 // body in the body pass, exactly as parse_funcdecl handles a function: the two passes reconcile on
 // the declaration site, and the arguments are rebuilt against whichever pass is running so the
 // body's reads bind to declarations from the same pass.
 static void parse_constructor(
     Parser::Payload &payload,
-    AST::StructDeclNode *struct_node,
+    AST::TypeDeclNode *struct_node,
     const AST::ValueType &self_value_type)
 {
     auto &cursor = payload.cursor;
@@ -76,13 +147,11 @@ static void parse_constructor(
 
     cursor.skip(); // skip "("
 
-    AST::FunctionDeclNode *ctor_decl = payload.collector.functions.find_by_declaration_site(ctor_token);
+    AST::FunctionDeclNode *ctor_decl = reconciled_member_decl(payload, ctor_token);
 
-    if (ctor_decl != nullptr) {
-        // the arguments are rebuilt against this pass's context, so drop the previous pass's
-        ctor_decl->args.clear();
-    } else {
+    if (ctor_decl == nullptr) {
         ctor_decl = &payload.context.emplace_node<AST::FunctionDeclNode>(name_token, ctor_token);
+        ctor_decl->member_kind = AST::MemberKind::t_constructor;
         struct_node->add_constructor(ctor_decl);
     }
 
@@ -117,21 +186,15 @@ static void parse_constructor(
     payload.collector.functions.register_function(
         payload.collector, payload.context.code_ref(ctor_token), ctor_decl);
 
-    if (!expect_token(payload, Token::Type::t_open_brace)) {
+    if (!enter_member_body(payload)) {
         return;
     }
-
-    if (payload.pass == Parser::Pass::t_declarations) {
-        skip_member_body(payload);
-        return;
-    }
-
-    cursor.skip(); // skip "{"
 
     // predeclare "$this" so member access works in the body. a body-local of *value* type, unlike a
     // method's `$this`, which is a borrow parameter - a constructor hands back a new instance
     auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
     auto this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, ctor_decl->return_type);
+    seat_this_storage(payload, this_vardecl, self_value_type, name_token);
     auto this_var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
     auto this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
 
@@ -153,11 +216,7 @@ static void parse_constructor(
         ctor_decl->body = &parse_scope(payload, &ctor_body);
     }
 
-    if (expect_token(payload, Token::Type::t_close_brace)) {
-        cursor.skip(); // skip "}"
-    }
-
-    payload.context.pop_scope();
+    leave_member_body(payload);
 
     // append implicit "return $this" if the user did not return
     const bool has_return = std::any_of(
@@ -173,12 +232,142 @@ static void parse_constructor(
     payload.context.scope().add_funcdecl(*ctor_decl);
 }
 
+// a `destructor()` written in a struct body. shaped like a *method*, not like a constructor: the
+// receiver is the borrow `Foo&` so the body mutates the caller's storage, the return type is void,
+// and it registers on the type rather than in a namespace overload set - which is also what keeps a
+// `destructor` out of every diagnostic about a name nobody declared.
+//
+// the two-pass reconciliation is the constructor's, keyed on the `destructor` keyword token. that
+// token is both the declaration site *and* the name token, so `func_name()` is "destructor" and the
+// mangled name reads `_MBuffer_destructorZ...` - unambiguous because `destructor` is a keyword and
+// no user member can be spelled it.
+//
+// nobody ever writes a call to one. it is reached only by the drop calls AST::OwnershipPass inserts,
+// which look it up through AST::find_destructor
+static void parse_destructor(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *struct_node,
+    AST::TypeNode *self_type_node)
+{
+    auto &cursor = payload.cursor;
+    auto dtor_token = cursor.current();
+
+    cursor.skip(); // skip "destructor"
+
+    if (!expect_token(payload, Token::Type::t_open_paren)) {
+        return;
+    }
+
+    cursor.skip(); // skip "("
+
+    AST::FunctionDeclNode *dtor_decl = reconciled_member_decl(payload, dtor_token);
+
+    if (dtor_decl == nullptr) {
+        dtor_decl = &payload.context.emplace_node<AST::FunctionDeclNode>(dtor_token);
+        dtor_decl->member_kind = AST::MemberKind::t_destructor;
+    }
+
+    dtor_decl->ast_namespace = payload.context.current_namespace;
+    dtor_decl->owner_type = &struct_node->complex_type();
+
+    // shares the struct's parameter declarations rather than declaring its own, exactly as a method
+    // does: the receiver's type is the struct's self-application `Foo<T>&`, so a substitution built
+    // from this list has to bind the very same T that type mentions. every one of them is inherited -
+    // a destructor has no type parameters of its own to spell, and no call site to spell them at
+    dtor_decl->type_parameters = struct_node->type_parameters();
+    dtor_decl->inherited_type_param_count = dtor_decl->type_parameters.size();
+
+    // returns nothing, and there is no `: type` to read - built once, since a second pass would only
+    // emplace a node equal to the one already here
+    if (dtor_decl->return_type == nullptr) {
+        dtor_decl->return_type = &payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_void());
+    }
+
+    // receiver + body scope
+    auto &dtor_scope = payload.context.emplace_node<AST::ScopeNode>();
+
+    Parser::push_receiver_param(payload, *dtor_decl, dtor_scope, self_type_node, dtor_token);
+
+    // parsed rather than required-empty so a parameter list gets a located error naming what is
+    // wrong, instead of "unexpected token" at whatever the first parameter happens to start with.
+    // the receiver is already in `args`, so anything beyond it is the user's
+    if (!parse_parameter_list(payload, *dtor_decl, dtor_scope, dtor_token)) {
+        return;
+    }
+
+    if (dtor_decl->args.size() > dtor_decl->implicit_arg_count()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(dtor_token),
+            fmt::format("A destructor takes no parameters - '{}' declares {}.",
+                struct_node->type_name(),
+                dtor_decl->args.size() - dtor_decl->implicit_arg_count()));
+
+        // the extra parameters are dropped rather than carried: nothing ever passes an argument to a
+        // destructor, so a signature that declares one would fail at the drop site instead of here
+        dtor_decl->args.resize(dtor_decl->implicit_arg_count());
+    }
+
+    // a declared return type is rejected outright rather than checked against void. `destructor() :
+    // void` reads as though the colon were meaningful, and it never is
+    if (cursor.is_type(Token::Type::t_colon)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(dtor_token),
+            "A destructor returns nothing - drop the ': type'.");
+        cursor.skip(); // the colon
+        if (can_parse_type(payload)) {
+            parse_type(payload);
+        }
+    }
+
+    // a struct has at most one. asked before registering, and asked of the *slot* rather than of the
+    // pass, so the body pass coming back around to the declaration pass's node is not a redeclaration -
+    // register_destructor's declaration-site claim is what tells those two apart. reported at the
+    // second `destructor` keyword, so the two do not both point at the same place
+    AST::FunctionDeclNode *existing = struct_node->complex_type().destructor();
+
+    if (existing != nullptr && existing != dtor_decl) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(dtor_token),
+            fmt::format("'{}' already has a destructor.", struct_node->type_name()));
+
+        skip_member_body(payload);
+        return;
+    }
+
+    // registering in both passes is intentional: the declaration pass makes the destructor reachable
+    // by a drop site anywhere in the program, and the body pass finds its own site already claimed
+    payload.collector.functions.register_destructor(
+        payload.collector, payload.context.code_ref(dtor_token), dtor_decl, struct_node->complex_type());
+
+    if (!enter_member_body(payload)) {
+        return;
+    }
+
+    // pushed so the receiver resolves through the scope's parent, as in a method body
+    payload.context.push_scope(dtor_scope);
+
+    {
+        AST::ReturnTypeScope return_scope(payload.context, dtor_decl->return_type);
+
+        // the receiver reaches the body as an ordinary parameter, so the body is no longer inside a
+        // struct declaration - same reason parse_funcdecl clears it
+        AST::SelfScope no_self(payload.context, nullptr, nullptr);
+
+        dtor_decl->body = &parse_scope(payload);
+    }
+
+    leave_member_body(payload);
+
+    // codegen emits a body only for the declarations in the file root's children
+    payload.context.scope().add_funcdecl(*dtor_decl);
+}
+
 // the field-wise constructor, synthesized for every struct: it takes one parameter per property and
 // initializes them in order. built whole, so it is the same in either pass and belongs to whichever
 // one reaches the struct first.
 static void synthesize_field_wise_constructor(
     Parser::Payload &payload,
-    AST::StructDeclNode *struct_node,
+    AST::TypeDeclNode *struct_node,
     const AST::ValueType &self_value_type)
 {
     auto name_token = struct_node->name_token.value();
@@ -208,6 +397,7 @@ static void synthesize_field_wise_constructor(
     // declaration is not in the function registry) and it is the same index in every pass, so the
     // synthesized constructor needs no token minted for it either
     auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
+    default_ctor.member_kind = AST::MemberKind::t_constructor;
     struct_node->set_field_wise_constructor(&default_ctor);
 
     default_ctor.ast_namespace = payload.context.current_namespace;
@@ -236,6 +426,7 @@ static void synthesize_field_wise_constructor(
     // allocate "$this"
     auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
     auto this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, &type_node);
+    seat_this_storage(payload, this_vardecl, self_value_type, name_token);
     default_ctor.body->add_vardecl(*this_vardecl);
 
     // create a var of the declaration
@@ -280,16 +471,20 @@ static void synthesize_field_wise_constructor(
         payload.collector, payload.context.code_ref(name_token), &default_ctor);
 }
 
-AST::StructDeclNode *Parser::parse_struct(Payload &payload)
+AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 {
     auto &cursor = payload.cursor;
     const bool declarations_only = payload.pass == Pass::t_declarations;
 
-    if (!expect_token(payload, Token::Type::t_struct)) {
+    if (!starts_typedecl(cursor)) {
+        payload.collect_unexpected_token(Token::Type::t_struct);
+        cursor.try_skip_to_next_statement();
         return nullptr;
     }
 
-    // skip the struct keyword
+    const AST::ComplexTypeKind kind = typedecl_kind(cursor);
+
+    // skip the struct or class keyword
     cursor.skip();
 
     if (!expect_token(payload, Token::Type::t_identifier)) {
@@ -312,11 +507,11 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
 
     // try to find the predeclared struct symbol
     auto structsymbol = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.current_namespace);
-    AST::StructDeclNode *struct_node = nullptr;
+    AST::TypeDeclNode *struct_node = nullptr;
 
     // we found a name matching symbol
     if (structsymbol) {
-        auto symboldecl = structsymbol->node.get_ptr<AST::StructDeclNode>();
+        auto symboldecl = structsymbol->node.get_ptr<AST::TypeDeclNode>();
         if (symboldecl) {
             struct_node = symboldecl;
         }
@@ -325,7 +520,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
     // a name-matching symbol declared at some *other* token is a second `struct Foo` in one
     // namespace, not this pass reconciling with the declaration the symbol was made from - that case
     // matches the site. everything below here mutates the node the other declaration owns: its type
-    // parameters, add_structdecl, the member walk, and a field-wise constructor that add_funcdecl
+    // parameters, add_typedecl, the member walk, and a field-wise constructor that add_funcdecl
     // would push into the file root a second time (codegen then emits two bodies onto one
     // llvm::Function). so this has to return before any of it. the body is skipped rather than
     // parsed-and-discarded the way a second pass over the same struct discards it, because parsing it
@@ -334,7 +529,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
     if (struct_node != nullptr && !struct_node->is_declared_at(name_token)) {
         payload.collector.collect_issue<AST::Issue::TypeRedeclaration>(
             payload.context.code_ref(name_token),
-            struct_node->struct_name(),
+            struct_node->type_name(),
             struct_node->declaration_site_token());
 
         // the open brace is already consumed, and this is brace-depth aware and eats the closing one,
@@ -345,7 +540,7 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
 
     // still no struct we create it
     if (!struct_node) {
-        struct_node = &payload.context.emplace_node<AST::StructDeclNode>(name_token);
+        struct_node = &payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
     }
 
     // create the struct node
@@ -369,7 +564,9 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
         for (const auto *param : template_ct->type_parameters) {
             self_args.push_back(AST::ValueType::make_type_param(param));
         }
-        self_value_type = AST::ValueType::make_struct(
+        // make_complex, not make_struct: the instance carries the template's storage class, so a
+        // generic *class* self-applies to a class type rather than tripping make_struct's assert
+        self_value_type = AST::ValueType::make_complex(
             payload.collector.type_registry.get_or_create_instantiation(template_ct, self_args));
     }
 
@@ -390,13 +587,13 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
     // parse_type_names pushed it as a namespace symbol - which is also what lets a struct be
     // recursive, and what lets a property name a struct declared further down
     if (!declarations_only) {
-        payload.context.scope().add_structdecl(*struct_node);
+        payload.context.scope().add_typedecl(*struct_node);
     }
 
     // create an empty base scope for the properties to sit in
     auto &structscope = payload.context.emplace_node<AST::ScopeNode>();
 
-    // only the first pass to walk this body keeps what it parsed - see StructDeclNode's
+    // only the first pass to walk this body keeps what it parsed - see TypeDeclNode's
     // members_collected(). the second walks the same code, rather than skipping to each member's end,
     // for two reasons: the two cannot then disagree about where a member ends, and re-reading a
     // property type calls TypeRegistry::get_or_create_instantiation again, which is what *refreshes*
@@ -433,6 +630,11 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
             parse_constructor(payload, struct_node, self_value_type);
         }
+        else if (cursor.is_type(Token::Type::t_destructor)) {
+            // a real token, unlike `constructor` above: it has to be one so no member can be named
+            // `destructor` and collide with the mangled name of the real thing
+            parse_destructor(payload, struct_node, &self_type_node);
+        }
         else if (cursor.is_type(Token::Type::t_close_brace)) {
             cursor.skip();
             break;
@@ -465,19 +667,25 @@ AST::StructDeclNode *Parser::parse_struct(Payload &payload)
     }
 
     if (!declarations_only) {
-        // a constructor the declaration pass registered that this pass never reached - error
-        // recovery in the body above skipped past it. it would otherwise be silent and fatal: codegen
-        // *declares* every function in the module's arena but emits a body only for the ones in the
-        // file root's children, so the program would link against a symbol nobody defines
-        for (auto *constructor : struct_node->constructors()) {
-            if (constructor->body != nullptr) {
-                continue;
+        // a member the declaration pass registered that this pass never reached - error recovery in
+        // the body above skipped past it. it would otherwise be silent and fatal: codegen *declares*
+        // every function in the module's arena but emits a body only for the ones in the file root's
+        // children, so the program would link against a symbol nobody defines
+        auto report_bodyless = [&payload](AST::FunctionDeclNode *member) {
+            if (member == nullptr || member->body != nullptr) {
+                return;
             }
 
             payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(constructor->declaration_site_token()),
-                fmt::format("'{}' was declared but never given a body.", constructor->signature_description()));
+                payload.context.code_ref(member->declaration_site_token()),
+                fmt::format("'{}' was declared but never given a body.", member->signature_description()));
+        };
+
+        for (auto *ctor : struct_node->constructors()) {
+            report_bodyless(ctor);
         }
+
+        report_bodyless(struct_node->complex_type().destructor());
 
         // codegen emits a body from the file root's children, so the synthesized constructor has to
         // land there - at the tail, where it has always been

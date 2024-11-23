@@ -1,0 +1,34 @@
+// a class block carries a type word alongside its strong count, so a reference can be asked what it
+// actually points at. there is no inheritance, so "is it a T" has only one reading and lowers to a
+// single address comparison against T's identity global
+
+class Cat { int32 $lives; }
+class Dog { int32 $bones; }
+struct Rock { int32 $mass; }
+
+$c = Cat(9);
+$d = Dog(3);
+
+echo $c instanceof Cat;
+echo $c instanceof Dog;
+echo $d instanceof Dog;
+
+// a struct on the right is a fair question with a boring answer: no class block was ever stamped
+// with a struct's identity, because a struct has none
+echo $c instanceof Rock;
+
+// null points at no block at all, so it is an instance of nothing
+Cat $none = null;
+echo $none instanceof Cat;
+
+// it is an ordinary bool expression
+if ($c instanceof Cat) {
+    echo 10;
+}
+
+// and it composes with the rest of an expression
+if ($d instanceof Cat) {
+    echo 20;
+} else {
+    echo 30;
+}

@@ -33,8 +33,13 @@ namespace AST
         n_expr_addrof,
         n_expr_deref,
         n_expr_peel,
+        n_expr_move,
         n_expr_index,
         n_expr_void,
+        n_expr_class_alloc,
+        n_expr_retain,
+        n_expr_instanceof,
+        n_release,
         n_func_decl,
         n_func_return,
         n_if_statement,
@@ -43,7 +48,7 @@ namespace AST
         n_namespace_decl,
         n_namespace,
         n_attribute,
-        n_struct_decl,
+        n_type_decl,
         n_member_access,
     };
 

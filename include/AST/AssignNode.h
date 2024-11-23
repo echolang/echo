@@ -37,6 +37,17 @@ namespace AST
         // const checks in AST::TypeChecker would otherwise reject that write along with real ones
         bool is_initialization = false;
 
+        // the target is a class-typed place, so whatever reference it held before this write has to be
+        // released. set by AST::OwnershipPass, which is where every other ownership decision is made -
+        // but the *sequence* is codegen's, because the old handle only exists at runtime and there is
+        // nowhere to put it once the store has happened. gen_assign therefore reads the old handle out
+        // of the slot before storing and releases it after, which is what makes `$a = $a` safe: the
+        // retain on the right-hand side has already run by then.
+        //
+        // false when the variable was moved out of - the reference it appears to hold is somebody
+        // else's now
+        bool releases_old = false;
+
         AssignNode(ExprNode *target, ExprNode *value_expr, TokenReference token_assign)
             : target(target), value_expr(value_expr), token_assign(token_assign)
         {

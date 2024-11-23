@@ -5,6 +5,7 @@
 
 #include "AST/ASTValueType.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/LLVM/Codegen/ClassLayout.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -14,7 +15,7 @@ namespace AST
 {
     class Bundle;
     class FunctionDeclNode;
-    class StructDeclNode;
+    class TypeDeclNode;
     class ComplexType;
 };
 
@@ -35,11 +36,19 @@ namespace Compiler::LLVM
         void build_struct_maps(const AST::Bundle &bundle);
 
         llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
-        llvm::StructType *create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+        llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property
         // types) to an llvm struct on first use, registering it in the compilation unit.
         llvm::StructType *create_llvm_struct_for_instance(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // the heap block, payload and identity global of a class, lowered into this unit on first
+        // use. separate from get_llvm_type because that answers what a class *value* is - an opaque
+        // handle - and so cannot be the thing that lowers the layout: everything that needs the
+        // layout (sizing an allocation, reaching the payload, touching the count, instanceof) asks
+        // here instead. keyed on the ComplexType, so a generic instantiation and a class used from
+        // another module both resolve
+        ClassLayout get_or_create_class_layout(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
         llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
@@ -58,6 +67,10 @@ namespace Compiler::LLVM
         llvm::Value *coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
 
     private:
+        // wraps an already-lowered payload in its heap block and mints the class's typeinfo global.
+        // idempotent - a second call over a structure that already has a box does nothing
+        void build_class_box(Structure &structure, const std::string &type_name, const Compiler::LLVM::CmpUnit &cmp_unit);
+
         CodegenContext &_ctx;
     };
 };

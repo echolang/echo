@@ -125,6 +125,23 @@ void AST::FunctionRegistry::register_member_function(
     owner.add_method(decl);
 }
 
+void AST::FunctionRegistry::register_destructor(
+    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl, AST::ComplexType &owner)
+{
+    // the `destructor` keyword is a real token at a fixed index, so the two passes reconcile on it
+    // exactly as a method reconciles on its name token. an unclaimed site means the body pass coming
+    // back around to the node the declaration pass registered - there is nothing left to do
+    if (!claim_declaration_site(decl)) {
+        return;
+    }
+
+    // a struct has at most one, and there are no parameters to overload on - so the slot itself is
+    // the duplicate check, and it is the caller's, which owns the wording. entered in neither
+    // _by_name nor the method table: a destructor is not a name anybody can write, and it must not
+    // turn up as a candidate in an overload diagnostic
+    owner.set_destructor(decl);
+}
+
 AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     const AST::ComplexType &owner,
     const AST::FunctionDeclNode *decl,

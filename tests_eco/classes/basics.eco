@@ -1,0 +1,22 @@
+// a class is a struct that lives on the heap. same body, same field-wise constructor, same `Foo(...)`
+// to build one - the declaration keyword is the only place the storage class appears
+
+class Point
+{
+    int32 $x;
+    int32 $y;
+
+    function sum() : int32
+    {
+        return $this->x + $this->y;
+    }
+}
+
+$p = Point(3, 4);
+echo $p->x;
+echo $p->y;
+echo $p->sum();
+
+// a member is a place, so it writes as well as it reads
+$p->x = 10;
+echo $p->sum();

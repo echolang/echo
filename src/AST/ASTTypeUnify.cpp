@@ -31,7 +31,7 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     }
 
     // a generic application binds structurally, e.g. Box<T> against Box<int> binds T=int
-    if ((param.is_struct() || param.is_class()) && (arg.is_struct() || arg.is_class())) {
+    if (param.has_complex_type() && arg.has_complex_type()) {
         ComplexType *pct = param.get_complex_type();
         ComplexType *act = arg.get_complex_type();
 

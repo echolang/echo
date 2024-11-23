@@ -7,7 +7,7 @@
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/ScopeNode.h>
-#include <AST/StructNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/TypeNode.h>
 #include <AST/VarDeclNode.h>
 
@@ -16,7 +16,7 @@ using namespace AST;
 using EchoTests::calls_to;
 using EchoTests::decls_named;
 using EchoTests::has_issue_containing;
-using EchoTests::struct_named;
+using EchoTests::type_named;
 
 TEST_CASE("a method is registered on its type, not in the enclosing namespace", "[methods]")
 {
@@ -32,7 +32,7 @@ TEST_CASE("a method is registered on its type, not in the enclosing namespace", 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *point = struct_named(m, "Point");
+    auto *point = type_named(m, "Point");
     REQUIRE(point != nullptr);
 
     // on the type
@@ -72,7 +72,7 @@ TEST_CASE("a method's receiver is its first parameter, as a borrow of the struct
     const auto self_type = method->args[0]->type();
     REQUIRE(self_type.is_pointer());
     REQUIRE_FALSE(self_type.is_nullable());
-    REQUIRE(self_type.pointee() == struct_named(m, "Point")->value_type());
+    REQUIRE(self_type.pointee() == type_named(m, "Point")->value_type());
 }
 
 TEST_CASE("a method call passes the receiver's address as its first argument", "[methods]")
@@ -164,7 +164,7 @@ TEST_CASE("a method of a generic struct carries its owner's type parameters ahea
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *box = struct_named(m, "Box");
+    auto *box = type_named(m, "Box");
     REQUIRE(box != nullptr);
 
     auto decls = decls_named(m, "widen");
@@ -335,7 +335,7 @@ TEST_CASE("reaching a struct body in both parse passes does not duplicate constr
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *point = struct_named(m, "Point");
+    auto *point = type_named(m, "Point");
     REQUIRE(point != nullptr);
 
     // the user's, exactly once - not one node per pass

@@ -1,0 +1,20 @@
+// locals are destroyed in reverse declaration order: the last thing built is the first torn down,
+// so a local holding a borrow of an earlier one is gone before its target is
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+$a = Buffer(1, mem::alloc<uint8>(1));
+$b = Buffer(2, mem::alloc<uint8>(1));
+$c = Buffer(3, mem::alloc<uint8>(1));
+
+echo 0;

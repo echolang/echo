@@ -4,14 +4,14 @@
 
 #include <AST/ASTBundle.h>
 #include <AST/FunctionDeclNode.h>
-#include <AST/StructNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
 
 using namespace AST;
 
 using EchoTests::decls_named;
 using EchoTests::has_issue_containing;
-using EchoTests::struct_named;
+using EchoTests::type_named;
 
 // a module is parsed in three passes - type names, then declarations, then bodies - and each one runs
 // over every file before the next starts. what that buys is order independence: nothing a declaration
@@ -29,12 +29,12 @@ TEST_CASE("a property can be typed by a struct declared further down", "[structd
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *holder = struct_named(m, "Holder");
+    auto *holder = type_named(m, "Holder");
     REQUIRE(holder != nullptr);
     REQUIRE(holder->properties().size() == 1);
 
     REQUIRE(holder->properties()[0]->type().is_struct());
-    REQUIRE(holder->properties()[0]->type() == struct_named(m, "Inner")->value_type());
+    REQUIRE(holder->properties()[0]->type() == type_named(m, "Inner")->value_type());
 }
 
 TEST_CASE("a property can be typed by a struct declared in a later file", "[structdecl]")
@@ -47,10 +47,10 @@ TEST_CASE("a property can be typed by a struct declared in a later file", "[stru
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *holder = struct_named(m, "Holder");
+    auto *holder = type_named(m, "Holder");
     REQUIRE(holder != nullptr);
     REQUIRE(holder->properties().size() == 1);
-    REQUIRE(holder->properties()[0]->type() == struct_named(m, "Inner")->value_type());
+    REQUIRE(holder->properties()[0]->type() == type_named(m, "Inner")->value_type());
 }
 
 TEST_CASE("a struct's properties are collected by exactly one pass", "[structdecl]")
@@ -65,7 +65,7 @@ TEST_CASE("a struct's properties are collected by exactly one pass", "[structdec
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *point = struct_named(m, "Point");
+    auto *point = type_named(m, "Point");
     REQUIRE(point != nullptr);
     REQUIRE(point->properties().size() == 2);
     REQUIRE(point->complex_type().property_count() == 2);
@@ -87,7 +87,7 @@ TEST_CASE("a constructor is one declaration across both parse passes", "[structd
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto *point = struct_named(m, "Point");
+    auto *point = type_named(m, "Point");
     REQUIRE(point != nullptr);
 
     // two constructors, each one node - not one per pass, and not collapsed into one
@@ -147,8 +147,8 @@ namespace {
     size_t structs_named(AST::Module &m, const std::string &name)
     {
         size_t count = 0;
-        for (auto *strct : m.nodes.of_type<AST::StructDeclNode>()) {
-            if (strct->struct_name() == name) {
+        for (auto *strct : m.nodes.of_type<AST::TypeDeclNode>()) {
+            if (strct->type_name() == name) {
                 count++;
             }
         }
@@ -175,13 +175,13 @@ TEST_CASE("the first declaration of a duplicated struct wins", "[structdecl]")
     auto &m = bundle->modules.find_module("test");
     REQUIRE(structs_named(m, "Foo") == 1);
 
-    auto *foo = struct_named(m, "Foo");
+    auto *foo = type_named(m, "Foo");
     REQUIRE(foo != nullptr);
     REQUIRE(foo->properties().size() == 1);
     REQUIRE(foo->complex_type().property_count() == 1);
     REQUIRE(foo->properties()[0]->name() == "x");
 
-    // one field-wise constructor, not two. the duplicate used to reach the tail of parse_struct and
+    // one field-wise constructor, not two. the duplicate used to reach the tail of parse_typedecl and
     // push the same synthesized node into the file root a second time, which codegen then emitted a
     // second body for onto one llvm::Function
     REQUIRE(decls_named(m, "Foo").size() == 1);
@@ -208,8 +208,8 @@ TEST_CASE("a struct duplicated in another file is reported", "[structdecl]")
     REQUIRE(redeclaration_issue_count(*bundle) == 1);
 
     auto &m = bundle->modules.find_module("test");
-    REQUIRE(struct_named(m, "Foo")->properties().size() == 1);
-    REQUIRE(struct_named(m, "Foo")->properties()[0]->name() == "x");
+    REQUIRE(type_named(m, "Foo")->properties().size() == 1);
+    REQUIRE(type_named(m, "Foo")->properties()[0]->name() == "x");
 }
 
 TEST_CASE("a duplicated struct's members do not leak into the first", "[structdecl]")
@@ -229,7 +229,7 @@ TEST_CASE("a duplicated struct's members do not leak into the first", "[structde
     REQUIRE(redeclaration_issue_count(*bundle) == 1);
 
     auto &m = bundle->modules.find_module("test");
-    auto *foo = struct_named(m, "Foo");
+    auto *foo = type_named(m, "Foo");
     REQUIRE(foo != nullptr);
     REQUIRE(foo->properties().size() == 1);
     REQUIRE(foo->methods().empty());
@@ -237,7 +237,7 @@ TEST_CASE("a duplicated struct's members do not leak into the first", "[structde
     REQUIRE(foo->field_wise_constructor() != nullptr);
 
     // parsing resumed on the token after the duplicate's closing brace
-    auto *bar = struct_named(m, "Bar");
+    auto *bar = type_named(m, "Bar");
     REQUIRE(bar != nullptr);
     REQUIRE(bar->properties().size() == 1);
 }
@@ -268,8 +268,8 @@ TEST_CASE("a struct declared inside a function body cannot redeclare a type", "[
     REQUIRE(redeclaration_issue_count(*bundle) == 1);
 
     auto &m = bundle->modules.find_module("test");
-    REQUIRE(struct_named(m, "Foo")->properties().size() == 1);
-    REQUIRE(struct_named(m, "Foo")->properties()[0]->name() == "x");
+    REQUIRE(type_named(m, "Foo")->properties().size() == 1);
+    REQUIRE(type_named(m, "Foo")->properties()[0]->name() == "x");
 }
 
 TEST_CASE("a duplicated generic struct does not gain the duplicate's type parameters", "[structdecl]")
@@ -283,7 +283,7 @@ TEST_CASE("a duplicated generic struct does not gain the duplicate's type parame
     REQUIRE(redeclaration_issue_count(*bundle) == 1);
 
     auto &m = bundle->modules.find_module("test");
-    auto *foo = struct_named(m, "Foo");
+    auto *foo = type_named(m, "Foo");
     REQUIRE(foo != nullptr);
     REQUIRE(foo->type_parameters().size() == 1);
     REQUIRE(foo->properties().size() == 1);

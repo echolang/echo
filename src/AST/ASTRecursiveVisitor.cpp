@@ -13,6 +13,7 @@
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ExprNode.h"
+#include "AST/ReleaseNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/IfStatementNode.h"
@@ -22,7 +23,7 @@
 #include "AST/NamespaceDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/AttributeNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 
 namespace AST
 {
@@ -48,7 +49,7 @@ void RecursiveVisitor::visitFunctionDecl(FunctionDeclNode &node)
     }
 }
 
-void RecursiveVisitor::visitStructDecl(StructDeclNode &node)
+void RecursiveVisitor::visit_type_decl(TypeDeclNode &node)
 {
     for (auto *prop : node.properties()) {
         if (prop) prop->accept(*this);
@@ -128,6 +129,31 @@ void RecursiveVisitor::visit_deref_expr(DerefExprNode &node)
 void RecursiveVisitor::visit_pointer_value(PointerValueNode &node)
 {
     if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_move_expr(MoveExprNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)
+{
+    // a leaf: the allocation has no operand, only the class type it was synthesized for
+}
+
+void RecursiveVisitor::visit_retain_expr(RetainExprNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_release(ReleaseNode &node)
+{
+    if (node.target) node.target->accept(*this);
 }
 
 void RecursiveVisitor::visit_index_expr(IndexExprNode &node)

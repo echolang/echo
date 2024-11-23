@@ -24,11 +24,10 @@ AST::ValueType AST::MemberAccessNode::base_target_type() const
 
 AST::ValueType AST::MemberAccessNode::result_type() const
 {
-    // struct only. a class base would resolve here just as well, but the member would then fail
-    // one layer further down in gen_member_lvalue instead of the void guard in gen_member_access,
-    // which is no gain until classes exist (todo/A1)
+    // either storage class: a property lives at the same place in the same layout, and reaching it
+    // through a class handle rather than into a stack aggregate is gen_member_lvalue's business
     auto base_type = base_target_type();
-    if (!base_type.is_struct()) {
+    if (!base_type.has_complex_type()) {
         return ValueType::void_type();
     }
 

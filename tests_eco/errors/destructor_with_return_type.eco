@@ -1,0 +1,12 @@
+// a destructor returns nothing. the `: type` is rejected outright rather than checked against void,
+// because it reads as though the colon were meaningful and it never is
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor() : void
+    {
+        mem::free($this->data);
+    }
+}

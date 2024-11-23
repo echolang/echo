@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 21:6
+'mv' can only move a whole variable - moving a field or an element out of a value is not supported yet
+Begin: 'mv'
+End: 'mv'
+Code excerpt:
+ [20]> $d = Document(Buffer(mem::alloc<uint8>(1)), 1);
+ [21]> $b = mv $d->body;
+           ^
+ [22]> 
+
+Critical issues found, cannot compile.

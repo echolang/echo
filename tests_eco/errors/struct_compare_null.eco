@@ -1,0 +1,7 @@
+// a class handle can be absent, a struct cannot: it has no runtime representation that could be
+// missing, which is also why it carries no metadata for `instanceof`
+
+struct P { int32 $v; }
+
+$a = P(1);
+echo $a == null;

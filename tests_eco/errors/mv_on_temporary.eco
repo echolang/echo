@@ -1,0 +1,9 @@
+// only a place can be moved *out of* - there has to be storage left behind for the move to empty. a
+// call result is already a move, so writing `mv` on one says the author expected a copy somewhere
+
+function make() : int32
+{
+    return 1;
+}
+
+$a = mv make();

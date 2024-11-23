@@ -49,6 +49,15 @@ namespace AST
         inline VarDeclNode *try_decl() const {
             return _decl;
         }
+
+        // where *this* mention of the variable is written, falling back to the declaration for a
+        // reference the parser synthesized rather than read (a constructor's `$this`, a drop's
+        // receiver). the single answer to "where do I point a diagnostic about this use" - without
+        // it, "'$a' has been moved out of" lands on the declaration and says nothing about which
+        // read was the offending one
+        inline const TokenReference &use_token() const {
+            return _token_varname.has_value() ? _token_varname.value() : _decl->token_varname;
+        }
     private:
         std::optional<TokenReference> _token_varname;
         VarDeclNode *_decl;

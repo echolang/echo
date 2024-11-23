@@ -41,6 +41,15 @@ namespace AST
         t_unknown
     };
 
+    // which of the two storage classes a named type was declared as. the distinction is one bit and
+    // everything else about the two is identical - one parser, one declaration node, one layout - so
+    // it is a tag rather than a separate type. carried on ComplexType, since that is the only thing a
+    // generic instantiation has
+    enum class ComplexTypeKind {
+        t_struct,
+        t_class,
+    };
+
     // flags apply to the level they sit on, which is what makes `ptr<const T>` (const pointee)
     // and `const ptr<T>` (const pointer) distinct types. t_nullable only ever sits on a
     // t_pointer level: set for `ptr<T>`, clear for the non-nullable borrow `T&`
@@ -129,6 +138,14 @@ namespace AST
             return ValueType(ValueTypePrimitive::t_void);
         }
 
+        // the type of a named declaration, struct or class, taking the kind from the ComplexType
+        // itself. this is the one that should be called: it cannot produce a t_class ValueType over a
+        // struct's layout or the reverse, which the two spellings below can
+        static ValueType make_complex(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
+
+        // both assert the ComplexType agrees. kept because a caller that genuinely knows which kind it
+        // is asking for reads better saying so, and because the assert catches the mismatch at the
+        // construction site rather than wherever the wrong type later fails to lower
         static ValueType make_struct(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
 
         static ValueType make_class(ComplexType *complex_type, const std::vector<ValueType>& args = {}, TypeRegistry* registry = nullptr);
@@ -169,7 +186,7 @@ namespace AST
         {}
 
         inline ComplexType *get_complex_type() const {
-            assert(is_struct() || is_class());
+            assert(has_complex_type());
             return _complex_type;
         }
 
@@ -235,6 +252,14 @@ namespace AST
 
         bool is_class() const {
             return kind == ValueTypeKind::t_class;
+        }
+
+        // a named user type of either storage class - exactly the kinds get_complex_type() answers
+        // for. this is what a *member* question wants: `->x` resolves the same property table either
+        // way, and the difference is only in how codegen reaches it. asking is_struct() where this
+        // was meant is what made every class member read type as void
+        bool has_complex_type() const {
+            return is_struct() || is_class();
         }
 
         bool is_numeric_type() const {
@@ -360,7 +385,7 @@ namespace AST
                 return *_pointee == *other._pointee;
             }
 
-            if ((is_struct() || is_class()) && (other.is_struct() || other.is_class())) {
+            if (has_complex_type() && other.has_complex_type()) {
                 // For struct and class types, compare the complex type pointers
                 // Two struct/class types are equal if they point to the same ComplexType
                 return _complex_type == other._complex_type;
@@ -422,6 +447,17 @@ namespace AST
         };
 
         std::optional<std::string> name;
+
+        // stack value type or reference counted heap type - the one bit that separates `struct` from
+        // `class`. it lives here rather than only on the ValueType because an *instantiation* has a
+        // ComplexType and no declaration node, so this is the only thing that can answer for
+        // `Box<int32>` what kind `Box` was declared as. ValueType::make_complex reads it, which is
+        // what makes a mismatched (kind, ComplexType) pair unconstructible
+        ComplexTypeKind kind = ComplexTypeKind::t_struct;
+
+        bool is_class_kind() const {
+            return kind == ComplexTypeKind::t_class;
+        }
 
         // the namespace the type was declared in, null when unknown or root. instantiations
         // inherit it from their template, so a mangled name can always be fully qualified
@@ -527,6 +563,38 @@ namespace AST
             return _methods;
         }
 
+        // this type's destructor, or null. at most one, so a slot rather than an overload set -
+        // it takes no parameters, which leaves nothing to overload on.
+        //
+        // on the *type* rather than on TypeDeclNode for the same reason methods are: an
+        // instantiation has a ComplexType and no TypeDeclNode, and the drop sites the ownership
+        // pass inserts are keyed on the type of the value being destroyed. only a template ever
+        // holds one - AST::find_destructor redirects an instantiation through template_ref, as
+        // AST::find_member_functions does
+        void set_destructor(FunctionDeclNode *decl) {
+            _destructor = decl;
+        }
+
+        FunctionDeclNode *destructor() const {
+            return _destructor;
+        }
+
+        // a class only: the synthesized function that tears the payload down when the strong count
+        // reaches zero - this type's own destructor first, then each owning property. null when the
+        // payload owns nothing, and null for every struct.
+        //
+        // a *synthesized* function rather than a sequence codegen builds, because it is built by the
+        // very same AST::OwnershipPass::emit_drop recursion that a struct's scope exit uses. that is
+        // the point: what a class destroys at zero and what a struct destroys at scope end can never
+        // disagree, because one piece of code decides both. codegen only calls it
+        void set_deinit(FunctionDeclNode *decl) {
+            _deinit = decl;
+        }
+
+        FunctionDeclNode *deinit() const {
+            return _deinit;
+        }
+
         // a concrete copy of this type: every property type run through `substitute`, and nothing
         // left that identifies it as a template or as somebody's instantiation.
         //
@@ -558,6 +626,8 @@ namespace AST
         std::vector<Property> _properties;
         std::unordered_map<std::string, size_t> _property_map;
         std::vector<FunctionDeclNode *> _methods;
+        FunctionDeclNode *_destructor = nullptr;
+        FunctionDeclNode *_deinit = nullptr;
 
         friend class TypeRegistry;  // Allow TypeRegistry to access _properties
     };
@@ -570,7 +640,7 @@ namespace std {
         size_t operator()(const AST::ValueType& vt) const {
             size_t h = static_cast<size_t>(vt.get_kind()) ^ vt.get_type_flags();
             if (vt.is_primitive()) h ^= static_cast<size_t>(vt.get_primitive_type());
-            else if (vt.is_struct() || vt.is_class()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
+            else if (vt.has_complex_type()) h ^= reinterpret_cast<size_t>(vt.get_complex_type());
             else if (vt.is_type_param()) h ^= reinterpret_cast<size_t>(vt.get_type_param());
             // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
             // collide with int32, since the primitive component is identical
@@ -691,7 +761,7 @@ namespace AST {
         std::string args_description(const std::vector<ValueType>& args) const;
 
         // owns the instantiation ComplexTypes this registry creates. Templates are owned elsewhere
-        // (embedded on their StructDeclNode) and only appear here as map values, never in _owned.
+        // (embedded on their TypeDeclNode) and only appear here as map values, never in _owned.
         std::vector<std::unique_ptr<ComplexType>> _owned;
         std::unordered_map<std::tuple<ComplexType*, std::vector<ValueType>>, ComplexType*, TypeRegistryKeyHash> _instantiations;
     };

@@ -1,0 +1,22 @@
+// two variables naming one object. this is the whole difference from a struct: assigning a class
+// copies the reference, not the value, so a write through one is visible through the other
+
+class Counter
+{
+    int32 $n;
+}
+
+$a = Counter(0);
+$b = $a;
+
+$a->n = 5;
+echo $b->n;
+
+$b->n = 9;
+echo $a->n;
+
+// and identity is comparable - two handles into the same block are equal
+echo $a == $b;
+
+$c = Counter(9);
+echo $a == $c;

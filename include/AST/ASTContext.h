@@ -15,7 +15,7 @@
 namespace AST
 {
     class TypeNode;
-    class StructDeclNode;
+    class TypeDeclNode;
 
     struct Context
     {
@@ -46,7 +46,7 @@ namespace AST
         // carried on the context rather than passed as an argument for the same reason
         // return_type_ptr is: it flows downward through a parser that is a set of free functions
         // calling each other, and only one of them in the chain cares
-        StructDeclNode *self_struct_ptr = nullptr;
+        TypeDeclNode *self_struct_ptr = nullptr;
 
         // the receiver type `$this` binds to - the non-nullable borrow `Foo&`, or the borrow of the
         // interned self-application `Foo<T>&` for a generic owner. held as a node so every method
@@ -172,10 +172,10 @@ namespace AST
     struct SelfScope
     {
         Context &context;
-        StructDeclNode *previous_struct;
+        TypeDeclNode *previous_struct;
         TypeNode *previous_type;
 
-        SelfScope(Context &context, StructDeclNode *self_struct, TypeNode *self_type) :
+        SelfScope(Context &context, TypeDeclNode *self_struct, TypeNode *self_type) :
             context(context),
             previous_struct(context.self_struct_ptr),
             previous_type(context.self_type_ptr)

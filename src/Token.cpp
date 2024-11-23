@@ -94,6 +94,9 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_enum: return "enum";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";
+        case Token::Type::t_destructor: return "destructor";
+        case Token::Type::t_instanceof: return "instanceof";
+        case Token::Type::t_mv: return "mv";
 
         default: return "[undefined]";
     }
@@ -159,6 +162,9 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_enum: return "enum";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";
+        case Token::Type::t_destructor: return "destructor";
+        case Token::Type::t_instanceof: return "instanceof";
+        case Token::Type::t_mv: return "mv";
     
         default: 
             assert(false && "undefined operator type");

@@ -1,0 +1,25 @@
+// a borrow transfers nothing and copies nothing, so passing one needs no `mv` and destroys nothing.
+// the value is still the caller's, and is destroyed once, at the caller's scope end
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function peek(Buffer& $b) : usize
+{
+    return $b->tag;
+}
+
+$a = Buffer(4, mem::alloc<uint8>(1));
+echo peek($a);
+echo peek($a);
+
+echo 0;

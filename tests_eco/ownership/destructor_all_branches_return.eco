@@ -1,0 +1,47 @@
+// an `if` whose every arm returns terminates the block the builder is left in, so the scope-exit
+// drops appended after it are unreachable. emitting them anyway put a second terminator in one
+// basic block and failed the LLVM verifier - the drops before each `return` are the ones that count
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function pick(int32 $x) : int32
+{
+    Buffer $b = Buffer(7, mem::alloc<uint8>(1));
+
+    if ($x > 0) {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+
+// the same shape one level down: a loop body that always returns terminates its own block, so the
+// back edge to the loop header must not be emitted either
+function first(int32 $n) : int32
+{
+    Buffer $b = Buffer(8, mem::alloc<uint8>(1));
+
+    int32 $i = 0;
+    while ($i < $n) {
+        return $i;
+    }
+
+    return 99;
+}
+
+echo pick(1);
+echo pick(0);
+echo first(3);
+echo first(0);
+
+echo 0;

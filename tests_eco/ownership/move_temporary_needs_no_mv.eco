@@ -1,0 +1,27 @@
+// "a temporary argument moves." a call result is a value nobody else holds, so it needs no `mv` and
+// leaves nothing behind - the place/non-place distinction doing the whole job
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function make(usize $tag) : Buffer
+{
+    return Buffer($tag, mem::alloc<uint8>(1));
+}
+
+function consume(mv Buffer $b) : void
+{
+    echo 500;
+}
+
+consume(make(3));
+echo 0;

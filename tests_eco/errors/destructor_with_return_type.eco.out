@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 8:5
+A destructor returns nothing - drop the ': type'.
+Begin: 'destructor'
+End: 'destructor'
+Code excerpt:
+ [7]> 
+ [8]>     destructor() : void
+          ^
+ [9]>     {
+
+Critical issues found, cannot compile.

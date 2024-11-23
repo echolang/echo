@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ScopeNode.h"
@@ -9,7 +10,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ExprNode.h"
@@ -61,8 +62,13 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
         // anything else leaving a value behind is still a genuine codegen bug
         assert(_ctx.value_stack.size() == depth_before && "statement leaked a value onto the stack");
 
-        // after any return statement we need to terminate the block
-        if (child.has_type<AST::ReturnNode>()) {
+        // the block this statement left the builder in already ends, so everything after it is
+        // unreachable and must not be emitted - a second terminator in one block fails the
+        // verifier. asked of the block rather than of the statement because a return is not the
+        // only thing that terminates one: an `if` whose every arm returns leaves the builder
+        // inside the last arm, and the scope-exit drops the ownership pass appends after it would
+        // land there. that shape is only reachable at all once a scope owes drops
+        if (_ctx.builder->GetInsertBlock()->getTerminator() != nullptr) {
             break;
         }
     }
@@ -78,6 +84,21 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
 
     // store the variable in the map
     _ctx.var_map[&node] = alloca;
+
+    // an aggregate with no initializer used to be left holding `undef`, which a constructor that
+    // writes only some of its fields then read back as garbage. it is a prerequisite of scope-exit
+    // destruction rather than a tidy-up: a destructor over an undef pointer field frees whatever
+    // happened to be in those bytes. only aggregates, and only when nothing else writes the slot -
+    // a scalar with an initializer is fully covered by the store below
+    //
+    // a class local is a scalar - one handle - but needs the same treatment for the same reason and
+    // one step more urgently: the scope-exit release reads that slot unconditionally, so an
+    // uninitialized `Foo $x;` would decrement a count at whatever address was on the stack. null is
+    // a legitimate value of the type, and releasing null is a no-op
+    const bool needs_zero_init = type->isAggregateType() || node.type_node()->type.is_class();
+    if (needs_zero_init && !node.init_expr) {
+        _ctx.builder->CreateStore(llvm::Constant::getNullValue(type), alloca);
+    }
 
     if (node.init_expr) {
         node.init_expr->accept(*_ctx.visitor);
@@ -279,10 +300,14 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
 
     _ctx.builder->CreateCondBr(condition, body_block, merge_block);
 
-    // body block
+    // body block. the back edge is only emitted when the body can actually fall out of its end -
+    // a body whose every path returns already terminated its block, and a second terminator there
+    // fails the verifier
     _ctx.builder->SetInsertPoint(body_block);
     node.loop_scope->accept(*_ctx.visitor);
-    _ctx.builder->CreateBr(loop_block);
+    if (_ctx.builder->GetInsertBlock()->getTerminator() == nullptr) {
+        _ctx.builder->CreateBr(loop_block);
+    }
 
     // merge block
     _ctx.builder->SetInsertPoint(merge_block);
@@ -300,8 +325,21 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
     // pointee, `$p:$ = &$b` arrives as $p itself and lands on the slot, re-seating it
     auto place = _ctx.lvalues->gen_lvalue(*node.target);
 
+    // the reference being overwritten, read before the store destroys it. the order of the four steps
+    // is the whole point and it is fixed: the retain on the right-hand side has already run (it is a
+    // node inside value_expr), then the old handle is read, then the new one is stored, then the old is
+    // released. any other order breaks `$a = $a`, where the old and the new are the same block
+    llvm::Value *old_handle = nullptr;
+    if (node.releases_old) {
+        old_handle = _ctx.lvalues->gen_load(place, "old");
+    }
+
     _ctx.builder->CreateStore(
         _ctx.types->coerce_value(new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit),
         place.address);
+
+    if (old_handle != nullptr) {
+        _ctx.classes->gen_release(old_handle, place.storage_type);
+    }
 }
 }

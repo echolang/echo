@@ -1,0 +1,26 @@
+// "a struct that contains an owner is itself an owner, and nothing needs to be declared for that."
+// Wrap has no destructor of its own; its Buffer field is still destroyed. properties go in reverse
+// declaration order too, and a property that owns nothing is not visited at all
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+struct Wrap
+{
+    Buffer $first;
+    usize $version;
+    Buffer $second;
+}
+
+$w = Wrap(Buffer(1, mem::alloc<uint8>(1)), 99, Buffer(2, mem::alloc<uint8>(1)));
+
+echo 0;

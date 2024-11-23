@@ -1,0 +1,14 @@
+// a member is read from an address, and a value nobody stored has none. for a class this is also the
+// question of who releases the intermediate, which is why binding it to a variable is the answer
+// rather than something the compiler can quietly do for you
+
+struct Inner { int32 $tag; }
+
+struct Outer
+{
+    Inner $in;
+    function get() : Inner { return $this->in; }
+}
+
+$o = Outer(Inner(5));
+echo $o->get()->tag;

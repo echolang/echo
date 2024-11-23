@@ -1,0 +1,26 @@
+// a parameter marked `mv` takes ownership of its argument, so the value is destroyed at the end of
+// *that* body rather than at the caller's scope end. the destructor line lands before `0`, which is
+// what proves the ownership actually changed hands
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $b) : void
+{
+    echo $b->tag;
+    // $b is ours; it is destroyed here
+}
+
+$a = Buffer(9, mem::alloc<uint8>(1));
+consume(mv $a);
+
+echo 0;

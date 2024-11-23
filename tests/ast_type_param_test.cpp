@@ -4,7 +4,7 @@
 
 #include <AST/ASTTypeParam.h>
 #include <AST/ASTValueType.h>
-#include <AST/StructNode.h>
+#include <AST/TypeDeclNode.h>
 
 #include <unordered_set>
 
@@ -287,7 +287,7 @@ TEST_CASE("Re-parsing a generic struct reuses its type parameter declarations", 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
-    auto structs = m.nodes.of_type<StructDeclNode>();
+    auto structs = m.nodes.of_type<TypeDeclNode>();
     REQUIRE(structs.size() == 1);
 
     auto *box = structs[0];

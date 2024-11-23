@@ -11,13 +11,13 @@ namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
-    class StructDeclNode;
+    class TypeDeclNode;
     class AttributeNode;
 
     class ScopeNode : public Node
     {
         std::unordered_map<std::string, VarDeclNode *> _declared_variables;
-        std::unordered_map<std::string, StructDeclNode *> _declared_structs;
+        std::unordered_map<std::string, TypeDeclNode *> _declared_types;
 
     public:
         ScopeNode *parent_ptr = nullptr;
@@ -76,7 +76,7 @@ namespace AST
         // (namespace, name) to an overload set rather than to a single declaration
         void add_funcdecl(FunctionDeclNode &funcdecl);
 
-        void add_structdecl(StructDeclNode &structdecl);
+        void add_typedecl(TypeDeclNode &structdecl);
 
         void add_attribute(AttributeNode &attribute);
 

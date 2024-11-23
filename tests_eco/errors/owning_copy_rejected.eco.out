@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 16:6
+'Buffer' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, or take a borrow ('Buffer&') if the value is only being read.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [15]> $a = Buffer(mem::alloc<uint8>(1));
+ [16]> $b = $a;
+           ^
+ [17]> 
+
+Critical issues found, cannot compile.

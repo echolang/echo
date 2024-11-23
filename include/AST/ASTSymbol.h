@@ -9,12 +9,15 @@
 namespace AST
 {  
     class FunctionDeclNode;
-    class StructDeclNode;
+    class TypeDeclNode;
 
+    // what a namespace symbol slot names. a slot holds one node per name, so this is the
+    // function-or-type distinction and nothing finer: whether a type is a `struct` or a `class` is
+    // ComplexType::kind's answer, and every consumer here dereferences the node to ask it anyway
     enum class SymbolType
     {
         t_function,
-        t_struct
+        t_type
     };
 
     class Symbol
@@ -28,7 +31,7 @@ namespace AST
         {}
 
         Symbol(FunctionDeclNode *func);
-        Symbol(StructDeclNode *strct);
+        Symbol(TypeDeclNode *type_decl);
 
         ~Symbol() {};
 

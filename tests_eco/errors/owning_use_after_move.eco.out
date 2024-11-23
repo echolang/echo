@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 18:6
+'$a' has been moved out of.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [17]> 
+ [18]> echo $a->tag;
+           ^
+ [19]> 
+
+Critical issues found, cannot compile.

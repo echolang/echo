@@ -47,7 +47,15 @@ const std::string AST::FunctionDeclNode::signature_description() const
 
     buffer += "(";
     for (size_t i = implicit_arg_count(); i < args.size(); i++) {
-        buffer += (i > implicit_arg_count() ? ", " : "") + args[i]->type().get_type_desciption();
+        buffer += (i > implicit_arg_count() ? ", " : "");
+
+        // `mv` is part of how a call has to be written, so it belongs in the signature a diagnostic
+        // shows even though it is not part of the type and not something a call resolves on
+        if (args[i]->takes_ownership) {
+            buffer += "mv ";
+        }
+
+        buffer += args[i]->type().get_type_desciption();
     }
     buffer += ")";
 

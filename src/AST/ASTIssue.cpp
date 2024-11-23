@@ -84,7 +84,7 @@ ISSUE_MESSAGE_FNC(IntegerUnderflow)
 
 ISSUE_MESSAGE_FNC(UnknownMember)
 {
-    return fmt::format("The struct '{}' has no member named '{}'", struct_name, member_name);
+    return fmt::format("The type '{}' has no member named '{}'", type_name, member_name);
 }
 
 ISSUE_MESSAGE_FNC(ArgumentTypeMismatch)

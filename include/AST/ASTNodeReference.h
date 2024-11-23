@@ -69,8 +69,12 @@ namespace AST
                    parent_type == NodeType::n_expr_addrof ||
                    parent_type == NodeType::n_expr_deref ||
                    parent_type == NodeType::n_expr_peel ||
+                   parent_type == NodeType::n_expr_move ||
                    parent_type == NodeType::n_expr_index ||
                    parent_type == NodeType::n_expr_void ||
+                   parent_type == NodeType::n_expr_class_alloc ||
+                   parent_type == NodeType::n_expr_retain ||
+                   parent_type == NodeType::n_expr_instanceof ||
                    parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||

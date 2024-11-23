@@ -1,0 +1,8 @@
+// a struct has no runtime metadata, so the question has no answer to read - it is rejected rather
+// than answered false. a *class* tested against a struct type is a different question and folds to
+// false, which is why only the left side is checked
+
+struct Rock { int32 $mass; }
+
+$r = Rock(1);
+echo $r instanceof Rock;

@@ -1,0 +1,16 @@
+// an implicit copy of a type that owns a resource. the chapter specifies a member-wise deep copy, but
+// the leaf of every owning type is a raw pointer the type system cannot deep-copy - so both copies
+// would point at one allocation and both destructors would free it. rejected, naming `mv`
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+$a = Buffer(mem::alloc<uint8>(1));
+$b = $a;

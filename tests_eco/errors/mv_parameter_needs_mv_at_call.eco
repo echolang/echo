@@ -1,0 +1,18 @@
+// a `mv` parameter given a place the caller did not mark. the error is the point of the annotation: a
+// function that quietly swallowed its argument would be indistinguishable at the call site from one
+// that borrowed it
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $b) : void {}
+
+$a = Buffer(mem::alloc<uint8>(1));
+consume($a);

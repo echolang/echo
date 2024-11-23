@@ -5,6 +5,7 @@
 
 #include "AST/FunctionDeclNode.h"
 #include "AST/ASTMangler.h"
+#include "Compiler/LLVM/Codegen/ClassLayout.h"
 
 #include <llvm/IR/Function.h>
 
@@ -21,21 +22,30 @@ namespace Compiler::LLVM
 
     struct Structure
     {
-        const AST::StructDeclNode *ast_structdecl;
+        const AST::TypeDeclNode *ast_structdecl;
+
+        // the payload layout, built identically for both storage classes - the properties, in
+        // declaration order, and nothing else
         llvm::StructType *llvm_struct;
+
+        // a class only: the heap block wrapping that payload, and the per-class identity global.
+        // both null for a struct, which has no block and no runtime metadata at all. see
+        // Codegen/ClassLayout.h for the block's shape
+        llvm::StructType *llvm_box = nullptr;
+        llvm::GlobalVariable *typeinfo = nullptr;
     };
 
     class StructureTable
     {
     public:
         StructureTable() {
-            _structures.push_back({ nullptr, nullptr });
+            _structures.push_back(Structure{});
         }
 
-        structure_id_t push_structure(const AST::StructDeclNode *structdecl, llvm::StructType *structtype);
+        structure_id_t push_structure(const AST::TypeDeclNode *structdecl, llvm::StructType *structtype);
 
         // registers a generic struct instantiation, which has an interned ComplexType but no
-        // StructDeclNode of its own (the layout lives on the ComplexType).
+        // TypeDeclNode of its own (the layout lives on the ComplexType).
         structure_id_t push_structure(const AST::ComplexType *type, llvm::StructType *structtype);
 
         Structure &get_structure(structure_id_t id) {
@@ -43,7 +53,7 @@ namespace Compiler::LLVM
             return _structures[id];
         }
 
-        structure_id_t get_structure_id(const AST::StructDeclNode *structdecl) const {
+        structure_id_t get_structure_id(const AST::TypeDeclNode *structdecl) const {
             auto it = _struct_ast_map.find(structdecl);
             if (it != _struct_ast_map.end()) {
                 return it->second;
@@ -63,7 +73,7 @@ namespace Compiler::LLVM
 
     private:
         std::vector<Structure> _structures;
-        std::unordered_map<const AST::StructDeclNode *, structure_id_t> _struct_ast_map;
+        std::unordered_map<const AST::TypeDeclNode *, structure_id_t> _struct_ast_map;
         std::unordered_map<const AST::ComplexType *, structure_id_t> _struct_type_map;
     };
 

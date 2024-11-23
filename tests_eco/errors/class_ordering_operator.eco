@@ -1,0 +1,7 @@
+// two handles compare for identity and nothing else - there is no ordering on a reference
+
+class Res { int32 $v; }
+
+$a = Res(1);
+$b = Res(2);
+bool $less = $a < $b;

@@ -7,7 +7,7 @@
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
-#include "AST/StructNode.h"
+#include "AST/TypeDeclNode.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -161,21 +161,21 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     return llvm_func;
 }
 
-llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::StructDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
+llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
 {
     if (!node->name_token.has_value()) {
         assert(false);
         throw _ctx.error("Anonymous struct declarations are not yet supported.");
     }
 
-    auto struct_name = node->struct_name();
-    // if (_ctx.current_cmp_unit->struct_table.is_defined(struct_name)) {
-    //     assert(false);
-    //     throw _ctx.error(fmt::format(
-    //         "Struct '{}' is already defined.",
-    //         struct_name
-    //     ));
-    // }
+    // idempotent, because more than one thing lowers a declaration: build_struct_maps walks every
+    // TypeDeclNode a unit holds up front, and the codegen visitor reaches the same node again when it
+    // walks the file root
+    if (auto existing = cmp_unit.structure_table->get_structure_id(node); existing != 0) {
+        return cmp_unit.structure_table->get_structure(existing).llvm_struct;
+    }
+
+    auto type_name = node->type_name();
 
     // make the prop types
     std::vector<llvm::Type *> member_types;
@@ -185,39 +185,123 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::StructDeclNod
             assert(false);
             throw _ctx.error(fmt::format(
                 "Unknown type for field '{}' in struct '{}'.",
-                prop->name(), struct_name
+                prop->name(), type_name
             ));
         }
         member_types.push_back(llvm_type);
     }
 
     // define the llvm struct type
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, member_types, struct_name);
+    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, member_types, type_name);
 
     // store the struct in the struct table
-    cmp_unit.structure_table->push_structure(node, llvm_struct_type);
+    auto struct_id = cmp_unit.structure_table->push_structure(node, llvm_struct_type);
+
+    // a class needs the block around that payload before anything can allocate one. built eagerly
+    // here, alongside the payload, so the unit that declares the class always has it
+    if (node->is_class()) {
+        build_class_box(cmp_unit.structure_table->get_structure(struct_id), type_name, cmp_unit);
+    }
 
     return llvm_struct_type;
 }
 
 llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
-    std::string struct_name = type->name.value_or("anon");
+    std::string type_name = type->name.value_or("anon");
 
     // create the struct opaque first and register it, so a self-referential instantiation
     // (a property that mentions the same instantiation) resolves to this in-progress type.
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, struct_name);
-    cmp_unit.structure_table->push_structure(type, llvm_struct_type);
+    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
+    auto struct_id = cmp_unit.structure_table->push_structure(type, llvm_struct_type);
 
-    for (size_t i = 0; i < type->property_count(); i++) {
-    }
     std::vector<llvm::Type *> member_types;
     for (size_t i = 0; i < type->property_count(); i++) {
         member_types.push_back(get_llvm_type(type->get_property_type(i), cmp_unit));
     }
     llvm_struct_type->setBody(member_types);
 
+    // the block, once the payload is complete - it is a member of the block, so it has to be
+    if (type->is_class_kind()) {
+        build_class_box(cmp_unit.structure_table->get_structure(struct_id), type_name, cmp_unit);
+    }
+
     return llvm_struct_type;
+}
+
+void TypeLowering::build_class_box(
+    Structure &structure, const std::string &type_name, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    assert(structure.llvm_struct != nullptr);
+
+    if (structure.llvm_box != nullptr) {
+        return;
+    }
+
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    // the field order is the contract Codegen/ClassLayout.h states: strong count first so retain and
+    // release need no offset, then the identity pointer, then the payload
+    std::vector<llvm::Type *> box_members(3);
+    box_members[ClassBox::strong_index] = i64;
+    box_members[ClassBox::typeinfo_index] = opaque_ptr;
+    box_members[ClassBox::payload_index] = structure.llvm_struct;
+
+    structure.llvm_box = llvm::StructType::create(*_ctx.llvm_context, box_members, type_name + ".box");
+
+    // one byte whose *address* is the class's identity. linkonce_odr so every unit may define it and
+    // the linker keeps one - which is what makes the address comparable across modules without a
+    // numbering scheme anybody has to keep stable
+    const std::string typeinfo_name = type_name + ".typeinfo";
+    structure.typeinfo = cmp_unit.llvm_module->getGlobalVariable(typeinfo_name, true);
+
+    if (structure.typeinfo == nullptr) {
+        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+        structure.typeinfo = new llvm::GlobalVariable(
+            *cmp_unit.llvm_module,
+            i8,
+            /*isConstant=*/true,
+            llvm::GlobalValue::LinkOnceODRLinkage,
+            llvm::ConstantInt::get(i8, 0),
+            typeinfo_name);
+    }
+}
+
+Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
+    const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (type == nullptr) {
+        throw _ctx.error(fmt::format("Cannot resolve the layout of an anonymous class {}", _ctx.function_context()));
+    }
+
+    auto struct_id = cmp_unit.structure_table->get_structure_id(type);
+
+    // the same lazy path get_llvm_type takes for a struct: a generic instantiation has no
+    // TypeDeclNode, and a class declared in another module was never registered here
+    if (struct_id == 0) {
+        create_llvm_struct_for_instance(type, cmp_unit);
+        struct_id = cmp_unit.structure_table->get_structure_id(type);
+    }
+
+    if (struct_id == 0) {
+        throw _ctx.error(fmt::format(
+            "Class '{}' is not declared in compilation unit '{}' ({})",
+            type->name.value_or("<anonymous>"),
+            cmp_unit.ast_module ? cmp_unit.ast_module->name : "<unknown>",
+            _ctx.function_context()));
+    }
+
+    Structure &structure = cmp_unit.structure_table->get_structure(struct_id);
+
+    // a struct registered before the declaration was known to be a class cannot happen - the kind is
+    // settled in the type-name pass - but the box may still be missing if the payload was lowered
+    // through the struct path, so build it rather than assuming
+    if (structure.llvm_box == nullptr) {
+        build_class_box(structure, type->name.value_or("anon"), cmp_unit);
+    }
+
+    return ClassLayout{ structure.llvm_struct, structure.llvm_box, structure.typeinfo };
 }
 
 void TypeLowering::build_function_maps(const AST::Bundle &bundle)
@@ -275,7 +359,7 @@ void TypeLowering::build_struct_maps(const AST::Bundle &bundle)
     // should in the future only happen if a compilation unit actually
     // references the structure
     for (auto &cmp_unit : _ctx.cmp_units) {
-        for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::StructDeclNode>()) {
+        for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::TypeDeclNode>()) {
             // a generic struct template has type-parameter-typed properties and no concrete
             // layout; only its instantiations (Box<int>) are lowered, lazily in get_llvm_type.
             if (struct_decl->is_generic()) {
@@ -297,6 +381,14 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         return llvm::PointerType::get(*_ctx.llvm_context, 0);
     }
 
+    // a class-typed *value* is the handle - one machine address into the heap block, never the block
+    // itself. so this answers before the struct arm, and deliberately does not lower the layout: that
+    // is get_or_create_class_layout's job, asked for by the few places that need it. lowering it here
+    // instead would mean every `ptr<Foo>` and every borrow parameter dragged the whole layout in
+    if (type.is_class()) {
+        return llvm::PointerType::get(*_ctx.llvm_context, 0);
+    }
+
     if (type.is_primitive()) {
         base_type = get_llvm_type(type.get_primitive_type());
     }
@@ -307,7 +399,7 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
         // lower the layout into this unit on demand. build_struct_maps only registers the structs
         // each module declares itself, so two cases arrive here undeclared:
         //
-        //  - a generic instantiation (Box<int>), which has no StructDeclNode at all;
+        //  - a generic instantiation (Box<int>), which has no TypeDeclNode at all;
         //  - a struct declared in *another* module. `mem::alloc<Padded>(2)` is instantiated into
         //    the stdlib module, because that is where the `alloc<T>` template lives, but `Padded`
         //    is declared in main - so lowering that instance needs a layout the stdlib unit has

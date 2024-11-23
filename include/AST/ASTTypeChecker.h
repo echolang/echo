@@ -31,8 +31,9 @@ namespace AST
         void run();
 
         void visitFunctionDecl(FunctionDeclNode &node) override;
-        void visitStructDecl(StructDeclNode &node) override;
+        void visit_type_decl(TypeDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
+        void visit_instanceof_expr(InstanceOfExprNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visitVarDecl(VarDeclNode &node) override;
         void visit_assign(AssignNode &node) override;

@@ -108,25 +108,34 @@ AST::IntegerSize AST::get_integer_size(ValueTypePrimitive primitive)
     };
 }
 
-// Implementation of new static factory methods
-AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+// the one factory. the kind comes off the ComplexType, so a t_class ValueType can only ever name a
+// layout that was declared as a class - which is what lets everything downstream trust the tag on
+// either the type or its layout and get the same answer
+AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
     if (!args.empty()) {
         assert(complex_type->is_generic());
         if (registry) {
             complex_type = registry->get_or_create_instantiation(complex_type, args);
         }
     }
-    return ValueType(ValueTypeKind::t_struct, complex_type);
+
+    assert(complex_type != nullptr);
+
+    return ValueType(
+        complex_type->is_class_kind() ? ValueTypeKind::t_class : ValueTypeKind::t_struct,
+        complex_type);
+}
+
+AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
+    ValueType type = make_complex(complex_type, args, registry);
+    assert(type.is_struct() && "make_struct over a class layout - use make_complex");
+    return type;
 }
 
 AST::ValueType AST::ValueType::make_class(ComplexType *complex_type, const std::vector<ValueType>& args, TypeRegistry* registry) {
-    if (!args.empty()) {
-        assert(complex_type->is_generic());
-        if (registry) {
-            complex_type = registry->get_or_create_instantiation(complex_type, args);
-        }
-    }
-    return ValueType(ValueTypeKind::t_class, complex_type);
+    ValueType type = make_complex(complex_type, args, registry);
+    assert(type.is_class() && "make_class over a struct layout - use make_complex");
+    return type;
 }
 
 bool AST::ValueType::will_fit_into(ValueType other) const
@@ -256,7 +265,7 @@ std::string AST::ValueType::get_mangled_name() const
         // a type parameter at all, and a template is never emitted
         mangled_name += "T"; // type parameter
         mangled_name += std::to_string(_type_param->ordinal);
-    } else if (is_struct() || is_class()) {
+    } else if (has_complex_type()) {
         mangled_name += "C"; // complex type
         mangled_name += get_complex_type()->mangled_token();
     } else {
@@ -298,7 +307,7 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + _type_param->name;
     }
 
-    if (is_struct() || is_class()) {
+    if (has_complex_type()) {
         ComplexType* ct = get_complex_type();
         if (!ct->name.has_value()) {
             return prefix + "[unknown]";
@@ -343,6 +352,9 @@ AST::ComplexType* AST::TypeRegistry::get_or_create_instantiation(ComplexType* tm
         instantiated->name = tmpl->name.value() + "<" + args_description(args) + ">";
     }
     instantiated->ast_namespace = tmpl->ast_namespace;
+    // the storage class is the template's: `Box<int32>` is a class exactly when `Box` is one. without
+    // this an instantiation would answer t_struct and lower as a stack aggregate
+    instantiated->kind = tmpl->kind;
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = args;
 
@@ -465,7 +477,7 @@ bool AST::contains_type_param(const ValueType& type)
     }
 
     // a generic application is unresolved if any of its arguments still is
-    if (type.is_struct() || type.is_class()) {
+    if (type.has_complex_type()) {
         ComplexType* ct = type.get_complex_type();
         if (ct && ct->is_instantiated()) {
             for (const auto& arg : ct->instantiation_args) {
@@ -506,7 +518,7 @@ AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitutio
     }
 
     // a generic application: recursively substitute its arguments, then re-intern.
-    if (type.is_struct() || type.is_class()) {
+    if (type.has_complex_type()) {
         ComplexType* ct = type.get_complex_type();
         if (ct && ct->is_instantiated()) {
             std::vector<ValueType> resolved_args;
@@ -515,7 +527,7 @@ AST::ValueType AST::substitute_type(const ValueType& type, const TypeSubstitutio
                 resolved_args.push_back(substitute_type(arg, subst, registry));
             }
             ComplexType* inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
-            ValueType result = type.is_struct() ? ValueType::make_struct(inst) : ValueType::make_class(inst);
+            ValueType result = ValueType::make_complex(inst);
             return type.is_const() ? ValueType::make_const(result) : result;
         }
     }

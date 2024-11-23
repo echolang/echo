@@ -1,0 +1,22 @@
+// a move inside a loop body runs on every iteration, so the second one would move a value that is no
+// longer there
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $b) : void {}
+
+$a = Buffer(mem::alloc<uint8>(1));
+$i = 0;
+
+while ($i < 3) {
+    consume(mv $a);
+    $i++;
+}

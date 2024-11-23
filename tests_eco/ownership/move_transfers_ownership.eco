@@ -1,0 +1,19 @@
+// `mv` hands the value over: the destination is valid, the source is not, and the source is *not*
+// destroyed at the end of its scope - "its destructor travelled with the value". one destructor line
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+$a = Buffer(5, mem::alloc<uint8>(2));
+$b = mv $a;
+
+echo 0;
