@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 #include <AST/ASTBundle.h>
 #include <AST/ASTDestruction.h>
 #include <AST/ASTMemberLookup.h>
@@ -413,6 +415,21 @@ namespace
         "    destructor() { $this->data = null; }\n"
         "}\n";
 
+    // the value a statement puts somewhere, or null when it puts none: the two statements the pass
+    // rewrites the right-hand side of, asked the same way
+    ExprNode *value_of(NodeReference &child)
+    {
+        if (child.has_type<VarDeclNode>()) {
+            return child.get<VarDeclNode>().init_expr;
+        }
+
+        if (child.has_type<AssignNode>()) {
+            return child.get<AssignNode>().value_expr;
+        }
+
+        return nullptr;
+    }
+
     // every copy the pass inserted into a scope's declarations, in order. a copy is an ordinary call
     // whose declaration is the type's copy constructor, which is the same bargain a drop makes
     std::vector<FunctionCallExprNode *> copies_in(ScopeNode &scope)
@@ -420,14 +437,7 @@ namespace
         std::vector<FunctionCallExprNode *> found;
 
         for (auto &child : scope.children) {
-            ExprNode *value = nullptr;
-
-            if (child.has_type<VarDeclNode>()) {
-                value = child.get<VarDeclNode>().init_expr;
-            }
-            else if (child.has_type<AssignNode>()) {
-                value = child.get<AssignNode>().value_expr;
-            }
+            ExprNode *value = value_of(child);
 
             if (value == nullptr || value->get_node_type() != NodeType::n_expr_call) {
                 continue;
@@ -613,6 +623,163 @@ TEST_CASE("a constructor's write to its own `$this` is that field's first write"
         "}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
+}
+
+// --- the copy the compiler writes itself ----------------------------------------------------------
+
+namespace
+{
+    // a struct whose only owner is a class. nothing here says how it is copied, which is the point:
+    // one more reference to each field is the only thing a copy could mean
+    const char *k_holds_classes =
+        "class Handle { int32 $id; }\n"
+        "struct Pair {\n"
+        "    Handle $a;\n"
+        "    Handle $b;\n"
+        "}\n";
+
+    // the retains a synthesized body puts on the right of its field-wise assignments
+    size_t retains_in(ScopeNode &scope)
+    {
+        size_t found = 0;
+
+        for (auto &child : scope.children) {
+            ExprNode *value = value_of(child);
+
+            if (value != nullptr && value->get_node_type() == NodeType::n_expr_retain) {
+                found++;
+            }
+        }
+
+        return found;
+    }
+}
+
+TEST_CASE("a struct whose owning fields are all classes is copied by a constructor nobody wrote", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_holds_classes) +
+        "function f() : void {\n"
+        "    $a = Pair(Handle(1), Handle(2));\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *synthesized = find_copy_constructor(&type_named(m, "Pair")->complex_type());
+    REQUIRE(synthesized != nullptr);
+
+    // indistinguishable from a written one from here on, which is the whole design: the copy is the
+    // same resolved call, through the same hook, and nothing downstream asks who wrote the body
+    auto copies = copies_in(body_of(m, "f"));
+    REQUIRE(copies.size() == 1);
+    REQUIRE(copies[0]->decl == synthesized);
+
+    // one non-nullable borrow of its own type, so AST::is_copy_constructor would recognise it too
+    REQUIRE(synthesized->args.size() == 1);
+    REQUIRE(is_copy_constructor(synthesized, type_named(m, "Pair")->value_type()));
+}
+
+TEST_CASE("the synthesized copy retains each class field", "[ownership]")
+{
+    // the body it builds is a field-wise assignment and nothing else - no retain is written into it.
+    // they appear because the next round walks those assignments through resolve_value_arrival, the
+    // same arm a hand-written copy constructor's body goes through
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_holds_classes) +
+        "function f() : void {\n"
+        "    $a = Pair(Handle(1), Handle(2));\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *synthesized = find_copy_constructor(&type_named(m, "Pair")->complex_type());
+    REQUIRE(synthesized != nullptr);
+    REQUIRE(synthesized->body != nullptr);
+
+    REQUIRE(retains_in(*synthesized->body) == 2);
+
+    // and nothing it writes into is owed a teardown: `$this` is fresh storage, so the assignments are
+    // initializations and there is no old reference to release
+    for (auto &child : synthesized->body->children) {
+        if (child.has_type<AssignNode>()) {
+            REQUIRE(child.get<AssignNode>().is_initialization);
+            REQUIRE_FALSE(child.get<AssignNode>().releases_old);
+
+            // and deliberately not handed over: `$other` is a borrow, so its fields are copied
+            REQUIRE_FALSE(child.get<AssignNode>().hands_over_value);
+        }
+    }
+}
+
+TEST_CASE("a struct that declares a destructor gets no synthesized copy", "[ownership]")
+{
+    // what a second value running that body would mean is the question its author has not answered,
+    // and the compiler does not guess it
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_holds_classes) +
+        "struct Pool {\n"
+        "    Handle $h;\n"
+        "    destructor() { }\n"
+        "}\n"
+        "function f() : void {\n"
+        "    $a = Pool(Handle(1));\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "cannot be copied implicitly"));
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(find_copy_constructor(&type_named(m, "Pool")->complex_type()) == nullptr);
+}
+
+TEST_CASE("an owner that is not a class gets no synthesized copy", "[ownership]")
+{
+    // the split worth stating: not "we cannot copy owners", but "we cannot copy owners we have no
+    // rule for". ownership ends at a raw pointer, and the type holding it is the only thing that
+    // knows what duplicating it would mean
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "function f() : void {\n"
+        "    $a = Buffer(1, null);\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE(has_issue_containing(*bundle, "cannot be copied implicitly"));
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(find_copy_constructor(&type_named(m, "Buffer")->complex_type()) == nullptr);
+}
+
+TEST_CASE("a written copy constructor is never replaced by a synthesized one", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Handle { int32 $id; }\n"
+        "struct Pair {\n"
+        "    Handle $a;\n"
+        "    Handle $b;\n"
+        "    constructor(Handle $x, Handle $y) { $this->a = $x; $this->b = $y; }\n"
+        "    constructor(Pair& $other) { $this->a = $other->a; $this->b = $other->b; }\n"
+        "}\n"
+        "function f() : void {\n"
+        "    $a = Pair(Handle(1), Handle(2));\n"
+        "    $b = $a;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    // the declaration the parser published, still - and still in the overload set, so `Pair($a)`
+    // and `$b = $a` remain one operation
+    auto written = decls_named(m, "Pair");
+    auto *found = find_copy_constructor(&type_named(m, "Pair")->complex_type());
+
+    REQUIRE(found != nullptr);
+    REQUIRE(std::find(written.begin(), written.end(), found) != written.end());
 }
 
 TEST_CASE("an owning field initialized twice in one constructor is reported", "[ownership]")

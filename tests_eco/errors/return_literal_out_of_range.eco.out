@@ -1,12 +1,12 @@
 ---- Issue ----
-Issue at 7:12
+Issue at 6:12
 Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
 Begin: '300'
 End: '300'
 Code excerpt:
- [6]> {
- [7]>     return 300;
+ [5]> {
+ [6]>     return 300;
                  ^
- [8]> }
+ [7]> }
 
 Critical issues found, cannot compile.

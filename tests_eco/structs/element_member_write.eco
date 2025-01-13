@@ -1,6 +1,5 @@
-// a member reached through an *element* of a heap array. `$items:$[0]` is an IndexExprNode base,
-// which MemberAccessNode::result_type() used to answer void for - so the write went untyped and
-// the read threw "Cannot access member 'x' of void type" in codegen (todo/B16)
+// a member reached through an *element* of a heap array is an ordinary place: read, written,
+// stepped and borrowed like a field of a plain local
 struct Point {
     int32 $x;
     float64 $y;
@@ -18,7 +17,7 @@ echo $items:$[0]->y;
 echo $items:$[1]->x;
 echo $items:$[1]->y;
 
-// the field's type now reaches the expression, so the int32 gets its implicit cast to float64
+// the field's type reaches the expression, so the int32 is cast to float64
 echo $items:$[0]->x * 2.5;
 
 // the step is typed from the field it moves

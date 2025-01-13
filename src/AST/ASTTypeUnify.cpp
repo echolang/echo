@@ -61,14 +61,20 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         return true;
     }
 
-    // nothing left to bind: the parameter is already concrete, so the question is only whether
-    // the argument can reach it. this arm is what lets a partially generic signature reject a
-    // bad argument - `at<T>(ptr<T> $p, usize $i)` binds T from $p and still has to answer for $i
-    if (param == arg || is_implicitly_convertible(arg, param)) {
-        return true;
-    }
-
-    return param.is_primitive() && arg.is_primitive();
+    // nothing was bound, and the parameter's shape is what decides whether that is a failure
+    //
+    // **still mentions a type parameter**: the shapes genuinely did not match. none of the arms above
+    // could descend, so no substitution exists that makes this argument fit - `Box<T>&` against an
+    // int32 binds nothing and never will. the candidate is out, which is also how a template stays
+    // out of an overload set it has no business in
+    //
+    // **type-parameter free**: there was nothing to bind, so unification has no opinion. whether the
+    // argument can *reach* the parameter is deliberately not asked here - that is AST::argument_fit's,
+    // and the matcher asks it of every candidate, generic and concrete alike, once this has
+    // substituted. this arm used to answer it too (is_implicitly_convertible, then a
+    // primitive/primitive catch-all), so a generic candidate was filtered by one rule and then scored
+    // by another, with nothing to notice when the two disagreed
+    return !contains_type_param(param);
 }
 
 AST::InstantiationFit AST::can_instantiate(

@@ -156,9 +156,9 @@ bool OwnershipPass::run_round()
                 continue;
             }
 
-            // cleared before the walk, not between its two halves: the file root's own statements are
-            // walked first and ask for deinits too
-            _pending_deinits.clear();
+            // cleared before the walk, not between its two halves: the file root's own statements ask
+            // for synthesized declarations too
+            _pending_declarations.clear();
 
             // the file root is a body in every sense that matters here: codegen synthesizes `main`
             // out of it, so a local declared at file scope owns its value and is destroyed at the
@@ -174,14 +174,16 @@ bool OwnershipPass::run_round()
                 }
             }
 
-            // the class deinits this file's walk asked for. appended after the loop rather than during
-            // it, since that loop is iterating the very vector this appends to. they are picked up on
-            // the next round like any other declaration, which is also when their own bodies get
-            // walked - and a deinit's `$this` is a borrow, so it owes nothing of its own
-            for (FunctionDeclNode *deinit : _pending_deinits) {
-                file.root->add_funcdecl(*deinit);
+            // the declarations this file's walk asked for - class deinits and copy constructors.
+            // appended after the loop rather than during it, since that loop is iterating the very
+            // vector this appends to. they are picked up on the next round like any other
+            // declaration, which is also when their own bodies get walked: a deinit's `$this` is a
+            // borrow and owes nothing of its own, and a copy constructor's field-wise assignments
+            // are exactly what has to be walked for the retains to appear
+            for (FunctionDeclNode *decl : _pending_declarations) {
+                file.root->add_funcdecl(*decl);
             }
-            _pending_deinits.clear();
+            _pending_declarations.clear();
         }
     }
 
@@ -964,6 +966,13 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // because a constructor's own `return $this` would otherwise call the copy constructor from inside
     // the copy constructor. and ahead of both rejections below, because with a copy constructor a
     // *field* source is legal and no longer belongs in the first of them
+    //
+    // **and the compiler writes that constructor itself when the answer is not a guess**: a struct
+    // whose owning properties are all classes is copied by retaining each of them. built here rather
+    // than checked for as a second kind of copy, so what follows cannot tell a synthesized copy
+    // constructor from a written one - the whole difference is who wrote the body
+    ensure_copy_constructor(wanted, location_of(expr));
+
     if (FunctionDeclNode *copy_ctor = copy_constructor_for(wanted)) {
         // the type's own name, positioned at the copy rather than at the declaration: this is the call
         // the author could have written by hand, and a diagnostic about it has to point at where the
@@ -1130,6 +1139,40 @@ void OwnershipPass::emit_property_drops(
     }
 }
 
+FunctionDeclNode &OwnershipPass::begin_synthesized_decl(const std::string &name, const TokenReference &site)
+{
+    auto &decl = _current_module->nodes.emplace_back<FunctionDeclNode>(
+        virtual_token(name, Token::Type::t_identifier, site));
+
+    // concrete by construction: everything this pass synthesizes is built per instantiated type rather
+    // than per template, so there is nothing left for the monomorphizer to bind
+    decl.inherited_type_param_count = 0;
+
+    decl.body = &_current_module->nodes.emplace_back<ScopeNode>();
+
+    return decl;
+}
+
+VarDeclNode &OwnershipPass::add_borrow_parameter(
+    FunctionDeclNode &decl, const std::string &name, const ValueType &borrowed, const TokenReference &site)
+{
+    auto &param_type = _current_module->nodes.emplace_back<TypeNode>(
+        ValueType::make_pointer(borrowed, /*nullable=*/false));
+
+    auto &param = _current_module->nodes.emplace_back<VarDeclNode>(
+        virtual_token(name, Token::Type::t_varname, site), &param_type);
+
+    decl.args.push_back(&param);
+
+    return param;
+}
+
+void OwnershipPass::publish_synthesized_decl(FunctionDeclNode &decl)
+{
+    _pending_declarations.push_back(&decl);
+    _changed = true;
+}
+
 void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const TokenReference &site)
 {
     ComplexType *ct = class_type.get_complex_type();
@@ -1144,10 +1187,7 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
         return;
     }
 
-    // positioned at the release that asked for it: a synthesized declaration at line 0 gives every
-    // diagnostic raised inside this body nowhere to point
-    auto &decl = _current_module->nodes.emplace_back<FunctionDeclNode>(
-        virtual_token("deinit", Token::Type::t_identifier, site));
+    auto &decl = begin_synthesized_decl("deinit", site);
 
     // a member of the class, which is what gives the mangled name its owner segment - mangled_token()
     // already carries the namespace and, for an instantiation, the type arguments. the namespace is
@@ -1158,20 +1198,12 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
 
     decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(ValueType::make_void());
 
-    // `Foo&`, not `Foo`. a by-value class parameter is an owning parameter, so it would be released at
-    // the end of this very body - the release that got us here, recursing forever. a borrow keeps
-    // nothing alive, which is exactly right for a function that runs when nothing is keeping it alive
-    // any more
-    auto &this_type = _current_module->nodes.emplace_back<TypeNode>(
-        ValueType::make_pointer(class_type, /*nullable=*/false));
+    // a borrow keeps nothing alive, which is exactly right for a function that runs when nothing is
+    // keeping it alive any more: a by-value class parameter would be released at the end of this very
+    // body - the release that got us here, recursing forever
+    auto &this_decl = add_borrow_parameter(decl, "$this", class_type, site);
 
-    auto &this_decl = _current_module->nodes.emplace_back<VarDeclNode>(
-        virtual_token("$this", Token::Type::t_varname, site), &this_type);
-    decl.args.push_back(&this_decl);
-    decl.inherited_type_param_count = 0;
-
-    auto &body = _current_module->nodes.emplace_back<ScopeNode>();
-    decl.body = &body;
+    ScopeNode &body = *decl.body;
 
     // published *before* the body is built, not after. building it emits a release for every
     // class-typed property, and a release asks for that class's deinit - so `class Node { Node $next; }`
@@ -1190,10 +1222,94 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
         body.children.push_back(statement);
     }
 
-    // codegen emits a body only for a declaration that is a child of the file root, and the caller is
-    // iterating those children right now
-    _pending_deinits.push_back(&decl);
-    _changed = true;
+    publish_synthesized_decl(decl);
+}
+
+void OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenReference &site)
+{
+    // the single gate, and it is both halves of the question: whether there is a body to write at all,
+    // and - since it declines a type AST::find_copy_constructor already answers for - the idempotency
+    // that builds this once per type, at the first copy that needs it
+    //
+    // everything it declines still reaches the two rejections below the caller: a type that owns
+    // something the compiler has no rule for is a located error, not a silently wrong copy
+    if (!copy_is_synthesizable(type)) {
+        return;
+    }
+
+    ComplexType *ct = type.get_complex_type();
+
+    // named after the struct, like every constructor - the *template's* name for an instantiation,
+    // since `Box<int32>` is what the layout is called and `Box` is what a constructor of it is
+    auto &decl = begin_synthesized_decl(ct->template_or_self()->name.value_or(""), site);
+
+    // a constructor, and so deliberately **not** a member: owner_type is what implicit_arg_count()
+    // keys on, and args[0] here is the `$other` the caller writes rather than a receiver
+    //
+    // so unlike the deinit above, the mangled name gets no owner segment - and needs none. the sole
+    // parameter is typed `Foo&`, and ValueType::get_mangled_name reaches ComplexType::mangled_token
+    // through it, which carries both the namespace path and, for an instantiation, the type
+    // arguments. `a::Pair` and `b::Pair` cannot collide, and neither can `Box<int32>` and
+    // `Box<float64>`. the namespace is left null for the same reason it is on the deinit: ComplexType
+    // holds its own as a const pointer, and nothing reads this one - the declaration is never in an
+    // overload set to be found by name
+    decl.member_kind = MemberKind::t_constructor;
+
+    auto &self_type = _current_module->nodes.emplace_back<TypeNode>(type);
+    decl.return_type = &self_type;
+
+    // the borrow AST::is_copy_constructor recognises, which is also what makes the call
+    // emit_resolved_member_call builds fit without a cast
+    auto &other_decl = add_borrow_parameter(decl, "$other", type, site);
+
+    ScopeNode &body = *decl.body;
+
+    // published *before* the body is built, the same rule ensure_class_deinit follows. the body is
+    // walked on a later round rather than here, so nothing recurses through this call - but the
+    // invariant is worth keeping unconditional, and it is what stops the `return $this` below from
+    // ever being read as a copy of a type whose copy is still being decided
+    ct->set_copy_constructor(&decl);
+
+    // `Foo $this;` - a body-local of value type, exactly as a written constructor's is, and the
+    // *first* child: gen_scope allocas in child order, so a `$this` declared after the statements
+    // that read it has no storage yet (see TypeDeclParser, which seeds it for the same reason)
+    auto &this_decl = _current_module->nodes.emplace_back<VarDeclNode>(
+        virtual_token("$this", Token::Type::t_varname, site), &self_type);
+    body.add_vardecl(this_decl);
+
+    for (size_t i = 0; i < ct->property_count(); i++) {
+        const ComplexType::Property &prop = ct->get_property(i);
+
+        // one place per use rather than one shared `$this` read, the rule make_place spells out: no
+        // node may sit in the tree twice
+        std::vector<std::string> path{prop.name};
+
+        ExprNode *target = make_place(&this_decl, path);
+        ExprNode *source = make_place(&other_decl, path);
+
+        // a pointer property is *bound* here, not written through: the slot has never been seated,
+        // so a plain assignment would write through uninitialized memory. `$this->prop:$ = $other->prop`,
+        // the same re-seating form the synthesized field-wise constructor spells
+        if (prop.type.is_pointer()) {
+            target = &_current_module->nodes.emplace_back<PointerValueNode>(
+                target, virtual_token(prop.name, Token::Type::t_identifier, site));
+        }
+
+        auto &assign = _current_module->nodes.emplace_back<AssignNode>(
+            target, source, virtual_token(prop.name, Token::Type::t_identifier, site));
+
+        // fresh storage, so no teardown is owed and a `const` property gets its one legitimate write
+        assign.is_initialization = true;
+
+        // and deliberately *not* hands_over_value: `$other` is a borrow this constructor does not own,
+        // so its fields are copied - which is the whole point - rather than moved out of it
+        body.children.push_back(make_ref(assign));
+    }
+
+    auto &this_result = _current_module->nodes.emplace_back<ReturnNode>(make_place(&this_decl, {}));
+    body.children.push_back(make_ref(this_result));
+
+    publish_synthesized_decl(decl);
 }
 
 ExprNode *OwnershipPass::make_place(VarDeclNode *root, const std::vector<std::string> &path)

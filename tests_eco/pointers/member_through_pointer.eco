@@ -1,12 +1,6 @@
-// `->` reaches through a pointer to any depth. there is no `.` versus `->` distinction to
-// remember: a struct value and a pointer to one are accessed the same way
-// (book/concept/pointers_and_refs_v2.md, "Structs and classes")
-//
-// "any depth" was the part that did not hold. member lowering peeled exactly one level, so a
-// `ptr<ptr<Point>>` base resolved to `ptr<Point>`, which is not a struct - the read failed with
-// "Cannot access member 'x' of void type". the peeling is now a loop, and the type side asks
-// AST::target_type_of rather than value_type_of, which is the same distinction: reading is one
-// auto-deref, but `->` wants the struct however many addresses away it is
+// `->` reaches through a pointer to any depth - unlike a plain read, which is exactly one
+// auto-deref. there is no `.` versus `->` distinction: a struct value and a pointer to one are
+// accessed the same way (book/concept/pointers_and_refs_v2.md, "Structs and classes")
 
 struct Point {
     int $x;

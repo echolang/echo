@@ -42,8 +42,7 @@ function first_over(int32 $limit) : int8
     return 0;
 }
 
-// a bare `return;` hands back nothing. this used to trip an assertion in the expression parser,
-// so a void function could not return early at all
+// a bare `return;` hands back nothing, which is how a void function exits early
 function only_positive(int32 $n) : void
 {
     if ($n < 0) {

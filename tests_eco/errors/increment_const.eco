@@ -1,4 +1,3 @@
-// stepping is a write, so it meets the same const check an assignment does - the desugar hands
-// AST::TypeChecker an ordinary AssignNode
+// stepping is a write, so it meets the same const check an assignment does
 const int $c = 1;
 $c++;

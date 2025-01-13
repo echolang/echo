@@ -1,0 +1,46 @@
+// the synthesized copy is decided per *instantiation*, not per template: `Box<Tracked>` owns a
+// reference and copies by retaining it, `Box<int32>` owns nothing and copies as bytes, and a
+// `Box<Buffer>` would own a raw pointer and reject. `Box<T>` itself cannot answer, so the
+// declaration lives on the instance - like a class's deinit, unlike a written copy constructor
+
+class Tracked
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Box<T>
+{
+    T $item;
+}
+
+// the instance that owns something: one teardown, after both boxes are gone
+function classes() : void
+{
+    $a = Box<Tracked>(Tracked(1));
+
+    {
+        $b = $a;
+        echo 10;
+    }
+
+    echo 11;
+}
+
+// the instance that owns nothing is copied as bytes, with no constructor synthesized
+function plain() : void
+{
+    $a = Box<int32>(5);
+    $b = $a;
+    echo $b->item;
+    echo 20;
+}
+
+// two instantiations of one template in one program, each with its own answer
+classes();
+plain();
+echo 99;

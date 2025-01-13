@@ -1,9 +1,4 @@
-// `&` needs something with storage. a literal has none, and neither does a call result -
-// there is nothing to point at (book/concept/pointers_and_refs_v2.md, "Taking addresses").
-//
-// the sibling case address_of_temporary.eco covers `&($a + $b)`, which is rejected by the
-// lexer before the parser ever sees a reference. these two reach the expression parser, where
-// they used to fall off the end of the operand production into `assert(false && "unimplemented")` -
-// aborting the compiler with no location, and in a release build falling off a non-void function
+// `&` needs something with storage, and a literal has none
+// (book/concept/pointers_and_refs_v2.md, "Taking addresses")
 $a = 1;
 int& $r = &5;

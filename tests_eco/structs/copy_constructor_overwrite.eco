@@ -1,6 +1,5 @@
-// the general order, with no copy involved at all: the right-hand side is a fresh construction, and the
-// old value is still torn down after it rather than before. nothing pinned this before - every owning
-// site in the corpus was a *declaration*, which never reaches the assignment path
+// assignment order with no copy involved: the right-hand side is a fresh construction, and the
+// target's old value is torn down after it has been built, not before
 
 struct Box
 {

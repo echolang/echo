@@ -239,6 +239,31 @@ namespace AST
             const ComplexType *ct,
             std::vector<NodeReference> &out);
 
+        // --- synthesized declarations ------------------------------------------------------------
+
+        // the skeleton every declaration this pass writes shares: a node named `name` at `site`, with
+        // nothing left open for the monomorphizer to bind and an empty body attached. the caller fills
+        // in what differs - the kind, the return type, the parameters, the statements
+        //
+        // `site` is the release or the copy that asked for the declaration, rather than the type's own
+        // line: a synthesized declaration at line 0 gives every diagnostic raised inside its body
+        // nowhere to point
+        FunctionDeclNode &begin_synthesized_decl(const std::string &name, const TokenReference &site);
+
+        // a single non-nullable borrow parameter, which is what both synthesized declarations take -
+        // a deinit's `$this` and a copy constructor's `$other`. `Foo&` rather than `Foo`: a by-value
+        // parameter of an owning type is an owner, and neither of them may own its argument
+        VarDeclNode &add_borrow_parameter(
+            FunctionDeclNode &decl, const std::string &name, const ValueType &borrowed, const TokenReference &site);
+
+        // hands a finished declaration to the file root, and marks the round changed so the next one
+        // walks its body
+        //
+        // through `_pending_declarations` rather than add_funcdecl directly: run_round is iterating
+        // the very children this appends to. codegen emits a body only for a declaration that is one
+        // of them, so a synthesizer that skips this step emits a `declare` nobody defines
+        void publish_synthesized_decl(FunctionDeclNode &decl);
+
         // --- classes ---------------------------------------------------------------------------
 
         // the function a class's release calls when the count reaches zero: its own destructor, then
@@ -257,9 +282,35 @@ namespace AST
         // somewhere to point other than line 0
         void ensure_class_deinit(const ValueType &class_type, const TokenReference &site);
 
-        // deinits built this round, appended to the file root after the walk rather than during it -
-        // resolve_function is iterating those children
-        std::vector<FunctionDeclNode *> _pending_deinits;
+        // --- copies ----------------------------------------------------------------------------
+
+        // the copy constructor for a struct whose owning properties are all classes, transitively:
+        // the body its author would have written, which is a field-wise assignment and nothing else
+        //
+        // no retain appears in what this builds. `$this->a = $other->a` is an ordinary assignment, so
+        // the next round's walk reaches it through resolve_value_arrival and inserts the retain there
+        // - the same arm a hand-written copy constructor's body goes through. a property that is a
+        // struct with a copy of its own gets a resolved call to it instead, and one that needs a
+        // synthesized copy asks for its own here, which is where the recursion lives
+        //
+        // synthesized on demand at the first copy that needs it, and per *concrete* type rather than
+        // per template: whether the compiler can write the body at all depends on the property types,
+        // and `Box<Handle>` can while `Box<Buffer>` cannot. AST::copy_is_synthesizable (ASTCopy.h) is
+        // the rule, and it declines a type that already has a written one
+        //
+        // deliberately **not** registered in AST::FunctionRegistry, unlike the parser's field-wise
+        // constructor. that registry is read only while parsing, and a call site is resolved as it is
+        // parsed - so a declaration created inside this fixpoint arrives after every written call was
+        // already resolved or already reported. it would make `Pair($p)` no more callable than it is
+        // now, and would put a per-instantiation declaration into a name-keyed overload set the
+        // parser owns. `$q = $p` is the spelling
+        void ensure_copy_constructor(const ValueType &type, const TokenReference &site);
+
+        // declarations synthesized this round - class deinits and copy constructors - appended to the
+        // file root after the walk rather than during it, since resolve_function is iterating those
+        // children. one list because it is one mechanism: whatever lands here is emitted by codegen
+        // and walked by the next round like any other declaration
+        std::vector<FunctionDeclNode *> _pending_declarations;
     };
 };
 

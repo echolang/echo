@@ -4,9 +4,8 @@
 //   $out:$     the address $out holds
 //   $out:$:$   the address of $out's own slot - identical to &$out
 //
-// the trailing '$' in the operator is what makes the chained form spellable at all: two bare
-// colons back to back would always lex as the namespace separator
-// (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+// the trailing '$' is what makes the chained form spellable: two bare colons back to back
+// lex as the namespace separator (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
 
 $a = 1;
 ptr<int> $p = &$a;

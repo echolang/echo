@@ -1,9 +1,6 @@
-// `$a = $a` on an owning type, which was unreachable until copies existed - it was rejected as a copy,
-// so the order of the old value's teardown against the right-hand side was unobservable.
-//
-// the order pinned here is the only correct one: copy first (700), then tear the old value down (10),
-// then store. the destructor zeroes `$tag`, so a teardown that ran first would make the copy read 0 and
-// the last line would be 1 rather than 11
+// `$a = $a` on an owning type, where the order is observable: copy first (700), then tear the old
+// value down (10), then store. the destructor zeroes `$tag`, so a teardown running first would make
+// the copy read 0 and the last line 1 rather than 11
 
 struct Box
 {

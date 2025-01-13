@@ -16,24 +16,19 @@ namespace Parser
 {
     bool can_parse_type(Payload &payload);
 
-    // true when the cursor sits on a namespace qualified type followed by a variable name,
-    // e.g. `a::b::Foo $x`. lets the statement dispatch tell a qualified var declaration apart
-    // from a qualified function call `a::foo()`. pure lookahead, the cursor is not moved
-    bool starts_qualified_vardecl(Payload &payload);
-
-    // true when the cursor sits on a borrow declaration, `int32& $r` / `int32 & $r`. the lexer
-    // only emits t_ref when the `&` abuts a name character, so the spaced form arrives as
-    // t_and and both spellings have to be recognised. lives here, next to parse_ref_suffix,
-    // so every statement dispatch that has to spot a declaration asks the same question -
-    // the struct body used to keep its own list and silently rejected borrow properties
-    // pure lookahead, the cursor is not moved
-    bool starts_borrow_vardecl(Payload &payload);
-
     // true when the cursor sits on a variable declaration in any of its spellings - inferred
-    // (`$x = ...`), typed (`int32 $x`), qualified, borrowed, const or ptr. the one owner of
-    // "what a declaration looks like", so a scope body and a struct body cannot disagree about
-    // it; they used to keep a token list each and the struct's silently lagged behind.
-    // pure lookahead, the cursor is not moved
+    // (`$x = ...`), typed (`int32 $x`), qualified, generic, borrowed, const or ptr. the one owner
+    // of "what a declaration looks like", so a scope body and a struct body cannot disagree about
+    // it; they used to keep a token list each and the struct's silently lagged behind
+    //
+    // the question is answered by scanning the *type grammar* and looking at what follows it,
+    // rather than by enumerating token sequences. an enumeration needs an arm per spelling and had
+    // none for a generic application, so `Q<int32> $q` and `struct H { Q<int32> $i; }` did not
+    // parse - and the three arms that did exist did not compose, so `a::b::Foo& $r` matched none of
+    // them. a scan has one arm per *grammar production* instead, which is the thing that has a
+    // fixed number of cases
+    //
+    // pure lookahead: the scan moves the cursor and restores it before returning
     bool starts_vardecl(Payload &payload);
 
     AST::TypeNode *parse_type(Payload &payload);

@@ -1,6 +1,4 @@
-// echo prints values, and an address is not one. reaching a pointer's format through
-// value_type_of used to peel a second time and print the address as though it were the int
-// sitting at it, so `echo $p:$` produced a plausible-looking but meaningless number
+// echo prints values, and an address is not one
 $a = 5;
 ptr<int> $p = &$a;
 echo $p:$;

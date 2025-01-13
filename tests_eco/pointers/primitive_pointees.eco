@@ -1,7 +1,5 @@
-// every primitive family read and written through a borrow, not just int32. the write is a literal
-// so the destination's expected type is the *pointee*, which is what todo/B11 was about: the bool
-// half of that ticket reported the self-contradicting "the boolean literal 'false' cannot be
-// implicitly converted to the expected type 'bool'"
+// every primitive family read and written through a borrow, not just int32. each write is a
+// literal, so the type it is given is the *pointee's*
 
 // bool
 $b = true;
@@ -10,8 +8,7 @@ echo $br;
 $br = false;
 echo $b;
 
-// float64 - the literal is a float here and an int on the next write, which takes the other
-// autocast branch and still has to land as a double
+// float64 - written from a float literal and then from an int one, which still lands as a double
 $f = 1.5;
 float64& $fr = &$f;
 echo $fr;
@@ -27,7 +24,7 @@ echo $gr;
 $gr = 0.75;
 echo $g;
 
-// uint8 - the write has to truncate to a byte rather than store four
+// uint8 - the write stores one byte, not four
 uint8 $u = 3;
 uint8& $ur = &$u;
 echo $ur;
@@ -40,7 +37,7 @@ int64& $lr = &$l;
 $lr = 5000000000;
 echo $l;
 
-// int32, for completeness next to the rest
+// int32
 int32 $i = 7;
 int32& $ir = &$i;
 echo $ir;

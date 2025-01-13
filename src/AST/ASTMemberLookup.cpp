@@ -6,17 +6,11 @@ namespace
 {
     // an instantiation carries the layout of `Box<int32>` but none of its members: they are the
     // template's declarations, instantiated per call site. so the receiver's *type* answers where to
-    // look and the template answers what is there
-    //
-    // the one spelling of that redirect, because it is the contract that keeps TypeRegistry ignorant
-    // of members - both lookups below are the same rule asked about a different store
+    // look and ComplexType::template_or_self answers what is there - the null check is the only thing
+    // this adds, and it is what lets every lookup below take an unchecked layout
     const AST::ComplexType *member_owner_of(const AST::ComplexType *ct)
     {
-        if (ct == nullptr) {
-            return nullptr;
-        }
-
-        return ct->is_instantiated() ? ct->template_ref : ct;
+        return ct == nullptr ? nullptr : ct->template_or_self();
     }
 }
 
@@ -76,7 +70,14 @@ bool AST::is_copy_constructor(const AST::FunctionDeclNode *decl, const AST::Valu
 
 AST::FunctionDeclNode *AST::find_copy_constructor(const AST::ComplexType *ct)
 {
-    const AST::ComplexType *owner = member_owner_of(ct);
+    if (ct == nullptr) {
+        return nullptr;
+    }
 
-    return owner == nullptr ? nullptr : owner->copy_constructor();
+    // the type's own slot first - see the header for why this one lookup does not simply redirect
+    if (auto *own = ct->copy_constructor()) {
+        return own;
+    }
+
+    return ct->template_or_self()->copy_constructor();
 }

@@ -1,5 +1,4 @@
-// echo has a printf conversion per primitive and none for a named type. reported at the call rather
-// than aborting inside codegen (todo/B6 is the feature itself)
+// echo has a printf conversion per primitive and none for a named type (todo/B6)
 
 class Res { int32 $v; }
 

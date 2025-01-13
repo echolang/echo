@@ -1,6 +1,6 @@
-// "a struct that contains an owner is itself an owner, and nothing needs to be declared for that."
-// Wrap has no destructor of its own; its Buffer field is still destroyed. properties go in reverse
-// declaration order too, and a property that owns nothing is not visited at all
+// a struct that contains an owner is itself an owner, with nothing declared for it: `Wrap` has no
+// destructor and its Buffer field is still destroyed. properties go in reverse declaration order,
+// and one that owns nothing is not visited at all
 
 struct Buffer
 {

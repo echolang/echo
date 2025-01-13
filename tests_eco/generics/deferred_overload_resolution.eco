@@ -1,0 +1,16 @@
+// an overload set that only becomes decidable after monomorphization.
+//
+// at parse time `$q` still carries the template's `Q<T>`, which is undetermined, so both overloads
+// score neutrally and the matcher answers t_undecidable - a not-yet rather than an error. the
+// fixpoint that re-derives `$q`'s type from its initializer is the one that then settles the call
+struct Q<T> { T $x; }
+struct P { int32 $y; }
+
+function pick(Q<int32>& $q) : int32 { return $q->x; }
+function pick(P& $p) : int32 { return $p->y; }
+
+$q = Q<int32>(7);
+$p = P(9);
+
+echo pick($q);
+echo pick($p);

@@ -1,11 +1,6 @@
-// `const int32& $r` is the read-only borrow, and the doc's recommended form for a parameter
-// that only needs to look at its argument (book/concept/pointers_and_refs_v2.md, "Const")
-//
-// it was unusable. `&$a` yields `int32&`, and implicit convertibility only ever dropped const at
-// the *top* level, so a mutable borrow did not satisfy a const one and every call site failed
-// with "cannot implicitly convert 'int32&' to 'const int32&'". adding const to the pointee is
-// safe - promising only to read is weaker than being allowed to write - so it is now allowed,
-// while removing it still is not
+// `const int32& $r` is the read-only borrow, the form for a parameter that only looks at its
+// argument (book/concept/pointers_and_refs_v2.md, "Const"). a mutable borrow satisfies it -
+// adding const to the pointee is a weakening - while dropping the const again is not
 
 function show(const int& $r) : void {
     echo $r;

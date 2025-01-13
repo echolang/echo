@@ -1,10 +1,6 @@
-// an address only compares against another address. codegen lowers a pointer comparison to an
-// icmp over two pointers, and llvm asserts when the operand types differ - so this aborted the
-// compiler with "Both operands to ICmp instruction are not of the same type!" and no location.
-//
-// note this is a different rule from null_compare_value.eco: there the *value* side was wrong,
-// here the two sides simply are not the same kind of thing. arithmetic still mixes freely,
-// because `$p:$ + 1` offsets an address rather than comparing it
+// an address only compares against another address - a different rule from
+// null_compare_value.eco, where the wrong side was read. arithmetic still mixes freely, since
+// `$p:$ + 1` offsets an address rather than comparing it
 $a = 1;
 ptr<int> $p = &$a;
 echo ($p:$ == 0);

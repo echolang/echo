@@ -1,5 +1,5 @@
-// namespace-qualified type names: a type from another namespace can be named explicitly
-// as a parameter, a return type, a property and a generic argument (see todo/B7)
+// a namespace-qualified type name works anywhere a type does: parameter, return type,
+// property and generic argument
 
 namespace geometry;
 

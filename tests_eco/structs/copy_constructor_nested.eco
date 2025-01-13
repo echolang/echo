@@ -1,14 +1,10 @@
-// the case that shows the recursion bottoms out. the chapter's original member-wise deep copy had no
-// bottom, because ownership ends at a raw pointer the type system sees as owning nothing - so copying
-// member-wise would copy the address and leave two owners.
+// a copy of a struct whose field is itself copyable. nothing recurses on its own - `Outer` and
+// `Plain` each *write* what copying their owning field means - and both spellings reach `Inner`'s
+// copy constructor: an explicit `Inner($other->inner)`, and a plain field read arriving at a
+// destination.
 //
-// here nothing recurses on its own: `Outer`'s copy constructor is *written*, and it says what copying
-// its owning field means. both spellings work - an explicit inner copy, and the plain field read, which
-// reaches `Inner`'s copy constructor through the very same hook.
-//
-// what had to change for this to compile at all: a write to a field of the enclosing constructor's own
-// `$this` is that field's first write, so it is not the "cannot assign into a field" partial-ownership
-// case. `$this` is a fresh zero-filled slot, so there is genuinely nothing there to tear down
+// a write to a field of the enclosing constructor's own `$this` is that field's first write, so no
+// old value is torn down here
 
 struct Inner
 {

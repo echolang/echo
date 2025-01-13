@@ -1,12 +1,7 @@
-// the counterpart to generic_decay.eco: asking for `ptr<T>` explicitly is how the doc says to
-// opt out of the decay, so the pointer survives into the instance instead of being read away
-// (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
-//
-// the opt-out used to be shallow. the decay rule fired again on the recursive descent, so
-// `ptr<T>` matched against a `ptr<ptr<int32>>` argument bound T=int32 rather than T=ptr<int32> -
-// both call sites below collapsed onto one instance, and the deeper one was handed an argument
-// two levels away from what its body expected. decay is a statement about the argument as a
-// whole, so it now applies only at the top of a unification
+// the counterpart to generic_decay.eco: a `ptr<T>` parameter opts out of the decay, so the
+// pointer survives into the instance (book/concept/pointers_and_refs_v2.md, "Pointers and
+// generics"). the decay is top-level only, so a `ptr<ptr<int32>>` argument binds T=ptr<int32>
+// and is a different instance from the shallow one
 
 function first<T>(ptr<T> $v) : T {
     return $v;
@@ -18,8 +13,8 @@ ptr<int> $p = &$a;
 // T is int32 here: the parameter asked for the pointer, so nothing decayed
 echo first($p);
 
-// a level deeper T is ptr<int32>, a genuinely different instance: what comes back is the
-// caller's ptr<int>, so it is bound rather than echoed - echo has no format for an address
+// a level deeper T is ptr<int32>, a different instance: what comes back is the caller's
+// ptr<int>, so it is bound rather than echoed - echo has no format for an address
 ptr<ptr<int>> $pp = &$p;
 ptr<int> $inner = first($pp);
 

@@ -1,9 +1,9 @@
-// a generic method with its *own* type parameter on a generic owner - the case that needs both
-// resolved at once. the method carries [T, U]: T is the owner's, bound from the receiver argument,
-// and U is its own, either inferred from the arguments or spelled at the call site.
+// a generic method with its *own* type parameter on a generic owner. the method carries [T, U]:
+// T is the owner's, bound from the receiver, and U is its own, inferred from the arguments or
+// spelled at the call site.
 //
-// only U can be spelled. `$a->pick<float64>(...)` says nothing about Box's T, which the receiver
-// already fixes, so the type argument list is arity-checked against the method's own parameters
+// only U can be spelled - the receiver already fixes T - so the type argument list is arity-checked
+// against the method's own parameters
 
 struct Box<T>
 {

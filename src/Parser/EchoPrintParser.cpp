@@ -25,6 +25,15 @@ AST::FunctionCallExprNode * Parser::parse_echo(Payload &payload)
 
     auto &node = payload.context.emplace_node<AST::FunctionCallExprNode>(echo_token, args);
 
+    // `echo` borrows the call node's shape without being a call: it names no declaration anywhere,
+    // and ExprCodegen lowers it from this very token into a printf. so it is settled the moment it is
+    // built - there is nothing for AST::CallResolver to look up, and nothing to fit to a parameter
+    // list that does not exist
+    //
+    // sayable only because settlement is its own state rather than "decl is set": with the state
+    // inferred from the pointer, a node like this could not tell the finalizing sweep it was finished
+    node.settlement = AST::CallSettlement::t_settled;
+
     // next token should be a semicolon
     if (payload.cursor.current().type() != Token::Type::t_semicolon) {
         payload.collect_unexpected_token(Token::Type::t_semicolon);

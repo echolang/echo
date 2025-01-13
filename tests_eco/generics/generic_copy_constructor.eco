@@ -1,12 +1,8 @@
-// a generic's copy constructor needs no instantiation logic of its own. the copy call the ownership
-// pass inserts names the *template's* declaration, and the receiver `Box<T>&` binds T from the type of
-// the value being copied - so the next monomorphizer round rewires it to the instance, exactly as it
-// does for the drop that calls the template's destructor.
+// a generic's copy constructor needs no instantiation logic of its own: the inserted copy call names
+// the *template's* declaration, the receiver `Box<T>&` binds T from the value being copied, and the
+// next monomorphizer round rewires it to the instance - the same path a drop takes.
 //
-// that is the reason the ownership pass runs inside the monomorphizer's fixpoint rather than after it:
-// inserting a copy *creates* a generic call site.
-//
-// two instantiations, so the goldens would show it if one of them collapsed onto the other
+// two instantiations, so the goldens show it if one collapses onto the other
 
 struct Box<T>
 {

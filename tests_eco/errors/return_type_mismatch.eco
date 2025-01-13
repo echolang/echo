@@ -1,6 +1,4 @@
-// returning a value where the signature promises a borrow. this used to reach codegen and fail
-// llvm's own verifier with "Function return type does not match operand type of return inst",
-// which named neither the function nor the line
+// returning a value where the signature promises a borrow
 function bad(int $x) : int& {
     return $x;
 }

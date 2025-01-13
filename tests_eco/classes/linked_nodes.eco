@@ -1,10 +1,8 @@
-// a class may hold itself, which is the point of having one - and the reason a class's cleanup is a
-// *release* rather than a transitive walk over its properties. a struct cannot contain itself by
-// value, so the struct rule bottoms out on its own; a class needs the reference to be where the
-// recursion stops.
+// a class may hold itself, which a struct cannot - and is why a class's cleanup is a *release*
+// rather than a transitive walk over its properties.
 //
-// dropping the head of a chain cascades: each link's count reaches zero only once the link above it
-// has been torn down
+// dropping the head of a chain cascades: each link's count reaches zero only once the link above
+// it has been torn down
 
 class Node
 {

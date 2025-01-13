@@ -1,11 +1,6 @@
-// a function may return a borrow, and the caller may write through what comes back.
-//
-// this parsed and type-checked long before it worked. the adjustment pass read every return
-// expression as a value, so `return $x` on an `int32&` handed back the pointee - an i32 where
-// the signature promised a pointer - and llvm's verifier rejected the module with "Function
-// return type does not match operand type of return inst", naming neither function nor line.
-// a return now fits its value to the declared return type, the same rule declarations and
-// assignments already used
+// a function may return a borrow, and the caller may write through what comes back. how far
+// the returned expression is read follows the declared return type, so the same body returns
+// the address for an `int&` signature and the pointee for an `int` one
 
 function pick(int &$x) : int& {
     return $x;
@@ -27,8 +22,7 @@ $again = 7;
 echo $a;
 echo ($r:$ == $again:$);
 
-// a value return from the same borrow parameter still reads through, so the two rules stay
-// distinguishable rather than one swallowing the other
+// a value return from the same borrow parameter reads through instead
 function read(int &$x) : int {
     return $x;
 }

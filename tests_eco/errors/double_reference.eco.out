@@ -1,12 +1,12 @@
 ---- Issue ----
-Issue at 10:17
+Issue at 8:17
 A reference cannot be taken twice, write 'ptr<int32&>' instead
 Begin: '&'
 End: '&'
 Code excerpt:
- [9]> // message, so it appears once - this golden is where a regression in that would show up
- [10]> function f(int& & $x) : void {}
+ [7]> // the signature is read in every module pass, so this also pins that the issue is reported once
+ [8]> function f(int& & $x) : void {}
                       ^
- [11]> 
+ [9]> 
 
 Critical issues found, cannot compile.

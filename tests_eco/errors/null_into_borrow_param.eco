@@ -1,6 +1,5 @@
-// a borrow promises it is never null. the declaration site already refuses to seed one with
-// null (see null_into_borrow.eco); the call site has to refuse too, or the promise only holds
-// for locals and the callee segfaults the moment it reads through the parameter
+// a borrow promises it is never null, at a call site as much as at a declaration
+// (see null_into_borrow.eco)
 function f(int &$x) : void {
     $x = 1;
 }

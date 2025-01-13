@@ -33,59 +33,113 @@ bool Parser::can_parse_type(Parser::Payload &payload)
     return false;
 }
 
-bool Parser::starts_qualified_vardecl(Parser::Payload &payload)
+// advances past one type if the tokens at the cursor form one, and answers whether they did
+//
+// shape only - no symbol lookup, no diagnostics, no nodes - because this runs at a statement head,
+// where the answer decides which parser is called at all. a type name is not necessarily resolvable
+// there either: the type-name pass may not have reached it, and an unresolved unqualified name is
+// silently `unknown` rather than a diagnostic
+//
+// the grammar it walks mirrors parse_value_type:
+//   type      := 'const'? ( 'ptr' '<' type '>' | qualified ) ref?
+//   qualified := ( identifier '::' )* identifier ( '<' type ( ',' type )* '>' )?
+//   ref       := '&'
+// it consumes its closing angle brackets through the cursor's own '>>' split rather than counting
+// them, so `Box<Box<int32>>` cannot end in a different place here than it does in
+// parse_generic_application - two notions of "where does this argument list end" would desync
+//
+// only the bounds-safe cursor accessors are used (never current(), which asserts), so a truncated
+// type runs out of tokens and answers false instead of aborting
+static bool skip_type_shape(Parser::Cursor &cursor)
 {
-    size_t offset = 0;
-    if (payload.cursor.is_type(Token::Type::t_const)) {
-        offset++;
+    if (cursor.is_type(Token::Type::t_const)) {
+        cursor.skip();
     }
 
-    // walk the `identifier ::` pairs of the namespace path, at least one is required
-    const size_t after_prefix = peek_past_namespace_prefix(payload, offset);
-    if (after_prefix == offset) {
-        return false;
+    // `ptr<T>` is a type constructor, so it recurses on its pointee exactly as the parser does
+    if (cursor.is_type(Token::Type::t_ptr)) {
+        cursor.skip();
+
+        if (!cursor.is_type(Token::Type::t_open_angle)) {
+            return false;
+        }
+        cursor.skip();
+
+        if (!skip_type_shape(cursor) || !cursor.is_generic_close()) {
+            return false;
+        }
+        cursor.consume_generic_close();
     }
-    offset = after_prefix;
+    else {
+        // an optionally qualified name, `a::b::Foo`
+        while (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+            cursor.skip(2);
+        }
 
-    // the type name itself followed by the variable name
-    return payload.cursor.is_type_sequence(offset, { Token::Type::t_identifier, Token::Type::t_varname });
-}
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            return false;
+        }
+        cursor.skip();
 
-bool Parser::starts_borrow_vardecl(Parser::Payload &payload)
-{
-    size_t offset = 0;
-    if (payload.cursor.is_type(Token::Type::t_const)) {
-        offset++;
+        // a generic application, `Foo<Arg, Arg>`. a bare identifier is never a value operand -
+        // values carry a `$` - so a `<` after a type name is a type argument list and nothing else,
+        // which is why this needs no reinterpretation the way `->name<` does
+        if (cursor.is_type(Token::Type::t_open_angle)) {
+            cursor.skip();
+
+            while (!cursor.is_generic_close()) {
+                if (cursor.is_done() || !skip_type_shape(cursor)) {
+                    return false;
+                }
+
+                if (cursor.is_type(Token::Type::t_comma)) {
+                    cursor.skip();
+                } else if (!cursor.is_generic_close()) {
+                    return false;
+                }
+            }
+
+            cursor.consume_generic_close();
+        }
     }
 
-    // an optionally qualified type name, `a::b::Foo& $x`
-    offset = peek_past_namespace_prefix(payload, offset);
-
-    if (!payload.cursor.peek_is_type(offset, Token::Type::t_identifier)) {
-        return false;
+    // the borrow suffix, in either of the two spellings the lexer produces (see parse_ref_suffix)
+    if (cursor.is_type(Token::Type::t_ref) || cursor.is_type(Token::Type::t_and)) {
+        cursor.skip();
     }
-    offset++;
 
-    if (!payload.cursor.peek_is_type(offset, Token::Type::t_ref)
-        && !payload.cursor.peek_is_type(offset, Token::Type::t_and)) {
-        return false;
-    }
-    offset++;
-
-    return payload.cursor.peek_is_type(offset, Token::Type::t_varname);
+    return true;
 }
 
 bool Parser::starts_vardecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
-    return cursor.is_type(Token::Type::t_const) // const keyword always starts a vardecl
-        || cursor.is_type(Token::Type::t_ptr) // ptr keyword also indicates a vardecl
-        || cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign })
-        || cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_assign })
-        || cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_varname, Token::Type::t_semicolon })
-        || starts_borrow_vardecl(payload) // int32& $r, either `&` spelling
-        || starts_qualified_vardecl(payload); // a::b::Foo $foo
+    // `const` and `ptr` begin nothing else at a statement head, so they answer without a scan.
+    // that keeps a malformed one reported by parse_varexpr, which knows what it was reading,
+    // rather than by the statement dispatch's catch-all
+    if (cursor.is_type(Token::Type::t_const) || cursor.is_type(Token::Type::t_ptr)) {
+        return true;
+    }
+
+    // the inferred form, `$x = ...`, which has no type to scan
+    if (cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_assign })) {
+        return true;
+    }
+
+    // everything else is a declaration exactly when a whole type is followed by a variable name.
+    // one scan rather than a list of token sequences: the list had an arm per spelling and no arm
+    // for a generic application at all, so `Q<int32> $q` fell through to the call statement branch
+    // and was read as a constructor call whose `(` never arrives - and the struct member loop asks
+    // this same question, which is why a property failed identically
+    //
+    // the scan moves the cursor and puts it back. the snapshot carries the '>>' split state, so a
+    // rolled-back `Box<Box<int32>>` leaves nothing behind for the real parse to trip on
+    const auto snapshot = cursor.snapshot();
+    const bool is_decl = skip_type_shape(cursor) && cursor.is_type(Token::Type::t_varname);
+    cursor.restore(snapshot);
+
+    return is_decl;
 }
 
 AST::ValueType get_primitive_type(const std::string &types_string)
@@ -300,6 +354,14 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
         if (cursor.is_type(Token::Type::t_colon)) {
             cursor.skip(); // skip ':'
 
+            // the type-name pass reads this list for the one thing it owns - a generic type's arity
+            // and its parameter names - and a constraint atom may name a type no pass has registered
+            // yet, so resolving one here would report an unknown type for a well formed program. the
+            // atoms are still walked, to leave the cursor after the list, and the declaration pass
+            // fills the constraint in: declare_params refreshes it on every pass precisely so this
+            // can be deferred
+            const bool resolve_atoms = payload.pass != Pass::t_type_names;
+
             while (true) {
                 if (!cursor.is_type(Token::Type::t_identifier)) {
                     payload.collect_unexpected_token(Token::Type::t_identifier);
@@ -310,23 +372,26 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
                 auto atom_token = cursor.current();
                 auto atom_name = atom_token.value();
 
-                auto atom_types = resolve_constraint_atom(payload, atom_name);
-                if (!atom_types) {
-                    payload.collector.collect_issue<AST::Issue::GenericError>(
-                        payload.context.code_ref(atom_token),
-                        fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
-                    );
-                    cursor.try_skip_to_next_statement();
-                    return type_parameters;
+                if (resolve_atoms) {
+                    auto atom_types = resolve_constraint_atom(payload, atom_name);
+                    if (!atom_types) {
+                        payload.collector.collect_issue<AST::Issue::GenericError>(
+                            payload.context.code_ref(atom_token),
+                            fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
+                        );
+                        cursor.try_skip_to_next_statement();
+                        return type_parameters;
+                    }
+
+                    for (const auto &type : *atom_types) {
+                        param.constraint.push_back(type);
+                    }
+                    if (!param.constraint_spelling.empty()) {
+                        param.constraint_spelling += "|";
+                    }
+                    param.constraint_spelling += atom_name;
                 }
 
-                for (const auto &type : *atom_types) {
-                    param.constraint.push_back(type);
-                }
-                if (!param.constraint_spelling.empty()) {
-                    param.constraint_spelling += "|";
-                }
-                param.constraint_spelling += atom_name;
                 cursor.skip();
 
                 // more atoms are separated by '|'

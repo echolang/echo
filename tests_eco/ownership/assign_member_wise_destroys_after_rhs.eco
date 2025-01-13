@@ -1,6 +1,6 @@
-// the same window, for a target whose teardown is more than one node. `Wrap` declares no destructor,
-// so what it owes is a drop per owning property in reverse declaration order - and all of them belong
-// after the right-hand side has read the value they are tearing down.
+// the same order, for a target whose teardown is more than one node: `Wrap` declares no destructor,
+// so it owes a drop per owning property in reverse declaration order, and all of them run after the
+// right-hand side has read what they tear down.
 //
 // the non-owning `$version` between the two buffers is skipped, as at any other drop site
 

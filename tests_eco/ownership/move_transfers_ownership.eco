@@ -1,5 +1,5 @@
 // `mv` hands the value over: the destination is valid, the source is not, and the source is *not*
-// destroyed at the end of its scope - "its destructor travelled with the value". one destructor line
+// destroyed at the end of its scope. one destructor line
 
 struct Buffer
 {

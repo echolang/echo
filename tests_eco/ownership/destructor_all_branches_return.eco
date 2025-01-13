@@ -1,6 +1,5 @@
-// an `if` whose every arm returns terminates the block the builder is left in, so the scope-exit
-// drops appended after it are unreachable. emitting them anyway put a second terminator in one
-// basic block and failed the LLVM verifier - the drops before each `return` are the ones that count
+// an `if` whose every arm returns leaves no reachable code after it, so the drops that count are
+// the ones before each `return` and none are appended at scope exit
 
 struct Buffer
 {
@@ -25,8 +24,7 @@ function pick(int32 $x) : int32
     }
 }
 
-// the same shape one level down: a loop body that always returns terminates its own block, so the
-// back edge to the loop header must not be emitted either
+// the same shape one level down: a loop body that always returns has no back edge to the header
 function first(int32 $n) : int32
 {
     Buffer $b = Buffer(8, mem::alloc<uint8>(1));

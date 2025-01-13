@@ -1,9 +1,6 @@
-// a literal in a generic body has no concrete type to be typed against: T says nothing until it is
-// substituted. it is therefore typed on its own (int32) and fitted at its destination by
-// TypeLowering::coerce_value once the instance exists - the same rule the return case already
-// followed (literal_return_coercion.eco). before that, the expected type reached
-// autocast_literal_int as a t_generic and every one of these was "Unexpected token
-// 'integer_literal' found" at parse time (todo/B11)
+// a literal in a generic body has no concrete type to be typed against, since T says nothing until
+// it is substituted. it is typed on its own (int32) and fitted at its destination once the instance
+// exists - the same rule as the return case (literal_return_coercion.eco)
 
 // through a pointer: the assignment writes into the pointee, so the expected type is T itself
 function poke<T>(ptr<T> $v) : void

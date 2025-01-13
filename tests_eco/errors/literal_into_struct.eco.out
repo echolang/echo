@@ -1,23 +1,23 @@
 ---- Issue ----
-Issue at 19:7
+Issue at 17:7
 Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
 Begin: '$p'
 End: '$p'
 Code excerpt:
- [18]> 
- [19]> Point $p = 42;
+ [16]> 
+ [17]> Point $p = 42;
             ^
- [20]> 
+ [18]> 
 
 ---- Issue ----
-Issue at 15:7
+Issue at 13:7
 Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
 Begin: '$x'
 End: '$x'
 Code excerpt:
- [14]> {
- [15]>     T $x = 42;
+ [12]> {
+ [13]>     T $x = 42;
             ^
- [16]>     return $x;
+ [14]>     return $x;
 
 Critical issues found, cannot compile.

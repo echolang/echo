@@ -76,7 +76,9 @@ namespace AST
 
         std::unordered_map<InstanceKey, FunctionDeclNode *, InstanceKeyHash> _func_instances;
 
-        // call sites already handled, so re-scans skip them
+        // generic call sites this pass is done with: instantiated, or reported as unresolvable. only
+        // *this* pass's business - whether a call is finished overall is AST::CallSettlement on the
+        // node, which is one answer shared by the parser, this pass and the finalizing sweep
         std::unordered_set<const FunctionCallExprNode *> _processed;
 
         size_t _instance_count = 0;
@@ -96,7 +98,19 @@ namespace AST
 
         FunctionDeclNode *get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args);
 
-        void insert_argument_casts(FunctionCallExprNode *call, FunctionDeclNode *instance, Module &mod);
+        // every call in the bundle, snapshotted before anything is instantiated - cloning appends to
+        // the very collections this walks
+        std::vector<std::pair<FunctionCallExprNode *, Module *>> snapshot_calls();
+
+        // one round's steps, in the order they have to run in - see the comments on each
+        bool instantiate_generic_calls(size_t round);
+        bool rederive_stale_variable_types();
+        bool settle_calls();
+
+        // after the fixpoint has stopped: report every call that never resolved, and give the ones
+        // that resolved but never got concrete arguments the coercion they would have got anyway, so
+        // the passes below this one see the tree shape they expect
+        void finalize_calls();
 
         CodeRef code_ref_for(Module &mod, const TokenReference &token);
     };

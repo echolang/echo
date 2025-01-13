@@ -53,6 +53,79 @@ TEST_CASE("a property can be typed by a struct declared in a later file", "[stru
     REQUIRE(holder->properties()[0]->type() == type_named(m, "Inner")->value_type());
 }
 
+TEST_CASE("a property can be a generic application", "[structdecl]")
+{
+    // the composition case: a generic type that cannot be a property type is a generic type that
+    // cannot be composed, so nothing built on `Array<T>` is reachable. assert the *layout*, not only
+    // that it parsed - `L<int32>` has to intern a property of type `Q<int32>`, which is
+    // substitute_type recursing into a generic application's arguments and re-interning
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Q<T> { T $x; }\n"
+        "struct H { Q<int32> $i; }\n"
+        "struct L<T> { Q<T> $i; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *q = type_named(m, "Q");
+    auto *h = type_named(m, "H");
+    auto *l = type_named(m, "L");
+    REQUIRE(q != nullptr);
+    REQUIRE(h != nullptr);
+    REQUIRE(l != nullptr);
+
+    const auto int32 = EchoTests::prim(AST::ValueTypePrimitive::t_int32);
+    auto *q_of_int32 = bundle->collector.type_registry.get_or_create_instantiation(
+        &q->complex_type(), { int32 });
+
+    // the concrete application in a non-generic struct
+    REQUIRE(h->properties().size() == 1);
+    REQUIRE(h->properties()[0]->type() == AST::ValueType::make_complex(q_of_int32));
+
+    // and the one that mentions the enclosing template's parameter. the *template's* property is
+    // `Q<T>`, and instantiating L for int32 has to carry that through to `Q<int32>`
+    REQUIRE(l->properties().size() == 1);
+    REQUIRE(l->properties()[0]->type() != AST::ValueType::make_complex(q_of_int32));
+
+    auto *l_of_int32 = bundle->collector.type_registry.get_or_create_instantiation(
+        &l->complex_type(), { int32 });
+
+    REQUIRE(l_of_int32->property_count() == 1);
+    REQUIRE(l_of_int32->get_property(0).type == AST::ValueType::make_complex(q_of_int32));
+}
+
+TEST_CASE("a generic property type can be declared further down", "[structdecl]")
+{
+    // the same order independence the cases above pin for a plain property, for a generic one. it
+    // needs one thing more: the type-name pass has to collect a generic type's *arity*, not only its
+    // name, because parse_generic_application checks the application against the template's
+    // parameter count. with only the name, `Box<int32>` read before `struct Box<T>` was reached
+    // reported "wrong number of type arguments" against a template whose list nobody had read
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Holder { Box<int32> $b; }\n"
+        "struct Box<T> { T $v; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *box = type_named(m, "Box");
+    auto *holder = type_named(m, "Holder");
+    REQUIRE(box != nullptr);
+    REQUIRE(holder != nullptr);
+
+    // the arity came from the type-name pass, before Holder's property was read
+    REQUIRE(box->type_parameters().size() == 1);
+
+    auto *box_of_int32 = bundle->collector.type_registry.get_or_create_instantiation(
+        &box->complex_type(), { EchoTests::prim(AST::ValueTypePrimitive::t_int32) });
+
+    REQUIRE(holder->properties().size() == 1);
+    REQUIRE(holder->properties()[0]->type() == AST::ValueType::make_complex(box_of_int32));
+
+    // and the layout behind it is complete, not the empty one the property's own intern saw
+    REQUIRE(box_of_int32->property_count() == 1);
+}
+
 TEST_CASE("a struct's properties are collected by exactly one pass", "[structdecl]")
 {
     // the body is walked in both the declaration and the body pass, by the same code so the two

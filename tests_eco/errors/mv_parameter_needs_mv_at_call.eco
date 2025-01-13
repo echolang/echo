@@ -1,6 +1,5 @@
-// a `mv` parameter given a place the caller did not mark. the error is the point of the annotation: a
-// function that quietly swallowed its argument would be indistinguishable at the call site from one
-// that borrowed it
+// a `mv` parameter given a place the caller did not mark. the annotation exists so that a call
+// which hands ownership away is visible as one in the source
 
 struct Buffer
 {

@@ -1,0 +1,23 @@
+// a generic application as a *property* type - the composition case, which is what lets one
+// generic struct hold another (`struct Document { Array<uint8> $body; }`)
+struct Q<T> { T $x; }
+
+// a concrete application in a non-generic struct
+struct H { Q<int32> $i; }
+
+// and one that mentions the enclosing template's parameter, so `L<int32>` has to intern a property
+// of type `Q<int32>` - substitute_type recursing into a generic application's arguments
+struct L<T> { Q<T> $i; }
+
+// the property type is declared *below* the struct that names it: the type-name pass collects both
+// the name and its arity, so the application can be checked against the template's parameter count
+struct Holder { Box<int32> $b; }
+struct Box<T> { T $v; }
+
+$h = H(Q<int32>(3));
+$l = L<int32>(Q<int32>(4));
+$holder = Holder(Box<int32>(41));
+
+echo $h->i->x;
+echo $l->i->x;
+echo $holder->b->v;

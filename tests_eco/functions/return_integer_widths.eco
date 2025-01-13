@@ -1,10 +1,9 @@
-// a return goes through the same conversion table as a declaration and an assignment, so the
-// extension follows the *source's* signedness and a narrowing return truncates. this walks every
-// integer width because the table is keyed on the AST type, not the lowered llvm type - an i8 and
-// a u8 are the same `i8` to llvm and only the ValueType says which extend to emit
+// a return goes through the same conversion table as a declaration, so the extension follows
+// the *source's* signedness and a narrowing return truncates - walked over every integer width,
+// since llvm sees one `i8` for both int8 and uint8 and only the ValueType says which extend.
 //
-// narrow returns are widened into an int32 before `echo` on purpose: passing an i8 straight into
-// a variadic printf is an unrelated echo bug (todo/B15), and this test is about the return
+// narrow returns are widened into an int32 before `echo`, which has its own variadic bug for
+// types narrower than a word (todo/B15)
 
 function make_uint8(int32 $v) : uint8
 {
@@ -66,7 +65,7 @@ function big() : uint64
 
 echo big();
 
-// float32 is returned and widened before echo - `echo` of a float32 has its own variadic bug
+// float32 is returned and widened before echo, as above
 function quarter() : float32
 {
     return 0.25;

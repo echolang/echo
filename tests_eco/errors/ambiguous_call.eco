@@ -1,5 +1,5 @@
-// each overload is exact on one argument and a conversion on the other, in opposite directions.
-// neither dominates, so the call has no best match and must be reported rather than guessed
+// each overload is exact on one argument and a conversion on the other, in opposite directions:
+// neither dominates, so the call has no best match
 function f(int32 $a, float64 $b) : int32 { return 1; }
 function f(float64 $a, int32 $b) : int32 { return 2; }
 

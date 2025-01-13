@@ -1,7 +1,6 @@
-// `Box&` beside `const Box&` are two different signatures, so they are not a duplicate signature and
-// register_function has nothing to say about them - but they are both the copy constructor, and a type
-// has one copy. nothing would decide which of the two an implicit `$b = $a` meant, so this is the one
-// case that needs its own diagnostic
+// `Box&` beside `const Box&` are two distinct signatures, so they are not a duplicate declaration -
+// but both are the copy constructor, and a type has one. nothing would decide which of them an
+// implicit `$b = $a` meant, so it needs its own diagnostic
 
 struct Box
 {

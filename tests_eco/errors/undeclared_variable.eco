@@ -1,2 +1,2 @@
-// using a variable that was never declared must fail to compile
+// using a variable that was never declared
 echo $undefined;

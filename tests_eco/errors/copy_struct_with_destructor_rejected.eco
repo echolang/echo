@@ -1,0 +1,23 @@
+// a struct holding a class is copied by retaining it - but not when the struct also declares a
+// destructor: what a second value running that body would mean is the author's question to answer,
+// so no copy is synthesized and the ordinary rejection stands.
+//
+// the neighbouring case is owning_copy_rejected.eco, where the owner is a raw pointer instead
+
+class Handle
+{
+    int32 $id;
+}
+
+struct Pool
+{
+    Handle $h;
+
+    destructor()
+    {
+        echo 1;
+    }
+}
+
+$a = Pool(Handle(1));
+$b = $a;

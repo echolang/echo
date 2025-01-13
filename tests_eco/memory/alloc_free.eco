@@ -1,8 +1,5 @@
-// the heap allocation example from book/concept/pointers_and_refs_v2.md, verbatim.
-//
-// this is the first program in the language whose storage outlives its stack frame - before
-// mem:: existed, every allocation was a stack alloca, which is why the pointer-arithmetic tests
-// had to borrow adjacent storage from a struct's two int32 fields
+// heap storage outliving no scope in particular: allocate, index, free
+// (book/concept/pointers_and_refs_v2.md)
 ptr<int32> $p = mem::alloc<int32>(4);
 
 $p:$[0] = 424242;

@@ -4,7 +4,7 @@ Unknown compiler builtin 'sizeof_but_misspelled'.
 Begin: 'builtin'
 End: ']'
 Code excerpt:
- [2]> // the error points at the declaration rather than failing later as an unresolved symbol
+ [2]> // than failing later as an unresolved symbol
  [3]> #[builtin: "sizeof_but_misspelled"]
         ^
  [4]> function bogus<T>() : usize;

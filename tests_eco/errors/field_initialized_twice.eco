@@ -1,9 +1,6 @@
-// a constructor writing a field of its own `$this` owes the old value no teardown, because `$this` is a
-// fresh zero-filled slot - there is no old value. that is only true of the *first* write, though, and a
-// second one to the same owning field would leak whatever the first built.
-//
-// so the claim is checked rather than trusted. the honest alternative would be to tear the first value
-// down, which is the partial-ownership case the language does not answer yet
+// a constructor writing a field of its own `$this` owes no teardown, because `$this` is a fresh
+// zero-filled slot. that holds for the *first* write only, so a second write to the same owning
+// field is rejected rather than leaking what the first one built
 
 struct Inner
 {

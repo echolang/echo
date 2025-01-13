@@ -1,8 +1,7 @@
-// a moved-from target owes no teardown: what is still sitting in its slot belongs to whoever the
-// value was handed to. so the assignment that re-seats it destroys nothing, and there are exactly two
-// destructor lines - the one inside `consume`, and the replacement's at scope exit.
-//
-// pins the empty branch of AssignNode::teardown_old. a third line here would be a double free
+// a moved-from target owes no teardown: what is still in its slot belongs to whoever the value was
+// handed to. the assignment that re-seats it destroys nothing, so there are exactly two destructor
+// lines - the one inside `consume`, and the replacement's at scope exit. a third would be a double
+// free
 
 struct Buffer
 {

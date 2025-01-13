@@ -1,12 +1,12 @@
 ---- Issue ----
-Issue at 14:17
+Issue at 13:17
 'Inner' has no storage to read a member from - bind it to a variable first
 Begin: 'tag'
 End: 'tag'
 Code excerpt:
- [13]> $o = Outer(Inner(5));
- [14]> echo $o->get()->tag;
+ [12]> $o = Outer(Inner(5));
+ [13]> echo $o->get()->tag;
                       ^
- [15]> 
+ [14]> 
 
 Critical issues found, cannot compile.

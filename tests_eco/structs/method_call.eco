@@ -1,6 +1,6 @@
 // member functions on a struct. a method is an ordinary function whose first parameter is `$this`,
 // typed as the non-nullable borrow `Point&` - so a mutating method writes through the caller's
-// storage rather than into a copy, which is the half a value receiver would silently get wrong
+// storage rather than into a copy
 
 struct Point
 {
@@ -30,7 +30,7 @@ echo $p->sum();
 echo $p->x;
 echo $p->y;
 
-// the field-wise constructor and plain member reads are untouched by any of this
+// the field-wise constructor and plain member reads still work alongside
 $q = Point(1, 2);
 echo $q->sum();
 echo $p->sum();

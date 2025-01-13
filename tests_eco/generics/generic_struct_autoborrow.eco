@@ -1,0 +1,23 @@
+// a local initialized from a generic constructor, handed to a borrow parameter: it auto-borrows
+// identically whether its type was written out or inferred, even though the inferred one is still
+// the undetermined `Q<T>` at parse time and only settles in the fixpoint
+struct Q<T> { T $x; }
+struct P { int32 $y; }
+
+function f(Q<int32>& $s) : int32 { return $s->x; }
+function g(P& $s) : int32 { return $s->y; }
+
+// the inferred spelling
+$q = Q<int32>(2);
+echo f($q);
+
+// the same call with the type written out - both must reach the same tree
+Q<int32> $written = Q<int32>(3);
+echo f($written);
+
+// an explicit address
+echo f(&$q);
+
+// the non-generic control: the identical program over a plain struct
+$p = P(4);
+echo g($p);

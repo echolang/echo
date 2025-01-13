@@ -1,7 +1,5 @@
-// a custom constructor on a *generic* struct. the silent half of the $this ordering defect lived
-// here: CloneContext::rebind answers with the original for anything not yet cloned, so a `$this`
-// declared after the statements that read it left every instance's body pointing at the
-// template's declaration - no crash, just the wrong storage (todo/B2)
+// a custom constructor on a *generic* struct: every instance clones the body with its own `$this`,
+// so the two instantiations below write into separate storage
 
 struct Box<T> {
     T $value;
@@ -17,7 +15,7 @@ $a = Box<int32>(5);
 echo $a->value;
 echo $a->backup;
 
-// a second instantiation, so the two instances cannot be sharing one $this
+// a second instantiation, writing into its own $this
 $b = Box<float64>(2.5);
 echo $b->value;
 echo $b->backup;

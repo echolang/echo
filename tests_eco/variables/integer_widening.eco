@@ -1,7 +1,5 @@
-// widening an integer in a declaration goes through the one shared conversion, so the
-// extension follows the *source's* signedness: unsigned zero-extends, signed sign-extends.
-// this path used to handle only float/double, so a narrow integer was stored straight into
-// the wide slot and read back with whatever else occupied those bytes
+// widening an integer in a declaration follows the *source's* signedness: unsigned
+// zero-extends, signed sign-extends. narrowing truncates
 
 uint8 $small = 200;
 uint32 $wide = $small;

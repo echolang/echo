@@ -9,7 +9,7 @@
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
-#include "AST/ASTArgumentCoercion.h"
+#include "AST/ASTCallResolution.h"
 #include "AST/ASTOwnership.h"
 #include "Debugging.h"
 
@@ -109,13 +109,7 @@ namespace AST
             // an unbound parameter is only retryable while the call still sits in a template body
             // that has not been instantiated. once every argument type is concrete, nothing later
             // can bind it, so this is a real "cannot infer" rather than a not-yet
-            bool arguments_concrete = true;
-            for (auto *argument : call->arguments) {
-                if (is_undetermined_type(argument->result_type())) {
-                    arguments_concrete = false;
-                    break;
-                }
-            }
+            const bool arguments_concrete = CallResolver::arguments_are_determined(*call);
 
             for (const auto *param : tmpl->type_parameters) {
                 const ValueType *bound = inferred.lookup(param);
@@ -225,19 +219,165 @@ namespace AST
         return instance;
     }
 
-    void Monomorphizer::insert_argument_casts(FunctionCallExprNode *call, FunctionDeclNode *instance, Module &mod)
+    // every call in the bundle, snapshotted. cloning a template appends new call nodes to the very
+    // collections this walks, so the list has to be taken before anything is instantiated
+    std::vector<std::pair<FunctionCallExprNode *, Module *>> Monomorphizer::snapshot_calls()
     {
-        for (size_t i = 0; i < call->arguments.size() && i < instance->args.size(); i++) {
-            ValueType expected = instance->args[i]->type();
-            // wrap a place expression in an AddrOfExprNode when the parameter is a borrow,
-            // same as the non-generic path in FuncCallParser (keeps codegen uniform)
-            call->arguments[i] = coerce_arg_to_pointer_param(mod.nodes, call->arguments[i], expected);
-            ValueType actual = call->arguments[i]->result_type();
-            // mirrors FuncCallParser: a borrow widening to a nullable pointer needs no cast
-            if (!is_implicitly_convertible(actual, expected)) {
-                auto &cast = mod.nodes.emplace_back<TypeCastNode>(expected, call->arguments[i], true);
-                call->arguments[i] = &cast;
+        std::vector<std::pair<FunctionCallExprNode *, Module *>> calls;
+
+        for (auto &module_ptr : _bundle.modules) {
+            Module &mod = *module_ptr;
+            for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
+                calls.push_back({call, &mod});
             }
+        }
+
+        return calls;
+    }
+
+    // step A: a call naming a template becomes a call naming a concrete instance
+    //
+    // only the declaration is rewired here. fitting the arguments to it is step C's, through the one
+    // implementation the parser also uses - this used to keep a second copy of that loop, and the two
+    // disagreed about exactly the case B23 is: the parser's ran for a concrete callee whose arguments
+    // were not typed yet, this one only ever ran after substitution
+    bool Monomorphizer::instantiate_generic_calls(size_t round)
+    {
+        bool progressed = false;
+
+        for (auto &[call, mod] : snapshot_calls()) {
+            if (_processed.count(call) || !call->decl || !call->decl->is_generic()) {
+                continue;
+            }
+
+            bool is_error = false;
+            auto args = determine_type_args(call, *mod, is_error);
+            if (!args) {
+                // reported errors are final; unresolved template-body calls retry later
+                if (is_error) {
+                    _processed.insert(call);
+                }
+                continue;
+            }
+
+            _processed.insert(call);
+
+            if (_trace) {
+                std::string arg_desc;
+                for (size_t i = 0; i < args->size(); i++) {
+                    arg_desc += (i > 0 ? ", " : "") + (*args)[i].get_type_desciption();
+                }
+                std::cout << "[mono] round " << round << ": resolve '" << call->decl->func_name()
+                          << "' with <" << arg_desc << ">" << std::endl;
+            }
+
+            FunctionDeclNode *instance = get_or_create_function_instance(call->decl, *args);
+            if (instance) {
+                call->decl = instance;
+                progressed = true;
+            }
+        }
+
+        return progressed;
+    }
+
+    // step B: a variable whose type was inferred from a call that had not resolved yet
+    //
+    // `$b = Box<int32>(...)` captured the template's un-substituted return type at parse time, and
+    // `$x = f(...)` on a call the parser could not settle captured void. now that those calls point
+    // somewhere concrete, re-derive from the initializer. this is what unblocks a call that takes the
+    // variable as an argument, which is why it runs inside the fixpoint and reports progress
+    bool Monomorphizer::rederive_stale_variable_types()
+    {
+        bool progressed = false;
+
+        for (auto &module_ptr : _bundle.modules) {
+            Module &mod = *module_ptr;
+            for (auto *decl : mod.nodes.of_type<VarDeclNode>()) {
+                if (!decl->has_type() || !decl->init_expr) {
+                    continue;
+                }
+
+                // is_undetermined_type rather than contains_type_param: an unresolved call answers
+                // void, so a variable initialized from one is stale in exactly the same way as one
+                // that captured a `T`, and reads as undetermined for exactly the same reason
+                if (!is_undetermined_type(decl->type())) {
+                    continue;
+                }
+
+                ValueType derived = decl->init_expr->result_type();
+                if (is_undetermined_type(derived)) {
+                    continue;  // initializer is not concrete yet either; revisit next round
+                }
+
+                auto &type_node = mod.nodes.emplace_back<TypeNode>(derived);
+                decl->set_type_node(&type_node);
+                progressed = true;
+            }
+        }
+
+        return progressed;
+    }
+
+    // step C: choose the declaration for any call that still has none, and fit the arguments of every
+    // call whose arguments are finally typed
+    //
+    // after step B, so a local that step A made concrete *this* round is a determined argument in the
+    // same round - and before ownership, so no body is walked with a call whose arguments have not
+    // been fitted yet
+    bool Monomorphizer::settle_calls()
+    {
+        CallResolver resolver(_collector);
+        bool progressed = false;
+
+        for (auto &[call, mod] : snapshot_calls()) {
+            if (call->settlement == CallSettlement::t_settled) {
+                continue;
+            }
+
+            const auto result = resolver.settle(
+                *call, mod->nodes, code_ref_for(*mod, call->token_function_name), false);
+
+            if (result == CallResolver::Result::t_settled) {
+                progressed = true;
+            }
+        }
+
+        return progressed;
+    }
+
+    void Monomorphizer::finalize_calls()
+    {
+        CallResolver resolver(_collector);
+
+        for (auto &[call, mod] : snapshot_calls()) {
+            if (call->settlement == CallSettlement::t_settled) {
+                continue;
+            }
+
+            const CodeRef at = code_ref_for(*mod, call->token_function_name);
+
+            // a call still naming a template is one inside a template nobody instantiated. silent,
+            // exactly as determine_type_args is about it: the body is never emitted, and reporting it
+            // would blame a declaration for going unused
+            if (call->decl != nullptr && call->decl->is_generic()) {
+                continue;
+            }
+
+            // no declaration after every round: genuinely undecidable, and now it *is* an error.
+            // reported here rather than at the parse, because only being out of rounds proves that
+            // nothing was going to answer the argument types. Collector::collect_issue de-duplicates
+            // on (kind, token range, message), so a template body's call and each of its clones
+            // report once between them
+            if (call->decl == nullptr) {
+                resolver.settle(*call, mod->nodes, at, true);
+                continue;
+            }
+
+            // a declaration, but an argument that never got a type - a string literal, an unbound
+            // `null`. coerced anyway, which is precisely what happened before any of this deferral
+            // existed, so the diagnostic the type checker gives it is unchanged
+            resolver.coerce_arguments(*call, mod->nodes);
         }
     }
 
@@ -251,115 +391,47 @@ namespace AST
             }
         }
 
-        // fixpoint: each round resolves the calls whose type arguments are now concrete;
-        // cloning a template exposes its body's calls (with concrete types) for the next round
+        // fixpoint: each round takes every call as far as the types now known allow, and cloning a
+        // template exposes its body's calls - with concrete types - for the next round
+        //
+        // the four steps are ordered, and the order is the design. see each one
         bool progressed = true;
         size_t rounds = 0;
         while (progressed) {
             progressed = false;
+
             if (++rounds > MAX_ROUNDS) {
                 // the fixpoint did not converge. locate the report at any generic call still
                 // unresolved so the user has a concrete site to look at rather than a silent stall
-                bool reported = false;
-                for (auto &module_ptr : _bundle.modules) {
-                    if (reported) {
+                for (auto &[call, mod] : snapshot_calls()) {
+                    if (call->decl && call->decl->is_generic() && !_processed.count(call)) {
+                        _collector.collect_issue<Issue::GenericError>(
+                            code_ref_for(*mod, call->token_function_name),
+                            "monomorphization did not converge after " + std::to_string(MAX_ROUNDS)
+                                + " rounds: generic '" + call->decl->func_name() + "' could not be resolved");
                         break;
-                    }
-                    Module &mod = *module_ptr;
-                    for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
-                        if (call->decl && call->decl->is_generic() && !_processed.count(call)) {
-                            _collector.collect_issue<Issue::GenericError>(
-                                code_ref_for(mod, call->token_function_name),
-                                "monomorphization did not converge after " + std::to_string(MAX_ROUNDS)
-                                    + " rounds: generic '" + call->decl->func_name() + "' could not be resolved");
-                            reported = true;
-                            break;
-                        }
                     }
                 }
                 break;
             }
 
-            // snapshot the current calls; cloning appends new ones as we go
-            std::vector<std::pair<FunctionCallExprNode *, Module *>> calls;
-            for (auto &module_ptr : _bundle.modules) {
-                Module &mod = *module_ptr;
-                for (auto *call : mod.nodes.of_type<FunctionCallExprNode>()) {
-                    calls.push_back({call, &mod});
-                }
-            }
-
-            for (auto &[call, mod] : calls) {
-                if (_processed.count(call)) {
-                    continue;
-                }
-                if (!call->decl || !call->decl->is_generic()) {
-                    _processed.insert(call);
-                    continue;
-                }
-
-                bool is_error = false;
-                auto args = determine_type_args(call, *mod, is_error);
-                if (!args) {
-                    // reported errors are final; unresolved template-body calls retry later
-                    if (is_error) {
-                        _processed.insert(call);
-                    }
-                    continue;
-                }
-
-                _processed.insert(call);
-
-                if (_trace) {
-                    std::string arg_desc;
-                    for (size_t i = 0; i < args->size(); i++) {
-                        arg_desc += (i > 0 ? ", " : "") + (*args)[i].get_type_desciption();
-                    }
-                    std::cout << "[mono] round " << rounds << ": resolve '" << call->decl->func_name()
-                              << "' with <" << arg_desc << ">" << std::endl;
-                }
-
-                FunctionDeclNode *instance = get_or_create_function_instance(call->decl, *args);
-                if (instance) {
-                    call->decl = instance;
-                    insert_argument_casts(call, instance, *mod);
-                    progressed = true;
-                }
-            }
-
-            // a variable whose type was inferred from a generic call (e.g. `$b = Box<int>(...)`)
-            // captured the template's un-substituted return type at parse time; now that the
-            // call points at the concrete instance, re-derive the variable's type from its
-            // initializer. this can unblock calls that take the variable as an argument (e.g.
-            // unwrap($b)), so it runs inside the fixpoint and reports progress
-            for (auto &module_ptr : _bundle.modules) {
-                Module &mod = *module_ptr;
-                for (auto *decl : mod.nodes.of_type<VarDeclNode>()) {
-                    if (!decl->has_type() || !decl->init_expr) {
-                        continue;
-                    }
-                    if (!contains_type_param(decl->type())) {
-                        continue;
-                    }
-                    ValueType derived = decl->init_expr->result_type();
-                    if (contains_type_param(derived)) {
-                        continue;  // initializer is not concrete yet either; revisit next round
-                    }
-                    auto &type_node = mod.nodes.emplace_back<TypeNode>(derived);
-                    decl->set_type_node(&type_node);
-                    progressed = true;
-                }
-            }
+            progressed |= instantiate_generic_calls(rounds);
+            progressed |= rederive_stale_variable_types();
+            progressed |= settle_calls();
 
             // resolve ownership for every body that is concrete now: erase its `mv` markers, report
             // the copies it cannot make, and insert its drops. inside the loop for the same reason
             // the re-typing above is - it both *needs* the concrete types this round produced and
             // *produces* new generic call sites (a drop of a `Box<int32>` local calls Box<T>'s
             // destructor), which the next round instantiates through the ordinary path
-            if (_ownership.run_round()) {
-                progressed = true;
-            }
+            //
+            // last of the four, so every call in a body it walks has already been fitted to its
+            // parameters. a copy this pass inserts wraps an argument, and so does a coercion; doing
+            // them in the other order would nest them the other way round
+            progressed |= _ownership.run_round();
         }
+
+        finalize_calls();
     }
 
     namespace

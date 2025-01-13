@@ -16,7 +16,10 @@ namespace Parser
     // were listed in (Parser::ModuleParser::parse_module)
     enum class Pass
     {
-        // every `struct` name, as a namespace symbol, and nothing else
+        // every `struct` name, as a namespace symbol, plus its type-parameter list - for a generic
+        // type the arity is part of the identity a name denotes, and an application is checked
+        // against it. nothing else: a constraint atom may name a type this pass has not reached, so
+        // resolving one is left to the pass below
         t_type_names,
 
         // the declaration surface: function, method and constructor signatures, struct properties

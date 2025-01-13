@@ -1,5 +1,4 @@
-// a destructor returns nothing. the `: type` is rejected outright rather than checked against void,
-// because it reads as though the colon were meaningful and it never is
+// a destructor returns nothing, so a `: type` is rejected outright rather than checked against void
 
 struct Buffer
 {

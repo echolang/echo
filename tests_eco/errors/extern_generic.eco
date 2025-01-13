@@ -1,5 +1,5 @@
-// an extern function cannot be generic: one raw C symbol has no per-instantiation body. this is
-// exactly why mem::alloc<T> is Echo code layered over a concrete alloc_bytes
+// an extern function cannot be generic: one raw C symbol has no per-instantiation body, which is
+// why `mem::alloc<T>` is Echo code layered over a concrete alloc_bytes
 extern {
     function malloc as bad_alloc<T>(usize $count) : ptr<T>;
 }

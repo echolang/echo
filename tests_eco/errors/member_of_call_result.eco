@@ -1,6 +1,5 @@
-// a member is read from an address, and a value nobody stored has none. for a class this is also the
-// question of who releases the intermediate, which is why binding it to a variable is the answer
-// rather than something the compiler can quietly do for you
+// a member is read from an address, and a value nobody stored has none. for a class it is also the
+// question of who releases the intermediate, so the answer is to bind it to a variable first
 
 struct Inner { int32 $tag; }
 

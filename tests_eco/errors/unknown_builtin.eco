@@ -1,5 +1,5 @@
-// #[builtin: ...] is rejected at the attribute when the name is not one the compiler knows, so
-// the error points at the declaration rather than failing later as an unresolved symbol
+// #[builtin: ...] naming something the compiler does not know is rejected at the attribute, rather
+// than failing later as an unresolved symbol
 #[builtin: "sizeof_but_misspelled"]
 function bogus<T>() : usize;
 

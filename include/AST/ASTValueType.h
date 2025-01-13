@@ -496,6 +496,18 @@ namespace AST
             return template_ref != nullptr;
         }
 
+        // the type a question about the *declaration* is asked of: the template for an instantiation,
+        // and this type itself otherwise. an instantiation carries the layout of `Box<int32>` but
+        // nothing that was written - no methods, no destructor, not even the name a constructor of it
+        // is spelled with, since that is `Box`
+        //
+        // the one spelling of that redirect. AST::find_member_functions and AST::find_destructor are
+        // it asked about a different store, and it is the contract that keeps TypeRegistry ignorant
+        // of members
+        const ComplexType *template_or_self() const {
+            return is_instantiated() ? template_ref : this;
+        }
+
         // appends a type parameter, stamping this type as its owner. asserts the ordinal matches
         // the position it lands in, so the ordinal can never drift from the list order
         // defined out of line because it needs TypeParamDecl complete
@@ -585,8 +597,10 @@ namespace AST
         // this type's copy constructor - the constructor taking one non-nullable borrow of its own
         // type - or null. at most one, so a slot beside the destructor above, and reached by type for
         // the same reason: the copy sites AST::OwnershipPass inserts know the type of the value being
-        // copied and nothing else. only a template ever holds one; AST::find_copy_constructor
-        // redirects an instantiation through template_ref
+        // copied and nothing else. unlike the destructor above, an *instantiation* can hold one of its
+        // own: a written copy constructor is a member and lives on the template, but a synthesized one
+        // is built per concrete type, because whether the compiler can write it at all depends on the
+        // property types. AST::find_copy_constructor is where the two are reconciled
         //
         // the one thing that makes it unlike a destructor: **the declaration is also in the ordinary
         // overload set.** a destructor is deliberately kept out of FunctionRegistry::_by_name because

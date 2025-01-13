@@ -1,8 +1,5 @@
 // an `extern { }` block binds C symbols. the C name comes first, and `as` renames it for Echo
-// callers - the symbol is what reaches the linker, the Echo name is what call sites use.
-//
-// these are the same libc entry points mem:: is built on, declared here directly to exercise the
-// binding itself rather than the stdlib on top of it
+// callers - the symbol is what reaches the linker, the Echo name is what call sites use
 extern {
     function malloc as raw_alloc(usize $bytes) : ptr<uint8>;
     function free as raw_free(ptr<uint8> $p) : void;

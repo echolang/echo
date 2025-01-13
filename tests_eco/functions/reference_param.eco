@@ -1,7 +1,5 @@
-// passing a variable to a reference (pointer) parameter passes its address, so the
-// callee mutates the caller's variable. the compiler wraps the bare argument in a
-// VarPtrExprNode during argument coercion (see ASTArgumentCoercion.h), and an explicit
-// &$a (already a pointer expression) is passed through unchanged; both behave the same
+// a borrow parameter auto-borrows its argument, so the callee mutates the caller's variable.
+// a bare variable and an explicit `&$a` behave the same
 
 function inc(int &$x) : void {
     $x = $x + 1;

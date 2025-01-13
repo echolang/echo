@@ -1,8 +1,6 @@
-// a struct slot takes nothing but that struct. the parser used to reject this while *typing* the
-// literal, with the same bogus "Unexpected token 'integer_literal' found" that made a literal
-// unwritable in a generic body (todo/B11) - a type it cannot type a literal against is now simply
-// not a hint, so the diagnostic belongs to the semantic pass, which is also the only place that
-// can answer it for the generic below: `T $x = 42;` is fine for T=int32 and wrong for T=Point
+// a struct slot takes nothing but that struct. a type a literal cannot be typed against is simply
+// not a hint, so the diagnostic belongs to the semantic pass - which is also the only place that
+// can answer it for the generic below, where `T $x = 42;` is fine for T=int32 and wrong for T=Point
 
 struct Point
 {

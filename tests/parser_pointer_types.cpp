@@ -126,7 +126,7 @@ TEST_CASE( "A borrow is a legal struct property", "[parser][pointer]" )
     // the struct body kept its own hand-rolled list of "what starts a property declaration" and
     // no entry in it allowed for the `&` suffix, so a borrow property was silently not a property
     // at all - the declaration fell through to "Unexpected token 'identifier'". both dispatch
-    // sites now ask Parser::starts_borrow_vardecl rather than keeping a private copy
+    // sites now ask Parser::starts_vardecl rather than keeping a private copy
     auto bundle = EchoTests::tests_make_parsed_bundle(R"(
         struct Holder {
             int& $target;

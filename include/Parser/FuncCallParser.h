@@ -3,30 +3,13 @@
 
 #pragma once
 
+#include "AST/ASTCallResolution.h"
 #include "AST/ExprNode.h"
 #include "Parser/ParserPayload.h"
 
 namespace Parser
 {
     AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace = nullptr);
-
-    // picks one declaration out of `candidates` for an already-built call node, and everything that
-    // follows from it: scoring a template against the types it would be instantiated with, the
-    // Pareto match, the ambiguity and no-viable diagnostics, and the argument coercion a concrete
-    // callee needs. sets `call.decl` and answers true on success
-    //
-    // split out from parse_funccall so that a member call resolves by exactly the same rule. the two
-    // differ only in where the candidate set comes from - the (namespace, name) overload sets for a
-    // free call, the receiver's type for a member one - and in the diagnostic for an empty set,
-    // which stays with each caller because "no such function" and "no such member" are different
-    // errors. everything after that is one implementation
-    //
-    // the diagnostics anchor on `call.token_function_name` rather than on a token passed alongside,
-    // so a message cannot name a token the node it describes disagrees with
-    bool resolve_funccall(
-        Parser::Payload &payload,
-        AST::FunctionCallExprNode &call,
-        const std::vector<AST::FunctionDeclNode *> &candidates);
 
     // parses `->name(...)` / `->name<...>(...)` into an ordinary call whose first argument is the
     // receiver's address. the cursor must sit on the `(` or `<` that follows the member name

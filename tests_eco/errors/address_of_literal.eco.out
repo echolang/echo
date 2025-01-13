@@ -1,12 +1,12 @@
 ---- Issue ----
-Issue at 9:11
+Issue at 4:11
 Cannot take the address of an expression that has no storage
 Begin: '&'
 End: '&'
 Code excerpt:
- [8]> $a = 1;
- [9]> int& $r = &5;
+ [3]> $a = 1;
+ [4]> int& $r = &5;
                 ^
- [10]> 
+ [5]> 
 
 Critical issues found, cannot compile.

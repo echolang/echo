@@ -2,6 +2,7 @@
 #include "Parser/FuncDeclParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/TypeDeclParser.h"
+#include "Parser/TypeParser.h"
 #include "Parser/ExternParser.h"
 
 #include "AST/ASTSymbol.h"
@@ -49,6 +50,18 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // node in both later passes, so it never has to re-derive it from the keyword
         auto &type_node = payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
         type_node.set_namespace(payload.context.current_namespace);
+
+        // the type parameters, not only the name: for a generic type the arity is part of its
+        // identity, and parse_generic_application reads the arity off the template to check an
+        // application against it. without this `struct Holder { Box<int32> $b; }` written *above*
+        // `struct Box<T>` reports "wrong number of type arguments" against a template that has not
+        // had its list read yet - the declaration pass reaches Holder's property first. one level of
+        // dependency per pass is the rule, and an arity is a name's, not a signature's
+        //
+        // declare_type_parameters is idempotent by reuse, so the two later passes reaching the same
+        // list keep *these* declarations rather than minting their own - which they have to, or
+        // Box<T> would intern twice and the two would compare unequal
+        Parser::declare_type_parameters(payload, type_node.complex_type(), parse_type_param_list(payload));
 
         payload.context.current_namespace->push_symbol(std::make_unique<AST::Symbol>(&type_node));
     }

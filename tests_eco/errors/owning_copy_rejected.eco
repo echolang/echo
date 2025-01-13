@@ -1,6 +1,5 @@
-// an implicit copy of a type that owns a resource. the chapter specifies a member-wise deep copy, but
-// the leaf of every owning type is a raw pointer the type system cannot deep-copy - so both copies
-// would point at one allocation and both destructors would free it. rejected, naming `mv`
+// an implicit copy of a type whose owning leaf is a raw pointer: both copies would point at one
+// allocation and both destructors would free it. rejected, naming `mv`
 
 struct Buffer
 {

@@ -48,10 +48,18 @@ namespace AST
     // the parser reports that spelling rather than silently not recognising it
     bool is_copy_constructor(const FunctionDeclNode *decl, const ValueType &self_value_type);
 
-    // `ct`'s copy constructor, or null. the same template_ref redirect find_destructor does, and for
-    // the same reason: `Box<int32>` holds no copy constructor, the template does, and the ownership
-    // pass hands the *template's* declaration to the copy call it inserts so the monomorphizer's
-    // ordinary fixpoint instantiates it from the receiver type
+    // `ct`'s copy constructor, or null. the type's **own slot first**, and only then the template_ref
+    // redirect find_destructor does - the one lookup here that does not simply redirect
+    //
+    // a **written** copy constructor is a member like any other and lives on the template, so an
+    // instantiation reaches it through the redirect and the monomorphizer's ordinary fixpoint
+    // instantiates it from the receiver type. a **synthesized** one is per instantiation, like a
+    // class's deinit, because whether the compiler can write it at all depends on the concrete
+    // property types: `Box<Handle>` is a retain per field and `Box<Buffer>` has no copy at all. so an
+    // instance's slot is not a cache of the template's - it holds a different declaration, and it wins
+    //
+    // the two can never both be set: AST::copy_is_synthesizable (ASTCopy.h) declines a type this very
+    // lookup already answers for, and it is the only gate OwnershipPass synthesizes behind
     FunctionDeclNode *find_copy_constructor(const ComplexType *ct);
 };
 

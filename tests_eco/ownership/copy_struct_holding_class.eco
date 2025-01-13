@@ -1,0 +1,101 @@
+// the copy the compiler synthesizes. a struct whose owning properties are all classes has exactly
+// one thing a copy could mean - one more reference to each - so it need not be written out. any
+// other owner still rejects (errors/copy_struct_with_destructor_rejected.eco,
+// errors/owning_copy_rejected.eco).
+//
+// nothing here declares a copy constructor; the synthesized one is visible only in the counts, with
+// each handle destroyed once, after the *last* copy of the struct holding it is gone
+
+class Handle
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+struct Pair
+{
+    Handle $a;
+    Handle $b;
+}
+
+// the base case: the inner scope's copy releases both handles when it ends, and neither reaches
+// zero until the original goes too
+function copied() : void
+{
+    Pair $p = Pair(Handle(1), Handle(2));
+
+    {
+        Pair $q = $p;
+        echo 10;
+    }
+
+    echo 11;
+}
+
+// self assignment must not free what it is about to copy. the retain runs before the teardown of the
+// old value, the same order gen_assign gives a class
+function self_assign() : void
+{
+    Pair $p = Pair(Handle(3), Handle(4));
+    $p = $p;
+    echo 20;
+}
+
+// overwriting the last owner tears the old pair down at the assignment, not at scope exit
+function overwrite() : void
+{
+    Pair $p = Pair(Handle(5), Handle(6));
+    Pair $q = Pair(Handle(7), Handle(8));
+    $p = $q;
+    echo 30;
+}
+
+// a by-value parameter is a copy like any other: the caller retains, the callee's frame releases
+function take(Pair $p) : void
+{
+    echo 40;
+}
+
+function passed() : void
+{
+    Pair $p = Pair(Handle(9), Handle(10));
+    take($p);
+    echo 41;
+}
+
+// transitively, through a struct-typed property. `Outer` owns nothing of its own - it holds an
+// `Inner`, which holds the class - so both copies are synthesized and the inner one is reached from
+// the outer one's field-wise body
+struct Inner
+{
+    Handle $h;
+}
+
+struct Outer
+{
+    Inner $inner;
+    int32 $n;
+}
+
+function nested() : void
+{
+    Outer $a = Outer(Inner(Handle(11)), 50);
+
+    {
+        Outer $b = $a;
+        echo $b->n;
+    }
+
+    echo 51;
+}
+
+copied();
+self_assign();
+overwrite();
+passed();
+nested();
+echo 99;

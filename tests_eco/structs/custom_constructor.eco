@@ -1,8 +1,5 @@
-// a user-written `constructor(...)`. two things had to be true for this to work at all: `$this`
-// has to be the body's first declaration (allocas are emitted in child order, so a `$this` added
-// after the body was parsed had no storage when the statements above it wrote through it), and
-// the constructor has to be *reachable* - it shares its name with the synthesized field-wise one,
-// which used to win every lookup (todo/B2)
+// a user-written `constructor(...)`. it shares its name with the synthesized field-wise one, so
+// the two are an overload set and the arguments decide which is meant
 
 struct Point {
     int32 $x;

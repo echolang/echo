@@ -1,4 +1,4 @@
-// the three rules of binding, writing and re-seating, from the doc's own example.
+// the three rules of binding, writing and re-seating.
 //
 //   a declaration binds        ptr<int32> $p = &$a;
 //   a plain assignment writes  $p = 100;      -> into $a

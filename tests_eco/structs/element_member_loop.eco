@@ -1,9 +1,6 @@
-// element members written and read back inside `while` loops, over an inferred pointer.
-//
-// three things stack here that the straight-line element_member_write test does not cover:
-// the pointer's type is *inferred* from `mem::alloc<Point>` rather than spelled, the index is a
-// loop variable rather than a constant, and the second loop walks the block backwards - so the
-// element address has to be recomputed per iteration instead of folded once
+// element members written and read back inside `while` loops: the pointer's type is inferred from
+// `mem::alloc<Point>`, the index is a loop variable rather than a constant, and the second loop
+// walks the block backwards - so the element address is recomputed per iteration
 struct Point {
     float $x;
     float $y;

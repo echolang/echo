@@ -1,6 +1,5 @@
-// a `return` leaves every enclosing scope at once, so it owes the drops of all of them - innermost
-// first. `return` is the only early exit in the language today, which is why there are exactly two
-// insertion points to get right
+// a `return` leaves every enclosing scope at once, so it owes the drops of all of them, innermost
+// first
 
 struct Buffer
 {

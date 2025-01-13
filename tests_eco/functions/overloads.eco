@@ -1,6 +1,5 @@
-// function names resolve on the full signature, not just the name. before this, two same-named
-// declarations collapsed into a single AST node: the last signature and the last body won, and
-// the first body was silently dropped
+// a name denotes an overload set: which declaration a call means is decided by the arguments,
+// by arity first and then by how well each one fits
 
 function describe(int32 $v) : int32 { return 1; }
 function describe(float64 $v) : int32 { return 2; }
@@ -30,8 +29,7 @@ int64 $big = 4;
 echo width($big);
 
 // with neither exact, a promotion beats a conversion: int32 into int64 keeps both the value and
-// the family, where int32 into float64 crosses families. these two used to rank identically and
-// the call was reported as ambiguous
+// the family, where int32 into float64 crosses families
 int32 $small = 4;
 float32 $narrow = 1.5f;
 echo width($small);     // int32 -> int64

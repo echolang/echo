@@ -1,6 +1,5 @@
-// `&` applies to any expression that denotes storage, not just a bare variable. taking the
-// address of a struct field used to abort the compiler: the parser ran the member chain and
-// then asked for the result as a variable reference, which it no longer was (todo/B4)
+// `&` applies to any expression that denotes storage, not just a bare variable - here a
+// struct field, borrowed explicitly and then implicitly at a call
 
 struct Point {
     int $x;

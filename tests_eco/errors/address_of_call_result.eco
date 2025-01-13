@@ -1,4 +1,4 @@
-// the other half of address_of_literal.eco: a call result is a value, not storage
+// a call result is a value, not storage, so there is nothing for `&` to point at
 function get() : int {
     return 5;
 }

@@ -1,10 +1,6 @@
-// `Box($a)` written by hand and `$b = $a` are the *same declaration*, which is the whole argument for
-// recognising a constructor rather than adding a spelling for copies: there is one way to copy a value,
-// so the two cannot drift apart.
-//
-// asserted rather than assumed. the explicit call already worked before any of this existed - it is an
-// ordinary overload resolution - so a second construction path would have been easy to add without
-// noticing
+// `Box($a)` written by hand and `$b = $a` reach the *same declaration* - the explicit call by
+// ordinary overload resolution, the implicit one through the copy-constructor slot - so there is
+// only ever one way a value is copied
 
 struct Box
 {

@@ -1,9 +1,8 @@
-// what a function does to its argument depends on the storage class, and on nothing else. the two
-// declarations below have identical bodies: writing through a class parameter reaches the caller's
-// object, writing through a struct parameter reaches a copy the callee owns.
+// what a function does to its argument depends on the storage class alone. the two `twice` have
+// identical bodies: writing through the class parameter reaches the caller's object, writing
+// through the struct parameter reaches a copy the callee owns.
 //
-// the two `twice` also have to stay apart as overloads - a class and a struct of the same shape are
-// distinct types, so the call site picks by the argument's type
+// they are also two overloads - a class and a struct of the same shape are distinct types
 
 class CPoint
 {

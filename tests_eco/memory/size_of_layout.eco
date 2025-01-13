@@ -1,8 +1,5 @@
 // size_of / align_of answer from the *host target's* data layout, folded to a constant.
-//
-// the padded struct is the case that matters: LLVM's default layout aligns i64 to 4 and would say
-// 12/4 here, where every real 64-bit target says 16/8. this test is what catches the data layout
-// going missing from the modules again
+// `Padded` is the case that matters: only the real layout reports 16/8 for it
 struct Padded {
     uint8 $a;
     uint64 $b;
@@ -16,16 +13,12 @@ echo mem::size_of<Padded>();
 echo mem::align_of<uint8>();
 echo mem::align_of<Padded>();
 
-// size_of is the allocation *stride*, so it includes tail padding - `n * size_of<T>()` is exactly
-// the room n elements need and `$p:$[n]` lands on element n rather than partway into it.
-//
-// this also pins cross-module instantiation: `alloc<Padded>` is cloned into the stdlib module,
-// where the `alloc<T>` template lives, but `Padded` is declared here in main - so the stdlib
-// compilation unit has to lower a layout it never declared
+// size_of is the allocation *stride*, so it includes tail padding and `$p:$[n]` lands on
+// element n. also a cross-module instantiation: `alloc<Padded>` is cloned into the stdlib
+// module, which has to lower a layout declared here in main
 ptr<Padded> $items = mem::alloc<Padded>(2);
 
-// written straight through the element. this used to need a borrow bound first
-// (`Padded& $first = &$items:$[0];`) because a member reached through an index answered void
+// written straight through the element
 $items:$[0]->b = 7;
 $items:$[1]->b = 9;
 

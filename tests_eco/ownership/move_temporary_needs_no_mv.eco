@@ -1,5 +1,5 @@
-// "a temporary argument moves." a call result is a value nobody else holds, so it needs no `mv` and
-// leaves nothing behind - the place/non-place distinction doing the whole job
+// a temporary argument moves: a call result is a value nobody else holds, so it needs no `mv` and
+// leaves nothing behind
 
 struct Buffer
 {

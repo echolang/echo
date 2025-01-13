@@ -1,0 +1,22 @@
+// a generic application as a *declaration's* type, in every spelling a declaration has - each of
+// which the statement dispatch has to tell apart from a constructor call used as a statement
+struct Q<T> { T $x; }
+struct Box<T> { T $v; }
+
+// the plain form
+Q<int32> $q = Q<int32>(2);
+
+// a borrow of one
+Q<int32>& $r = &$q;
+
+// nested, which closes on a single `>>` token the cursor has to split - the lookahead shares that
+// split with the type-argument parser rather than counting brackets
+Box<Box<int32>> $b = Box<Box<int32>>(Box<int32>(5));
+
+echo $q->x;
+echo $r->x;
+echo $b->v->v;
+
+// and the negative: with a `(` after the type arguments rather than a variable name, this is a
+// constructor call used as a statement
+Q<int32>(9);

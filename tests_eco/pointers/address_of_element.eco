@@ -1,9 +1,5 @@
-// `&` applies to anything that has storage, and an element reached through `:$[n]` does
-// (book/concept/pointers_and_refs_v2.md, "Taking addresses" - `$p3 = &$buf:$[3]`)
-//
-// `$p:$[n]` is a genuine lvalue, so it can be read, written and addressed. taking its address
-// is the case that proves it: if indexing produced a value rather than a place, there would be
-// nothing to point at
+// `$p:$[n]` is a place, so it can be read, written, addressed and borrowed like any other
+// (book/concept/pointers_and_refs_v2.md, "Taking addresses")
 
 struct Pair {
     int $a;

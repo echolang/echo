@@ -1,11 +1,4 @@
-// a namespace-qualified call used as a whole statement, and a call whose result is discarded.
-//
-// the statement form was matched as `{identifier, open_paren}`, so `math::sqrt(9.0);` - which
-// lexes as `identifier :: identifier (` - matched no branch and was reported as an unexpected
-// token. the spec's own `mem::free($p);` could not be written.
-//
-// discarding the result was a separate stop: a statement had to leave the value stack untouched,
-// but a call pushes its return value, so any non-void call statement tripped the assert
+// a call is a statement on its own, qualified or not, and a non-void result may be discarded
 float64 $root = math::sqrt(16.0);
 echo $root;
 

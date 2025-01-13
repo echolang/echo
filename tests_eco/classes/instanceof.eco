@@ -13,8 +13,7 @@ echo $c instanceof Cat;
 echo $c instanceof Dog;
 echo $d instanceof Dog;
 
-// a struct on the right is a fair question with a boring answer: no class block was ever stamped
-// with a struct's identity, because a struct has none
+// a struct on the right is always false - a struct carries no identity to be stamped with
 echo $c instanceof Rock;
 
 // null points at no block at all, so it is an instance of nothing

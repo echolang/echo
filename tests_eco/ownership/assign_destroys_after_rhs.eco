@@ -1,11 +1,9 @@
-// the drop for an assignment target belongs *after* the right-hand side, not ahead of the statement.
-// `replace($a)` takes a borrow, so nothing about this is a copy and no `mv` is involved - the old
-// value is simply still being read while the new one is built.
+// the drop for an assignment target runs *after* the right-hand side, not ahead of the statement -
+// `replace($a)` borrows the old value while the new one is being built.
 //
-// two things are pinned. the *order*, by the `echo 500` inside replace; and that the read saw a live
-// value, by the tag: the destructor zeroes `$tag`, so a teardown that ran too early would make
-// replace compute 0 + 10 rather than 1 + 10. self-assignment is only the statically visible case of
-// this, which is why the fix is the general order rather than a check for `$a = $a`
+// the `echo 500` inside replace pins the order, and the tag pins that the read saw a live value: the
+// destructor zeroes `$tag`, so an early teardown would make replace compute 0 + 10 rather than
+// 1 + 10
 
 struct Buffer
 {

@@ -13,6 +13,7 @@
 #include "AST/TypeDeclNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/ReturnNode.h"
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTPlaceExpr.h"
 
 #include <fmt/core.h>
@@ -53,32 +54,23 @@ static std::string place_description(const ExprNode &expr)
     }
 }
 
-// numeric/primitive conversions are inserted by the parser/monomorphizer as casts, so only a
-// fundamental kind mismatch (struct vs primitive, or two distinct struct identities) is a real
-// argument error here. undeterminable types (void/unknown) are left to other diagnostics
-static bool arg_assignable_to(const ValueType &arg, const ValueType &param)
+// can this argument reach this parameter? one rule, AST::argument_fit, which is also what the
+// overload matcher ranks with and what the implicit borrow is decided by - so a call this pass
+// accepts is a call resolution could have chosen, and vice versa. this used to be a fourth
+// hand-written copy of the same case analysis, and it disagreed with argument_fit about the borrow
+// arm (which additionally requires the argument to be a place)
+//
+// numeric conversions are inserted as casts by AST::CallResolver, so a t_conversion answer is a
+// legal argument here; only t_none is a real error. an undeterminable type answers t_undetermined,
+// which is how "no information yet" stays out of this pass's diagnostics
+//
+// `expr` is the argument as written, or null when only its type is available. passing it admits
+// t_borrow - the parameter is a borrow and this is a place, so an address would be taken - which is
+// right at a call site and wrong for a cast, because a cast is not an address-of. the two callers
+// differ on exactly that
+static bool arg_assignable_to(const ValueType &arg, const ExprNode *expr, const ValueType &param)
 {
-    if (arg.get_kind() == ValueTypeKind::t_unknown || param.get_kind() == ValueTypeKind::t_unknown) {
-        return true;
-    }
-    if (arg.is_void()) {
-        return true;
-    }
-
-    // pointers match structurally on their pointee, with the borrow-widens-to-nullable rule
-    // this arm is load bearing: a reference parameter used to reach the primitive arm below,
-    // because `int32&` was an int32 carrying a flag rather than a kind of its own
-    if (arg.is_pointer() || param.is_pointer()) {
-        return is_implicitly_convertible(arg, param);
-    }
-
-    if (arg.is_primitive() && param.is_primitive()) {
-        return true;
-    }
-    if (arg.has_complex_type() && param.has_complex_type()) {
-        return arg.get_complex_type() == param.get_complex_type();
-    }
-    return false;
+    return argument_fit(arg, expr, param) != ArgumentFit::t_none;
 }
 
 // looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
@@ -283,7 +275,8 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     continue;
                 }
 
-                if (!arg_assignable_to(arg_type, param_type)) {
+                // the argument as written is passed, so this scores it exactly as the matcher did
+                if (!arg_assignable_to(arg_type, node.arguments[i], param_type)) {
                     _collector.collect_issue<Issue::ArgumentTypeMismatch>(
                         code_ref_for(node.token_function_name),
                         fmt::format(
@@ -345,7 +338,9 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
     // a context-free "Unsupported type cast" deep in codegen. report it here, located
     if (node.is_implcit && node.expr && _context_token) {
         ValueType from = node.expr->result_type();
-        if (!arg_assignable_to(from, node.cast_to)) {
+        // null, not the operand: a cast is not an address-of, so admitting the borrow arm here would
+        // accept a cast that is still wrong - the very cast this arm exists to catch
+        if (!arg_assignable_to(from, nullptr, node.cast_to)) {
             _collector.collect_issue<Issue::InvalidTypeConversion>(
                 code_ref_for(*_context_token),
                 fmt::format("cannot implicitly convert '{}' to '{}'",

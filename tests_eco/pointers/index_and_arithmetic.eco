@@ -1,9 +1,7 @@
 // indexing and arithmetic both go through `:$`, because they are operations on the address
-// rather than on the value it stands for. offsets count *elements*, never bytes - the scaling
-// by the pointee's size is what GEP does for us.
+// rather than on the value it stands for. offsets count *elements*, never bytes.
 //
-// there is no allocator yet, so the adjacent storage here comes from a struct's two int32
-// fields, which llvm lays out at offset 0 and 4
+// the adjacent storage is a struct's two int32 fields, at offset 0 and 4
 
 struct Pair {
     int $a;

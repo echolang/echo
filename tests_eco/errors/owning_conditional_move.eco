@@ -1,6 +1,6 @@
-// moved on one branch and not the other. the chapter's merge rule makes the variable unset
-// afterwards, which settles reading it - but nothing then destroys the value on the branch that kept
-// it, and a runtime drop flag is no part of the design. rejected rather than leaked
+// moved on one branch and not the other. the merge leaves the variable unset, so nothing would
+// destroy the value on the branch that kept it - and there is no runtime drop flag. rejected
+// rather than leaked
 
 struct Buffer
 {

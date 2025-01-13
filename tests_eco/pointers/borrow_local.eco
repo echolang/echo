@@ -1,6 +1,5 @@
-// a borrow declared as a local. `int& $r = &$var` binds the reference to $var's storage;
-// from then on reading $r reads $var and writing $r writes $var, with no explicit deref.
-// declaring a borrow local did not parse at all before the type parser owned the `&` suffix
+// a borrow declared as a local. `int& $r = &$var` binds the reference to $var's storage; from
+// then on reading $r reads $var and writing $r writes $var, with no explicit deref
 
 $var = 10;
 

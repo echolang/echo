@@ -1,6 +1,6 @@
-// `const Foo&` is recognised too, and is the more honest spelling: a copy reads its source. const is
-// dropped on both sides of the recognition comparison, and the plain `Foo&` receiver the ownership pass
-// builds still fits, because a borrow of a mutable value converts to a borrow of a const one already
+// `const Foo&` is recognised as the copy constructor too, and is the more honest spelling: a copy
+// only reads its source. the implicit copy the ownership pass builds still fits it, since a borrow
+// of a mutable value converts to a borrow of a const one
 
 struct Box
 {

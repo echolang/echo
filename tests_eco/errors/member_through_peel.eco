@@ -1,6 +1,6 @@
-// `->` already reaches through every pointer level, so `$p:$->x` could only mean what `$p->x`
-// means. it is rejected rather than aliased: `:$` marks an operation on the address, and the
-// pointer object itself has no members (todo/B9 - the rule is the feature)
+// `->` already reaches through every pointer level, so `$p:$->x` could only mean `$p->x`. it is
+// rejected rather than aliased: `:$` marks an operation on the address, and the pointer object
+// itself has no members (todo/B9)
 struct Point {
     int32 $x;
 }

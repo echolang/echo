@@ -22,7 +22,7 @@ namespace AST
         t_widening,
 
         // the parameter is a borrow and the argument is a place, so its address is taken
-        // implicitly. see coerce_arg_to_pointer_param, which performs exactly this case
+        // implicitly. see AST::CallResolver::coerce_arguments, which performs exactly this case
         t_borrow,
 
         // a numeric conversion that stays inside its family and cannot lose anything: a wider
@@ -71,16 +71,23 @@ namespace AST
         return false;
     }
 
-    // the single rule for "does this argument answer this parameter", shared by overload
-    // resolution and the implicit borrow in coerce_arg_to_pointer_param. those two agreeing is
-    // what stops the matcher accepting a borrow parameter that the coercion right after it would
-    // then decline to wrap
+    // **the** rule for "does this argument answer this parameter" - the only implementation, with
+    // three readers that each take a different amount of it:
     //
-    // @TODO TypeChecker::arg_assignable_to is a third copy of the same question and should fold
-    // onto this one; it answers only yes/no, so it needs `!= t_none` rather than the ranking.
+    //  - AST::match_function ranks with the whole ordering, which is what picks an overload;
+    //  - AST::CallResolver's argument coercion reads only `t_borrow`, so a candidate the matcher
+    //    accepted on the borrow arm is a candidate the coercion then actually wraps;
+    //  - AST::TypeChecker reads only `!= t_none`, so a call it reports is a call resolution could
+    //    not have chosen.
+    //
+    // it used to be three separate case analyses. the third was a hand-written copy in the type
+    // checker whose pointer arm was plain is_implicitly_convertible, and the "first" was consulted
+    // for concrete candidates while unify_type's tail filtered generic ones by yet another rule - so
+    // a generic overload could be admitted by one and scored by the other with nothing to notice
     //
     // `expr` may be null when only the argument's type is known; the borrow rule needs the
-    // expression, because only an expression can be a place
+    // expression, because only an expression can be a place. a caller that passes null therefore
+    // declines the borrow arm, which is what a *cast* wants - a cast is not an address-of
     inline ArgumentFit argument_fit(const ValueType &from, const ExprNode *expr, const ValueType &to)
     {
         // no information. checked first so an undetermined argument can never be read as a
@@ -96,8 +103,8 @@ namespace AST
 
         // before the borrow rule, so an argument that already fits a borrow parameter is not
         // wrapped in a second address-of. that ordering is load-bearing in
-        // coerce_arg_to_pointer_param, where taking the address of a ptr<int32> for a ptr<int32>
-        // parameter would build a ptr<ptr<int32>>
+        // AST::CallResolver::coerce_arguments, where taking the address of a ptr<int32> for a
+        // ptr<int32> parameter would build a ptr<ptr<int32>>
         if (is_implicitly_convertible(from, to)) {
             return ArgumentFit::t_widening;
         }

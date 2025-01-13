@@ -1,6 +1,6 @@
-// a generic struct's destructor is instantiated per concrete type, by the ordinary monomorphizer
-// fixpoint: the drop the ownership pass inserts names the *template's* destructor, and the receiver
-// `Box<T>&` binds T from the local's type. two instantiations, two destructor bodies, no special case
+// a generic struct's destructor is instantiated per concrete type: the drop names the *template's*
+// destructor and the receiver `Box<T>&` binds T from the local's type. two instantiations, two
+// destructor bodies
 
 struct Box<T>
 {

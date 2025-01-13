@@ -1,9 +1,7 @@
-// a literal in a generic body is typed where the *template* is parsed, where the expected type is
-// the unsubstituted T - so it falls back to int32. cloning substitutes the declared return type to
-// float64 but the literal is untouched, and codegen emitted `ret i32 0` from a double-returning
-// function. the fix is not in the monomorphizer: a return simply had no destination to fit, for
-// generics and plain functions alike, so it now fits the declared type at codegen like every other
-// destination does. the shape is `mem::alloc<T>(usize) : ptr<T>` - T appears only in the return
+// a literal in a generic body is typed where the *template* is parsed, against an unsubstituted T,
+// so it falls back to int32 and cloning leaves it alone. each instance fits it to the substituted
+// return type at codegen, like any other destination. the shape is `mem::alloc<T>(usize) : ptr<T>`,
+// where T appears only in the return
 
 function zero_of<T>(int32 $ignored) : T
 {

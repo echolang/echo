@@ -1,10 +1,8 @@
 // a reference cannot be taken twice - `ptr<T&>` is the spelling for a pointer to a borrow.
 //
-// note the space: `int&&` lexes as a single logical-and token and never reaches the type
-// parser, so only the spaced form produces this diagnostic. the glued form is still rejected,
-// just as an unexpected token.
+// note the space: `int&&` lexes as a single logical-and token and never reaches the type parser,
+// so only the spaced form produces this diagnostic. the glued form is rejected as an unexpected
+// token instead.
 //
-// a module is parsed more than once and a function signature is read in every pass, so this used
-// to be reported once per pass. AST::Collector::collect_issue de-duplicates on kind + tokens +
-// message, so it appears once - this golden is where a regression in that would show up
+// the signature is read in every module pass, so this also pins that the issue is reported once
 function f(int& & $x) : void {}

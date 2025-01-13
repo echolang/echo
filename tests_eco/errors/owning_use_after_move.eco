@@ -1,5 +1,5 @@
-// after a move the source is unset: not empty, not null, not zero - it has no value, and any use of
-// it is a compile error rather than something discovered at runtime
+// after a move the source is unset: not empty, not null, not zero - it has no value, and any use
+// of it is a compile error
 
 struct Buffer
 {

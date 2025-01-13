@@ -1,7 +1,6 @@
-// a template's body is parsed once, with T unsubstituted, so nothing in it can be typed against
-// the eventual return type: the literal below is an int32 in the template no matter how many
-// instances follow. every instance therefore leans on the return being fitted at codegen, which
-// is what this walks - one instance per shape the conversion table can take
+// a template's body is parsed once with T unsubstituted, so the literal below is an int32 no matter
+// how many instances follow and every instance fits its return at codegen - walked here over one
+// instance per shape the conversion table can take
 
 function zero_of<T>(int32 $ignored) : T
 {
@@ -57,7 +56,6 @@ echo $clamped_low;
 float64 $clamped_high = clamp_of<float64>(4);
 echo $clamped_high;
 
-// the same instance reused, to prove the cache hands back a working instance rather than a
-// half-fitted one
+// the same instance reused, so the cache hands back a fully fitted one
 float64 $again = zero_of<float64>(2);
 echo $again;

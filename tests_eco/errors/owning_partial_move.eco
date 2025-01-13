@@ -1,5 +1,5 @@
-// moving one field out and leaving the rest is rejected: the analysis is keyed on a whole variable,
-// and it would also have to answer what the destructor of a partly-moved struct does
+// moving one field out and leaving the rest is rejected - ownership is tracked per variable, and a
+// partly-moved struct has no answer for what its destructor does
 
 struct Buffer
 {

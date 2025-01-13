@@ -1,11 +1,9 @@
-// a constructor taking one non-nullable borrow of its own type *is* the copy constructor, and nothing
-// had to be added to the language for it to parse: a constructor is an ordinary function, a borrow an
-// ordinary parameter. what is new is that the ownership pass now recognises it and calls it wherever a
-// place arrives at a destination - a declaration, an argument, a return - instead of reporting that an
-// owning value cannot be copied.
+// a constructor taking one non-nullable borrow of its own type *is* the copy constructor: the
+// ownership pass calls it wherever a place arrives at a destination - a declaration, an argument, a
+// return - instead of rejecting the copy.
 //
-// every copy adds one to the tag, so the goldens count the calls rather than just their existence:
-// three copies here, four values, four destructions
+// every copy adds one to the tag, so the goldens count the calls: three copies, four values, four
+// destructions
 
 struct Box
 {

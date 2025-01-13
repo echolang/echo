@@ -1,10 +1,6 @@
-// a `const ptr<int32>` promises only that it keeps pointing where it was seated. writing *through*
-// it is allowed - the pointee is not const (book/concept/pointers_and_refs_v2.md, "Const")
-//
-// this used to be rejected. the const check lived in the parser and fired on the declared type's
-// top level, which for a const pointer is the pointer itself, so it could not tell a write-through
-// from a re-seat - the deref that distinguishes them is only inserted later, by the pointer
-// adjustment pass. the check now runs there, on the assignment target's shape
+// a `const ptr<int32>` promises only that it keeps pointing where it was seated, so writing
+// *through* it is allowed - const sits per pointer level, and only the slot is frozen
+// (book/concept/pointers_and_refs_v2.md, "Const")
 $a = 1;
 
 const ptr<int> $p = &$a;

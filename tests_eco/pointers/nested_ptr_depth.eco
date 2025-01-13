@@ -1,9 +1,8 @@
-// three levels of pointer, exercised at each one. no new rules apply at depth - it is the same
-// three lines of binding, writing and re-seating, one level up each time
-// (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+// three levels of pointer, exercised at each one: binding, writing and re-seating, one level
+// up each time (book/concept/pointers_and_refs_v2.md, "Pointers to pointers").
 //
-// nothing here echoes a raw address: a stack address is not reproducible across runs, so the
-// assertions are all relationships between addresses instead
+// nothing echoes a raw address - a stack address is not reproducible across runs, so the
+// assertions are relationships between addresses instead
 
 $a = 1;
 $b = 2;
@@ -32,8 +31,8 @@ $p = 20;
 echo $b;
 
 // $ppp reaches one level further out: writing through it stores into $pp's own slot, so it
-// re-points $pp. the value has to be a ptr<ptr<int>>-shaped address, which is what `&$p` is -
-// note that `$ppp = &$a` is rejected, since an int32& does not fit a ptr<ptr<int32>> slot
+// re-points $pp. the value has to be a ptr<ptr<int>>-shaped address, which is what `&$p` is;
+// `$ppp = &$a` is rejected, since an int32& does not fit a ptr<ptr<int32>> slot
 $ppp = &$p;
 echo ($pp:$ == &$p);
 

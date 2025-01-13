@@ -1,6 +1,5 @@
-// an unsigned field read out of an element. the conversion table is keyed on ValueType because
-// signedness does not survive lowering - and with the member's type answering void, coerce_value
-// used to get `from = void`, fall back to "assume signed" and sign extend a uint8
+// widening a field read out of an element follows the *field's* signedness, which llvm's lowered
+// type cannot tell apart: a uint8 zero-extends where an int8 sign-extends
 struct Flags {
     uint8 $a;
     int8 $b;

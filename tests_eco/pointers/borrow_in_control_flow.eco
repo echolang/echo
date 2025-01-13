@@ -1,9 +1,5 @@
-// a borrow inside if and while. conditions are value positions, so a pointer read in one
-// auto-derefs like any other read - the condition tests the pointee, never the address.
-//
-// worth its own case because the adjustment pass has to reach into a condition and into a loop
-// body separately from the surrounding scope, and a missed edge there does not fail loudly: an
-// un-derefed pointer in a condition is a non-zero address, so the branch simply always taken
+// a borrow inside if and while. conditions and loop bodies are ordinary value positions, so a
+// pointer read in one auto-derefs - the condition tests the pointee, never the address
 
 $counter = 3;
 int& $c = &$counter;
@@ -13,8 +9,7 @@ if ($c > 0) {
     echo 1;
 }
 
-// a borrow that points at zero must therefore take the else branch, which an address test
-// could never do - the address is non-zero
+// a borrow that points at zero takes the else branch, where an address test would not
 $zero = 0;
 int& $z = &$zero;
 

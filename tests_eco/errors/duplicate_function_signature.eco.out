@@ -1,12 +1,12 @@
 ---- Issue ----
-Issue at 5:10
+Issue at 4:10
 'f(int32)' is already declared with these parameter types. Overloads must differ in their parameters.
 Begin: 'f'
 End: 'f'
 Code excerpt:
- [4]> function f(int32 $a) : int32 { return 1; }
- [5]> function f(int32 $b) : int32 { return 2; }
+ [3]> function f(int32 $a) : int32 { return 1; }
+ [4]> function f(int32 $b) : int32 { return 2; }
                ^
- [6]> 
+ [5]> 
 
 Critical issues found, cannot compile.

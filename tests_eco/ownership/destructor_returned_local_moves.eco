@@ -1,7 +1,5 @@
-// "a returned local is moved, not copied" - the rule the whole feature rests on. a constructor's
-// `$this` is a body-local of value type with an implicit `return $this`, so without the move
-// `$x = make(...)` would free the buffer twice: once when the constructor's `$this` goes out of
-// scope and once when `$x` does. exactly one destructor line proves it did not
+// a returned local is moved, not copied - including a constructor's `$this`, which is a body-local
+// of value type with an implicit `return $this`. exactly one destructor line per buffer
 
 struct Buffer
 {

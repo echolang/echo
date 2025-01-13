@@ -14,6 +14,7 @@
 namespace AST
 {
     class FunctionDeclNode;
+    class Namespace;
     class VarRefNode;
     class TypeNode;
 
@@ -56,6 +57,29 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
+    // how far a call has been taken towards being resolved
+    //
+    // resolution is *attempted* where the call is written, because the call's type is needed there -
+    // `$x = f(1);` takes the variable's type from it. but an argument's type is not necessarily
+    // final at that moment: a local initialized from a generic constructor carries the template's
+    // type until the monomorphizer's fixpoint answers it. a decision made against a type that says
+    // nothing is a wrong decision rather than a missing one, so it is deferred instead, and the
+    // fixpoint that answers those types is what finishes the call
+    enum class CallSettlement
+    {
+        // no declaration yet: several candidates remain and the arguments that would separate them
+        // have no type. the candidate set is re-derived when the question is asked again, never
+        // stored - a stored set goes stale the moment the tree is cloned for an instantiation
+        t_unresolved,
+
+        // a declaration is chosen, but the arguments have not been fitted to its parameters
+        t_uncoerced,
+
+        // declaration chosen, arguments fitted. nothing further is owed - and nothing may touch the
+        // arguments again, because a second coercion would wrap what the first one wrapped
+        t_settled,
+    };
+
     class FunctionCallExprNode : public ExprNode
     {
     public:
@@ -69,6 +93,19 @@ namespace AST
         std::vector<TypeNode*> explicit_type_args;
 
         FunctionDeclNode *decl = nullptr;
+
+        // maintained only by AST::CallResolver, which is the one thing that sets `decl` and the one
+        // thing that coerces the arguments - so the two can never disagree about what is done
+        //
+        // CloneContext::shallow copy-constructs, and inheriting this is exactly right in all three
+        // states: a settled call's coercion nodes are cloned with it and must not be redone, while
+        // an unresolved or uncoerced one is retried against the substituted types
+        CallSettlement settlement = CallSettlement::t_unresolved;
+
+        // where a free call looked its name up, so the lookup can be repeated in a later round.
+        // null for a member call, whose candidates come from its receiver's type instead - which is
+        // argument 0, so a member call needs nothing stored at all
+        const Namespace *lookup_namespace = nullptr;
 
         FunctionCallExprNode(TokenReference token_function_name, std::vector<ExprNode*> arguments) :
             token_function_name(token_function_name), arguments(arguments)

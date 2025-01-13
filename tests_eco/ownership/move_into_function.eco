@@ -1,6 +1,5 @@
 // a parameter marked `mv` takes ownership of its argument, so the value is destroyed at the end of
-// *that* body rather than at the caller's scope end. the destructor line lands before `0`, which is
-// what proves the ownership actually changed hands
+// *that* body rather than at the caller's scope end - the destructor line lands before `0`
 
 struct Buffer
 {
