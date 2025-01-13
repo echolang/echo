@@ -11,6 +11,7 @@
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTOwnership.h"
+#include "AST/ASTPlaceExpr.h"
 #include "Debugging.h"
 
 #include <fmt/core.h>
@@ -45,116 +46,72 @@ namespace AST
 
     std::optional<std::vector<ValueType>> Monomorphizer::determine_type_args(FunctionCallExprNode *call, Module &mod, bool &is_error)
     {
-        FunctionDeclNode *tmpl = call->decl;
-        size_t n = tmpl->type_parameters.size();
+        const FunctionDeclNode *tmpl = call->decl;
 
-        std::vector<ValueType> args;
+        // the inference rules themselves are AST::can_instantiate's, which the parser scores
+        // candidates with. everything below is the half the parser must *not* do: a template that
+        // cannot take a call is an overload filter there and a diagnostic here, and this is the only
+        // place that difference lives
+        const Instantiation inst = can_instantiate(tmpl, *call);
 
-        // a method carries its owner's parameters ahead of its own, and only the *own* ones can be
-        // spelled at the call site: `$b->map<float64>()` says nothing about Box's T, which the
-        // receiver already fixes. so the two halves are resolved from different places
-        const size_t inherited = tmpl->inherited_type_param_count;
+        switch (inst.blame) {
+        case InstantiationBlame::t_type_argument_count:
+            _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
+                "Wrong number of type arguments for generic function '" + tmpl->func_name() + "'");
+            is_error = true;
+            return std::nullopt;
 
-        if (!call->explicit_type_args.empty()) {
-            // explicit type arguments win: foo<int>(...)
-            if (call->explicit_type_args.size() != tmpl->own_type_param_count()) {
-                _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
-                    "Wrong number of type arguments for generic function '" + tmpl->func_name() + "'");
-                is_error = true;
-                return std::nullopt;
-            }
+        case InstantiationBlame::t_argument_count:
+            _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
+                fmt::format("Argument count mismatch for generic function '{}': it takes {}, {} given",
+                    tmpl->func_name(),
+                    tmpl->args.size() - tmpl->implicit_arg_count(),
+                    call->arguments.size() - tmpl->implicit_arg_count()));
+            is_error = true;
+            return std::nullopt;
 
-            // the owner's parameters come from the receiver, which is argument 0. inferred rather
-            // than read off the receiver's instantiation_args so there is one binding rule: the
-            // receiver parameter is `Box<T>&` and unify already descends a generic application
-            TypeSubstitution from_receiver;
-            if (inherited > 0 && !call->arguments.empty()) {
-                unify_type(tmpl->args[0]->type(), call->arguments[0]->result_type(), from_receiver);
-            }
+        case InstantiationBlame::t_unbound_parameter:
+            // nothing binds this parameter and nothing later will, so it is a real "cannot infer"
+            // rather than a not-yet
+            _collector.collect_issue<Issue::UnresolvedTypeParameter>(
+                code_ref_for(mod, call->token_function_name),
+                "Cannot infer type parameter '" + inst.param->name + "' of generic '"
+                    + tmpl->func_name() + "' from the call arguments; specify it explicitly, e.g. "
+                    + tmpl->func_name() + "<...>(...)");
+            is_error = true;
+            return std::nullopt;
 
-            for (size_t i = 0; i < inherited; i++) {
-                const ValueType *bound = from_receiver.lookup(tmpl->type_parameters[i]);
+        case InstantiationBlame::t_constraint:
+            _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(code_ref_for(mod, call->token_function_name),
+                "Type parameter '" + inst.param->name + "' of '" + tmpl->func_name() +
+                "' is constrained to '" + inst.param->constraint_spelling +
+                "' but was given '" + inst.bound.get_type_desciption() + "'");
+            is_error = true;
+            return std::nullopt;
 
-                // the receiver's own type is not concrete yet - this call sits in a template
-                // body that has not been instantiated. retried, not reported
-                if (!bound) {
-                    return std::nullopt;
-                }
+        case InstantiationBlame::t_undecided_parameter:
+            // this call lives inside an un-instantiated template body: its type arguments mention
+            // the enclosing template's parameters, or a receiver is not resolved. skip it silently
+            // and revisit once that template is instantiated, which substitutes them to concrete
+            // types. this is why the inner Box<T>(...) of a generic factory is never instantiated as
+            // Box<T> - only as Box<int32> after the factory is cloned for int32
+            return std::nullopt;
 
-                args.push_back(*bound);
-            }
+        case InstantiationBlame::t_argument_shape:
+            // an argument no substitution can make fit, which is AST::TypeChecker's diagnostic
+            // against the instance rather than ours - it numbers the argument and names both types.
+            // so fall through and instantiate, if the other parameters decided an instance
+            break;
 
-            for (auto *type_node : call->explicit_type_args) {
-                args.push_back(type_node->type);
-            }
-        } else {
-            // otherwise infer from the call arguments
-            if (call->arguments.size() != tmpl->args.size()) {
-                _collector.collect_issue<Issue::GenericError>(code_ref_for(mod, call->token_function_name),
-                    fmt::format("Argument count mismatch for generic function '{}': it takes {}, {} given",
-                        tmpl->func_name(),
-                        tmpl->args.size() - tmpl->implicit_arg_count(),
-                        call->arguments.size() - tmpl->implicit_arg_count()));
-                is_error = true;
-                return std::nullopt;
-            }
-
-            // unify binds in *argument* order; the type-argument list has to come back out in
-            // *declaration* order, because that order is what identifies the instantiation
-            TypeSubstitution inferred;
-            for (size_t i = 0; i < call->arguments.size(); i++) {
-                unify_type(tmpl->args[i]->type(), call->arguments[i]->result_type(), inferred);
-            }
-
-            // an unbound parameter is only retryable while the call still sits in a template body
-            // that has not been instantiated. once every argument type is concrete, nothing later
-            // can bind it, so this is a real "cannot infer" rather than a not-yet
-            const bool arguments_concrete = CallResolver::arguments_are_determined(*call);
-
-            for (const auto *param : tmpl->type_parameters) {
-                const ValueType *bound = inferred.lookup(param);
-                if (!bound) {
-                    if (arguments_concrete) {
-                        _collector.collect_issue<Issue::UnresolvedTypeParameter>(
-                            code_ref_for(mod, call->token_function_name),
-                            "Cannot infer type parameter '" + param->name + "' of generic '"
-                                + tmpl->func_name() + "' from the call arguments; specify it explicitly, e.g. "
-                                + tmpl->func_name() + "<...>(...)");
-                        is_error = true;
-                    }
-                    return std::nullopt;
-                }
-                args.push_back(*bound);
-            }
+        case InstantiationBlame::n_none:
+            break;
         }
 
-        // if any argument is still non-concrete, this call lives inside an un-instantiated
-        // template body (its type arguments mention the enclosing template's parameters, or an
-        // operand's type is still void/unknown). skip it silently and revisit once the enclosing
-        // template is instantiated, which substitutes those to concrete types. this guard is why
-        // e.g. the inner Box<T>(...) in a generic factory is not instantiated as Box<T> - only as
-        // Box<int> after the factory is cloned for int
-        for (const auto &arg : args) {
-            if (is_undetermined_type(arg)) {
-                return std::nullopt;
-            }
+        if (!inst.decided) {
+            return std::nullopt;
         }
 
-        // enforce any type-parameter constraints (e.g. `<T: numeric>`). both the explicit
-        // and inferred paths converge on `args`, so this single check covers both
-        for (size_t i = 0; i < n; i++) {
-            const auto *param = tmpl->type_parameters[i];
-            if (param->is_constrained() && !param->allows(args[i])) {
-                _collector.collect_issue<Issue::UnsatisfiedTypeConstraint>(code_ref_for(mod, call->token_function_name),
-                    "Type parameter '" + param->name + "' of '" + tmpl->func_name() +
-                    "' is constrained to '" + param->constraint_spelling +
-                    "' but was given '" + args[i].get_type_desciption() + "'");
-                is_error = true;
-                return std::nullopt;
-            }
-        }
-
-        return args;
+        return inst.type_arguments;
     }
 
     FunctionDeclNode *Monomorphizer::get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args)
@@ -305,7 +262,13 @@ namespace AST
                     continue;
                 }
 
-                ValueType derived = decl->init_expr->result_type();
+                // through the same rule the parser inferred with, rather than a second spelling of
+                // it: the value the initializer reads as, and the `const` the declaration was
+                // written with - which is still on the stale type, since make_const survives the
+                // initializer's type being undetermined
+                const ValueType derived =
+                    infer_declaration_type(*decl->init_expr, decl->type().is_const());
+
                 if (is_undetermined_type(derived)) {
                     continue;  // initializer is not concrete yet either; revisit next round
                 }
@@ -331,7 +294,9 @@ namespace AST
         bool progressed = false;
 
         for (auto &[call, mod] : snapshot_calls()) {
-            if (call->settlement == CallSettlement::t_settled) {
+            // a settled call owes nothing, and a failed one is decided on types no later round can
+            // change - re-deriving its match would re-derive its diagnostic with it
+            if (call_is_terminal(call->settlement)) {
                 continue;
             }
 
@@ -351,7 +316,10 @@ namespace AST
         CallResolver resolver(_collector);
 
         for (auto &[call, mod] : snapshot_calls()) {
-            if (call->settlement == CallSettlement::t_settled) {
+            // t_failed among the terminal states is what keeps this sweep from reporting a second
+            // time on a call some round already reported - it used to rely on the collector
+            // de-duplicating the identical message
+            if (call_is_terminal(call->settlement)) {
                 continue;
             }
 

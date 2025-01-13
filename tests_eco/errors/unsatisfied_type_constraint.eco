@@ -1,0 +1,10 @@
+// a constrained type parameter bound to a type its constraint does not list. the diagnostic names
+// the parameter, the template, what the constraint was written as and what it was given - the
+// monomorphizer's, because a constraint is only violated by a binding, which is what inference
+// produces
+function id<T: numeric>(T $v) : T
+{
+    return $v;
+}
+
+echo id(true);

@@ -71,6 +71,21 @@ namespace AST
         return false;
     }
 
+    // **which parameters auto-borrow** - the type-level half of the borrow rule, on its own because
+    // it has a second reader that has no expression to ask about: AST::unify_type anticipates this
+    // wrapping during inference, since the implicit address-of is inserted *after* a type argument is
+    // bound (`bump<T>(T &$v)` called as `bump($a)` has to bind T=int32 from a bare value).
+    //
+    // a nullable `ptr<T>` deliberately does not auto-borrow: taking an address is a decision the
+    // caller should be able to see in the source (book/concept/pointers_and_refs_v2.md, "Passing to
+    // functions"). that exclusion is the whole reason this is one predicate rather than two spellings -
+    // the inference and the coercion disagreeing about it would name an instance the coercion then
+    // never produces
+    inline bool parameter_auto_borrows(const ValueType &param)
+    {
+        return param.is_pointer() && !param.is_nullable();
+    }
+
     // **the** rule for "does this argument answer this parameter" - the only implementation, with
     // three readers that each take a different amount of it:
     //
@@ -109,10 +124,9 @@ namespace AST
             return ArgumentFit::t_widening;
         }
 
-        // a non-nullable borrow parameter takes the address of any place. a nullable `ptr<T>`
-        // deliberately does not auto-borrow: taking an address is a decision the caller should be
-        // able to see in the source (book/concept/pointers_and_refs_v2.md, "Passing to functions")
-        if (to.is_pointer() && !to.is_nullable() && expr != nullptr && is_place_expression(*expr)) {
+        // a borrow parameter takes the address of any place - which parameters those are is
+        // parameter_auto_borrows, shared with the inference that has to predict this
+        if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)) {
             const ValueType pointee = ValueType::make_mutable(to.pointee());
             if (ValueType::make_mutable(from) == pointee) {
                 return ArgumentFit::t_borrow;

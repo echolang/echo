@@ -4,8 +4,8 @@
 #pragma once
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTInstantiation.h"
 #include "AST/ASTOwnership.h"
-#include "AST/ASTTypeUnify.h"
 #include "AST/ASTValueType.h"
 
 #include <optional>
@@ -94,6 +94,10 @@ namespace AST
         // returns the concrete type arguments for a generic call, or nullopt when the call
         // cannot be resolved yet (it sits in an un-instantiated template body) or is invalid
         // (in which case an issue is recorded and `is_error` is set)
+        //
+        // the inference itself is AST::can_instantiate's, shared with the overload resolution that
+        // scores a template candidate; this adds only the diagnostics, which is the one thing a
+        // candidate-scoring caller must not do
         std::optional<std::vector<ValueType>> determine_type_args(FunctionCallExprNode *call, Module &mod, bool &is_error);
 
         FunctionDeclNode *get_or_create_function_instance(FunctionDeclNode *tmpl, const std::vector<ValueType> &args);

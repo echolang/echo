@@ -1,6 +1,7 @@
 #include "Parser/TypeParser.h"
 #include "Parser/NamespaceParser.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTInstantiation.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
@@ -287,20 +288,19 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::T
         return AST::ValueType::make_unknown();
     }
 
-    // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>`
-    // where `Vec<T: numeric>`). skip args still mentioning a type parameter - those are
-    // resolved and re-checked once the enclosing template is instantiated
-    for (size_t i = 0; i < args.size(); i++) {
-        const auto *param = template_ct->type_parameters[i];
-        if (param->is_constrained() && !args[i].is_type_param() && !param->allows(args[i])) {
-            payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
-                payload.context.code_ref(name_token),
-                "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
-                "' is constrained to '" + param->constraint_spelling +
-                "' but was given '" + args[i].get_type_desciption() + "'"
-            );
-            return AST::ValueType::make_unknown();
-        }
+    // enforce any type-parameter constraints on the explicit arguments (e.g. `Vec<bool>` where
+    // `Vec<T: numeric>`), by the same rule that judges a generic *call*'s inferred arguments - only
+    // the message differs, because this one names a type rather than a function
+    if (const auto violation = AST::first_constraint_violation(template_ct->type_parameters, args)) {
+        const auto *param = template_ct->type_parameters[*violation];
+
+        payload.collector.collect_issue<AST::Issue::UnsatisfiedTypeConstraint>(
+            payload.context.code_ref(name_token),
+            "Type parameter '" + param->name + "' of '" + template_ct->name.value_or(name_token.value()) +
+            "' is constrained to '" + param->constraint_spelling +
+            "' but was given '" + args[*violation].get_type_desciption() + "'"
+        );
+        return AST::ValueType::make_unknown();
     }
 
     // the instance carries the template's kind, so make_complex answers `Box<int32>` the same way it

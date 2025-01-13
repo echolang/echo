@@ -74,10 +74,11 @@ AST::FunctionDeclNode *AST::find_copy_constructor(const AST::ComplexType *ct)
         return nullptr;
     }
 
-    // the type's own slot first - see the header for why this one lookup does not simply redirect
+    // the type's own slot first - see the header for why this one lookup does not simply redirect.
+    // for anything but an instantiation that slot is the only one there is
     if (auto *own = ct->copy_constructor()) {
         return own;
     }
 
-    return ct->template_or_self()->copy_constructor();
+    return ct->is_instantiated() ? ct->template_ref->copy_constructor() : nullptr;
 }

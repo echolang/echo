@@ -881,11 +881,20 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // "a place is copied, a non-place is moved". a non-place - a call result, a constructor call -
     // is a value nobody else holds, so it needs no annotation and leaves nothing behind
     //
-    // and a copy of a place is only this pass's business when it is not a copy of bytes:
-    // copy_needs_constructor answers that for both reasons it can be true - the type owns something,
-    // or the type has said what its copy is. every other copy in the language still happens the way it
-    // always did, with nothing inserted and nothing tracked
-    if (!is_place_expression(*expr) || !copy_needs_constructor(wanted)) {
+    // and a copy of a place is only this pass's business when it is not a copy of bytes. which copy
+    // this is, is AST::classify_copy - decided once here and dispatched on below, because the arms are
+    // separated by the move analysis in between and re-deciding them there is what used to make this
+    // ladder a second implementation of the one in ASTCopy.cpp. every other copy in the language still
+    // happens the way it always did, with nothing inserted and nothing tracked
+    if (!is_place_expression(*expr)) {
+        return expr;
+    }
+
+    // after the place test, not beside it: classifying descends into the type's properties, and a
+    // non-place has already left with no copy to make
+    const CopyKind copy_kind = classify_copy(wanted);
+
+    if (copy_kind == CopyKind::t_bytes) {
         return expr;
     }
 
@@ -945,7 +954,7 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     //
     // note this is reached for a *place* only. a class-typed call result is already one reference
     // nobody else holds, and the early return above lets it through untouched
-    if (wanted.is_class()) {
+    if (copy_kind == CopyKind::t_retain) {
         return &_current_module->nodes.emplace_back<RetainExprNode>(expr);
     }
 
@@ -971,7 +980,12 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     // whose owning properties are all classes is copied by retaining each of them. built here rather
     // than checked for as a second kind of copy, so what follows cannot tell a synthesized copy
     // constructor from a written one - the whole difference is who wrote the body
-    ensure_copy_constructor(wanted, location_of(expr));
+    //
+    // t_none skips this: there is nothing to synthesize, and asking anyway re-walked the type's
+    // properties at every copy site of every round for the one case that never has an answer
+    if (copy_kind == CopyKind::t_synthesizable) {
+        ensure_copy_constructor(wanted, location_of(expr));
+    }
 
     if (FunctionDeclNode *copy_ctor = copy_constructor_for(wanted)) {
         // the type's own name, positioned at the copy rather than at the declaration: this is the call
@@ -1091,7 +1105,12 @@ FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
     // instantiation this is the *template's* declaration, and the monomorphizer's next round
     // binds the owner's parameters from the receiver and rewires this call to the instance -
     // which is the whole reason the pass runs inside that fixpoint
+    //
+    // so this pass is the one other producer of a call that already knows its declaration, and it
+    // publishes the state that describes it: choosing is done, fitting the receiver to the callee's
+    // borrow parameter is still AST::CallResolver's, in a later round
     call.decl = callee;
+    call.settlement = CallSettlement::t_uncoerced;
 
     _changed = true;
 
@@ -1141,12 +1160,11 @@ void OwnershipPass::emit_property_drops(
 
 FunctionDeclNode &OwnershipPass::begin_synthesized_decl(const std::string &name, const TokenReference &site)
 {
+    // concrete by construction: everything this pass synthesizes is built per instantiated type rather
+    // than per template, so there is nothing left for the monomorphizer to bind - which is the default
+    // `inherited_type_param_count` of 0, left as declared
     auto &decl = _current_module->nodes.emplace_back<FunctionDeclNode>(
         virtual_token(name, Token::Type::t_identifier, site));
-
-    // concrete by construction: everything this pass synthesizes is built per instantiated type rather
-    // than per template, so there is nothing left for the monomorphizer to bind
-    decl.inherited_type_param_count = 0;
 
     decl.body = &_current_module->nodes.emplace_back<ScopeNode>();
 

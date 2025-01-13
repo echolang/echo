@@ -76,10 +76,6 @@ namespace AST
         // guarantees it runs once
         void coerce_arguments(FunctionCallExprNode &call, NodeCollection &nodes);
 
-        // true when every argument's type is known, so a decision made about them is final rather
-        // than premature
-        static bool arguments_are_determined(const FunctionCallExprNode &call);
-
     private:
         Collector &_collector;
 

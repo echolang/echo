@@ -78,7 +78,21 @@ namespace AST
         // declaration chosen, arguments fitted. nothing further is owed - and nothing may touch the
         // arguments again, because a second coercion would wrap what the first one wrapped
         t_settled,
+
+        // reported, and terminal. an ambiguous or unmatchable call is decided on types that are
+        // already known, so no later round can change the answer - without this state the fixpoint
+        // re-derives the whole match, and the diagnostic with it, once per round for every failed
+        // call, and non-duplication rests on Collector::collect_issue de-duplicating a message it
+        // should never have been handed twice
+        t_failed,
     };
+
+    // has the call been taken as far as it will go, whether that ended in a declaration or in a
+    // diagnostic? the two loops in the fixpoint skip these, and `settle` answers from cache
+    inline bool call_is_terminal(CallSettlement settlement)
+    {
+        return settlement == CallSettlement::t_settled || settlement == CallSettlement::t_failed;
+    }
 
     class FunctionCallExprNode : public ExprNode
     {
@@ -94,12 +108,15 @@ namespace AST
 
         FunctionDeclNode *decl = nullptr;
 
-        // maintained only by AST::CallResolver, which is the one thing that sets `decl` and the one
-        // thing that coerces the arguments - so the two can never disagree about what is done
+        // maintained by AST::CallResolver, which is the one thing that coerces the arguments, and by
+        // AST::OwnershipPass for the calls it synthesizes with their callee already named - which it
+        // publishes as t_uncoerced, so the state and `decl` cannot disagree about what is done
         //
-        // CloneContext::shallow copy-constructs, and inheriting this is exactly right in all three
-        // states: a settled call's coercion nodes are cloned with it and must not be redone, while
-        // an unresolved or uncoerced one is retried against the substituted types
+        // CloneContext::shallow copy-constructs, and inheriting this is right in all four states: a
+        // settled call's coercion nodes are cloned with it and must not be redone, an unresolved or
+        // uncoerced one is retried against the substituted types, and a failed one stays failed
+        // because the arms that fail are the two that no substitution changes - a tie decided on
+        // known types, and an argument argument_fit answered t_none rather than t_undetermined for
         CallSettlement settlement = CallSettlement::t_unresolved;
 
         // where a free call looked its name up, so the lookup can be repeated in a later round.
@@ -125,6 +142,23 @@ namespace AST
 
         Node *clone(CloneContext &cc) const override;
     };
+
+    // **is this the decl-less print builtin?** `echo` borrows the call node's shape without being a
+    // call: it names no declaration anywhere, and ExprCodegen lowers it from its own token into a
+    // printf rather than through the function table - the `builtin` kind's "no symbol at all", spelled
+    // as a statement
+    //
+    // one predicate because three passes have to agree about it - the parser, which settles the node
+    // on the spot since there is nothing to look up; the type checker, which owns the "printf has a
+    // conversion for this argument" diagnostic; and codegen, which lowers it. they used to compare the
+    // *name* against a literal, once each, so a second construct of this kind meant finding all three
+    //
+    // the token type, not the name: `echo` is a whole-word lexer keyword (ECHO_LEX_FNC_KEYWORD), so
+    // nothing else can carry that token, and a declaration can never be spelled with one
+    inline bool is_print_call(const FunctionCallExprNode &call)
+    {
+        return call.decl == nullptr && call.token_function_name.type() == Token::Type::t_echo;
+    }
 
     class BinaryExprNode : public ExprNode
     {

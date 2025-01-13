@@ -11,7 +11,6 @@
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
-#include "AST/ASTTypeUnify.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/LiteralValueNode.h"

@@ -73,6 +73,14 @@ static bool arg_assignable_to(const ValueType &arg, const ExprNode *expr, const 
     return argument_fit(arg, expr, param) != ArgumentFit::t_none;
 }
 
+// the same rule asked about an implicit cast rather than an argument, named so the intent is not a
+// null pointer the reader has to interpret: no expression is offered, so the borrow arm is declined,
+// because a cast is not an address-of
+static bool implicit_conversion_is_legal(const ValueType &from, const ValueType &to)
+{
+    return arg_assignable_to(from, nullptr, to);
+}
+
 // looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
 // expression the user actually wrote. `null` is the case that needs it: the null-specific rules
 // all test for the raw n_null tag, and a cast inserted to reconcile the argument with its
@@ -292,15 +300,14 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
     // nothing else. reported here so each gap is a located diagnostic instead of the uncaught codegen
-    // throw it used to be. the `decl == nullptr` guard is what keeps this off a user-declared or
-    // namespaced function that happens to be spelled `echo` - it has a signature, so the ordinary
-    // argument checks above are the ones that apply to it
+    // throw it used to be. AST::is_print_call owns the recognition, including the "has a declaration,
+    // so the ordinary argument checks above apply instead" half of it
     //
     // two shapes are worth naming. an *address*, because after the adjustment pass a pointer here
     // really is an address rather than a not-yet-dereferenced read, so printing one is almost always
     // a missing read. and a *named type*, struct or class, for which there is no rendering to pick at
     // all - giving them one is todo/B6
-    if (node.decl == nullptr && node.token_function_name.value() == "echo") {
+    if (is_print_call(node)) {
         for (auto *arg : node.arguments) {
             if (arg == nullptr) {
                 continue;
@@ -338,9 +345,7 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
     // a context-free "Unsupported type cast" deep in codegen. report it here, located
     if (node.is_implcit && node.expr && _context_token) {
         ValueType from = node.expr->result_type();
-        // null, not the operand: a cast is not an address-of, so admitting the borrow arm here would
-        // accept a cast that is still wrong - the very cast this arm exists to catch
-        if (!arg_assignable_to(from, nullptr, node.cast_to)) {
+        if (!implicit_conversion_is_legal(from, node.cast_to)) {
             _collector.collect_issue<Issue::InvalidTypeConversion>(
                 code_ref_for(*_context_token),
                 fmt::format("cannot implicitly convert '{}' to '{}'",

@@ -1,0 +1,8 @@
+// explicit type arguments are checked against the template's *own* parameter count before anything
+// is inferred
+function id<T>(T $v) : T
+{
+    return $v;
+}
+
+echo id<int32, float64>(1);

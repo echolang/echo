@@ -34,6 +34,42 @@ namespace AST
     // address - which is what a borrow is
     bool copy_needs_constructor(const ValueType &type);
 
+    // **how a value of this type is copied** - the four ways there are, and the one place that
+    // decides between them
+    //
+    // declaration order is the order they are decided in, and the order is load-bearing: a class is
+    // asked about before a declared constructor, because a class's copy is one more reference even
+    // when it also declares a `Foo&` constructor - which builds a *new* object, a different
+    // operation. see AST::OwnershipPass::resolve_value_arrival, which dispatches on this
+    //
+    // both readers used to spell the ladder out for themselves - the pass, of the value arriving
+    // somewhere, and the synthesis question, of a *part* of that value - so the recursion and the
+    // decision it feeds were two implementations held in step by nothing but being written in the
+    // same order
+    enum class CopyKind
+    {
+        // nothing to arrange: a primitive, a pointer, or a struct that owns nothing. copied as bytes,
+        // the way every copy in the language worked before ownership existed
+        t_bytes,
+
+        // one more reference to the same object. the bottom of the recursion, exactly as it is for
+        // destruction - what the class *holds* is a different question, and nobody asks it here
+        t_retain,
+
+        // the constructor its author wrote, recognised rather than newly spelled - so the explicit
+        // `Foo($a)` and the implicit `$b = $a` are the same declaration
+        t_constructor,
+
+        // a body the compiler can write itself - see copy_is_synthesizable
+        t_synthesizable,
+
+        // nobody has said what a copy would mean, and the compiler will not guess. the ownership
+        // pass's located error
+        t_none,
+    };
+
+    CopyKind classify_copy(const ValueType &type);
+
     // can the compiler write this type's copy constructor itself?
     //
     // the one case book/concept/ownership_and_moving.md leaves to the compiler rather than to the

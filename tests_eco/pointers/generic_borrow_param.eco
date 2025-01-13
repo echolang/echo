@@ -1,0 +1,26 @@
+// a generic mutator, the natural spelling of one: `T&` is inferred from a value argument, because
+// the address-of the borrow needs is inserted after inference and binding through the borrow is
+// exactly what it will produce
+function bump<T>(T &$v) : void
+{
+    $v = $v + 1;
+}
+
+$a = 1;
+bump($a);
+echo $a;
+
+// a second instantiation, on a different type, mutating the caller's storage the same way
+$f = 2.5;
+bump($f);
+echo $f;
+
+// still one binding rule: a pointer argument to a value parameter decays, so this reads $a rather
+// than instantiating on ptr<int32>
+function twice<T>(T $v) : T
+{
+    return $v + $v;
+}
+
+int& $p = &$a;
+echo twice($p);

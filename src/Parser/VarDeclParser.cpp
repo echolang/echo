@@ -280,13 +280,10 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             return nullptr;
         }
         else {
-            // the inferred type is the single source of truth, const included - there is no
-            // longer a separate node-level flag that could disagree with it
-            // value_result_type, not result_type: `$copy = $r` over an `int32&` copies the int
-            // it refers to, so the copy is an int32 rather than a second reference
-            auto inferred = AST::value_result_type(*vardecl->init_expr);
+            // AST::infer_declaration_type owns the rule - see it for both halves and for the
+            // second asker, the monomorphizer's re-derivation sweep
             vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
-                is_const ? AST::ValueType::make_const(inferred) : inferred));
+                AST::infer_declaration_type(*vardecl->init_expr, is_const)));
         }
     }
 

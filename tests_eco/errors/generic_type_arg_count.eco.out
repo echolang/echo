@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 8:6
+Wrong number of type arguments for generic function 'id'
+Begin: 'id'
+End: 'id'
+Code excerpt:
+ [7]> 
+ [8]> echo id<int32, float64>(1);
+           ^
+ [9]> 
+
+Critical issues found, cannot compile.

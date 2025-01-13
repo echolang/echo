@@ -428,7 +428,9 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         return;
     }
 
-    if (node.token_function_name.value() == "echo") {
+    // the other bodyless kind: lowered from its own token into a printf, with no symbol to look up -
+    // AST::is_print_call owns which nodes those are
+    if (AST::is_print_call(node)) {
 
         for (auto &arg : node.arguments) {
             arg->accept(*_ctx.visitor);

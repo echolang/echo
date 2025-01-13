@@ -1,0 +1,8 @@
+// 'U' appears nowhere in the parameter list, so no argument can bind it and no later round will
+// either. reported by name, with the spelling that would fix it
+function pick<T, U>(T $x) : T
+{
+    return $x;
+}
+
+echo pick(1);

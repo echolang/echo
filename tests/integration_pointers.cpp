@@ -141,6 +141,37 @@ TEST_CASE("Pointer depth reaches the mangled name", "[Integration][pointer][gene
     REQUIRE(instances_of(*bundle, "hold").size() == 2);
 }
 
+TEST_CASE("A borrow parameter infers its type parameter from a value argument", "[Integration][pointer][generics]")
+{
+    // the mirror of the decay rule: the implicit address-of is inserted against the parameter type,
+    // so at inference time `bump($a)` still reads as an int32 against a `T&`. binding through the
+    // borrow is what the address-of then produces, so both calls land on the same instance rather
+    // than failing to infer T at all
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function bump<T>(T &$v) : void { $v = $v + 1; }\n"
+        "$a = 1;\n"
+        "$b = 2;\n"
+        "bump($a);\n"
+        "bump($b);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    REQUIRE(instances_of(*bundle, "bump").size() == 1);
+}
+
+TEST_CASE("A nullable pointer parameter does not infer from a value argument", "[Integration][pointer][generics]")
+{
+    // `ptr<T>` does not auto-borrow, so there is no implicit address-of to anticipate and nothing
+    // for T to bind to - the inverse of the case above, and the reason that arm tests nullability
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function hold<T>(ptr<T> $v) : void { }\n"
+        "$a = 1;\n"
+        "hold($a);\n");
+
+    REQUIRE(EchoTests::has_issue_containing(*bundle, "Cannot infer type parameter 'T'"));
+    REQUIRE(instances_of(*bundle, "hold").empty());
+}
+
 TEST_CASE("A borrow property resolves on the struct's type", "[Integration][pointer]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(

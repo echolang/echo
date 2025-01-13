@@ -61,6 +61,21 @@ namespace AST
         ValueType type = expr.result_type();
         return is_place_expression(expr) ? value_type_of(type) : type;
     }
+
+    // **the** type an inferred declaration takes from its initializer: the value the initializer
+    // reads as, with the `const` the declaration was written with put back on top - the inferred type
+    // is the single source of truth, const included, so there is no node-level flag to disagree with
+    //
+    // two askers at two moments, which is the only difference between them: the parser, where the
+    // declaration is written, and the monomorphizer's re-derivation sweep, for a declaration whose
+    // initializer was a call that could not be settled yet. they used to spell it out separately, and
+    // the sweep's spelling dropped both halves - so `const $x = f();` silently lost its `const`, and
+    // lost it only for the initializers the fixpoint had to finish
+    inline ValueType infer_declaration_type(const ExprNode &init_expr, bool is_const)
+    {
+        const ValueType inferred = value_result_type(init_expr);
+        return is_const ? ValueType::make_const(inferred) : inferred;
+    }
 };
 
 #endif

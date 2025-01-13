@@ -1,9 +1,7 @@
 #include "AST/ASTTypeUnify.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTTypeParam.h"
-#include "AST/FunctionDeclNode.h"
-#include "AST/TypeNode.h"
-#include "AST/VarDeclNode.h"
 
 bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST::TypeSubstitution &out, bool allow_decay)
 {
@@ -17,6 +15,22 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // the decay, so everything below that match binds exactly
     if (allow_decay && !param.is_pointer() && arg.is_pointer()) {
         return unify_type(param, value_type_of(arg), out, allow_decay);
+    }
+
+    // the mirror of that rule, and the reason a generic mutator can be written at all: a
+    // non-nullable borrow parameter is filled by taking the address of a place argument
+    // (AST::argument_fit's t_borrow), and that wrapping happens *after* inference - the call site
+    // still reads as a bare value here. so bind through the borrow, which is exactly what the
+    // implicit address-of will produce: `bump<T>(T &$v)` called as `bump($a)` binds T=int32
+    //
+    // which parameters those are is not decided here: AST::parameter_auto_borrows is the one
+    // spelling, so this cannot come to a different answer than the coercion it is anticipating. a
+    // nullable `ptr<T>` is excluded there, and excluded here by the same call
+    //
+    // top level only, like the decay it mirrors, and for the same reason: below a structural match
+    // `allow_decay` is false, or `ptr<T>` against a `ptr<int32>` argument would bind T by two routes
+    if (allow_decay && parameter_auto_borrows(param) && !arg.is_pointer()) {
+        return unify_type(param.pointee(), arg, out, false);
     }
 
     // pointer against pointer binds structurally, one level down
@@ -75,46 +89,4 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // primitive/primitive catch-all), so a generic candidate was filtered by one rule and then scored
     // by another, with nothing to notice when the two disagreed
     return !contains_type_param(param);
-}
-
-AST::InstantiationFit AST::can_instantiate(
-    const AST::FunctionDeclNode *tmpl,
-    const std::vector<AST::ValueType> &argument_types,
-    AST::TypeSubstitution &out)
-{
-    if (tmpl->args.size() != argument_types.size()) {
-        return InstantiationFit::t_no;
-    }
-
-    for (size_t i = 0; i < argument_types.size(); i++) {
-        // an argument with no type yet cannot contradict the template, and cannot bind anything
-        // either. it is the reason for the t_maybe answer below
-        if (is_undetermined_type(argument_types[i])) {
-            continue;
-        }
-
-        if (!tmpl->args[i]->has_type()) {
-            continue;
-        }
-
-        if (!unify_type(tmpl->args[i]->type(), argument_types[i], out)) {
-            return InstantiationFit::t_no;
-        }
-    }
-
-    // a constraint is only violated by a binding that exists. an unbound parameter has not
-    // failed its constraint, it simply has not been decided
-    for (const auto *param : tmpl->type_parameters) {
-        const auto *bound = out.lookup(param);
-
-        if (bound == nullptr) {
-            return InstantiationFit::t_maybe;
-        }
-
-        if (!param->allows(*bound)) {
-            return InstantiationFit::t_no;
-        }
-    }
-
-    return InstantiationFit::t_yes;
 }

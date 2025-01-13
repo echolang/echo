@@ -3,10 +3,11 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTFunctionMatcher.h"
+#include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
-#include "AST/ASTTypeUnify.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
 
 #include <fmt/core.h>
@@ -33,23 +34,26 @@ namespace AST
 
             return &nodes.emplace_back<AddrOfExprNode>(arg);
         }
-    }
 
-    bool CallResolver::arguments_are_determined(const FunctionCallExprNode &call)
-    {
-        for (const auto *arg : call.arguments) {
-            // a hole left by a failed parse cannot be waited on - there is nothing coming that would
-            // give it a type, and the diagnostic for it was already reported where it was read
-            if (arg == nullptr) {
-                continue;
+        // true when every argument's type is known, so a decision made about them is final rather
+        // than premature
+        bool arguments_are_determined(const FunctionCallExprNode &call)
+        {
+            for (const auto *arg : call.arguments) {
+                // a hole left by a failed parse cannot be waited on - there is nothing coming that
+                // would give it a type, and the diagnostic for it was already reported where it was
+                // read
+                if (arg == nullptr) {
+                    continue;
+                }
+
+                if (is_undetermined_type(arg->result_type())) {
+                    return false;
+                }
             }
 
-            if (is_undetermined_type(arg->result_type())) {
-                return false;
-            }
+            return true;
         }
-
-        return true;
     }
 
     std::vector<FunctionDeclNode *> CallResolver::candidates_for(const FunctionCallExprNode &call) const
@@ -82,11 +86,7 @@ namespace AST
     {
         const std::string &name = call.token_function_name.value();
 
-        std::vector<ValueType> argument_types;
-        argument_types.reserve(call.arguments.size());
-        for (const auto *arg : call.arguments) {
-            argument_types.push_back(arg ? arg->result_type() : ValueType::make_unknown());
-        }
+        const std::vector<ValueType> argument_types = argument_types_of(call);
 
         // with a single candidate there is nothing to choose between, so it is taken as written and
         // every judgement about it is left to the passes that specialise in one: the monomorphizer
@@ -94,6 +94,11 @@ namespace AST
         // wrong. pre-filtering here would replace both with "no overload accepts these arguments" -
         // the same reasoning as the arity short-circuit inside match_function
         const bool choosing = candidates.size() > 1;
+
+        // what the call spelled out, if anything: `foo<int32>(...)` names the instance rather than
+        // leaving it to inference, so a candidate has to be scored with those in hand - otherwise a
+        // template is judged on parameters the call already decided
+        const std::vector<ValueType> explicit_type_args = explicit_type_args_of(call);
 
         std::vector<FunctionCandidate> match_candidates;
         match_candidates.reserve(candidates.size());
@@ -107,21 +112,25 @@ namespace AST
                 // matcher treats as neutral - so `pick<T>(T)` would tie with `pick(int32)` for a
                 // float64 argument and lose the non-generic tiebreak, calling the concrete overload
                 // through a narrowing conversion when the template matched exactly
-                TypeSubstitution inferred;
-                const auto fit = can_instantiate(candidate, argument_types, inferred);
+                //
+                // the same question the monomorphizer asks of the call it commits to, asked here of
+                // a candidate that may be discarded - so only `fit` is read. the blame fields are
+                // deliberately ignored: a constraint that rejects a template filters it out of the
+                // set, and reporting it here would turn an overload the user never meant into an error
+                const Instantiation inst = can_instantiate(candidate, argument_types, explicit_type_args);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set
-                if (fit == InstantiationFit::t_no) {
+                if (inst.fit == InstantiationFit::t_no) {
                     continue;
                 }
 
                 // t_maybe leaves the parameters as written, still mentioning `T`, which the matcher
                 // reads as undetermined - the honest answer while the call sits in a template body
                 // whose own parameters are not bound yet
-                if (fit == InstantiationFit::t_yes) {
+                if (inst.fit == InstantiationFit::t_yes) {
                     for (auto &parameter_type : parameter_types) {
-                        parameter_type = substitute_type(parameter_type, inferred, _collector.type_registry);
+                        parameter_type = substitute_type(parameter_type, inst.bindings, _collector.type_registry);
                     }
                 }
             }
@@ -213,18 +222,30 @@ namespace AST
     CallResolver::Result CallResolver::settle(
         FunctionCallExprNode &call, NodeCollection &nodes, const CodeRef &at, bool report)
     {
-        if (call.settlement == CallSettlement::t_settled) {
-            return Result::t_settled;
+        // both terminal states answer from the node, so asking again costs nothing and reports
+        // nothing - which is what lets the fixpoint ask about every call every round
+        if (call_is_terminal(call.settlement)) {
+            return call.settlement == CallSettlement::t_settled ? Result::t_settled : Result::t_failed;
         }
 
-        if (call.decl == nullptr) {
+        // the state, not `decl == nullptr`, decides which half runs. they agree for every call this
+        // resolver made, and differ for the one other producer of a decided call - the ownership
+        // pass, whose drops and copies name their callee outright and owe only the coercion
+        if (call.settlement == CallSettlement::t_unresolved) {
             const auto candidates = candidates_for(call);
 
+            // retryable, deliberately: a member call's candidates come from its receiver's type,
+            // which a later round may still make concrete. so this is not a terminal state
             if (candidates.empty()) {
                 return Result::t_unknown_name;
             }
 
             const auto chosen = choose_declaration(call, candidates, at, report);
+
+            if (chosen == Result::t_failed) {
+                call.settlement = CallSettlement::t_failed;
+            }
+
             if (chosen != Result::t_settled) {
                 return chosen;
             }

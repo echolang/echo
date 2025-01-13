@@ -25,41 +25,33 @@ bool AST::copy_needs_constructor(const AST::ValueType &type)
     return AST::needs_destruction(type);
 }
 
-namespace
+AST::CopyKind AST::classify_copy(const AST::ValueType &type)
 {
-    // has *somebody* said how a value of this type is copied? the four ways there are, in one place:
-    // its author's constructor, one more reference to a class, a body the compiler can write itself,
-    // or nothing to arrange because the value owns nothing
-    //
-    // the same four arms AST::OwnershipPass::resolve_value_arrival decides between - this is them
-    // asked of a *part* rather than of the value being copied, which is what makes the synthesis
-    // question recursive. it is not the pass's gate, so the two are held in step by nothing but the
-    // arms being listed in the same order in both
-    bool copy_is_defined(const AST::ValueType &type)
-    {
-        // the constructor its author wrote. asked first so it is looked up once for both arms below -
-        // and it is the answer whether or not the type owns anything, exactly as
-        // copy_needs_constructor says
-        if (AST::copy_constructor_for(type) != nullptr) {
-            return true;
-        }
-
-        // nothing to arrange: a primitive, a pointer, or a struct that owns nothing. copied as bytes,
-        // the way every copy in the language worked before this pass existed
-        if (!AST::needs_destruction(type)) {
-            return true;
-        }
-
-        // one more reference to the same object. the bottom of the recursion, exactly as it is for
-        // destruction - what the class *holds* is a different question, and nobody asks it here
-        if (type.is_class()) {
-            return true;
-        }
-
-        // or the body the compiler writes itself, which is where the recursion into properties lives
-        return AST::copy_is_synthesizable(type);
+    // the byte copy first, through the shared gate rather than through its two halves: a type that
+    // owns nothing *and* has said nothing about copying is copied the way it always was
+    if (!AST::copy_needs_constructor(type)) {
+        return AST::CopyKind::t_bytes;
     }
 
+    // ahead of the declared constructor - see the header for why that order is not free
+    if (type.is_class()) {
+        return AST::CopyKind::t_retain;
+    }
+
+    if (AST::copy_constructor_for(type) != nullptr) {
+        return AST::CopyKind::t_constructor;
+    }
+
+    // the recursion into properties lives here
+    if (AST::copy_is_synthesizable(type)) {
+        return AST::CopyKind::t_synthesizable;
+    }
+
+    return AST::CopyKind::t_none;
+}
+
+namespace
+{
     // "every property has a copy somebody has said how to make". the copying counterpart of
     // ASTDestruction.cpp's body_needs_destruction, and the same shape: the walk lives here, the
     // public entry below owns the guards
@@ -68,7 +60,10 @@ namespace
         for (size_t i = 0; i < ct->property_count(); i++) {
             // one uncopyable property is enough: it would be copied as bytes alongside the ones that
             // do have a rule, leaving two owners of one resource
-            if (!copy_is_defined(ct->get_property_type(i))) {
+            //
+            // asked through the same classifier the ownership pass dispatches on, so "has somebody
+            // said how this is copied" cannot come apart from "what does copying it do"
+            if (AST::classify_copy(ct->get_property_type(i)) == AST::CopyKind::t_none) {
                 return false;
             }
         }
