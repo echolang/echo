@@ -39,6 +39,8 @@ namespace AST
         n_expr_void,
         n_expr_class_alloc,
         n_expr_retain,
+        n_expr_closure,
+        n_expr_indirect_call,
         n_expr_instanceof,
         n_release,
         n_func_decl,

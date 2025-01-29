@@ -4,6 +4,7 @@
 #include "Debugging.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 std::vector<std::string> split_namespace(const std::string &str)
@@ -22,18 +23,54 @@ std::vector<std::string> split_namespace(const std::string &str)
     return parts;
 }
 
-std::vector<std::string> AST::Namespace::path_segments() const
+std::vector<std::string> AST::Namespace::segments(bool display) const
 {
     std::vector<std::string> segments;
 
-    // the root carries an empty name and must not contribute a segment
+    // the root carries an empty name and must not contribute a segment - and on the display walk
+    // neither does a lexical namespace whose display name is empty, which is how a block nested inside
+    // another block of the same function avoids rendering `outer::outer::helper`. see retrieve_lexical
     for (const Namespace *ns = this; ns != nullptr && !ns->is_root(); ns = ns->parent()) {
-        segments.push_back(ns->_name);
+        if (display && ns->_display_name.empty()) {
+            continue;
+        }
+
+        segments.push_back(display ? ns->_display_name : ns->_name);
     }
 
     std::reverse(segments.begin(), segments.end());
 
     return segments;
+}
+
+std::vector<std::string> AST::Namespace::path_segments() const
+{
+    return segments(true);
+}
+
+std::vector<std::string> AST::Namespace::mangling_segments() const
+{
+    // the same walk as path_segments, over `_name` rather than the display name. a lexical namespace is
+    // the only place the two differ, and it is exactly where they have to: two blocks of one function
+    // read as `outer` to a human, but two `outer` segments in a symbol name would put two helper
+    // bodies into one llvm::Function - so one walk, one flag, and they cannot drift apart
+    return segments(false);
+}
+
+const AST::Namespace *AST::Namespace::declaring_namespace() const
+{
+    const Namespace *ns = this;
+
+    while (ns != nullptr && ns->_is_lexical) {
+        ns = ns->_parent;
+    }
+
+    return ns;
+}
+
+AST::Namespace *AST::Namespace::declaring_namespace()
+{
+    return const_cast<Namespace *>(std::as_const(*this).declaring_namespace());
 }
 
 std::string AST::Namespace::full_name() const
@@ -74,6 +111,42 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &
     }
 
     return *current;
+}
+
+AST::Namespace &AST::NamespaceManager::retrieve_lexical(
+    AST::Namespace &parent, const AST::DeclarationSite &site, const std::string &display_name)
+{
+    if (const auto existing = parent._lexical_children.find(site); existing != parent._lexical_children.end()) {
+        return *existing->second;
+    }
+
+    // a block nested inside another block of the same function displays as nothing, because a lexical
+    // namespace above it already displays that function's name - without this a diagnostic for a
+    // declaration two blocks deep in `outer` reads `outer::outer::helper(int32)`. the *mangling* name
+    // keeps its discriminator either way, which is the half that has to stay unique
+    //
+    // the whole lexical chain rather than the parent alone: the parent of a third-level block displays
+    // nothing itself, so asking only it would let the name back in at every odd depth
+    bool ancestor_already_displays = false;
+    for (const Namespace *ns = &parent; ns != nullptr && ns->_is_lexical; ns = ns->_parent) {
+        if (ns->_display_name == display_name) {
+            ancestor_already_displays = true;
+            break;
+        }
+    }
+
+    // `outer$3` mangles, `outer` displays. the discriminator is what keeps two blocks of one function
+    // apart in a symbol name, and leaving it out of the display name is what keeps it out of every
+    // diagnostic - a user never wrote this namespace and should never have to read its number
+    auto lexical = std::make_unique<Namespace>(display_name + "$" + std::to_string(_lexical_counter++));
+    lexical->_display_name = ancestor_already_displays ? "" : display_name;
+    lexical->_is_lexical = true;
+    lexical->_parent = &parent;
+
+    auto &inserted = *lexical;
+    parent._lexical_children[site] = std::move(lexical);
+
+    return inserted;
 }
 
 const AST::Namespace *AST::NamespaceManager::get(const std::string &name) const
@@ -159,6 +232,9 @@ std::string AST::Namespace::debug_dump_symbols() const
 {
     std::string buffer;
 
+    // the unique name rather than the display one: two sibling blocks of a function would otherwise
+    // print as two indistinguishable `[outer]` blocks, and a dump whose entries cannot be told apart
+    // is worse than a slightly noisy one
     std::string name = _name.empty() ? "<root>" : _name;
     buffer = "[" + name + "]\n";
 
@@ -167,6 +243,17 @@ std::string AST::Namespace::debug_dump_symbols() const
     }
 
     for (const auto &child : _children) {
+        buffer += DD::tabbify(child.second->debug_dump_symbols(), 1, '|');
+    }
+
+    // a lexical namespace holds no type symbols today - functions live in AST::FunctionRegistry - so
+    // one with nothing under it would be pure noise in every dump of every program that has a block
+    for (const auto &child : _lexical_children) {
+        if (child.second->_symbols.empty() && child.second->_children.empty()
+            && child.second->_lexical_children.empty()) {
+            continue;
+        }
+
         buffer += DD::tabbify(child.second->debug_dump_symbols(), 1, '|');
     }
 

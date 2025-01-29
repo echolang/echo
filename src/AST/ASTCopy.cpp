@@ -38,6 +38,13 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         return AST::CopyKind::t_retain;
     }
 
+    // a callable is copied the way a class is: the copy shares the captured environment, so it is one
+    // more reference to it. a callable can declare nothing, so there is no constructor arm to order
+    // against - but it has to precede the two below, which both go looking for properties it has none of
+    if (type.is_callable()) {
+        return AST::CopyKind::t_retain;
+    }
+
     if (AST::copy_constructor_for(type) != nullptr) {
         return AST::CopyKind::t_constructor;
     }

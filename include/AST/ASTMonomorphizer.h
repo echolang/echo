@@ -109,6 +109,7 @@ namespace AST
         // one round's steps, in the order they have to run in - see the comments on each
         bool instantiate_generic_calls(size_t round);
         bool rederive_stale_variable_types();
+        bool rederive_stale_capture_types();
         bool settle_calls();
 
         // after the fixpoint has stopped: report every call that never resolved, and give the ones

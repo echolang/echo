@@ -21,6 +21,8 @@ namespace AST
     class MoveExprNode;
     class ClassAllocExprNode;
     class RetainExprNode;
+    class ClosureExprNode;
+    class IndirectCallExprNode;
     class InstanceOfExprNode;
     class ReleaseNode;
     class IndexExprNode;
@@ -61,6 +63,8 @@ namespace AST
         virtual void visit_move_expr(MoveExprNode &node) = 0;
         virtual void visit_class_alloc_expr(ClassAllocExprNode &node) = 0;
         virtual void visit_retain_expr(RetainExprNode &node) = 0;
+        virtual void visit_closure_expr(ClosureExprNode &node) = 0;
+        virtual void visit_indirect_call_expr(IndirectCallExprNode &node) = 0;
         virtual void visit_instanceof_expr(InstanceOfExprNode &node) = 0;
         virtual void visit_release(ReleaseNode &node) = 0;
         virtual void visit_index_expr(IndexExprNode &node) = 0;

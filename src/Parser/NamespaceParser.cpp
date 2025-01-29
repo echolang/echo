@@ -48,9 +48,23 @@ AST::NamespaceDeclNode *Parser::parse_namespacedecl(Parser::Payload &payload)
         return nullptr;
     }
 
+    // `namespace a;` names what the rest of the *file* declares into, so it is meaningless inside a
+    // block - and worse than meaningless: the three parse passes walk blocks differently, so one of
+    // them would follow this statement and the others would not, and a struct written after the block
+    // would end up with two declaration nodes in two different namespaces
+    //
+    // being inside a block is exactly "the current namespace is lexical"
+    if (payload.context.current_namespace != nullptr && payload.context.current_namespace->is_lexical()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(payload.cursor.current()),
+            "A 'namespace' declaration cannot appear inside a body - it names what the rest of the file declares into.");
+        payload.cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
     // skip the namespace keyword
     payload.cursor.skip();
-    
+
     // collect the namespace tokens
     auto start = payload.cursor.snapshot();
 

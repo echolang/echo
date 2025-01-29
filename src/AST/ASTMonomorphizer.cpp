@@ -282,6 +282,60 @@ namespace AST
         return progressed;
     }
 
+    // step B2: a closure environment property whose type came from a variable that was not typed yet
+    //
+    // capture is decided in the parser, at the read, so the property took the captured variable's type as
+    // it stood *then* - which for `$b = Box<int32>(5)` was the template's un-substituted `Box<T>`, stale
+    // for precisely the reason step B's variables are. re-derived from the place the capture reads rather
+    // than from a remembered type: `captured_values[i]` is what fills the property, so the two cannot
+    // drift - and it answers for a capture of any shape, which the declaration behind it would not
+    // (a transitive capture, todo/A27 §3, reads the enclosing environment's property, not a local)
+    //
+    // immediately after step B, so a variable that round made concrete retypes its capture in the same
+    // round, and before step C, so the body's `$__env->b->get()` resolves against `Box<int32>` rather
+    // than finding only the template's method and reaching codegen unresolved
+    //
+    // one environment per closure *expression*, which a clone shares (ClosureExprNode::clone) - fine only
+    // while a closure cannot be written in a generic body, since two instances' captures would otherwise
+    // want two layouts and retype each other every round. that restriction lifts together with the
+    // per-instantiation environment todo/A27 §4 describes
+    bool Monomorphizer::rederive_stale_capture_types()
+    {
+        bool progressed = false;
+
+        for (auto &module_ptr : _bundle.modules) {
+            for (auto *closure : module_ptr->nodes.of_type<ClosureExprNode>()) {
+                ComplexType *environment = closure->environment_type;
+
+                if (environment == nullptr) {
+                    continue;  // nothing was captured, so there are no properties to retype
+                }
+
+                // by index: the capture list and the property list are built in one order, which is
+                // what lets a store in gen_closure_expr find its slot
+                for (size_t i = 0; i < closure->captured_values.size(); i++) {
+                    if (closure->captured_values[i] == nullptr) {
+                        continue;
+                    }
+
+                    // the place's own type, *not* value_result_type: a place read into a destination of
+                    // the same shape keeps that shape, which is how a captured `int32&` stays a copy of
+                    // the reference rather than of the pointee - and it is the type the parse site froze
+                    const ValueType derived = closure->captured_values[i]->result_type();
+
+                    if (is_undetermined_type(derived) || derived == environment->get_property_type(i)) {
+                        continue;  // not concrete yet, or already what the property says
+                    }
+
+                    environment->set_property_type(i, derived);
+                    progressed = true;
+                }
+            }
+        }
+
+        return progressed;
+    }
+
     // step C: choose the declaration for any call that still has none, and fit the arguments of every
     // call whose arguments are finally typed
     //
@@ -385,6 +439,7 @@ namespace AST
 
             progressed |= instantiate_generic_calls(rounds);
             progressed |= rederive_stale_variable_types();
+            progressed |= rederive_stale_capture_types();
             progressed |= settle_calls();
 
             // resolve ownership for every body that is concrete now: erase its `mv` markers, report

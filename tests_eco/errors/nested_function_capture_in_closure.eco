@@ -1,0 +1,17 @@
+// a plain nested `function` captures nothing wherever it is written - including inside a closure body,
+// which is the one place there *is* an environment. it is not that closure's environment: the nested
+// function is an ordinary declaration with its own frame, and it has no env parameter to read from
+//
+// the closure being parsed is scoped to its own body (AST::FunctionBodyScope), so the read below is the
+// same error it is in any other nested function. before that, it was taken for a capture and lowered as
+// a read of the *closure's* `$__env` from a different llvm::Function - which aborted the compiler
+
+function<int32(int32)> $c = function(int32 $a) : int32 {
+    int32 $local = 3;
+
+    function helper(int32 $b) : int32 { return $b + $local; }
+
+    return helper($a);
+};
+
+echo $c(1);

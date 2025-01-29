@@ -1,4 +1,6 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
+#include "Compiler/LLVM/Codegen/ClassLayout.h"
+#include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -470,25 +472,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
     }
 
     else {
-        // locate the function
-        auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(node.decl);
-        llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
-
-        // look for the function in the other modules
-        if (!func) {
-            for (auto &cmp_unit : _ctx.cmp_units) {
-                if (cmp_unit.get() == _ctx.current_cmp_unit) {
-                    continue;
-                }
-
-                auto funcid = cmp_unit->function_table.get_function_id(node.decl);
-                func = cmp_unit->function_table.get_llvm_function(funcid);
-
-                if (func) {
-                    break;
-                }
-            }
-        }
+        llvm::Function *func = find_llvm_function(node.decl);
 
         if (!func) {
             throw _ctx.error(fmt::format(
@@ -515,6 +499,151 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         if (!ret->getType()->isVoidTy()) {
             _ctx.value_stack.push(ret);
         }
+    }
+}
+
+llvm::Function *ExprCodegen::find_llvm_function(const AST::FunctionDeclNode *decl)
+{
+    auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(decl);
+    llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
+
+    if (func) {
+        return func;
+    }
+
+    // look for the function in the other modules
+    for (auto &cmp_unit : _ctx.cmp_units) {
+        if (cmp_unit.get() == _ctx.current_cmp_unit) {
+            continue;
+        }
+
+        funcid = cmp_unit->function_table.get_function_id(decl);
+        func = cmp_unit->function_table.get_llvm_function(funcid);
+
+        if (func) {
+            return func;
+        }
+    }
+
+    return nullptr;
+}
+
+void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)
+{
+    if (node.decl == nullptr) {
+        throw _ctx.error(fmt::format("A closure literal reached codegen with no body {}", _ctx.function_context()));
+    }
+
+    // the body is an ordinary declaration, emitted from the file root like any other, so its
+    // llvm::Function is already in the table by the time any expression is lowered
+    llvm::Function *func = find_llvm_function(node.decl);
+
+    if (!func) {
+        throw _ctx.error(fmt::format(
+            "No generated function found for the closure '{}' {}",
+            node.decl->decorated_func_name(), _ctx.function_context()));
+    }
+
+    llvm::Value *environment = nullptr;
+
+    if (node.environment_type != nullptr) {
+        const AST::ValueType env_type = AST::ValueType::make_class(node.environment_type);
+
+        // the same block a class value gets, because the environment *is* a class: strong count 1, so the
+        // callable this expression produces holds the one reference, and every copy of it adds another
+        environment = _ctx.classes->gen_class_box_alloc(env_type);
+
+        const ClassLayout layout =
+            _ctx.types->get_or_create_class_layout(node.environment_type, *_ctx.current_cmp_unit);
+
+        llvm::Value *payload_ptr = _ctx.builder->CreateStructGEP(
+            layout.box, environment, ClassBox::payload_index, "env_payload");
+
+        // one store per capture, in property order - `captured_values` is built in the same order the
+        // properties were appended, which is what lets this walk by index
+        for (size_t i = 0; i < node.captured_values.size(); i++) {
+            AST::ExprNode *value = node.captured_values[i];
+
+            value->accept(*_ctx.visitor);
+            llvm::Value *captured = _ctx.value_stack.top();
+            _ctx.value_stack.pop();
+
+            llvm::Value *slot = _ctx.builder->CreateStructGEP(
+                layout.payload, payload_ptr, static_cast<unsigned>(i), "env_slot");
+
+            _ctx.builder->CreateStore(
+                _ctx.types->coerce_value(
+                    captured,
+                    value->result_type(),
+                    node.environment_type->get_property_type(i),
+                    *_ctx.current_cmp_unit),
+                slot);
+        }
+    }
+    else {
+        // a non-capturing closure allocates nothing. that is the whole reason the callable is a *fat*
+        // pointer rather than a handle to an environment that would always have to exist
+        environment = llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0));
+    }
+
+    llvm::StructType *callable_type = _ctx.types->callable_llvm_type();
+
+    llvm::Value *value = llvm::UndefValue::get(callable_type);
+    value = _ctx.builder->CreateInsertValue(value, func, 0, "closure.fn");
+    value = _ctx.builder->CreateInsertValue(value, environment, 1, "closure.env");
+
+    _ctx.value_stack.push(value);
+}
+
+void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
+{
+    const AST::ValueType callee_type = node.callee_type();
+
+    if (!callee_type.is_callable()) {
+        throw _ctx.error(fmt::format(
+            "An indirect call reached codegen over a '{}', which is not callable {}",
+            callee_type.get_type_desciption(), _ctx.function_context()));
+    }
+
+    node.callee->accept(*_ctx.visitor);
+    llvm::Value *callable = _ctx.value_stack.top();
+    _ctx.value_stack.pop();
+
+    llvm::Value *fn = _ctx.builder->CreateExtractValue(callable, 0, "call.fn");
+    llvm::Value *env = _ctx.builder->CreateExtractValue(callable, 1, "call.env");
+
+    // the environment leads, always - see TypeLowering::get_llvm_function_type. one shape for both kinds
+    // of target is what lets this site call either without asking which it has
+    std::vector<llvm::Value *> args;
+    args.push_back(env);
+
+    const auto &signature = callee_type.signature();
+
+    for (size_t i = 0; i < node.arguments.size(); i++) {
+        AST::ExprNode *arg = node.arguments[i];
+
+        arg->accept(*_ctx.visitor);
+        llvm::Value *value = _ctx.value_stack.top();
+        _ctx.value_stack.pop();
+
+        // through the one conversion table, like every other destination. a direct call has its
+        // arguments coerced by AST::CallResolver, which walks the callee's *declaration* - an indirect
+        // call has no declaration, so its parameter types come off the signature and the fit happens here
+        if (i < signature.parameter_types.size()) {
+            value = _ctx.types->coerce_value(
+                value, arg->result_type(), signature.parameter_types[i], *_ctx.current_cmp_unit);
+        }
+
+        args.push_back(value);
+    }
+
+    llvm::FunctionType *fn_type =
+        _ctx.types->get_llvm_function_type(signature, *_ctx.current_cmp_unit);
+
+    llvm::Value *ret = _ctx.builder->CreateCall(fn_type, fn, args);
+
+    if (!ret->getType()->isVoidTy()) {
+        _ctx.value_stack.push(ret);
     }
 }
 

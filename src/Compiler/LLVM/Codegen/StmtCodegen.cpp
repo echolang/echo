@@ -190,8 +190,19 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
 
 void StmtCodegen::gen_return(AST::ReturnNode &node)
 {
+    // the drops this return owes, run *after* the returned value is computed - see ReturnNode::unwind.
+    // one helper rather than three copies, because every exit below has to run them
+    auto emit_unwind = [&]() {
+        for (auto &drop : node.unwind) {
+            if (drop.has()) {
+                drop.node()->accept(*_ctx.visitor);
+            }
+        }
+    };
+
     // handle returns without an actual extression
     if (node.expr == nullptr) {
+        emit_unwind();
         _ctx.builder->CreateRetVoid();
         return;
     }
@@ -200,6 +211,7 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
 
     // check if we actually got a value on the stack
     if (_ctx.value_stack.empty()) {
+        emit_unwind();
         _ctx.builder->CreateRetVoid();
         return;
     }
@@ -222,6 +234,10 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
             ret, node.expr->result_type(), _ctx.current_function->get_return_type(),
             *_ctx.current_cmp_unit);
     }
+
+    // after the value is computed and coerced, before the ret. this ordering is the point of
+    // ReturnNode::unwind: `return $c->x` over an owning `$c` reads the block and then gives it back
+    emit_unwind();
 
     _ctx.builder->CreateRet(ret);
 }
@@ -348,7 +364,7 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
         place.address);
 
     if (old_handle != nullptr) {
-        _ctx.classes->gen_release(old_handle, place.storage_type);
+        _ctx.classes->gen_release_value(old_handle, place.storage_type);
     }
 }
 };

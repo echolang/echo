@@ -240,10 +240,17 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     // a by-value parameter of an owning type owns what it was handed - "$items is ours; it is
     // destroyed at the end of this body". seeded into the *body's* frame rather than a frame of its
     // own, and ahead of the body's locals, so reverse-order drops destroy the body's locals first
-    // and the parameters last. the receiver of a method or destructor is a borrow, so
-    // needs_destruction filters it out with no special case
+    // and the parameters last.
+    //
+    // an *implicit* parameter is skipped by position, because it is never the callee's to destroy: a
+    // method's receiver is a borrow of storage the caller owns, and a closure's environment belongs to
+    // the callable value that was called, which may well outlive this call. the receiver needed no
+    // special case - a borrow is a pointer, so needs_destruction already answered no - but a closure's
+    // environment is a class *handle*, and by-value class parameters are exactly the ones this owns
     std::vector<VarDeclNode *> owned_params;
-    for (auto *arg : decl.args) {
+    for (size_t i = decl.implicit_arg_count(); i < decl.args.size(); i++) {
+        VarDeclNode *arg = decl.args[i];
+
         if (arg != nullptr && arg->has_type() && needs_destruction(arg->type())) {
             owned_params.push_back(arg);
         }
@@ -343,8 +350,17 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
             // points in the language today - `break` and `continue` are lexed but have no parser
             // arm, so `return` is the only early exit. that window closes the day `break` lands,
             // and this loop is what will have to grow an edge-per-exit
+            //
+            // collected onto the return, not ahead of it: the returned expression may read what is being
+            // dropped, and codegen evaluates the expression before running these - see ReturnNode::unwind
+            auto *ret = child.get_ptr<ReturnNode>();
+
+            // rebuilt each round rather than appended to: the pass is idempotent by re-deriving, and the
+            // fixpoint walks a body more than once
+            ret->unwind.clear();
+
             for (auto frame = _frames.rbegin(); frame != _frames.rend(); ++frame) {
-                collect_frame_drops(*frame, rebuilt);
+                collect_frame_drops(*frame, ret->unwind);
             }
         }
 
@@ -433,7 +449,10 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // field is the unspecified partial-ownership case, but a class field holds one handle and
             // replacing it is completely defined, which is what makes `$node->next = $other` - and so
             // any linked structure at all - expressible
-            if (!assign->is_initialization && target_type.is_class()) {
+            // "a copy of this is one more reference" is exactly what AST::classify_copy answers with
+            // t_retain, and it is already the compiler's one classifier - asked rather than respelled,
+            // so the next reference-counted kind does not have to find this site
+            if (!assign->is_initialization && classify_copy(target_type) == CopyKind::t_retain) {
                 VarDeclNode *root =
                     assign->target != nullptr ? whole_variable_moved(assign->target) : nullptr;
 
@@ -443,7 +462,8 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 // one - a field cannot be moved out of, so it always still holds what it was given
                 assign->releases_old = root == nullptr || _moved.count(root) == 0;
 
-                if (assign->releases_old) {
+                // a callable's teardown is uniform and needs no per-type deinit - see emit_drop
+                if (assign->releases_old && target_type.is_class()) {
                     // the release codegen emits here calls the same thunk a scope-exit release does,
                     // so the deinit has to exist by the time it is reached
                     ensure_class_deinit(target_type, location_of(assign->target));
@@ -1053,6 +1073,15 @@ void OwnershipPass::emit_drop(
     const ValueType &type,
     std::vector<NodeReference> &out)
 {
+    // a callable owes one release of its environment and has no properties to walk - so it answers here,
+    // before the ComplexType it does not have is asked for. no deinit to ensure either: the environment's
+    // teardown is uniform, because a callable's static type never says which environment it holds
+    if (type.is_callable()) {
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        _changed = true;
+        return;
+    }
+
     const ComplexType *ct = type.get_complex_type();
 
     if (ct == nullptr) {

@@ -1,0 +1,31 @@
+// a capturing closure's environment is heap allocated and reference counted, so the loop below has to
+// give every one of them back. it used to be the whole risk of the feature: nothing observable goes
+// wrong when an environment leaks, the process just grows
+//
+// bounded so the golden is fast; the unbounded version peaks at ~1MB for two million iterations, which
+// is what says the release actually runs
+int32 $i = 0;
+int32 $sum = 0;
+
+while ($i < 2000) {
+    function<int32()> $f = function() : int32 { return $i; };
+
+    // a copy shares the environment, so this round holds two references to it and owes two releases
+    function<int32()> $copy = $f;
+
+    $sum = $sum + $f() + $copy();
+    $i = $i + 1;
+}
+
+echo $sum;
+
+// and a reassignment gives back the environment the variable held before, rather than leaking it
+int32 $j = 0;
+function<int32()> $rolling = function() : int32 { return 0; };
+
+while ($j < 1000) {
+    $rolling = function() : int32 { return $j; };
+    $j = $j + 1;
+}
+
+echo $rolling();

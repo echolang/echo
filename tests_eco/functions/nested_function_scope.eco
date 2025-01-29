@@ -1,0 +1,81 @@
+// a `function` declared inside a `{ }` block is a scoped declaration, not a closure: its name belongs
+// to the block, while the declaration itself is an ordinary top-level function. so two blocks may each
+// declare the same signature, a block-local name hides a file-scope one, and neither is reachable from
+// outside the block that declared it
+
+function helper(int32 $a) : int32 { return 100; }
+
+// two unrelated bodies, each with its own helper of the same signature
+function outer() : int32
+{
+    function helper(int32 $a) : int32 { return $a + 1; }
+    return helper(1);
+}
+
+function other() : int32
+{
+    function helper(int32 $a) : int32 { return $a + 2; }
+    return helper(1);
+}
+
+echo outer();
+echo other();
+
+// the file-scope one is untouched by either
+echo helper(1);
+
+// order does not matter inside a block - the declaration pass walks a body's declarations before the
+// body pass reads its statements, so a call above the declaration resolves and two block-local
+// functions can call each other
+function recursive_pair() : int32
+{
+    int32 $r = is_even(4);
+
+    function is_even(int32 $n) : int32 { if ($n == 0) { return 1; } return is_odd($n - 1); }
+    function is_odd(int32 $n) : int32 { if ($n == 0) { return 0; } return is_even($n - 1); }
+
+    return $r;
+}
+
+echo recursive_pair();
+
+// names are block scoped, exactly as variables are - so sibling blocks do not collide
+function sibling_blocks() : int32
+{
+    { function h() : int32 { return 1; } echo h(); }
+    { function h() : int32 { return 2; } echo h(); }
+    return 3;
+}
+
+echo sibling_blocks();
+
+// a member body is no different: the receiver arrives as an ordinary parameter, so a `function`
+// written in one is a scoped free function and not another method
+struct Counter
+{
+    int32 $count;
+
+    function bump() : int32
+    {
+        function twice(int32 $a) : int32 { return $a * 2; }
+        return twice($this->count);
+    }
+}
+
+Counter $c = Counter(21);
+echo $c->bump();
+
+// and a constructor body, which also declares its `$this` as a local
+struct Box
+{
+    int32 $v;
+
+    constructor(int32 $v)
+    {
+        function triple(int32 $a) : int32 { return $a * 3; }
+        $this->v = triple($v);
+    }
+}
+
+Box $b = Box(5);
+echo $b->v;

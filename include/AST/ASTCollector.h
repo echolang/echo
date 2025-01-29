@@ -32,6 +32,11 @@ namespace AST
         // types; this holds the functions, which is what lets a struct `Foo` and its constructor
         // `Foo` coexist under one name
         FunctionRegistry functions = FunctionRegistry();
+
+        // names the next closure literal. a closure has no name of its own and is in no overload set, but
+        // it still needs a *symbol*, and two closures written in one block would otherwise mangle alike.
+        // bundle-wide and deterministic: files are walked in a fixed order, and a literal is parsed once
+        size_t next_closure_id = 0;
         
         // create a registry for the native scalar cast types
         
@@ -48,7 +53,7 @@ namespace AST
 
             // two issues are the same issue when they are the same kind, about the same tokens, and
             // say the same thing. the token collection belongs in the key because indices are per
-            // module - the same shape FunctionRegistry::DeclarationSite keys a declaration on
+            // module - the same shape AST::DeclarationSite keys a declaration on
             const bool is_first = _reported.emplace(
                 std::type_index(typeid(T)),
                 &code_ref.token_slice.tokens,

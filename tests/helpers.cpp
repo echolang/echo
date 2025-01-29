@@ -173,11 +173,35 @@ AST::TypeDeclNode *EchoTests::type_named(AST::Module &m, const std::string &name
     return nullptr;
 }
 
-bool EchoTests::has_issue_containing(const AST::Bundle &bundle, const std::string &needle)
+size_t EchoTests::count_issues_containing(const AST::Bundle &bundle, const std::string &needle)
 {
+    size_t count = 0;
+
     for (const auto &issue : bundle.collector.issues) {
         if (issue->message().find(needle) != std::string::npos) {
-            return true;
+            count++;
+        }
+    }
+
+    return count;
+}
+
+bool EchoTests::has_issue_containing(const AST::Bundle &bundle, const std::string &needle)
+{
+    return count_issues_containing(bundle, needle) > 0;
+}
+
+bool EchoTests::is_file_root_child(AST::Module &m, const AST::Node *decl)
+{
+    for (auto &file : m.files()) {
+        if (file.root == nullptr) {
+            continue;
+        }
+
+        for (auto &child : file.root->children) {
+            if (child.node() == decl) {
+                return true;
+            }
         }
     }
 

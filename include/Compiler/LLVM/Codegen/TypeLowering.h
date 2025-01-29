@@ -53,6 +53,18 @@ namespace Compiler::LLVM
         llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
 
+        // the fat pointer every `function<R(P...)>` value is: `{ ptr fn, ptr env }`. one shape for every
+        // signature, because the *signature* only decides how the target is called, not how the value is
+        // stored - which is what lets a callable be assigned, passed and returned without knowing what
+        // it points at. an anonymous StructType, so two units agree structurally with no registration
+        llvm::StructType *callable_llvm_type();
+
+        // the llvm::FunctionType a callable's `fn` slot points at. the environment is parameter 0,
+        // always, exactly the way a method's `$this` is - a capturing closure has nowhere else to read
+        // its captures from, and a uniform shape is what lets one indirect call site invoke either kind
+        llvm::FunctionType *get_llvm_function_type(
+            const AST::CallableSignature &signature, const Compiler::LLVM::CmpUnit &cmp_unit);
+
         // converts `value` from one echo type to another, emitting the widening, narrowing or
         // int/float conversion the pair calls for. returns the value unchanged when no
         // conversion is needed, and throws when the pair has no meaning

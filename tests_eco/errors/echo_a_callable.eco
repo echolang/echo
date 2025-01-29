@@ -1,0 +1,5 @@
+// `echo` has no printf conversion for a callable. reported here rather than left to ExprCodegen, which
+// throws an *internal compiler error* - not the user's mistake to read
+
+function<int32()> $f = function() : int32 { return 1; };
+echo $f;

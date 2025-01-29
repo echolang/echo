@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTDeclarationSite.h"
 #include "AST/ASTValueType.h"
 #include "Token.h"
 
@@ -36,31 +37,6 @@ namespace AST
     class FunctionRegistry
     {
     public:
-        // the declaration a module's parse passes agree on. a module is tokenized once and every
-        // pass walks identical indices, so the position a declaration is *written* at is an exact
-        // identity for it that is available *before* the parameter list is parsed. the name alone is
-        // not: with overloads it names a set, and the reuse decision has to happen at the name
-        // token, long before the signature is known
-        //
-        // which token that is, is FunctionDeclNode::declaration_site_token()'s answer - the name
-        // token for anything the user named, its own `constructor` keyword for a constructor
-        struct DeclarationSite
-        {
-            const TokenCollection *tokens;
-            size_t index;
-
-            bool operator==(const DeclarationSite &other) const {
-                return tokens == other.tokens && index == other.index;
-            }
-        };
-
-        struct DeclarationSiteHash
-        {
-            size_t operator()(const DeclarationSite &site) const {
-                return std::hash<const TokenCollection *>{}(site.tokens) ^ (std::hash<size_t>{}(site.index) << 1);
-            }
-        };
-
         FunctionRegistry() {};
 
         ~FunctionRegistry() {};
@@ -126,12 +102,6 @@ namespace AST
 
     private:
 
-        // the site key a token denotes. the one spelling of the identity, so the registration paths
-        // and the lookup cannot construct it differently
-        static DeclarationSite make_site(const TokenReference &declaration_token) {
-            return DeclarationSite { &declaration_token.get_collection_ref(), declaration_token.get_handle() };
-        }
-
         // takes ownership of `decl`'s declaration site: appends it to `_functions`, keys it in
         // `_by_decl_site` and answers whether the caller should carry on registering it. false for a
         // declaration that cannot be looked up (null or anonymous) and for the second parse pass
@@ -145,6 +115,10 @@ namespace AST
 
         std::unordered_map<const Namespace *, std::unordered_map<std::string, std::vector<FunctionDeclNode *>>> _by_name;
 
+        // keyed on the declaration a module's parse passes agree on, the same key AST::NamespaceManager
+        // keys a lexical namespace by. which token identifies *this* kind of declaration is
+        // FunctionDeclNode::declaration_site_token()'s answer: the name token for anything the user
+        // named, its own `constructor` keyword for a constructor
         std::unordered_map<DeclarationSite, FunctionDeclNode *, DeclarationSiteHash> _by_decl_site;
     };
 };

@@ -135,6 +135,27 @@ Node *InstanceOfExprNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *ClosureExprNode::clone(CloneContext &cc) const
+{
+    ClosureExprNode *c = cc.shallow(this);
+    // the declaration is not a child - it hangs off the file root, not off this expression - so it is
+    // rebound the way a call's decl is. an instantiated body therefore shares the template's closure
+    // body, which is correct: a closure cannot name the enclosing type parameters (see todo/A27)
+    c->decl = cc.rebind(c->decl);
+    // the captured places are read in the *enclosing* frame, so they are ordinary owned children of this
+    // expression. the environment type is not cloned: it is a layout, shared like a ComplexType always is
+    for (auto &value : c->captured_values) value = cc.child(value);
+    return c;
+}
+
+Node *IndirectCallExprNode::clone(CloneContext &cc) const
+{
+    IndirectCallExprNode *c = cc.shallow(this);
+    c->callee = cc.child(c->callee);
+    for (auto &arg : c->arguments) arg = cc.child(arg);
+    return c;
+}
+
 Node *RetainExprNode::clone(CloneContext &cc) const
 {
     RetainExprNode *c = cc.shallow(this);
@@ -236,6 +257,7 @@ Node *ReturnNode::clone(CloneContext &cc) const
 {
     ReturnNode *c = cc.shallow(this);
     c->expr = cc.child(c->expr);
+    for (auto &drop : c->unwind) drop = cc.clone_ref(drop);
     return c;
 }
 
@@ -263,13 +285,13 @@ Node *ScopeNode::clone(CloneContext &cc) const
     // scopes that point back at this one via parent_ptr rebind correctly
     ScopeNode *c = cc.make<ScopeNode>(this);
     c->parent_ptr = cc.rebind(parent_ptr);
+    c->is_function_boundary = is_function_boundary;
 
     for (const auto &ref : children) {
         c->children.push_back(cc.clone_ref(ref));
     }
 
     for (const auto &[name, decl] : _declared_variables) c->_declared_variables[name] = cc.rebind(decl);
-    for (const auto &[name, decl] : _declared_types) c->_declared_types[name] = cc.rebind(decl);
     for (auto *attr : _attribute_stack) c->_attribute_stack.push_back(cc.rebind(attr));
 
     return c;

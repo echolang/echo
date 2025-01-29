@@ -1,0 +1,5 @@
+// `$x(...)` where `$x` is not a callable is not a call with bad arguments - it is not a call at all,
+// so the shape is reported rather than the argument types
+
+int32 $x = 1;
+echo $x(1);

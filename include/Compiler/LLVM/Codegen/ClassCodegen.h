@@ -49,21 +49,40 @@ namespace Compiler::LLVM
         void gen_instanceof(AST::InstanceOfExprNode &node);
 
 
-        // -= 1, and tear the block down at zero. emits a call to the class's release thunk rather than
-        // the sequence itself: a release appears at every scope exit and every overwritten field, and
-        // the teardown at zero is not small
-        void gen_release(llvm::Value *handle, const AST::ValueType &class_type);
+        // "move the strong count of this value", whatever kind of value it is. the one entry point for
+        // both, so a teardown site added later cannot forget that a callable counts its environment
+        // rather than a class block - which would be the wrong thunk with no diagnostic
+        //
+        // the retain hands the value back unchanged, so it can sit inline in an expression
+        llvm::Value *gen_retain_value(llvm::Value *value, const AST::ValueType &type);
+        void gen_release_value(llvm::Value *value, const AST::ValueType &type);
+
+        // the heap block for a class value: malloc, zero, strong count 1, typeinfo. shared by
+        // gen_class_alloc and by a closure's environment, which is a class the compiler declared rather
+        // than one the user did - so the two cannot end up with differently shaped blocks
+        llvm::Value *gen_class_box_alloc(const AST::ValueType &class_type);
 
     private:
         CodegenContext &_ctx;
 
-        // += 1 on the strong count of `handle`, which is returned unchanged so this can sit inline in
-        // an expression. null-safe, because a class handle is nullable and a retain of null is how
-        // `Foo $a = $b;` behaves when `$b` holds nothing.
+        // the two arms gen_retain_value / gen_release_value dispatch to. a class moves the count in its
+        // block; a callable moves the one in its *environment*, which is the only thing a callable owns
         //
-        // private, unlike gen_release: a retain is only ever a RetainExprNode the ownership pass put
-        // in the tree, so nothing outside decides to emit one
+        // the callable arm is uniform rather than per type, and that is forced: a callable's static type
+        // is its signature and says nothing about which environment it holds, so the teardown cannot be
+        // keyed on a class the way the class arm is. it stays correct because an environment holds no
+        // owning capture - one that would is rejected at the capture site (todo/A27)
         llvm::Value *gen_retain(llvm::Value *handle, const AST::ValueType &class_type);
+        void gen_release(llvm::Value *handle, const AST::ValueType &class_type);
+        llvm::Value *gen_callable_retain(llvm::Value *callable);
+        void gen_callable_release(llvm::Value *callable);
+
+        // += 1 on the strong count of `block`, guarded on `block` being non-null - a class handle is
+        // nullable and a retain of null is how `Foo $a = $b;` behaves when `$b` holds nothing.
+        //
+        // a null `layout` means the count is the block's first word, which is how an environment is
+        // reached: the one thing a callable does not know is a class layout
+        void gen_strong_inc(llvm::Value *block, const ClassLayout *layout, const char *label);
 
         // the one release implementation per class per compilation unit, created on first use
         //
@@ -74,6 +93,22 @@ namespace Compiler::LLVM
         // emit_drop recursion a struct's scope exit uses - so what a class destroys at zero and what a
         // struct destroys at scope end are decided in exactly one place
         llvm::Function *get_or_create_release_thunk(const AST::ValueType &class_type);
+
+        // the environment counterpart, one per compilation unit rather than one per type:
+        //
+        //   void __eco_release_env(ptr handle)
+        //
+        // no deinit, because an environment holds no owning capture - see gen_callable_release
+        llvm::Function *get_or_create_env_release_thunk();
+
+        // the body both of the above are: linkonce_odr `void <name>(ptr handle)`, null-check, decrement,
+        // return unless zero, `complex`'s deinit if there is one, free. built with its own builder
+        // position, which is saved and restored - this is called from the middle of whatever function
+        // asked for a release
+        //
+        // `layout` and `complex` are both null for an environment, which has neither
+        llvm::Function *build_release_thunk(
+            const std::string &name, const ClassLayout *layout, const AST::ComplexType *complex);
 
         // libc, declared into the current unit the way printf is. the RC runtime is emitted inline
         // rather than living in the stdlib, so these two are the only external symbols it needs

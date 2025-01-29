@@ -1,0 +1,11 @@
+// a nested declaration has no access to the enclosing frame, and an enclosing type parameter is exactly
+// such an access: `T` resolves through the type-parameter scope stack, which would make this declaration
+// depend on a substitution nothing will ever hand it
+
+function outer<T>(T $value) : int32
+{
+    function helper(int32 $a) : int32 { return $a; }
+    return helper(1);
+}
+
+echo outer<int32>(1);

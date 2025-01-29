@@ -9,6 +9,11 @@
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ParserPayload.h"
 
+namespace AST
+{
+    class ClosureExprNode;
+};
+
 namespace Parser
 {
     // which grammar a `function` declaration is being read under. an extern declaration accepts
@@ -24,6 +29,63 @@ namespace Parser
     // whether the body is parsed or left for the body pass is read off `payload.pass`
     AST::FunctionDeclNode *parse_funcdecl(Payload &payload, FuncDeclKind kind = FuncDeclKind::t_normal);
 
+    // consumes a declaration's body from its first token: either a braced body or the bare `;` of a
+    // declaration that has none. the one place that knows how a declaration body is skipped, shared by
+    // the pass that does not read member bodies and by the recovery for a refused `function`
+    //
+    // brace-depth aware rather than token-by-token, because a body's closing brace would otherwise read
+    // as the end of the enclosing scope - silently truncating a struct and losing every member written
+    // after it, or resuming *inside* a body full of semicolons and reporting a cascade of nonsense
+    void skip_declaration_body(Payload &payload);
+
+    // does a `function` *declaration* start here? the keyword alone no longer answers it: `function`
+    // introduces three different things, told apart by the one token after it -
+    //
+    //   function <ident> (...)   a declaration
+    //   function < ... >         the callable type `function<R(P...)>`
+    //   function ( ... ) { }     a closure literal, an expression
+    //
+    // the sole owner of that question, so the statement dispatch, the declaration-surface walk and the
+    // struct member walk cannot come to three different answers
+    bool starts_funcdecl(Parser::Cursor &cursor);
+
+    // does a closure literal start here? `function (` - the third of the three things the keyword
+    // introduces, and the only one that is an expression
+    bool starts_closure_literal(Parser::Cursor &cursor);
+
+    // `function(int32 $a) : int32 { ... }` in a value position.
+    //
+    // the same machinery a declaration uses - one parameter list parser, one body parser - over an
+    // *anonymous* declaration that is hoisted to the file root and entered in no overload set. its
+    // `args[0]` is the environment its captures will live in, exactly the way a method's is its receiver
+    AST::ClosureExprNode *parse_closure_literal(Payload &payload);
+
+    // captures `vardecl` into the closure currently being parsed and answers the expression its body
+    // should read instead: a member access on the environment parameter.
+    //
+    // capture is *by value* - the place is read once, here, in the frame the closure is created in - so a
+    // closure is always safe to outlive that frame. the returned read is of the environment's copy, which
+    // is why a later write to the original is not observed
+    //
+    // null when the capture is refused, with the reason already reported
+    AST::ExprNode *capture_variable(
+        Payload &payload, AST::VarDeclNode *vardecl, const TokenReference &at, size_t boundaries_crossed);
+
+    // parses a function's body, from its opening brace through its closing one, into `decl->body`.
+    // `scope` is the parameter frame the body is pushed under, so a parameter resolves through it
+    //
+    // shared by parse_funcdecl and parse_closure_literal, which differ in exactly one thing: a closure
+    // hands itself in, so a read of an enclosing local in the body is a capture rather than an error.
+    // everything else - the function-boundary marker, the return-type and body frames, the recovery on a
+    // missing brace - is one body of code, and it had to be edited in two places as long as it was two
+    //
+    // answers false when a brace is missing, having reported it and recovered
+    bool parse_function_body(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        AST::ScopeNode &scope,
+        AST::ClosureExprNode *closure = nullptr);
+
     // reads a parameter list up to and *including* its closing parenthesis, appending each parameter
     // to `decl` and declaring it in `into`. the cursor must already be past the open parenthesis
     //
@@ -37,21 +99,35 @@ namespace Parser
     bool parse_parameter_list(
         Payload &payload, AST::FunctionDeclNode &decl, AST::ScopeNode &into, const TokenReference &report_at);
 
-    // prepends the implicit `$this` receiver to `decl`, typed `self_type` - the non-nullable borrow
-    // `Foo&` (or `Foo<T>&`) every member of the struct shares - and declares it in `into` so it
-    // resolves exactly as any other parameter does
+    // prepends an implicit parameter - one the caller never writes - to `decl`, named `name` and typed
+    // `type_node`, and declares it in `into` so it resolves exactly as any other parameter does
     //
-    // a *parameter* rather than a body-local the way a constructor's `$this` is, which is what makes
-    // a member an ordinary function: mangling, cloning, the pointer adjuster and codegen all handle
-    // it with no special case. shared by the method and destructor arms so the two receivers cannot
-    // drift - they are the same thing, and a destructor that borrowed differently would mutate a
-    // copy and free nothing
-    void push_receiver_param(
+    // a *parameter* rather than something codegen conjures, which is what makes a method and a closure
+    // ordinary functions: mangling, cloning, the pointer adjuster and codegen all handle them with no
+    // special case. the two kinds - a receiver and an environment - sit in the same slot and are counted
+    // back out by the same `implicit_arg_count()`, so they are pushed by the same code
+    void push_implicit_param(
+        Payload &payload,
+        AST::FunctionDeclNode &decl,
+        AST::ScopeNode &into,
+        const std::string &name,
+        AST::TypeNode *type_node,
+        const TokenReference &at);
+
+    // the implicit `$this` receiver, typed `self_type` - the non-nullable borrow `Foo&` (or `Foo<T>&`)
+    // every member of the struct shares
+    //
+    // shared by the method and destructor arms so the two receivers cannot drift - they are the same
+    // thing, and a destructor that borrowed differently would mutate a copy and free nothing
+    inline void push_receiver_param(
         Payload &payload,
         AST::FunctionDeclNode &decl,
         AST::ScopeNode &into,
         AST::TypeNode *self_type,
-        const TokenReference &at);
+        const TokenReference &at)
+    {
+        push_implicit_param(payload, decl, into, "$this", self_type, at);
+    }
 };
 
 

@@ -1,0 +1,17 @@
+// a nested function's body can name an enclosing function's local - the scope chain is deliberately
+// left intact, because it is the environment a closure will capture from - but there is no environment
+// to capture into yet, so the read is reported instead of lowered
+//
+// lowering it would load from an alloca belonging to a different llvm::Function: CodegenContext::var_map
+// is keyed on the declaration and never cleared, so the wrong frame's slot is found and is *valid*
+
+function outer() : int32
+{
+    int32 $n = 5;
+
+    function bad() : int32 { return $n; }
+
+    return bad();
+}
+
+echo outer();

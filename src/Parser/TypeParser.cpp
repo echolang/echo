@@ -15,6 +15,14 @@
 // generic application. both work on bare ValueTypes, only the public entry point makes a node
 static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload);
 
+bool Parser::starts_callable_type(Parser::Cursor &cursor, size_t offset)
+{
+    // the `<` is what tells it from a *declaration*, which has an identifier there, and from a closure
+    // literal, which has a `(`. one token of lookahead, and the three spellings cannot overlap
+    return cursor.peek_is_type(offset, Token::Type::t_function) &&
+        cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
+}
+
 bool Parser::can_parse_type(Parser::Payload &payload)
 {
     // a type can be preceded by a const keyword
@@ -31,7 +39,7 @@ bool Parser::can_parse_type(Parser::Payload &payload)
         return true;
     }
 
-    return false;
+    return starts_callable_type(payload.cursor, offset);
 }
 
 // advances past one type if the tokens at the cursor form one, and answers whether they did
@@ -51,14 +59,64 @@ bool Parser::can_parse_type(Parser::Payload &payload)
 //
 // only the bounds-safe cursor accessors are used (never current(), which asserts), so a truncated
 // type runs out of tokens and answers false instead of aborting
+static bool skip_type_shape(Parser::Cursor &cursor);
+
+// skips a comma-separated list of type shapes, up to but not through whatever closes it. the grammar
+// has two such lists - a callable's parameters and a generic argument list - and they differ in
+// nothing but `is_end`, so the trailing-comma rule is decided here once for both
+template <typename IsEnd>
+static bool skip_type_list(Parser::Cursor &cursor, IsEnd is_end)
+{
+    while (!is_end(cursor)) {
+        if (cursor.is_done() || !skip_type_shape(cursor)) {
+            return false;
+        }
+
+        if (cursor.is_type(Token::Type::t_comma)) {
+            cursor.skip();
+        } else if (!is_end(cursor)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static bool skip_type_shape(Parser::Cursor &cursor)
 {
     if (cursor.is_type(Token::Type::t_const)) {
         cursor.skip();
     }
 
+    // `function<R(P...)>`, walked in the same shape-only way: the return type, then a parenthesised
+    // parameter list. the angle brackets close through the cursor's `>>` split like every other
+    // argument list, so `function<void(ptr<Box<int32>>)>` ends in one place here and in
+    // parse_value_type
+    if (Parser::starts_callable_type(cursor)) {
+        cursor.skip(2);
+
+        if (!skip_type_shape(cursor)) {
+            return false;
+        }
+
+        if (!cursor.is_type(Token::Type::t_open_paren)) {
+            return false;
+        }
+        cursor.skip();
+
+        if (!skip_type_list(cursor, [](Parser::Cursor &c) { return c.is_type(Token::Type::t_close_paren); })) {
+            return false;
+        }
+
+        cursor.skip(); // the close paren
+
+        if (!cursor.is_generic_close()) {
+            return false;
+        }
+        cursor.consume_generic_close();
+    }
     // `ptr<T>` is a type constructor, so it recurses on its pointee exactly as the parser does
-    if (cursor.is_type(Token::Type::t_ptr)) {
+    else if (cursor.is_type(Token::Type::t_ptr)) {
         cursor.skip();
 
         if (!cursor.is_type(Token::Type::t_open_angle)) {
@@ -88,16 +146,8 @@ static bool skip_type_shape(Parser::Cursor &cursor)
         if (cursor.is_type(Token::Type::t_open_angle)) {
             cursor.skip();
 
-            while (!cursor.is_generic_close()) {
-                if (cursor.is_done() || !skip_type_shape(cursor)) {
-                    return false;
-                }
-
-                if (cursor.is_type(Token::Type::t_comma)) {
-                    cursor.skip();
-                } else if (!cursor.is_generic_close()) {
-                    return false;
-                }
+            if (!skip_type_list(cursor, [](Parser::Cursor &c) { return c.is_generic_close(); })) {
+                return false;
             }
 
             cursor.consume_generic_close();
@@ -238,7 +288,9 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
         return std::vector<AST::ValueType>{ primitive };
     }
 
-    auto symbol = payload.collector.namespaces.find_symbol(name, *payload.context.current_namespace);
+    // the declaring namespace, not the current one: a type is not block-scoped, so a type name written
+    // inside a `{ }` block resolves exactly as it does outside one
+    auto symbol = payload.collector.namespaces.find_symbol(name, *payload.context.declaring_namespace());
     if (symbol && symbol->type() == AST::SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
         return std::vector<AST::ValueType>{ decl->value_type() };
@@ -534,6 +586,58 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         payload.cursor.skip();
     }
 
+    // `function<R(P...)>`, the callable type. spelled return-type-first inside the brackets, which is
+    // the shape CONCEPT.md specifies
+    if (Parser::starts_callable_type(payload.cursor)) {
+        payload.cursor.skip(2);
+
+        auto return_type = parse_value_type(payload);
+        if (!return_type.has_value()) {
+            return std::nullopt;
+        }
+
+        if (!payload.cursor.is_type(Token::Type::t_open_paren)) {
+            payload.collect_unexpected_token(Token::Type::t_open_paren);
+            return std::nullopt;
+        }
+        payload.cursor.skip();
+
+        std::vector<AST::ValueType> parameter_types;
+
+        while (!payload.cursor.is_type(Token::Type::t_close_paren)) {
+            if (payload.cursor.is_done()) {
+                payload.collect_unexpected_token(Token::Type::t_close_paren);
+                return std::nullopt;
+            }
+
+            auto param = parse_value_type(payload);
+            if (!param.has_value()) {
+                return std::nullopt;
+            }
+
+            parameter_types.push_back(param.value());
+
+            if (payload.cursor.is_type(Token::Type::t_comma)) {
+                payload.cursor.skip();
+            }
+            else if (!payload.cursor.is_type(Token::Type::t_close_paren)) {
+                payload.collect_unexpected_token(Token::Type::t_close_paren);
+                return std::nullopt;
+            }
+        }
+        payload.cursor.skip(); // the close paren
+
+        // through the cursor's `>>` split, like every other argument list
+        if (!payload.cursor.is_generic_close()) {
+            payload.collect_unexpected_token(Token::Type::t_close_angle);
+            return std::nullopt;
+        }
+        payload.cursor.consume_generic_close();
+
+        auto callable = AST::ValueType::make_callable(return_type.value(), std::move(parameter_types));
+        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(callable) : callable);
+    }
+
     // `ptr<T>` is a real type constructor, so it recurses: the pointee is an arbitrary type,
     // which is what makes ptr<ptr<T>> and ptr<Box<int>> representable at all
     if (payload.cursor.is_type(Token::Type::t_ptr)) {
@@ -569,7 +673,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
     // a type may be namespace qualified: `a::b::Foo`. the prefix is consumed here so the name
     // token below resolves in that namespace instead of the current one. a qualified name is
     // never a primitive or a type parameter, so those lookups are skipped for it
-    const AST::Namespace *lookup_namespace = payload.context.current_namespace;
+    const AST::Namespace *lookup_namespace = payload.context.declaring_namespace();
     bool is_qualified = false;
     if (payload.cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
         auto *ns_node = parse_namespace(payload);

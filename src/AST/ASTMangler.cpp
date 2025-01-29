@@ -18,8 +18,13 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
 
     // root first, so a nested namespace reads in declaration order and the root contributes
     // no empty segment
+    //
+    // the *mangling* segments, not the display ones: a lexical namespace names a `{ }` block, and two
+    // blocks of one function both display as that function's name. taking the display path here would
+    // give both their `helper(int32)` one symbol, and two bodies would be emitted into one
+    // llvm::Function - the mangling defect TypeLowering throws on
     if (func_decl->ast_namespace) {
-        for (const auto &segment : func_decl->ast_namespace->path_segments()) {
+        for (const auto &segment : func_decl->ast_namespace->mangling_segments()) {
             mangled_name += segment + "_";
         }
     }

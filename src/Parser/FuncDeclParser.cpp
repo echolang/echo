@@ -6,11 +6,16 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ExprNode.h"
+#include "AST/MemberAccessNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
+#include "Parser/SymbolParser.h"
 
 #include <fmt/core.h>
 
@@ -37,24 +42,78 @@ static std::optional<std::string> attribute_string_value(
     return attribute->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>()->get_string_value();
 }
 
-void Parser::push_receiver_param(
+void Parser::push_implicit_param(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &into,
-    AST::TypeNode *self_type,
+    const std::string &name,
+    AST::TypeNode *type_node,
     const TokenReference &at)
 {
-    auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, at);
-    auto *this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, self_type);
+    auto token = payload.context.make_virtual_token(name, Token::Type::t_varname, at);
+    auto *vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(token, type_node);
 
     // ahead of everything the caller wrote. FunctionDeclNode::clone clones args before the body
     // precisely so the body's references rebind to the cloned declaration
-    decl.args.push_back(this_vardecl);
+    decl.args.push_back(vardecl);
 
-    // declared in the argument scope, not in the body, so `$this` resolves the same way every other
+    // declared in the argument scope, not in the body, so it resolves the same way every other
     // parameter does. the argument scope's children are never emitted - the body is a separate child
     // scope and codegen allocas from `args` - so this costs no second slot
-    into.add_vardecl(*this_vardecl);
+    into.add_vardecl(*vardecl);
+}
+
+bool Parser::parse_function_body(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    AST::ScopeNode &scope,
+    AST::ClosureExprNode *closure)
+{
+    auto &cursor = payload.cursor;
+
+    if (!payload.expect_token(Token::Type::t_open_brace)) {
+        return false;
+    }
+
+    // the body's opening brace, captured before it is consumed: it is the identity of the body block's
+    // lexical namespace, and the declaration pass keyed the same block on the same token
+    auto body_brace = cursor.current();
+
+    cursor.skip(); // the opening brace
+
+    // the parameters live one frame up from the body, and that frame is where this function ends. a
+    // name resolved past it belongs to another function's storage - see ScopeNode::lookup_variable.
+    // for a closure that is exactly what makes such a name a *capture* instead
+    scope.is_function_boundary = true;
+
+    payload.context.push_scope(scope);
+
+    {
+        // the body's returns fit this type, exactly as a variable declaration's initializer fits
+        // the declared variable type. scoped so a declaration nested in the body restores it
+        AST::ReturnTypeScope return_scope(payload.context, decl.return_type);
+
+        // the receiver reaches the body as an ordinary parameter, so the *body* is no longer inside a
+        // struct declaration - and nothing enclosing this declaration reaches into it either. cleared
+        // rather than left standing so nothing declared in here inherits a receiver, an environment or a
+        // constructor's `$this` it has no business having, and it names the lexical namespaces the body
+        // opens so a diagnostic about a block-local declaration can say which function it was written in
+        //
+        // the closure is the one thing passed *on* rather than cleared, and only to its own body
+        AST::FunctionBodyScope body_scope(payload.context, &decl, closure);
+
+        decl.body = &parse_scope(payload, nullptr, body_brace);
+    }
+
+    if (!payload.expect_token(Token::Type::t_close_brace)) {
+        return false;
+    }
+
+    cursor.skip(); // the closing brace
+
+    payload.context.pop_scope();
+
+    return true;
 }
 
 bool Parser::parse_parameter_list(
@@ -94,6 +153,223 @@ bool Parser::parse_parameter_list(
     cursor.skip();
 
     return true;
+}
+
+bool Parser::starts_funcdecl(Parser::Cursor &cursor)
+{
+    return cursor.is_type_sequence(0, { Token::Type::t_function, Token::Type::t_identifier });
+}
+
+bool Parser::starts_closure_literal(Parser::Cursor &cursor)
+{
+    return cursor.is_type_sequence(0, { Token::Type::t_function, Token::Type::t_open_paren });
+}
+
+void Parser::skip_declaration_body(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    if (cursor.is_type(Token::Type::t_open_brace)) {
+        cursor.skip();
+        cursor.skip_till_end_of_scope();
+        return;
+    }
+
+    if (cursor.is_type(Token::Type::t_semicolon)) {
+        cursor.skip();
+    }
+}
+
+// recovery for a `function` this parser has decided not to read: past its signature and its whole body
+static void skip_refused_function(Parser::Payload &payload)
+{
+    // the signature cannot contain either token, so the first one found opens the body or ends a
+    // bodyless declaration - and from there skip_declaration_body knows how to consume it
+    payload.cursor.skip_until({ Token::Type::t_open_brace, Token::Type::t_semicolon });
+
+    Parser::skip_declaration_body(payload);
+}
+
+// the environment parameter. `args[0]` of every closure, exactly where a method's receiver sits and for
+// the same reason: it is how the body reaches storage the caller does not pass, so it must be a real
+// parameter rather than something codegen conjures
+//
+// typed as the environment *class*, so a captured read is an ordinary member access and the whole
+// property-offset machinery is reused rather than rebuilt. a class value is one machine word, so this
+// lowers to the same `ptr` the callable's env slot holds. the *type of the closure* says nothing about
+// it - two closures of one signature capturing different things are one type
+static void push_environment_param(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode &decl,
+    AST::ScopeNode &into,
+    AST::ComplexType *environment,
+    const TokenReference &at)
+{
+    auto &env_type = payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_class(environment));
+
+    Parser::push_implicit_param(payload, decl, into, "$__env", &env_type, at);
+}
+
+AST::ExprNode *Parser::capture_variable(
+    Parser::Payload &payload,
+    AST::VarDeclNode *vardecl,
+    const TokenReference &at,
+    size_t boundaries_crossed)
+{
+    AST::ClosureExprNode *closure = payload.context.current_closure_ptr;
+
+    assert(closure != nullptr && closure->decl != nullptr && "capture_variable called outside a closure body");
+
+    // the environment is `args[0]`, put there by push_environment_param before the parameter list was
+    // read - the same slot a method's receiver sits in, which is what implicit_arg_count counts
+    AST::VarDeclNode *env_param = closure->decl->args[0];
+
+    // more than one frame out means the closure this is written in would have to capture it *and* hand it
+    // on. the value has to be read where it lives, and that place is not reachable from the creation site
+    // of this closure - so it is refused rather than read from the wrong frame
+    if (boundaries_crossed > 1) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            fmt::format(
+                "'{}' is declared outside the closure that encloses this one. Capturing through a "
+                "closure is not supported yet - capture it in the outer closure first.",
+                at.value()));
+        return nullptr;
+    }
+
+    // whether the captured value owns a resource is *not* asked here, though this is where the capture
+    // is made: a variable's type is only final once the monomorphizer has settled the call it was
+    // inferred from, so the answer for `$b = Box<int32>(5)` would be taken from `Box<T>` and come back
+    // "owns nothing". AST::TypeChecker::visit_closure_expr asks it, once the types are honest
+    //
+    // a declaration whose inference failed has no type node at all, and `type()` would read through the
+    // null. unknown rather than a refusal: the failure has already been reported at the declaration, and
+    // "no information" is what every pass below reads an unresolved type as - the same answer
+    // VarRefNode::result_type gives for the same declaration
+    const AST::ValueType captured_type =
+        vardecl->has_type() ? vardecl->type() : AST::ValueType::make_unknown();
+
+    const AST::ValueType env_type = env_param->type();
+    AST::ComplexType *environment = env_type.get_complex_type();
+
+    const std::string property_name = vardecl->token_varname.value();
+
+    // already captured, so the property is reused rather than added twice. two reads of one variable are
+    // one capture - which is also what keeps the property indices in step with `captured_values`
+    if (!environment->has_property(property_name)) {
+        environment->add_property(property_name, captured_type);
+
+        // the place, read in the *enclosing* frame. it is an ordinary VarRef over the outer declaration,
+        // and it is evaluated at the closure expression rather than in the body - which is the whole of
+        // what "by value" means here
+        auto &outer_var = payload.context.emplace_node<AST::VarNode>(vardecl, at);
+        auto &outer_ref = payload.context.emplace_node<AST::VarRefNode>(&outer_var);
+
+        closure->captured_values.push_back(&outer_ref);
+    }
+
+    // and the read the body gets: `$__env->name`. the environment is a class, so its value is already a
+    // handle - the same shape a member access on any class value has
+    auto &env_var = payload.context.emplace_node<AST::VarNode>(env_param, at);
+    auto &env_ref = payload.context.emplace_node<AST::VarRefNode>(&env_var);
+
+    return &payload.context.emplace_node<AST::MemberAccessNode>(AST::make_ref(env_ref), at);
+}
+
+AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    assert(starts_closure_literal(cursor) && "parse_closure_literal called off a closure literal");
+
+    // the `function` keyword is both the declaration site and, through a virtual name token, where the
+    // symbol's position is reported from. a closure has no name the user wrote, so the two coincide the
+    // way a destructor's do
+    auto function_token = cursor.current();
+    cursor.skip();
+
+    // a name nobody can spell, discriminated so two closures never share a symbol. the block's lexical
+    // namespace already separates blocks; the counter separates two literals inside one block
+    auto name_token = payload.context.make_virtual_token(
+        fmt::format("closure${}", payload.collector.next_closure_id++),
+        Token::Type::t_identifier,
+        function_token);
+
+    auto *closure_decl = payload.context.emplace_nodep<AST::FunctionDeclNode>(name_token, function_token);
+
+    closure_decl->is_closure = true;
+
+    // the block it was written in, which is what makes its symbol unique per block and lets a diagnostic
+    // say which function it appeared in. deliberately *not* registered in the FunctionRegistry: no name
+    // reaches a closure, so it belongs to no overload set
+    closure_decl->ast_namespace = payload.context.current_namespace;
+
+    // the same reason a nested declaration is rejected where a type parameter is visible: a closure
+    // cannot receive a substitution for one. lifted with capture-in-generics, see todo/A27
+    if (payload.context.has_visible_type_params()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(function_token),
+            "A closure cannot be written inside a generic function's body yet - it has no access to the "
+            "enclosing type parameters.");
+        skip_refused_function(payload);
+        return nullptr;
+    }
+
+    auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();
+
+    // the environment is created empty and grows a property per capture as the body is parsed. a class,
+    // so it is heap allocated and reference counted - two copies of one closure share one environment,
+    // which is what makes assigning and returning a closure mean what it should
+    //
+    // minted even when nothing turns out to be captured: the body is what says, and the parameter has to
+    // be typed before the body is read. an environment with no properties is simply never allocated
+    AST::ComplexType *environment = payload.collector.type_registry.create_anonymous_type(
+        closure_decl->func_name() + ".env",
+        AST::ComplexTypeKind::t_class,
+        payload.context.declaring_namespace());
+
+    // `args[0]`, ahead of everything the user wrote - which is where capture_variable reads it back from
+    push_environment_param(payload, *closure_decl, closure_scope, environment, function_token);
+
+    cursor.skip(); // the open paren
+
+    if (!parse_parameter_list(payload, *closure_decl, closure_scope, function_token)) {
+        return nullptr;
+    }
+
+    // `: T` is optional here exactly as it is on a declaration, where a missing return type is void
+    if (cursor.is_type(Token::Type::t_colon)) {
+        cursor.skip();
+
+        if (!can_parse_type(payload)) {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
+
+        closure_decl->return_type = parse_type(payload);
+    }
+
+    // the node exists before the body is parsed, because the body is what fills its capture list. it is
+    // also what the body is parsed *under*, which is what makes a read of an enclosing local in there a
+    // capture rather than the error it is inside a plain nested `function`
+    auto &closure_expr = payload.context.emplace_node<AST::ClosureExprNode>(closure_decl, function_token);
+
+    if (!parse_function_body(payload, *closure_decl, closure_scope, &closure_expr)) {
+        return nullptr;
+    }
+
+    // to the file root, like every other declaration: codegen emits bodies from there and
+    // AST::OwnershipPass resolves drops from the same list
+    payload.context.declaration_scope().add_funcdecl(*closure_decl);
+
+    // only now is it known whether anything was captured. an environment with no properties is left off
+    // the node entirely, so the closure's env slot stays null and nothing is allocated for it
+    if (environment->property_count() > 0) {
+        closure_expr.environment_type = environment;
+    }
+
+    return &closure_expr;
 }
 
 AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser::FuncDeclKind kind)
@@ -172,6 +448,25 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
     // set the namespace of the function
     funcdecl->ast_namespace = payload.context.current_namespace;
+
+    // a `function` written inside a `{ }` block is a scoped declaration - the lexical namespace above
+    // is the block's - and it has no access to the enclosing frame. an enclosing *type parameter* is
+    // exactly such an access: `T` would resolve through the type-param scope stack and silently make
+    // this declaration depend on a substitution nothing will ever hand it, so it is rejected outright
+    // rather than lowered against an unresolved generic. see todo/A27, which lifts this
+    if (payload.context.current_namespace != nullptr
+        && payload.context.current_namespace->is_lexical()
+        && payload.context.has_visible_type_params())
+    {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(nametoken),
+            fmt::format(
+                "'{}' cannot be declared inside a generic function's body - it has no access to the "
+                "enclosing type parameters. Declare it at file scope instead.",
+                nametoken.value()));
+        skip_refused_function(payload);
+        return nullptr;
+    }
 
     // a `function` written inside a struct body is a method: the enclosing struct arrived on the
     // context, and it is the only thing that distinguishes this from a free function
@@ -283,20 +578,42 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
         funcdecl->extern_symbol = extern_symbol;
 
         if (!symbol_only) {
-            payload.context.scope().add_funcdecl(*funcdecl);
+            payload.context.declaration_scope().add_funcdecl(*funcdecl);
         }
 
         return funcdecl;
     }
 
-    // if we are only interested in the symbol, we are done
+    // the declaration pass takes the signature and then walks the *declarations* of the body, so a
+    // `function` written inside this one joins its block's overload set before any call to it is read.
+    // consumed here rather than by the caller: both of this pass's callers - the file walk and the
+    // struct member walk - want exactly this, and the body is this function's to know the shape of
     if (symbol_only) {
+        if (cursor.is_type(Token::Type::t_open_brace)) {
+            // the frames this opens have to be *exactly* the ones the body pass opens below, or the two
+            // passes read one declaration differently and the first to reach it wins: without the null
+            // self a `function` nested in a method body registers as another method of the owner here,
+            // and the body pass then finds the site already claimed and never puts it in an overload set
+            // at all - the name resolves nowhere. one guard, so the two sites cannot drift apart
+            //
+            // opened before the surface walk, because the block's lexical namespace is named after this
+            // function and the walk mints it
+            AST::FunctionBodyScope body_scope(payload.context, funcdecl);
+
+            Parser::parse_declaration_surface(payload, cursor.current());
+        }
+
         return funcdecl;
     }
 
-    // we already add the function declaration to the scope
-    // in case the function is recursive
-    payload.context.scope().add_funcdecl(*funcdecl);
+    // the declaration goes to the file root, never into the body it was written in. a nested `function`
+    // is a scoped declaration, not a closure: its *name* belongs to the block, while the declaration
+    // itself is an ordinary top-level one. codegen emits bodies from the file root's children and
+    // AST::OwnershipPass resolves drops from the same list, so one left in a body scope would be both
+    // undefined at link time and never ownership-resolved
+    //
+    // added before the body is parsed so a recursive call inside it resolves
+    payload.context.declaration_scope().add_funcdecl(*funcdecl);
 
     // attach all attributes to the function
     auto attributes = payload.context.scope().collect_attributes();
@@ -338,45 +655,9 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
         return funcdecl;
     }
 
-    // if the next token is an open brace, we parse the function body
-    if (!cursor.is_type(Token::Type::t_open_brace)) {
-        payload.collect_unexpected_token(Token::Type::t_open_brace);
-        cursor.try_skip_to_next_statement();
+    if (!parse_function_body(payload, *funcdecl, funcscope)) {
         return nullptr;
     }
 
-    // skip the open brace
-    cursor.skip();
-
-    // push the function scope
-    payload.context.push_scope(funcscope);
-
-    {
-        // the body's returns fit this type, exactly as a variable declaration's initializer fits
-        // the declared variable type. scoped so a declaration nested in the body restores it
-        AST::ReturnTypeScope return_scope(payload.context, funcdecl->return_type);
-
-        // the receiver reaches the body as an ordinary parameter, so the *body* is no longer inside
-        // a struct declaration. cleared rather than left standing so nothing declared in here
-        // inherits a receiver it has no business having
-        AST::SelfScope no_self(payload.context, nullptr, nullptr);
-
-        funcdecl->body = &parse_scope(payload);
-    }
-
-    // we expect a closing brace
-    if (!cursor.is_type(Token::Type::t_close_brace)) {
-        payload.collect_unexpected_token(Token::Type::t_close_brace);
-        cursor.try_skip_to_next_statement();
-        return nullptr;
-    }
-
-    // skip the closing brace
-    cursor.skip();
-
-    // pop the function scope
-    payload.context.pop_scope();
-
-    // payload.context.scope().children.push_back(AST::make_ref(funcdecl));
     return funcdecl;
 }

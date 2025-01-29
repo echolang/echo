@@ -37,9 +37,10 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
         return nullptr;
     }
 
+    auto if_brace = payload.cursor.current();
     payload.cursor.skip(); // skip the opening brace
 
-    ifstatement.if_scope = &parse_scope(payload);
+    ifstatement.if_scope = &parse_scope(payload, nullptr, if_brace);
 
     // expect a closing brace
     if (!payload.cursor.is_type(Token::Type::t_close_brace)) {
@@ -57,6 +58,10 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
         // if the first token is not an if keyword we expect the token to be an opening brace
         // and skip it
         auto is_end_else = !payload.cursor.is_type(Token::Type::t_if);
+        // an `else if` has no brace of its own - the nested if statement is the whole body - so there
+        // is no block here, and therefore no lexical scope to open
+        std::optional<TokenReference> else_brace;
+
         if (is_end_else) {
             if (!payload.cursor.is_type(Token::Type::t_open_brace)) {
                 payload.collect_unexpected_token(Token::Type::t_open_brace);
@@ -64,13 +69,14 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
                 return nullptr;
             }
 
+            else_brace.emplace(payload.cursor.current());
             payload.cursor.skip(); // skip the opening brace
         }
 
         // parse the else scope
         // if there is another if statement aka "else if" it should automatically be parsed as a new if statement
         // instead of an else block building the tree
-        ifstatement.else_scope = &parse_scope(payload);
+        ifstatement.else_scope = &parse_scope(payload, nullptr, else_brace);
 
         // expect a closing brace
         if (is_end_else) {

@@ -14,6 +14,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTDestruction.h"
 #include "AST/ASTPlaceExpr.h"
 
 #include <fmt/core.h>
@@ -30,9 +31,37 @@ namespace AST
 // `!is_implicitly_convertible`. the struct half is what catches `Foo $x = 42;`: the parser used to
 // reject that while typing the literal, but a hint that cannot type a literal is now ignored there,
 // and coerce_value passes a non-primitive destination straight through
+// **does this destination admit a `null`?** null, and the answer, in one place.
+//
+// `check_destination_fits` exempts a null value on purpose - "null answers to its own rules" - and those
+// rules then got spelled at every arrival site that cared. three of the five were missing the callable
+// case, which reached codegen as a null aggregate and either crashed the compiler or produced a value
+// that faults when called
+//
+// answers with the reason rather than a bool, so each site can frame it for the destination it is
+static const char *null_rejection_reason(const ValueType &to)
+{
+    // a borrow is the type that promises it is never null, so seeding one with null defeats the only
+    // guarantee it carries (book/concept/pointers_and_refs_v2.md, "Two pointer types")
+    if (to.is_pointer() && !to.is_nullable()) {
+        return "declare it as a nullable pointer instead";
+    }
+
+    // a callable's *environment* slot is nullable - that is how a non-capturing closure is represented -
+    // but its function slot is not, so there is no null callable that could be tested before calling
+    if (to.is_callable()) {
+        return "a callable has no empty value, so give it a function";
+    }
+
+    return nullptr;
+}
+
 static bool demands_exact_conversion(const ValueType &type)
 {
-    return type.is_pointer() || type.has_complex_type();
+    // a callable joins the list for the same reason a pointer is on it: there is no conversion between
+    // two signatures. leaving it off would let a cast be silently accepted between two callables that
+    // agree on nothing, and the only thing that catches a wrong `fn` slot afterwards is a crash
+    return type.is_pointer() || type.has_complex_type() || type.is_callable();
 }
 
 // names the storage an assignment target denotes, so a const diagnostic can say what the user
@@ -85,16 +114,25 @@ static bool implicit_conversion_is_legal(const ValueType &from, const ValueType 
 // expression the user actually wrote. `null` is the case that needs it: the null-specific rules
 // all test for the raw n_null tag, and a cast inserted to reconcile the argument with its
 // parameter hides that tag behind an n_type_cast
-static ExprNode *strip_implicit_casts(ExprNode *expr)
+static const ExprNode *strip_implicit_casts(const ExprNode *expr)
 {
     while (expr != nullptr && expr->get_node_type() == NodeType::n_type_cast) {
-        auto *cast = static_cast<TypeCastNode *>(expr);
+        const auto *cast = static_cast<const TypeCastNode *>(expr);
         if (!cast->is_implcit) {
             break;
         }
         expr = cast->expr;
     }
     return expr;
+}
+
+// "did the user write null here" - the entry condition every null rule shares, paired one to one
+// with null_rejection_reason. spelled once so an arrival site cannot get the rule right and the
+// question wrong: the sites that skipped the strip judged a cast-wrapped null differently
+static bool is_written_null(const ExprNode *expr)
+{
+    const ExprNode *written = strip_implicit_casts(expr);
+    return written != nullptr && written->get_node_type() == NodeType::n_null;
 }
 
 TypeChecker::TypeChecker(Bundle &bundle) :
@@ -144,6 +182,15 @@ void TypeChecker::visitReturn(ReturnNode &node)
         const ValueType actual = node.expr->result_type();
 
         check_destination_fits(Destination::t_return, declared, *node.expr, node.token_return.value());
+
+        // and the same for a returned null, which check_destination_fits also waves through
+        if (is_written_null(node.expr)) {
+            if (const char *reason = null_rejection_reason(declared)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_return.value()),
+                    fmt::format("cannot return null as '{}' - {}", declared.get_type_desciption(), reason));
+            }
+        }
 
         // the storage a local names is gone before the caller can read it, so handing back its
         // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes")
@@ -248,6 +295,45 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
     RecursiveVisitor::visit_instanceof_expr(node);
 }
 
+void TypeChecker::check_call_argument(
+    ExprNode *argument,
+    const ValueType &param_type,
+    size_t arg_number,
+    const std::string &callee_name,
+    const TokenReference &at)
+{
+    // the declaration site already refuses to seed a non-nullable parameter with null - the call site
+    // has to refuse too, or the promise only holds for locals. this was a segfault the moment the
+    // callee read through it
+    if (is_written_null(argument)) {
+        if (const char *reason = null_rejection_reason(param_type)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(at),
+                fmt::format("argument {} of '{}' is '{}', which cannot be null - {}",
+                    arg_number, callee_name, param_type.get_type_desciption(), reason));
+        }
+        return;
+    }
+
+    // a mismatched argument that the parser/monomorphizer could not reconcile with an implicit cast is
+    // caught here directly (e.g. two distinct struct types). one that *was* wrapped in an implicit cast
+    // is validated in visitTypeCast instead, where the illegal conversion actually lives
+    //
+    // the argument as written is passed, so this scores it exactly as the matcher did
+    const ValueType arg_type = argument->result_type();
+
+    if (!arg_assignable_to(arg_type, argument, param_type)) {
+        _collector.collect_issue<Issue::ArgumentTypeMismatch>(
+            code_ref_for(at),
+            fmt::format(
+                "Argument {} of '{}' expects type '{}' but got '{}'",
+                arg_number,
+                callee_name,
+                param_type.get_type_desciption(),
+                arg_type.get_type_desciption()));
+    }
+}
+
 void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
     // generic templates are resolved to concrete instances by the monomorphizer; only a
@@ -263,37 +349,13 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 if (!node.arguments[i] || !params[i]->has_type()) {
                     continue;
                 }
-                // a mismatched argument that the parser/monomorphizer could not reconcile with an
-                // implicit cast is caught here directly (e.g. two distinct struct types). arguments
-                // that were wrapped in an implicit cast are validated in visitTypeCast instead,
-                // where the illegal conversion actually lives
-                ValueType arg_type = node.arguments[i]->result_type();
-                ValueType param_type = params[i]->type();
 
-                // a borrow promises it is never null, and the declaration site already refuses
-                // to seed one with null - the call site has to refuse too, or the promise only
-                // holds for locals. this was a segfault the moment the callee read through it
-                ExprNode *written = strip_implicit_casts(node.arguments[i]);
-                if (written != nullptr && written->get_node_type() == NodeType::n_null
-                    && param_type.is_pointer() && !param_type.is_nullable()) {
-                    _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(node.token_function_name),
-                        fmt::format("argument {} of '{}' is '{}', which cannot be null",
-                            node.decl->user_arg_number(i), node.decl->func_name(), param_type.get_type_desciption()));
-                    continue;
-                }
-
-                // the argument as written is passed, so this scores it exactly as the matcher did
-                if (!arg_assignable_to(arg_type, node.arguments[i], param_type)) {
-                    _collector.collect_issue<Issue::ArgumentTypeMismatch>(
-                        code_ref_for(node.token_function_name),
-                        fmt::format(
-                            "Argument {} of '{}' expects type '{}' but got '{}'",
-                            node.decl->user_arg_number(i),
-                            node.decl->func_name(),
-                            param_type.get_type_desciption(),
-                            arg_type.get_type_desciption()));
-                }
+                check_call_argument(
+                    node.arguments[i],
+                    params[i]->type(),
+                    node.decl->user_arg_number(i),
+                    node.decl->func_name(),
+                    node.token_function_name);
             }
         }
     }
@@ -327,6 +389,14 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     fmt::format("'echo' has no way to print a '{}' - print its members instead",
                         type.get_type_desciption()));
             }
+            else if (type.is_callable()) {
+                // reported here for the reason the two above are: ExprCodegen has no printf conversion
+                // for it and throws an *internal compiler error*, which is not the user's mistake to read
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_function_name),
+                    fmt::format("'echo' has no way to print a '{}' - call it and print the result",
+                        type.get_type_desciption()));
+            }
         }
     }
 
@@ -336,6 +406,76 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     _context_token = &node.token_function_name;
     RecursiveVisitor::visitFunctionCallExpr(node);
     _context_token = prev;
+}
+
+void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
+{
+    const ValueType callee_type = node.callee_type();
+
+    // the callee's *signature* is the parameter list here - there is no declaration to walk. the shape
+    // ("this is not callable") and the arity are the parser's, reported where the call was written; what
+    // is left is whether each argument reaches its parameter, which is the same question a direct call
+    // asks and the same one answer
+    if (callee_type.is_callable()) {
+        const auto &signature = callee_type.signature();
+
+        if (node.arguments.size() == signature.parameter_types.size()) {
+            // the callee is named by its *type* - there is no declaration to take a name from. built
+            // once: a callable's description recurses through its return and every parameter
+            const std::string callee_name = callee_type.get_type_desciption();
+
+            for (size_t i = 0; i < node.arguments.size(); i++) {
+                if (node.arguments[i] == nullptr) {
+                    continue;
+                }
+
+                // an indirect call has no implicit parameter, so the position a reader counts to is the
+                // index
+                check_call_argument(
+                    node.arguments[i],
+                    signature.parameter_types[i],
+                    i + 1,
+                    callee_name,
+                    node.token);
+            }
+        }
+    }
+
+    RecursiveVisitor::visit_indirect_call_expr(node);
+}
+
+void TypeChecker::visit_closure_expr(ClosureExprNode &node)
+{
+    // capture is by value, and a copy of an owning value is a whole taxonomy - a retain, a copy
+    // constructor, or nothing that exists at all. the environment's teardown is uniform precisely
+    // because it holds no owner: one `__eco_release_env` thunk and no deinit, so an owner admitted here
+    // is a leak rather than a wrong destructor. see todo/A27
+    //
+    // here rather than at the capture site in the parser, where the read is written: the captured
+    // variable's type is not final until the monomorphizer has settled the call it was inferred from,
+    // so `$b = Box<int32>(5)` was still a `Box<T>` when the parser saw it - and a bare type parameter
+    // owns nothing, which is how an owning capture used to pass unnoticed
+    if (node.environment_type != nullptr) {
+        for (size_t i = 0; i < node.environment_type->property_count(); i++) {
+            const ComplexType::Property &property = node.environment_type->get_property(i);
+
+            if (!needs_destruction(property.type)) {
+                continue;
+            }
+
+            // the property name *is* the variable's name - it is what the body's `$__env->name` read
+            // resolves through - so the diagnostic can name the capture without a second list to keep
+            // in step. located at the literal, which is where the copy would be made
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token),
+                fmt::format(
+                    "'{}' is a '{}', which owns a resource. Capturing an owning value is not supported "
+                    "yet - pass it as a parameter instead.",
+                    property.name, property.type.get_type_desciption()));
+        }
+    }
+
+    RecursiveVisitor::visit_closure_expr(node);
 }
 
 void TypeChecker::visitTypeCast(TypeCastNode &node)
@@ -498,7 +638,7 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     // (book/concept/pointers_and_refs_v2.md, "Two pointer types"), and a struct slot takes nothing
     // but that struct. null answers to its own rules, and an undeterminable type to other diagnostics
     if (to.is_void() || from.is_void()
-        || value.get_node_type() == NodeType::n_null
+        || is_written_null(&value)
         || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
         || is_implicitly_convertible(from, to)) {
         return;
@@ -551,7 +691,19 @@ void TypeChecker::visit_assign(AssignNode &node)
     // pointee's slot. re-seating is spelled `$p:$ = &$b`, whose target *is* the slot
     // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
     if (node.target && node.value_expr) {
-        check_destination_fits(Destination::t_assignment, node.target->result_type(), *node.value_expr, node.token_assign);
+        const ValueType target_type = node.target->result_type();
+
+        // check_destination_fits waves a null value through, so the rule for one is asked here
+        if (is_written_null(node.value_expr)) {
+            if (const char *reason = null_rejection_reason(target_type)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(node.token_assign),
+                    fmt::format("cannot assign null to '{}' - {}",
+                        target_type.get_type_desciption(), reason));
+            }
+        }
+
+        check_destination_fits(Destination::t_assignment, target_type, *node.value_expr, node.token_assign);
     }
 
     RecursiveVisitor::visit_assign(node);
@@ -572,14 +724,12 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
         check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
     }
 
-    // a borrow is the type that promises it is never null, so seeding one with null defeats
-    // the only guarantee it carries. use ptr<T> when the absence case is real (doc L59)
-    if (node.init_expr && node.init_expr->get_node_type() == NodeType::n_null
-        && node.has_type() && node.type().is_pointer() && !node.type().is_nullable()) {
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(node.token_varname),
-            fmt::format("'{}' cannot be null - declare it as a nullable pointer instead",
-                node.type().get_type_desciption()));
+    if (node.has_type() && is_written_null(node.init_expr)) {
+        if (const char *reason = null_rejection_reason(node.type())) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_varname),
+                fmt::format("'{}' cannot be null - {}", node.type().get_type_desciption(), reason));
+        }
     }
 
     // locate any implicit cast in the initializer at the declared variable

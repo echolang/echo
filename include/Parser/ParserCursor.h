@@ -56,6 +56,17 @@ namespace Parser
             return _index >= range_size();
         }
 
+        inline bool is_empty() const {
+            return range_size() == 0;
+        }
+
+        // the last token of the range. what a diagnostic about *running out* of input points at, since
+        // there is no current token to name - see Payload::collect_unexpected_token
+        inline TokenReference last() const {
+            assert(!is_empty());
+            return tokens[range_size() - 1];
+        }
+
         inline bool is_valid(size_t index) const {
             return index < range_size();
         }

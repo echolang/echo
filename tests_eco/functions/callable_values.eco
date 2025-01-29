@@ -1,0 +1,110 @@
+// the callable type in every position it can appear, and every way a callable value can be reached.
+// the *semantics* live here rather than in the unit tests, which can only assert tree shape
+
+// -- positions ---------------------------------------------------------------
+
+// a parameter, and calling through it
+function apply(function<int32(int32)> $f, int32 $v) : int32
+{
+    return $f($v);
+}
+
+echo apply(function(int32 $a) : int32 { return $a * 2; }, 21);
+
+// a return type
+function pick() : function<int32(int32)>
+{
+    return function(int32 $a) : int32 { return $a + 1; };
+}
+
+function<int32(int32)> $picked = pick();
+echo $picked(41);
+
+// a `const` local
+const function<int32()> $frozen = function() : int32 { return 42; };
+echo $frozen();
+
+// a borrow parameter - one machine word either way, so nothing special happens. taken of a mutable
+// local, since a borrow of a `const` one is `const T&` and does not convert (todo/A25)
+function<int32()> $plain = function() : int32 { return 42; };
+
+function apply_ref(function<int32()>& $f) : int32
+{
+    return $f();
+}
+
+echo apply_ref($plain);
+
+// a pointer to one, which reads through to the callable first like every other pointer read
+ptr<function<int32()>> $via = &$plain;
+echo $via();
+
+// a struct property, called through the property rather than as a method
+struct Handler
+{
+    function<int32(int32)> $op;
+    int32 $tag;
+}
+
+Handler $h = Handler(function(int32 $a) : int32 { return $a * 2; }, 7);
+echo $h->op(21);
+echo $h->tag;
+
+// a class property
+class Cell
+{
+    function<int32()> $get;
+}
+
+Cell $c = Cell(function() : int32 { return 42; });
+echo $c->get();
+
+// a generic argument
+struct Box<T> { T $value; }
+
+Box<function<int32()>> $boxed = Box<function<int32()>>(function() : int32 { return 42; });
+echo $boxed->value();
+
+// a nested callable type: a callable that returns a callable
+function<function<int32()>()> $maker = function() : function<int32()> {
+    return function() : int32 { return 42; };
+};
+
+function<int32()> $made = $maker();
+echo $made();
+
+// -- fitting -----------------------------------------------------------------
+
+// an argument is fitted to its parameter through the one conversion table, so a narrower integer
+// widens on the way in exactly as it does at a direct call
+function<int32(int64)> $widen = function(int64 $a) : int32 { return 42; };
+int32 $small = 1;
+echo $widen($small);
+
+function<float64(float64)> $scale = function(float64 $a) : float64 { return $a * 2.0; };
+echo $scale(21);
+
+// -- generics ----------------------------------------------------------------
+
+// a signature substitutes structurally, so `T` is inferred through a callable parameter
+function apply_generic<T>(function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+echo apply_generic(function(int32 $a) : int32 { return $a + 1; }, 41);
+echo apply_generic(function(float64 $a) : float64 { return $a * 2.0; }, 21.0);
+
+// and through a method of a generic owner
+struct Twice<T>
+{
+    T $value;
+
+    function run(function<T(T)> $f) : T
+    {
+        return $f($f($this->value));
+    }
+}
+
+Twice<int32> $t = Twice<int32>(10);
+echo $t->run(function(int32 $a) : int32 { return $a + 1; });

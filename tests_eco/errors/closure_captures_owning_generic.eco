@@ -1,0 +1,38 @@
+// the same refusal as closure_captures_owning_value.eco, on a value whose type is only known to own
+// something after monomorphization: `Box<int32>` owns a resource because `Box<T>` has a destructor, and
+// the captured variable is not typed `Box<int32>` until the fixpoint has settled the call it was
+// inferred from
+//
+// which is why the question is asked in AST::TypeChecker and not at the capture site: the parser sees
+// `Box<T>` here, and a bare type parameter owns nothing
+
+struct Box<T>
+{
+    T $value;
+
+    constructor(T $v)
+    {
+        $this->value = $v;
+    }
+
+    destructor()
+    {
+        echo 1;
+    }
+
+    function get() : T
+    {
+        return $this->value;
+    }
+}
+
+function outer() : int32
+{
+    $b = Box<int32>(5);
+
+    function<int32()> $f = function() : int32 { return $b->get(); };
+
+    return $f();
+}
+
+echo outer();

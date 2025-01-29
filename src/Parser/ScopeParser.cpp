@@ -2,6 +2,7 @@
 
 #include "AST/VarDeclNode.h"
 #include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 
 #include "Parser/VarDeclParser.h"
 #include "Parser/EchoPrintParser.h"
@@ -15,6 +16,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
+#include "Parser/ExprParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -33,7 +35,8 @@ void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &sco
     cursor.skip(); // the semicolon
 }
 
-AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *into)
+AST::ScopeNode & Parser::parse_scope(
+    Parser::Payload &payload, AST::ScopeNode *into, std::optional<TokenReference> block_token)
 {
     auto &cursor = payload.cursor;
     auto &context = payload.context;
@@ -42,11 +45,18 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
 
     context.push_scope(scope_node);
 
+    // the block's declaration scope. minted for every block rather than only for one that turns out to
+    // hold a declaration: a call written *above* the declaration in the same block is stamped with
+    // whatever namespace is current when the call is parsed, so a namespace that appeared halfway
+    // through the block would leave the earlier call unable to see the later declaration
+    AST::LexicalScope lexical_scope(context, payload.collector.namespaces, block_token);
+
     while (!cursor.is_done()) {
         // deep scope
         if (cursor.is_type(Token::Type::t_open_brace)) {
+            auto nested_brace = cursor.current();
             cursor.skip();
-            context.scope().add_child_scope(parse_scope(payload));
+            context.scope().add_child_scope(parse_scope(payload, nullptr, nested_brace));
 
             // next token needs to be a closing brace
             if (!cursor.is_type(Token::Type::t_close_brace)) {
@@ -63,7 +73,7 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
         }
-        else if (cursor.is_type(Token::Type::t_function)) {
+        else if (starts_funcdecl(cursor)) {
             parse_funcdecl(payload);
         }
         else if (starts_typedecl(cursor)) {
@@ -110,6 +120,14 @@ AST::ScopeNode & Parser::parse_scope(Parser::Payload &payload, AST::ScopeNode *i
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
         ) {
             parse_varexpr(payload, &scope_node);
+        }
+
+        // neither branch above claims a call through a callable *value*: it is not a declaration, and
+        // starts_call_statement is anchored on an identifier
+        else if (starts_indirect_call_statement(cursor)) {
+            if (auto *call = parse_expr(payload, nullptr)) {
+                finish_call_statement(payload, scope_node, call);
+            }
         }
 
         // a call used as a statement. ordered after the vardecl branch above so that

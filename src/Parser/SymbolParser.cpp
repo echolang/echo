@@ -4,6 +4,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExternParser.h"
+#include "Parser/ScopeParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -41,7 +42,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // then find the *first* node and parse_typedecl reports the redeclaration at the duplicate's own
         // name token, which is also where the body-skip recovery lives. this pass has no such
         // recovery, and its detection is a strict subset of parse_typedecl's anyway
-        auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.current_namespace);
+        auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
         if (existing != nullptr && existing->node.get_ptr<AST::TypeDeclNode>() != nullptr) {
             continue;
         }
@@ -49,7 +50,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // the kind is settled here, at the only place the node is created. parse_typedecl reuses this
         // node in both later passes, so it never has to re-derive it from the keyword
         auto &type_node = payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
-        type_node.set_namespace(payload.context.current_namespace);
+        type_node.set_namespace(payload.context.declaring_namespace());
 
         // the type parameters, not only the name: for a generic type the arity is part of its
         // identity, and parse_generic_application reads the arity off the template to check an
@@ -63,7 +64,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // Box<T> would intern twice and the two would compare unequal
         Parser::declare_type_parameters(payload, type_node.complex_type(), parse_type_param_list(payload));
 
-        payload.context.current_namespace->push_symbol(std::make_unique<AST::Symbol>(&type_node));
+        payload.context.declaring_namespace()->push_symbol(std::make_unique<AST::Symbol>(&type_node));
     }
 }
 
@@ -77,33 +78,58 @@ void Parser::parse_symbols(Parser::Payload &payload)
     auto &declaration_scope = payload.context.emplace_node<AST::ScopeNode>();
     payload.context.push_scope(declaration_scope);
 
-    while (!payload.cursor.is_done()) {
+    parse_declaration_surface(payload);
+
+    payload.context.pop_scope();
+}
+
+void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<TokenReference> block_token)
+{
+    auto &cursor = payload.cursor;
+
+    // a block's declarations belong to the block. minted here as well as in parse_scope, on the same
+    // brace, so both passes reach one namespace object: this pass is where a declaration actually joins
+    // its overload set, and the body pass's calls have to look it up in the same place
+    AST::LexicalScope lexical_scope(payload.context, payload.collector.namespaces, block_token);
+
+    if (block_token.has_value()) {
+        cursor.skip(); // the opening brace
+    }
+
+    while (!cursor.is_done()) {
         // functions do not become namespace symbols: a symbol slot holds one node per name, and a
         // name denotes an overload *set*. parse_funcdecl registers them in
         // Collector::functions instead, which is also why `struct Foo` and its constructor `Foo`
         // no longer fight over the same slot
-        if (payload.cursor.is_type(Token::Type::t_function)) {
+        if (starts_funcdecl(cursor)) {
             parse_funcdecl(payload);
         }
-        else if (starts_typedecl(payload.cursor)) {
+        else if (starts_typedecl(cursor)) {
             // the name is already a symbol - parse_type_names pushed it, over every file, before
             // this pass started. that is what lets the declarations below name a type from any file
             parse_typedecl(payload);
         }
-        else if (payload.cursor.is_type(Token::Type::t_extern)) {
+        else if (cursor.is_type(Token::Type::t_extern)) {
             // walked in this pass too, so the node it produces already knows it is extern. otherwise
             // a cross-module call would resolve to this node and mangle the Echo name while codegen
             // emitted the raw C symbol - an undefined symbol at link time. registration happens
             // inside parse_funcdecl, same as any other function
             parse_extern_block(payload);
         }
-        else if (payload.cursor.is_type(Token::Type::t_namespace)) {
+        else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
         }
+        else if (cursor.is_type(Token::Type::t_open_brace)) {
+            // a bare nested block, which is its own declaration scope - the body pass mirrors this in
+            // parse_scope, keyed on the same brace
+            parse_declaration_surface(payload, cursor.current());
+        }
+        else if (block_token.has_value() && cursor.is_type(Token::Type::t_close_brace)) {
+            cursor.skip(); // the region's own closing brace
+            return;
+        }
         else {
-            payload.cursor.skip();
+            cursor.skip();
         }
     }
-
-    payload.context.pop_scope();
 }

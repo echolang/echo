@@ -25,7 +25,7 @@ namespace AST
         ~NamespaceNode() {};
 
         const std::string node_description() override { 
-            return "ns<" + ast_namespace->name() + ">";
+            return "ns<" + ast_namespace->display_name() + ">";
         }
 
         void accept(Visitor &visitor) override {

@@ -1,0 +1,15 @@
+// a file-scope variable is a local of the implicit entry point, so reading one from a function body
+// crosses a function boundary exactly as reading another function's local does - and is refused for the
+// same reason: the alloca belongs to a different llvm::Function
+//
+// it gets its own phrasing, because "declared in an enclosing function" would name a function the source
+// does not contain
+
+int32 $at_file_scope = 5;
+
+function reader() : int32
+{
+    return $at_file_scope;
+}
+
+echo reader();

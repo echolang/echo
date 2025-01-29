@@ -369,6 +369,35 @@ void TypeLowering::build_struct_maps(const AST::Bundle &bundle)
     }
 }
 
+llvm::StructType *TypeLowering::callable_llvm_type()
+{
+    auto *ptr_type = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    // named rather than literal so the IR reads, and looked up before creating so every unit and every
+    // signature share one type - `getTypeByName` is what makes the second ask return the first answer
+    if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, "eco.callable")) {
+        return existing;
+    }
+
+    return llvm::StructType::create(*_ctx.llvm_context, { ptr_type, ptr_type }, "eco.callable");
+}
+
+llvm::FunctionType *TypeLowering::get_llvm_function_type(
+    const AST::CallableSignature &signature, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    std::vector<llvm::Type *> param_types;
+    param_types.reserve(signature.parameter_types.size() + 1);
+
+    // the environment first, always - see the header. a non-capturing target ignores it
+    param_types.push_back(llvm::PointerType::get(*_ctx.llvm_context, 0));
+
+    for (const auto &param : signature.parameter_types) {
+        param_types.push_back(get_llvm_type(param, cmp_unit));
+    }
+
+    return llvm::FunctionType::get(get_llvm_type(signature.return_type, cmp_unit), param_types, false);
+}
+
 llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
     llvm::Type *base_type = nullptr;
@@ -386,6 +415,17 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     // instead would mean every `ptr<Foo>` and every borrow parameter dragged the whole layout in
     if (type.is_class()) {
         return llvm::PointerType::get(*_ctx.llvm_context, 0);
+    }
+
+    // a callable is a *fat* pointer, `{ ptr fn, ptr env }`. two words rather than one because a
+    // non-capturing callable - which includes every plain function used as a value - must not have to
+    // allocate an environment just to be callable; its env slot is simply null. and the env has to be
+    // there at all because a capturing closure's storage cannot live in the function pointer
+    //
+    // structural, so this type is built rather than looked up: two spellings of one signature are one
+    // Echo type and must be one llvm::Type, which an anonymous StructType gives for free
+    if (type.is_callable()) {
+        return callable_llvm_type();
     }
 
     if (type.is_primitive()) {

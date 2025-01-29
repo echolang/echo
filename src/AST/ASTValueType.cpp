@@ -215,7 +215,11 @@ std::string AST::ComplexType::mangled_token() const
         return "0";
     }
 
-    std::vector<std::string> segments = ast_namespace ? ast_namespace->path_segments() : std::vector<std::string>{};
+    // the mangling segments, for the same reason mangle_function_name takes them: this token is a
+    // symbol identity, and a lexical namespace's display name is shared by every block of one
+    // function. the display path for a ComplexType is namespaced_name(), just above
+    std::vector<std::string> segments =
+        ast_namespace ? ast_namespace->mangling_segments() : std::vector<std::string>{};
 
     // unqualified types stay a plain token, the `N...E` wrapper only appears when there
     // actually is a namespace path to separate from the name
@@ -271,7 +275,19 @@ std::string AST::ValueType::get_mangled_name() const
     } else if (has_complex_type()) {
         mangled_name += "C"; // complex type
         mangled_name += get_complex_type()->mangled_token();
+    } else if (is_callable()) {
+        // `F` <return> <param>... `E`, self delimiting the way mangled_token's `I...E` is: each nested
+        // type mangles itself and the terminator says where the parameter list ends. without a distinct
+        // form here every callable shared the `UA` unknown token, so `function<void()>` and
+        // `function<int32(int32)>` produced one symbol
+        mangled_name += "F";
+        mangled_name += _signature->return_type.get_mangled_name();
+        for (const auto &param : _signature->parameter_types) {
+            mangled_name += param.get_mangled_name();
+        }
+        mangled_name += "E";
     } else {
+        assert(kind == ValueTypeKind::t_unknown && "a ValueType kind with no mangling would share the unknown token");
         mangled_name += "U"; // unknown type
         mangled_name += "A";
     }
@@ -310,6 +326,16 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + _type_param->name;
     }
 
+    if (is_callable()) {
+        std::string buffer = prefix + "function<" + _signature->return_type.get_type_desciption() + "(";
+
+        for (size_t i = 0; i < _signature->parameter_types.size(); i++) {
+            buffer += (i > 0 ? ", " : "") + _signature->parameter_types[i].get_type_desciption();
+        }
+
+        return buffer + ")>";
+    }
+
     if (has_complex_type()) {
         ComplexType *ct = get_complex_type();
         if (!ct->name.has_value()) {
@@ -324,6 +350,23 @@ std::string AST::ValueType::get_type_desciption() const
 
     // handle unknown or other types
     return prefix + "[unknown]";
+}
+
+AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
+    const std::string &name, AST::ComplexTypeKind kind, const AST::Namespace *ns)
+{
+    auto owned = std::make_unique<ComplexType>();
+    ComplexType *type = owned.get();
+    _owned.push_back(std::move(owned));
+
+    type->name = name;
+    type->kind = kind;
+    type->ast_namespace = ns;
+
+    // deliberately *not* entered into `_instantiations`: it instantiates no template, so there is no key
+    // it could be interned under, and nothing will ever ask for it by (template, args) again. the caller
+    // holds the only handle, which is exactly the ownership a closure's environment wants
+    return type;
 }
 
 AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args)
@@ -478,6 +521,22 @@ bool AST::contains_type_param(const ValueType &type)
         return contains_type_param(type.pointee());
     }
 
+    // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
+    // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away
+    if (type.is_callable()) {
+        if (contains_type_param(type.signature().return_type)) {
+            return true;
+        }
+
+        for (const auto &param : type.signature().parameter_types) {
+            if (contains_type_param(param)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // a generic application is unresolved if any of its arguments still is
     if (type.has_complex_type()) {
         ComplexType *ct = type.get_complex_type();
@@ -505,6 +564,29 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
     if (type.is_pointer()) {
         ValueType inner = substitute_type(type.pointee(), subst, registry);
         ValueType result = ValueType::make_pointer(inner, type.is_nullable());
+        return type.is_const() ? ValueType::make_const(result) : result;
+    }
+
+    // and structurally through a signature, for the same reason - returning it unchanged would leave
+    // `function<void(T)>` generic forever inside an instantiated body
+    if (type.is_callable()) {
+        // a concrete signature substitutes to itself, and rebuilding one mints a fresh
+        // shared_ptr that then compares structurally rather than by identity. asked here rather
+        // than at the top: the arms above are cheap to redo, a signature is not
+        if (!contains_type_param(type)) {
+            return type;
+        }
+
+        std::vector<ValueType> params;
+        params.reserve(type.signature().parameter_types.size());
+
+        for (const auto &param : type.signature().parameter_types) {
+            params.push_back(substitute_type(param, subst, registry));
+        }
+
+        ValueType result = ValueType::make_callable(
+            substitute_type(type.signature().return_type, subst, registry), std::move(params));
+
         return type.is_const() ? ValueType::make_const(result) : result;
     }
 
@@ -536,4 +618,24 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
 
     // primitives and already-concrete types are unchanged
     return type;
+}
+// structural, and recursive through every part: this is what makes two independently written
+// `function<void(int32)>`s one type, which is the whole point of the callable kind being structural
+bool AST::CallableSignature::operator==(const AST::CallableSignature &other) const
+{
+    if (parameter_types.size() != other.parameter_types.size()) {
+        return false;
+    }
+
+    if (!(return_type == other.return_type)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < parameter_types.size(); i++) {
+        if (!(parameter_types[i] == other.parameter_types[i])) {
+            return false;
+        }
+    }
+
+    return true;
 }

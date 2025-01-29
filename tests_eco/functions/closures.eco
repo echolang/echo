@@ -1,0 +1,248 @@
+// `function<R(P...)>` is the type of a callable value, and `function(...) { ... }` written where a value
+// is expected is a closure literal. a closure captures what it reads from the enclosing frame, by value
+
+// a closure that captures nothing is just a function nobody can name. it allocates no environment at
+// all, which is why a callable is a fat pointer `{ fn, env }` rather than a handle to one
+function<int32(int32)> $inc = function(int32 $a) : int32 { return $a + 1; };
+echo $inc(41);
+
+// callables are ordinary values: pass them, return them, reassign them
+function apply(function<int32(int32)> $f, int32 $v) : int32
+{
+    return $f($v);
+}
+
+echo apply($inc, 1);
+echo apply(function(int32 $a) : int32 { return $a * 2; }, 21);
+
+// a closure with no return type returns void, exactly as a declaration with none does
+function<void()> $greet = function() { echo 7; };
+$greet();
+
+// capture. the value is copied into the closure's environment where the closure is *created*, so a
+// later write to the original is not observed - and the closure is always safe to outlive the frame
+function captures_by_value() : int32
+{
+    int32 $n = 5;
+    function<int32()> $read = function() : int32 { return $n; };
+
+    $n = 99;
+
+    return $read();
+}
+
+echo captures_by_value();
+
+// which is what makes this work: the environment outlives `make`
+function make(int32 $seed) : function<int32(int32)>
+{
+    return function(int32 $x) : int32 { return $x + $seed; };
+}
+
+function<int32(int32)> $add10 = make(10);
+echo $add10(32);
+
+// several captures, and one variable read more than once is captured once
+function two_captures() : int32
+{
+    int32 $a = 10;
+    int32 $b = 32;
+
+    function<int32()> $sum = function() : int32 { return $a + $b + $a - $a; };
+
+    return $sum();
+}
+
+echo two_captures();
+
+// captures live alongside the parameters the caller passes
+function mixed() : int32
+{
+    int32 $base = 100;
+
+    function<int32(int32,int32)> $f = function(int32 $x, int32 $y) : int32 { return $base + $x + $y; };
+
+    return $f(1, 2);
+}
+
+echo mixed();
+
+// the environment is reference counted, so a copy shares it and both give it back
+function shared() : int32
+{
+    int32 $n = 21;
+
+    function<int32()> $a = function() : int32 { return $n; };
+    function<int32()> $b = $a;
+
+    return $a() + $b();
+}
+
+echo shared();
+
+// and a reassignment releases the environment the variable held before
+function reassigned() : int32
+{
+    int32 $x = 1;
+    int32 $y = 41;
+
+    function<int32()> $f = function() : int32 { return $x; };
+    $f = function() : int32 { return $y; };
+
+    return $f() + 1;
+}
+
+echo reassigned();
+
+// a callable stored in a property is callable through it - a call on a *value*, not a method call
+struct Handler
+{
+    function<int32(int32)> $op;
+}
+
+Handler $h = Handler(function(int32 $a) : int32 { return $a * 2; });
+echo $h->op(21);
+
+// and through a pointer to one, which reads to the callable first like every other pointer read
+function<int32()> $direct = function() : int32 { return 42; };
+ptr<function<int32()>> $via = &$direct;
+echo $via();
+
+// an argument is fitted to its parameter through the same conversion table every other destination
+// uses - the parameter types come off the signature, since there is no declaration to walk
+function<float64(float64)> $scale = function(float64 $a) : float64 { return $a * 2.0; };
+echo $scale(21);
+
+// generic inference reaches through a callable parameter, because a signature substitutes structurally
+function apply_generic<T>(function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+echo apply_generic(function(int32 $a) : int32 { return $a + 1; }, 41);
+
+// -- more capture shapes -----------------------------------------------------
+
+// two closures capturing the same variable each get their own copy of it
+function two_closures() : int32
+{
+    int32 $n = 21;
+
+    function<int32()> $a = function() : int32 { return $n; };
+    function<int32()> $b = function() : int32 { return $n; };
+
+    return $a() + $b();
+}
+
+echo two_closures();
+
+// a captured pointer is copied like anything else - the *pointer* is the value, so what it addresses
+// is still shared
+function captures_a_pointer() : int32
+{
+    int32 $n = 42;
+    ptr<int32> $p = &$n;
+
+    function<int32()> $f = function() : int32 { return $p; };
+
+    return $f();
+}
+
+echo captures_a_pointer();
+
+// a struct that owns nothing is copied into the environment whole
+struct Point { int32 $x; int32 $y; }
+
+function captures_a_struct() : int32
+{
+    Point $p = Point(20, 22);
+
+    function<int32()> $f = function() : int32 { return $p->x + $p->y; };
+
+    return $f();
+}
+
+echo captures_a_struct();
+
+// a closure body is a body like any other, so a nested `function` inside one is block scoped there
+function<int32()> $with_helper = function() : int32 {
+    function helper(int32 $a) : int32 { return $a * 2; }
+    return helper(21);
+};
+
+echo $with_helper();
+
+// closures in a loop: one environment per iteration, each capturing that iteration's value
+int32 $i = 0;
+while ($i < 3) {
+    function<int32()> $step = function() : int32 { return $i * 10; };
+    echo $step();
+    $i = $i + 1;
+}
+
+// a closure written in a constructor body, and in a destructor body
+struct Built
+{
+    int32 $v;
+
+    constructor(int32 $seed)
+    {
+        function<int32()> $f = function() : int32 { return 42; };
+        $this->v = $f();
+    }
+
+    destructor()
+    {
+        function<int32()> $bye = function() : int32 { return 9; };
+        echo $bye();
+    }
+}
+
+function built_scope() : int32
+{
+    Built $b = Built(0);
+    return $b->v;
+}
+
+echo built_scope();
+
+// a captured variable's type is re-derived once the monomorphizer has settled the call it was inferred
+// from, so the environment holds `Box<int32>` and the body's `->get()` resolves against the instance -
+// not against the template the parser saw when the capture was made
+struct Box<T>
+{
+    T $value;
+
+    constructor(T $v) { $this->value = $v; }
+
+    function get() : T { return $this->value; }
+}
+
+function captures_a_generic() : int32
+{
+    $b = Box<int32>(42);
+
+    function<int32()> $f = function() : int32 { return $b->get(); };
+
+    return $f();
+}
+
+echo captures_a_generic();
+
+// a call through a callable property stands on its own as a statement, exactly as a method call does -
+// there is no `=` owed. the value it returns is simply discarded
+Handler $discarded = Handler(function(int32 $a) : int32 { echo $a; return $a; });
+$discarded->op(42);
+
+// a closure passed to another closure
+function closure_into_closure() : int32
+{
+    function<int32()> $twenty_one = function() : int32 { return 21; };
+
+    function<int32(function<int32()>)> $twice =
+        function(function<int32()> $g) : int32 { return $g() + $g(); };
+
+    return $twice($twenty_one);
+}
+
+echo closure_into_closure();

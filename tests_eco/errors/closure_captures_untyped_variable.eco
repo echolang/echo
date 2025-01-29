@@ -1,0 +1,17 @@
+// a declaration whose inference failed has no type at all, and capturing it must not go looking for one:
+// `capture_variable` reads unknown rather than through a null type node, which used to abort the compiler
+// before a single diagnostic was printed
+//
+// the two issues below are the real ones - the capture adds nothing, because "no information" is what
+// every pass under the parser already reads an unresolved type as
+
+class Node
+{
+    int32 $v;
+}
+
+$n = Node();
+
+function<int32()> $f = function() : int32 { return $n->v; };
+
+echo $f();

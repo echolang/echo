@@ -22,6 +22,19 @@ namespace Parser
     void parse_type_names(Payload &payload);
 
     void parse_symbols(Payload &payload);
+
+    // the declarations of a region, and only the declarations - statements are stepped over. the one
+    // walk the declaration pass uses, whether the region is a whole file or one `{ }` block, so the two
+    // cannot disagree about what a declaration pass collects
+    //
+    // `block_token` is the brace the region opens at, and passing it does two things: the region gets
+    // that block's lexical namespace, so a declaration inside it belongs to the block, and the walk
+    // stops at the matching `}` instead of at end of file. nullopt is a whole file
+    //
+    // it *descends* rather than skipping, which is what makes a block-local declaration visible to a
+    // call written above it: Parser::parse_funccall reports UnknownFunction and discards the node
+    // immediately, so a name not yet registered when the body pass reaches the call is gone for good
+    void parse_declaration_surface(Payload &payload, std::optional<TokenReference> block_token = std::nullopt);
 };
 
 

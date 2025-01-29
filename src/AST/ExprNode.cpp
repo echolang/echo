@@ -143,6 +143,57 @@ AST::ValueType AST::RetainExprNode::result_type() const
     return operand->result_type();
 }
 
+AST::ValueType AST::ClosureExprNode::result_type() const
+{
+    if (decl == nullptr) {
+        return ValueType::make_void();
+    }
+
+    return decl->callable_type();
+}
+
+AST::ValueType AST::IndirectCallExprNode::callee_type() const
+{
+    if (callee == nullptr) {
+        return ValueType::make_void();
+    }
+
+    return value_type_of(callee->result_type());
+}
+
+AST::ValueType AST::IndirectCallExprNode::result_type() const
+{
+    // void rather than an assert when the callee is not callable: the type checker owns that
+    // diagnostic, and result_type is asked while the tree is still half-resolved. the same contract a
+    // FunctionCallExprNode with no decl answers under
+    const ValueType type = callee_type();
+
+    if (!type.is_callable()) {
+        return ValueType::make_void();
+    }
+
+    return type.signature().return_type;
+}
+
+const std::string AST::ClosureExprNode::node_description()
+{
+    return "closure<" + result_type().get_type_desciption() + ">("
+        + (decl != nullptr ? decl->decorated_func_name() : "<null>")
+        + (captured_values.empty() ? ", no captures" : ", captures " + std::to_string(captured_values.size()))
+        + ")";
+}
+
+const std::string AST::IndirectCallExprNode::node_description()
+{
+    std::string buffer = "call_indirect " + (callee != nullptr ? callee->node_description() : "<null>") + "(";
+
+    for (size_t i = 0; i < arguments.size(); i++) {
+        buffer += (i > 0 ? ", " : "") + arguments[i]->node_description();
+    }
+
+    return buffer + "): " + result_type().get_type_desciption();
+}
+
 const std::string AST::InstanceOfExprNode::node_description()
 {
     return "instanceof<" + queried_type.get_type_desciption() + ">(" + operand->node_description() + ")";

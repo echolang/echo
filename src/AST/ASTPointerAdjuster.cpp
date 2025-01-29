@@ -105,6 +105,28 @@ ExprNode *PointerAdjuster::as_value_for(ExprNode *expr, const ValueType &wanted)
     return as_value(expr);
 }
 
+template <typename WantedAt>
+void PointerAdjuster::adjust_call_arguments(std::vector<ExprNode *> &arguments, WantedAt wanted_at)
+{
+    for (size_t i = 0; i < arguments.size(); i++) {
+        auto *&arg = arguments[i];
+
+        // an argument already wrapped in an address-of was borrowed deliberately,
+        // by the coercion pass or by the user writing `&$x`; leave it as the address
+        if (arg != nullptr && arg->get_node_type() == NodeType::n_expr_addrof) {
+            auto *addr = static_cast<AddrOfExprNode *>(arg);
+            addr->operand = adjust_place(addr->operand);
+            continue;
+        }
+
+        // otherwise the parameter decides how far to read: a pointer parameter takes
+        // the address as it is, anything else reads through. that is also where the
+        // generic decay lands - an inferred `T` is not a pointer, so a pointer
+        // argument is read to its pointee
+        arg = as_value_for(arg, wanted_at(i));
+    }
+}
+
 ExprNode *PointerAdjuster::adjust_place(ExprNode *expr)
 {
     if (expr == nullptr) {
@@ -224,28 +246,56 @@ void PointerAdjuster::adjust(Node *node)
         case NodeType::n_expr_call:
         {
             auto *call = static_cast<FunctionCallExprNode *>(node);
-            for (size_t i = 0; i < call->arguments.size(); i++) {
-                auto *&arg = call->arguments[i];
 
-                // an argument already wrapped in an address-of was borrowed deliberately,
-                // by the coercion pass or by the user writing `&$x`; leave it as the address
-                if (arg != nullptr && arg->get_node_type() == NodeType::n_expr_addrof) {
-                    auto *addr = static_cast<AddrOfExprNode *>(arg);
-                    addr->operand = adjust_place(addr->operand);
-                    continue;
-                }
-
-                // otherwise the parameter decides how far to read: a pointer parameter takes
-                // the address as it is, anything else reads through. that is also where the
-                // generic decay lands - an inferred `T` is not a pointer, so a pointer
-                // argument is read to its pointee
-                ValueType wanted = ValueType::make_unknown();
+            adjust_call_arguments(call->arguments, [call](size_t i) {
                 if (call->decl != nullptr && i < call->decl->args.size() && call->decl->args[i]->has_type()) {
-                    wanted = call->decl->args[i]->type();
+                    return call->decl->args[i]->type();
                 }
 
-                arg = as_value_for(arg, wanted);
+                return ValueType::make_unknown();
+            });
+
+            break;
+        }
+
+        case NodeType::n_expr_indirect_call:
+        {
+            auto *call = static_cast<IndirectCallExprNode *>(node);
+
+            // the callee is wanted as a *value*: `$p()` over a `ptr<function<...>>` has to read through
+            // to the callable before its fn slot can be extracted. the parameter types come off the
+            // signature rather than off a declaration, which is the whole difference from a direct call
+            const ValueType callee_type = call->callee_type();
+            call->callee = as_value_for(call->callee, callee_type);
+
+            if (!callee_type.is_callable()) {
+                break;
             }
+
+            const auto &signature = callee_type.signature();
+
+            adjust_call_arguments(call->arguments, [&signature](size_t i) {
+                return i < signature.parameter_types.size()
+                    ? signature.parameter_types[i]
+                    : ValueType::make_unknown();
+            });
+
+            break;
+        }
+
+        case NodeType::n_expr_closure:
+        {
+            auto *closure = static_cast<ClosureExprNode *>(node);
+
+            // each captured place is read in the enclosing frame, as a value of the property it fills
+            for (size_t i = 0; i < closure->captured_values.size(); i++) {
+                const ValueType wanted = closure->environment_type != nullptr
+                    ? closure->environment_type->get_property_type(i)
+                    : ValueType::make_unknown();
+
+                closure->captured_values[i] = as_value_for(closure->captured_values[i], wanted);
+            }
+
             break;
         }
 

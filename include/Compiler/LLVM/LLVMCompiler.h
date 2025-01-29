@@ -46,6 +46,8 @@ public:
     void visit_move_expr(AST::MoveExprNode &node);
     void visit_class_alloc_expr(AST::ClassAllocExprNode &node);
     void visit_retain_expr(AST::RetainExprNode &node);
+    void visit_closure_expr(AST::ClosureExprNode &node);
+    void visit_indirect_call_expr(AST::IndirectCallExprNode &node);
     void visit_instanceof_expr(AST::InstanceOfExprNode &node);
     void visit_release(AST::ReleaseNode &node);
     void visit_index_expr(AST::IndexExprNode &node);

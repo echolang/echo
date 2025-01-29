@@ -74,6 +74,8 @@ namespace AST
                    parent_type == NodeType::n_expr_void ||
                    parent_type == NodeType::n_expr_class_alloc ||
                    parent_type == NodeType::n_expr_retain ||
+                   parent_type == NodeType::n_expr_closure ||
+                   parent_type == NodeType::n_expr_indirect_call ||
                    parent_type == NodeType::n_expr_instanceof ||
                    parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||

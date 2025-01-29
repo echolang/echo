@@ -16,6 +16,14 @@ namespace Parser
 {
     bool can_parse_type(Payload &payload);
 
+    // does the callable type `function<R(P...)>` start at `offset`? the third of the three things the
+    // `function` keyword introduces, and the only one that is a type - the sibling of
+    // Parser::starts_funcdecl and Parser::starts_closure_literal, which own the other two
+    //
+    // it lives here rather than beside them because it is a production of the type grammar, and this
+    // file owns that grammar: can_parse_type, skip_type_shape and parse_value_type all ask it
+    bool starts_callable_type(Cursor &cursor, size_t offset = 0);
+
     // true when the cursor sits on a variable declaration in any of its spellings - inferred
     // (`$x = ...`), typed (`int32 $x`), qualified, generic, borrowed, const or ptr. the one owner
     // of "what a declaration looks like", so a scope body and a struct body cannot disagree about

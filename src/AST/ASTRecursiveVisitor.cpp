@@ -79,6 +79,11 @@ void RecursiveVisitor::visitReturn(ReturnNode &node)
     if (node.expr) {
         node.expr->accept(*this);
     }
+
+    // the drops this return owes, which live on the node rather than ahead of it
+    for (auto &drop : node.unwind) {
+        if (drop.has()) drop.node()->accept(*this);
+    }
 }
 
 void RecursiveVisitor::visitIfStatement(IfStatementNode &node)
@@ -149,6 +154,24 @@ void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)
 void RecursiveVisitor::visit_retain_expr(RetainExprNode &node)
 {
     if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_closure_expr(ClosureExprNode &node)
+{
+    // the *environment* is a child of this expression and is walked; the body is not. the declaration
+    // hangs off the file root, so every pass that walks declarations reaches it there exactly once -
+    // descending into it here would process it twice
+    for (auto *value : node.captured_values) {
+        if (value) value->accept(*this);
+    }
+}
+
+void RecursiveVisitor::visit_indirect_call_expr(IndirectCallExprNode &node)
+{
+    if (node.callee) node.callee->accept(*this);
+    for (auto *arg : node.arguments) {
+        if (arg) arg->accept(*this);
+    }
 }
 
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)

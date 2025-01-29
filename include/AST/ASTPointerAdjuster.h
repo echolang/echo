@@ -67,6 +67,12 @@ namespace AST
         // reading through it. shared by declarations and assignments so the two agree
         ExprNode *as_value_for(ExprNode *expr, const ValueType &wanted);
 
+        // a call's arguments, each read as far as its own parameter wants. `wanted_at` answers
+        // the parameter type at an index - off the declaration for a direct call, off the
+        // callee's signature for an indirect one, which is the only difference between the two
+        template <typename WantedAt>
+        void adjust_call_arguments(std::vector<ExprNode *> &arguments, WantedAt wanted_at);
+
         // erases a `:$` marker, leaving the operand as a place whose value is the pointer
         // reports here, where the type is finally concrete, when there is nothing to peel
         ExprNode *strip_peel(ExprNode *expr);

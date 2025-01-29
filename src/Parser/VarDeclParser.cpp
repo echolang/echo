@@ -116,10 +116,14 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         return nullptr;
     }
 
-    // check if the name is already taken in the current scope
+    // check if the name is already taken in the current scope. a hit *past* a function boundary does
+    // not count: `int32 $x = 2;` written inside a nested function body over an enclosing `$x` declares a
+    // fresh variable that shadows it, and treating it as an assignment would have the nested body write
+    // into a frame it cannot even address
     AST::VarDeclNode *prev_vardecl = nullptr;
     if (scope != nullptr) {
-        prev_vardecl = scope->find_vardecl_by_name(nametoken.value());
+        const auto found = scope->lookup_variable(nametoken.value());
+        prev_vardecl = found.found_in_frame() ? found.decl : nullptr;
     }
 
     // if the next token is a accessor this is a member reference
@@ -156,7 +160,11 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         // `$var ->` to an assignment, and the postfix chain is what discovers the call. it is a
         // statement in its own right, so there is no `=` to demand - the same shape the call
         // statement branch in ScopeParser handles for a free function
-        if (target->get_node_type() == AST::NodeType::n_expr_call) {
+        //
+        // both kinds of call, because the chain discovers both: `$obj->push(5)` is a member call and
+        // `$obj->op(5)` over a callable *property* is an indirect one, and which of the two a name is
+        // decided in parse_postfix_chain, not here
+        if (AST::is_call_expression(*target)) {
             finish_call_statement(payload, payload.context.scope(), target);
             return nullptr;
         }

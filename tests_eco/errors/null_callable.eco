@@ -1,0 +1,15 @@
+// a callable has no null. its *environment* slot is nullable - that is how a non-capturing closure is
+// represented - but its function slot is not, so a null callable is a value that faults when called
+// rather than one that can be tested
+//
+// all four arrival sites, because the rule used to be spelled per site and three of them were missing it
+
+function<int32()> $decl = null;
+
+function<int32()> $ok = function() : int32 { return 1; };
+$ok = null;
+
+function takes(function<int32()> $f) : int32 { return $f(); }
+echo takes(null);
+
+function gives() : function<int32()> { return null; }

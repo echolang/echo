@@ -397,6 +397,104 @@ namespace AST
     // in the tree rather than folded into codegen for the reason every implicit thing in this compiler
     // is: --print-resolved-ast shows exactly where the counting happens, which is the only practical
     // way to check a retain/release balance. AST::OwnershipPass decides, ClassCodegen emits
+    // `function(int32 $a) : int32 { ... }` written where a value is expected.
+    //
+    // the body is an ordinary FunctionDeclNode hoisted to the file root - a closure is not a special kind
+    // of function, only a function nobody can name - and this node is what turns it into a *value*: the
+    // fat pointer `{ fn, env }` that a `function<R(P...)>` is
+    class ClosureExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_closure);
+
+        // the anonymous declaration this literal makes a value of. non-owning, like every tree edge:
+        // the declaration hangs off the file root's scope, which is what codegen emits bodies from
+        FunctionDeclNode *decl = nullptr;
+
+        // the environment the captures live in, or null when nothing is captured - the shape a
+        // non-capturing closure keeps, and the reason a callable is a fat pointer rather than a handle
+        //
+        // a *type* rather than an expression: the block is allocated and filled at this expression, and
+        // there is no Echo-level constructor to call, because the environment is a type the compiler
+        // declared and no source ever names
+        ComplexType *environment_type = nullptr;
+
+        // one place expression per captured variable, in property order - evaluated *here*, in the frame
+        // the closure is created in, which is what makes capture by value what it is. the closure's body
+        // reads them back off the environment parameter
+        std::vector<ExprNode *> captured_values;
+
+        TokenReference token;
+
+        ClosureExprNode(FunctionDeclNode *decl, TokenReference token) : decl(decl), token(token) {};
+
+        ~ClosureExprNode() {}
+
+        // the callable type its declaration describes, environment parameter excluded
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_closure_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `$f(1, 2)` - a call through a *value* rather than to a declaration.
+    //
+    // a distinct node rather than a `callee` field on FunctionCallExprNode, because `decl` there is not
+    // one thing: it is the callee, the return type, the parameter list argument coercion walks, the
+    // function-table key and the name every diagnostic prints. an indirect call answers all five from its
+    // callee's type instead, and has no overload set to resolve - so it is settled the moment it parses,
+    // the same standing `echo` already has
+    class IndirectCallExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_indirect_call);
+
+        ExprNode *callee = nullptr;
+        std::vector<ExprNode *> arguments;
+
+        TokenReference token;
+
+        IndirectCallExprNode(ExprNode *callee, std::vector<ExprNode *> arguments, TokenReference token) :
+            callee(callee), arguments(std::move(arguments)), token(token) {};
+
+        ~IndirectCallExprNode() {}
+
+        // what the callee reads as: a `ptr<function<...>>` is read through first, which is the one
+        // thing every reader of this node has to know. void when there is no callee - callers ask
+        // is_callable() from here, and the type they get back is also what a diagnostic names
+        ValueType callee_type() const;
+
+        // the callee's signature's return type. void when the callee is not (yet) callable, so a
+        // half-resolved tree answers rather than asserting - the same contract a call with no decl has
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_indirect_call_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // true when the expression is a call, whichever of the two kinds above it is. a caller asking this
+    // is asking "may this expression stand alone as a statement" or "is a value being produced by
+    // invoking something" - neither question cares which, and spelling out one of the two tags is how
+    // `$h->op(41);` came to be rejected while `echo $h->op(41);` worked
+    //
+    // here rather than with the place predicates: the two nodes it enumerates are declared right above
+    // it, so a third call node cannot be added without seeing it
+    inline bool is_call_expression(const ExprNode &expr)
+    {
+        return expr.get_node_type() == NodeType::n_expr_call
+            || expr.get_node_type() == NodeType::n_expr_indirect_call;
+    }
+
     class RetainExprNode : public ExprNode
     {
     public:

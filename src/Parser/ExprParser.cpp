@@ -9,11 +9,13 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/NullNode.h"
 
 #include "External/infint.h"
 
 #include "Parser/FuncCallParser.h"
+#include "Parser/FuncDeclParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/TypeParser.h"
 #include "AST/TypeNode.h"
@@ -627,6 +629,10 @@ bool is_expr_token(Parser::Cursor &cursor)
            // `mv E` is a prefix operator, so it begins one too. without this the shunting-yard loop
            // never enters and the expression comes back empty
            cursor.is_type(Token::Type::t_mv) ||
+           // a closure literal, `function(...) { ... }`. the same trap as `mv` above: without this the
+           // loop does not enter and the expression comes back empty. guarded on the `(` so the
+           // callable *type* `function<...>` - which is not an expression - cannot get in here
+           Parser::starts_closure_literal(cursor) ||
            // `$a instanceof Foo` continues an expression that already began, so the loop must not
            // stop at the keyword - parse_postfix_chain is what actually consumes it
            cursor.is_type(Token::Type::t_instanceof) ||
@@ -740,6 +746,42 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
         auto member_token = cursor.current();
         cursor.skip(); // skip the member name
+
+        // `->name(` where `name` is a *property* of callable type is a call through that value, not a
+        // method call: `$h->op(21)` on a `function<int32(int32)> $op`.
+        //
+        // tried before the member-call attempt below, and gated on the type having no member function of
+        // that name, so no existing call changes meaning. it has to come first rather than as a fallback,
+        // because parse_member_call *commits* once a `(` follows - it reports an unknown member instead of
+        // restoring, which is the right behaviour for a name that was meant to be a method
+        if (cursor.is_type(Token::Type::t_open_paren)) {
+            const AST::ValueType base_type =
+                AST::target_type_of(current_ref.unsafe_ptr<AST::ExprNode>()->result_type());
+
+            // the property is asked for first even though the member-function gate is the more
+            // interesting condition: find_property is an O(1) map hit, where find_member_functions is a
+            // linear scan that builds a vector. `->name(` is overwhelmingly an ordinary method call, and
+            // in that shape there is no callable property, so this way it never pays for the scan
+            const AST::ComplexType::Property *property = base_type.has_complex_type()
+                ? base_type.get_complex_type()->find_property(member_token.value())
+                : nullptr;
+
+            if (property != nullptr && property->type.is_callable()
+                && AST::find_member_functions(base_type.get_complex_type(), member_token.value()).empty())
+            {
+                auto &member_access =
+                    payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
+
+                auto *call = Parser::parse_indirect_call(payload, &member_access, member_token);
+
+                if (call == nullptr) {
+                    return AST::make_void_ref();
+                }
+
+                current_ref = AST::make_ref(*call);
+                continue;
+            }
+        }
 
         // `->name(` is a method call rather than a member read. `->name<` may be either: unlike a
         // free call, where a bare identifier can never be a comparison operand because values carry
@@ -863,24 +905,82 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         auto var_token = cursor.current();
-        auto vardecl = payload.context.scope().find_vardecl_by_name(var_token.value());
+        auto found = payload.context.scope().lookup_variable(var_token.value());
 
-        if (!vardecl) {
+        if (!found.decl) {
             payload.collector.collect_issue<AST::Issue::UnknownVariable>(payload.context.code_ref(cursor.current()), cursor.current().value());
             cursor.skip();
             return AST::make_void_ref();
         }
 
+        // the name resolves, but to storage in a frame this one cannot reach. inside a closure that is a
+        // *capture*: the value is copied into the closure's environment at the creation site, and the body
+        // reads the copy. anywhere else - a plain nested `function`, which has no environment - it is an
+        // error, because lowering it would load from an alloca belonging to a different llvm::Function and
+        // CodegenContext::var_map would hand over a perfectly valid one
+        AST::ExprNode *captured_read = nullptr;
+
+        if (found.crossed_function_boundary()) {
+            if (payload.context.current_closure_ptr == nullptr) {
+                // a file-scope declaration is one frame out like any other - its storage is a local of
+                // the implicit entry point - but saying "an enclosing function" about it names a
+                // function the source does not contain, so it gets its own phrasing
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(var_token),
+                    found.declared_at_file_scope
+                        ? fmt::format(
+                            "'{}' is declared at file scope, which is the implicit entry point's own "
+                            "frame - a function body cannot reach it. Pass it as a parameter, or write "
+                            "a closure.",
+                            var_token.value())
+                        : fmt::format(
+                            "'{}' is declared in an enclosing function. A plain nested function captures "
+                            "nothing - pass it as a parameter, or write a closure.",
+                            var_token.value()));
+                cursor.skip();
+                return AST::make_void_ref();
+            }
+
+            captured_read =
+                Parser::capture_variable(payload, found.decl, var_token, found.boundaries_crossed);
+
+            if (captured_read == nullptr) {
+                cursor.skip();
+                return AST::make_void_ref();
+            }
+        }
+
+        auto vardecl = found.decl;
+
         cursor.skip(); // skip the variable name
-        
-        // create the base variable reference
-        auto &varnode = payload.context.emplace_node<AST::VarNode>(vardecl, var_token);
-        auto &varref = payload.context.emplace_node<AST::VarRefNode>(&varnode);
-        auto current_ref = AST::make_ref(varref);
+
+        // the base is either the variable itself, or the read of the environment's copy of it
+        AST::NodeReference current_ref = AST::make_void_ref();
+
+        if (captured_read != nullptr) {
+            current_ref = AST::make_ref(captured_read);
+        }
+        else {
+            auto &varnode = payload.context.emplace_node<AST::VarNode>(vardecl, var_token);
+            current_ref = AST::make_ref(payload.context.emplace_node<AST::VarRefNode>(&varnode));
+        }
         
         // wrap the base in a MemberAccessNode for each `->member` in the chain
         current_ref = Parser::parse_postfix_chain(payload, current_ref);
         if (!current_ref.has()) {
+            return AST::make_void_ref();
+        }
+
+        // `$f(...)` - a call through a callable *value*. only a `(` directly after the chain can mean
+        // this: a place expression is never followed by one otherwise, so there is nothing to
+        // disambiguate against and no need to snapshot
+        if (!is_creating_ptr && cursor.is_type(Token::Type::t_open_paren)) {
+            auto *callee = current_ref.unsafe_ptr<AST::ExprNode>();
+
+            if (auto *call = Parser::parse_indirect_call(payload, callee, var_token)) {
+                return Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+            }
+
             return AST::make_void_ref();
         }
 
@@ -901,6 +1001,18 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         return current_ref;
+    }
+
+    // a closure literal, `function(int32 $a) : int32 { ... }`. a value, so it belongs here rather than
+    // in the statement dispatch - `starts_funcdecl` is what keeps a *declaration* out of this arm
+    else if (Parser::starts_closure_literal(cursor)) {
+        auto *closure = Parser::parse_closure_literal(payload);
+
+        if (closure == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        return AST::make_ref(*closure);
     }
 
     // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an

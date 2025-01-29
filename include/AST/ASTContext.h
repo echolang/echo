@@ -9,11 +9,14 @@
 #include "ASTModule.h"
 #include "ASTFile.h"
 #include "ASTCodeRef.h"
+#include "ASTDeclarationSite.h"
 #include "ASTNamespace.h"
 #include "ASTValueType.h"
 
 namespace AST
 {
+    class ClosureExprNode;
+    class FunctionDeclNode;
     class TypeNode;
     class TypeDeclNode;
     class VarDeclNode;
@@ -24,9 +27,27 @@ namespace AST
 
         const TokenizedFile &file;
 
+        // the namespace declarations here go into, which inside a `{ }` block is that block's *lexical*
+        // namespace rather than anything the user wrote. deliberately one field and not two: a
+        // `namespace a::b;` statement writes this one mid-file, and a parallel "the namespace I really
+        // meant" would desync from it silently - every function in a namespaced file would quietly lose
+        // its prefix. what wants the written namespace instead asks declaring_namespace()
         Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
+
+        // the function whose body is being parsed, null at file scope. it names the lexical namespaces
+        // opened inside that body, so a diagnostic about a block-local declaration can say which
+        // function it was written in
+        FunctionDeclNode *current_function_ptr = nullptr;
+
+        // the closure literal whose body is being parsed, null everywhere else - including inside a plain
+        // nested `function`, which captures nothing and reports an outer read instead
+        //
+        // this is what turns a read across a function boundary from an error into a capture. carried on
+        // the context for the reason self_struct_ptr is: the read site is deep inside the expression
+        // parser, and nothing between it and parse_closure_literal cares
+        ClosureExprNode *current_closure_ptr = nullptr;
 
         // the return type of the function body being parsed, null at file scope. this is the
         // destination a `return` fits its expression to, the same way a variable declaration's
@@ -70,11 +91,35 @@ namespace AST
             assert(scope_ptr);
             return *scope_ptr;
         }
-        
+
+        // the nearest namespace the user could have written. types live there rather than in a block's
+        // lexical namespace - the lexical half holds function declarations only, so far, and a struct
+        // declared in a body is still reached by its plain name from anywhere in the namespace
+        inline Namespace *declaring_namespace() const {
+            assert(current_namespace);
+            return current_namespace->declaring_namespace();
+        }
+
+        // the scope a *declaration* is emitted into: the file root, whatever block it was written in.
+        //
+        // a nested `function` is a scoped declaration, not a closure - so its name is block-scoped
+        // while the declaration itself is an ordinary top-level one. codegen emits bodies from the file
+        // root's children and AST::OwnershipPass resolves drops from the same list, so a declaration
+        // left in a body scope is both undefined at link time and never ownership-resolved
+        inline ScopeNode &declaration_scope() const {
+            ScopeNode *root = &scope();
+
+            while (!root->is_root()) {
+                root = root->parent_ptr;
+            }
+
+            return *root;
+        }
+
         // push & pop the contexts scope
         void push_scope(ScopeNode &scope);
         void pop_scope();
-        
+
         // enters a nested type-parameter scope. pushing an empty scope is fine and normal — a
         // non-generic member of a generic owner still needs its own frame so leaving it cannot
         // disturb the owner's parameters
@@ -85,6 +130,16 @@ namespace AST
         void pop_type_param_scope() {
             assert(!type_param_scopes.empty());
             type_param_scopes.pop_back();
+        }
+
+        // is any generic type parameter reachable from here? deliberately not "is the stack empty":
+        // every declaration parser pushes a frame unconditionally, even an empty one, so the stack is
+        // never empty inside a body and emptiness would answer this question wrong every time
+        bool has_visible_type_params() const {
+            return std::any_of(
+                type_param_scopes.begin(),
+                type_param_scopes.end(),
+                [](const std::vector<TypeParamDecl *> &frame) { return !frame.empty(); });
         }
 
         // resolves a name against the type parameters in scope, innermost first, so an inner
@@ -206,6 +261,89 @@ namespace AST
         }
     };
 
+    // opens a `{ }` block's lexical namespace, so a declaration written inside it belongs to the block
+    // rather than to the enclosing namespace - which is the whole of how a nested `function` gets a
+    // scope. the namespace is keyed on the block's opening brace, so the declaration pass and the body
+    // pass walking the same brace land on one object
+    //
+    // saves and restores like every guard here. it has to: `namespace a::b;` writes
+    // `current_namespace` too, and a block must hand back whatever was current when it opened
+    struct LexicalScope
+    {
+        Context &context;
+        Namespace *previous;
+
+        // takes the manager rather than reaching for it, because Context deliberately does not know the
+        // collector - every parser that opens a block has `payload.collector.namespaces` at hand
+        // `block_token` is the `{` this scope opens at, and it keys the namespace. no block token means
+        // no block - only the file root has none - and the guard does nothing at all
+        //
+        // the one construction, shared by the two walks that open a block: parse_scope in the body pass
+        // and parse_declaration_surface in the declaration pass. the two *must* mint the same namespace
+        // object for the same brace, so they cannot be allowed to reach retrieve_lexical by two spellings
+        // that could drift apart - which is why the display name is derived in here rather than passed
+        LexicalScope(
+            Context &context,
+            NamespaceManager &namespaces,
+            const std::optional<TokenReference> &block_token);
+
+        LexicalScope(const LexicalScope &) = delete;
+        LexicalScope &operator=(const LexicalScope &) = delete;
+
+        ~LexicalScope() {
+            context.current_namespace = previous;
+        }
+    };
+
+    // scopes the closure literal whose body is being parsed, so a read of an enclosing local inside it is
+    // a capture rather than an error. saves and restores, which is what lets a plain `function` nested in
+    // a closure body go back to *not* capturing - it is a declaration, not a second closure, and it opens
+    // a null frame of this through FunctionBodyScope below
+    struct ClosureScope
+    {
+        Context &context;
+        ClosureExprNode *previous_closure;
+
+        // the closure alone, because the environment parameter is not a second fact: it is `args[0]` of
+        // the closure's declaration by construction - push_environment_param puts it there before the
+        // parameter list is read, and `is_closure` is what makes implicit_arg_count count it. carrying
+        // it separately would be two fields that must agree
+        ClosureScope(Context &context, ClosureExprNode *closure) :
+            context(context), previous_closure(context.current_closure_ptr)
+        {
+            context.current_closure_ptr = closure;
+        }
+
+        ClosureScope(const ClosureScope &) = delete;
+        ClosureScope &operator=(const ClosureScope &) = delete;
+
+        ~ClosureScope() {
+            context.current_closure_ptr = previous_closure;
+        }
+    };
+
+    // scopes the function whose body is being parsed, which is what names the lexical namespaces opened
+    // inside it. saves and restores rather than clearing, so a declaration nested in a body hands the
+    // enclosing function back when it ends
+    struct CurrentFunctionScope
+    {
+        Context &context;
+        FunctionDeclNode *previous;
+
+        CurrentFunctionScope(Context &context, FunctionDeclNode *function) :
+            context(context), previous(context.current_function_ptr)
+        {
+            context.current_function_ptr = function;
+        }
+
+        CurrentFunctionScope(const CurrentFunctionScope &) = delete;
+        CurrentFunctionScope &operator=(const CurrentFunctionScope &) = delete;
+
+        ~CurrentFunctionScope() {
+            context.current_function_ptr = previous;
+        }
+    };
+
     // scopes a constructor's `$this` to that constructor's body, so a write to one of its fields is
     // recognised as the field's first write
     //
@@ -230,6 +368,38 @@ namespace AST
         ~ConstructorScope() {
             context.ctor_this_ptr = previous_this;
         }
+    };
+
+    // every frame a function-like body opens, in one guard: it is no longer inside a struct declaration,
+    // no longer inside a constructor, no longer inside a closure unless it *is* one, and it names the
+    // lexical namespaces its blocks mint
+    //
+    // one type rather than four spellings at seven sites, because the four say one thing - "the body of
+    // *this* declaration starts here" - and a field left standing at one site is a body reading the
+    // enclosing declaration's state. each of them has already been that bug or is one token away from it:
+    // without the null self a `function` nested in a method registers as another method of the owner,
+    // and without the null closure one nested in a closure body captures - reading that closure's
+    // environment parameter out of a different llvm::Function. a per-body field added to Context now has
+    // exactly one place it must be cleared
+    struct FunctionBodyScope
+    {
+        SelfScope no_self;
+        ConstructorScope no_ctor_this;
+        ClosureScope enclosing_closure;
+        CurrentFunctionScope current_function;
+
+        // the closure defaults to none, because a closure literal's own body is the only one written
+        // inside one: a plain `function` nested in a closure body captures nothing, it is a declaration
+        FunctionBodyScope(Context &context, FunctionDeclNode *function, ClosureExprNode *closure = nullptr) :
+            no_self(context, nullptr, nullptr),
+            no_ctor_this(context, nullptr),
+            enclosing_closure(context, closure),
+            current_function(context, function)
+        {
+        }
+
+        FunctionBodyScope(const FunctionBodyScope &) = delete;
+        FunctionBodyScope &operator=(const FunctionBodyScope &) = delete;
     };
 };
 #endif

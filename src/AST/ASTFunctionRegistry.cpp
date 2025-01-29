@@ -47,7 +47,7 @@ bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
         return false;
     }
 
-    const DeclarationSite site = make_site(decl->declaration_site_token());
+    const DeclarationSite site = make_declaration_site(decl->declaration_site_token());
 
     // the same declaration coming back around in the module's second parse pass. everything the
     // caller would do next has already happened for it, including any duplicate report - doing it
@@ -189,7 +189,7 @@ std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
 
 AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &declaration_token) const
 {
-    const auto found = _by_decl_site.find(make_site(declaration_token));
+    const auto found = _by_decl_site.find(make_declaration_site(declaration_token));
     return found != _by_decl_site.end() ? found->second : nullptr;
 }
 

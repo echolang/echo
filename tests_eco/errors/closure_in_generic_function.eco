@@ -1,0 +1,12 @@
+// a closure written inside a generic function's body has no way to receive a substitution for the
+// enclosing type parameters, so it is refused - the same reason a plain nested `function` is
+//
+// the recovery has to skip the whole literal, brace-aware: skipping to the next `;` lands *inside* the
+// body, which used to run the cursor off the end of the file
+
+function mk<T>(T $seed) : int32
+{
+    return function() : int32 { return 1; };
+}
+
+echo 1;

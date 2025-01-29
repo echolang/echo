@@ -1,0 +1,12 @@
+---- Issue ----
+Issue at 10:60
+'$n' is declared outside the closure that encloses this one. Capturing through a closure is not supported yet - capture it in the outer closure first.
+Begin: '$n'
+End: '$n'
+Code excerpt:
+ [9]>     function<int32()> $f = function() : int32 {
+ [10]>         function<int32()> $g = function() : int32 { return $n; };
+                                                                 ^
+ [11]>         return $g();
+
+Critical issues found, cannot compile.

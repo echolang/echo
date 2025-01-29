@@ -12,46 +12,11 @@
 #include "Parser/FuncDeclParser.h"
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
+#include "Parser/SymbolParser.h"
 #include "Parser/TypeParser.h"
 
 #include <algorithm>
 #include <fmt/core.h>
-
-// answers whether the cursor is on the token this position requires, and when it is not, reports it
-// and recovers to the next statement. the recovery ritual every check in here shares, so the sites
-// differ only in what they expect. deliberately does *not* consume the token it matched - the caller
-// decides, and the open brace of a member body is looked at without being skipped
-static bool expect_token(Parser::Payload &payload, Token::Type expected)
-{
-    if (payload.cursor.is_type(expected)) {
-        return true;
-    }
-
-    payload.collect_unexpected_token(expected);
-    payload.cursor.try_skip_to_next_statement();
-
-    return false;
-}
-
-// consumes a member body the declaration pass did not parse: either a braced body or the bare `;` of
-// a declaration that has none. the one place that knows how a member body is skipped
-//
-// brace-depth aware rather than token-by-token, because a body's closing brace would otherwise read
-// as the end of the struct - silently truncating the type and losing every member written after it
-static void skip_member_body(Parser::Payload &payload)
-{
-    auto &cursor = payload.cursor;
-
-    if (cursor.is_type(Token::Type::t_open_brace)) {
-        cursor.skip();
-        cursor.skip_till_end_of_scope();
-        return;
-    }
-
-    if (cursor.is_type(Token::Type::t_semicolon)) {
-        cursor.skip();
-    }
-}
 
 // the node a previous pass already registered for this declaration site, with its arguments dropped,
 // or null when the running pass is the first to reach it
@@ -77,27 +42,44 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
 //
 // the one place that decides where a member body begins, shared by the constructor and destructor arms
 // so a change to the recovery or to which pass reads a body cannot reach only one of them
-static bool enter_member_body(Parser::Payload &payload)
+static std::optional<TokenReference> enter_member_body(Parser::Payload &payload, AST::FunctionDeclNode *decl)
 {
-    if (!expect_token(payload, Token::Type::t_open_brace)) {
-        return false;
+    if (!payload.expect_token(Token::Type::t_open_brace)) {
+        return std::nullopt;
     }
 
+    // answers with the brace rather than a bare yes, because the caller has to hand it to parse_scope:
+    // it is the identity of this body block's lexical namespace, and the declaration pass below keys the
+    // same block on the same token
+    const TokenReference brace = payload.cursor.current();
+
     if (payload.pass == Parser::Pass::t_declarations) {
-        skip_member_body(payload);
-        return false;
+        // walked rather than skipped, so a declaration written inside a member body joins its overload
+        // set before any call to it is parsed - the body pass is a single linear walk, and a free call
+        // that cannot be resolved is reported and *discarded* right there, with nothing left for the
+        // fixpoint to retry. a member body would otherwise be the one place a forward reference to a
+        // block-local helper failed
+        //
+        // the same frames the body pass opens, for the same reason parse_funcdecl's descent opens them:
+        // the two passes have to read a nested declaration identically, and the receiver reaches this
+        // body as an ordinary parameter - so a `function` written in here is a free function, not
+        // another member of the owner
+        AST::FunctionBodyScope body_scope(payload.context, decl);
+
+        Parser::parse_declaration_surface(payload, brace);
+        return std::nullopt;
     }
 
     payload.cursor.skip(); // skip "{"
 
-    return true;
+    return brace;
 }
 
 // closes a member body: the brace, and the scope enter_member_body's caller pushed. reported and left
 // unconsumed when the brace is missing, which is what lets the enclosing struct walk recover
 static void leave_member_body(Parser::Payload &payload)
 {
-    if (expect_token(payload, Token::Type::t_close_brace)) {
+    if (payload.expect_token(Token::Type::t_close_brace)) {
         payload.cursor.skip(); // skip "}"
     }
 
@@ -161,7 +143,7 @@ static void publish_copy_constructor(
         // recognition rule - and that does need saying, because they are not overloads of anything:
         // a type has one copy, and nothing would decide which of them an implicit copy meant
         //
-        // and deliberately no skip_member_body/return, unlike the destructor's duplicate below.
+        // and deliberately no skip_declaration_body/return, unlike the destructor's duplicate below.
         // report_bodyless at the end of parse_typedecl iterates *every* constructor, so a body-less
         // one would earn a second, confusing diagnostic; the destructor escapes that because
         // report_bodyless asks only its slot
@@ -222,7 +204,7 @@ static void parse_constructor(
 
     cursor.skip(); // skip "constructor"
 
-    if (!expect_token(payload, Token::Type::t_open_paren)) {
+    if (!payload.expect_token(Token::Type::t_open_paren)) {
         return;
     }
 
@@ -236,7 +218,9 @@ static void parse_constructor(
         struct_node->add_constructor(ctor_decl);
     }
 
-    ctor_decl->ast_namespace = payload.context.current_namespace;
+    // the declaring namespace, like the struct's own: `Foo(...)` has to resolve wherever the type name
+    // does, and a type is not block-scoped
+    ctor_decl->ast_namespace = payload.context.declaring_namespace();
 
     // share the struct's parameter declarations rather than declaring its own: the ctor's return
     // type is the struct's self-application Foo<T>, so a substitution built from this list has to
@@ -273,7 +257,8 @@ static void parse_constructor(
     // list above was rebuilt identically
     publish_copy_constructor(payload, struct_node, self_value_type, ctor_decl, ctor_token);
 
-    if (!enter_member_body(payload)) {
+    const auto ctor_brace = enter_member_body(payload, ctor_decl);
+    if (!ctor_brace.has_value()) {
         return;
     }
 
@@ -294,6 +279,10 @@ static void parse_constructor(
     auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
     ctor_body.add_vardecl(*this_vardecl);
 
+    // the parameters' frame is where this constructor ends: a name resolved past it belongs to
+    // another function's storage - see ScopeNode::lookup_variable
+    ctor_scope.is_function_boundary = true;
+
     // pushed under the body, so a parameter read in the body resolves through the scope's parent
     payload.context.push_scope(ctor_scope);
 
@@ -301,11 +290,16 @@ static void parse_constructor(
         // same as a function body: a `return` inside the ctor fits the ctor's return type
         AST::ReturnTypeScope return_scope(payload.context, ctor_decl->return_type);
 
+        // `$this` is a body-local here, so the body is no longer inside a struct declaration - a
+        // `function` written in it is a scoped free function, exactly as in a method body
+        AST::FunctionBodyScope body_scope(payload.context, ctor_decl);
+
         // and `$this` is fresh storage for as long as this body lasts, so a write to one of its
-        // fields is that field's first write - see Context::ctor_this_ptr
+        // fields is that field's first write - see Context::ctor_this_ptr. *after* the frame above,
+        // which clears it: this body has one, the declarations nested in it do not
         AST::ConstructorScope ctor_this_scope(payload.context, this_vardecl);
 
-        ctor_decl->body = &parse_scope(payload, &ctor_body);
+        ctor_decl->body = &parse_scope(payload, &ctor_body, ctor_brace);
     }
 
     leave_member_body(payload);
@@ -321,7 +315,7 @@ static void parse_constructor(
         ctor_decl->body->children.push_back(AST::make_ref(ret_stmt));
     }
 
-    payload.context.scope().add_funcdecl(*ctor_decl);
+    payload.context.declaration_scope().add_funcdecl(*ctor_decl);
 }
 
 // a `destructor()` written in a struct body. shaped like a *method*, not like a constructor: the
@@ -346,7 +340,7 @@ static void parse_destructor(
 
     cursor.skip(); // skip "destructor"
 
-    if (!expect_token(payload, Token::Type::t_open_paren)) {
+    if (!payload.expect_token(Token::Type::t_open_paren)) {
         return;
     }
 
@@ -359,7 +353,7 @@ static void parse_destructor(
         dtor_decl->member_kind = AST::MemberKind::t_destructor;
     }
 
-    dtor_decl->ast_namespace = payload.context.current_namespace;
+    dtor_decl->ast_namespace = payload.context.declaring_namespace();
     dtor_decl->owner_type = &struct_node->complex_type();
 
     // shares the struct's parameter declarations rather than declaring its own, exactly as a method
@@ -422,7 +416,7 @@ static void parse_destructor(
             payload.context.code_ref(dtor_token),
             fmt::format("'{}' already has a destructor.", struct_node->type_name()));
 
-        skip_member_body(payload);
+        Parser::skip_declaration_body(payload);
         return;
     }
 
@@ -431,9 +425,13 @@ static void parse_destructor(
     payload.collector.functions.register_destructor(
         payload.collector, payload.context.code_ref(dtor_token), dtor_decl, struct_node->complex_type());
 
-    if (!enter_member_body(payload)) {
+    const auto dtor_brace = enter_member_body(payload, dtor_decl);
+    if (!dtor_brace.has_value()) {
         return;
     }
+
+    // the receiver's frame is where this destructor ends - see ScopeNode::lookup_variable
+    dtor_scope.is_function_boundary = true;
 
     // pushed so the receiver resolves through the scope's parent, as in a method body
     payload.context.push_scope(dtor_scope);
@@ -443,15 +441,15 @@ static void parse_destructor(
 
         // the receiver reaches the body as an ordinary parameter, so the body is no longer inside a
         // struct declaration - same reason parse_funcdecl clears it
-        AST::SelfScope no_self(payload.context, nullptr, nullptr);
+        AST::FunctionBodyScope body_scope(payload.context, dtor_decl);
 
-        dtor_decl->body = &parse_scope(payload);
+        dtor_decl->body = &parse_scope(payload, nullptr, dtor_brace);
     }
 
     leave_member_body(payload);
 
     // codegen emits a body only for the declarations in the file root's children
-    payload.context.scope().add_funcdecl(*dtor_decl);
+    payload.context.declaration_scope().add_funcdecl(*dtor_decl);
 }
 
 // the field-wise constructor, synthesized for every struct: it takes one parameter per property and
@@ -492,7 +490,7 @@ static void synthesize_field_wise_constructor(
     default_ctor.member_kind = AST::MemberKind::t_constructor;
     struct_node->set_field_wise_constructor(&default_ctor);
 
-    default_ctor.ast_namespace = payload.context.current_namespace;
+    default_ctor.ast_namespace = payload.context.declaring_namespace();
 
     // shares the struct's parameter declarations, same reason as the explicit constructor above
     default_ctor.type_parameters = struct_node->type_parameters();
@@ -585,7 +583,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // skip the struct or class keyword
     cursor.skip();
 
-    if (!expect_token(payload, Token::Type::t_identifier)) {
+    if (!payload.expect_token(Token::Type::t_identifier)) {
         return nullptr;
     }
 
@@ -597,14 +595,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     std::vector<ParsedTypeParam> parsed_type_params = parse_type_param_list(payload);
 
     // next token needs to be an open brace
-    if (!expect_token(payload, Token::Type::t_open_brace)) {
+    if (!payload.expect_token(Token::Type::t_open_brace)) {
         return nullptr;
     }
 
     cursor.skip(); // skip the open brace
 
     // try to find the predeclared struct symbol
-    auto structsymbol = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.current_namespace);
+    auto structsymbol = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
     AST::TypeDeclNode *struct_node = nullptr;
 
     // we found a name matching symbol
@@ -642,7 +640,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     }
 
     // create the struct node
-    struct_node->set_namespace(payload.context.current_namespace);
+    struct_node->set_namespace(payload.context.declaring_namespace());
 
     // declare the generic type parameters (idempotent across the parse passes) and, when the struct
     // is generic, make them resolvable while parsing its property types
@@ -709,20 +707,15 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 struct_node->add_property(var);
             }
         }
-        else if (cursor.is_type(Token::Type::t_function)) {
+        else if (starts_funcdecl(cursor)) {
             // a method. the declaration lands in the *enclosing* scope's children rather than in the
             // struct - the struct body never pushes a scope, so `payload.context.scope()` is still
             // the file/namespace root, which is the list codegen walks to emit bodies. exactly how a
             // constructor already reaches codegen; being a member is a lookup rule, not a placement
+            // the declaration pass's body is parse_funcdecl's own to consume: it walks the body's
+            // declaration surface so a `function` nested in a method joins its block's overload set.
+            // skipping it here as well would eat the token after the body
             parse_funcdecl(payload);
-
-            if (declarations_only) {
-                // the declaration pass stops at the body it did not parse. consumed here rather than
-                // by parse_funcdecl itself, because its *other* declaration-pass caller - the
-                // token-by-token walk in parse_symbols - deliberately wants to carry on *into* a
-                // function body, which is how a `struct` written inside one is reached at all
-                skip_member_body(payload);
-            }
         }
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
             parse_constructor(payload, struct_node, self_value_type);
@@ -787,7 +780,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         // codegen emits a body from the file root's children, so the synthesized constructor has to
         // land there - at the tail, where it has always been
         if (struct_node->field_wise_constructor() != nullptr) {
-            payload.context.scope().add_funcdecl(*struct_node->field_wise_constructor());
+            payload.context.declaration_scope().add_funcdecl(*struct_node->field_wise_constructor());
         }
     }
 

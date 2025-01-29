@@ -45,27 +45,9 @@ void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)
 
 void AST::ScopeNode::add_typedecl(AST::TypeDeclNode &structdecl)
 {
+    // the child list only, like add_funcdecl. a type is *found* through the namespace symbol table, so
+    // there is no name to register here
     children.push_back(AST::make_ref(structdecl));
-
-    if (structdecl.name_token.has_value()) {
-        _declared_types[structdecl.name_token.value().value()] = &structdecl;
-    }
-}
-
-bool AST::ScopeNode::is_varname_taken(const std::string &varname) const
-{
-    // first check if the variable is declared in the local scope
-    auto in_local_scope = _declared_variables.find(varname) != _declared_variables.end();
-    if (in_local_scope) {
-        return true;
-    }
-
-    // if this is not the root scope, check the parent tree
-    if (!is_root()) {
-        return parent().is_varname_taken(varname);
-    }
-    
-    return false;
 }
 
 void AST::ScopeNode::add_attribute(AST::AttributeNode &attribute)
@@ -83,18 +65,28 @@ std::vector<AST::AttributeNode *> AST::ScopeNode::collect_attributes()
     return result;
 }
 
-AST::VarDeclNode *AST::ScopeNode::find_vardecl_by_name(const std::string &varname) const
+AST::ScopeNode::VariableLookup AST::ScopeNode::lookup_variable(const std::string &varname) const
 {
     auto found = _declared_variables.find(varname);
     if (found != _declared_variables.end()) {
-        return found->second;
+        // where it was declared is answered by the frame that holds it, here - the walk back out below
+        // only counts boundaries and cannot tell the root from any other scope it passed through
+        return VariableLookup { found->second, 0, is_root() };
     }
 
-    // if this is not the root scope, check the parent tree
-    if (!is_root()) {
-        return parent().find_vardecl_by_name(varname);
+    if (is_root()) {
+        return VariableLookup {};
     }
-    
-    return nullptr;
+
+    VariableLookup outer = parent().lookup_variable(varname);
+
+    // the flag is set on the way *back out*, by the frame being left rather than by the one that found
+    // the declaration - which is what makes it true for every level above the boundary and not just the
+    // one immediately past it
+    if (is_function_boundary && outer.decl != nullptr) {
+        outer.boundaries_crossed++;
+    }
+
+    return outer;
 }
 

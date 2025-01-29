@@ -1,0 +1,9 @@
+// running out of input is a diagnostic, not an abort. `Cursor::current` asserts when the cursor is
+// past the end, so every parser that reported a missing token at end of input used to kill the
+// compiler - the missing brace here, an unterminated `if` block, or a truncated closure body
+//
+// the *last* token is what it points at: that is where the input ran out, and it is the only thing
+// anyone can say about a truncated file
+
+function f() : int32 {
+    return 1;

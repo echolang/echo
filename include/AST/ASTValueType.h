@@ -39,6 +39,9 @@ namespace AST
         t_struct,
         t_generic,
         t_pointer,
+        // a callable value: `function<R(P...)>`. structural like a pointer and for the same reason -
+        // it carries nothing but its signature, so two spellings of one signature must be one type
+        t_callable,
         t_unknown
     };
 
@@ -125,10 +128,14 @@ namespace AST
     char get_primitive_id_char(ValueTypePrimitive primitive);
     IntegerSize get_integer_size(ValueTypePrimitive primitive);
 
-    class ValueType 
+    // what a `function<R(P...)>` is: a return type and a parameter list, and nothing else. defined
+    // below ValueType, which it is made of; only the handle appears inside the class
+    struct CallableSignature;
+
+    class ValueType
     {
         friend struct std::hash<ValueType>;
-        
+
     public:
 
         static ValueType make_void() {
@@ -184,8 +191,12 @@ namespace AST
             return type;
         }
 
+        // `function<R(P...)>`. the signature is shared rather than interned, so equality is structural
+        // all the way down - see CallableSignature
+        static ValueType make_callable(ValueType return_type, std::vector<ValueType> parameter_types);
+
         ValueType() = default;
-        ValueType(ValueTypePrimitive primitive) : 
+        ValueType(ValueTypePrimitive primitive) :
             kind(ValueTypeKind::t_primitive), 
             primitive(primitive) 
         {}
@@ -219,6 +230,12 @@ namespace AST
         bool is_pointer() const {
             return kind == ValueTypeKind::t_pointer;
         }
+
+        bool is_callable() const {
+            return kind == ValueTypeKind::t_callable;
+        }
+
+        const CallableSignature &signature() const;
 
         // true for `ptr<T>`, false for the borrow `T&`. only meaningful on a pointer
         bool is_nullable() const {
@@ -364,6 +381,11 @@ namespace AST
         }
 
         // compare two types
+        //
+        // one arm per kind and *no* catch-all tail: a kind added without an arm here would compare
+        // unequal to itself, which is silent and poisons everything downstream - the type registry's
+        // interning (equality *is* the identity it dedupes on), argument_fit's exact arm, and
+        // coerce_value's passthrough. the switch makes the compiler ask for the arm instead
         bool operator==(const ValueType &other) const {
             // first check if the kinds are different
             if (kind != other.kind) {
@@ -375,32 +397,34 @@ namespace AST
                 return false;
             }
 
-            // compare based on the kind
-            if (is_primitive() && other.is_primitive()) {
-                return primitive == other.primitive;
-            }
+            switch (kind) {
+                case ValueTypeKind::t_primitive:
+                    return primitive == other.primitive;
 
-            // a pointer is structural: same nullability (already covered by the flag check
-            // above) and the same pointee, all the way down
-            if (is_pointer() && other.is_pointer()) {
-                return *_pointee == *other._pointee;
-            }
+                // a pointer is structural: same nullability (already covered by the flag check
+                // above) and the same pointee, all the way down
+                case ValueTypeKind::t_pointer:
+                    return *_pointee == *other._pointee;
 
-            if (has_complex_type() && other.has_complex_type()) {
                 // for struct and class types, compare the complex type pointers
                 // two struct/class types are equal if they point to the same ComplexType
-                return _complex_type == other._complex_type;
-            }
+                case ValueTypeKind::t_struct:
+                case ValueTypeKind::t_class:
+                    return _complex_type == other._complex_type;
 
-            if (is_type_param() && other.is_type_param()) {
+                // structural, like a pointer: a signature carries no identity of its own, so two
+                // separately written `function<void(int32)>`s are one type
+                case ValueTypeKind::t_callable:
+                    return signatures_are_equal(*this, other);
+
                 // identity is the declaration itself, mirroring how struct/class compare their
                 // ComplexType. so the T of `struct Box<T>` is not the A of `struct Pair<A, B>`
                 // even though both are the first parameter of their owner
-                return _type_param == other._type_param;
-            }
+                case ValueTypeKind::t_generic:
+                    return _type_param == other._type_param;
 
-            if (kind == ValueTypeKind::t_unknown && other.kind == ValueTypeKind::t_unknown) {
-                return true;
+                case ValueTypeKind::t_unknown:
+                    return true;
             }
 
             return false;
@@ -411,6 +435,11 @@ namespace AST
         std::string get_type_desciption() const;
 
     private:
+        // operator== is inline and CallableSignature is not complete there, so the comparison is one
+        // hop out of line. keeping operator== in the header is worth the hop: it is on the hot path of
+        // every overload match and every interning lookup
+        static bool signatures_are_equal(const ValueType &a, const ValueType &b);
+
         // defaulted so a default-constructed ValueType is a well-defined `unknown`
         // rather than carrying indeterminate kind/primitive
         ValueTypeKind kind = ValueTypeKind::t_unknown;
@@ -429,6 +458,10 @@ namespace AST
         // by identity. shared_ptr keeps ValueType cheap to copy, which everything relies on
         std::shared_ptr<const ValueType> _pointee = nullptr;
 
+        // for the t_callable kind: the signature. shared and structurally compared, for the same
+        // reason _pointee is
+        std::shared_ptr<const CallableSignature> _signature = nullptr;
+
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
         ValueType(ValueTypeKind kind, ComplexType *complex_type) :
             kind(kind),
@@ -439,6 +472,45 @@ namespace AST
             kind(kind), primitive(ValueTypePrimitive::t_void), _type_param(param) {}
     };
     
+    // held by shared_ptr off a ValueType and compared *structurally*, for the reason the pointee is:
+    // it carries no mutable state and no identity of its own, so two independently written
+    // `function<void(int32)>`s have to be one type or a callback could never be passed anywhere. that
+    // is the whole difference from ComplexType, which is shared by pointer identity because it is a
+    // mutable, property-carrying object
+    struct CallableSignature
+    {
+        ValueType return_type;
+        std::vector<ValueType> parameter_types;
+
+        bool operator==(const CallableSignature &other) const;
+    };
+
+    inline ValueType ValueType::make_callable(ValueType return_type, std::vector<ValueType> parameter_types)
+    {
+        ValueType type(ValueTypeKind::t_callable, ValueTypePrimitive::t_void);
+        type._signature = std::make_shared<const CallableSignature>(
+            CallableSignature { std::move(return_type), std::move(parameter_types) });
+        return type;
+    }
+
+    inline const CallableSignature &ValueType::signature() const
+    {
+        assert(is_callable() && "only a callable has a signature");
+        return *_signature;
+    }
+
+    inline bool ValueType::signatures_are_equal(const ValueType &a, const ValueType &b)
+    {
+        // one signature shared by both, which is what a copy of a ValueType produces - and a copy is
+        // how nearly every comparison gets its operands. the structural compare below is recursive over
+        // the return type and every parameter, so short-circuiting it is worth a pointer test
+        if (a._signature == b._signature) {
+            return true;
+        }
+
+        return a.signature() == b.signature();
+    }
+
     class ComplexType
     {
     public:
@@ -526,6 +598,19 @@ namespace AST
             }
             _property_map[name] = _properties.size();
             _properties.push_back(Property { _properties.size(), name, type });
+        }
+
+        // retypes a property that is already there. the *layout* is fixed by the order properties were
+        // appended in and is not touched - only what the slot holds
+        //
+        // exists for one caller, a closure environment: its properties are the types of the places the
+        // body captured, and a captured place is not typed until the monomorphizer has settled the call
+        // its variable was inferred from. so the property is appended when the capture is *found*, at
+        // parse time, and its type re-derived when the place finally has one - the same stale-then-
+        // re-derived shape a variable's own inferred type has. a declared struct never needs this: its
+        // properties are written with their types
+        void set_property_type(size_t index, ValueType type) {
+            _properties.at(index).type = type;
         }
 
         bool has_property(const std::string &name) const {
@@ -683,6 +768,15 @@ namespace std
             // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
             // collide with int32, since the primitive component is identical
             else if (vt.is_pointer()) h ^= (*this)(vt.pointee()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            // structural, so the hash has to be too - mixed for the reason above, and over the
+            // return type as well as the parameters, since `function<int32()>` and
+            // `function<void()>` differ only there
+            else if (vt.is_callable()) {
+                h ^= (*this)(vt.signature().return_type) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                for (const auto &param : vt.signature().parameter_types) {
+                    h ^= (*this)(param) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                }
+            }
             return h;
         }
     };
@@ -785,6 +879,16 @@ namespace AST
         // intern the instantiation of `tmpl` with `args`, substituting the template's properties
         // through `args`. Implemented in ASTValueType.cpp so it can call the unified substitute_type
         ComplexType *get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args);
+
+        // a type the *compiler* declares, with no TypeDeclNode behind it and no template it instantiates
+        // - a closure's capture environment is the one caller today. it is nothing but a name, a kind and
+        // whatever properties the caller appends
+        //
+        // it lives here because this is where a ComplexType's lifetime and the pointer-identity contract
+        // already live: `_owned` keeps it alive for the whole compilation, which is what lets a ValueType
+        // hold it by raw pointer. nothing downstream needs a declaration node - StructureTable keys a
+        // layout on the ComplexType and create_llvm_struct_for_instance builds it from the properties
+        ComplexType *create_anonymous_type(const std::string &name, ComplexTypeKind kind, const Namespace *ns);
 
         // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
         // register_template maps to themselves. used by the --print-instances dump

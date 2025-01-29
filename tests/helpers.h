@@ -67,9 +67,19 @@ namespace EchoTests
     // would show up too
     AST::TypeDeclNode *type_named(AST::Module &m, const std::string &name);
 
+    // how many diagnostics mentioned this? a test asserting that one mistake is reported *once*
+    // needs the count, not the yes/no below
+    size_t count_issues_containing(const AST::Bundle &bundle, const std::string &needle);
+
     // did any diagnostic mention this? the loose counterpart to assert_code_emits_issue, which
     // compares a whole message
     bool has_issue_containing(const AST::Bundle &bundle, const std::string &needle);
+
+    // is this declaration a child of the file root's scope? a nested `function` is a scoped
+    // declaration and not a closure, so its *name* belongs to its block while the declaration itself
+    // is an ordinary top-level one - and it has to be, because codegen emits bodies from this list and
+    // AST::OwnershipPass resolves drops from it
+    bool is_file_root_child(AST::Module &m, const AST::Node *decl);
 };
 
 #endif

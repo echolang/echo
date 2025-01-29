@@ -29,6 +29,14 @@ namespace
 
 bool AST::needs_destruction(const AST::ValueType &type)
 {
+    // a callable owes exactly one release: its captured environment. answered before the leaf below and
+    // *without* looking at what it captured, for the same reason a class is - the signature is the type,
+    // so two callables of one type may capture different things, and only the value knows which. a
+    // non-capturing one carries a null environment and the release is a no-op on it
+    if (type.is_callable()) {
+        return true;
+    }
+
     // a primitive owns its own bytes and nothing else. a pointer and a borrow own nothing at all -
     // see the header, this is the leaf of the whole recursion
     if (!type.has_complex_type()) {

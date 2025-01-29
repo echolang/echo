@@ -44,8 +44,13 @@ llvm::Value *ClassCodegen::gen_strong_ptr(llvm::Value *handle, const ClassLayout
 
 void ClassCodegen::gen_class_alloc(AST::ClassAllocExprNode &node)
 {
+    _ctx.push(gen_class_box_alloc(node.class_type));
+}
+
+llvm::Value *ClassCodegen::gen_class_box_alloc(const AST::ValueType &class_type)
+{
     const ClassLayout layout =
-        _ctx.types->get_or_create_class_layout(node.class_type.get_complex_type(), *_ctx.current_cmp_unit);
+        _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
 
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     const uint64_t block_size = _ctx.layout().getTypeAllocSize(layout.box);
@@ -74,7 +79,37 @@ void ClassCodegen::gen_class_alloc(AST::ClassAllocExprNode &node)
         layout.typeinfo,
         _ctx.builder->CreateStructGEP(layout.box, handle, ClassBox::typeinfo_index, "typeinfo_ptr"));
 
-    _ctx.push(handle);
+    return handle;
+}
+
+llvm::Value *ClassCodegen::gen_callable_retain(llvm::Value *callable)
+{
+    // the strong count is the block's first word, so the environment pointer *is* the count's address.
+    // taken directly rather than through a ClassLayout GEP, because the layout is exactly what a
+    // callable does not know
+    gen_strong_inc(_ctx.builder->CreateExtractValue(callable, 1, "retain.env"), nullptr, "env.retain");
+
+    // the value flows through: a retain is a side effect on the environment, not a new callable
+    return callable;
+}
+
+void ClassCodegen::gen_callable_release(llvm::Value *callable)
+{
+    llvm::Value *env = _ctx.builder->CreateExtractValue(callable, 1, "release.env");
+    _ctx.builder->CreateCall(get_or_create_env_release_thunk(), { env });
+}
+
+llvm::Function *ClassCodegen::get_or_create_env_release_thunk()
+{
+    const std::string name = "__eco_release_env";
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    // no layout and no deinit: the count is the block's first word, and an environment holds no owning
+    // capture, so the block is all there is to give back
+    return build_release_thunk(name, nullptr, nullptr);
 }
 
 void ClassCodegen::gen_retain_expr(AST::RetainExprNode &node)
@@ -85,7 +120,7 @@ void ClassCodegen::gen_retain_expr(AST::RetainExprNode &node)
 
     // the handle flows straight through - the retain is a side effect on the block, so the value this
     // expression hands its consumer is the one the operand produced
-    _ctx.push(gen_retain(handle, node.result_type()));
+    _ctx.push(gen_retain_value(handle, node.result_type()));
 }
 
 void ClassCodegen::gen_release_stmt(AST::ReleaseNode &node)
@@ -95,7 +130,22 @@ void ClassCodegen::gen_release_stmt(AST::ReleaseNode &node)
     // scope owes
     LValue place = _ctx.lvalues->gen_lvalue(*node.target);
 
-    gen_release(_ctx.lvalues->gen_load(place, "obj"), place.storage_type);
+    gen_release_value(_ctx.lvalues->gen_load(place, "obj"), place.storage_type);
+}
+
+llvm::Value *ClassCodegen::gen_retain_value(llvm::Value *value, const AST::ValueType &type)
+{
+    return type.is_callable() ? gen_callable_retain(value) : gen_retain(value, type);
+}
+
+void ClassCodegen::gen_release_value(llvm::Value *value, const AST::ValueType &type)
+{
+    if (type.is_callable()) {
+        gen_callable_release(value);
+        return;
+    }
+
+    gen_release(value, type);
 }
 
 void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
@@ -155,17 +205,31 @@ llvm::Value *ClassCodegen::gen_retain(llvm::Value *handle, const AST::ValueType 
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
 
+    gen_strong_inc(handle, &layout, "retain");
+
+    // the handle itself, unchanged. a retain is a side effect on the block, not a new value
+    return handle;
+}
+
+void ClassCodegen::gen_strong_inc(llvm::Value *block, const ClassLayout *layout, const char *label)
+{
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
-    llvm::BasicBlock *bump_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "retain", function);
-    llvm::BasicBlock *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "retain.done", function);
+    llvm::BasicBlock *bump_block =
+        llvm::BasicBlock::Create(*_ctx.llvm_context, label, function);
+    llvm::BasicBlock *done_block =
+        llvm::BasicBlock::Create(*_ctx.llvm_context, std::string(label) + ".done", function);
 
     // null-safe: a class handle is nullable, so retaining one that holds nothing is `$a = $b` where
-    // `$b` is null. skipping rather than trapping keeps null a first-class value of the type
-    _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), done_block, bump_block);
+    // `$b` is null. skipping rather than trapping keeps null a first-class value of the type. for an
+    // environment it is not even an edge case - a closure that captured nothing carries none at all,
+    // which is the whole reason a callable is a fat pointer
+    _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(block), done_block, bump_block);
 
     _ctx.builder->SetInsertPoint(bump_block);
-    llvm::Value *strong_ptr = gen_strong_ptr(handle, layout);
+
+    // the count's address is only well defined once the block is known non-null, so it is taken here
+    llvm::Value *strong_ptr = layout != nullptr ? gen_strong_ptr(block, *layout) : block;
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Value *count = _ctx.builder->CreateLoad(i64, strong_ptr, "strong");
     _ctx.builder->CreateStore(
@@ -173,9 +237,6 @@ llvm::Value *ClassCodegen::gen_retain(llvm::Value *handle, const AST::ValueType 
     _ctx.builder->CreateBr(done_block);
 
     _ctx.builder->SetInsertPoint(done_block);
-
-    // the handle itself, unchanged. a retain is a side effect on the block, not a new value
-    return handle;
 }
 
 void ClassCodegen::gen_release(llvm::Value *handle, const AST::ValueType &class_type)
@@ -199,20 +260,26 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
     // the steady state that is a map lookup and a name to throw away
     const ClassLayout layout = _ctx.types->get_or_create_class_layout(complex, *_ctx.current_cmp_unit);
 
+    return build_release_thunk(name, &layout, complex);
+}
+
+llvm::Function *ClassCodegen::build_release_thunk(
+    const std::string &name, const ClassLayout *layout, const AST::ComplexType *complex)
+{
     llvm::Type *void_type = llvm::Type::getVoidTy(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
 
     llvm::Function *thunk = llvm::Function::Create(
         llvm::FunctionType::get(void_type, { opaque_ptr }, false),
-        // linkonce_odr for the same reason the typeinfo global is: every unit that releases this class
+        // linkonce_odr for the same reason the typeinfo global is: every unit that releases this block
         // emits its own definition, and the linker folds them
         llvm::GlobalValue::LinkOnceODRLinkage,
         name,
         _ctx.current_module());
 
     llvm::Value *handle = thunk->getArg(0);
-    handle->setName("obj");
+    handle->setName(layout != nullptr ? "obj" : "env");
 
     // built with its own builder position, then restored - this is called from the middle of whatever
     // function asked for a release
@@ -228,7 +295,10 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), return_block, dec_block);
 
     _ctx.builder->SetInsertPoint(dec_block);
-    llvm::Value *strong_ptr = gen_strong_ptr(handle, layout);
+
+    // an environment passes no layout: its count is the block's first word, so the handle *is* the
+    // count's address. see gen_callable_release
+    llvm::Value *strong_ptr = layout != nullptr ? gen_strong_ptr(handle, *layout) : handle;
     llvm::Value *count = _ctx.builder->CreateLoad(i64, strong_ptr, "strong");
     llvm::Value *next = _ctx.builder->CreateSub(count, llvm::ConstantInt::get(i64, 1), "strong.dec");
     _ctx.builder->CreateStore(next, strong_ptr);
@@ -242,7 +312,7 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
     // the payload's teardown, when there is any. the deinit takes `Foo&` - a pointer to a *slot*
     // holding a handle, which is the receiver shape every method and destructor uses - so the handle
     // is spilled to a slot to be addressed. two instructions to keep one receiver convention
-    if (AST::FunctionDeclNode *deinit = complex->deinit()) {
+    if (AST::FunctionDeclNode *deinit = complex != nullptr ? complex->deinit() : nullptr) {
         auto deinit_id = _ctx.current_cmp_unit->function_table.get_function_id(deinit);
         if (deinit_id == 0) {
             _ctx.types->create_llvm_func_decl(deinit, *_ctx.current_cmp_unit);

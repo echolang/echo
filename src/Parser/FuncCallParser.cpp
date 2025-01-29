@@ -93,13 +93,19 @@ static bool parse_explicit_type_args(
 // the argument list of a call, from just past the `(` through the `)`. answers false having reported,
 // leaving the recovery to the caller
 //
-// shared by both call forms so the "unterminated argument list" diagnostic and the optional-comma
+// shared by all three call forms so the "unterminated argument list" diagnostic and the optional-comma
 // rule exist once - anything the argument grammar grows later (defaults, named arguments) is written
-// here rather than in each
+// here rather than in each. a direct call has its expected types on its declaration and does not know
+// them until the call resolves, so it passes none; an indirect call reads them off the callee's
+// signature and passes them, which is what types a literal argument by its destination
+//
+// past the end of `expected_types` an argument types itself - the arity mismatch is the caller's to
+// report, where the whole list is in view rather than one argument
 static bool parse_call_arguments(
     Parser::Payload &payload,
     const TokenReference &at_token,
-    std::vector<AST::ExprNode *> &args)
+    std::vector<AST::ExprNode *> &args,
+    const std::vector<AST::ValueType> *expected_types = nullptr)
 {
     auto &cursor = payload.cursor;
 
@@ -110,7 +116,12 @@ static bool parse_call_arguments(
             return false;
         }
 
-        auto *arg = Parser::parse_expr(payload);
+        AST::TypeNode *expected = nullptr;
+        if (expected_types != nullptr && args.size() < expected_types->size()) {
+            expected = &payload.context.emplace_node<AST::TypeNode>((*expected_types)[args.size()]);
+        }
+
+        auto *arg = Parser::parse_expr(payload, expected);
         if (arg == nullptr) {
             // an issue was already collected by the failed sub-parse; abort this call rather than
             // propagating a null argument into the funccall node
@@ -127,6 +138,11 @@ static bool parse_call_arguments(
     cursor.skip(); // the ')'
 
     return true;
+}
+
+bool Parser::starts_indirect_call_statement(Parser::Cursor &cursor)
+{
+    return cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_open_paren });
 }
 
 bool Parser::starts_call_statement(Parser::Payload &payload)
@@ -146,6 +162,51 @@ bool Parser::starts_call_statement(Parser::Payload &payload)
     // parse_varexpr relies on
     return cursor.peek_is_type(offset + 1, Token::Type::t_open_paren)
         || cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
+}
+
+AST::IndirectCallExprNode *Parser::parse_indirect_call(
+    Parser::Payload &payload, AST::ExprNode *callee, const TokenReference &at)
+{
+    auto &cursor = payload.cursor;
+
+    assert(cursor.is_type(Token::Type::t_open_paren) && "parse_indirect_call called off an argument list");
+
+    const AST::ValueType callee_type = AST::value_type_of(callee->result_type());
+
+    // reported here rather than in the type checker because the *shape* is what is wrong: `$x(1)` on a
+    // non-callable is not a call with bad arguments, it is not a call at all
+    if (!callee_type.is_callable()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            fmt::format(
+                "'{}' is a '{}', which cannot be called.",
+                at.value(), callee_type.get_type_desciption()));
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
+    cursor.skip(); // the open paren
+
+    const auto &signature = callee_type.signature();
+
+    std::vector<AST::ExprNode *> arguments;
+
+    // through the one argument-list walk, handing it the signature's parameter types as the
+    // destinations its literals are typed against
+    if (!parse_call_arguments(payload, at, arguments, &signature.parameter_types)) {
+        return nullptr;
+    }
+
+    if (arguments.size() != signature.parameter_types.size()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            fmt::format(
+                "'{}' takes {} argument(s), but {} were given.",
+                callee_type.get_type_desciption(), signature.parameter_types.size(), arguments.size()));
+        return nullptr;
+    }
+
+    return &payload.context.emplace_node<AST::IndirectCallExprNode>(callee, std::move(arguments), at);
 }
 
 AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace)

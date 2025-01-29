@@ -34,13 +34,13 @@ namespace
         "    destructor() { $this->data = null; }\n"
         "}\n";
 
-    // every drop the pass inserted into a scope, in order. a drop is an ordinary call whose
-    // declaration is a destructor - there is nothing else it could be, since no source can spell one
-    std::vector<FunctionCallExprNode *> drops_in(ScopeNode &scope)
+    // the drops in a node list, in order. a drop is an ordinary call whose declaration is a destructor -
+    // there is nothing else it could be, since no source can spell one
+    std::vector<FunctionCallExprNode *> drops_in_list(const NodeReferenceList &list)
     {
         std::vector<FunctionCallExprNode *> found;
 
-        for (auto &child : scope.children) {
+        for (auto &child : list) {
             if (!child.has_type<FunctionCallExprNode>()) {
                 continue;
             }
@@ -52,6 +52,26 @@ namespace
         }
 
         return found;
+    }
+
+    // every drop the pass inserted into a scope, in order
+    std::vector<FunctionCallExprNode *> drops_in(ScopeNode &scope)
+    {
+        return drops_in_list(scope.children);
+    }
+
+    // the drops a `return` owes. they live *on* the return rather than as statements ahead of it,
+    // because the returned expression may read what is being dropped - `return $c->x` over an owning
+    // `$c` - so codegen has to compute the value first and unwind after
+    std::vector<FunctionCallExprNode *> drops_on_return(ScopeNode &scope)
+    {
+        for (auto &child : scope.children) {
+            if (child.has_type<ReturnNode>()) {
+                return drops_in_list(child.get<ReturnNode>().unwind);
+            }
+        }
+
+        return {};
     }
 
     // the variable a drop is destroying: its receiver is `&<place>`, and for a whole-variable drop
@@ -263,8 +283,9 @@ TEST_CASE("a `return` drops every enclosing scope, innermost first", "[ownership
     auto &m = bundle->modules.find_module("test");
     auto &body = body_of(m, "f");
 
-    // the outer return drops the outer local
-    auto outer_drops = drops_in(body);
+    // the outer return drops the outer local. asked of the *return* rather than of the scope: a
+    // return's drops ride on it, so that its own expression is evaluated before they run
+    auto outer_drops = drops_on_return(body);
     REQUIRE(outer_drops.size() == 1);
     REQUIRE(dropped_variable(outer_drops[0])->name_full() == "$outer");
 
@@ -278,7 +299,7 @@ TEST_CASE("a `return` drops every enclosing scope, innermost first", "[ownership
 
     REQUIRE(if_scope != nullptr);
 
-    auto inner_drops = drops_in(*if_scope);
+    auto inner_drops = drops_on_return(*if_scope);
     REQUIRE(inner_drops.size() == 2);
     REQUIRE(dropped_variable(inner_drops[0])->name_full() == "$inner");
     REQUIRE(dropped_variable(inner_drops[1])->name_full() == "$outer");

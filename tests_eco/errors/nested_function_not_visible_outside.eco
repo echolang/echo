@@ -1,0 +1,11 @@
+// a block-local declaration is invisible outside the block that declared it. it used to resolve at file
+// scope and then jump into a declared-but-never-defined symbol, because the llvm declarations are built
+// from the module arena while bodies are emitted from the file root's children
+
+function outer() : int32
+{
+    function helper(int32 $a) : int32 { return $a + 1; }
+    return helper(1);
+}
+
+echo helper(5);

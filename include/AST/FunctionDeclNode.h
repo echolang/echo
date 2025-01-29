@@ -39,7 +39,7 @@ namespace AST
         std::optional<TokenReference> name_token;
 
         // where this declaration is *written*, which is what a module's parse passes reconcile on
-        // (AST::FunctionRegistry::DeclarationSite). unset for everything the user spelled with a
+        // (AST::DeclarationSite). unset for everything the user spelled with a
         // name, where the name token already is that position
         //
         // a constructor needs the two apart: it is named after its struct, so `name_token` is the
@@ -87,11 +87,27 @@ namespace AST
             return owner_type != nullptr;
         }
 
-        // how many leading `args` entries the caller did not write. exactly the receiver, so 0 or
-        // 1 - spelled as a count rather than a bool because every consumer wants to offset an
-        // index by it
+        // the body of a `function(...) { ... }` written as an expression. it is an ordinary declaration
+        // in every other respect - hoisted to the file root, mangled, emitted - but it is in no overload
+        // set, no name reaches it, and its `args[0]` is the environment its captures live in
+        bool is_closure = false;
+
+        // how many leading `args` entries the caller did not write: a method's receiver, or a closure's
+        // environment. never both, since a closure is not a member - spelled as a count rather than a
+        // bool because every consumer wants to offset an index by it
         inline size_t implicit_arg_count() const {
-            return is_member() ? 1 : 0;
+            return (is_member() || is_closure) ? 1 : 0;
+        }
+
+        // the callable type a value of this function has. the environment parameter is *not* part of it:
+        // it is how a closure reaches its captures, not something a caller passes or a signature
+        // promises, exactly as a method's receiver is absent from `signature_description`
+        ValueType callable_type() const {
+            std::vector<ValueType> params;
+            for (size_t i = implicit_arg_count(); i < args.size(); i++) {
+                params.push_back(parameter_type(i));
+            }
+            return ValueType::make_callable(get_return_type(), std::move(params));
         }
 
         // the 1-based position a reader would count `args[index]` at. the implicit receiver is not
