@@ -12,15 +12,20 @@
 
 #include <fmt/core.h>
 
-LLVMCompiler::LLVMCompiler()
-    : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx), _backend(_ctx)
+LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
+    : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
+      _abort(_ctx), _backend(_ctx)
 {
+    // what the invocation asked for, before any subsystem can read it
+    _ctx.options = options;
+
     // wire the shared context back to the single visitor (for accept-recursion) and to the
     // type-lowering subsystem (reachable from every other subsystem)
     _ctx.visitor = this;
     _ctx.types = &_types;
     _ctx.lvalues = &_lvalues;
     _ctx.classes = &_classes;
+    _ctx.abort = &_abort;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -46,10 +51,15 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     _types.build_function_maps(bundle);
 
     // always declare printf @TODO make this a bit more dynamic..
+    //
+    // eagerly into every unit rather than lazily on first use, unlike the other emitted-runtime
+    // symbols - `echo` fetches it back by name at the call site rather than through a getter
     for (auto &cmp_unit : _ctx.cmp_units) {
-        cmp_unit->llvm_module->getOrInsertFunction("printf",
-            llvm::FunctionType::get(llvm::IntegerType::getInt32Ty(*_ctx.llvm_context), llvm::PointerType::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0), true) 
-        );
+        _ctx.current_cmp_unit = cmp_unit.get();
+        _ctx.libc_callee("printf",
+            llvm::Type::getInt32Ty(*_ctx.llvm_context),
+            { _ctx.opaque_ptr_type() },
+            /*variadic=*/true);
     }
 
     // fetch all function declarations inside of the module
@@ -83,12 +93,22 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
 
     // visit all nodes in the main module
     for (auto &file : main_cmp_unit->ast_module->files()) {
+        // a file whose top level stopped the program - a `die` at module scope - leaves the block
+        // terminated, and everything after it, including the next file, is unreachable. the same
+        // question StmtCodegen::gen_scope asks after every statement, asked across files because
+        // this is the one function body not emitted through gen_function_decl
+        if (_ctx.block_is_terminated()) {
+            break;
+        }
+
         _ctx.current_file = &file;
         file.root->accept(*this);
     }
 
-    // terminate the function
-    _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+    // terminate the function, unless the program already stopped itself
+    if (!_ctx.block_is_terminated()) {
+        _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
+    }
 
     // verify the main module before linking
     std::string error_str;

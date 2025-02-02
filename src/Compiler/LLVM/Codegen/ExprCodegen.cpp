@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -101,17 +102,20 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     auto value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
+    // asked once each rather than five times: result_type() builds its answer, and for a pointer
+    // it heap-allocates the pointee
+    const AST::ValueType from = node.expr->result_type();
+    const AST::ValueType to = node.result_type();
+
     // narrowing a nullable pointer to a borrow asserts the thing a borrow promises. under
-    // opaque pointers the reinterpretation itself is free, so the trap is all there is to emit
-    if (node.result_type().is_pointer() && !node.result_type().is_nullable()
-        && node.expr->result_type().is_pointer() && node.expr->result_type().is_nullable()) {
+    // opaque pointers the reinterpretation itself is free, so the check is all there is to emit
+    if (to.is_pointer() && !to.is_nullable() && from.is_pointer() && from.is_nullable()) {
         gen_null_assert(value);
     }
 
     // the conversion table lives on TypeLowering, shared with every declaration, assignment
     // and member write, so all of them agree on signedness
-    _ctx.value_stack.push(_ctx.types->coerce_value(
-        value, node.expr->result_type(), node.result_type(), *_ctx.current_cmp_unit));
+    _ctx.value_stack.push(_ctx.types->coerce_value(value, from, to, *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
@@ -153,6 +157,10 @@ void ExprCodegen::gen_literal_bool(AST::LiteralBoolExprNode &node)
 
 void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
 {
+    // a global constant C string, the same thing the `echo` format string above is. escapes are
+    // not processed yet - get_string_value() strips the quotes and nothing else - which stays
+    // with todo/B1 along with the real `string` type
+    _ctx.push(_ctx.builder->CreateGlobalStringPtr(node.get_string_value(), "str"));
 }
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
@@ -649,6 +657,59 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
 {
+    // dispatched on the kind first, because the two families answer different questions and share
+    // nothing. `size_of`/`align_of` are generic, take no arguments and fold to a constant; `die`
+    // and `assert` are concrete, take arguments, and push no value at all
+    const AST::BuiltinKind kind = AST::builtin_kind_for(node.decl->builtin.value());
+
+    switch (kind) {
+        case AST::BuiltinKind::t_size_of:
+        case AST::BuiltinKind::t_align_of:
+            // the kind is handed down rather than looked up again: this switch has already made
+            // the routing decision, so the callee's contract is two kinds, not four
+            gen_type_query_builtin(node, kind);
+            return;
+
+        case AST::BuiltinKind::t_die:
+            gen_die_builtin(node);
+            return;
+
+        case AST::BuiltinKind::t_assert:
+            gen_assert_builtin(node);
+            return;
+    }
+}
+
+void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
+{
+    _ctx.abort->gen_abort(
+        "fatal error", _ctx.abort->detail_of(node), _ctx.abort->location_of(node));
+}
+
+void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
+{
+    // a release build emits nothing, and never visits the condition - which is what makes the
+    // elision balanced: any retain or release the ownership pass wrapped the condition in is a
+    // child of this node and disappears with it
+    if (!_ctx.options.assertions_enabled()) {
+        return;
+    }
+
+    if (node.arguments.empty() || node.arguments[0] == nullptr) {
+        throw _ctx.error(fmt::format("'assert' has no condition {}", _ctx.function_context()));
+    }
+
+    node.arguments[0]->accept(*_ctx.visitor);
+    llvm::Value *condition = _ctx.pop();
+
+    // stop on the *false* path, so the branch reads the way the source does
+    _ctx.abort->gen_abort_if(
+        _ctx.builder->CreateNot(condition, "assert.failed"),
+        "assertion failed", _ctx.abort->detail_of(node), _ctx.abort->location_of(node));
+}
+
+void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
+{
     const AST::FunctionDeclNode *decl = node.decl;
 
     // the builtin asks about a type, and that type is the instance's single type argument. an
@@ -667,19 +728,12 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
     // lands with the type the caller's arithmetic already expects
     llvm::Type *result_type = _ctx.types->get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
 
-    uint64_t value = 0;
-    switch (AST::builtin_kind_for(decl->builtin.value())) {
-        case AST::BuiltinKind::t_size_of:
-            // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the
-            // stride between array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]`
-            // mean, and using the store size would under-allocate for any padded struct
-            value = _ctx.layout().getTypeAllocSize(llvm_subject);
-            break;
-
-        case AST::BuiltinKind::t_align_of:
-            value = _ctx.layout().getABITypeAlign(llvm_subject).value();
-            break;
-    }
+    // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the stride between
+    // array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]` mean, and using the store
+    // size would under-allocate for any padded struct
+    const uint64_t value = kind == AST::BuiltinKind::t_size_of
+        ? _ctx.layout().getTypeAllocSize(llvm_subject)
+        : _ctx.layout().getABITypeAlign(llvm_subject).value();
 
     _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
 }
@@ -693,25 +747,24 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
 
 void ExprCodegen::gen_null_assert(llvm::Value *address)
 {
-#if ECO_DONT_CATCH_EXCEPTIONS || !defined(NDEBUG)
-    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
+    // a property of the *program being compiled*, not of how echoc was built. this used to be an
+    // `#if` over the host compiler's NDEBUG, which meant book/concept/pointers_and_refs_v2.md's
+    // "in release builds it is unchecked" described nothing
+    if (!_ctx.options.assertions_enabled()) {
+        return;
+    }
 
     llvm::Value *is_null = _ctx.builder->CreateICmpEQ(
         address,
         llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0)),
         "isnull");
 
-    llvm::BasicBlock *trap_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "null_trap", fn);
-    llvm::BasicBlock *ok_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "not_null", fn);
-
-    _ctx.builder->CreateCondBr(is_null, trap_block, ok_block);
-
-    _ctx.builder->SetInsertPoint(trap_block);
-    _ctx.builder->CreateCall(llvm::Intrinsic::getDeclaration(_ctx.current_module(), llvm::Intrinsic::trap));
-    _ctx.builder->CreateUnreachable();
-
-    _ctx.builder->SetInsertPoint(ok_block);
-#endif
+    // through the same runtime *and the same message shape* `die` and `assert` use, so this finally
+    // says what went wrong instead of raising SIGILL. a cast node carries no token, so its location
+    // is the enclosing function rather than a line - see todo/C6
+    _ctx.abort->gen_abort_if(is_null,
+        "fatal error", "null pointer cast to a reference",
+        fmt::format("{}, {}", _ctx.current_file_name(), _ctx.function_context()));
 }
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)

@@ -14,8 +14,10 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTBuiltin.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/LiteralValueNode.h"
 
 #include <fmt/core.h>
 
@@ -295,6 +297,51 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
     RecursiveVisitor::visit_instanceof_expr(node);
 }
 
+void TypeChecker::check_abort_message(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    // which argument the message is comes from AST::builtin_message_index, shared with the
+    // ExprCodegen site that folds it - spelled here as well, the two could check one argument and
+    // fold another, and a message that is not a literal folds to *nothing* rather than to an error
+    const auto index = builtin_message_index(builtin_kind_for(node.decl->builtin.value()));
+
+    if (!index.has_value() || node.arguments.size() <= *index) {
+        return;
+    }
+
+    ExprNode *message = node.arguments[*index];
+
+    // an argument whose *type* is already wrong has been reported - directly by the per-argument
+    // walk above, or by visitTypeCast when the resolver wrapped it to make it fit. saying it is
+    // also not a literal is two diagnostics for one mistake, and the shape is the less useful one.
+    //
+    // asked of the expression the user *wrote*, through the same strip is_written_null uses: a
+    // legal cast around a perfectly good literal must not read as "not a literal"
+    const ExprNode *written = strip_implicit_casts(message);
+    if (written == nullptr) {
+        return;
+    }
+
+    if (*index < node.decl->args.size() && node.decl->args[*index]->has_type()
+        && !arg_assignable_to(written->result_type(), message, node.decl->args[*index]->type())) {
+        return;
+    }
+
+    // the message is folded into a constant at the call site, together with the source location -
+    // that is what makes these builtins rather than library functions, and it is why the text has
+    // to be readable at compile time. lifts when there is a `string` type to hand one at runtime
+    if (!literal_string_value(message).has_value()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            fmt::format("the message of '{}' must be a string literal - it is folded into the "
+                "binary along with the source location, so it has to be known at compile time",
+                node.decl->func_name()));
+    }
+}
+
 void TypeChecker::check_call_argument(
     ExprNode *argument,
     const ValueType &param_type,
@@ -358,6 +405,8 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     node.token_function_name);
             }
         }
+
+        check_abort_message(node);
     }
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and

@@ -1,0 +1,4 @@
+// a satisfied assert emits a branch and nothing else happens
+int32 $i = 5;
+assert($i < 10);
+echo $i;

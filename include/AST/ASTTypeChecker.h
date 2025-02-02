@@ -94,6 +94,12 @@ namespace AST
             const TokenReference &at
         );
 
+        // `die`'s and `assert`'s message has to be a string literal, because codegen folds it into a
+        // constant along with the call site's source location. reported here rather than in the
+        // parser: the declaration is what makes the call legal, and codegen has to be able to trust
+        // the shape by the time it reads it. a no-op for every other call
+        void check_abort_message(FunctionCallExprNode &node);
+
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value
         // fit" but "may this storage be written at all"

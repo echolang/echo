@@ -5,6 +5,7 @@
 
 #include "eco.h"
 #include "Compiler/CompilerException.h"
+#include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 
 #include <llvm/IR/DataLayout.h>
@@ -35,6 +36,7 @@ namespace Compiler::LLVM
     class TypeLowering;
     class LValueCodegen;
     class ClassCodegen;
+    class AbortCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -45,6 +47,10 @@ namespace Compiler::LLVM
     {
         std::unique_ptr<llvm::LLVMContext> llvm_context;
         std::unique_ptr<llvm::IRBuilder<>> builder;
+
+        // what the invocation asked for. read through its predicates rather than compared, so that
+        // every check the compiler can skip skips together
+        CompilerOptions options;
 
         // the host target's data layout and triple, published by Backend::init_target before any
         // module is created so that every module carries them from the start. this is what makes
@@ -87,8 +93,47 @@ namespace Compiler::LLVM
         // statement and expression subsystems, which is where the tree says a retain or a release goes
         ClassCodegen *classes = nullptr;
 
+        // the abort subsystem: the one owner of how a program stops. every stop site - `die`, a
+        // failed `assert`, the null narrowing check - goes through it, so they share one runtime,
+        // one message shape and one release-mode gate
+        AbortCodegen *abort = nullptr;
+
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();
+        }
+
+        // declares a libc function into the current module, or hands back the one already there
+        //
+        // the RC runtime, the abort runtime and `echo` are all *emitted* rather than linked, so
+        // each needs a handful of C symbols with no stdlib declaration behind them. spelled out per
+        // symbol they had already drifted - `printf` still uses the legacy typed pointer, and only
+        // `exit` remembered its attributes - so this is the one spelling
+        llvm::FunctionCallee libc_callee(
+            const char *name,
+            llvm::Type *return_type,
+            llvm::ArrayRef<llvm::Type *> parameter_types,
+            bool variadic = false)
+        {
+            return current_module()->getOrInsertFunction(
+                name, llvm::FunctionType::get(return_type, parameter_types, variadic));
+        }
+
+        // the opaque `ptr`, spelled once - it appears in almost every emitted runtime signature
+        llvm::Type *opaque_ptr_type() const {
+            return llvm::PointerType::get(*llvm_context, 0);
+        }
+
+        // **has the block being emitted into already ended?** one question with many askers, and
+        // the answer to all of them is "then emit nothing more here": gen_scope stops walking a
+        // scope, gen_function_decl declines to synthesize a second terminator, the if/while arms
+        // decline to branch, and compile_bundle's main epilogue declines to return
+        //
+        // named because a second terminator in one block fails the verifier, so every emitter that
+        // can follow a `return` or a `die` owes this check - and the next early exit (`break`) will
+        // owe it too
+        bool block_is_terminated() const {
+            llvm::BasicBlock *block = builder->GetInsertBlock();
+            return block != nullptr && block->getTerminator() != nullptr;
         }
 
         void push(llvm::Value *value) {
@@ -109,6 +154,14 @@ namespace Compiler::LLVM
         // a human-readable description of the current codegen location, e.g. "in function 'foo'"
         // or "at global scope", suffixed onto codegen error messages
         std::string function_context() const;
+
+        // the name of the file being emitted. the *file name*, not the path: the e2e runner passes
+        // an absolute source directory, so a path would make every golden machine-specific
+        //
+        // beside function_context() rather than on a subsystem, because it answers the same kind of
+        // question from the same state, and the one caller that needs both would otherwise reach
+        // through two different owners for one sentence of output
+        std::string current_file_name() const;
 
         Compiler::InternalCompilerException error(std::string message);
     };

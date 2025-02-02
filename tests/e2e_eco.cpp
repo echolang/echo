@@ -32,12 +32,50 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    // run `echoc run <file>` capturing merged stdout+stderr, return the captured text.
+    std::string read_file(const fs::path &p)
+    {
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        return ss.str();
+    }
+
+    // the extra flags a test asks for, from a sibling `<name>.eco.flags`, or "" when there is none
+    //
+    // most tests need none - the point of a golden is that the same invocation produces the same
+    // output. but a flag can be the thing under test: `--release` is what makes an `assert`
+    // disappear, and no amount of source can show that from inside the program
+    std::string read_flags(const fs::path &eco)
+    {
+        fs::path flags_path = eco;
+        flags_path += ".flags";
+
+        if (!fs::exists(flags_path)) {
+            return "";
+        }
+
+        std::string flags = read_file(flags_path);
+
+        // one line, whitespace-trimmed - a trailing newline from an editor must not become an
+        // empty argument
+        const size_t first = flags.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) {
+            return "";
+        }
+
+        return flags.substr(first, flags.find_last_not_of(" \t\r\n") - first + 1);
+    }
+
+    // run `echoc run [flags] <file>` capturing merged stdout+stderr, return the captured text.
     // 2>&1 so a rare stderr line (e.g. "No source files") is captured too; in practice a
     // successful run prints only program output and a failing run prints only diagnostics
     std::string run_echoc(const fs::path &eco)
     {
-        std::string cmd = "\"" ECHOC_BINARY "\" run \"" + eco.string() + "\" 2>&1";
+        const std::string flags = read_flags(eco);
+
+        std::string cmd = "\"" ECHOC_BINARY "\" run "
+            + (flags.empty() ? "" : flags + " ")
+            + "\"" + eco.string() + "\" 2>&1";
 
         std::string out;
         std::array<char, 4096> buf;
@@ -52,14 +90,6 @@ namespace
         // exit code is intentionally ignored - the captured output is the contract
         pclose(pipe);
         return out;
-    }
-
-    std::string read_file(const fs::path &p)
-    {
-        std::ifstream f(p, std::ios::binary);
-        std::stringstream ss;
-        ss << f.rdbuf();
-        return ss.str();
     }
 
     // strip a single trailing newline so goldens don't have to be byte-perfect on the last \n

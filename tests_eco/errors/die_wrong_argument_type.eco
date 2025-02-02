@@ -1,0 +1,3 @@
+// an ordinary argument mismatch - `die` is a declared builtin, so it gets the same diagnostic
+// any other call would
+die(42);

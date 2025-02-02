@@ -1,0 +1,11 @@
+// an assert inside a template: it is emitted per instance, and the location is the template's
+struct Box<T> { T $v; }
+
+function peek<T>(Box<T>& $b, int32 $tag) : T {
+    assert($tag > 0, "tag must be positive");
+    return $b->v;
+}
+
+Box<int32> $b = Box<int32>(9);
+echo peek(&$b, 1);
+echo peek(&$b, 0);

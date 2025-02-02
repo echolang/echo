@@ -213,8 +213,19 @@ namespace AST
         {};
         ~LiteralStringExprNode() {};
 
+        // a C string: the address of a NUL-terminated run of bytes in the module's constants
+        //
+        // not the language's eventual `string` type, which does not exist yet (todo/C1) - but a
+        // literal has to have *some* type for a declaration to be able to name it, which is what
+        // `die(ptr<const uint8> $message)` needs. answering `unknown` meant a literal could not be
+        // passed to anything and lowered to nothing at all (todo/B1)
         ValueType result_type() const override {
-            return ValueType::make_unknown(); // string type not yet implemented
+            // one shared instance: `make_pointer` heap-allocates its pointee, and this type does not
+            // depend on the node at all, so building it per call would malloc on every overload
+            // candidate scored, every adjuster visit and every fit check
+            static const ValueType type = ValueType::make_pointer(
+                ValueType::make_const(ValueType(ValueTypePrimitive::t_uint8)), true);
+            return type;
         }
 
         void accept(Visitor &visitor) override {

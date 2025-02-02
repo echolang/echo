@@ -160,6 +160,18 @@ namespace AST
         return call.decl == nullptr && call.token_function_name.type() == Token::Type::t_echo;
     }
 
+    // **is this expression a string literal, and what does it say?** the text if it is, nullopt if
+    // it is not, one question because two subsystems ask it about the same argument and must agree:
+    // AST::TypeChecker rejects a `die`/`assert` message that has no answer, and ExprCodegen folds
+    // the answer into the abort text
+    //
+    // spelled separately they were a silent failure rather than a diagnostic - codegen's copy
+    // returned "" for a shape the checker had let through, so the message simply lost its detail
+    //
+    // implemented in ExprNode.cpp because it looks through the implicit casts the resolver wraps an
+    // argument in, which is the same reason is_written_null does
+    std::optional<std::string> literal_string_value(const ExprNode *expr);
+
     class BinaryExprNode : public ExprNode
     {
     public:

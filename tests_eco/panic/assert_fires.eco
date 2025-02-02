@@ -1,0 +1,4 @@
+// a failed assert stops the program where it stands
+int32 $i = 5;
+assert($i > 10);
+echo $i;

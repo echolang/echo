@@ -1,0 +1,16 @@
+// a `die` terminates whichever block it lands in: every arm of an `if`, a loop body, and a scope
+// that owes a release for its class local. none of them needs special handling in codegen -
+// gen_scope already stops at a terminated block
+class Node { int32 $v; }
+
+int32 $i = 0;
+while ($i < 3) {
+    Node $n = Node(7);
+    echo $n->v;
+
+    if ($i == 2) {
+        die("loop finished");
+    }
+
+    $i = $i + 1;
+}

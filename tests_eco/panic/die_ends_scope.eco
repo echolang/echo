@@ -1,0 +1,13 @@
+// a `die` terminates its block: `pick` needs no `return` after it, and the echo below the
+// die at module scope is never compiled
+function pick(int32 $n) : int32 {
+    if ($n > 0) {
+        return $n;
+    }
+
+    die("pick needs a positive value");
+}
+
+echo pick(7);
+echo pick(0);
+echo 999;

@@ -1,6 +1,8 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarRefNode.h"
+#include "AST/TypeCastNode.h"
+#include "AST/LiteralValueNode.h"
 #include <map>
 
 AST::ValueType AST::BinaryExprNode::result_type() const
@@ -223,4 +225,23 @@ AST::ValueType AST::DerefExprNode::result_type() const
 const std::string AST::DerefExprNode::node_description()
 {
     return "deref<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+std::optional<std::string> AST::literal_string_value(const AST::ExprNode *expr)
+{
+    // through the implicit casts the resolver wraps an argument in to make it fit its parameter.
+    // without this a nullability or const adjustment around an otherwise perfectly good literal
+    // would read as "not a literal", and the message would silently lose its text
+    while (expr != nullptr && expr->get_node_type() == AST::NodeType::n_type_cast) {
+        const auto *cast = static_cast<const AST::TypeCastNode *>(expr);
+        if (!cast->is_implcit) {
+            break;
+        }
+        expr = cast->expr;
+    }
+
+    if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_literal_string) {
+        return std::nullopt;
+    }
+
+    return static_cast<const AST::LiteralStringExprNode *>(expr)->get_string_value();
 }

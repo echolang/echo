@@ -19,22 +19,16 @@ namespace Compiler::LLVM
 
 llvm::FunctionCallee ClassCodegen::get_malloc()
 {
-    return _ctx.current_module()->getOrInsertFunction(
-        "malloc",
-        llvm::FunctionType::get(
-            llvm::PointerType::get(*_ctx.llvm_context, 0),
-            { llvm::Type::getInt64Ty(*_ctx.llvm_context) },
-            false));
+    return _ctx.libc_callee("malloc",
+        _ctx.opaque_ptr_type(),
+        { llvm::Type::getInt64Ty(*_ctx.llvm_context) });
 }
 
 llvm::FunctionCallee ClassCodegen::get_free()
 {
-    return _ctx.current_module()->getOrInsertFunction(
-        "free",
-        llvm::FunctionType::get(
-            llvm::Type::getVoidTy(*_ctx.llvm_context),
-            { llvm::PointerType::get(*_ctx.llvm_context, 0) },
-            false));
+    return _ctx.libc_callee("free",
+        llvm::Type::getVoidTy(*_ctx.llvm_context),
+        { _ctx.opaque_ptr_type() });
 }
 
 llvm::Value *ClassCodegen::gen_strong_ptr(llvm::Value *handle, const ClassLayout &layout)

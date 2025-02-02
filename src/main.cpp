@@ -264,6 +264,25 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
     return 0;
 }
 
+// resolves --debug/--release against the subcommand's default. one function because the two
+// subcommands disagree only about the default, and a second spelling of the rule would let them
+// drift - `build` is a release build unless told otherwise, matching that it already always optimizes
+//
+// cannot fail: the mutually exclusive group refuses both flags at parse time
+static Compiler::CompilerOptions resolve_options(
+    argparse::ArgumentParser &cli, Compiler::BuildMode fallback)
+{
+    if (cli.get<bool>("--debug")) {
+        return { Compiler::BuildMode::t_debug };
+    }
+
+    if (cli.get<bool>("--release")) {
+        return { Compiler::BuildMode::t_release };
+    }
+
+    return { fallback };
+}
+
 int main_run(argparse::ArgumentParser &cli)
 {
     auto bundle = AST::Bundle();
@@ -278,7 +297,7 @@ int main_run(argparse::ArgumentParser &cli)
     }
 
     // compile the module
-    LLVMCompiler compiler;
+    LLVMCompiler compiler(resolve_options(cli, Compiler::BuildMode::t_debug));
 
     try {
         compiler.compile_bundle(bundle);
@@ -317,7 +336,7 @@ int main_build(argparse::ArgumentParser &cli)
     }
 
     // compile the module
-    LLVMCompiler compiler;
+    LLVMCompiler compiler(resolve_options(cli, Compiler::BuildMode::t_release));
 
     try {
         compiler.compile_bundle(bundle);
@@ -396,6 +415,25 @@ int main(int argc, char *argv[])
 
         command.get().add_argument("-O", "--optimize")
             .help("Sets the optimization level to 3, makes your code go brrrrrr.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // the build mode decides which checks the program carries: `assert` and the null check the
+        // `ptr<T>` -> `T&` narrowing emits are both debug-only. deliberately orthogonal to -O,
+        // which says how hard to optimize what is emitted, not what to emit
+        //
+        // `run` defaults to debug and `build` to release - see main_run / main_build. the group is
+        // what refuses both at once, so the conflict is reported by the parser with usage, the way
+        // every other CLI mistake is, rather than by a hand-rolled check with its own message
+        auto &build_mode = command.get().add_mutually_exclusive_group();
+
+        build_mode.add_argument("--debug")
+            .help("Debug build: keep 'assert' and the compiler's own runtime checks. The default for 'run'.")
+            .default_value(false)
+            .implicit_value(true);
+
+        build_mode.add_argument("--release")
+            .help("Release build: drop 'assert' and the compiler's own runtime checks. The default for 'build'.")
             .default_value(false)
             .implicit_value(true);
 

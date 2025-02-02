@@ -1,0 +1,5 @@
+// run with --release (see the .eco.flags sibling): the assert is not emitted at all - the
+// condition included - so the program runs straight past a condition that is plainly false
+echo 1;
+assert(false, "this must never be reached in a release build");
+echo 2;

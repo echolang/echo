@@ -1,0 +1,5 @@
+// `die` prints its message and the call site, and stops with a non-zero status.
+// the echo above it must appear first - the abort runtime flushes stdout before writing
+echo 1;
+die("something went wrong");
+echo 2;

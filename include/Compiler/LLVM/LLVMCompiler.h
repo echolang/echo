@@ -8,7 +8,9 @@
 #include "AST/ASTVisitor.h"
 
 #include "Compiler/CompilerException.h"
+#include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
@@ -25,7 +27,7 @@
 class LLVMCompiler : public AST::Visitor
 {
 public:
-    LLVMCompiler();
+    LLVMCompiler(Compiler::CompilerOptions options);
     ~LLVMCompiler();
 
     void compile_bundle(const AST::Bundle &bundle);
@@ -81,6 +83,7 @@ private:
     Compiler::LLVM::StmtCodegen _stmt;
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
+    Compiler::LLVM::AbortCodegen _abort;
     Compiler::LLVM::Backend _backend;
 };
 

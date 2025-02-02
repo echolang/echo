@@ -68,7 +68,7 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
         // only thing that terminates one: an `if` whose every arm returns leaves the builder
         // inside the last arm, and the scope-exit drops the ownership pass appends after it would
         // land there. that shape is only reachable at all once a scope owes drops
-        if (_ctx.builder->GetInsertBlock()->getTerminator() != nullptr) {
+        if (_ctx.block_is_terminated()) {
             break;
         }
     }
@@ -134,6 +134,13 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             return;
         }
 
+        // a builtin has no symbol at all - it is answered in gen_builtin_call at each call site, so
+        // there is nothing to emit here. spelled out rather than left to the !is_generic() fallback
+        // below, which only happened to cover the generic builtins that existed first
+        if (node.is_builtin()) {
+            return;
+        }
+
         // skip instantiated generic functions that don't have bodies yet
         // this is a temporary measure while we implement proper body cloning
         // (is_generic() is exactly !type_parameters.empty(), so one check covers it)
@@ -173,7 +180,7 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     node.body->accept(*_ctx.visitor);
 
     // add a terminator if the block doesn't already have one
-    if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
+    if (!_ctx.block_is_terminated()) {
         // if the function returns void, add a void return
         if (func->getReturnType()->isVoidTy()) {
             _ctx.builder->CreateRetVoid();
@@ -262,7 +269,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         node.if_scope->accept(*_ctx.visitor);
 
         // if last instruction is not a terminator we need to add a branch to the merge block
-        if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
+        if (!_ctx.block_is_terminated()) {
             _ctx.builder->CreateBr(merge_block);
         }
 
@@ -277,7 +284,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         node.if_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
-        if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
+        if (!_ctx.block_is_terminated()) {
             merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", _ctx.builder->GetInsertBlock()->getParent());
             _ctx.builder->CreateBr(merge_block);
         }
@@ -287,7 +294,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         node.else_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
-        if (!_ctx.builder->GetInsertBlock()->getTerminator()) {
+        if (!_ctx.block_is_terminated()) {
             if (!merge_block) {
                 merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", _ctx.builder->GetInsertBlock()->getParent());
             }
@@ -321,7 +328,7 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     // fails the verifier
     _ctx.builder->SetInsertPoint(body_block);
     node.loop_scope->accept(*_ctx.visitor);
-    if (_ctx.builder->GetInsertBlock()->getTerminator() == nullptr) {
+    if (!_ctx.block_is_terminated()) {
         _ctx.builder->CreateBr(loop_block);
     }
 

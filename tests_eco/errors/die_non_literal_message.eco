@@ -1,0 +1,4 @@
+// the message is folded into a constant with the source location, so it has to be readable
+// at compile time. lifts when there is a `string` type
+ptr<const uint8> $m = "not a literal at the call site";
+die($m);

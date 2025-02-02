@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTFile.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <fmt/core.h>
@@ -31,6 +32,14 @@ namespace Compiler::LLVM
             return fmt::format("in function '{}'", current_function->func_name());
         }
         return "at global scope";
+    }
+
+    std::string CodegenContext::current_file_name() const
+    {
+        if (current_file == nullptr) {
+            return "<unknown>";
+        }
+        return current_file->get_path().filename().string();
     }
 
     Compiler::InternalCompilerException CodegenContext::error(std::string message)
