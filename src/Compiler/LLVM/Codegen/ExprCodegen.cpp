@@ -14,6 +14,7 @@
 #include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ReturnNode.h"
@@ -157,10 +158,42 @@ void ExprCodegen::gen_literal_bool(AST::LiteralBoolExprNode &node)
 
 void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
 {
-    // a global constant C string, the same thing the `echo` format string above is. escapes are
-    // not processed yet - get_string_value() strips the quotes and nothing else - which stays
-    // with todo/B1 along with the real `string` type
-    _ctx.push(_ctx.builder->CreateGlobalStringPtr(node.get_string_value(), "str"));
+    const std::string &bytes = node.get_string_value();
+
+    // the bytes themselves, always: a private NUL-terminated global. the NUL costs one byte and buys
+    // `->c_str()` for free on a literal, which is the whole C-interop story for one
+    llvm::Value *byte_pointer = _ctx.builder->CreateGlobalStringPtr(bytes, "str");
+
+    const AST::ValueType type = node.result_type();
+
+    // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
+    // path that compiles `stdlib/core/string.eco` itself
+    if (!type.has_complex_type()) {
+        _ctx.push(byte_pointer);
+        return;
+    }
+
+    // resolved once by compile_bundle, which is also where a malformed stdlib string is reported
+    const AST::CoreStringLayout &layout = _ctx.core_string_layout();
+
+    auto *string_struct = llvm::cast<llvm::StructType>(_ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit));
+    auto *view_struct = llvm::cast<llvm::StructType>(string_struct->getElementType(layout.window_index));
+
+    // **the whole point of this function.** a literal is a *constant* of the string type, not a call to
+    // one of its constructors: the bytes are already in the binary, the size is known here, and the
+    // owner is null - so nothing is allocated and nothing is retained. a null owner is also what makes
+    // the retain and release the ownership pass wraps this value in no-ops, since both are null-guarded
+    std::vector<llvm::Constant *> view_fields(2);
+    view_fields[layout.bytes_index] = llvm::cast<llvm::Constant>(byte_pointer);
+    view_fields[layout.size_index] =
+        llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
+
+    std::vector<llvm::Constant *> string_fields(2);
+    string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
+    string_fields[layout.owner_index] =
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
+
+    _ctx.push(llvm::ConstantStruct::get(string_struct, string_fields));
 }
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
@@ -456,6 +489,14 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             // has no format for one
             auto result_type = arg->result_type();
 
+            // **the one non-primitive `echo` knows.** a string prints as a length-counted write rather
+            // than through printf: its bytes are not NUL-terminated in general - a substring shares its
+            // owner's buffer and simply stops early - and `%s` would run off the end of one
+            if (_ctx.core_types().is_string_like(result_type)) {
+                gen_echo_string(arg_value, result_type);
+                continue;
+            }
+
             const EchoConversion conversion = printf_conversion_for(result_type);
             if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
@@ -677,7 +718,80 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_assert:
             gen_assert_builtin(node);
             return;
+
+        case AST::BuiltinKind::t_ref_count:
+            gen_ref_count_builtin(node);
+            return;
     }
+}
+
+void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type)
+{
+    const AST::CoreStringLayout &layout = _ctx.core_string_layout();
+
+    // both string types arrive here as a *value*, so the window is reached by extraction rather than a
+    // GEP - there is no address to walk. an owning `string` is one level further out than its window
+    llvm::Value *window = _ctx.core_types().is_string(type)
+        ? _ctx.builder->CreateExtractValue(value, { static_cast<unsigned>(layout.window_index) }, "window")
+        : value;
+
+    llvm::Value *bytes = _ctx.builder->CreateExtractValue(
+        window, { static_cast<unsigned>(layout.bytes_index) }, "bytes");
+    llvm::Value *size = _ctx.builder->CreateExtractValue(
+        window, { static_cast<unsigned>(layout.size_index) }, "size");
+
+    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+
+    // stdout is buffered and this write is not, so flushing first keeps a string in order with the
+    // printf every other `echo` emits. AbortCodegen flushes for the same reason before its own write
+    _ctx.builder->CreateCall(
+        _ctx.libc_callee("fflush", i32, { _ctx.opaque_ptr_type() }),
+        { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
+
+    _ctx.builder->CreateCall(
+        _ctx.libc_callee("write", i64, { i32, _ctx.opaque_ptr_type(), i64 }),
+        { llvm::ConstantInt::get(i32, 1), bytes, size });
+
+    // the trailing newline every other `echo` conversion carries, so one statement behaves one way
+    // whatever it is handed. writing it separately rather than copying the bytes to append it: the
+    // bytes may be a shared substring, and there is nowhere to put a longer copy
+    _ctx.builder->CreateCall(
+        _ctx.libc_callee("write", i64, { i32, _ctx.opaque_ptr_type(), i64 }),
+        { llvm::ConstantInt::get(i32, 1), _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"),
+          llvm::ConstantInt::get(i64, 1) });
+}
+
+void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node)
+{
+    // the shape is TypeChecker::check_ref_count_argument's, not this arm's: a non-class argument is
+    // the user's mistake and gets a located diagnostic there rather than an internal compiler error
+    // here. what is left is the invariant a settled call already carries
+    if (node.arguments.size() != 1 || node.arguments[0] == nullptr) {
+        throw _ctx.error(fmt::format("'ref_count' takes exactly one argument {}", _ctx.function_context()));
+    }
+
+    const AST::ValueType argument_type = node.arguments[0]->result_type();
+    const AST::ValueType handle_type = AST::value_type_of(argument_type);
+
+    node.arguments[0]->accept(*_ctx.visitor);
+    llvm::Value *handle = _ctx.pop();
+
+    // read *through* the borrow. the parameter is `T&`, so what arrives is the address of the slot
+    // holding the handle rather than the handle - one load short. the pointer adjuster inserts no deref
+    // here because the argument sits in a pointer position, so this load is owed at exactly this site
+    if (argument_type.is_pointer()) {
+        handle = _ctx.builder->CreateLoad(_ctx.opaque_ptr_type(), handle, "handle");
+    }
+
+    // the count itself belongs to the class subsystem, beside retain and release - this arm only routes
+    // to it and fits the result to whatever the declaration promised, so the stdlib is free to say
+    // `usize` where the block holds an i64
+    llvm::Value *count = _ctx.classes->gen_strong_count(handle, handle_type);
+
+    _ctx.push(_ctx.types->coerce_value(
+        count, AST::ValueType(AST::ValueTypePrimitive::t_uint64), node.decl->get_return_type(),
+        *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)

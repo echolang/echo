@@ -2,6 +2,42 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/ExprNode.h"
+#include "AST/LiteralValueNode.h"
+
+#include <fmt/core.h>
+
+std::optional<std::string> Parser::attribute_string_value(
+    Parser::Payload &payload, AST::AttributeNode *attribute, const std::string &attribute_name)
+{
+    if (attribute->attribute_exprs.size() != 1) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(attribute->attribute_tokens),
+            fmt::format("The '{}' attribute takes exactly one value.", attribute_name));
+        return std::nullopt;
+    }
+
+    // AST::literal_string_value, not a hand-rolled node-type test: it is the one answer to "what text
+    // does this expression spell", shared with the abort message the type checker validates and the one
+    // ExprCodegen folds - so an attribute can never read a literal differently from the rest of the
+    // compiler
+    const AST::NodeReference &written = attribute->attribute_exprs[0];
+
+    std::optional<std::string> value;
+    if (written.has() && written.is_expression_node()) {
+        value = AST::literal_string_value(written.unsafe_ptr<AST::ExprNode>());
+    }
+
+    if (!value.has_value()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(attribute->attribute_tokens),
+            fmt::format("The '{}' attribute value must be a string.", attribute_name));
+        return std::nullopt;
+    }
+
+    return value;
+}
+
 AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
 {
     if (!payload.cursor.is_type(Token::Type::t_hash)) {

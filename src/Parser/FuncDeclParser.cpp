@@ -16,31 +16,9 @@
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
+#include "Parser/AttributeParser.h"
 
 #include <fmt/core.h>
-
-// reads the single string value out of an attribute like `#[intrinsic: "llvm.sin"]`, reporting a
-// located issue and answering nullopt when the attribute is malformed. shared by every attribute
-// whose payload is one string, so they cannot diverge in how they validate
-static std::optional<std::string> attribute_string_value(
-    Parser::Payload &payload, AST::AttributeNode *attribute, const std::string &attribute_name)
-{
-    if (attribute->attribute_exprs.size() != 1) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(attribute->attribute_tokens),
-            fmt::format("The '{}' attribute takes exactly one value.", attribute_name));
-        return std::nullopt;
-    }
-
-    if (!attribute->attribute_exprs[0].has_type<AST::LiteralStringExprNode>()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(attribute->attribute_tokens),
-            fmt::format("The '{}' attribute value must be a string.", attribute_name));
-        return std::nullopt;
-    }
-
-    return attribute->attribute_exprs[0].get_ptr<AST::LiteralStringExprNode>()->get_string_value();
-}
 
 void Parser::push_implicit_param(
     Parser::Payload &payload,

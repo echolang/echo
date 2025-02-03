@@ -299,6 +299,81 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
     return std::nullopt;
 }
 
+// `Owner::Nested` in type position. a nested type lives on its owner rather than in a namespace, so
+// the `A::B` prefix has to be tried as a type as well as a namespace - this is the type half.
+//
+// it commits to consuming only once the leading identifier is *known* to name a type, so an ordinary
+// `a::b::Foo` walk reaches the namespace path below with the cursor untouched. the loop is what makes
+// `A::B::C` nest twice.
+//
+// only an unqualified owner is recognised: `text::string::view` would need the namespace resolved
+// first, and Parser::parse_namespace consumes `identifier ::` runs greedily. that is a real hole and
+// not one this needs - a nested type is reached through its owner, and an owner is a plain type name
+// wherever it is in scope
+static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, std::optional<TokenReference> &out_name)
+{
+    auto &cursor = payload.cursor;
+
+    if (!cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+        return nullptr;
+    }
+
+    // the declaring namespace, not the current one - a type is not block-scoped, the same rule
+    // resolve_constraint_atom above states
+    auto *symbol = payload.collector.namespaces.find_symbol(
+        cursor.current().value(), *payload.context.declaring_namespace());
+
+    if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+        return nullptr;
+    }
+
+    AST::TypeDeclNode *owner = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
+
+    // snapshot/restore, the idiom parse_member_call and starts_vardecl already use for exactly this
+    // ambiguity: a name can be both a type and a namespace, and every failure below leaves the caller
+    // to try the namespace-qualified path. consuming irreversibly here left the cursor mid-name and
+    // turned one mis-resolved `A::B` into a cascade of unrelated diagnostics
+    const auto start = cursor.snapshot();
+
+    cursor.skip(); // the owner name
+    cursor.skip(); // the `::`
+
+    while (true) {
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+            cursor.restore(start);
+            return nullptr;
+        }
+
+        auto name_token = cursor.current();
+
+        // the *local* table: an owner reached by name is a declaration, never an instantiation, so
+        // there is nothing for AST::find_member_type's redirect to do here
+        AST::TypeDeclNode *nested = owner->complex_type().find_member_type_decl(name_token.value());
+
+        if (nested == nullptr) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(name_token),
+                fmt::format("'{}' has no nested type '{}'.",
+                    owner->namespaced_type_name(), name_token.value()));
+
+            cursor.restore(start);
+            return nullptr;
+        }
+
+        owner = nested;
+        out_name.emplace(name_token); // TokenReference has no copy assignment
+        cursor.skip();
+
+        // another `::` continues the chain
+        if (!cursor.is_type_sequence(0, { Token::Type::t_namespace_sep, Token::Type::t_identifier })) {
+            return owner;
+        }
+
+        cursor.skip(); // the `::`
+    }
+}
+
 // parses `<Arg, Arg, ...>` (cursor positioned at the opening `<`) as generic type arguments
 // applied to `template_decl`, and returns the interned application ValueType. Arguments are
 // themselves types, so nesting (Foo<Bar<int>>) falls out of the recursion into parse_type
@@ -668,6 +743,20 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
         auto pointer_type = AST::ValueType::make_pointer(pointee.value(), true);
         return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(pointer_type) : pointer_type);
+    }
+
+    // `Owner::Nested` before `a::b::Foo`: the two spellings are indistinguishable until the leading
+    // identifier is looked up, and only one of them can be resolved by descending namespaces
+    std::optional<TokenReference> member_type_name;
+    if (AST::TypeDeclNode *member_type = try_parse_member_type_chain(payload, member_type_name)) {
+        AST::ValueType nested_type = member_type->value_type();
+
+        // a nested type may itself be generic, and the application reads the same as any other
+        if (payload.cursor.is_type(Token::Type::t_open_angle)) {
+            nested_type = parse_generic_application(payload, member_type, member_type_name.value());
+        }
+
+        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(nested_type) : nested_type);
     }
 
     // a type may be namespace qualified: `a::b::Foo`. the prefix is consumed here so the name

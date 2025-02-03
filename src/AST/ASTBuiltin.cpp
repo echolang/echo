@@ -13,6 +13,7 @@ namespace
             { "align_of", AST::BuiltinKind::t_align_of },
             { "die", AST::BuiltinKind::t_die },
             { "assert", AST::BuiltinKind::t_assert },
+            { "ref_count", AST::BuiltinKind::t_ref_count },
         };
         return table;
     }
@@ -42,9 +43,11 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_assert:
             return 1;
 
-        // no arguments at all, so nothing to fold
+        // nothing to fold: size_of and align_of take no arguments at all, and ref_count's one argument
+        // is a class handle rather than a message
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_ref_count:
             return std::nullopt;
     }
 

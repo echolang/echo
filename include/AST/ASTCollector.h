@@ -11,6 +11,7 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/ASTCoreTypes.h"
 
 #include <set>
 #include <tuple>
@@ -32,6 +33,12 @@ namespace AST
         // types; this holds the functions, which is what lets a struct `Foo` and its constructor
         // `Foo` coexist under one name
         FunctionRegistry functions = FunctionRegistry();
+
+        // the handful of stdlib types the compiler itself names - `string` and `string::view` - bound by
+        // `#[core: "..."]`. bundle-wide and here beside `namespaces` and `type_registry` because that is
+        // what every parser already has at hand through Payload::collector, and because the binding must
+        // outlive the module that declared it: a literal in *any* file resolves against it
+        CoreTypes core_types = CoreTypes();
 
         // names the next closure literal. a closure has no name of its own and is in no overload set, but
         // it still needs a *symbol*, and two closures written in one block would otherwise mangle alike.

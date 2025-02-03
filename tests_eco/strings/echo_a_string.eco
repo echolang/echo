@@ -1,0 +1,23 @@
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    function view() : string::view { return $this->window; }
+    function size() : usize { return $this->window->size; }
+}
+
+// echo's one non-primitive case. a length-counted write(2) rather than printf, so bytes that are not
+// NUL-terminated - a shared substring - still print correctly
+echo 'hello';
+echo "tabs\tand\nnewlines";
+echo "utf-8: héllo 😀";
+
+// still a primitive alongside it, through the unchanged printf table
+echo 42;

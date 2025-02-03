@@ -1,5 +1,6 @@
 #include "Parser/TypeDeclParser.h"
 
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ExprNode.h"
@@ -9,6 +10,7 @@
 #include "AST/ReturnNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
+#include "Parser/AttributeParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/VarDeclParser.h"
 #include "Parser/ScopeParser.h"
@@ -567,6 +569,45 @@ static void synthesize_field_wise_constructor(
         payload.collector, payload.context.code_ref(name_token), &default_ctor);
 }
 
+// `#[core: "string"]` - the stdlib telling the compiler which declared type this is. bound in both the
+// declaration and the body pass; re-binding the same node is how the two reconcile, and a *different*
+// node is a second declaration of one core type, which is reported.
+//
+// its own function, with guard clauses, rather than four nested levels inside parse_typedecl: reading
+// an attribute off a declaration is not parsing a type body, and the sibling readers in FuncDeclParser
+// are already shaped this way
+static void bind_core_type_attribute(Parser::Payload &payload, AST::TypeDeclNode *struct_node)
+{
+    auto *core_attr = struct_node->attributes.get_first("core");
+    if (core_attr == nullptr) {
+        return;
+    }
+
+    auto value = Parser::attribute_string_value(payload, core_attr, "core");
+    if (!value.has_value()) {
+        return;
+    }
+
+    auto kind = AST::core_type_kind_for(value.value());
+    if (!kind.has_value()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(core_attr->attribute_tokens),
+            fmt::format("Unknown core type '{}'.", value.value()));
+        return;
+    }
+
+    if (auto *bound = payload.collector.core_types.declaration(kind.value());
+        bound != nullptr && bound != struct_node) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(core_attr->attribute_tokens),
+            fmt::format("The core type '{}' is already declared as '{}'.",
+                value.value(), bound->namespaced_type_name()));
+        return;
+    }
+
+    payload.collector.core_types.bind(kind.value(), struct_node);
+}
+
 AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -601,16 +642,32 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     cursor.skip(); // skip the open brace
 
-    // try to find the predeclared struct symbol
-    auto structsymbol = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
+    // the struct this declaration is written inside, if any - which is what makes it a *member* type.
+    // the same field that makes a `function` in this position a method, asked one line differently, so
+    // the two can never disagree about where the walk is. a `struct` in a *method* body reads null
+    // here: AST::FunctionBodyScope clears the receiver, which is A30's separate question
+    AST::TypeDeclNode *owner_node = payload.context.self_struct_ptr;
+
+    // a nested type's *declarations* - its constructors and methods - belong to a namespace named after
+    // the owner, so `A::Inner(1)` resolves and a bare `Inner(1)` does not. opened before the node is
+    // namespaced below, and held for the whole body, so everything the walk registers lands there.
+    // optional because the guard is only owed when there is an owner, and it is not movable
+    std::optional<AST::MemberTypeScope> member_type_scope;
+    if (owner_node != nullptr) {
+        member_type_scope.emplace(payload.context, payload.collector.namespaces, owner_node->complex_type());
+    }
+
+    // try to find the predeclared struct node. a nested type is in no namespace, so it is reached
+    // through its owner instead - parse_type_names put it there, over every file, before this pass
     AST::TypeDeclNode *struct_node = nullptr;
 
-    // we found a name matching symbol
-    if (structsymbol) {
-        auto symboldecl = structsymbol->node.get_ptr<AST::TypeDeclNode>();
-        if (symboldecl) {
-            struct_node = symboldecl;
-        }
+    if (owner_node != nullptr) {
+        struct_node = owner_node->complex_type().find_member_type_decl(name_token.value());
+    }
+    else if (auto *structsymbol = payload.collector.namespaces.find_symbol(
+                 name_token.value(), *payload.context.declaring_namespace())) {
+        // we found a name matching symbol
+        struct_node = structsymbol->node.get_ptr<AST::TypeDeclNode>();
     }
 
     // a name-matching symbol declared at some *other* token is a second `struct Foo` in one
@@ -637,10 +694,47 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // still no struct we create it
     if (!struct_node) {
         struct_node = &payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
+
+        // parse_type_names normally got here first, over every file, which is what makes a nested type
+        // nameable from anywhere in its owner. reaching this with an owner means it did not - a struct
+        // nested two levels deep, say - so register it now rather than leaving a type only this pass
+        // can see
+        if (owner_node != nullptr) {
+            owner_node->complex_type().add_member_type(name_token.value(), struct_node);
+        }
     }
 
     // create the struct node
     struct_node->set_namespace(payload.context.declaring_namespace());
+
+    // the attributes written ahead of the declaration. drained here rather than left on the scope,
+    // which is what a function already does - an undrained attribute would otherwise attach itself to
+    // whatever declaration came next
+    for (auto &attr : payload.context.scope().collect_attributes()) {
+        struct_node->attributes.push_back(attr);
+    }
+
+    bind_core_type_attribute(payload, struct_node);
+
+    if (owner_node != nullptr) {
+        // part of the nested type's identity - see ComplexType::owner_type. set here rather than at
+        // the two registration sites so it cannot be forgotten at one of them
+        struct_node->complex_type().owner_type = &owner_node->complex_type();
+
+        // a nested type of a *generic* owner would need one layout per instantiation the moment it
+        // mentions the owner's `T`, and ComplexType::substituted_copy has no way to mint one. the
+        // template_or_self redirect hands every instantiation the template's single nested type, which
+        // is the right answer only while that cannot happen - so refuse the whole case rather than
+        // ship one that miscompiles as soon as the type is actually useful
+        if (owner_node->is_generic()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(name_token),
+                fmt::format(
+                    "'{}' is declared inside the generic type '{}', which is not supported yet - "
+                    "declare it alongside its owner instead.",
+                    name_token.value(), owner_node->type_name()));
+        }
+    }
 
     // declare the generic type parameters (idempotent across the parse passes) and, when the struct
     // is generic, make them resolvable while parsing its property types
@@ -699,7 +793,27 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     const bool collect_members = !struct_node->members_collected();
 
     while (!cursor.is_done()) {
-        if (starts_vardecl(payload)) {
+        if (cursor.is_type(Token::Type::t_hash)) {
+            // an attribute ahead of a member. it lands on `context.scope()` - the file root, since a
+            // struct body pushes no scope of its own - and the member declaration below drains it from
+            // there, exactly as a top-level declaration does. `#[core: "string_view"]` on a nested
+            // `view` is the case that needs it
+            parse_attribute(payload);
+        }
+        else if (starts_typedecl(cursor)) {
+            // a nested type. recursed into rather than skipped, so one function owns "what does a
+            // struct body contain" - and the recursion needs nothing passed to it: the SelfScope
+            // opened above is what tells the nested call it has an owner, exactly as it tells a
+            // `function` below that it is a method
+            //
+            // the node is *not* added as a property or a member of this struct's layout. a nested type
+            // has no storage; it is a name, and add_member_type in parse_type_names is where it lives
+            //
+            // ahead of starts_vardecl because this is an unambiguous keyword and that one scans the
+            // type grammar - the order costs nothing and means the two can never race
+            parse_typedecl(payload);
+        }
+        else if (starts_vardecl(payload)) {
             auto var = parse_varexpr(payload, &structscope);
 
             // append the var as a property of the struct

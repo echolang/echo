@@ -1,0 +1,26 @@
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    function view() : string::view { return $this->window; }
+    function size() : usize { return $this->window->size; }
+}
+
+// the byte size is O(1) and is *not* the character count: 'héllo' is 5 characters in 6 bytes and the
+// emoji is one character in four. that the two differ is the whole point of the design.
+//
+// bound to a variable first - a method call directly on a literal (`'hey'->size()`) does not parse
+$ascii = 'hello';
+$accent = 'héllo';
+$emoji = '😀';
+
+echo $ascii->size();
+echo $accent->size();
+echo $emoji->size();

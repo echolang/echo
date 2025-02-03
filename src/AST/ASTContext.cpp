@@ -23,6 +23,29 @@ AST::LexicalScope::LexicalScope(
         *context.current_namespace, make_declaration_site(block_token.value()), display_name);
 }
 
+AST::MemberTypeScope::MemberTypeScope(
+    AST::Context &context,
+    AST::NamespaceManager &namespaces,
+    const AST::ComplexType &owner) :
+    context(context), previous(context.current_namespace)
+{
+    // an anonymous owner has no path to hang a child off; a closure environment is the only one, and it
+    // declares no nested types. leaving the namespace alone is the safe answer either way
+    if (!owner.name.has_value()) {
+        return;
+    }
+
+    // the owner's own path plus its name. path_segments() rather than mangling_segments() because this
+    // namespace is one a user writes - `A::Inner(1)` - and a type's namespace is never lexical, which is
+    // the only place the two views differ
+    std::vector<std::string> parts =
+        owner.ast_namespace != nullptr ? owner.ast_namespace->path_segments() : std::vector<std::string>{};
+
+    parts.push_back(owner.name.value());
+
+    context.current_namespace = &namespaces.retrieve(parts);
+}
+
 const AST::TypeParamDecl *AST::Context::find_type_param(const std::string &name) const
 {
     // innermost scope first, so an inner parameter shadows an outer one of the same name

@@ -30,6 +30,16 @@ namespace AST
         // *call site's* source location, which nothing a library can be handed knows
         t_die,
         t_assert,
+
+        // how many strong references a class handle has. the **first builtin that is both generic and
+        // takes an argument** - the two above take arguments and are concrete, the two at the top are
+        // generic and argument-less - so it fits neither family's shape and owns its own arm.
+        //
+        // a builtin rather than a library function because the count is a word inside the heap block
+        // (ClassBox::strong_index) with no Echo spelling reaching it. its parameter is a **borrow**, not
+        // a value: a by-value class parameter is +1, so the answer would be one too high at every call,
+        // which is exactly the question the caller is asking
+        t_ref_count,
     };
 
     // resolves a builtin name to its kind, or nullopt when the name is not one. the single place

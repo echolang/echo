@@ -62,6 +62,13 @@ namespace Compiler::LLVM
         // than one the user did - so the two cannot end up with differently shaped blocks
         llvm::Value *gen_class_box_alloc(const AST::ValueType &class_type);
 
+        // the strong count of `handle` as an i64, or **0 when it is null**. the third reference-count
+        // operation, here rather than at its caller so `ClassBox::strong_index` keeps one owner.
+        //
+        // reached from Echo through the `ref_count` builtin, whose one real consumer is a copy-on-write
+        // container asking "am I the only owner". see the implementation for why null answers zero
+        llvm::Value *gen_strong_count(llvm::Value *handle, const AST::ValueType &class_type);
+
     private:
         CodegenContext &_ctx;
 
@@ -74,6 +81,7 @@ namespace Compiler::LLVM
         // owning capture - one that would is rejected at the capture site (todo/A27)
         llvm::Value *gen_retain(llvm::Value *handle, const AST::ValueType &class_type);
         void gen_release(llvm::Value *handle, const AST::ValueType &class_type);
+
         llvm::Value *gen_callable_retain(llvm::Value *callable);
         void gen_callable_release(llvm::Value *callable);
 

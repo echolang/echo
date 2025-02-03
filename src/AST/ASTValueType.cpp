@@ -182,6 +182,12 @@ std::string AST::ComplexType::namespaced_name() const
 {
     std::string type_name = name.value_or("[anonymous]");
 
+    // a nested type is reached through its owner and never through a namespace path, so the owner is
+    // what a reader has to be given to find it - it already carries the namespace prefix itself
+    if (owner_type != nullptr) {
+        return owner_type->namespaced_name() + ECO_NAMESPACE_SEPARATOR + type_name;
+    }
+
     if (ast_namespace) {
         std::string ns = ast_namespace->full_name();
         if (!ns.empty()) {
@@ -213,6 +219,13 @@ std::string AST::ComplexType::mangled_token() const
 
     if (!name.has_value()) {
         return "0";
+    }
+
+    // a nested type's owner is part of its symbol identity, or two structs' `view`s would mangle
+    // identically and their methods would collide on one llvm::Function. the owner's token already
+    // carries its namespace, and nesting an N...E inside one stays self-delimiting
+    if (owner_type != nullptr) {
+        return "N" + owner_type->mangled_token() + mangle_length_prefixed(name.value()) + "E";
     }
 
     // the mangling segments, for the same reason mangle_function_name takes them: this token is a

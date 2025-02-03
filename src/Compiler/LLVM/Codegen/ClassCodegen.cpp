@@ -233,6 +233,39 @@ void ClassCodegen::gen_strong_inc(llvm::Value *block, const ClassLayout *layout,
     _ctx.builder->SetInsertPoint(done_block);
 }
 
+llvm::Value *ClassCodegen::gen_strong_count(llvm::Value *handle, const AST::ValueType &class_type)
+{
+    const ClassLayout layout =
+        _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
+
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    auto *load_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "refcount.load", function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "refcount.done", function);
+    llvm::BasicBlock *null_block = _ctx.builder->GetInsertBlock();
+
+    // null-safe for gen_strong_inc's reason, and the answer matters: **a null handle owns nothing, so
+    // the count is 0.** that is what lets a copy-on-write check read as one condition - a `string`
+    // holding static literal bytes has a null owner, is therefore not uniquely owned, and clones before
+    // mutating, exactly as a shared one does. answering 1 would have it scribble on the binary
+    _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), done_block, load_block);
+
+    _ctx.builder->SetInsertPoint(load_block);
+
+    // the count's address is only well defined once the handle is known non-null, as above
+    llvm::Value *count = _ctx.builder->CreateLoad(i64, gen_strong_ptr(handle, layout), "strong");
+    _ctx.builder->CreateBr(done_block);
+
+    _ctx.builder->SetInsertPoint(done_block);
+
+    llvm::PHINode *result = _ctx.builder->CreatePHI(i64, 2, "refcount");
+    result->addIncoming(llvm::ConstantInt::get(i64, 0), null_block);
+    result->addIncoming(count, load_block);
+
+    return result;
+}
+
 void ClassCodegen::gen_release(llvm::Value *handle, const AST::ValueType &class_type)
 {
     _ctx.builder->CreateCall(get_or_create_release_thunk(class_type), { handle });

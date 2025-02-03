@@ -32,6 +32,10 @@ namespace AST
     // in ASTMemberLookup.h instead
     class FunctionDeclNode;
 
+    // a type nested inside a ComplexType, stored the same way and for the same reason: this header
+    // only ever stores and hands back the pointer
+    class TypeDeclNode;
+
     enum class ValueTypeKind
     {
         t_primitive,
@@ -538,6 +542,12 @@ namespace AST
         // inherit it from their template, so a mangled name can always be fully qualified
         const Namespace *ast_namespace = nullptr;
 
+        // the type this one is declared *inside*, null for a top-level type. it is part of this type's
+        // identity, not decoration: a nested type is in no namespace, so without it `string::view` and
+        // any other struct's `view` would render the same in a diagnostic and - far worse - produce the
+        // same mangled_token(), which is what interning and every method symbol key on
+        const ComplexType *owner_type = nullptr;
+
         // this template's own generic parameters (the T, U in `struct Foo<T, U>`), owned by the
         // collector's TypeParamRegistry. empty for non-generics and for instantiations. always
         // append through add_type_parameter, which keeps the ordinal and owner consistent
@@ -663,6 +673,28 @@ namespace AST
             return _methods;
         }
 
+        // the types declared *inside* this one, by name. `string::view` is reached through its owner
+        // and lives in no namespace at all, which is the same decision that keeps a method out of
+        // FunctionRegistry::_by_name: no namespace path a user can write reaches it, so two structs
+        // may each declare a `view` without colliding
+        //
+        // a map rather than the flat list methods use, because a type name denotes exactly one type -
+        // there is nothing to overload it on. only a *template* (or a plain non-generic struct) holds
+        // one, which is why a nested type inside a generic owner is refused at its declaration site
+        //
+        // the *declaration* is what is stored, as it is for a method beside it: the parse passes reach
+        // this node again to reconcile on it, and a type site wants the node, not a layout
+        void add_member_type(const std::string &name, TypeDeclNode *decl) {
+            _member_types[name] = decl;
+        }
+
+        // this type's own nested declaration of that name, or null. **the one lookup** - see the note
+        // in ASTMemberLookup.h for why this one needs no template_ref redirect beside it
+        TypeDeclNode *find_member_type_decl(const std::string &name) const {
+            auto it = _member_types.find(name);
+            return it == _member_types.end() ? nullptr : it->second;
+        }
+
         // this type's destructor, or null. at most one, so a slot rather than an overload set -
         // it takes no parameters, which leaves nothing to overload on
         //
@@ -747,6 +779,7 @@ namespace AST
         std::vector<Property> _properties;
         std::unordered_map<std::string, size_t> _property_map;
         std::vector<FunctionDeclNode *> _methods;
+        std::unordered_map<std::string, TypeDeclNode *> _member_types;
         FunctionDeclNode *_destructor = nullptr;
         FunctionDeclNode *_copy_constructor = nullptr;
         FunctionDeclNode *_deinit = nullptr;

@@ -23,6 +23,32 @@ namespace AST
     // TypeRegistry::get_or_create_instantiation needs to know nothing about members
     std::vector<FunctionDeclNode *> find_member_functions(const ComplexType *ct, const std::string &name);
 
+    // there is deliberately no find_member_type here. a nested type is only ever reached through an
+    // owner *named in source*, which is a declaration and never an instantiation, so there is nothing
+    // for the template_ref redirect below to do - ComplexType::find_member_type_decl is the whole
+    // lookup, and it hands back the declaration its three callers actually want. that also lines up
+    // with the refusal of a nested type inside a *generic* owner at its declaration site: one
+    // `Iterator` shared by `Box<int32>` and `Box<float>` is the right answer only while it cannot
+    // mention `T`, and deciding that per instantiation is what ComplexType::substituted_copy would
+    // have to grow
+
+    // the name of the method that hands out a borrowed window over a value. **the one spelling** of a
+    // member the compiler knows by name, the same device `todo/C4` specifies for element access and
+    // `todo/A18` will eventually replace with a declarable operator
+    inline constexpr const char *view_method_name = "view";
+
+    // the `view()` method that turns a `from` into a `to`, or null when there is none.
+    //
+    // **the one rule** for "does this type convert to a view of itself": a parameterless method named
+    // `view` whose return type is exactly `to`. generalised rather than hardcoded to `string` - the same
+    // rule gives `Array<T>` its `Slice<T>` - and deliberately exact rather than convertible, so a chain
+    // of view conversions can never be searched for.
+    //
+    // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as the
+    // lowest real rank, so an overload taking the owning type always wins), TypeChecker accepts it, and
+    // AST::CallResolver is the one that actually inserts the call
+    FunctionDeclNode *find_view_conversion(const ValueType &from, const ValueType &to);
+
     // `ct`'s destructor, or null when the type has none of its own. the same template_ref redirect
     // the overload lookup above does, and for the same reason: `Box<int32>` holds no destructor, the
     // template does, and the ownership pass hands the *template's* declaration to the drop call it

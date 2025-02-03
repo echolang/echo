@@ -207,19 +207,41 @@ namespace AST
         ECO_AST_NODE_TYPE(n_literal_string);
 
         TokenReference token_literal;
-    
+
+        // the bytes the literal denotes: quotes stripped, escapes decoded, validated UTF-8. decoded
+        // once, at construction, by AST::decode_string_literal - which is also where a bad escape is
+        // reported, since that needs the collector and this node has no access to one.
+        //
+        // a *field* rather than a method for one reason: `"a\nb"` is three bytes and its token is six
+        // characters, and every reader that matters wants the three. the token stays verbatim because a
+        // code excerpt has to show what was written
+        std::string decoded_value;
+
         LiteralStringExprNode(TokenReference token) :
             token_literal(token)
         {};
         ~LiteralStringExprNode() {};
 
-        // a C string: the address of a NUL-terminated run of bytes in the module's constants
+        // the `#[core: "string"]` type, stamped at construction from the collector - `result_type()` is
+        // const and takes nothing, so it cannot go looking for it. carried per node rather than read
+        // from a global, and it survives a clone because this node clones shallowly.
         //
-        // not the language's eventual `string` type, which does not exist yet (todo/C1) - but a
-        // literal has to have *some* type for a declaration to be able to name it, which is what
-        // `die(ptr<const uint8> $message)` needs. answering `unknown` meant a literal could not be
-        // passed to anything and lowered to nothing at all (todo/B1)
+        // ordering is what makes stamping safe: the declaration pass completes over *every* file before
+        // the body pass parses any expression, so the binding is in place wherever a literal appears
+        std::optional<ValueType> core_string_type;
+
+        // **a string literal is a `string`** - one total rule, no destination-dependence. it lowers to a
+        // constant: a private global holding the bytes, a length, and a null owner. no allocation and no
+        // reference count, which is what keeps `$foo = 'john';` free.
+        //
+        // the fallback is today's `ptr<const uint8>`, for when no stdlib declared a string at all. that
+        // is not a curiosity - it is what keeps the compiler able to compile the very file that declares
+        // `string`, and what keeps a stdlib-less invocation working
         ValueType result_type() const override {
+            if (core_string_type.has_value()) {
+                return core_string_type.value();
+            }
+
             // one shared instance: `make_pointer` heap-allocates its pointee, and this type does not
             // depend on the node at all, so building it per call would malloc on every overload
             // candidate scored, every adjuster visit and every fit check
@@ -238,7 +260,9 @@ namespace AST
             return "literal<string>(\"" + token_literal.value() + "\")";
         }
 
-        std::string get_string_value() const;
+        // by reference: this used to substr the token's interior and had to answer by value, but the
+        // decoding now happens once at construction and the bytes of a literal are unbounded
+        const std::string &get_string_value() const;
     };
 };
 

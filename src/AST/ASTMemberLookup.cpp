@@ -1,6 +1,7 @@
 #include "AST/ASTMemberLookup.h"
 
 #include "AST/FunctionDeclNode.h"
+#include "AST/TypeDeclNode.h"
 
 namespace
 {
@@ -33,6 +34,43 @@ std::vector<AST::FunctionDeclNode *> AST::find_member_functions(const AST::Compl
     }
 
     return candidates;
+}
+
+AST::FunctionDeclNode *AST::find_view_conversion(const AST::ValueType &from, const AST::ValueType &to)
+{
+    // only a declared type can offer one, and only ever to a *different* type - `t_exact` already
+    // answered the identity case, and admitting it here would let a view convert to itself
+    if (!from.has_complex_type() || !to.has_complex_type() || from == to) {
+        return nullptr;
+    }
+
+    const AST::ComplexType *owner = member_owner_of(from.get_complex_type());
+
+    if (owner == nullptr) {
+        return nullptr;
+    }
+
+    // walked here rather than through find_member_functions, which answers with a *vector*: this runs
+    // from the bottom of argument_fit, once per candidate per argument per fixpoint round, and the
+    // overload set it would build is discarded immediately
+    for (AST::FunctionDeclNode *candidate : owner->methods()) {
+        if (!candidate->name_token.has_value()
+            || candidate->name_token.value().value() != AST::view_method_name) {
+            continue;
+        }
+
+        // the receiver and nothing else. a `view(usize, usize)` is a substring accessor, a different
+        // operation, and must not be mistaken for the whole-value conversion
+        if (candidate->args.size() != candidate->implicit_arg_count()) {
+            continue;
+        }
+
+        if (candidate->get_return_type() == to) {
+            return candidate;
+        }
+    }
+
+    return nullptr;
 }
 
 AST::FunctionDeclNode *AST::find_destructor(const AST::ComplexType *ct)

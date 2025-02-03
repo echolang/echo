@@ -297,6 +297,41 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
     RecursiveVisitor::visit_instanceof_expr(node);
 }
 
+// `ref_count<T>(T& $handle)` infers T from anything, so overload resolution admits `ref_count($aStruct)`
+// and nothing below it says no. reported here for the reason check_abort_message's rule is: the only
+// other reader is ExprCodegen, which throws an *internal compiler error* with no source location, and
+// that is not the user's mistake to read
+void TypeChecker::check_ref_count_argument(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()
+        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_ref_count) {
+        return;
+    }
+
+    if (node.arguments.empty() || node.arguments[0] == nullptr) {
+        return;
+    }
+
+    // the parameter is `T&`, so the argument arrives as the address of the slot holding the handle -
+    // one load short of the handle itself, which is what codegen reads through. that indirection is the
+    // point: taking the handle by value would retain it and answer one too high every time
+    const ValueType argument_type = node.arguments[0]->result_type();
+    const ValueType handle_type = value_type_of(argument_type);
+
+    // an argument still generic is not this pass's to judge - the monomorphizer reports an
+    // uninstantiated call itself, and a bare type parameter here means nothing was decided yet
+    if (is_undetermined_type(handle_type) || handle_type.is_type_param()) {
+        return;
+    }
+
+    if (!handle_type.is_class()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            fmt::format("'ref_count' needs a class handle, not '{}' - only a class carries a "
+                "reference count", handle_type.get_type_desciption()));
+    }
+}
+
 void TypeChecker::check_abort_message(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin()) {
@@ -407,6 +442,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         }
 
         check_abort_message(node);
+        check_ref_count_argument(node);
     }
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
@@ -425,6 +461,13 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
             }
 
             const ValueType type = arg->result_type();
+
+            // the one complex type `echo` prints, so it is admitted ahead of the blanket refusal below.
+            // ExprCodegen::gen_echo_string is the other half of this rule and the two have to agree, or
+            // a program is either rejected for something that works or lowered by a path that throws
+            if (_collector.core_types.is_string_like(type)) {
+                continue;
+            }
 
             if (type.is_pointer()) {
                 _collector.collect_issue<Issue::GenericError>(

@@ -99,6 +99,7 @@ namespace AST
         // parser: the declaration is what makes the call legal, and codegen has to be able to trust
         // the shape by the time it reads it. a no-op for every other call
         void check_abort_message(FunctionCallExprNode &node);
+        void check_ref_count_argument(FunctionCallExprNode &node);
 
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value

@@ -1,0 +1,4 @@
+// a nested type is not in any namespace, so its constructor is not in the enclosing overload set
+struct MovieCollection { struct Iterator { usize $index; } }
+
+$bare = Iterator(1);

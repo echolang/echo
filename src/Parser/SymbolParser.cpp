@@ -5,6 +5,7 @@
 #include "Parser/TypeParser.h"
 #include "Parser/ExternParser.h"
 #include "Parser/ScopeParser.h"
+#include "Parser/AttributeParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -12,6 +13,23 @@
 void Parser::parse_type_names(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
+
+    // the struct bodies this walk is currently inside, innermost last, each paired with the brace
+    // depth its body opened at. a nested type is registered on its *owner* rather than in the
+    // namespace, so this pass has to know where it is - and it walks token by token without ever
+    // consuming a body, which is what makes that a tracked depth rather than a recursion
+    struct OpenBody
+    {
+        size_t depth;
+        AST::TypeDeclNode *node;
+    };
+
+    std::vector<OpenBody> open_bodies;
+    size_t brace_depth = 0;
+
+    // the declaration just read, waiting for the `{` that opens its body. anything other than that
+    // brace arriving next clears it: a malformed declaration must not adopt a later block
+    AST::TypeDeclNode *pending_body = nullptr;
 
     while (!cursor.is_done()) {
         // `namespace a::b;` is a statement, not a block - it names the namespace the rest of the
@@ -24,9 +42,38 @@ void Parser::parse_type_names(Parser::Payload &payload)
         if (!starts_typedecl(cursor) || !cursor.peek_is_type(1, Token::Type::t_identifier)) {
             // token by token rather than skipping bodies whole, which is also how parse_symbols
             // walks - so a `struct` written inside a function body is reached by both
+            if (cursor.is_type(Token::Type::t_open_brace)) {
+                brace_depth += 1;
+
+                if (pending_body != nullptr) {
+                    open_bodies.push_back(OpenBody { brace_depth, pending_body });
+                }
+            }
+            else if (cursor.is_type(Token::Type::t_close_brace)) {
+                if (!open_bodies.empty() && open_bodies.back().depth == brace_depth) {
+                    open_bodies.pop_back();
+                }
+
+                if (brace_depth > 0) {
+                    brace_depth -= 1;
+                }
+            }
+
+            pending_body = nullptr;
             cursor.skip();
             continue;
         }
+
+        // the struct whose body this declaration sits *directly* inside, if any. the depth comparison
+        // is what makes "directly" true: a method body's `{` bumps the depth without pushing anything,
+        // so without it a `struct` written in a *function* body would be adopted by the enclosing
+        // struct here while parse_typedecl - which asks Context::self_struct_ptr, cleared by
+        // AST::FunctionBodyScope - sees no owner and mints a second node for one type. one notion of
+        // where a member body ends, spelled twice, has to agree at both spellings
+        AST::TypeDeclNode *owner =
+            (!open_bodies.empty() && open_bodies.back().depth == brace_depth)
+                ? open_bodies.back().node
+                : nullptr;
 
         const AST::ComplexTypeKind kind = typedecl_kind(cursor);
 
@@ -42,9 +89,18 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // then find the *first* node and parse_typedecl reports the redeclaration at the duplicate's own
         // name token, which is also where the body-skip recovery lives. this pass has no such
         // recovery, and its detection is a strict subset of parse_typedecl's anyway
-        auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
-        if (existing != nullptr && existing->node.get_ptr<AST::TypeDeclNode>() != nullptr) {
-            continue;
+        //
+        // a nested type is in no namespace, so the same question is asked of its owner instead
+        if (owner != nullptr) {
+            if (owner->complex_type().find_member_type_decl(name_token.value()) != nullptr) {
+                continue;
+            }
+        }
+        else {
+            auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
+            if (existing != nullptr && existing->node.get_ptr<AST::TypeDeclNode>() != nullptr) {
+                continue;
+            }
         }
 
         // the kind is settled here, at the only place the node is created. parse_typedecl reuses this
@@ -64,7 +120,18 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // Box<T> would intern twice and the two would compare unequal
         Parser::declare_type_parameters(payload, type_node.complex_type(), parse_type_param_list(payload));
 
-        payload.context.declaring_namespace()->push_symbol(std::make_unique<AST::Symbol>(&type_node));
+        // a nested type goes on the owner and *not* into the namespace, so a bare `view` never
+        // resolves at file scope. parse_typedecl reaches the same node in both later passes by asking
+        // the owner, exactly as it reaches a top-level one by asking the namespace
+        if (owner != nullptr) {
+            owner->complex_type().add_member_type(name_token.value(), &type_node);
+        }
+        else {
+            payload.context.declaring_namespace()->push_symbol(std::make_unique<AST::Symbol>(&type_node));
+        }
+
+        // the body this declaration is about to open, so the `{` arriving next knows whose it is
+        pending_body = &type_node;
     }
 }
 
@@ -115,6 +182,16 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
             // emitted the raw C symbol - an undefined symbol at link time. registration happens
             // inside parse_funcdecl, same as any other function
             parse_extern_block(payload);
+        }
+        else if (cursor.is_type(Token::Type::t_hash)) {
+            // an attribute, walked in this pass too - the frames of this walk must mirror the body
+            // pass's exactly, and until now this one skipped `#` as an unknown token. that made every
+            // attribute a *body-pass* fact, which is fine for `#[builtin: ...]` (read off the same
+            // declaration node either pass reconciles on) but not for anything the next pass has to
+            // already know: `#[core: "string"]` binds the type a string literal is, and a literal is
+            // parsed in the body pass. binding it here is what makes that independent of file order,
+            // since this pass completes over *every* file before the next one starts
+            parse_attribute(payload);
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);

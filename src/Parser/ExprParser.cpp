@@ -7,6 +7,7 @@
 #include "AST/VarNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/ASTStringLiteral.h"
 #include "AST/TypeCastNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/ASTMemberLookup.h"
@@ -851,7 +852,23 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     }
 
     else if (cursor.is_type(Token::Type::t_string_literal)) {
-        auto &node = payload.context.emplace_node<AST::LiteralStringExprNode>(cursor.current());
+        auto token = cursor.current();
+        auto &node = payload.context.emplace_node<AST::LiteralStringExprNode>(token);
+
+        // decoded here, at the one place a string literal is built, because reporting a bad escape needs
+        // the collector and the node has none. the node keeps the *bytes* from this moment on; the token
+        // stays verbatim for the code excerpt a diagnostic prints
+        if (auto error = AST::decode_string_literal(token.value(), node.decoded_value)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(token), error->message);
+        }
+
+        // the type the literal *is*. stamped rather than looked up later, because result_type() has no
+        // way to reach the collector - see the field's comment
+        if (payload.collector.core_types.has(AST::CoreTypeKind::t_string)) {
+            node.core_string_type = payload.collector.core_types.string_type();
+        }
+
         cursor.skip();
         return AST::make_ref(node);
     }

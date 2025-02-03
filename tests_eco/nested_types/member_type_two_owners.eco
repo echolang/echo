@@ -1,0 +1,23 @@
+// two structs may each declare a nested type of the same name. they collide in neither the type
+// lookup (which goes through the owner) nor the overload set their constructors join (a namespace
+// named for the owner), so `Inner(1)` is never one ambiguous set of two
+struct A { struct Inner { int32 $x; } }
+struct B { struct Inner { float $y; } }
+
+struct Holder
+{
+    A::Inner $a;
+    B::Inner $b;
+
+    function bump(A::Inner $v) : A::Inner
+    {
+        return A::Inner($v->x + 1);
+    }
+}
+
+$h = Holder(A::Inner(1), B::Inner(2.5));
+echo $h->a->x;
+echo $h->b->y;
+
+$bumped = $h->bump(A::Inner(10));
+echo $bumped->x;

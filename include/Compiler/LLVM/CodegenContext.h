@@ -7,6 +7,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "AST/ASTCoreTypes.h"
 
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
@@ -51,6 +52,27 @@ namespace Compiler::LLVM
         // what the invocation asked for. read through its predicates rather than compared, so that
         // every check the compiler can skip skips together
         CompilerOptions options;
+
+        // the stdlib types the compiler names, bound by `#[core: "..."]` during parsing. published here
+        // by compile_bundle rather than reached for, so codegen never holds the whole collector - the
+        // only thing it needs from it is which declared type is `string`
+        const AST::CoreTypes *core_types_ptr = nullptr;
+
+        const AST::CoreTypes &core_types() const {
+            assert(core_types_ptr && "core types not published - compile_bundle must set them");
+            return *core_types_ptr;
+        }
+
+        // where the fields of the bound `string` and `string::view` sit, resolved **once** beside the
+        // binding above rather than per literal: it is a fact about the program, not about the node
+        // being lowered, and the diagnostic for a malformed stdlib string should fire once whether or
+        // not some literal happens to reach codegen. nullopt when no stdlib declared one at all
+        std::optional<AST::CoreStringLayout> string_layout;
+
+        const AST::CoreStringLayout &core_string_layout() const {
+            assert(string_layout.has_value() && "string layout not resolved - compile_bundle must resolve it");
+            return string_layout.value();
+        }
 
         // the host target's data layout and triple, published by Backend::init_target before any
         // module is created so that every module carries them from the start. this is what makes

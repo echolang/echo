@@ -1,0 +1,26 @@
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    function view() : string::view { return $this->window; }
+    function size() : usize { return $this->window->size; }
+}
+
+// a `string` binds to a `string::view` parameter with nothing written at the call site, and it costs
+// no reference count at all - a view owns nothing
+function show(string::view $v) : void { echo $v->size; }
+
+$foo = 'john';
+show($foo);
+
+// but an overload taking the owning type still wins: the view conversion is ranked lowest on purpose
+function which(string::view $v) : void { echo 1; }
+function which(string $s) : void { echo 2; }
+which($foo);

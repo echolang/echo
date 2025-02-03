@@ -7,17 +7,22 @@
 #include "ASTNamespace.h"
 #include "Token.h"
 #include "ASTValueType.h"
+#include "AttributeNode.h"
 
-namespace AST 
+namespace AST
 {
     class TypeDeclNode : public Node
     {
     public:
         ECO_AST_NODE_TYPE(n_type_decl);
-        
+
         Namespace *ast_namespace = nullptr;
-        
+
         std::optional<TokenReference> name_token;
+
+        // the attributes written ahead of this declaration, the same list a function carries. `core` is
+        // the only one read today
+        AttributeList attributes;
 
         TypeDeclNode(TokenReference name_token, ComplexTypeKind kind = ComplexTypeKind::t_struct) :
             name_token(name_token)

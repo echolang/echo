@@ -37,6 +37,24 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     _ctx.llvm_context = std::make_unique<llvm::LLVMContext>();
     _ctx.builder = std::make_unique<llvm::IRBuilder<>>(*_ctx.llvm_context);
 
+    // which declared type is `string`, published before anything is lowered: gen_literal_string builds a
+    // constant of it, so it has to be answerable from the first expression onward
+    _ctx.core_types_ptr = &bundle.collector.core_types;
+
+    // and *where its fields sit*, resolved here, once. absence of a binding is not an error - a program
+    // compiled without the stdlib has no string - but a bound type of the wrong shape is, and reporting
+    // it here rather than at whichever literal happened to be lowered first is what makes the message
+    // about the stdlib declaration it is actually about
+    if (_ctx.core_types().has(AST::CoreTypeKind::t_string)
+        || _ctx.core_types().has(AST::CoreTypeKind::t_string_view)) {
+        std::string layout_error;
+        _ctx.string_layout = AST::resolve_core_string_layout(_ctx.core_types(), layout_error);
+
+        if (!_ctx.string_layout.has_value()) {
+            throw _ctx.error(fmt::format("the declared core string types are unusable: {}", layout_error));
+        }
+    }
+
     // resolve the host target first: create_cmp_units stamps its data layout onto every module,
     // and a compile-time size_of<T>() reads it
     _backend.init_target();

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTValueType.h"
 
 namespace llvm
 {
@@ -92,6 +93,15 @@ namespace Compiler::LLVM
         // `assert`: stop when the condition is false, and in a release build emit nothing at all -
         // not even the condition, which is what CompilerOptions::assertions_enabled decides
         void gen_assert_builtin(AST::FunctionCallExprNode &node);
+
+        // `ref_count<T>(T& $handle)`. the one builtin that is both generic and takes an argument, so it
+        // shares neither family's shape - see AST::BuiltinKind::t_ref_count
+        void gen_ref_count_builtin(AST::FunctionCallExprNode &node);
+
+        // `echo` of a string or a string view: a length-counted write(2) rather than a printf, because
+        // the bytes are not NUL-terminated in general. the codegen half of the rule
+        // TypeChecker::visitFunctionCallExpr admits
+        void gen_echo_string(llvm::Value *value, const AST::ValueType &type);
 
         // stops when `address` is null. emitted where a nullable pointer is narrowed to a
         // borrow, which is the one conversion that asserts rather than merely reinterprets

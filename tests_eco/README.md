@@ -42,6 +42,49 @@ stdout+stderr, and compares it against the matching `.eco.out`. Discovery is don
 If the case needs flags, write them to `<name>.eco.flags` first and capture with the same
 flags, or the golden records a different invocation than the one the runner performs.
 
+## Checking the generated IR
+
+Some contracts are invisible from program output. That a string literal is a *constant* rather than an
+allocation, that `echo` of a string reaches `write` and not `printf`, that passing a `string::view`
+touches no reference count — every one of those prints exactly the same thing whether it holds or not.
+
+An optional sibling **`<name>.eco.ir`** asserts them against the emitted LLVM IR. When it exists the
+runner performs a *second* `echoc run --print-ir` (separate from the output run, so `--print-ir` can
+never pollute the `.eco.out` golden) and applies the directives in it:
+
+```
+CHECK:     <substring>    must appear at or after the previous CHECK's match
+CHECK-NOT: <substring>    must not appear between the surrounding CHECKs
+```
+
+Blank lines and `#` / `//` lines are ignored. Anything else is an **error**, not a no-op — a mistyped
+`CHEK:` that silently checks nothing is the one failure mode this must not have. An empty file is an
+error for the same reason.
+
+**Directives rather than a byte-for-byte golden, deliberately.** The IR carries a `target triple` and
+`target datalayout` that are machine specific, `attributes #0` that depend on the LLVM version, and
+`%0`/`%1` numbering that shifts with any unrelated codegen change. A full-text IR golden would fail on
+every machine but the one that recorded it and churn on every commit — and a golden regenerated without
+being read asserts nothing.
+
+**`CHECK:` advances a cursor**, so order is part of the assertion and each CHECK can only match at or
+after the previous one. That is what gives free function scoping — a `CHECK: define i32 @main()`
+followed by CHECKs that can then only match inside it — and it is why `CHECK-NOT:` is scoped to the
+region *between* its neighbours rather than to the whole module. Whole-module would be useless here:
+`mem::` declares `@malloc` and the class runtime calls it, both above `main`, so "this function does not
+allocate" has to mean "not in this region".
+
+```
+CHECK: define i32 @main()
+CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
+CHECK-NOT: call ptr @malloc
+CHECK-NOT: strong.inc
+CHECK: ret i32 0
+```
+
+Write these by hand from a real dump — `./build/echoc run -p <file>` — and keep them to the claim you
+mean. A directive that quotes a whole basic block is a byte-for-byte golden wearing a disguise.
+
 ## Running
 
 ```bash

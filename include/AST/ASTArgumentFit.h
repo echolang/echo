@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
@@ -139,6 +140,19 @@ namespace AST
             return is_value_preserving_promotion(from, to)
                 ? ArgumentFit::t_promotion
                 : ArgumentFit::t_conversion;
+        }
+
+        // a value converts to a borrowed *view* of itself when its own type says how - AST::view_method_name.
+        // last, and ranked t_conversion, which is what makes `f(string)` always beat `f(string::view)` for a
+        // `string` argument: this is the fallback that lets a caller take the cheap window without writing
+        // anything, never a way to hide a better-matching overload.
+        //
+        // a **place**, for the borrow arm's reason one rule up: the conversion is a call whose receiver is
+        // `$this`, so it needs an address. materialising a temporary for a non-place argument is todo/A13b,
+        // and until that lands `f('literal')` against a view parameter reports an ordinary mismatch rather
+        // than being lowered wrong
+        if (expr != nullptr && is_place_expression(*expr) && find_view_conversion(from, to) != nullptr) {
+            return ArgumentFit::t_conversion;
         }
 
         return ArgumentFit::t_none;

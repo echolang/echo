@@ -1,0 +1,24 @@
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    function view() : string::view { return $this->window; }
+    function size() : usize { return $this->window->size; }
+}
+
+// a literal *is* a string: it lowers to a constant - static bytes, a length, and a null owner - so
+// nothing is allocated and nothing is retained. `$size` is the *decoded* byte count
+$a = 'hey';
+echo $a;
+echo $a->size();
+
+// the escapes decode (todo/B1's open half): three bytes, not four
+$e = "a\nb";
+echo $e->size();

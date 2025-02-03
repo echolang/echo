@@ -295,6 +295,36 @@ namespace AST
         }
     };
 
+    // opens the namespace a *nested type's declarations* live in: a child of the owner's namespace,
+    // named after the owner. `struct A { struct Inner { … } }` puts Inner's constructors and methods in
+    // namespace `A`, so `A::Inner(1)` resolves through the ordinary namespace path, a bare `Inner(1)`
+    // does not - FunctionRegistry::overloads only ever walks *outward* - and B's `Inner` cannot collide
+    // with A's in one overload set.
+    //
+    // the nested *type* is deliberately not here: it lives on ComplexType::_member_types, the way a
+    // method lives on the type rather than in a namespace. that is the split the language already has -
+    // Namespace::_symbols holds types only while the FunctionRegistry keys functions by namespace - and
+    // it is the same reason the type `A` and the namespace `A` can coexist that lets struct Foo and its
+    // constructor Foo already do so
+    //
+    // saves and restores, for LexicalScope's reason: `namespace a::b;` writes current_namespace too
+    struct MemberTypeScope
+    {
+        Context &context;
+        Namespace *previous;
+
+        // takes the manager rather than reaching for it, as LexicalScope does and for the same reason.
+        // `owner` is the enclosing type, whose namespace and name together name the child
+        MemberTypeScope(Context &context, NamespaceManager &namespaces, const ComplexType &owner);
+
+        MemberTypeScope(const MemberTypeScope &) = delete;
+        MemberTypeScope &operator=(const MemberTypeScope &) = delete;
+
+        ~MemberTypeScope() {
+            context.current_namespace = previous;
+        }
+    };
+
     // scopes the closure literal whose body is being parsed, so a read of an enclosing local inside it is
     // a capture rather than an error. saves and restores, which is what lets a plain `function` nested in
     // a closure body go back to *not* capturing - it is a declaration, not a second closure, and it opens

@@ -1,0 +1,20 @@
+# a string literal is a *constant*, not a construction: static bytes in the binary, a length, and a
+# null owner. this is the claim that makes `$foo = 'john'` free, and it is not observable from program
+# output - only from here
+
+# the bytes live in the binary, NUL-terminated so `->c_str()` on a literal costs nothing
+CHECK: @str = private unnamed_addr constant [4 x i8] c"hey\00"
+
+CHECK: define i32 @main()
+
+# one store of a whole-string constant. the `i64 3` is the *decoded* byte count
+CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
+
+# ...and nothing else between entering main and leaving it: no allocation for the literal, and no
+# reference count touched, because the owner is null and both operations are null-guarded.
+# scoped to main on purpose - `mem::` declares @malloc at module level, so this could not be asked
+# of the whole program
+CHECK-NOT: call ptr @malloc
+CHECK-NOT: strong.inc
+
+CHECK: ret i32 0

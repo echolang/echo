@@ -1,0 +1,23 @@
+---- Issue ----
+Issue at 4:9
+The function 'Iterator' could not be found
+Begin: 'Iterator'
+End: 'Iterator'
+Code excerpt:
+ [3]> 
+ [4]> $bare = Iterator(1);
+              ^
+ [5]> 
+
+---- Issue ----
+Issue at 4:20
+cannot infer type of variable without an initializer
+Begin: ';'
+End: ';'
+Code excerpt:
+ [3]> 
+ [4]> $bare = Iterator(1);
+                         ^
+ [5]> 
+
+Critical issues found, cannot compile.

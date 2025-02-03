@@ -1,0 +1,29 @@
+// a type declared inside a type, reached through its owner. the name is *only* reachable that way:
+// see errors/nested_type_bare_name.eco
+struct MovieCollection
+{
+    struct Iterator
+    {
+        usize $index;
+
+        function advance() : void { $this->index = $this->index + 1; }
+    }
+
+    usize $count;
+
+    function make_iterator() : MovieCollection::Iterator
+    {
+        return MovieCollection::Iterator(0);
+    }
+}
+
+$c = MovieCollection(7);
+$it = $c->make_iterator();
+echo $it->index;
+
+$it->advance();
+echo $it->index;
+
+// spelled directly, as a declaration type and as a constructor
+MovieCollection::Iterator $direct = MovieCollection::Iterator(42);
+echo $direct->index;
