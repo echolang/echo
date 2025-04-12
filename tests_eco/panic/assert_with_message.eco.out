@@ -1,2 +1,0 @@
-assertion failed: i must be greater than ten
-  at assert_with_message.eco:3

@@ -1,25 +1,24 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "eco_test_file.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
-// end-to-end golden-output suite
+// end-to-end suite
 //
-// discovers every `*.eco` under ECO_E2E_TESTS_DIR recursively, runs it through the
-// real `echoc run` binary (ECHOC_BINARY), captures stdout+stderr and compares it to the
-// sibling `*.eco.out` golden file. both successful programs and deliberately broken ones
-// are matched the same way - the compiler prints its diagnostics to stdout, so an error
-// test's golden simply contains the expected diagnostic text
+// discovers every `*.eco` under ECO_E2E_TESTS_DIR recursively and reads its sibling `*.test`, which
+// is the whole contract for that case: the settings it runs under, the output it must print, and
+// optionally what the emitted IR or either AST dump must contain. see tests_eco/README.md for the
+// format; EchoTests::parse_eco_test_file owns it.
 //
-// the corpus is data driven: adding `.eco`/`.eco.out` pairs (in arbitrarily nested
-// subdirs) needs no CMake reconfigure - discovery happens at runtime
+// the corpus is data driven: adding a `.eco`/`.test` pair (in arbitrarily nested subdirs) needs no
+// CMake reconfigure - discovery happens at runtime
 
 #ifndef ECHOC_BINARY
 #define ECHOC_BINARY "echoc"
@@ -29,288 +28,319 @@
 #define ECO_E2E_TESTS_DIR "tests_eco"
 #endif
 
+#ifndef ECO_E2E_TMP_DIR
+#define ECO_E2E_TMP_DIR "e2e_tmp"
+#endif
+
 namespace fs = std::filesystem;
 
 namespace
 {
-    std::string read_file(const fs::path &p)
+    // the exit status matters now: `expect` is what makes a deliberately broken program's rejection
+    // part of the contract, rather than a coincidence of the text it happened to print
+    struct ProcessResult
     {
-        std::ifstream f(p, std::ios::binary);
-        std::stringstream ss;
-        ss << f.rdbuf();
-        return ss.str();
-    }
+        int exit_code = 0;
+        std::string output;
+    };
 
-    // leading and trailing whitespace stripped, "" when there is nothing else. one answer for the
-    // flags file and for a directive line, which are read the same way and must not differ on
-    // whether an editor's trailing newline counts
-    std::string trim(const std::string &s)
-    {
-        const size_t first = s.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos) {
-            return "";
-        }
-        return s.substr(first, s.find_last_not_of(" \t\r\n") - first + 1);
-    }
-
-    // the extra flags a test asks for, from a sibling `<name>.eco.flags`, or "" when there is none
+    // runs a shell command capturing merged stdout+stderr.
     //
-    // most tests need none - the point of a golden is that the same invocation produces the same
-    // output. but a flag can be the thing under test: `--release` is what makes an `assert`
-    // disappear, and no amount of source can show that from inside the program
-    std::string read_flags(const fs::path &eco)
-    {
-        fs::path flags_path = eco;
-        flags_path += ".flags";
-
-        if (!fs::exists(flags_path)) {
-            return "";
-        }
-
-        // one line, whitespace-trimmed - a trailing newline from an editor must not become an
-        // empty argument
-        return trim(read_file(flags_path));
-    }
-
-    // run `echoc run [extra] [flags] <file>` capturing merged stdout+stderr, return the captured text.
-    // 2>&1 so a rare stderr line (e.g. "No source files") is captured too; in practice a
-    // successful run prints only program output and a failing run prints only diagnostics
+    // one function rather than a popen block per call site, so the wait status is decoded in exactly
+    // one place - and so a future `timeout:` setting has one place to go. a signal is reported as
+    // `128 + signo`, the way a shell reports it, which keeps a JIT segfault distinguishable from a
+    // clean rejection in the failure message.
     //
-    // `extra` is the caller's own flag rather than the test's - `--print-ir` is the only one, and it
-    // goes through the same invocation so an IR check is about the code that actually ran
-    std::string run_echoc(const fs::path &eco, const std::string &extra = "")
+    // a failure to spawn is reported through `exit_code` like any other, never with a Catch2
+    // assertion: this is the suite's process primitive, and a primitive that asserts can only be
+    // called from inside an assertion context - which a cached probe run at static-init time is not
+    ProcessResult run_capturing(const std::string &command)
     {
-        const std::string flags = read_flags(eco);
+        ProcessResult result;
 
-        std::string cmd = "\"" ECHOC_BINARY "\" run "
-            + (extra.empty() ? "" : extra + " ")
-            + (flags.empty() ? "" : flags + " ")
-            + "\"" + eco.string() + "\" 2>&1";
-
-        std::string out;
         std::array<char, 4096> buf;
-        FILE *pipe = popen(cmd.c_str(), "r");
-        REQUIRE(pipe != nullptr);
+        FILE *pipe = popen(command.c_str(), "r");
+
+        if (!pipe) {
+            result.exit_code = 127;
+            result.output = "could not spawn: " + command;
+            return result;
+        }
 
         size_t n;
         while ((n = fread(buf.data(), 1, buf.size(), pipe)) > 0) {
-            out.append(buf.data(), n);
+            result.output.append(buf.data(), n);
         }
 
-        // exit code is intentionally ignored - the captured output is the contract
-        pclose(pipe);
-        return out;
+        const int status = pclose(pipe);
+        result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+
+        return result;
     }
 
-    // strip a single trailing newline so goldens don't have to be byte-perfect on the last \n
-    std::string normalize(std::string s)
+    std::string quoted(const fs::path &p)
     {
-        if (!s.empty() && s.back() == '\n') {
-            s.pop_back();
+        return "\"" + p.string() + "\"";
+    }
+
+    // `echoc run [dump] [flags] <file>`. `dump` is empty for the output run - the OUT golden is a
+    // byte comparison, so nothing may be added to that stream
+    std::string run_command(
+        const EchoTests::EcoTestFile &test, const fs::path &eco, const std::string &dump)
+    {
+        return "\"" ECHOC_BINARY "\" run "
+            + (dump.empty() ? "" : dump + " ")
+            + test.compiler_flags()
+            + quoted(eco) + " 2>&1";
+    }
+
+    std::string build_command(
+        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path &binary,
+        const std::string &dump)
+    {
+        return "\"" ECHOC_BINARY "\" build -o " + quoted(binary) + " "
+            + (dump.empty() ? "" : dump + " ")
+            + test.compiler_flags()
+            + quoted(eco) + " 2>&1";
+    }
+
+    // where a `mode: build` case's binary goes: the build tree, absolute.
+    //
+    // absolute because the tests binary's working directory is not fixed - CI runs `./tests` from
+    // inside `build/`, a developer runs `./build/tests` from the repo root - so any relative path is
+    // wrong in one of the two, and a repo-root-relative one drops artifacts among tracked files
+    fs::path temp_binary_for(const fs::path &eco, const fs::path &root)
+    {
+        std::string name = fs::relative(eco, root).replace_extension("").string();
+        std::replace(name.begin(), name.end(), '/', '_');
+        std::replace(name.begin(), name.end(), '\\', '_');
+
+        return fs::path(ECO_E2E_TMP_DIR) / name;
+    }
+
+    // make_exec leaves two artifacts, the executable and `<executable>.o`. both go, always,
+    // including after a failure - Catch2's INFO has already captured everything a human needs by
+    // then, and a stale binary from a previous run is a false pass waiting to happen
+    struct ScopedBinary
+    {
+        fs::path path;
+
+        ScopedBinary(fs::path p) : path(std::move(p))
+        {
+            std::error_code ec;
+            fs::create_directories(path.parent_path(), ec);
+            remove_artifacts();
         }
-        return s;
-    }
 
-    // --- generated-IR checks ---------------------------------------------------------------------
-    //
-    // a sibling `<name>.eco.ir` asserts things about the *emitted LLVM IR* that no amount of program
-    // output can show: that a literal is a constant rather than an allocation, that `echo` of a string
-    // reaches `write` rather than `printf`, that passing a view costs no reference count.
-    //
-    // **directives, not a byte-for-byte golden**, and that is deliberate. the IR carries a
-    // `target triple` and a `target datalayout` that are machine specific, `attributes #0` that depend
-    // on the LLVM version, and `%0`/`%1` numbering that shifts with any unrelated codegen change. a
-    // full-text golden would therefore fail on every machine but one and churn on every commit - and a
-    // golden that is regenerated without being read asserts nothing at all.
-    //
-    // the format is LLVM's own FileCheck, reduced to the two directives that carry their weight:
-    //
-    //     CHECK:     <substring>   must appear at or after the previous CHECK's match
-    //     CHECK-NOT: <substring>   must not appear between the surrounding CHECKs
-    //
-    // blank lines and `#` / `//` lines are ignored. anything else is an error rather than a no-op: a
-    // mistyped directive that silently checks nothing is the one failure mode this must not have.
-    struct IrDirective
-    {
-        bool negated;
-        std::string text;
-        size_t line;
+        ~ScopedBinary()
+        {
+            remove_artifacts();
+        }
+
+        void remove_artifacts()
+        {
+            std::error_code ec;
+            fs::remove(path, ec);
+            fs::remove(path.string() + ".o", ec);
+        }
     };
 
-    // parses the directive file. `out_error` is set (and the result meaningless) on a malformed line
-    std::vector<IrDirective> read_ir_directives(const fs::path &ir_file, std::string &out_error)
+    // `clang` is what Backend::make_exec shells out to link with. a FAIL rather than a skip: a suite
+    // that quietly stops testing native builds is exactly the silent no-op this corpus refuses
+    void require_clang()
     {
-        std::vector<IrDirective> directives;
-        std::istringstream in(read_file(ir_file));
+        static const bool available = std::system("command -v clang > /dev/null 2>&1") == 0;
 
-        std::string raw;
-        size_t line_number = 0;
-
-        while (std::getline(in, raw)) {
-            line_number += 1;
-            const std::string line = trim(raw);
-
-            if (line.empty() || line.rfind('#', 0) == 0 || line.rfind("//", 0) == 0) {
-                continue;
-            }
-
-            // the longer prefix first, or `CHECK-NOT:` would match `CHECK:`'s test and be read as a
-            // positive directive whose text happens to start with "-NOT:"
-            static constexpr const char *negated_prefix = "CHECK-NOT:";
-            static constexpr const char *positive_prefix = "CHECK:";
-
-            const bool negated = line.rfind(negated_prefix, 0) == 0;
-            const char *prefix = negated ? negated_prefix
-                : (line.rfind(positive_prefix, 0) == 0 ? positive_prefix : nullptr);
-
-            // an unrecognised line is an error rather than a no-op: a mistyped directive that silently
-            // checks nothing is the one failure mode this must not have
-            if (prefix == nullptr) {
-                out_error = ir_file.filename().string() + ":" + std::to_string(line_number)
-                    + ": expected 'CHECK:' or 'CHECK-NOT:', got: " + line;
-                return directives;
-            }
-
-            directives.push_back(IrDirective {
-                negated, trim(line.substr(std::strlen(prefix))), line_number });
-
-            if (directives.back().text.empty()) {
-                out_error = ir_file.filename().string() + ":" + std::to_string(line_number)
-                    + ": directive has no text to match";
-                return directives;
-            }
+        if (!available) {
+            FAIL("a 'mode: build' test needs `clang` on PATH - echoc links the emitted object with it");
         }
-
-        if (directives.empty()) {
-            out_error = ir_file.filename().string() + ": no directives - an empty check file asserts nothing";
-        }
-
-        return directives;
     }
 
-    // applies the directives to `ir`, returning "" on success or the failure message.
+    // asserts one dump section. its own invocation, and its own Catch2 section, so a failure names
+    // which of the case's contracts broke.
     //
-    // a positive CHECK advances a cursor, so ordering is asserted and each CHECK can only match at or
-    // after the last one. that is what gives free function scoping - `CHECK: define {{...}} @main`
-    // followed by CHECKs that can then only match below it - and it is why a CHECK-NOT is scoped to the
-    // region *between* its neighbours rather than to the whole module. whole-module would be useless
-    // here: `mem::` declares `malloc`, so "this function does not allocate" has to mean "not in this
-    // region", not "nowhere in the program"
-    std::string apply_ir_directives(const std::vector<IrDirective> &directives, const std::string &ir)
+    // the dumps cannot share one invocation: `-a` and `-ar` print byte-identical module headers, so
+    // there would be nothing to split a combined stream on, and on a rejected program `-p` never
+    // runs at all
+    void check_dump_section(
+        const EchoTests::EcoTestFile &test, const EchoTests::CheckSection &section,
+        const fs::path &eco, const fs::path &root)
     {
-        size_t cursor = 0;
-        std::vector<const IrDirective *> pending_negations;
+        const std::string flag = EchoTests::dump_flag(section.kind);
 
-        auto check_negations = [&](size_t region_end) -> std::string {
-            for (const auto *negated : pending_negations) {
-                const size_t found = ir.find(negated->text, cursor);
-
-                if (found != std::string::npos && found < region_end) {
-                    return "CHECK-NOT on line " + std::to_string(negated->line)
-                        + " matched, but must not: " + negated->text;
-                }
-            }
-            pending_negations.clear();
-            return "";
-        };
-
-        for (const auto &directive : directives) {
-            if (directive.negated) {
-                pending_negations.push_back(&directive);
-                continue;
-            }
-
-            const size_t found = ir.find(directive.text, cursor);
-
-            if (found == std::string::npos) {
-                return "CHECK on line " + std::to_string(directive.line)
-                    + " never matched (searching from offset " + std::to_string(cursor) + "): "
-                    + directive.text;
-            }
-
-            if (std::string failure = check_negations(found); !failure.empty()) {
-                return failure;
-            }
-
-            cursor = found + directive.text.size();
+        ProcessResult result;
+        if (test.mode == EchoTests::RunMode::t_build) {
+            require_clang();
+            const ScopedBinary binary(temp_binary_for(eco, root));
+            result = run_capturing(build_command(test, eco, binary.path, flag));
+        }
+        else {
+            result = run_capturing(run_command(test, eco, flag));
         }
 
-        // trailing CHECK-NOTs are scoped to everything after the last positive match
-        return check_negations(ir.size());
+        INFO("dump:\n" << result.output);
+
+        // the status is asserted before the directives, and on this path too - a dump invocation that
+        // died early (a mistyped `flags:` argparse refuses, a crash before the dump runs) produces a
+        // short or empty stream, and CHECK-NOTs against a stream that was never produced all hold
+        if (!EchoTests::status_matches(test.expect, result.exit_code)) {
+            FAIL("expected this case to " << EchoTests::expectation_name(test.expect)
+                << ", but the dump invocation exited " << result.exit_code);
+        }
+
+        CHECK(EchoTests::apply_check_directives(section.directives, result.output) == "");
     }
 
-    // the IR for a test: the same `run` invocation plus `--print-ir`, so the checks are about the code
-    // that actually ran. the program's own output follows the IR in this capture and is deliberately
-    // left in - the alternative is guessing where the module ends, and a directive only ever matches
-    // what it asks for
-    std::string run_echoc_ir(const fs::path &eco)
+    // the OUT golden plus the exit status, for whichever process the case says owns its output.
+    // `actor` is the only thing that differs between the two modes, so the contract - what counts as
+    // matching, and what a failure shows - is spelled once
+    void check_program_output(
+        const EchoTests::EcoTestFile &test, const ProcessResult &result, const char *actor)
     {
-        return run_echoc(eco, "--print-ir");
+        const std::string actual = EchoTests::strip_trailing_newline(result.output);
+
+        INFO("expected:\n" << test.expected_output);
+        INFO("actual:\n" << actual);
+        CHECK(actual == test.expected_output);
+
+        if (!EchoTests::status_matches(test.expect, result.exit_code)) {
+            FAIL_CHECK("expected this case to " << EchoTests::expectation_name(test.expect)
+                << ", but " << actor << " exited " << result.exit_code);
+        }
+    }
+
+    // asserts the OUT golden and the exit status of a `mode: run` case
+    void check_run_output(const EchoTests::EcoTestFile &test, const fs::path &eco)
+    {
+        check_program_output(test, run_capturing(run_command(test, eco, "")), "echoc");
+    }
+
+    // the same for `mode: build`: link a native binary, then run it.
+    //
+    // the OUT golden is the *program's* output only. the build step is asserted through its exit code
+    // alone, because its stdout carries absolute object and executable paths - putting those in a
+    // golden would fail on every machine but the one that recorded it, and filtering them would put a
+    // copy of the compiler's output format in here
+    void check_build_output(
+        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path &root)
+    {
+        require_clang();
+
+        const ScopedBinary binary(temp_binary_for(eco, root));
+
+        const ProcessResult build = run_capturing(build_command(test, eco, binary.path, ""));
+
+        if (build.exit_code != 0) {
+            INFO("build log:\n" << build.output);
+
+            // an `expect: fail` case that never linked is still owed its golden, against the build
+            // log - the OUT section is mandatory precisely so that no combination of settings makes
+            // it optional again, and a bare `SUCCEED()` here made "rejected somehow" the whole
+            // assertion for every build-mode case rejected at compile time
+            if (test.expect == EchoTests::Expectation::t_fail) {
+                check_program_output(test, build, "echoc build");
+                return;
+            }
+
+            FAIL("echoc build exited " << build.exit_code);
+        }
+
+        // make_exec used to report all three of its failure paths by printing and returning, so
+        // "exited 0" is on its own no proof that anything was linked
+        if (!fs::exists(binary.path)) {
+            INFO("build log:\n" << build.output);
+            FAIL("echoc build exited 0 but produced no binary at " << binary.path.string());
+        }
+
+        check_program_output(test, run_capturing(quoted(binary.path) + " 2>&1"), "the program");
     }
 };
 
-TEST_CASE("eco end-to-end golden output", "[e2e]")
+TEST_CASE("eco end-to-end", "[e2e]")
 {
     const fs::path root = ECO_E2E_TESTS_DIR;
 
     std::vector<fs::path> cases;
+    std::vector<fs::path> test_files;
+
     for (auto &entry : fs::recursive_directory_iterator(root)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".eco") {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+
+        if (entry.path().extension() == ".eco") {
             cases.push_back(entry.path());
+        }
+        else if (entry.path().extension() == ".test") {
+            test_files.push_back(entry.path());
         }
     }
 
     // deterministic order across platforms
     std::sort(cases.begin(), cases.end());
+    std::sort(test_files.begin(), test_files.end());
 
     REQUIRE_FALSE(cases.empty());
 
+    // a `.test` whose program was renamed away asserts nothing and is invisible to the loop below,
+    // so it is checked from the other side
+    for (const auto &test_file : test_files) {
+        fs::path eco = test_file;
+        eco.replace_extension(".eco");
+
+        DYNAMIC_SECTION("orphan: " << fs::relative(test_file, root).string())
+        {
+            if (!fs::exists(eco)) {
+                FAIL("no program next to this test file, expected " << eco.string());
+            }
+        }
+    }
+
     for (const auto &eco : cases) {
-        fs::path expected = eco;
-        expected += ".out";
-        std::string rel = fs::relative(eco, root).string();
+        fs::path test_path = eco;
+        test_path.replace_extension(".test");
+
+        const std::string rel = fs::relative(eco, root).string();
+
+        EchoTests::EcoTestFile test;
+        std::string parse_error;
+
+        // parsed once, outside the sections, because the section list below is derived from it
+        const bool exists = fs::exists(test_path);
+        const bool parsed = exists && EchoTests::parse_eco_test_file(test_path, test, parse_error);
 
         DYNAMIC_SECTION("eco: " << rel)
         {
-            if (!fs::exists(expected)) {
-                FAIL("missing golden file: " << rel << ".out, create it with: ./build/echoc run \"" << eco.string() << "\" > \"" << expected.string() << "\"");
-            }
-
-            std::string actual = normalize(run_echoc(eco));
-            std::string want = normalize(read_file(expected));
-
-            INFO("file:     " << eco.string());
-            INFO("expected:\n" << want);
-            INFO("actual:\n" << actual);
-            CHECK(actual == want);
-        }
-
-        // the optional second half: what the *emitted IR* must look like. a separate section so a
-        // failure names which of the two contracts broke, and a separate `echoc` run so `--print-ir`
-        // can never pollute the output golden above
-        fs::path ir_checks = eco;
-        ir_checks += ".ir";
-
-        if (!fs::exists(ir_checks)) {
-            continue;
-        }
-
-        DYNAMIC_SECTION("ir: " << rel)
-        {
-            std::string parse_error;
-            const auto directives = read_ir_directives(ir_checks, parse_error);
-
             INFO("file: " << eco.string());
 
-            if (!parse_error.empty()) {
+            if (!exists) {
+                FAIL("missing test file: " << fs::relative(test_path, root).string()
+                    << ", see tests_eco/README.md for the format");
+            }
+
+            if (!parsed) {
                 FAIL(parse_error);
             }
 
-            const std::string ir = run_echoc_ir(eco);
-            const std::string failure = apply_ir_directives(directives, ir);
+            if (test.mode == EchoTests::RunMode::t_build) {
+                check_build_output(test, eco, root);
+            }
+            else {
+                check_run_output(test, eco);
+            }
+        }
 
-            INFO("ir:\n" << ir);
-            CHECK(failure == "");
+        if (!parsed) {
+            continue;
+        }
+
+        // the optional other half: what the emitted IR or either AST dump must contain
+        for (const auto &section : test.checks) {
+            DYNAMIC_SECTION(EchoTests::dump_section_name(section.kind) << ": " << rel)
+            {
+                INFO("file: " << eco.string());
+                check_dump_section(test, section, eco, root);
+            }
         }
     }
 }

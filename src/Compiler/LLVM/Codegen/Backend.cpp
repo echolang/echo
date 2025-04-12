@@ -103,13 +103,13 @@ void Backend::init_target()
     _ctx.data_layout = _target_machine->createDataLayout();
 }
 
-void Backend::make_exec(std::string executable_name)
+bool Backend::make_exec(std::string executable_name)
 {
     // the same TargetMachine codegen took its data layout from (Backend::init_target), so the
     // object can never be emitted for a target the IR was not laid out for
     if (!_target_machine) {
         llvm::errs() << "No target resolved - init_target must run before make_exec\n";
-        return;
+        return false;
     }
 
     std::error_code EC;
@@ -118,7 +118,7 @@ void Backend::make_exec(std::string executable_name)
 
     if (EC) {
         llvm::errs() << "Could not open file: " << EC.message();
-        return;
+        return false;
     }
 
     llvm::legacy::PassManager pass;
@@ -126,7 +126,7 @@ void Backend::make_exec(std::string executable_name)
 
     if (_target_machine->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
         llvm::errs() << "TargetMachine can't emit a file of this type";
-        return;
+        return false;
     }
 
     pass.run(*_ctx.current_module());
@@ -138,10 +138,12 @@ void Backend::make_exec(std::string executable_name)
     int result = std::system(command.c_str());
     if (result != 0) {
         llvm::errs() << "Error: linking failed\n";
-        return;
+        return false;
     }
 
     llvm::outs() << "Executable \"" << executable_name << "\" created successfully\n";
+
+    return true;
 }
 
 void Backend::optimize()

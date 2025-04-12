@@ -1,0 +1,27 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 13:6
+No overload of 'Node' accepts these arguments. Candidates are:
+  Node(int32)
+Begin: 'Node'
+End: 'Node'
+Code excerpt:
+ [12]> 
+ [13]> $n = Node();
+           ^
+ [14]> 
+
+---- Issue ----
+Issue at 13:12
+cannot infer type of variable without an initializer
+Begin: ';'
+End: ';'
+Code excerpt:
+ [12]> 
+ [13]> $n = Node();
+                 ^
+ [14]> 
+
+Critical issues found, cannot compile.

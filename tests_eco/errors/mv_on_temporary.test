@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 9:6
+'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own
+Begin: 'mv'
+End: 'mv'
+Code excerpt:
+ [8]> 
+ [9]> $a = mv make();
+           ^
+ [10]> 
+
+---- Issue ----
+Issue at 9:15
+cannot infer type of variable without an initializer
+Begin: ';'
+End: ';'
+Code excerpt:
+ [8]> 
+ [9]> $a = mv make();
+                    ^
+ [10]> 
+
+Critical issues found, cannot compile.

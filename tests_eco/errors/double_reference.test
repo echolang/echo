@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 8:17
+A reference cannot be taken twice, write 'ptr<int32&>' instead
+Begin: '&'
+End: '&'
+Code excerpt:
+ [7]> // the signature is read in every module pass, so this also pins that the issue is reported once
+ [8]> function f(int& & $x) : void {}
+                      ^
+ [9]> 
+
+Critical issues found, cannot compile.

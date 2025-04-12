@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:4
+Invalid type conversion: cannot assign 'int32&' to 'int32' - to change where a pointer points, assign to ':$'
+Begin: '='
+End: '='
+Code excerpt:
+ [5]> ptr<int> $p = &$a;
+ [6]> $p = &$b;
+         ^
+ [7]> 
+
+Critical issues found, cannot compile.

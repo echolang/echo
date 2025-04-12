@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:6
+The function 'helper' could not be found
+Begin: 'helper'
+End: 'helper'
+Code excerpt:
+ [10]> 
+ [11]> echo helper(5);
+           ^
+ [12]> 
+
+Critical issues found, cannot compile.

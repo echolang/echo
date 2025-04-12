@@ -1,0 +1,6 @@
+mode: build
+expect: fail
+
+--- OUT --->
+fatal error: stopping here
+  at die_exits_nonzero.eco:3

@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+7
+fatal error: pick needs a positive value
+  at die_ends_scope.eco:8

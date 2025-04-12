@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:6
+Invalid type conversion: cannot implicitly convert 'ptr<int32>' to 'int32&' - write the cast explicitly to assert it is not null
+Begin: '$r'
+End: '$r'
+Code excerpt:
+ [4]> ptr<int> $p = &$a;
+ [5]> int& $r = $p:$;
+           ^
+ [6]> 
+
+Critical issues found, cannot compile.

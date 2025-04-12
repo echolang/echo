@@ -1,0 +1,8 @@
+expect: fail
+
+--- OUT --->
+7
+7
+7
+fatal error: loop finished
+  at die_in_control_flow.eco:12

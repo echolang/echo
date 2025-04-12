@@ -1,0 +1,12 @@
+// a reference counted allocation, in a natively linked binary: the RC runtime is emitted per
+// compilation unit rather than linked, so this must work with no stdlib symbols behind it
+class Box
+{
+    int32 $value;
+}
+
+$b = Box(7);
+$c = $b;
+
+echo $b->value;
+echo $c->value;

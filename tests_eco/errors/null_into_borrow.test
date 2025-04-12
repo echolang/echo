@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:6
+'int32&' cannot be null - declare it as a nullable pointer instead
+Begin: '$r'
+End: '$r'
+Code excerpt:
+ [2]> // throws away the only guarantee it carries
+ [3]> int& $r = null;
+           ^
+ [4]> 
+
+Critical issues found, cannot compile.

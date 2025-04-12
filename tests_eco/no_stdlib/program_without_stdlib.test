@@ -1,0 +1,18 @@
+stdlib: off
+
+--- OUT --->
+2
+7
+--- RAST --->
+# with the library out of the way the whole dump is this program, so an assertion cannot accidentally
+# match something in stdlib/math/functions.eco. that is the reason `stdlib: off` exists at all - with
+# it on, these same three CHECKs sit below ~240 lines of library
+CHECK: Module: [main]
+CHECK-NOT: Module: [stdlib]
+
+# a method is an ordinary function whose first parameter is a non-nullable borrow of the self type
+CHECK: function bump -> type<int32>
+CHECK: vardecl<type<Counter&>>($this)
+
+# ...and the receiver is addressed in the parser, so a member call passes `&$c` rather than a copy
+CHECK: call bump(addrof<Counter&>(varref<Counter>(var($c)))

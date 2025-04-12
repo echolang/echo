@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 4:14
+An extern function declaration cannot have a body - it must end with ';'
+Begin: 'some_symbol'
+End: 'some_symbol'
+Code excerpt:
+ [3]> extern {
+ [4]>     function some_symbol() : void {
+                   ^
+ [5]>         echo 1;
+
+Critical issues found, cannot compile.

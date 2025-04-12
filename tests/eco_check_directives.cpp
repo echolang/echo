@@ -1,0 +1,115 @@
+#include "eco_check_directives.h"
+
+#include <sstream>
+
+namespace EchoTests
+{
+std::string trim_whitespace(const std::string &s)
+{
+    const size_t first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+
+    return s.substr(first, s.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+std::string locate(const std::string &origin, size_t line, const std::string &message)
+{
+    return origin + ":" + std::to_string(line) + ": " + message;
+}
+
+bool parse_check_directives(
+    const std::string &body,
+    size_t first_line,
+    const std::string &origin,
+    std::vector<CheckDirective> &out_directives,
+    std::string &out_error)
+{
+    std::istringstream in(body);
+
+    std::string raw;
+    size_t line_number = first_line - 1;
+
+    while (std::getline(in, raw)) {
+        line_number += 1;
+        const std::string line = trim_whitespace(raw);
+
+        if (line.empty() || line.rfind('#', 0) == 0 || line.rfind("//", 0) == 0) {
+            continue;
+        }
+
+        // the longer prefix first, or `CHECK-NOT:` would match `CHECK:`'s test and be read as a
+        // positive directive whose text happens to start with "-NOT:"
+        bool matched = false;
+
+        for (const auto &[prefix, negated] :
+             { std::pair<const char *, bool>{ "CHECK-NOT:", true }, { "CHECK:", false } }) {
+
+            if (line.rfind(prefix, 0) == 0) {
+                out_directives.push_back(CheckDirective {
+                    negated, trim_whitespace(line.substr(std::string(prefix).size())), line_number });
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched) {
+            out_error = locate(
+                origin, line_number, "expected 'CHECK:' or 'CHECK-NOT:', got: " + line);
+            return false;
+        }
+
+        if (out_directives.back().text.empty()) {
+            out_error = locate(origin, line_number, "directive has no text to match");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::string apply_check_directives(
+    const std::vector<CheckDirective> &directives, const std::string &haystack)
+{
+    size_t cursor = 0;
+    std::vector<const CheckDirective *> pending_negations;
+
+    auto check_negations = [&](size_t region_end) -> std::string {
+        for (const auto *negated : pending_negations) {
+            const size_t found = haystack.find(negated->text, cursor);
+
+            if (found != std::string::npos && found < region_end) {
+                return "CHECK-NOT on line " + std::to_string(negated->line)
+                    + " matched, but must not: " + negated->text;
+            }
+        }
+        pending_negations.clear();
+        return "";
+    };
+
+    for (const auto &directive : directives) {
+        if (directive.negated) {
+            pending_negations.push_back(&directive);
+            continue;
+        }
+
+        const size_t found = haystack.find(directive.text, cursor);
+
+        if (found == std::string::npos) {
+            return "CHECK on line " + std::to_string(directive.line)
+                + " never matched (searching from offset " + std::to_string(cursor) + "): "
+                + directive.text;
+        }
+
+        if (std::string failure = check_negations(found); !failure.empty()) {
+            return failure;
+        }
+
+        cursor = found + directive.text.size();
+    }
+
+    // trailing CHECK-NOTs are scoped to everything after the last positive match
+    return check_negations(haystack.size());
+}
+};

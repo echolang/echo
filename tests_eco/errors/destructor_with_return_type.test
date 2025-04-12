@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 7:5
+A destructor returns nothing - drop the ': type'.
+Begin: 'destructor'
+End: 'destructor'
+Code excerpt:
+ [6]> 
+ [7]>     destructor() : void
+          ^
+ [8]>     {
+
+Critical issues found, cannot compile.

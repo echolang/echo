@@ -72,7 +72,9 @@ public:
     void optimize();
     void printIR(bool toFile);
     void run_code();
-    void make_exec(std::string executable_name);
+
+    // false when no binary was produced, see Backend::make_exec
+    bool make_exec(std::string executable_name);
 
 private:
     Compiler::LLVM::CodegenContext _ctx;

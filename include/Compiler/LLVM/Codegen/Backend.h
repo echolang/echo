@@ -36,7 +36,12 @@ namespace Compiler::LLVM
         void optimize();
         void print_ir(bool to_file);
         void run_code();
-        void make_exec(std::string executable_name);
+
+        // emits the object file and links it into `executable_name`, false on any of its three
+        // failure paths. it reports by return value rather than only by printing, because a caller
+        // that cannot tell exits 0 having produced no binary - which is a build that looks
+        // successful to a shell, a Makefile and the e2e suite alike
+        bool make_exec(std::string executable_name);
 
     private:
         CodegenContext &_ctx;

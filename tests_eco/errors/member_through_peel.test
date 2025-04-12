@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:10
+':$' names the pointer itself, which has no members - drop the ':$' and write '->' directly
+Begin: '->'
+End: '->'
+Code excerpt:
+ [10]> 
+ [11]> echo $p:$->x;
+               ^
+ [12]> 
+
+Critical issues found, cannot compile.

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:1
+Invalid type conversion: cannot implicitly convert 'int32' to 'ptr<const uint8>'
+Begin: 'die'
+End: 'die'
+Code excerpt:
+ [2]> // any other call would
+ [3]> die(42);
+      ^
+ [4]> 
+
+Critical issues found, cannot compile.

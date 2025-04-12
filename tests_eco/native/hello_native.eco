@@ -1,0 +1,5 @@
+// `mode: build` links a real executable through clang and runs it, rather than JITing the module.
+// nothing else in this corpus reaches LLVMCompiler::make_exec
+int32 $a = 20;
+int32 $b = 22;
+echo $a + $b;

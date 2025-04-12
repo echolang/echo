@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 19:28
+'$b' is a 'Buffer', which owns a resource. Capturing an owning value is not supported yet - pass it as a parameter instead.
+Begin: 'function'
+End: 'function'
+Code excerpt:
+ [18]> 
+ [19]>     function<usize()> $f = function() : usize { return $b->len; };
+                                 ^
+ [20]> 
+
+Critical issues found, cannot compile.

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:1
+'echo' has no way to print a 'Res' - print its members instead
+Begin: 'echo'
+End: 'echo'
+Code excerpt:
+ [5]> $a = Res(1);
+ [6]> echo $a;
+      ^
+ [7]> 
+
+Critical issues found, cannot compile.

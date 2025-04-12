@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 7:1
+argument 1 of 'f' is 'int32&', which cannot be null - declare it as a nullable pointer instead
+Begin: 'f'
+End: 'f'
+Code excerpt:
+ [6]> 
+ [7]> f(null);
+      ^
+ [8]> 
+
+Critical issues found, cannot compile.

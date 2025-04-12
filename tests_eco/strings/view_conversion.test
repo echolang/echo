@@ -1,0 +1,27 @@
+--- OUT --->
+4
+2
+--- IR --->
+# the cost model, which is the whole reason `string::view` is a public type: handing a `string` to a
+# view parameter touches no reference count, while handing it by value takes exactly one retain
+
+CHECK: define i32 @main()
+
+# the literal, as ever, a constant
+CHECK: store %string { %view { ptr @str, i64 4 }, ptr null }
+
+# show(string::view) - the conversion is a call to the type's own `view()`, taking the address of the
+# place, and then the view travels as a plain two-word value
+CHECK: call %view.0 @_M6string_view
+CHECK: call void @_showZZMLCN6string4viewE
+
+# ...and no reference count moved to get there. this is the claim that would silently regress if the
+# view conversion ever went through the copy path
+CHECK-NOT: strong.inc
+
+# which(string) - by value, so this one *does* go through the synthesized copy, whose body holds the
+# retain. the two calls sitting next to each other is the contrast worth pinning
+CHECK: call %string @_stringZZMRBMLC6string
+CHECK: call void @_whichZZMLC6string
+
+CHECK: ret i32 0

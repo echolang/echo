@@ -223,4 +223,4 @@ void LLVMCompiler::visitAttribute(AST::AttributeNode &node) {}
 void LLVMCompiler::optimize() { _backend.optimize(); }
 void LLVMCompiler::printIR(bool toFile) { _backend.print_ir(toFile); }
 void LLVMCompiler::run_code() { _backend.run_code(); }
-void LLVMCompiler::make_exec(std::string executable_name) { _backend.make_exec(executable_name); }
+bool LLVMCompiler::make_exec(std::string executable_name) { return _backend.make_exec(executable_name); }

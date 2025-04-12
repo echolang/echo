@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 23:6
+'Pool' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, take a borrow ('Pool&') if the value is only being read, or give 'Pool' a copy constructor ('constructor(Pool& $other)').
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [22]> $a = Pool(Handle(1));
+ [23]> $b = $a;
+           ^
+ [24]> 
+
+Critical issues found, cannot compile.

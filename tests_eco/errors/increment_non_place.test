@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:7
+'++' needs an expression with storage to step
+Begin: '++'
+End: '++'
+Code excerpt:
+ [4]> ptr<int> $p = &$a;
+ [5]> $p:$:$++;
+            ^
+ [6]> 
+
+Critical issues found, cannot compile.

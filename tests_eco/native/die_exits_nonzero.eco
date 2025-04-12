@@ -1,0 +1,3 @@
+// `die` in a native binary: the abort path writes to fd 2 and exits 1, so unlike in `mode: run` -
+// where the JIT's exit(1) takes echoc down with it - this is genuinely the *program's* status
+die("stopping here");

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 12:12
+'$at_file_scope' is declared at file scope, which is the implicit entry point's own frame - a function body cannot reach it. Pass it as a parameter, or write a closure.
+Begin: '$at_file_scope'
+End: '$at_file_scope'
+Code excerpt:
+ [11]> {
+ [12]>     return $at_file_scope;
+                 ^
+ [13]> }
+
+Critical issues found, cannot compile.

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 4:24
+An extern function cannot be generic - a single C symbol has no per-instantiation body
+Begin: 'bad_alloc'
+End: 'bad_alloc'
+Code excerpt:
+ [3]> extern {
+ [4]>     function malloc as bad_alloc<T>(usize $count) : ptr<T>;
+                             ^
+ [5]> }
+
+Critical issues found, cannot compile.

@@ -1,0 +1,18 @@
+mode: build
+
+--- OUT --->
+7
+7
+--- IR --->
+# an IR section reads main_build's dump in build mode, which is the *optimized release* IR - `echoc
+# build` always runs the O3 pipeline, unlike `run`, which only optimizes when asked. so this is the one
+# place in the corpus where that pipeline's effect on the reference counting runtime is asserted.
+#
+# and it removes all of it: the allocation, the retain for `$c = $b`, the two releases at scope end and
+# the reads through the handle are all gone, and both echoes are folded to the constant 7. that is only
+# sound because the counts balanced, so it is worth pinning
+CHECK: i32 @main()
+CHECK-NOT: call ptr @malloc
+CHECK-NOT: call void @__eco_release
+CHECK-NOT: strong.inc
+CHECK: ret i32 0

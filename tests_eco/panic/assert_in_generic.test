@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+9
+assertion failed: tag must be positive
+  at assert_in_generic.eco:5

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:6
+Type parameter 'T' of 'id' is constrained to 'numeric' but was given 'bool'
+Begin: 'id'
+End: 'id'
+Code excerpt:
+ [9]> 
+ [10]> echo id(true);
+           ^
+ [11]> 
+
+Critical issues found, cannot compile.
