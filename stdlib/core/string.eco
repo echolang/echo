@@ -1,0 +1,674 @@
+/**
+ * Text.
+ *
+ * Three types, and the split between them is the whole design:
+ *
+ *  - `string::view` **borrows**. Two words - an address and a byte count - owning nothing, copying
+ *    for free, keeping nothing alive. Every operation that only *reads* text lives here.
+ *  - `string` **owns**. A window plus a reference-counted buffer, so copying one is a retain rather
+ *    than a memcpy, and a substring shares its parent's bytes instead of duplicating them.
+ *  - `StringBuf` is that buffer, and the only thing in this file that touches raw memory.
+ *
+ * A **string literal is a `string`**. The compiler lowers `'hey'` to a constant - static bytes in
+ * the binary, the decoded byte count, and a *null owner*. Nothing is allocated and no count is
+ * touched, which is what makes `$name = 'ray';` free. It is also why every mutation below opens
+ * with the same gate: a null owner owns nothing, so it is not uniquely owned, and writing through
+ * it would scribble on the program's own image.
+ *
+ * Sizes are **bytes**, never characters. `->size()` is O(1) and `->char_count()` is a walk; that
+ * the two disagree is the point rather than an oversight - `'héllo'` is five characters in six
+ * bytes. Nothing here validates UTF-8, and nothing here normalizes or case-folds.
+ *
+ * `#[core: "string"]` and `#[core: "string_view"]` are how the compiler finds these two without
+ * hardcoding a name - a literal's type, `echo`'s one non-primitive case. It resolves the shape
+ * **by property name** (`AST::resolve_core_string_layout`): `$window` and `$owner` here, `$bytes`
+ * and `$size` on the view. So the fields may be reordered but not renamed, `$window` has to *be*
+ * the view type, and `$owner` has to stay a class - a class is what carries a reference count.
+ *
+ * Two shapes recur below and are deliberate rather than clumsy:
+ *
+ *  - a `bool` is a branch and two `return`s, never `return $a == $b;`. A `return` types its
+ *    literals against the declared return type, and there is no reason to find out the hard way
+ *    which side of that a comparison lands on.
+ *  - no comparison between two `uint8`s is ever `<` or `>`. Integer comparison lowers *signed*, so
+ *    `0xff` would read as -1; only `==` and `!=`, which do not consult signedness, are safe on a
+ *    byte. Comparing a byte against an integer *literal* is fine - it widens to int32 first, and
+ *    the widening follows the source's signedness, so a `uint8` zero-extends.
+ */
+
+/**
+ * The bytes behind a `string`, and the only owner of heap memory in this file.
+ *
+ * A class rather than a struct because it is *shared*: two `string`s naming one buffer are two
+ * references to one of these, and the count in its heap block is what the copy-on-write gate
+ * reads. It is also what frees the bytes, exactly once, when the last of them is gone.
+ *
+ * `$capacity` counts text bytes and deliberately **does not count the NUL slot**: every allocation
+ * here is `$capacity + 1` and every fullness test is `$used <= $capacity`, so the `+ 1` lives in
+ * three places instead of a `- 1` living in a dozen.
+ *
+ * The invariant everything downstream leans on: **`$bytes[$used]` is always 0**. That is what makes
+ * `->c_str()` sound with no copy, and what lets a window which stops early be *detected* rather
+ * than silently handing a caller bytes past its end.
+ *
+ * Nothing outside this file should construct one. There are no visibility modifiers yet (todo/A17),
+ * so that is a convention rather than a rule.
+ */
+class StringBuf
+{
+    usize $capacity;
+    usize $used;
+    ptr<uint8> $bytes;
+
+    /**
+     * Grows so that at least `$capacity` text bytes fit. Does nothing when they already do.
+     *
+     * Doubling rather than fitting exactly, so appending in a loop is amortized O(1) instead of
+     * O(n²). The `+ 1` is the NUL slot `$capacity` does not count.
+     *
+     * **This may move the block**, so every window into it is stale afterwards. That is safe only
+     * because the caller is always one of `string`'s mutators, and each of those has already run
+     * the gate establishing that no other `string` names this buffer. A bare `string::view` handed
+     * out earlier is *not* covered - a view holds no reference count by design, and the language
+     * has no borrow checker. This is the one place that shows.
+     */
+    function reserve(usize $capacity) : void
+    {
+        if ($this->capacity >= $capacity) {
+            return;
+        }
+
+        usize $grown = $this->capacity * 2;
+
+        if ($grown < $capacity) {
+            $grown = $capacity;
+        }
+
+        // re-seated through `:$`, because realloc hands back an address rather than writing through
+        // the old one
+        $this->bytes:$ = mem::realloc<uint8>($this->bytes, $grown + 1);
+        $this->capacity = $grown;
+    }
+
+    /**
+     * Copies `$count` bytes onto the end and re-terminates.
+     */
+    function append_bytes(ptr<const uint8> $src, usize $count) : void
+    {
+        $this->reserve($this->used + $count);
+
+        // the one place const is dropped in this file. `mem::copy` names one `T` for both sides,
+        // and the destination genuinely is writable - it is this buffer's own base
+        mem::copy<uint8>($this->bytes:$ + $this->used, ptr<uint8>($src:$), $count);
+
+        $this->used = $this->used + $count;
+        $this->bytes:$[$this->used] = 0;
+    }
+
+    /**
+     * Appends one byte and re-terminates.
+     */
+    function push(uint8 $byte) : void
+    {
+        $this->reserve($this->used + 1);
+
+        $this->bytes:$[$this->used] = $byte;
+        $this->used = $this->used + 1;
+        $this->bytes:$[$this->used] = 0;
+    }
+
+    /**
+     * Drops the contents and keeps the allocation.
+     */
+    function empty() : void
+    {
+        $this->used = 0;
+        $this->bytes:$[0] = 0;
+    }
+
+    /**
+     * Runs when the *last* `string` naming this buffer is gone - not when the first one is.
+     */
+    destructor()
+    {
+        mem::free($this->bytes);
+    }
+}
+
+/**
+ * An owning, reference-counted, copy-on-write string.
+ *
+ * **This type declares no destructor, and must not.** A declared destructor disqualifies the
+ * synthesized copy (`AST::copy_is_synthesizable`), and the synthesized copy - a struct whose only
+ * owning property is a class - is exactly what makes `$b = $a;` one retain of the buffer rather
+ * than a duplicated allocation. The `StringBuf` handle is released at scope exit either way.
+ */
+#[core: "string"]
+struct string
+{
+    /**
+     * A window over bytes someone else owns.
+     *
+     * Two words, owning nothing: copying one is free, passing one costs no reference count, and
+     * dropping one does nothing at all. That is the cost model the type exists for.
+     *
+     * The other half of it is that a view keeps *nothing* alive. It is valid only while whatever
+     * owns the bytes is - a `string` that has not been dropped, or, for a literal, the binary
+     * itself. Growing the buffer behind it invalidates it too.
+     *
+     * There is no `size()` method here on purpose, only the `$size` property: a view is two public
+     * words and hides nothing, so a reader wanting the count writes `$v->size`. `string` has the
+     * method because its count lives one level down, in the window.
+     */
+    #[core: "string_view"]
+    struct view
+    {
+        ptr<const uint8> $bytes;
+        usize $size;
+
+        /**
+         * True when the window covers no bytes.
+         */
+        function is_empty() : bool
+        {
+            if ($this->size > 0) {
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * The byte at `$index`.
+         *
+         * Checked with `assert`, so `echoc build` drops the check - the bargain C's `assert` makes.
+         * Reading past the end is a mistake in the caller, not a condition to recover from.
+         */
+        function byte_at(usize $index) : uint8
+        {
+            assert($index < $this->size, 'string index out of bounds');
+
+            return $this->bytes:$[$index];
+        }
+
+        /**
+         * The window `$len` bytes wide beginning `$from` bytes in. Costs nothing.
+         *
+         * The two bounds are checked separately rather than as `$from + $len > $this->size`: that
+         * sum wraps, and a wrapped sum lets an enormous `$len` through the very check meant to
+         * catch it.
+         */
+        function sub(usize $from, usize $len) : string::view
+        {
+            assert($from <= $this->size, 'substring starts past the end of the string');
+            assert($len <= $this->size - $from, 'substring runs past the end of the string');
+
+            return string::view($this->bytes:$ + $from, $len);
+        }
+
+        /**
+         * Byte-for-byte equality. No normalization, no case folding, no encoding check.
+         */
+        function equals(string::view $other) : bool
+        {
+            if ($this->size != $other->size) {
+                return false;
+            }
+
+            bool $same = true;
+            usize $i = 0;
+
+            // there is no `break` yet, so the early exit is spelled by moving the cursor to the end
+            while ($i < $this->size) {
+                if ($this->bytes:$[$i] != $other->bytes:$[$i]) {
+                    $same = false;
+                    $i = $this->size;
+                }
+                else {
+                    $i = $i + 1;
+                }
+            }
+
+            return $same;
+        }
+
+        /**
+         * True when the window begins with `$prefix`. An empty prefix always matches.
+         */
+        function starts_with(string::view $prefix) : bool
+        {
+            if ($prefix->size > $this->size) {
+                return false;
+            }
+
+            string::view $head = $this->sub(0, $prefix->size);
+
+            return $head->equals($prefix);
+        }
+
+        /**
+         * True when the window ends with `$suffix`. An empty suffix always matches.
+         */
+        function ends_with(string::view $suffix) : bool
+        {
+            if ($suffix->size > $this->size) {
+                return false;
+            }
+
+            string::view $tail = $this->sub($this->size - $suffix->size, $suffix->size);
+
+            return $tail->equals($suffix);
+        }
+
+        /**
+         * The byte offset of the first occurrence of `$needle`, or **`$this->size` when there is
+         * none**.
+         *
+         * There is no `Option` to hand back, so the sentinel is the one value always to hand and
+         * never a valid index: the size itself. The test reads `if ($i < $v->size)` rather than a
+         * comparison against an imported constant, and a found offset feeds straight into `sub`.
+         *
+         * An empty needle is found at 0. In an *empty* window that answer is also the sentinel, and
+         * `contains` inherits the corner and says false.
+         *
+         * A plain O(n*m) scan.
+         */
+        function index_of(string::view $needle) : usize
+        {
+            if ($needle->size > $this->size) {
+                return $this->size;
+            }
+
+            usize $last = $this->size - $needle->size;
+            usize $at = 0;
+            usize $found = $this->size;
+
+            // `<=`, because a needle may begin at the last offset that still fits
+            while ($at <= $last) {
+                string::view $candidate = $this->sub($at, $needle->size);
+
+                if ($candidate->equals($needle)) {
+                    $found = $at;
+                    $at = $last + 1;
+                }
+                else {
+                    $at = $at + 1;
+                }
+            }
+
+            return $found;
+        }
+
+        /**
+         * True when `$needle` occurs anywhere in the window.
+         */
+        function contains(string::view $needle) : bool
+        {
+            usize $at = $this->index_of($needle);
+
+            if ($at < $this->size) {
+                return true;
+            }
+
+            return false;
+        }
+
+        /**
+         * The number of UTF-8 codepoints, in one pass and without a single bitwise operator.
+         *
+         * A continuation byte is `10xxxxxx`, which is 128..191, which is exactly the bytes whose
+         * quotient by 64 is 2. Every other byte begins a character. `& 0xC0` would say the same
+         * thing and cannot be written: `& | ^ << >>` have precedence entries but no codegen, and a
+         * `&` before a name lexes as address-of anyway.
+         *
+         * Dividing by a **literal** is load-bearing. The byte widens to int32 against it and the
+         * widening follows the *source's* signedness, so a `uint8` zero-extends and `0xff` arrives
+         * as 255. Divided by another `uint8` this would stay i8 and reach a signed divide, which is
+         * wrong for every byte over 127.
+         *
+         * Invalid UTF-8 is counted, not rejected. This is a count, not a validator.
+         */
+        function char_count() : usize
+        {
+            usize $count = 0;
+            usize $i = 0;
+
+            while ($i < $this->size) {
+                if ($this->bytes:$[$i] / 64 != 2) {
+                    $count = $count + 1;
+                }
+
+                $i = $i + 1;
+            }
+
+            return $count;
+        }
+
+        /**
+         * True when the byte just past the window is a 0, which is what `c_str` needs.
+         *
+         * Reading that byte is always safe, and that is the whole invariant this file maintains:
+         * every buffer allocated here has room for one byte past its text and holds a 0 there, and
+         * the compiler emits every string literal NUL-terminated too. So index `$size` is at most
+         * index `$used`, which is inside the allocation - every window satisfies
+         * `from + size <= used`.
+         *
+         * And it is 0 exactly when this window reaches the end of the bytes behind it. So this is a
+         * real test rather than a hope: a window that stops early - a substring - answers false.
+         *
+         * The one shape it cannot judge is a view built by hand through the field-wise constructor
+         * over an arbitrary pointer, which establishes none of the above.
+         */
+        function is_terminated() : bool
+        {
+            if ($this->bytes:$[$this->size] == 0) {
+                return true;
+            }
+
+            return false;
+        }
+
+        /**
+         * The bytes as a NUL-terminated C string, with no copy.
+         *
+         * Asserted rather than checked, because handing C a pointer that runs past the end of the
+         * window is a mistake in the caller and not a condition to recover from. `->clone()` first
+         * when you need a terminated copy of a substring, or ask `is_terminated()` when you would
+         * rather branch than die.
+         *
+         * A 0 byte *inside* the window still ends the C string early. That is what a C string is,
+         * and nothing here can do anything about it.
+         */
+        function c_str() : ptr<const uint8>
+        {
+            assert($this->is_terminated(), 'string is not NUL terminated - clone it first');
+
+            return $this->bytes;
+        }
+    }
+
+    string::view $window;
+    StringBuf $owner;
+
+    /**
+     * The whole string as a borrowed window.
+     *
+     * Marked, not named: the compiler finds the conversion by `#[implicit]` and never by the
+     * spelling. It fires wherever a `string` *place* meets a `string::view` parameter with nothing
+     * written at the call site, and it costs no reference count at all - which is the entire reason
+     * `string::view` is a public type. A declared conversion ranks below every built-in one, so an
+     * overload taking `string` still wins outright.
+     *
+     * A literal cannot trigger it: a conversion needs a place, and a literal has no storage.
+     */
+    #[implicit]
+    function view() : string::view
+    {
+        return $this->window;
+    }
+
+    /**
+     * The byte count. O(1) - it is a field, not a walk. See `char_count`.
+     */
+    function size() : usize
+    {
+        return $this->window->size;
+    }
+
+    function is_empty() : bool
+    {
+        return $this->window->is_empty();
+    }
+
+    function byte_at(usize $index) : uint8
+    {
+        return $this->window->byte_at($index);
+    }
+
+    /**
+     * The substring `$len` bytes wide beginning `$from` bytes in, **sharing the buffer**.
+     *
+     * No bytes are copied and nothing is allocated: the window narrows and the owner travels with
+     * it, one retain. That is also what keeps the bytes alive for exactly as long as the substring
+     * names them, which a bare `string::view` would not.
+     *
+     * The cost lands later instead. A substring of a large buffer keeps the whole buffer alive, and
+     * mutating either the substring or its parent makes a copy - see `make_unique`. `->clone()`
+     * when you want the substring to stop holding the parent up.
+     */
+    function sub(usize $from, usize $len) : string
+    {
+        return string($this->window->sub($from, $len), $this->owner);
+    }
+
+    /**
+     * Byte-for-byte equality, against anything that is a `string` - a literal included.
+     *
+     * By value rather than by borrow, because a literal is not a place: it can bind to neither a
+     * `string&` parameter nor the `#[implicit]` conversion, and `$s->equals('yes')` is the call
+     * this method exists for. The price is one retain and one release. On a hot path write
+     * `$a->window->equals($b->window)`, which is the same comparison with neither.
+     */
+    function equals(string $other) : bool
+    {
+        return $this->window->equals($other->window);
+    }
+
+    function starts_with(string $prefix) : bool
+    {
+        return $this->window->starts_with($prefix->window);
+    }
+
+    function ends_with(string $suffix) : bool
+    {
+        return $this->window->ends_with($suffix->window);
+    }
+
+    /**
+     * The byte offset of the first occurrence of `$needle`, or `$this->size()` when there is none.
+     */
+    function index_of(string $needle) : usize
+    {
+        return $this->window->index_of($needle->window);
+    }
+
+    function contains(string $needle) : bool
+    {
+        return $this->window->contains($needle->window);
+    }
+
+    /**
+     * The number of UTF-8 codepoints. A walk, unlike `size()`.
+     */
+    function char_count() : usize
+    {
+        return $this->window->char_count();
+    }
+
+    /**
+     * True when this string's bytes are safe to hand to C as-is. See `string::view::is_terminated`.
+     */
+    function is_terminated() : bool
+    {
+        return $this->window->is_terminated();
+    }
+
+    /**
+     * The bytes as a NUL-terminated C string, with no copy. See `string::view::c_str`.
+     */
+    function c_str() : ptr<const uint8>
+    {
+        return $this->window->c_str();
+    }
+
+    /**
+     * An independent copy that shares nothing.
+     *
+     * The one operation that always allocates. Everything else in this file avoids a copy until a
+     * write makes one unavoidable; this is how you ask for one on purpose - to stop a substring
+     * holding a large parent buffer alive, or to get a NUL-terminated copy of one.
+     */
+    function clone() : string
+    {
+        return $this->clone_reserving(0);
+    }
+
+    /**
+     * A clone with room for `$extra` bytes of text beyond the copy, so the append that follows does
+     * not reallocate.
+     *
+     * `clone()` is this with no headroom, and `concat` is the reason it takes any: cloning at the
+     * copy's exact size and then appending reallocated the fresh block on the very next statement and
+     * copied every byte a second time.
+     *
+     * The bytes are copied through `StringBuf::append_bytes` rather than by hand, so the two
+     * invariants that file states - every allocation is `$capacity + 1`, and `$bytes[$used]` is 0 -
+     * are maintained where they are declared. Sizing the block up front is what keeps `append_bytes`
+     * from growing it: `reserve` does nothing when the room is already there.
+     *
+     * Internal, like `make_unique` - public only because there are no visibility modifiers yet
+     * (todo/A17).
+     */
+    function clone_reserving(usize $extra) : string
+    {
+        usize $n = $this->window->size;
+
+        // `+ 1` is the NUL slot, exactly as StringBuf counts it
+        StringBuf $buf = StringBuf($n + $extra, 0, mem::alloc<uint8>($n + $extra + 1));
+        $buf->append_bytes($this->window->bytes, $n);
+
+        return string(string::view($buf->bytes, $n), $buf);
+    }
+
+    /**
+     * This string followed by `$other`, as a new string. Neither operand is touched.
+     */
+    function concat(string $other) : string
+    {
+        // sized for both operands up front: one allocation and one copy of each side's bytes
+        string $out = $this->clone_reserving($other->window->size);
+        $out->append($other);
+
+        return $out;
+    }
+
+    /**
+     * **The copy-on-write gate**, and the one rule every mutator below opens with.
+     *
+     * Afterwards this string owns a buffer nobody else can see, and its window is that whole
+     * buffer. Three ways that can fail to be true already, collapsing into two conditions:
+     *
+     *  - the bytes are a **literal**. Static, immutable, in the binary. Its owner is null and
+     *    `ref_count(null)` is 0, so it takes the same branch a shared buffer does. Answering 1 here
+     *    would have `append` scribble on the program's own image.
+     *  - a **second `string`** names the same buffer, so the count is 2 or more.
+     *  - this string is a **sub-window** of its own buffer. The bytes ahead of it are not ours to
+     *    move, and a realloc would re-seat a base this window is not sitting on, with no stored
+     *    offset to recompute it from. `$size == $used` is the whole test: every window satisfies
+     *    `from + size <= used`, so a window as long as the buffer is used has to start at offset
+     *    zero and *is* the whole buffer.
+     *
+     * The two conditions are nested rather than joined with `&&`, and have to be: `&&` lowers to a
+     * plain `and` with no short circuit, and the second reads through `$owner`, which the first has
+     * only just established is not null.
+     *
+     * Internal. It is public only because there are no visibility modifiers yet (todo/A17).
+     */
+    function make_unique() : void
+    {
+        if (ref_count($this->owner) == 1) {
+            if ($this->window->size == $this->owner->used) {
+                return;
+            }
+        }
+
+        string $fresh = $this->clone();
+
+        // the window first. assigning the owner releases the one this string held, and if that was
+        // its last reference the old bytes are gone by the time the next statement would read them
+        $this->window = $fresh->window;
+        $this->owner = $fresh->owner;
+    }
+
+    /**
+     * Re-seats the window over the whole of the buffer, which is what every mutator owes afterwards.
+     *
+     * Two reasons, and both hold for all of them: growing the buffer may have *moved* the block, so
+     * the old window points at freed memory; and the text just changed length. It is the whole
+     * buffer rather than a sub-window because the gate has already established that this string is
+     * the only one naming it - a sub-window would have been cloned into a fresh, full-width one.
+     *
+     * One method rather than the same statement at the end of four mutators, so the fifth cannot
+     * forget it or spell it differently.
+     *
+     * Internal, like `make_unique` - public only because there are no visibility modifiers yet
+     * (todo/A17).
+     */
+    function reseat() : void
+    {
+        $this->window = string::view($this->owner->bytes, $this->owner->used);
+    }
+
+    /**
+     * Makes room for `$capacity` bytes of text, so the appends that follow do not reallocate.
+     *
+     * Copy-on-write first, so this is also the cheapest way to say "I am about to write to this":
+     * the copy a literal or a shared buffer owes happens once, here, at a size you chose.
+     */
+    function reserve(usize $capacity) : void
+    {
+        $this->make_unique();
+        $this->owner->reserve($capacity);
+        $this->reseat();
+    }
+
+    /**
+     * Appends `$other`'s bytes.
+     *
+     * `$s->append($s)` is correct rather than a special case, and for a reason worth reading: the
+     * parameter is by value, so `$other` holds a second reference to the buffer, the gate therefore
+     * sees a count of two and clones - and `$other` still names the old, untouched bytes while the
+     * new ones are written.
+     */
+    function append(string $other) : void
+    {
+        usize $extra = $other->window->size;
+
+        if ($extra == 0) {
+            return;
+        }
+
+        $this->make_unique();
+        $this->owner->append_bytes($other->window->bytes, $extra);
+        $this->reseat();
+    }
+
+    /**
+     * Appends one byte.
+     *
+     * A byte, not a character: appending `0x80` on its own leaves the string holding invalid UTF-8,
+     * and nothing here will say so - `char_count` will simply count it as a character.
+     */
+    function push_byte(uint8 $byte) : void
+    {
+        $this->make_unique();
+        $this->owner->push($byte);
+        $this->reseat();
+    }
+
+    /**
+     * Empties the string, keeping the capacity.
+     *
+     * The gate copies bytes this is about to discard, which is the price of every mutator sharing
+     * one rule rather than each carrying its own. This is the only one where that shows.
+     */
+    function clear() : void
+    {
+        $this->make_unique();
+        $this->owner->empty();
+
+        // the same re-seat as every other mutator: `empty()` has just set `$used` to 0, so the
+        // window this hands back is the empty one, spelled as the one rule rather than as a second
+        $this->reseat();
+    }
+}

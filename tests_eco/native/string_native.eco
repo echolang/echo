@@ -1,0 +1,13 @@
+// the string library through the native path, which is a different compile from `run`: it links a
+// real binary, and it defaults to release - so every `assert` in the library is elided and none of
+// the results below may depend on one having run
+$s = 'hello';
+$s->append(', world');
+
+echo $s;
+echo $s->size();
+echo $s->char_count();
+echo $s->contains('world');
+
+$sub = $s->sub(7, 5);
+echo $sub;

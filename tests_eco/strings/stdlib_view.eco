@@ -1,0 +1,33 @@
+// `string::view` is the borrowed half: two words, owning nothing, costing no reference count. it is
+// where every read operation actually lives, and `string` delegates to it
+
+// a `string` binds to a view parameter with nothing written at the call site - the #[implicit]
+// conversion the stdlib declares
+function show(string::view $v) : void { echo $v->size; }
+
+$owned = 'hello world';
+show($owned);
+
+// ...and the whole read surface is on the view itself
+$v = $owned->view();
+echo $v->size;
+echo $v->byte_at(0);
+echo $v->is_empty();
+echo $v->char_count();
+echo $v->starts_with($owned->view());
+
+// a sub-view narrows without touching a reference count, because there is none to touch
+string::view $tail = $v->sub(6, 5);
+echo $tail;
+echo $tail->size;
+
+// bound to a name first: a method takes the address of its receiver, and the temporary a call
+// returns has no storage to take one of (todo/A13)
+$piece = $owned->sub(6, 5);
+echo $tail->equals($piece->view());
+
+// an overload taking the owning type still wins outright: a declared conversion ranks below every
+// built-in one
+function which(string::view $v) : void { echo 1; }
+function which(string $s) : void { echo 2; }
+which($owned);

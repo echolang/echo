@@ -1,0 +1,56 @@
+// the mutating surface. every one of these opens with the copy-on-write gate, so none of them can
+// be reached with a buffer somebody else can see
+
+$s = '';
+echo $s->size();
+
+// reserve is also how you say "I am about to write to this": it pays the copy once, at a size you
+// chose, so the appends after it do not reallocate
+$s->reserve(32);
+$s->append('hello');
+$s->append(', ');
+$s->append('world');
+echo $s;
+echo $s->size();
+
+// a byte, not a character
+$s->push_byte(33);
+echo $s;
+echo $s->size();
+
+// appending in a loop, which is what the doubling growth is for
+$b = '';
+usize $i = 0;
+while ($i < 5) {
+    $b->append('xy');
+    $i = $i + 1;
+}
+echo $b;
+echo $b->size();
+
+// appending a string to itself is correct rather than a special case: the parameter is by value, so
+// the gate sees a second reference, clones, and the source still names the old bytes
+$self = 'ab';
+$self->append($self);
+echo $self;
+
+// appending nothing does nothing at all - not even the copy the gate would otherwise owe
+$noop = 'kept';
+$noop->append('');
+echo $noop;
+echo ref_count($noop->owner);
+
+// clear keeps the allocation
+$s->clear();
+echo $s->size();
+echo $s->is_empty();
+$s->append('again');
+echo $s;
+
+// concat leaves both operands alone
+$left = 'foo';
+$right = 'bar';
+$joined = $left->concat($right);
+echo $joined;
+echo $left;
+echo $right;

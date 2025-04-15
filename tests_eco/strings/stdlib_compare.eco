@@ -1,0 +1,30 @@
+// the read surface, all of it byte-for-byte: no normalization, no case folding, no encoding check
+
+$a = 'hello world';
+
+// every comparison takes a `string` by value, so a literal argument works. a `string::view`
+// parameter could not take one - a literal is not a place, so it can trigger neither a borrow nor
+// the #[implicit] conversion
+echo $a->equals('hello world');
+echo $a->equals('hello');
+echo $a->starts_with('hello');
+echo $a->starts_with('world');
+echo $a->ends_with('world');
+
+// an empty prefix or suffix always matches
+echo $a->starts_with('');
+echo $a->ends_with('');
+
+// index_of answers with the haystack's own size when there is no match - the one value always to
+// hand that is never a valid index
+echo $a->index_of('world');
+echo $a->index_of('o');
+echo $a->index_of('zzz');
+echo $a->size();
+
+echo $a->contains('lo w');
+echo $a->contains('zzz');
+
+// and the found offset feeds straight back into sub, with no adjustment
+$found = $a->sub($a->index_of('world'), 5);
+echo $found;

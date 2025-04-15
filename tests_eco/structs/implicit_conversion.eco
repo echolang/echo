@@ -1,0 +1,38 @@
+// an implicit conversion is declared by `#[implicit]`, not recognised by a member name. nothing here
+// is a core type, nothing is a string, and the method is deliberately *not* called `view` - if the
+// compiler still knew that spelling, this file is what would not compile
+
+struct Window
+{
+    ptr<const uint8> $at;
+    usize $count;
+}
+
+struct Buffer
+{
+    ptr<const uint8> $at;
+    usize $count;
+
+    // a whole-buffer window. the name is the author's to pick
+    #[implicit]
+    function window() : Window { return Window($this->at, $this->count); }
+
+    // ...and a name may still be overloaded with an operation that is not the conversion: two
+    // parameters, so it is not a candidate and does not collide with the marked one above
+    function window(usize $from, usize $count) : Window { return Window($this->at, $count); }
+}
+
+function span(Window $w) : void { echo $w->count; }
+
+$buf = Buffer('hello', 5);
+
+// no conversion written at the call site
+span($buf);
+
+// the conversion is the *lowest* real rank, so an overload taking the owning type wins outright
+function which(Window $w) : void { echo 1; }
+function which(Buffer $b) : void { echo 2; }
+which($buf);
+
+// and the explicit spelling still resolves to the very same method
+span($buf->window());

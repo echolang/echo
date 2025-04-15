@@ -35,42 +35,41 @@ namespace AST
             return &nodes.emplace_back<AddrOfExprNode>(arg);
         }
 
-        // a value handed to a parameter that wants a borrowed *view* of it becomes a call to the type's
-        // own `view()`. beside borrow_if_wanted because it is the same shape - ask the one fit rule
-        // whether this case applies, and if so wrap the argument - and because this is the single place
-        // that coerces arguments, so neither can be forgotten at some other call site.
+        // a value handed to a parameter its own type declared a conversion to becomes a call to that
+        // `#[implicit]` method. beside borrow_if_wanted because it is the same shape - ask the one fit
+        // rule whether this case applies, and if so wrap the argument - and because this is the single
+        // place that coerces arguments, so neither can be forgotten at some other call site.
         //
         // `at` locates the resulting call at the *caller*, not at the stdlib declaration, so anything
         // reported inside it points where the user wrote something
-        ExprNode *view_if_wanted(
+        ExprNode *convert_if_wanted(
             NodeCollection &nodes, ExprNode *arg, ArgumentFit fit, const ValueType &expected,
             const TokenReference &at)
         {
-            if (fit != ArgumentFit::t_conversion) {
+            if (fit != ArgumentFit::t_declared_conversion) {
                 return arg;
             }
 
-            FunctionDeclNode *conversion = find_view_conversion(arg->result_type(), expected);
+            FunctionDeclNode *conversion = find_implicit_conversion(arg->result_type(), expected);
 
-            // t_conversion is also what two primitives get, and those are TypeCastNode's business one
-            // step below - so the rank alone does not identify this case, the lookup does
-            if (conversion == nullptr) {
-                return arg;
-            }
+            // the rank identifies the case, so this is retrieval and not a second decision - the two
+            // used to share t_conversion with the primitive casts one step below, and a null answer
+            // here was how this told them apart
+            assert(conversion != nullptr && "the fit rank promised a declared conversion");
 
             // the receiver is addressed here, exactly as the parser addresses a method's and as
-            // OwnershipPass::emit_resolved_member_call does: `view()`'s `$this` is the borrow `string&`
-            auto &view_call = nodes.emplace_back<FunctionCallExprNode>(
+            // OwnershipPass::emit_resolved_member_call does: the conversion's `$this` is a borrow
+            auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
                 at, std::vector<ExprNode *>{ &nodes.emplace_back<AddrOfExprNode>(arg) });
 
             // settled outright, unlike the ownership pass's calls: the callee is known *and* its one
             // argument is the address just built, which is exactly what its borrow parameter wants. so
             // there is nothing left for a later round to decide, and nothing that would make the
             // fixpoint revisit a call this deep inside an already-settled one
-            view_call.decl = conversion;
-            view_call.settlement = CallSettlement::t_settled;
+            conversion_call.decl = conversion;
+            conversion_call.settlement = CallSettlement::t_settled;
 
-            return &view_call;
+            return &conversion_call;
         }
 
         // true when every argument's type is known, so a decision made about them is final rather
@@ -249,20 +248,20 @@ namespace AST
             // answers differ in principle while costing a full member-function walk in practice
             ArgumentFit fit = argument_fit(argument->result_type(), argument, expected);
 
-            // a value whose type offers a `view()` of itself, handed to a parameter of that view type.
-            // before the borrow below rather than after, so a `string::view&` parameter still sees the
-            // borrow rule applied to what this produced
-            ExprNode *viewed = view_if_wanted(nodes, argument, fit, expected, call.token_function_name);
+            // a value whose type declared a conversion to what this parameter wants. before the borrow
+            // below rather than after, so a `string::view&` parameter still sees the borrow rule applied
+            // to what this produced
+            ExprNode *converted = convert_if_wanted(nodes, argument, fit, expected, call.token_function_name);
 
             // ...which is why the fit is re-asked when, and only when, that wrapping happened: the
-            // borrow rule below is about the *view* now, not about what the caller wrote
-            if (viewed != argument) {
-                fit = argument_fit(viewed->result_type(), viewed, expected);
+            // borrow rule below is about the conversion's *result* now, not about what the caller wrote
+            if (converted != argument) {
+                fit = argument_fit(converted->result_type(), converted, expected);
             }
 
             // a place passed to a borrow parameter is coerced to its address here, so codegen sees a
             // uniform AddrOfExprNode instead of sniffing the argument's kind
-            call.arguments[i] = borrow_if_wanted(nodes, viewed, fit);
+            call.arguments[i] = borrow_if_wanted(nodes, converted, fit);
 
             // is_implicitly_convertible rather than ==, so a borrow passed where a nullable pointer
             // is expected does not acquire a cast codegen has no lowering for

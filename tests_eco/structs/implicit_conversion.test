@@ -1,0 +1,35 @@
+# the stdlib is out of the way so that `'hello'` below is a raw `ptr<const uint8>` rather than a
+# `string`. that is what keeps this case about `#[implicit]` alone: with the library on, the literal
+# is the core string type and the file would be testing a conversion *and* the string
+stdlib: off
+
+--- OUT --->
+5
+2
+5
+--- IR --->
+# the acceptance test for `#[implicit]` being *declared* rather than known: no core type, no string,
+# and a conversion method named `window`. what is pinned here is that the compiler inserted a call
+# nobody wrote, that it chose the right overload in spite of being able to, and that the marked
+# method and the explicitly written one are the same declaration
+
+CHECK: define i32 @main()
+
+# span($buf) - the conversion, inserted from an argument list. its receiver is a borrow, which is
+# what the `MRB` in the mangle says, so the caller's storage is read in place
+CHECK: call %Window @_M6Buffer_windowZZMRBMLC6Buffer(ptr %buf)
+CHECK: call void @_spanZZMLC6Window
+
+# which($buf) - `t_declared_conversion` is the last real rank, so the Buffer overload wins and no
+# conversion is emitted ahead of it. the ordering claim, in IR rather than in an enum
+CHECK: call void @_whichZZMLC6Buffer
+
+# span($buf->window()) - the same symbol as the inserted call above. one declaration, two spellings
+CHECK: call %Window @_M6Buffer_windowZZMRBMLC6Buffer(ptr %buf)
+CHECK: call void @_spanZZMLC6Window
+
+# a Window owns nothing, which publish_implicit_conversion requires - so an argument list can never
+# be where an allocation or a reference count appears
+CHECK-NOT: strong.inc
+
+CHECK: ret i32 0

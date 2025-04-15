@@ -1,0 +1,30 @@
+--- OUT --->
+5
+5
+0
+104
+6
+5
+6
+3
+0
+1
+0
+--- IR --->
+# a literal is still a *constant* with the whole library behind it - static bytes, a length and a
+# null owner. `literal_is_a_string.test` makes this claim about a hand-declared type; this one makes
+# it about the stdlib's, which is the one every program actually gets
+#
+# the llvm struct name is deliberately not spelled: the stdlib compilation unit declares `%string`
+# first, so the main unit's copy of the same Echo type is uniquified to `%string.N`. what matters is
+# the shape, and the shape is the tail of the line
+CHECK: define i32 @main()
+CHECK: { ptr @str, i64 5 }, ptr null }
+
+# and getting all of that costs nothing. no allocation for the bytes, and no reference count moved -
+# the owner is null and both operations are null-guarded. scoped to main on purpose: `mem::` declares
+# @malloc at module level and `->clone()` calls it, neither of which this program reaches
+CHECK-NOT: call ptr @malloc
+CHECK-NOT: strong.inc
+
+CHECK: ret i32 0

@@ -1,0 +1,26 @@
+/**
+ * Reading a reference count.
+ *
+ * In the root namespace beside `die` and `assert`, and for the same reason: "may I write to this"
+ * is a question a shared buffer has to ask before every mutation, and it belongs to no subsystem
+ * you opt into. See book/concept/ownership_and_moving.md.
+ */
+
+/**
+ * How many references name the object `$handle` holds. Zero for a null handle.
+ *
+ * A compiler builtin rather than a library function, because the count is a word inside the heap
+ * block - `{ i64 __strong, ptr __typeinfo, %Foo }` - and no Echo spelling reaches it. Nothing links
+ * against this and it has no symbol of its own.
+ *
+ * The parameter is a **borrow**, not a value. A by-value class parameter is one more reference, so
+ * a version taking `T` would answer one too high at every call - which is exactly the question the
+ * caller is asking.
+ *
+ * Zero for null is not a degenerate answer, it is the useful one. It lets a copy-on-write check
+ * read as a single condition: static bytes that nobody owns are not *uniquely* owned either, so
+ * they have to be copied before they are written, exactly as shared bytes do. `string` is written
+ * against precisely that - see `stdlib/core/string.eco`.
+ */
+#[builtin: "ref_count"]
+function ref_count<T>(T& $handle) : usize;

@@ -1,0 +1,14 @@
+// an implicit conversion is inserted where the user wrote nothing, so there is nowhere for an
+// argument to come from. a marked method that declares one is refused at the attribute
+struct Window { usize $count; }
+
+struct Buffer
+{
+    usize $count;
+
+    #[implicit]
+    function window(usize $from) : Window { return Window($this->count); }
+}
+
+$b = Buffer(1);
+echo $b->count;

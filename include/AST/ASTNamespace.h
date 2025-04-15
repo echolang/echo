@@ -138,9 +138,20 @@ namespace AST
         bool exists(const std::string &name) const;
         bool exists(const std::vector<std::string> &parts) const;
 
+        // **the exact-namespace lookup**: `ns`'s own symbols and nothing else. what a *declaration*
+        // site asks - "is this name already taken here" - and what an explicitly qualified
+        // `geometry::Point` asks, where walking outward would silently answer with the root's `Point`
         Symbol *find_symbol(const std::string &fullname) const;
         Symbol *find_symbol(const std::string &symbol_name, const std::string &ns) const;
         Symbol *find_symbol(const std::string &symbol_name, const Namespace &ns) const;
+
+        // **the scoped lookup**: `from` outward to the root, innermost wins. what a *use* site asks,
+        // and the exact mirror of FunctionRegistry::overloads - a name written unqualified means the
+        // nearest declaration of it, and an inner namespace hides an outer one rather than extending
+        // it. types had only the exact lookup above, so a `namespace app;` file could not name a
+        // root type at all, and a nested type's body - which parses inside a namespace named after
+        // its owner - could name no declared type whatsoever
+        Symbol *find_symbol_in_scope(const std::string &symbol_name, const Namespace &from) const;
 
         Namespace &root() { return _root; }
 

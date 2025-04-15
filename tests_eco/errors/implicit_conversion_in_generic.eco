@@ -1,0 +1,14 @@
+// the conversion rule compares the declared return type with the parameter type exactly, and on a
+// generic owner the declaration still mentions `T` - so it would be accepted and then never fire.
+// refused at the declaration instead. see the todo this diagnostic points at
+struct Slice<T> { ptr<T> $at; }
+
+struct Array<T>
+{
+    ptr<T> $at;
+
+    #[implicit]
+    function slice() : Slice<T> { return Slice<T>($this->at); }
+}
+
+echo 1;

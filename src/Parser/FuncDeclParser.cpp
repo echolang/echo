@@ -6,6 +6,9 @@
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTDestruction.h"
+#include "AST/ASTMemberLookup.h"
+#include "AST/AttributeNode.h"
 #include "AST/ExprNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/VarNode.h"
@@ -19,6 +22,8 @@
 #include "Parser/AttributeParser.h"
 
 #include <fmt/core.h>
+
+#include <algorithm>
 
 void Parser::push_implicit_param(
     Parser::Payload &payload,
@@ -350,6 +355,170 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     return &closure_expr;
 }
 
+void Parser::drain_attributes(Parser::Payload &payload, AST::AttributeList &into)
+{
+    // each pass emplaces its own AttributeNode over the same tokens, so a declaration reached twice
+    // accumulates two per attribute. that is already true of a TypeDeclNode, which drains in both
+    // passes, and AttributeList::get_first is what makes it not matter
+    for (auto &attr : payload.context.scope().collect_attributes()) {
+        into.push_back(attr);
+    }
+}
+
+void Parser::publish_declaration_markers(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode *funcdecl,
+    AST::TypeDeclNode *owner_struct,
+    const TokenReference &nametoken)
+{
+    publish_implicit_conversion(payload, funcdecl, owner_struct, nametoken);
+}
+
+// publishes a method marked `#[implicit]` as one of its owner's implicit conversions, and reports
+// every way of marking something that cannot be one. the contract, and why it is here rather than on
+// FunctionRegistry, are in the header
+//
+// this is publish_copy_constructor's situation exactly - a second fact about an already-registered
+// declaration - and it is that function's shape, down to comparing the slot by identity so the body
+// pass revisiting the declaration pass's node is not a redeclaration
+//
+// every refusal declines to *publish*, so AST::find_implicit_conversion never has to re-filter what
+// it finds. each one is reported in both passes, and stays one diagnostic because
+// Collector::collect_issue de-duplicates on (kind, token range, message) - both passes locate on the
+// same attribute tokens, which is the only thing about running twice that is not free
+void Parser::publish_implicit_conversion(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode *funcdecl,
+    AST::TypeDeclNode *owner_struct,
+    const TokenReference &nametoken)
+{
+    AST::AttributeNode *implicit_attr = funcdecl->attributes.get_first("implicit");
+
+    if (implicit_attr == nullptr) {
+        return;
+    }
+
+    const auto report = [&](const std::string &message) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(implicit_attr->attribute_tokens), message);
+    };
+
+    // a free function converts nothing: which type the conversion is *from* is the type it is
+    // declared on, and there is no other place that answer could come from
+    if (owner_struct == nullptr) {
+        report(fmt::format(
+            "Only a method can declare an implicit conversion - '{}' is a free function, and a "
+            "conversion converts the type it is declared on.",
+            nametoken.value()));
+        return;
+    }
+
+    // a constructor builds its own type and a destructor tears one down; neither converts anything,
+    // and neither is reachable from an argument position - AST::find_implicit_conversion is asked for
+    // a *method* to call on the value that is already there. asked of member_kind rather than of the
+    // call site's spelling, so the two struct-member parsers do not each carry a copy of the rule
+    if (funcdecl->member_kind != AST::MemberKind::t_method) {
+        report(fmt::format(
+            "Only a method can declare an implicit conversion - a {} cannot be one.",
+            funcdecl->is_constructor() ? "constructor" : "destructor"));
+        return;
+    }
+
+    // the receiver and nothing else. a `view(usize, usize)` beside it is a substring accessor - a
+    // different operation on the same name - and nothing would pass it arguments at a call site the
+    // user did not write
+    if (funcdecl->args.size() != funcdecl->implicit_arg_count()) {
+        report(fmt::format(
+            "An implicit conversion takes no parameters - '{}::{}' declares {}.",
+            owner_struct->type_name(), nametoken.value(),
+            funcdecl->args.size() - funcdecl->implicit_arg_count()));
+        return;
+    }
+
+    const AST::ValueType target = funcdecl->get_return_type();
+
+    // an unknown or still-generic return type was already reported where it was written, and
+    // AST::argument_fit answers t_undetermined for it - so there is nothing here to say that would
+    // not be a second diagnostic for one mistake
+    if (target.is_unknown() || target.is_void()) {
+        return;
+    }
+
+    // the whole conversion rule compares the declared return type with the parameter type, exactly.
+    // on a generic owner the walk reaches the *template*, whose return type still mentions the
+    // owner's `T`, and that never equals a concrete `Slice<int32>` - so the declaration would be
+    // accepted and then silently never fire. the walk reaches the template because
+    // ComplexType::substituted_copy copies `_methods` as template pointers - which is the same reason
+    // AST::find_member_functions redirects an instantiation through `template_ref` - so an
+    // instantiation's conversions hold declarations whose return type still mentions `T`, wherever
+    // the comparison is made. answering the concrete target means substituting that return type per
+    // instantiation. refuse the case rather than ship a marker that does nothing
+    if (owner_struct->is_generic() || AST::contains_type_param(target)) {
+        report(fmt::format(
+            "'{}' is generic, and an implicit conversion on a generic type is not supported yet - "
+            "the target type would have to be substituted per instantiation.",
+            owner_struct->type_name()));
+        return;
+    }
+
+    // a declared type, because the conversion is lowered as a call to this very method and the
+    // parameter it answers is compared by type identity. deliberately not widened to let a struct
+    // convert to a primitive: that would make every arithmetic site a conversion candidate, which is
+    // a different rule and would want a different owner
+    if (!target.has_complex_type()) {
+        report(fmt::format(
+            "An implicit conversion must return a declared type - '{}' is not one.",
+            target.get_type_desciption()));
+        return;
+    }
+
+    // a conversion to its own type can never fire: AST::argument_fit answers t_exact for an identical
+    // type long before it reaches the conversion arm. so this is a marker that does nothing, which is
+    // the thing this whole spelling exists to stop being possible
+    if (target == owner_struct->value_type()) {
+        report(fmt::format(
+            "An implicit conversion must return a type other than '{}'.",
+            owner_struct->type_name()));
+        return;
+    }
+
+    // the conversion fires at a call site nobody wrote, so what it hands over must cost nothing to
+    // hand over. a return value that has to be destroyed means an allocation or a retain appearing
+    // out of an argument list - which is the property `tests_eco/strings/view_conversion.test` pins
+    // with `CHECK-NOT: strong.inc`. nothing would leak (a callee destroys an owning by-value
+    // parameter), so this is a rule about what belongs in an invisible conversion, not a fix
+    if (AST::needs_destruction(target)) {
+        report(fmt::format(
+            "An implicit conversion must return a value that owns nothing - '{}' has to be "
+            "destroyed. Write the call out instead.",
+            target.get_type_desciption()));
+        return;
+    }
+
+    AST::ComplexType &owner = owner_struct->complex_type();
+
+    // compared by identity, so the body pass arriving at the node the declaration pass published is
+    // not a second declaration. this is the question the slot answers that the lookup does not - "is
+    // this declaration already here" rather than "what converts to that type"
+    if (std::ranges::find(owner.implicit_conversions(), funcdecl) != owner.implicit_conversions().end()) {
+        return;
+    }
+
+    // and a *different* declaration converting to the same target does need saying: nothing would
+    // decide which of them an invisible conversion meant. asked through the lookup rather than by
+    // re-walking the slot, so "which conversion does this type have to that one" stays one rule - if
+    // matching ever stops being exact return-type equality, a copy here would keep the old answer and
+    // quietly stop reporting the clash
+    if (AST::find_implicit_conversion(owner_struct->value_type(), target) != nullptr) {
+        report(fmt::format(
+            "'{}' already declares an implicit conversion to '{}'.",
+            owner_struct->type_name(), target.get_type_desciption()));
+        return;
+    }
+
+    owner.add_implicit_conversion(funcdecl);
+}
+
 AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser::FuncDeclKind kind)
 {
     auto &cursor = payload.cursor;
@@ -505,6 +674,15 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
     funcdecl->return_type = parse_type(payload);
 
+    // **here rather than after the body**, which is where this used to sit: the return type one line
+    // up is the last thing an attribute could have something to say about, and `#[implicit]` below
+    // needs the whole signature. it also has to run in *both* passes - the declaration pass returns
+    // further down without ever reaching a body - and that is what fixes a leak rather than works
+    // around one: an attribute a method left on the stack was drained by the next `struct` to come
+    // along (TypeDeclParser's own collect_attributes), landing on a type declaration that never
+    // asked for it
+    Parser::drain_attributes(payload, funcdecl->attributes);
+
     // the signature is complete, so this is the earliest point the declaration can join its
     // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes
     // the declaration visible to calls written above it and in other files, and the full pass
@@ -522,6 +700,11 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
         payload.collector.functions.register_function(
             payload.collector, payload.context.code_ref(nametoken), funcdecl);
     }
+
+    // ...and then, of an already-registered declaration, the second fact `#[implicit]` states about
+    // it. outside the branch above rather than in its method arm, because "only a method can declare
+    // one" is a diagnostic this owes and a helper called only for methods could never report it
+    publish_declaration_markers(payload, funcdecl, owner_struct, nametoken);
 
     // an extern declaration ends here, in both parser passes, so this is the single place that
     // owns its tail. doing it before the symbol_only return below is deliberate: the symbol pass
@@ -592,12 +775,6 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     //
     // added before the body is parsed so a recursive call inside it resolves
     payload.context.declaration_scope().add_funcdecl(*funcdecl);
-
-    // attach all attributes to the function
-    auto attributes = payload.context.scope().collect_attributes();
-    for (auto &attr : attributes) {
-        funcdecl->attributes.push_back(attr);
-    }
 
     // if next token is a semicolon we are done for now
     if (cursor.is_type(Token::Type::t_semicolon)) {

@@ -12,10 +12,52 @@
 namespace AST
 {
     class ClosureExprNode;
+    class TypeDeclNode;
 };
 
 namespace Parser
 {
+    // moves the attributes staged on the current scope onto `into`, so the declaration they were
+    // written ahead of is the one that consumes them.
+    //
+    // shared by every declaration that can carry one - a function, a method, a constructor, a
+    // destructor, a struct - because a declaration that does *not* drain leaves its attributes on the
+    // stack for whatever comes along next, which is how a method's `#[implicit]` used to land on the
+    // following `struct`. taken as an AttributeList rather than a FunctionDeclNode for exactly that
+    // reason: the struct site is the other half of that bug and drains through here too. called once
+    // the declaration node is in hand, which is also the earliest point at which an attribute has
+    // something to be read against
+    void drain_attributes(Payload &payload, AST::AttributeList &into);
+
+    // publishes every marker a member declaration's attributes state about it, or reports why the
+    // declaration cannot carry one.
+    //
+    // the one list of "what does an attribute publish about a member", so a second marker - whatever
+    // todo/A18 brings - is added here and reaches the method, constructor and destructor sites at
+    // once instead of being remembered at three. the drain stays at each site, because a declaration
+    // reads `#[intrinsic]`/`#[builtin]` off its own list before it gets here
+    void publish_declaration_markers(
+        Payload &payload,
+        AST::FunctionDeclNode *funcdecl,
+        AST::TypeDeclNode *owner_struct,
+        const TokenReference &nametoken);
+
+    // publishes `#[implicit]` on `owner_struct`, or reports why the declaration cannot carry it.
+    //
+    // the one owner of the marker: what it means, which shapes are refused, and how each refusal
+    // reads. every declaration that can be written with one reaches it through
+    // publish_declaration_markers - a free function and a constructor or destructor only so that they
+    // can be told they cannot be one, which is a diagnostic no method-only helper could ever report
+    //
+    // a second fact about an *already-registered* declaration, so it is called after registration and
+    // deliberately not on FunctionRegistry: all three registrars return early on the body pass, and a
+    // fourth would publish in whichever pass happened to claim the declaration site first
+    void publish_implicit_conversion(
+        Payload &payload,
+        AST::FunctionDeclNode *funcdecl,
+        AST::TypeDeclNode *owner_struct,
+        const TokenReference &nametoken);
+
     // which grammar a `function` declaration is being read under. an extern declaration accepts
     // the `function <c_symbol> as <echo_name>(...)` renaming spelling and must be bodyless;
     // everything else about the signature is parsed by the same code, so the two forms cannot

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <sys/wait.h>
 #include <vector>
@@ -83,22 +84,26 @@ namespace
         return "\"" + p.string() + "\"";
     }
 
-    // `echoc run [dump] [flags] <file>`. `dump` is empty for the output run - the OUT golden is a
-    // byte comparison, so nothing may be added to that stream
-    std::string run_command(
-        const EchoTests::EcoTestFile &test, const fs::path &eco, const std::string &dump)
-    {
-        return "\"" ECHOC_BINARY "\" run "
-            + (dump.empty() ? "" : dump + " ")
-            + test.compiler_flags()
-            + quoted(eco) + " 2>&1";
-    }
-
-    std::string build_command(
-        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path &binary,
+    // `echoc <run|build -o bin> [dump] [flags] <file>`.
+    //
+    // one builder for both subcommands: they differ in the subcommand word and the `-o` target and in
+    // nothing else, and as two functions the dump splice, the flags and the redirect were written
+    // twice. `dump` is empty for the output run - the OUT golden is a byte comparison, so nothing may
+    // be added to that stream.
+    //
+    // which subcommand it is comes off `test.mode` and not off whether a binary was handed in: those
+    // were two encodings of one fact, and passing null for a `mode: build` case silently produced a
+    // *run* invocation that nothing in here would have noticed
+    std::string echoc_command(
+        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path *binary,
         const std::string &dump)
     {
-        return "\"" ECHOC_BINARY "\" build -o " + quoted(binary) + " "
+        const bool is_build = test.mode == EchoTests::RunMode::t_build;
+
+        REQUIRE((binary != nullptr) == is_build);
+
+        return "\"" ECHOC_BINARY "\" "
+            + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
             + (dump.empty() ? "" : dump + " ")
             + test.compiler_flags()
             + quoted(eco) + " 2>&1";
@@ -149,11 +154,30 @@ namespace
     // that quietly stops testing native builds is exactly the silent no-op this corpus refuses
     void require_clang()
     {
-        static const bool available = std::system("command -v clang > /dev/null 2>&1") == 0;
+        // through the suite's one process primitive, so the wait status is decoded where every other
+        // spawn's is - and a spawn failure reads as an exit code here too rather than as a crash
+        static const bool available = run_capturing("command -v clang").exit_code == 0;
 
         if (!available) {
             FAIL("a 'mode: build' test needs `clang` on PATH - echoc links the emitted object with it");
         }
+    }
+
+    // did the process the case says owns its status exit the way the case expects? answers so, having
+    // reported the mismatch, so that one message shape serves both callers while each still decides
+    // what a mismatch costs it - the golden path has already compared its output and carries on, the
+    // dump path has nothing worth asserting against a stream that was never produced
+    bool check_status(
+        const EchoTests::EcoTestFile &test, const ProcessResult &result, const char *actor)
+    {
+        if (EchoTests::status_matches(test.expect, result.exit_code)) {
+            return true;
+        }
+
+        FAIL_CHECK("expected this case to " << EchoTests::expectation_name(test.expect)
+            << ", but " << actor << " exited " << result.exit_code);
+
+        return false;
     }
 
     // asserts one dump section. its own invocation, and its own Catch2 section, so a failure names
@@ -168,24 +192,25 @@ namespace
     {
         const std::string flag = EchoTests::dump_flag(section.kind);
 
-        ProcessResult result;
+        // the binary is what a build-mode dump invocation owes `-o`, and nothing here reads it. one
+        // invocation rather than one per mode: the subcommand is echoc_command's to decide
+        std::optional<ScopedBinary> binary;
+
         if (test.mode == EchoTests::RunMode::t_build) {
             require_clang();
-            const ScopedBinary binary(temp_binary_for(eco, root));
-            result = run_capturing(build_command(test, eco, binary.path, flag));
+            binary.emplace(temp_binary_for(eco, root));
         }
-        else {
-            result = run_capturing(run_command(test, eco, flag));
-        }
+
+        const ProcessResult result = run_capturing(
+            echoc_command(test, eco, binary.has_value() ? &binary->path : nullptr, flag));
 
         INFO("dump:\n" << result.output);
 
         // the status is asserted before the directives, and on this path too - a dump invocation that
         // died early (a mistyped `flags:` argparse refuses, a crash before the dump runs) produces a
         // short or empty stream, and CHECK-NOTs against a stream that was never produced all hold
-        if (!EchoTests::status_matches(test.expect, result.exit_code)) {
-            FAIL("expected this case to " << EchoTests::expectation_name(test.expect)
-                << ", but the dump invocation exited " << result.exit_code);
+        if (!check_status(test, result, "the dump invocation")) {
+            return;
         }
 
         CHECK(EchoTests::apply_check_directives(section.directives, result.output) == "");
@@ -203,16 +228,13 @@ namespace
         INFO("actual:\n" << actual);
         CHECK(actual == test.expected_output);
 
-        if (!EchoTests::status_matches(test.expect, result.exit_code)) {
-            FAIL_CHECK("expected this case to " << EchoTests::expectation_name(test.expect)
-                << ", but " << actor << " exited " << result.exit_code);
-        }
+        check_status(test, result, actor);
     }
 
     // asserts the OUT golden and the exit status of a `mode: run` case
     void check_run_output(const EchoTests::EcoTestFile &test, const fs::path &eco)
     {
-        check_program_output(test, run_capturing(run_command(test, eco, "")), "echoc");
+        check_program_output(test, run_capturing(echoc_command(test, eco, nullptr, "")), "echoc");
     }
 
     // the same for `mode: build`: link a native binary, then run it.
@@ -228,7 +250,7 @@ namespace
 
         const ScopedBinary binary(temp_binary_for(eco, root));
 
-        const ProcessResult build = run_capturing(build_command(test, eco, binary.path, ""));
+        const ProcessResult build = run_capturing(echoc_command(test, eco, &binary.path, ""));
 
         if (build.exit_code != 0) {
             INFO("build log:\n" << build.output);
@@ -254,92 +276,137 @@ namespace
 
         check_program_output(test, run_capturing(quoted(binary.path) + " 2>&1"), "the program");
     }
+
+    // one discovered case: the program, its parsed contract, and whether there was one to parse
+    struct DiscoveredCase
+    {
+        fs::path eco;
+        std::string rel;            // relative to the corpus root, for the section name
+        bool has_test_file = false;
+        EchoTests::EcoTestFile test;
+        std::string parse_error;
+    };
+
+    struct Corpus
+    {
+        std::vector<DiscoveredCase> cases;
+        std::vector<fs::path> orphans;   // a `.test` with no `.eco` beside it
+    };
+
+    Corpus discover_corpus(const fs::path &root)
+    {
+        Corpus corpus;
+        std::vector<fs::path> eco_files;
+        std::vector<fs::path> test_files;
+
+        for (auto &entry : fs::recursive_directory_iterator(root)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            if (entry.path().extension() == ".eco") {
+                eco_files.push_back(entry.path());
+            }
+            else if (entry.path().extension() == ".test") {
+                test_files.push_back(entry.path());
+            }
+        }
+
+        // deterministic order across platforms
+        std::sort(eco_files.begin(), eco_files.end());
+        std::sort(test_files.begin(), test_files.end());
+
+        for (const auto &eco : eco_files) {
+            fs::path test_path = eco;
+            test_path.replace_extension(".test");
+
+            DiscoveredCase discovered;
+            discovered.eco = eco;
+            discovered.rel = fs::relative(eco, root).string();
+            discovered.has_test_file = fs::exists(test_path);
+
+            if (discovered.has_test_file
+                && !EchoTests::parse_eco_test_file(test_path, discovered.test, discovered.parse_error)) {
+                discovered.test.checks.clear();
+            }
+
+            corpus.cases.push_back(std::move(discovered));
+        }
+
+        // a `.test` whose program was renamed away asserts nothing and is invisible to the loop above,
+        // so it is collected from the other side
+        for (const auto &test_file : test_files) {
+            fs::path eco = test_file;
+            eco.replace_extension(".eco");
+
+            if (!fs::exists(eco)) {
+                corpus.orphans.push_back(test_file);
+            }
+        }
+
+        return corpus;
+    }
+
+    // discovered and parsed **once** per process, not once per section.
+    //
+    // Catch2 re-runs a TEST_CASE body from the top for every leaf section it enters, so anything in
+    // that body happens once per case in the corpus *times* the number of sections. the walk and the
+    // ~200 `.test` parses that produce this list are what the sections are derived *from*, which is
+    // why they cannot move inside one - so they are cached instead, the way require_clang's probe is
+    const Corpus &corpus()
+    {
+        static const Corpus discovered = discover_corpus(ECO_E2E_TESTS_DIR);
+
+        return discovered;
+    }
 };
 
 TEST_CASE("eco end-to-end", "[e2e]")
 {
     const fs::path root = ECO_E2E_TESTS_DIR;
+    const Corpus &discovered = corpus();
 
-    std::vector<fs::path> cases;
-    std::vector<fs::path> test_files;
+    REQUIRE_FALSE(discovered.cases.empty());
 
-    for (auto &entry : fs::recursive_directory_iterator(root)) {
-        if (!entry.is_regular_file()) {
-            continue;
-        }
-
-        if (entry.path().extension() == ".eco") {
-            cases.push_back(entry.path());
-        }
-        else if (entry.path().extension() == ".test") {
-            test_files.push_back(entry.path());
+    // one section for all of them rather than one each: an orphan is named by its own CHECK, and 200
+    // sections that do nothing but an fs::exists double how many times Catch2 re-enters this body
+    SECTION("orphan test files")
+    {
+        for (const auto &orphan : discovered.orphans) {
+            FAIL_CHECK("no program next to this test file, expected "
+                << fs::path(orphan).replace_extension(".eco").string());
         }
     }
 
-    // deterministic order across platforms
-    std::sort(cases.begin(), cases.end());
-    std::sort(test_files.begin(), test_files.end());
-
-    REQUIRE_FALSE(cases.empty());
-
-    // a `.test` whose program was renamed away asserts nothing and is invisible to the loop below,
-    // so it is checked from the other side
-    for (const auto &test_file : test_files) {
-        fs::path eco = test_file;
-        eco.replace_extension(".eco");
-
-        DYNAMIC_SECTION("orphan: " << fs::relative(test_file, root).string())
+    for (const auto &entry : discovered.cases) {
+        DYNAMIC_SECTION("eco: " << entry.rel)
         {
-            if (!fs::exists(eco)) {
-                FAIL("no program next to this test file, expected " << eco.string());
-            }
-        }
-    }
+            INFO("file: " << entry.eco.string());
 
-    for (const auto &eco : cases) {
-        fs::path test_path = eco;
-        test_path.replace_extension(".test");
-
-        const std::string rel = fs::relative(eco, root).string();
-
-        EchoTests::EcoTestFile test;
-        std::string parse_error;
-
-        // parsed once, outside the sections, because the section list below is derived from it
-        const bool exists = fs::exists(test_path);
-        const bool parsed = exists && EchoTests::parse_eco_test_file(test_path, test, parse_error);
-
-        DYNAMIC_SECTION("eco: " << rel)
-        {
-            INFO("file: " << eco.string());
-
-            if (!exists) {
-                FAIL("missing test file: " << fs::relative(test_path, root).string()
+            if (!entry.has_test_file) {
+                FAIL("missing test file: " << fs::path(entry.rel).replace_extension(".test").string()
                     << ", see tests_eco/README.md for the format");
             }
 
-            if (!parsed) {
-                FAIL(parse_error);
+            if (!entry.parse_error.empty()) {
+                FAIL(entry.parse_error);
             }
 
-            if (test.mode == EchoTests::RunMode::t_build) {
-                check_build_output(test, eco, root);
+            if (entry.test.mode == EchoTests::RunMode::t_build) {
+                check_build_output(entry.test, entry.eco, root);
             }
             else {
-                check_run_output(test, eco);
+                check_run_output(entry.test, entry.eco);
             }
         }
 
-        if (!parsed) {
-            continue;
-        }
-
-        // the optional other half: what the emitted IR or either AST dump must contain
-        for (const auto &section : test.checks) {
-            DYNAMIC_SECTION(EchoTests::dump_section_name(section.kind) << ": " << rel)
+        // the optional other half: what the emitted IR or either AST dump must contain. empty for a
+        // case that did not parse, so a broken `.test` reports its parse error once and not per section
+        for (const auto &section : entry.test.checks) {
+            DYNAMIC_SECTION(EchoTests::dump_section_name(section.kind) << ": " << entry.rel)
             {
-                INFO("file: " << eco.string());
-                check_dump_section(test, section, eco, root);
+                INFO("file: " << entry.eco.string());
+                check_dump_section(entry.test, section, entry.eco, root);
             }
         }
     }

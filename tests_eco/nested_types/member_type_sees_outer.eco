@@ -1,0 +1,37 @@
+// a nested type's body parses inside a namespace named after its owner, so everything it names goes
+// through the same outward walk `namespaces/unqualified_outer_type.eco` covers. before that walk
+// existed a nested type could name no declared type whatsoever - not a root type, not its own
+// owner, not itself - which is why no method here could take anything but a primitive
+
+struct Tag { int32 $id; }
+
+struct Collection
+{
+    struct Cursor
+    {
+        usize $index;
+
+        // a root type, from two namespaces in
+        function tagged(Tag $t) : int32 { return $t->id; }
+
+        // its own owner
+        function of(Collection $c) : usize { return $c->count; }
+
+        // and itself, through its owner - the spelling every nested type is reached by
+        function further(Collection::Cursor $other) : Collection::Cursor
+        {
+            return Collection::Cursor($this->index + $other->index);
+        }
+    }
+
+    usize $count;
+}
+
+Collection::Cursor $a = Collection::Cursor(2);
+Collection::Cursor $b = Collection::Cursor(5);
+
+echo $a->tagged(Tag(42));
+echo $a->of(Collection(9));
+
+$sum = $a->further($b);
+echo $sum->index;

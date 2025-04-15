@@ -109,9 +109,14 @@ target_link_libraries(tests PRIVATE ${LIBNAME})
 # e2e (tests_eco): always run against a freshly built compiler and tell the runner
 # where the binary and the corpus live
 add_dependencies(tests ${APPNAME})
+#
+# ECO_E2E_TMP_DIR is where a `mode: build` case's native binary is linked. inside the build tree and
+# absolute: the tests binary's working directory is not fixed (ctest and CI run it from `build/`, a
+# developer runs `./build/tests` from the repo root), so a relative path is wrong in one of the two
 target_compile_definitions(tests PRIVATE
     "ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
-    "ECO_E2E_TESTS_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\"")
+    "ECO_E2E_TESTS_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\""
+    "ECO_E2E_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\"")
 
 # ctest integration
 enable_testing()

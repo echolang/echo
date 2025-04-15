@@ -66,6 +66,13 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     // a value cannot become a pointer without a place to take the address of, and no expression
     // was handed over here
     REQUIRE( AST::argument_fit(t_int32, nullptr, nullable) == ArgumentFit::t_none );
+
+    // the enum order *is* the overload ranking, and a `#[implicit]` conversion sits below every
+    // built-in one - which is what makes an overload taking the owning type always beat one taking
+    // the window. the case itself needs a ComplexType carrying a published method, so it is pinned
+    // end to end in tests_eco/structs/implicit_conversion; only the ordering can be asked here
+    REQUIRE( ArgumentFit::t_conversion < ArgumentFit::t_declared_conversion );
+    REQUIRE( ArgumentFit::t_declared_conversion < ArgumentFit::t_undetermined );
 }
 
 TEST_CASE( "arity filters before anything else", "[fnmatch]" )

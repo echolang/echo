@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 3:1
-Invalid type conversion: cannot implicitly convert 'int32' to 'ptr<const uint8>'
+Invalid type conversion: cannot implicitly convert 'int32' to 'string'
 Begin: 'die'
 End: 'die'
 Code excerpt:

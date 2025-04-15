@@ -216,11 +216,30 @@ AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &symbol_name, 
 
 AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &symbol_name, const Namespace &ns) const
 {
-    if (ns._symbols.find(symbol_name) == ns._symbols.end()) {
+    // one lookup, not a find followed by an at: find_symbol_in_scope calls this once per ancestor
+    // namespace, and every unqualified type name in every module pass goes through that walk
+    const auto it = ns._symbols.find(symbol_name);
+
+    if (it == ns._symbols.end()) {
         return nullptr;
     }
 
-    return ns._symbols.at(symbol_name).get();
+    return it->second.get();
+}
+
+AST::Symbol *AST::NamespaceManager::find_symbol_in_scope(
+    const std::string &symbol_name, const AST::Namespace &from) const
+{
+    // innermost first, exactly as FunctionRegistry::overloads walks - the nearest namespace that
+    // declares the name answers, and an outer one is hidden by it rather than consulted as well.
+    // a lexical namespace holds no type symbols, so the walk simply passes through one
+    for (const Namespace *current = &from; current != nullptr; current = current->parent()) {
+        if (AST::Symbol *found = find_symbol(symbol_name, *current)) {
+            return found;
+        }
+    }
+
+    return nullptr;
 }
 
 void AST::Namespace::push_symbol(std::unique_ptr<AST::Symbol> symbol)

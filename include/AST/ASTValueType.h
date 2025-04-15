@@ -748,6 +748,29 @@ namespace AST
             return _deinit;
         }
 
+        // the methods that declare an implicit conversion *from* this type - the ones the user marked
+        // `#[implicit]`. a value handed to a parameter of one of their return types is converted by a
+        // call to it, with nothing written at the call site; AST::find_implicit_conversion is the
+        // lookup and AST::argument_fit ranks the result last of the real ranks
+        //
+        // **declarations only, never the target type.** the declaration's return type already *is* the
+        // target, and a second copy of it here would be the only member field on ComplexType carrying
+        // a type - which substituted_copy below does not substitute, so a concrete copy of `Array<T>`
+        // would keep saying `Slice<T>`. holding the declaration means this slot behaves exactly like
+        // _methods under both copy paths and neither of them has to learn about it
+        //
+        // a list rather than the single slot the destructor and the copy constructor get: a type may
+        // offer a window over itself in more than one shape, and it puts the duplicate check on the
+        // right question - not "is the slot taken" but "is there already one to *this* target", which
+        // is what the user needs told. only valid declarations are ever pushed, so no reader re-filters
+        void add_implicit_conversion(FunctionDeclNode *decl) {
+            _implicit_conversions.push_back(decl);
+        }
+
+        const std::vector<FunctionDeclNode *> &implicit_conversions() const {
+            return _implicit_conversions;
+        }
+
         // a concrete copy of this type: every property type run through `substitute`, and nothing
         // left that identifies it as a template or as somebody's instantiation
         //
@@ -783,6 +806,7 @@ namespace AST
         FunctionDeclNode *_destructor = nullptr;
         FunctionDeclNode *_copy_constructor = nullptr;
         FunctionDeclNode *_deinit = nullptr;
+        std::vector<FunctionDeclNode *> _implicit_conversions;
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };

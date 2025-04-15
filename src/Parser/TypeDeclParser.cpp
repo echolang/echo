@@ -108,6 +108,26 @@ static void seat_this_storage(
         payload.context.emplace_nodep<AST::ClassAllocExprNode>(self_value_type, name_token);
 }
 
+// the attributes written ahead of a constructor or a destructor: drained onto the declaration they
+// were written for, then handed to the one owner of every marker that has something to say about a
+// member. neither used to drain, so an attribute sat on the scope's stack until whatever declaration
+// came next picked it up
+//
+// both halves are the shared ones - Parser::drain_attributes and Parser::publish_declaration_markers,
+// the same two parse_funcdecl calls around its own registration - so no rule about an attribute is
+// spelled here. every attribute name is still accepted and ignored: there is no known-attribute set
+// in the compiler, and inventing one at this site would quietly close a machinery that today takes
+// any identifier
+static void publish_member_attributes(
+    Parser::Payload &payload,
+    AST::FunctionDeclNode *decl,
+    AST::TypeDeclNode *struct_node,
+    const TokenReference &nametoken)
+{
+    Parser::drain_attributes(payload, decl->attributes);
+    Parser::publish_declaration_markers(payload, decl, struct_node, nametoken);
+}
+
 // recognises the copy constructor among a struct's constructors, and reports the two ways of getting
 // it wrong. called from parse_constructor as soon as the signature is complete
 //
@@ -219,6 +239,10 @@ static void parse_constructor(
         ctor_decl->member_kind = AST::MemberKind::t_constructor;
         struct_node->add_constructor(ctor_decl);
     }
+
+    // once the node exists, so an attribute is read against the declaration it was written for -
+    // member_kind above is the whole of what publish_implicit_conversion needs to refuse it
+    publish_member_attributes(payload, ctor_decl, struct_node, ctor_token);
 
     // the declaring namespace, like the struct's own: `Foo(...)` has to resolve wherever the type name
     // does, and a type is not block-scoped
@@ -338,6 +362,7 @@ static void parse_destructor(
     AST::TypeNode *self_type_node)
 {
     auto &cursor = payload.cursor;
+
     auto dtor_token = cursor.current();
 
     cursor.skip(); // skip "destructor"
@@ -354,6 +379,10 @@ static void parse_destructor(
         dtor_decl = &payload.context.emplace_node<AST::FunctionDeclNode>(dtor_token);
         dtor_decl->member_kind = AST::MemberKind::t_destructor;
     }
+
+    // the `destructor` keyword is both the declaration site and the name token, so it is what a
+    // refused attribute locates against too
+    publish_member_attributes(payload, dtor_decl, struct_node, dtor_token);
 
     dtor_decl->ast_namespace = payload.context.declaring_namespace();
     dtor_decl->owner_type = &struct_node->complex_type();
@@ -707,12 +736,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // create the struct node
     struct_node->set_namespace(payload.context.declaring_namespace());
 
-    // the attributes written ahead of the declaration. drained here rather than left on the scope,
-    // which is what a function already does - an undrained attribute would otherwise attach itself to
-    // whatever declaration came next
-    for (auto &attr : payload.context.scope().collect_attributes()) {
-        struct_node->attributes.push_back(attr);
-    }
+    // the attributes written ahead of the declaration, through the same drain a function uses - an
+    // undrained attribute attaches itself to whatever declaration comes next, and this site is the
+    // half of that bug that used to pick up a method's `#[implicit]`
+    Parser::drain_attributes(payload, struct_node->attributes);
 
     bind_core_type_attribute(payload, struct_node);
 

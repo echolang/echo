@@ -107,10 +107,10 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
 // globbed rather than listed, so adding a stdlib file does not need a C++ edit - the previous
 // hardcoded list had already fallen behind what is on disk
 //
-// two directories are skipped. `build/` holds the generated embedded header rather than source
-// `sketches/` holds Echo that describes a type the language cannot express yet (string, List) and
-// deliberately does not compile - it is design, kept in source form, and the directory name is
-// what says so
+// two directories are skipped. `build/` holds the generated embedded header rather than source.
+// `sketches/` is for Echo that describes a type the language cannot express yet, kept in source
+// form because the directory name is what says it does not compile - it is empty today, `string`
+// having graduated into `core/string.eco`, and the skip stays for the next one
 static std::vector<std::filesystem::path> stdlib_source_files()
 {
     std::vector<std::filesystem::path> files;
@@ -139,47 +139,57 @@ static std::vector<std::filesystem::path> stdlib_source_files()
     return files;
 }
 
+// adds the standard library module to the bundle and parses it, unless `--no-stdlib` says not to.
+//
+// leaving the standard library out is leaving one module out, nothing more - nothing downstream
+// looks a module up by that name, codegen only ever asks for ECO_MAIN_MODULE_NAME, and the core
+// types are bound by whichever source declares `#[core: ...]` rather than by the stdlib. what the
+// program gives up is `die`, `assert` and the `mem::`/`math::` namespaces, which is the point: a
+// test reading the emitted IR or an AST dump does not want several hundred lines of library
+// standing between its first assertion and the code it is about
+static void parse_stdlib_module(
+    argparse::ArgumentParser &cli, AST::Bundle &bundle, Parser::ModuleParser &parser)
+{
+    if (cli.get<bool>("--no-stdlib")) {
+        return;
+    }
+
+    AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
+    auto &stdlib = bundle.modules.get_module(stdlib_handle);
+
+#if ECO_USE_EMBEDDED_STDLIB
+    EmbeddedModule::load_stdlib_module(bundle, stdlib);
+    parser.parse_module(stdlib, bundle.collector);
+#else
+    auto stdlib_input = Parser::ModuleParser::InputPayload {
+        .files = {},
+        .module = stdlib,
+        .collector = bundle.collector
+    };
+
+    for (const auto &stdlib_file : stdlib_source_files()) {
+        stdlib_input.files.push_back(Parser::ModuleParser::InputFile(stdlib_file));
+    }
+
+    if (handle_parse(parser, stdlib_input)) {
+        throw std::runtime_error("Failed to parse the echo standard library.");
+    }
+#endif
+
+    // regenerating the embeddable header is a build step, not a compile step. it used to run on
+    // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
+    if (cli.is_used("--emit-stdlib-header")) {
+        AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
+    }
+}
+
 // builds the bundle both `run` and `build` compile: the stdlib module, then the main module with
 // the user's sources. one function rather than two copies, because the copies had already drifted
 // - `build` never created a stdlib module at all, so any program calling `mem::` or `math::`
 // compiled under `run` and failed under `build`
 static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Parser::ModuleParser &parser)
 {
-    // leaving the standard library out is leaving one module out, nothing more - nothing
-    // downstream looks a module up by that name, codegen only ever asks for ECO_MAIN_MODULE_NAME,
-    // and the core types are bound by whichever source declares `#[core: ...]` rather than by the
-    // stdlib. what the program gives up is `die`, `assert` and the `mem::`/`math::` namespaces,
-    // which is the point: a test reading the emitted IR or an AST dump does not want several
-    // hundred lines of library standing between its first assertion and the code it is about
-    if (!cli.get<bool>("--no-stdlib")) {
-        AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
-        auto &stdlib = bundle.modules.get_module(stdlib_handle);
-
-#if ECO_USE_EMBEDDED_STDLIB
-        EmbeddedModule::load_stdlib_module(bundle, stdlib);
-        parser.parse_module(stdlib, bundle.collector);
-#else
-        auto stdlib_input = Parser::ModuleParser::InputPayload {
-            .files = {},
-            .module = stdlib,
-            .collector = bundle.collector
-        };
-
-        for (const auto &stdlib_file : stdlib_source_files()) {
-            stdlib_input.files.push_back(Parser::ModuleParser::InputFile(stdlib_file));
-        }
-
-        if (handle_parse(parser, stdlib_input)) {
-            throw std::runtime_error("Failed to parse the echo standard library.");
-        }
-#endif
-
-        // regenerating the embeddable header is a build step, not a compile step. it used to run on
-        // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
-        if (cli.is_used("--emit-stdlib-header")) {
-            AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
-        }
-    }
+    parse_stdlib_module(cli, bundle, parser);
 
     AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
     auto &module = bundle.modules.get_module(module_handle);
@@ -291,6 +301,24 @@ static Compiler::CompilerOptions resolve_options(
     return { fallback };
 }
 
+// prints a codegen exception and answers the process status a subcommand returns for it.
+//
+// one function for the same reason resolve_options is one: both subcommands answer this the same way
+// and a second spelling would let them drift. the status is part of the rule, not the caller's - a
+// module whose codegen threw part way through a function is neither runnable nor linkable, and
+// printing the diagnostic and then carrying on is how both paths used to report success on a failed
+// compile: the exit code said 0 while MCJIT ran over a half-built module, or make_exec emitted
+// objects for one that may be null or only partly linked. the e2e corpus' `expect:` now asserts it
+static int report_compiler_exception(const Compiler::ASTCompilerException &e)
+{
+    std::cout << "Compiler Exception: " << e.what() << std::endl;
+
+    // the same renderer Collector::print_issues uses, so the two cannot drift on how an issue reads
+    AST::print_issue(e.issue());
+
+    return 1;
+}
+
 int main_run(argparse::ArgumentParser &cli)
 {
     auto bundle = AST::Bundle();
@@ -310,16 +338,7 @@ int main_run(argparse::ArgumentParser &cli)
     try {
         compiler.compile_bundle(bundle);
     } catch (Compiler::ASTCompilerException &e) {
-        auto issue = &e.issue();
-        std::cout << "Compiler Exception: " << e.what() << std::endl;
-        std::cout << "Issue at " << issue->code_ref.token_slice.startt().line << ":" << issue->code_ref.token_slice.startt().char_offset << std::endl;
-        std::cout << issue->message() << std::endl;
-        std::cout << issue->code_ref.get_referenced_code_excerpt() << std::endl;
-
-        // a module whose codegen threw part way through a function is not runnable. printing the
-        // diagnostic and then JITing it anyway is how this path used to report success on a failed
-        // compile - the exit code said 0 and MCJIT ran over a half-built module
-        return 1;
+        return report_compiler_exception(e);
     }
 
     if (cli.get<bool>("--optimize")) {
@@ -355,15 +374,7 @@ int main_build(argparse::ArgumentParser &cli)
         compiler.compile_bundle(bundle);
         compiler.optimize();
     } catch (Compiler::ASTCompilerException &e) {
-        auto issue = &e.issue();
-        std::cout << "Compiler Exception: " << e.what() << std::endl;
-        std::cout << "Issue at " << issue->code_ref.token_slice.startt().line << ":" << issue->code_ref.token_slice.startt().char_offset << std::endl;
-        std::cout << issue->message() << std::endl;
-        std::cout << issue->code_ref.get_referenced_code_excerpt() << std::endl;
-
-        // same as main_run, and worse: the next thing here is make_exec, which would run an
-        // object-emission pass over a module that may be null or only partly linked
-        return 1;
+        return report_compiler_exception(e);
     }
 
     if (cli.get<bool>("--print-ir")) {

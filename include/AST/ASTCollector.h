@@ -19,6 +19,14 @@
 
 namespace AST
 {
+    // renders one issue - where it is, what it says, and the code it points at.
+    //
+    // the one owner of that shape, because it has two callers that are not on the same path:
+    // Collector::print_issues walks the accumulated ones, and main.cpp reports the single issue an
+    // ASTCompilerException carries. each keeps only its own header line above this, and the ~90
+    // `.test` goldens in tests_eco/errors pin the text either way
+    void print_issue(const IssueRecord &issue);
+
     class Collector
     {
     public:

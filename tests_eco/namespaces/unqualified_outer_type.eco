@@ -1,0 +1,32 @@
+// a type name written unqualified resolves from the enclosing namespace *outward*, the way an
+// unqualified call already does - and an inner declaration hides an outer one of the same name
+// rather than extending it. before this, a type lookup only ever searched one namespace, so a file
+// under a `namespace` could not name a root type at all
+
+struct Shared { int32 $v; }
+struct Named { int32 $root; }
+
+namespace app;
+
+// `Shared` is in the root namespace and this file is not, so this is the outward walk
+function take(Shared $s) : int32 { return $s->v; }
+
+struct Holder { Shared $inner; }
+
+// ...and a name this namespace declares itself wins over the root's
+struct Named { int32 $app; }
+
+function which(Named $n) : int32 { return $n->app; }
+
+namespace main;
+
+echo app::take(Shared(7));
+
+app::Holder $h = app::Holder(Shared(9));
+echo $h->inner->v;
+
+echo app::which(app::Named(5));
+
+// the qualified spelling still names exactly one namespace and never falls back outward
+Named $root = Named(1);
+echo $root->root;

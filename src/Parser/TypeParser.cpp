@@ -290,7 +290,8 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 
     // the declaring namespace, not the current one: a type is not block-scoped, so a type name written
     // inside a `{ }` block resolves exactly as it does outside one
-    auto symbol = payload.collector.namespaces.find_symbol(name, *payload.context.declaring_namespace());
+    auto symbol = payload.collector.namespaces.find_symbol_in_scope(
+        name, *payload.context.declaring_namespace());
     if (symbol && symbol->type() == AST::SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
         return std::vector<AST::ValueType>{ decl->value_type() };
@@ -319,8 +320,10 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
     }
 
     // the declaring namespace, not the current one - a type is not block-scoped, the same rule
-    // resolve_constraint_atom above states
-    auto *symbol = payload.collector.namespaces.find_symbol(
+    // resolve_constraint_atom above states. searched *outward* from it, so an owner written
+    // unqualified is found wherever it is in scope - including from inside another nested type's
+    // body, which parses in a namespace named after its own owner
+    auto *symbol = payload.collector.namespaces.find_symbol_in_scope(
         cursor.current().value(), *payload.context.declaring_namespace());
 
     if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
@@ -783,8 +786,14 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         if (type_param) {
             primitive_type = AST::ValueType::make_type_param(type_param);
         } else {
-            // check for user-defined types (structs/classes)
-            auto struct_symbol = payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace);
+            // check for user-defined types (structs/classes). an unqualified name is searched from
+            // the enclosing namespace *outward*, the way an unqualified call already resolves; a
+            // qualified one names exactly one namespace and must not fall back to an outer type of
+            // the same name, or `geometry::Point` would quietly answer with the root's `Point`
+            auto struct_symbol = is_qualified
+                ? payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace)
+                : payload.collector.namespaces.find_symbol_in_scope(token.value(), *lookup_namespace);
+
             if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_type) {
                 user_type_decl = struct_symbol->node.unsafe_ptr<AST::TypeDeclNode>();
                 primitive_type = user_type_decl->value_type();

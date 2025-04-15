@@ -32,22 +32,29 @@ namespace AST
     // mention `T`, and deciding that per instantiation is what ComplexType::substituted_copy would
     // have to grow
 
-    // the name of the method that hands out a borrowed window over a value. **the one spelling** of a
-    // member the compiler knows by name, the same device `todo/C4` specifies for element access and
-    // `todo/A18` will eventually replace with a declarable operator
-    inline constexpr const char *view_method_name = "view";
-
-    // the `view()` method that turns a `from` into a `to`, or null when there is none.
+    // the method that implicitly converts a `from` into a `to`, or null when the type declares none.
     //
-    // **the one rule** for "does this type convert to a view of itself": a parameterless method named
-    // `view` whose return type is exactly `to`. generalised rather than hardcoded to `string` - the same
-    // rule gives `Array<T>` its `Slice<T>` - and deliberately exact rather than convertible, so a chain
-    // of view conversions can never be searched for.
+    // **the one rule** for "does this type convert to that one": a method its owner marked
+    // `#[implicit]`, whose return type is exactly `to`. exact rather than convertible on purpose, so a
+    // chain of conversions can never be searched for. everything else about a candidate - it takes no
+    // parameters, it is a method, its target is a declared type that owns nothing - was decided at the
+    // declaration by Parser's publish_implicit_conversion, which is what lets this be a comparison
+    // rather than a filter
     //
-    // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as the
-    // lowest real rank, so an overload taking the owning type always wins), TypeChecker accepts it, and
-    // AST::CallResolver is the one that actually inserts the call
-    FunctionDeclNode *find_view_conversion(const ValueType &from, const ValueType &to);
+    // this used to recognise the conversion by the member's *spelling*, a published `view_method_name`
+    // constant the compiler compared every method against. the comment there said `todo/A18` would
+    // eventually replace it with a declarable operator, and **that was wrong**: every form A18
+    // specifies is operand syntax the user writes - infix, prefix, suffix, each with operands and a
+    // precedence - while an implicit conversion is inserted at an argument position where the user
+    // wrote nothing at all. there is no operand for A18 to hang it on, so A18 could never have taken
+    // it over, and the mislabel is what let a magic name look temporary. the spelling is `#[implicit]`
+    // and it is declared. (`todo/C4`'s bracket is a genuinely different case: `$a[$i]` *is* operand
+    // syntax, and that one really is A18's to take)
+    //
+    // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
+    // t_declared_conversion, below every built-in conversion, so an overload taking the owning type
+    // always wins), TypeChecker accepts it, and AST::CallResolver is the one that inserts the call
+    FunctionDeclNode *find_implicit_conversion(const ValueType &from, const ValueType &to);
 
     // `ct`'s destructor, or null when the type has none of its own. the same template_ref redirect
     // the overload lookup above does, and for the same reason: `Box<int32>` holds no destructor, the

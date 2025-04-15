@@ -36,10 +36,10 @@ std::vector<AST::FunctionDeclNode *> AST::find_member_functions(const AST::Compl
     return candidates;
 }
 
-AST::FunctionDeclNode *AST::find_view_conversion(const AST::ValueType &from, const AST::ValueType &to)
+AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from, const AST::ValueType &to)
 {
     // only a declared type can offer one, and only ever to a *different* type - `t_exact` already
-    // answered the identity case, and admitting it here would let a view convert to itself
+    // answered the identity case, and admitting it here would let a type convert to itself
     if (!from.has_complex_type() || !to.has_complex_type() || from == to) {
         return nullptr;
     }
@@ -50,21 +50,12 @@ AST::FunctionDeclNode *AST::find_view_conversion(const AST::ValueType &from, con
         return nullptr;
     }
 
-    // walked here rather than through find_member_functions, which answers with a *vector*: this runs
-    // from the bottom of argument_fit, once per candidate per argument per fixpoint round, and the
-    // overload set it would build is discarded immediately
-    for (AST::FunctionDeclNode *candidate : owner->methods()) {
-        if (!candidate->name_token.has_value()
-            || candidate->name_token.value().value() != AST::view_method_name) {
-            continue;
-        }
-
-        // the receiver and nothing else. a `view(usize, usize)` is a substring accessor, a different
-        // operation, and must not be mistaken for the whole-value conversion
-        if (candidate->args.size() != candidate->implicit_arg_count()) {
-            continue;
-        }
-
+    // the published slot, not a walk of every method: this runs from the bottom of argument_fit, once
+    // per candidate per argument per fixpoint round, and it used to be a string comparison against
+    // every member the owner declares. a type has one or two entries here, so a flat scan of them is
+    // the whole cost - and the list holds only declarations publish_implicit_conversion accepted, so
+    // there is nothing left to check but the target
+    for (AST::FunctionDeclNode *candidate : owner->implicit_conversions()) {
         if (candidate->get_return_type() == to) {
             return candidate;
         }

@@ -1,3 +1,9 @@
+# the string type is declared *in the program*, so the stdlib's own must be out of the way - two
+# `#[core: "string"]` declarations in one program is a located error. that is not a workaround, it
+# is the claim: the compiler binds the type by the attribute and never by the name, so a program
+# may declare its own and everything below still holds
+stdlib: off
+
 --- OUT --->
 4
 2
@@ -10,13 +16,13 @@ CHECK: define i32 @main()
 # the literal, as ever, a constant
 CHECK: store %string { %view { ptr @str, i64 4 }, ptr null }
 
-# show(string::view) - the conversion is a call to the type's own `view()`, taking the address of the
-# place, and then the view travels as a plain two-word value
+# show(string::view) - the conversion is a call to the `#[implicit]` method the type declared, taking
+# the address of the place, and then the view travels as a plain two-word value
 CHECK: call %view.0 @_M6string_view
 CHECK: call void @_showZZMLCN6string4viewE
 
 # ...and no reference count moved to get there. this is the claim that would silently regress if the
-# view conversion ever went through the copy path
+# declared conversion ever went through the copy path
 CHECK-NOT: strong.inc
 
 # which(string) - by value, so this one *does* go through the synthesized copy, whose body holds the

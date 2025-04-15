@@ -1,3 +1,9 @@
+# the string type is declared *in the program*, so the stdlib's own must be out of the way - two
+# `#[core: "string"]` declarations in one program is a located error. that is not a workaround, it
+# is the claim: the compiler binds the type by the attribute and never by the name, so a program
+# may declare its own and everything below still holds
+stdlib: off
+
 --- OUT --->
 hello
 tabs	and

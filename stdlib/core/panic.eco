@@ -8,6 +8,11 @@
  * Both are compiler builtins: the message and the source location are folded into a constant at
  * the call site, which is the one thing a library function could not do. Nothing links against
  * them, and they have no symbol of their own.
+ *
+ * The message parameter is spelled `string` because that is what a literal *is*. Nothing reads it
+ * at runtime - the text is folded from the token, so the type here only decides what the call site
+ * is allowed to write, and a literal has to be able to arrive without a conversion. It also has to
+ * stay a **literal**: see the note on each overload.
  */
 
 /**
@@ -22,8 +27,13 @@
 #[builtin: "die"]
 function die() : void;
 
+/**
+ * The message must be a **string literal**, not a `string` variable. It is folded into the binary
+ * together with the source location, so it has to be readable at compile time - a runtime string
+ * has nothing to fold, and is a located error rather than a message that quietly goes missing.
+ */
 #[builtin: "die"]
-function die(ptr<const uint8> $message) : void;
+function die(string $message) : void;
 
 /**
  * Stops the program when `$condition` is false.
@@ -38,5 +48,8 @@ function die(ptr<const uint8> $message) : void;
 #[builtin: "assert"]
 function assert(bool $condition) : void;
 
+/**
+ * The message must be a **string literal**, for the reason `die`'s must.
+ */
 #[builtin: "assert"]
-function assert(bool $condition, ptr<const uint8> $message) : void;
+function assert(bool $condition, string $message) : void;

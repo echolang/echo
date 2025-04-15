@@ -1,10 +1,13 @@
 #include "eco_test_file.h"
 
 #include <algorithm>
+#include <cassert>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace EchoTests
@@ -60,8 +63,8 @@ namespace
         return line;
     }
 
-    const char *const k_delimiter_prefix = "--- ";
-    const char *const k_delimiter_suffix = " --->";
+    constexpr std::string_view k_delimiter_prefix = "--- ";
+    constexpr std::string_view k_delimiter_suffix = " --->";
 
     // is this line exactly `--- NAME --->`, and if so what is NAME?
     //
@@ -71,18 +74,17 @@ namespace
     // and no `--->` cannot match this
     bool match_delimiter(const std::string &line, std::string &out_name)
     {
-        const std::string prefix = k_delimiter_prefix;
-        const std::string suffix = k_delimiter_suffix;
-
-        if (line.size() <= prefix.size() + suffix.size()) {
+        if (line.size() <= k_delimiter_prefix.size() + k_delimiter_suffix.size()) {
             return false;
         }
 
-        if (line.rfind(prefix, 0) != 0 || line.compare(line.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        if (!line.starts_with(k_delimiter_prefix) || !line.ends_with(k_delimiter_suffix)) {
             return false;
         }
 
-        const std::string name = line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
+        const std::string name = line.substr(
+            k_delimiter_prefix.size(),
+            line.size() - k_delimiter_prefix.size() - k_delimiter_suffix.size());
 
         if (name.empty() || !(name[0] >= 'A' && name[0] <= 'Z')) {
             return false;
@@ -157,6 +159,10 @@ const char *dump_flag(DumpKind kind)
         return "--print-resolved-ast";
     }
 
+    // no fallback: a kind with no arm here would produce an echoc invocation with no dump flag at
+    // all, so the directives would run against the program's own output and hold or fail for reasons
+    // that have nothing to do with the case. everything this format does not understand is an error
+    assert(false && "unhandled DumpKind - add its echoc flag");
     return "";
 }
 
@@ -171,35 +177,52 @@ const char *dump_section_name(DumpKind kind)
         return "RAST";
     }
 
+    // and no fallback here either: an unnamed kind is a section header nothing matches, and the
+    // parser's "expected one of" message enumerates this very function
+    assert(false && "unhandled DumpKind - add its section name");
     return "";
 }
 
 namespace
 {
-    // a setting's value, checked against its enumeration. one helper because all three enumerated
-    // settings report their mistake the same way
+    // the accepted setting keys, so the dispatch below and the message that rejects an unknown one
+    // enumerate the same list - the same reason dump_section_name is the only spelling of a section
+    // name. a key added to the dispatch and forgotten here would leave the error telling an author
+    // that a valid key is invalid
+    constexpr std::string_view k_setting_keys[] = { "flags", "stdlib", "expect", "mode" };
+
+    // a setting's value, checked against its enumeration and written straight into the field it
+    // settles. one helper because all three enumerated settings report their mistake the same way,
+    // and templated on the destination so that each spelling sits beside the value it means - reading
+    // into a `bool is_second` left every caller inverting or mapping the answer afterwards, and one
+    // of the three inverted it
+    //
+    // the spellings arrive as a list rather than as two parameters, so the helper carries no opinion
+    // about how many a setting has: a three-valued `mode` would otherwise need a second copy of it,
+    // message included
+    template <typename T>
     bool read_enumerated(
         const std::string &origin,
-        size_t line,
+        const LineRecord &record,
         const std::string &key,
         const std::string &value,
-        const char *first_name,
-        const char *second_name,
-        bool &out_is_second,
+        std::initializer_list<std::pair<const char *, T>> options,
+        T &out_value,
         std::string &out_error)
     {
-        if (value == first_name) {
-            out_is_second = false;
-            return true;
+        std::string spellings;
+
+        for (const auto &option : options) {
+            if (value == option.first) {
+                out_value = option.second;
+                return true;
+            }
+
+            spellings += (spellings.empty() ? "'" : "' or '") + std::string(option.first);
         }
 
-        if (value == second_name) {
-            out_is_second = true;
-            return true;
-        }
-
-        out_error = locate(origin, line, "setting '" + key + "' must be '" + first_name + "' or '"
-            + second_name + "', got: " + value);
+        out_error = locate(origin, record.number,
+            "setting '" + key + "' must be " + spellings + "', got: " + value);
         return false;
     }
 
@@ -241,34 +264,29 @@ namespace
         }
 
         if (key == "stdlib") {
-            bool is_off = false;
-            if (!read_enumerated(origin, record.number, key, value, "on", "off", is_off, out_error)) {
-                return false;
-            }
-            out_file.stdlib = !is_off;
-            return true;
+            return read_enumerated<bool>(origin, record, key, value,
+                { { "on", true }, { "off", false } }, out_file.stdlib, out_error);
         }
 
         if (key == "expect") {
-            bool is_fail = false;
-            if (!read_enumerated(origin, record.number, key, value, "ok", "fail", is_fail, out_error)) {
-                return false;
-            }
-            out_file.expect = is_fail ? Expectation::t_fail : Expectation::t_ok;
-            return true;
+            return read_enumerated<Expectation>(origin, record, key, value,
+                { { "ok", Expectation::t_ok }, { "fail", Expectation::t_fail } },
+                out_file.expect, out_error);
         }
 
         if (key == "mode") {
-            bool is_build = false;
-            if (!read_enumerated(origin, record.number, key, value, "run", "build", is_build, out_error)) {
-                return false;
-            }
-            out_file.mode = is_build ? RunMode::t_build : RunMode::t_run;
-            return true;
+            return read_enumerated<RunMode>(origin, record, key, value,
+                { { "run", RunMode::t_run }, { "build", RunMode::t_build } },
+                out_file.mode, out_error);
+        }
+
+        std::string known;
+        for (const std::string_view accepted : k_setting_keys) {
+            known += (known.empty() ? "" : ", ") + std::string(accepted);
         }
 
         out_error = locate(origin, record.number,
-            "unknown setting '" + key + "', expected one of: flags, stdlib, expect, mode");
+            "unknown setting '" + key + "', expected one of: " + known);
         return false;
     }
 };
@@ -292,16 +310,24 @@ bool parse_eco_test_file(
 
     // every line is classified before anything is interpreted, so a near-miss delimiter is caught
     // wherever it sits - including inside a section, where it would otherwise become content
-    std::vector<size_t> delimiters;
-    std::vector<std::string> names;
+    //
+    // the line and its name travel together rather than as two index-synced vectors: the byte range
+    // of the *next* header is what bounds this section's body, and that is the only thing about a
+    // delimiter the loop below needs to look up
+    struct SectionHeader
+    {
+        const LineRecord *line;
+        std::string name;
+    };
+
+    std::vector<SectionHeader> headers;
 
     for (const LineRecord &record : lines) {
         const std::string line = strip_carriage_return(record.text);
 
         std::string name;
         if (match_delimiter(line, name)) {
-            delimiters.push_back(record.number - 1);
-            names.push_back(name);
+            headers.push_back(SectionHeader { &record, std::move(name) });
             continue;
         }
 
@@ -312,15 +338,20 @@ bool parse_eco_test_file(
         }
     }
 
-    if (delimiters.empty()) {
+    if (headers.empty()) {
         out_error = origin + ": no sections - a test with no '--- OUT --->' asserts nothing";
         return false;
     }
 
-    // the header is everything above the first delimiter
+    // the header is everything above the first delimiter, walked up to that very record - `number` is
+    // a line number for a message, never an index to compute back from
     std::set<std::string> seen_settings;
-    for (size_t i = 0; i < delimiters.front(); i += 1) {
-        if (!read_setting(origin, lines[i], seen_settings, out_file, out_error)) {
+    for (const LineRecord &record : lines) {
+        if (&record == headers.front().line) {
+            break;
+        }
+
+        if (!read_setting(origin, record, seen_settings, out_file, out_error)) {
             return false;
         }
     }
@@ -328,9 +359,9 @@ bool parse_eco_test_file(
     bool has_output = false;
     std::set<std::string> seen_sections;
 
-    for (size_t i = 0; i < delimiters.size(); i += 1) {
-        const LineRecord &header = lines[delimiters[i]];
-        const std::string &name = names[i];
+    for (size_t i = 0; i < headers.size(); i += 1) {
+        const LineRecord &header = *headers[i].line;
+        const std::string &name = headers[i].name;
 
         if (!seen_sections.insert(name).second) {
             out_error = locate(origin, header.number, "section '" + name + "' appears twice");
@@ -339,7 +370,7 @@ bool parse_eco_test_file(
 
         // sliced out of the file rather than rebuilt from lines, so an OUT golden is byte exact
         const size_t body_begin = header.next;
-        const size_t body_end = i + 1 < delimiters.size() ? lines[delimiters[i + 1]].begin : content.size();
+        const size_t body_end = i + 1 < headers.size() ? headers[i + 1].line->begin : content.size();
         const std::string body = content.substr(body_begin, body_end - body_begin);
         const size_t body_first_line = header.number + 1;
 
@@ -353,23 +384,30 @@ bool parse_eco_test_file(
             continue;
         }
 
-        DumpKind kind = DumpKind::t_ir;
-        if (name == "IR") {
-            kind = DumpKind::t_ir;
+        // matched against dump_section_name rather than against a second table of the same names: a
+        // dump kind is added by extending that one switch, and a name spelled here as well is a name
+        // this parser and the runner's section titles could disagree about. the message enumerates
+        // the same table, so it cannot list a name the parser does not accept
+        std::optional<DumpKind> kind;
+        for (const DumpKind candidate : k_dump_kinds) {
+            if (name == dump_section_name(candidate)) {
+                kind = candidate;
+                break;
+            }
         }
-        else if (name == "AST") {
-            kind = DumpKind::t_ast;
-        }
-        else if (name == "RAST") {
-            kind = DumpKind::t_resolved_ast;
-        }
-        else {
+
+        if (!kind.has_value()) {
+            std::string known = "OUT";
+            for (const DumpKind candidate : k_dump_kinds) {
+                known += std::string(", ") + dump_section_name(candidate);
+            }
+
             out_error = locate(origin, header.number,
-                "unknown section '" + name + "', expected one of: OUT, IR, AST, RAST");
+                "unknown section '" + name + "', expected one of: " + known);
             return false;
         }
 
-        CheckSection section { kind, {} };
+        CheckSection section { kind.value(), {} };
         if (!parse_check_directives(body, body_first_line, origin, section.directives, out_error)) {
             return false;
         }

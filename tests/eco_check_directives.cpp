@@ -1,9 +1,16 @@
 #include "eco_check_directives.h"
 
 #include <sstream>
+#include <string_view>
 
 namespace EchoTests
 {
+namespace
+{
+    constexpr std::string_view k_negated_prefix = "CHECK-NOT:";
+    constexpr std::string_view k_positive_prefix = "CHECK:";
+};
+
 std::string trim_whitespace(const std::string &s)
 {
     const size_t first = s.find_first_not_of(" \t\r\n");
@@ -41,24 +48,19 @@ bool parse_check_directives(
 
         // the longer prefix first, or `CHECK-NOT:` would match `CHECK:`'s test and be read as a
         // positive directive whose text happens to start with "-NOT:"
-        bool matched = false;
+        const bool negated = line.starts_with(k_negated_prefix);
+        const bool positive = !negated && line.starts_with(k_positive_prefix);
 
-        for (const auto &[prefix, negated] :
-             { std::pair<const char *, bool>{ "CHECK-NOT:", true }, { "CHECK:", false } }) {
-
-            if (line.rfind(prefix, 0) == 0) {
-                out_directives.push_back(CheckDirective {
-                    negated, trim_whitespace(line.substr(std::string(prefix).size())), line_number });
-                matched = true;
-                break;
-            }
-        }
-
-        if (!matched) {
+        if (!negated && !positive) {
             out_error = locate(
                 origin, line_number, "expected 'CHECK:' or 'CHECK-NOT:', got: " + line);
             return false;
         }
+
+        const std::string_view prefix = negated ? k_negated_prefix : k_positive_prefix;
+
+        out_directives.push_back(CheckDirective {
+            negated, trim_whitespace(line.substr(prefix.size())), line_number });
 
         if (out_directives.back().text.empty()) {
             out_error = locate(origin, line_number, "directive has no text to match");

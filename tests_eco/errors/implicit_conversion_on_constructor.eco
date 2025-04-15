@@ -1,0 +1,13 @@
+// only a method can be one - a constructor already has a spelling at every call site
+struct Window { usize $count; }
+
+struct Buffer
+{
+    usize $count;
+
+    #[implicit]
+    constructor(usize $count) { $this->count = $count; }
+}
+
+$b = Buffer(1);
+echo $b->count;

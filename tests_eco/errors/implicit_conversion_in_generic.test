@@ -1,0 +1,16 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:7
+'Array' is generic, and an implicit conversion on a generic type is not supported yet - the target type would have to be substituted per instantiation.
+Begin: 'implicit'
+End: 'function'
+Code excerpt:
+ [9]> 
+ [10]>     #[implicit]
+            ^
+ [11]>     function slice() : Slice<T> { return Slice<T>($this->at); }
+ [12]> }
+
+Critical issues found, cannot compile.

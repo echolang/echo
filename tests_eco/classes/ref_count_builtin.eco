@@ -1,8 +1,6 @@
-// `ref_count` is the one builtin that is both generic and takes an argument. its parameter is a
-// *borrow*: a by-value class parameter is +1, so the answer would be one too high at every call -
-// which is exactly the question the caller is asking
-#[builtin: "ref_count"]
-function ref_count<T>(T& $handle) : usize;
+// `ref_count` is the one builtin that is both generic and takes an argument. it is declared in
+// `stdlib/core/rc.eco` rather than here - a second declaration of it would not be a duplicate
+// signature (two templates' `T`s are distinct declarations) but an ambiguous call at every site
 
 class Handle { int32 $x; }
 

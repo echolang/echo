@@ -131,8 +131,8 @@ a failure names which of the case's contracts broke. They cannot share one invoc
 print byte-identical module headers, so there would be nothing to split a combined stream on, and on a
 rejected program `-p` never runs at all.
 
-**`-a` and `-ar` dump every module, the standard library included** — around 240 lines of it in front
-of a five-line program. So an `AST` or `RAST` section should either set `stdlib: off` or open with
+**`-a` and `-ar` dump every module, the standard library included** — around 650 lines of it in front
+of a five-line program, most of that `stdlib/core/string.eco`. So an `AST` or `RAST` section should either set `stdlib: off` or open with
 
 ```
 CHECK: Module: [main]

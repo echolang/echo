@@ -36,6 +36,13 @@ namespace AST
         // narrowing, a sign change, int to float. always possible, never free
         t_conversion,
 
+        // the argument's own type declared how to convert itself, `#[implicit]`. below every
+        // built-in conversion above rather than beside them, because that is what makes an
+        // overload taking the owning type always beat one taking the window: this is the
+        // fallback that lets a caller take the cheap view without writing anything, never a
+        // way to hide a better-matching overload. see AST::find_implicit_conversion
+        t_declared_conversion,
+
         // the argument's type says nothing yet: a string literal, an unbound `null`, a member of
         // an incomplete struct, a mixed-operand binary expression, or anything still mentioning a
         // type parameter. neutral - it neither qualifies nor disqualifies a candidate
@@ -142,17 +149,17 @@ namespace AST
                 : ArgumentFit::t_conversion;
         }
 
-        // a value converts to a borrowed *view* of itself when its own type says how - AST::view_method_name.
-        // last, and ranked t_conversion, which is what makes `f(string)` always beat `f(string::view)` for a
-        // `string` argument: this is the fallback that lets a caller take the cheap window without writing
-        // anything, never a way to hide a better-matching overload.
+        // a value converts to another type when its own type declared how - a method marked
+        // `#[implicit]`, found by AST::find_implicit_conversion. last, and its own rank, so that
+        // CallResolver can tell this case apart from the primitive conversions above by the rank
+        // alone rather than by asking the lookup a second time.
         //
         // a **place**, for the borrow arm's reason one rule up: the conversion is a call whose receiver is
-        // `$this`, so it needs an address. materialising a temporary for a non-place argument is todo/A13b,
-        // and until that lands `f('literal')` against a view parameter reports an ordinary mismatch rather
-        // than being lowered wrong
-        if (expr != nullptr && is_place_expression(*expr) && find_view_conversion(from, to) != nullptr) {
-            return ArgumentFit::t_conversion;
+        // `$this`, so it needs an address. materialising a temporary for a non-place argument is todo/A13
+        // (its A13b half), and until that lands `f('literal')` against a view parameter reports an
+        // ordinary mismatch rather than being lowered wrong
+        if (expr != nullptr && is_place_expression(*expr) && find_implicit_conversion(from, to) != nullptr) {
+            return ArgumentFit::t_declared_conversion;
         }
 
         return ArgumentFit::t_none;

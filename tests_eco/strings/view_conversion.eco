@@ -9,6 +9,8 @@ struct string
     string::view $window;
     StringBuf $owner;
 
+    // marked, not named: the compiler finds the conversion by the attribute, never by the spelling
+    #[implicit]
     function view() : string::view { return $this->window; }
     function size() : usize { return $this->window->size; }
 }
@@ -20,7 +22,8 @@ function show(string::view $v) : void { echo $v->size; }
 $foo = 'john';
 show($foo);
 
-// but an overload taking the owning type still wins: the view conversion is ranked lowest on purpose
+// but an overload taking the owning type still wins: a declared conversion is ranked below every
+// built-in one, on purpose
 function which(string::view $v) : void { echo 1; }
 function which(string $s) : void { echo 2; }
 which($foo);

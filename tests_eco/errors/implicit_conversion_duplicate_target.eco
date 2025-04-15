@@ -1,0 +1,16 @@
+// a type has one conversion per target: nothing would decide which of two an invisible call meant
+struct Window { usize $count; }
+
+struct Buffer
+{
+    usize $count;
+
+    #[implicit]
+    function window() : Window { return Window($this->count); }
+
+    #[implicit]
+    function whole() : Window { return Window($this->count); }
+}
+
+$b = Buffer(1);
+echo $b->count;

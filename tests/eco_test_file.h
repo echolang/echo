@@ -26,6 +26,13 @@ namespace EchoTests
     // the section name as written in the `.test` file
     const char *dump_section_name(DumpKind kind);
 
+    // every dump kind, for the readers that have to iterate them rather than switch on one: the
+    // section-name lookup, and the message that lists the names it accepts. here beside the enum so a
+    // fourth kind is added in one place - the alternative is a second list of names in the parser,
+    // which is exactly what dump_section_name exists to prevent
+    inline constexpr DumpKind k_dump_kinds[] = {
+        DumpKind::t_ir, DumpKind::t_ast, DumpKind::t_resolved_ast };
+
     // how the program is put in front of its output. `run` is the JIT; `build` links a native binary
     // and executes it, which is the only thing that exercises LLVMCompiler::make_exec
     enum class RunMode
