@@ -1,0 +1,5 @@
+// a symbol is matched by token *value*, so one spelled as a keyword would turn every occurrence of
+// that keyword in the program into an operator
+operator (int32 $a) if (int32 $b): int32 { return 1; }
+
+echo 1;

@@ -148,13 +148,14 @@ Links a native binary through `Backend::make_exec` and runs it. Nothing else in 
 that path, so [`native/`](native/) is its coverage. Needs bare `clang` on `PATH`; a missing `clang` is
 a failure, not a skip.
 
-Two things differ from `mode: run`, and they are not cosmetic — **these are not two views of one
-program**:
+One thing differs from `mode: run`, and it is not cosmetic — **these are not two views of one
+program**: `echoc build` defaults to `--release`, so `assert` and the `ptr<T>` → `T&` null check are
+**elided**. Write `flags: --debug` if you want run-mode semantics.
 
-- `echoc build` defaults to `--release`, so `assert` and the `ptr<T>` → `T&` null check are **elided**.
-  Write `flags: --debug` if you want run-mode semantics.
-- `echoc build` **always** optimizes at O3, whereas `run` only optimizes when passed `-O`. An `IR`
-  section in build mode therefore reads optimized release IR.
+Optimization is *not* a difference. Both subcommands optimize only when passed `-O`, so an `IR`
+section in build mode reads release IR that the optimizer has not touched unless the case asks for it
+with `flags: -O`. (`build` used to optimize unconditionally and ignore the flag, which meant there was
+no way to see what codegen had actually emitted for a release build.)
 
 So write build-mode cases *for* build mode rather than converting existing ones. The `OUT` golden is
 the **program's** output only — the build step is asserted through its exit code alone, because its

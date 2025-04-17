@@ -1,0 +1,7 @@
+// `$a blah $b` could not say whether the symbol closes the left operand or opens the right one
+struct S { int32 $x; }
+
+operator (S $a) blah (S $b): int32 { return 1; }
+operator (S $a) blah : int32 { return 2; }
+
+echo 1;

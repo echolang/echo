@@ -108,10 +108,6 @@ struct LexerCursor
         skip_until(MHP_VOCAB_LB);
     }
 
-    // will skip the currently begining scope and move the cursor to the end of the scope
-    // if the cursor is not at the beginning of a scope, the cursor will not be moved at all
-    void skip_scope(const char open, const char close);
-
     inline void advance() {
         if (is_eof()) {
             return;
@@ -143,11 +139,6 @@ struct LexerCursor
     inline bool is_formatting() {
         return peek() == MHP_VOCAB_SPACE || peek() == MHP_VOCAB_TAB || peek() == MHP_VOCAB_LB;
     }
-
-    // what may end a token, so a custom operator built out of existing ones ("<=>" rather than
-    // "<=" then ">") lexes as one. custom operators are found by the separate prepass over the
-    // input, not by this predicate alone
-    bool is_seperating_char(size_t offset = 0);
 
     // returns a string giving the user some context 
     // of where in the code the iterator currently is, will never go beyond its current line
@@ -393,12 +384,7 @@ public:
     /**
      * Parses the given input string into a collection of tokens
      */
-    void tokenize(TokenCollection &tokens, const std::string &input, const AST::OperatorRegistry *op_registry = nullptr);
-
-    /**
-     * Tokenizer prepass (used to identify custom operators)
-     */
-    void tokenize_prepass_operators(const std::string &input, AST::OperatorRegistry &op_registry);
+    void tokenize(TokenCollection &tokens, const std::string &input);
 };
 
 #endif // LEXER_H

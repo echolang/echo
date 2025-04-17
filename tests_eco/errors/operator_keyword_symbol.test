@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:21
+'if' cannot be part of an operator symbol - a symbol is written out of punctuation or a single word.
+Begin: 'if'
+End: 'if'
+Code excerpt:
+ [2]> // that keyword in the program into an operator
+ [3]> operator (int32 $a) if (int32 $b): int32 { return 1; }
+                          ^
+ [4]> 
+
+Critical issues found, cannot compile.

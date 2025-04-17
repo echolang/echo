@@ -1,12 +1,14 @@
 mode: build
+flags: -O
 
 --- OUT --->
 7
 7
 --- IR --->
-# an IR section reads main_build's dump in build mode, which is the *optimized release* IR - `echoc
-# build` always runs the O3 pipeline, unlike `run`, which only optimizes when asked. so this is the one
-# place in the corpus where that pipeline's effect on the reference counting runtime is asserted.
+# an IR section reads main_build's dump, and `-O` above is what makes it the *optimized* release IR.
+# it is spelled out because this case is the one place in the corpus that asserts what the O3 pipeline
+# does to the reference counting runtime, so the optimizer is the thing under test rather than a
+# background condition - it used to be implicit, because `build` optimized whether or not it was asked.
 #
 # and it removes all of it: the allocation, the retain for `$c = $b`, the two releases at scope end and
 # the reads through the handle are all gone, and both echoes are folded to the constant 7. that is only

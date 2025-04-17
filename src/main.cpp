@@ -45,7 +45,14 @@
 #define SH_COLOR_UNDL(x) "\x1B[4m" x SH_COLOR_RST
 
 
-std::vector<std::filesystem::path> get_file_list_from_args(argparse::ArgumentParser &cli, const std::string &arg)
+// the files an argument names, expanding wildcards. `missing` counts the paths that were named
+// literally and are not there - a caller has to refuse those rather than compile what is left, since
+// a build that quietly omits one of its inputs is a build that links against nothing
+//
+// a wildcard matching nothing is deliberately not counted: an empty glob is a pattern with no
+// matches, not a file somebody expected to exist
+std::vector<std::filesystem::path> get_file_list_from_args(
+    argparse::ArgumentParser &cli, const std::string &arg, size_t &missing)
 {
     auto path_strings = cli.get<std::vector<std::string>>(arg);
 
@@ -66,6 +73,14 @@ std::vector<std::filesystem::path> get_file_list_from_args(argparse::ArgumentPar
         } else {
             if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
                 files.push_back(path);
+            }
+            else {
+                // named and not there. dropping it silently left the caller reporting "No source
+                // files provided" for a path that was very much provided - so one typo in a filename
+                // answered with a complaint about something else entirely, and a *second* file on the
+                // same command line made the typo vanish without a word
+                std::cerr << "Cannot open '" << path_string << "': no such file." << std::endl;
+                missing++;
             }
         }
     }
@@ -200,7 +215,17 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
         .collector = bundle.collector
     };
 
-    auto source_files = get_file_list_from_args(cli, "source");
+    size_t missing_files = 0;
+    auto source_files = get_file_list_from_args(cli, "source", missing_files);
+
+    // a named file that is not there fails the build, even when others compiled. it is an input the
+    // user asked for, so carrying on would produce a binary missing whatever was in it - reported by
+    // name above, so nothing more is owed here
+    if (missing_files > 0) {
+        return 1;
+    }
+
+    // ...and "you named nothing" is the other mistake, which is the only one this message is about
     if (source_files.empty()) {
         std::cerr << "No source files provided." << std::endl;
         return 1;
@@ -284,7 +309,11 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
 
 // resolves --debug/--release against the subcommand's default. one function because the two
 // subcommands disagree only about the default, and a second spelling of the rule would let them
-// drift - `build` is a release build unless told otherwise, matching that it already always optimizes
+// drift - `build` is a release build unless told otherwise
+//
+// still orthogonal to -O, and now visibly so: both subcommands read that flag, so `build --release`
+// without it emits release *semantics* - no asserts, no null checks - without the optimizer having
+// run over them
 //
 // cannot fail: the mutually exclusive group refuses both flags at parse time
 static Compiler::CompilerOptions resolve_options(
@@ -372,9 +401,15 @@ int main_build(argparse::ArgumentParser &cli)
 
     try {
         compiler.compile_bundle(bundle);
-        compiler.optimize();
     } catch (Compiler::ASTCompilerException &e) {
         return report_compiler_exception(e);
+    }
+
+    // read off the flag, exactly as `run` does. this used to be unconditional, which made `-O` a
+    // switch `build` accepted and silently ignored - and left no way at all to see what codegen
+    // emitted for a release build, since `-p` only ever showed the optimizer's output
+    if (cli.get<bool>("--optimize")) {
+        compiler.optimize();
     }
 
     if (cli.get<bool>("--print-ir")) {

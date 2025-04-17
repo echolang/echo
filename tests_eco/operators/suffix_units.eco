@@ -1,0 +1,15 @@
+// the custom units example, book/concept/operators.md
+struct Distance {
+    uint64 $millimeters;
+}
+
+operator (Distance $a) + (Distance $b): Distance {
+    return Distance($a->millimeters + $b->millimeters);
+}
+
+operator (uint64 $a)mm: Distance { return Distance($a); }
+operator (uint64 $a)cm: Distance { return Distance($a * 10); }
+operator (uint64 $a)m: Distance { return Distance($a * 1000); }
+
+$distance = 1m + 50cm + 500mm;
+echo $distance->millimeters;

@@ -11,6 +11,27 @@ namespace Parser
 {
     AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace = nullptr);
 
+    // the call a user operator lowers to: an ordinary FunctionCallExprNode over the root namespace's
+    // overload set for `decorated_name`, with the operands as its arguments. `at` is the operator's
+    // symbol token, which is where the name is positioned and where a diagnostic points
+    //
+    // from here on it is a call like any other - the fixpoint settles it, CallResolver coerces its
+    // arguments, OwnershipPass copies what needs copying, and codegen emits a CreateCall. that is
+    // why operator overloading needs no arm anywhere downstream
+    //
+    // **an unresolved call is kept, not discarded.** parse_funccall above reports UnknownFunction and
+    // throws the node away, which is right for a misspelled name and wrong here: the overload set is
+    // filled by the declaration pass, and a use site inside a struct property initializer is parsed
+    // *during* that pass. so resolution is left to the fixpoint, which reports whatever never
+    // resolved - the same standing an ordinary forward reference inside a body has
+    //
+    // null only when the operands are not usable at all
+    AST::FunctionCallExprNode *build_operator_call(
+        Parser::Payload &payload,
+        const std::string &decorated_name,
+        const TokenReference &at,
+        std::vector<AST::ExprNode *> operands);
+
     // the argument list of a call through a *value*: `$f(1, 2)`. the cursor sits on the `(`.
     //
     // no overload set and nothing to look up, so unlike parse_funccall there is no settlement to drive -

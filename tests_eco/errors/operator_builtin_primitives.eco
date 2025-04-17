@@ -1,0 +1,5 @@
+// the built-in meaning wins for two primitives, so this would register, mangle, be emitted, and then
+// never fire. refused at the declaration rather than left as a silent no-op
+operator (int32 $a) + (int32 $b): int32 { return 1; }
+
+echo 1;

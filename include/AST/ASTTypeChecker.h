@@ -41,6 +41,7 @@ namespace AST
         void visit_assign(AssignNode &node) override;
         void visitTypeCast(TypeCastNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
+        void visitUnaryExpr(UnaryExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
 
     private:

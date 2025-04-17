@@ -1,0 +1,20 @@
+// an operand that is a *borrow* - `$this` inside a method body is a `Point&`. the operator is
+// resolved against the value the borrow reads as, not against the pointer it is stored as, so this
+// is a call and not pointer arithmetic
+struct Point {
+    float64 $x;
+
+    function plus(Point& $o): Point {
+        return $this + $o;
+    }
+}
+
+// two overloads on purpose: with one candidate, overload resolution wins without consulting types
+// at all, so the borrow-to-value fit only shows up once there is a choice to make
+operator (Point $a) + (Point $b): Point { return Point($a->x + $b->x); }
+operator (Point $a) + (int32 $b): Point { return Point($a->x + $b); }
+
+$a = Point(1.0);
+$b = Point(2.0);
+$c = $a->plus(&$b);
+echo $c->x;

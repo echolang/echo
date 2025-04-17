@@ -1,0 +1,13 @@
+// a custom infix word operator, and the default precedence of one
+operator (float64 $a) avg (float64 $b): float64 {
+    return ($a + $b) / 2.0;
+}
+
+echo 10.0 avg 20.0;
+
+// the default is looser than arithmetic and tighter than comparison, so the operands group first
+echo 1.0 + 2.0 avg 3.0 + 5.0;
+
+// a word declared as an operator is still an ordinary name: this is a call, not an operator use
+function avg(int32 $a, int32 $b, int32 $c): int32 { return $a + $b + $c; }
+echo avg(1, 2, 3);

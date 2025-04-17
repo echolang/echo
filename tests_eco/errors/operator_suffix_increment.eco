@@ -1,0 +1,6 @@
+// `$i++;` is a statement, dispatched straight to the variable parser and desugared into
+// `$i = $i + 1` so every arithmetic rule keeps one implementation. a declared suffix `++` would be
+// silently ignored at the only spelling of it that parses
+operator (int32 $a)++: int32 { return $a; }
+
+echo 1;

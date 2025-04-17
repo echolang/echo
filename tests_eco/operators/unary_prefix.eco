@@ -1,0 +1,20 @@
+// a unary prefix operator, spelled out of two ordinary tokens
+struct Flag { bool $on; }
+
+operator !!(Flag $f): bool {
+    return $f->on;
+}
+
+// ...and a prefix overload of a built-in symbol
+operator -(Flag $f): Flag {
+    return Flag(false);
+}
+
+$f = Flag(true);
+echo !!$f;
+
+$g = -$f;
+echo $g->on;
+
+// the built-in negation is untouched
+echo -5;

@@ -278,6 +278,40 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     }
 }
 
+AST::FunctionCallExprNode *Parser::build_operator_call(
+    Parser::Payload &payload,
+    const std::string &decorated_name,
+    const TokenReference &at,
+    std::vector<AST::ExprNode *> operands)
+{
+    for (const auto *operand : operands) {
+        if (operand == nullptr) {
+            return nullptr;
+        }
+    }
+
+    // the name is **virtual**, because no token in the source spells it: the decorated name is what
+    // FunctionRegistry keys the overload set on, and the position is the symbol, so a diagnostic about
+    // this call points at the operator a reader wrote. typed t_identifier so AST::is_print_call -
+    // which keys on t_echo - cannot mistake it for `echo`
+    const TokenReference name_token =
+        payload.context.make_virtual_token(decorated_name, Token::Type::t_identifier, at);
+
+    auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(name_token, std::move(operands));
+
+    // the **root** namespace, which is where every operator declaration registers. one symbol names
+    // one set for the whole program, so there is no outward walk to do and nothing an inner namespace
+    // could hide - see Parser::parse_operatordecl, which is the other half of that decision
+    call.lookup_namespace = &payload.collector.namespaces.root();
+
+    // driven, but not judged. an unresolved operator call is a legitimate intermediate state for the
+    // reason the header gives, and the fixpoint's finalizing sweep reports whatever is still
+    // unresolved when it runs out of rounds
+    resolve_funccall(payload, call);
+
+    return &call;
+}
+
 AST::FunctionCallExprNode *Parser::parse_member_call(
     Parser::Payload &payload,
     AST::ExprNode *receiver,

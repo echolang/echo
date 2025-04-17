@@ -1,0 +1,13 @@
+// an operator is an ordinary function, so a use site no declaration answers gets the ordinary
+// no-matching-overload diagnostic - listing the candidates the way any other call would
+struct A { int32 $x; }
+struct B { int32 $y; }
+
+operator (A $a) + (A $b): A { return $a; }
+operator (A $a) + (int32 $b): A { return $a; }
+
+$p = A(1);
+$q = B(2);
+$r = $p + $q;
+
+echo 1;

@@ -1,0 +1,6 @@
+# the one operator case that goes through make_exec. `build` also defaults to release and
+# always optimizes, so this is not another view of `run`
+mode: build
+
+--- OUT --->
+2000

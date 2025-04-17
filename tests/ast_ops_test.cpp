@@ -58,15 +58,151 @@ TEST_CASE( "predefined token operators", "[AST Ops]" )
 }
 
 
-TEST_CASE( "custom token operators", "[AST Ops]" ) 
+namespace
+{
+    // match_at needs the bound of the region being parsed, which in a real parse comes off the
+    // cursor. here the whole collection is the region
+    AST::OperatorRegistry::Match match_from(
+        const AST::OperatorRegistry &registry, const AST::Module &tm, size_t index)
+    {
+        return registry.match_at(tm.tokens[index], tm.tokens.size() - index);
+    }
+}
+
+TEST_CASE( "a declared symbol is matched as a token sequence", "[AST Ops]" )
 {
     auto registry = AST::OperatorRegistry();
- 
-    auto tm = EchoTests::tests_make_tokenized_module(
-        "<=>" 
-    );
 
-    registry.register_custom_op("<=>", 10, AST::OpAssociativity::left);
+    SECTION( "a multi token symbol matches across its tokens" ) {
+        // `<=>` is not one token: the lexer sees `<=` and `>`, and nothing in it knows about custom
+        // operators. putting the two back together is the registry's job
+        auto tm = EchoTests::tests_make_tokenized_module("42 <=> 69");
 
-    
+        // before the declaration the leading `<=` is just the predefined operator it lexes as
+        REQUIRE( match_from(registry, tm, 1).token_count == 1 );
+        REQUIRE( match_from(registry, tm, 1).op->type == Token::Type::t_logical_leq );
+
+        registry.find_or_declare({"<=", ">"});
+
+        auto match = match_from(registry, tm, 1);
+        REQUIRE( match.has() );
+        REQUIRE( match.token_count == 2 );
+        REQUIRE( match.op->spelling == "<=>" );
+        REQUIRE( match.op->is_custom() );
+    }
+
+    SECTION( "a word symbol matches whole tokens, never a prefix of one" ) {
+        // the trap the old prefix-matching lexer entry had: `mm` matched the front of `mmap`
+        auto tm = EchoTests::tests_make_tokenized_module("mm mmap");
+
+        registry.find_or_declare({"mm"});
+
+        REQUIRE( match_from(registry, tm, 0).has() );
+        REQUIRE( match_from(registry, tm, 0).token_count == 1 );
+        REQUIRE_FALSE( match_from(registry, tm, 1).has() );
+    }
+
+    SECTION( "the tokens of one symbol have to be adjacent" ) {
+        auto tm = EchoTests::tests_make_tokenized_module("!! ! !");
+
+        registry.find_or_declare({"!", "!"});
+
+        REQUIRE( match_from(registry, tm, 0).has() );
+        REQUIRE( match_from(registry, tm, 0).token_count == 2 );
+
+        // `! !` is two tokens with a gap, so it is not the symbol
+        REQUIRE_FALSE( match_from(registry, tm, 2).has() );
+    }
+
+    SECTION( "the longest declared symbol wins" ) {
+        auto tm = EchoTests::tests_make_tokenized_module("1cm");
+
+        registry.find_or_declare({"c"});
+        registry.find_or_declare({"cm"});
+
+        // `cm` lexes as one identifier, so this is really about declaration order not deciding it
+        auto match = match_from(registry, tm, 1);
+        REQUIRE( match.has() );
+        REQUIRE( match.op->spelling == "cm" );
+    }
+
+    SECTION( "a match never runs past the end of the region" ) {
+        auto tm = EchoTests::tests_make_tokenized_module("42 <=>");
+
+        registry.find_or_declare({"<=", ">"});
+
+        // the last token of the region is `>`, so a two token symbol starting at `<=` fits exactly
+        REQUIRE( match_from(registry, tm, 1).token_count == 2 );
+
+        // ...and does not fit when the region stops one token short, which is what a module holding
+        // several files back to back looks like from inside one of them. it falls back to the
+        // predefined `<=` rather than reading a token that belongs to the next file
+        auto clipped = registry.match_at(tm.tokens[1], 1);
+        REQUIRE( clipped.token_count == 1 );
+        REQUIRE( clipped.op->type == Token::Type::t_logical_leq );
+    }
+
+    SECTION( "declaring a predefined spelling answers with the predefined operator" ) {
+        // `operator (Point $a) + (Point $b)` overloads `+`; it must not mint a shadowing custom
+        // `+`, which would retype every `$i++` in the program
+        AST::Operator *op = registry.find_or_declare({"+"});
+
+        REQUIRE( op != nullptr );
+        REQUIRE_FALSE( op->is_custom() );
+        REQUIRE( op->type == Token::Type::t_op_add );
+        REQUIRE( registry.get_operator("+") == op );
+    }
+
+    SECTION( "one symbol is one operator, however often it is declared" ) {
+        AST::Operator *first = registry.find_or_declare({"avg"});
+        AST::Operator *second = registry.find_or_declare({"avg"});
+
+        REQUIRE( first == second );
+        REQUIRE( registry.get_custom_operators().size() == 1 );
+    }
+}
+
+TEST_CASE( "a custom operator carries its own precedence and fixities", "[AST Ops]" )
+{
+    auto registry = AST::OperatorRegistry();
+
+    AST::Operator *op = registry.find_or_declare({"avg"});
+    REQUIRE( op != nullptr );
+
+    // undeclared precedence sits between the bitwise tier and comparison, so `1 + 2 avg 3 + 4`
+    // groups its operands before combining them
+    REQUIRE( op->precedence.sequence == AST::CUSTOM_OP_DEFAULT_PRECEDENCE );
+    REQUIRE( op->precedence.sequence > AST::Operator::get_precedence_for_token(Token::Type::t_op_add).sequence );
+    REQUIRE( op->precedence.sequence < AST::Operator::get_precedence_for_token(Token::Type::t_logical_eq).sequence );
+
+    // no declaration has claimed it yet, so the expression parser must not treat it as an operator
+    REQUIRE_FALSE( op->is_declared() );
+
+    op->declare_fixity(AST::OpFixity::t_infix);
+
+    REQUIRE( op->is_declared() );
+    REQUIRE( op->has_fixity(AST::OpFixity::t_infix) );
+    REQUIRE_FALSE( op->has_fixity(AST::OpFixity::t_prefix) );
+    REQUIRE_FALSE( op->has_fixity(AST::OpFixity::t_suffix) );
+}
+
+TEST_CASE( "the built in precedence tiers keep their order", "[AST Ops]" )
+{
+    // smaller binds tighter, and the tiers are spaced so a declared number has room between them.
+    // the numbers are published in book/concept/operators.md, so this is a contract
+    const auto seq = [](Token::Type type) {
+        return AST::Operator::get_precedence_for_token(type).sequence;
+    };
+
+    REQUIRE( seq(Token::Type::t_op_pow) < seq(Token::Type::t_op_mul) );
+    REQUIRE( seq(Token::Type::t_op_mul) < seq(Token::Type::t_op_add) );
+    REQUIRE( seq(Token::Type::t_op_add) < seq(Token::Type::t_op_shl) );
+    REQUIRE( seq(Token::Type::t_op_shl) < seq(Token::Type::t_logical_eq) );
+    REQUIRE( seq(Token::Type::t_logical_eq) < seq(Token::Type::t_logical_and) );
+    REQUIRE( seq(Token::Type::t_logical_and) < seq(Token::Type::t_logical_or) );
+    REQUIRE( seq(Token::Type::t_logical_or) < seq(Token::Type::t_assign) );
+
+    // zero is what is_expr_token reads as "this token cannot appear in an expression"
+    REQUIRE( seq(Token::Type::t_identifier) == 0 );
+    REQUIRE( seq(Token::Type::t_op_add) != 0 );
 }

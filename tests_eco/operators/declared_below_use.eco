@@ -1,0 +1,15 @@
+// an operator may be declared anywhere and is valid everywhere: both the operator and the struct it
+// is declared over sit below every use site. the symbol is published by the type-name pass, which
+// completes over every file before any expression is parsed
+$a = Point(1.0);
+$b = Point(2.0);
+$c = $a + $b;
+echo $c->x;
+
+$d = 3.0 avg 5.0;
+echo $d;
+
+operator (Point $p) + (Point $q): Point { return Point($p->x + $q->x); }
+operator (float64 $p) avg (float64 $q): float64 { return ($p + $q) / 2.0; }
+
+struct Point { float64 $x; }

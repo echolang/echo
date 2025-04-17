@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:17
+'blah' is already declared as an infix operator. One symbol cannot be both infix and suffix - '$a blah $b' would not say which.
+Begin: 'blah'
+End: 'blah'
+Code excerpt:
+ [4]> operator (S $a) blah (S $b): int32 { return 1; }
+ [5]> operator (S $a) blah : int32 { return 2; }
+                      ^
+ [6]> 
+
+Critical issues found, cannot compile.

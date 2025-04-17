@@ -1,6 +1,7 @@
 #include "AST/ASTMangler.h"
 
 #include "AST/ASTNamespace.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeNode.h"
@@ -42,7 +43,13 @@ AST::mangled_id_t AST::mangle_function_name(const AST::FunctionDeclNode *func_de
         mangled_name += "M" + func_decl->owner_type->mangled_token() + "_";
     }
 
-    mangled_name += func_decl->func_name() + "Z";
+    // an operator's name is a decorated spelling of its symbol - "operator +", "operator suffix mm" -
+    // which is what makes one symbol's overload set distinct from another's, and is therefore not
+    // optional here. but it holds a space and whatever the symbol is spelled out of, and an llvm
+    // symbol carrying those is unportable at best, so it goes through the one escape
+    mangled_name += (func_decl->is_operator()
+        ? AST::mangle_operator_name(func_decl->func_name())
+        : func_decl->func_name()) + "Z";
 
     for (auto arg : func_decl->args) {
         mangled_name += "Z" + arg->type_node()->type.get_mangled_name();

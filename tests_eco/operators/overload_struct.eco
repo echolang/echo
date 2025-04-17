@@ -1,0 +1,24 @@
+// operator overloading, book/concept/operators.md
+struct Point {
+    float64 $x;
+    float64 $y;
+}
+
+operator (Point $a) + (Point $b): Point {
+    return Point($a->x + $b->x, $a->y + $b->y);
+}
+
+operator (Point $a) + (int32 $b): Point {
+    return Point($a->x + $b, $a->y + $b);
+}
+
+$pointA = Point(1.0, 1.0);
+$pointB = Point(2.0, 2.0);
+
+$pointC = $pointA + $pointB;
+$pointD = $pointA + 2;
+
+echo $pointC->x;
+echo $pointC->y;
+echo $pointD->x;
+echo $pointD->y;

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:21
+operator '+' is built in for these operand types, so this declaration would never be used. An overload of a built-in operator needs at least one declared type among its operands.
+Begin: '+'
+End: '+'
+Code excerpt:
+ [2]> // never fire. refused at the declaration rather than left as a silent no-op
+ [3]> operator (int32 $a) + (int32 $b): int32 { return 1; }
+                          ^
+ [4]> 
+
+Critical issues found, cannot compile.

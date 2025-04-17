@@ -42,14 +42,14 @@ namespace AST
     // rather than a filter
     //
     // this used to recognise the conversion by the member's *spelling*, a published `view_method_name`
-    // constant the compiler compared every method against. the comment there said `todo/A18` would
-    // eventually replace it with a declarable operator, and **that was wrong**: every form A18
-    // specifies is operand syntax the user writes - infix, prefix, suffix, each with operands and a
-    // precedence - while an implicit conversion is inserted at an argument position where the user
-    // wrote nothing at all. there is no operand for A18 to hang it on, so A18 could never have taken
-    // it over, and the mislabel is what let a magic name look temporary. the spelling is `#[implicit]`
-    // and it is declared. (`todo/C4`'s bracket is a genuinely different case: `$a[$i]` *is* operand
-    // syntax, and that one really is A18's to take)
+    // constant the compiler compared every method against. the comment there said operator overloading
+    // would eventually replace it with a declarable operator, and **that was wrong**: every form the
+    // operator grammar has is operand syntax the user writes - infix, prefix, suffix, each with
+    // operands and a precedence - while an implicit conversion is inserted at an argument position
+    // where the user wrote nothing at all. there is no operand to hang it on, so `operator` could
+    // never have taken it over, and the mislabel is what let a magic name look temporary. the spelling
+    // is `#[implicit]` and it is declared. (`todo/C4`'s bracket is a genuinely different case:
+    // `$a[$i]` *is* operand syntax, and that one really is the operator grammar's to take)
     //
     // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
     // t_declared_conversion, below every built-in conversion, so an overload taking the owning type

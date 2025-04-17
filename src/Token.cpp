@@ -97,6 +97,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_destructor: return "destructor";
         case Token::Type::t_instanceof: return "instanceof";
         case Token::Type::t_mv: return "mv";
+        case Token::Type::t_operator: return "operator";
 
         default: return "[undefined]";
     }
@@ -165,6 +166,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_destructor: return "destructor";
         case Token::Type::t_instanceof: return "instanceof";
         case Token::Type::t_mv: return "mv";
+        case Token::Type::t_operator: return "operator";
     
         default: 
             assert(false && "undefined operator type");

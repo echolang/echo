@@ -6,6 +6,7 @@
 #include "Parser/ExternParser.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/AttributeParser.h"
+#include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -36,6 +37,24 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // file declares into, so this pass has to follow it to push a symbol into the right one
         if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
+            continue;
+        }
+
+        // **an operator's symbol is published here, a whole pass earlier than any other declaration
+        // publishes anything.** the expression parser has to know whether a symbol is an operator
+        // before it parses a single use site, and the *declaration* pass already parses expressions
+        // itself - a struct property's `= ...` initializer - so publishing there would make a
+        // property initializer's operators depend on which file happened to be walked first
+        //
+        // only the symbol, its fixity and its precedence: no types, no namespace, no signature. that
+        // is what makes this reachable from a pass whose whole contract is that it validates nothing
+        // about declarations, and it is the deleted lexer prepass's job done at the right layer
+        if (starts_operatordecl(cursor)) {
+            publish_operator_symbol(payload, read_operator_header(payload));
+
+            // the rest of the declaration - its operand lists, return type and body - is walked token
+            // by token by the loop below, which is what keeps `brace_depth` right
+            pending_body = nullptr;
             continue;
         }
 
@@ -170,6 +189,12 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
         // no longer fight over the same slot
         if (starts_funcdecl(cursor)) {
             parse_funcdecl(payload);
+        }
+        else if (starts_operatordecl(cursor)) {
+            // the *signature*. the symbol itself was published a pass ago, in parse_type_names, so
+            // this pass is free to name a type from any file in its operand list - and a use site
+            // written above this declaration already knows the symbol is an operator
+            parse_operatordecl(payload);
         }
         else if (starts_typedecl(cursor)) {
             // the name is already a symbol - parse_type_names pushed it, over every file, before

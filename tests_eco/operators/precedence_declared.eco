@@ -1,0 +1,13 @@
+// a declared precedence sits on the same scale as the built-in tiers, where `*` is 40
+operator(35, left) (int32 $a) tight (int32 $b): int32 { return $a + $b; }
+operator(45, left) (int32 $a) loose (int32 $b): int32 { return $a + $b; }
+
+// 35 binds tighter than `*`: (2 tight 3) * 4
+echo 2 tight 3 * 4;
+
+// 45 binds looser than `*`: 2 loose (3 * 4)
+echo 2 loose 3 * 4;
+
+// right associativity, declared
+operator(45, right) (int32 $a) rassoc (int32 $b): int32 { return $a - $b; }
+echo 10 rassoc 5 rassoc 2;

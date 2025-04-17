@@ -1,0 +1,9 @@
+// every other declaration written in a block is scoped to it. an operator's symbol is visible to the
+// whole program - the shunting yard has one precedence table - so it cannot be scoped to one
+struct S { int32 $x; }
+
+{
+    operator (S $a) + (S $b): S { return $a; }
+}
+
+echo 1;

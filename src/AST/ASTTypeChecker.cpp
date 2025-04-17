@@ -1,5 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
+#include "AST/ASTOperatorSemantics.h"
+
 #include "AST/ASTModule.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
@@ -639,27 +641,66 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
                     lhs.get_type_desciption(), rhs.get_type_desciption()));
         }
 
-        // `==` and `!=` over two class handles is an address comparison, which codegen does lower -
-        // it is how two references are told apart and how a null one is detected. a null operand
-        // types as void here rather than as a class, so it is admitted the same way. everything
-        // else on a struct or a class operand still has no lowering at all
-        const bool class_identity =
-            node.op_node->op->is_identity_comparison()
-            && (lhs.is_class() || rhs.is_class())
-            && (lhs.is_class() || lhs_null)
-            && (rhs.is_class() || rhs_null);
+        // **the one predicate**, AST::binary_has_builtin_meaning, which the parser reads to decide
+        // whether to look for a declared `operator` and this reads to report that none was found. it
+        // used to be spelled out here, and the parser asking the same question its own way is exactly
+        // how the two would come to different answers - one of them silently
+        //
+        // the operands are handed over as **adjusted** facts: this pass runs after PointerAdjuster, so
+        // every deref is already a node and result_type() is the truth. the parser normalizes
+        // differently, and that asymmetry is the reason those are two named constructors
+        // an undeterminable operand needs no guard here: has_complex_type() is false for unknown, void
+        // and a bare type parameter, so the predicate already answers "there is a meaning" for them and
+        // leaves the diagnostic to whichever pass actually knows what went wrong
+        if (!binary_has_builtin_meaning(
+                node.op_node->op, adjusted_operand(node.lhs), adjusted_operand(node.rhs))) {
 
-        if (!class_identity && (lhs.has_complex_type() || rhs.has_complex_type())) {
+            // **a declared operator that did not fire** is a different thing to say, and the only
+            // place it can be said. the parser decides from the operand types it can see, so inside a
+            // generic body it saw `T`, took the built-in path, and this node is the substituted clone -
+            // a use site that looks like it should have worked. see todo/A32
+            const bool declared_but_unreached = node.op_node->op->is_declared()
+                && node.op_node->op->has_fixity(OpFixity::t_infix);
+
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.op_node->token_literal),
-                fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'",
-                    node.op_node->token_literal.value(),
-                    lhs.get_type_desciption(),
-                    rhs.get_type_desciption()));
+                declared_but_unreached
+                    ? fmt::format(
+                        "operator '{}' is declared for '{}' and '{}', but an operator applied to a "
+                        "type parameter is not resolved yet - the operand types are only known after "
+                        "substitution. Call the operator's function form instead. See todo/A32.",
+                        node.op_node->op->spelling,
+                        lhs.get_type_desciption(),
+                        rhs.get_type_desciption())
+                    : fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'",
+                        node.op_node->op->spelling,
+                        lhs.get_type_desciption(),
+                        rhs.get_type_desciption()));
         }
     }
 
     RecursiveVisitor::visitBinaryExpr(node);
+}
+
+// there was no unary arm here at all, so `-$point` fell through to a context-free codegen throw with
+// no location and nothing for the user to act on. the same predicate answers it, and the same
+// "an operand that says nothing is somebody else's diagnostic" rule applies
+void TypeChecker::visitUnaryExpr(UnaryExprNode &node)
+{
+    if (node.expr != nullptr) {
+        const Operator *op = _collector.operators.get_operator(node.token_operator);
+        const OperandFacts operand = adjusted_operand(node.expr);
+
+        if (!unary_has_builtin_meaning(op, operand)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_operator),
+                fmt::format("operator '{}' is not supported on an operand of type '{}'",
+                    node.token_operator.value(),
+                    operand.type.get_type_desciption()));
+        }
+    }
+
+    RecursiveVisitor::visitUnaryExpr(node);
 }
 
 // `const` is a promise about the storage an assignment reaches, and after the adjustment pass the

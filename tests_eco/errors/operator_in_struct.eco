@@ -1,0 +1,9 @@
+// an operator is not a member of either of its operand types: it is a free declaration whose symbol
+// is global and whose precedence is one entry in one table, so a struct body has nothing to own
+struct S {
+    int32 $x;
+
+    operator (S $a) + (S $b): S { return $a; }
+}
+
+echo 1;

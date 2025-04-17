@@ -17,6 +17,7 @@
 #include "Parser/ExternParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/OperatorDeclParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -75,6 +76,11 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (starts_funcdecl(cursor)) {
             parse_funcdecl(payload);
+        }
+        else if (starts_operatordecl(cursor)) {
+            // the body. the signature was registered by the declaration pass and the symbol a pass
+            // before that, so by here everything about the operator is known except what it does
+            parse_operatordecl(payload);
         }
         else if (starts_typedecl(cursor)) {
             parse_typedecl(payload);

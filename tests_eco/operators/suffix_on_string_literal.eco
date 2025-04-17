@@ -1,0 +1,22 @@
+// a suffix operator applied directly to a string literal - the resource handle shape from
+// book/concept/operators.md. a literal does not route through the postfix chain, so this is the
+// case parse_suffix_operator_chain's second caller exists for
+//
+// the hash is computed at runtime: folding it to a constant when every operand is known is an
+// optimization the chapter mentions and this does not do
+operator (string $s)_handle: usize {
+    usize $hash = 5381;
+    usize $i = 0;
+    while ($i < $s->size()) {
+        $hash = $hash * 33 + $s->byte_at($i);
+        $i = $i + 1;
+    }
+    return $hash % 100000;
+}
+
+$handle = "albedo"_handle;
+echo $handle;
+
+// ...and the same operator over a variable, which does route through the chain
+$name = "albedo";
+echo $name _handle;

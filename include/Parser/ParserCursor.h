@@ -56,6 +56,13 @@ namespace Parser
             return _index >= range_size();
         }
 
+        // how many tokens are left in *this* range. a module's TokenCollection holds every one of its
+        // files, so anything walking forward token by token has to be handed this bound rather than
+        // trusting TokenReference::next() - which would happily run into the next file
+        inline size_t remaining() const {
+            return is_done() ? 0 : range_size() - _index;
+        }
+
         inline bool is_empty() const {
             return range_size() == 0;
         }

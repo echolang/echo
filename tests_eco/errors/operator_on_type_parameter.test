@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 9:44
+operator '+' is declared for 'Point' and 'Point', but an operator applied to a type parameter is not resolved yet - the operand types are only known after substitution. Call the operator's function form instead. See todo/A32.
+Begin: '+'
+End: '+'
+Code excerpt:
+ [8]> 
+ [9]> function add<T>(T $a, T $b): T { return $a + $b; }
+                                                 ^
+ [10]> 
+
+Critical issues found, cannot compile.

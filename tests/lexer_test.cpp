@@ -306,27 +306,43 @@ TEST_CASE("Predefined Keywords", "[lexer]")
     REQUIRE( tokens[3].type() == Token::Type::t_bool_literal );
 }
 
-// tests trying to parse custom operator symbols
-TEST_CASE( "Operator Prepass", "[lexer]" ) {
+// the lexer has no knowledge of custom operators at all - that is the design, not an omission. a
+// declared symbol lexes as the ordinary tokens it is spelled out of, and AST::OperatorRegistry
+// matches the sequence in the parser (see the match_at cases in ast_ops_test.cpp)
+//
+// this used to be an "Operator Prepass" test over a per-file registry the lexer fed back into
+// itself. what it pinned that is still worth pinning is that `<=>` reaches the parser *at all*, as
+// two tokens the registry can put back together
+TEST_CASE( "A custom operator symbol lexes as ordinary tokens", "[lexer]" ) {
     Lexer lexer;
     TokenCollection tokens;
-    AST::OperatorRegistry ops;
 
-    std::string code = 
+    std::string code =
         "operator (int $foo) <=> (int $bar) : int {"
         "    return $foo + $bar;"
         "}"
         "echo 42 <=> 69";
 
-    lexer.tokenize_prepass_operators(code, ops);
-    lexer.tokenize(tokens, code, &ops);
+    lexer.tokenize(tokens, code);
 
-    REQUIRE( tokens.tokens.size() == 23 );
-    REQUIRE( tokens.tokens[20].type == Token::Type::t_integer_literal );
-    REQUIRE( tokens.tokens[21].type == Token::Type::t_op_custom );
-    REQUIRE( tokens.tokens[22].type == Token::Type::t_integer_literal );
+    REQUIRE( tokens.tokens[0].type == Token::Type::t_operator );
 
-    REQUIRE( tokens.token_values[21] == "<=>" );
+    // `echo 42 <=> 69` is the tail, so index off the end rather than counting the declaration's
+    // tokens - which would make this test fail for the wrong reason if the grammar around it moved
+    // five tokens, because `<=>` is two of them - which is the whole point
+    const size_t tail = tokens.tokens.size() - 5;
+
+    // `<=>` is `<=` then `>`, adjacent - the two halves the registry's longest-match reassembles
+    REQUIRE( tokens.tokens[tail].type == Token::Type::t_echo );
+    REQUIRE( tokens.tokens[tail + 1].type == Token::Type::t_integer_literal );
+    REQUIRE( tokens.tokens[tail + 2].type == Token::Type::t_logical_leq );
+    REQUIRE( tokens.tokens[tail + 3].type == Token::Type::t_close_angle );
+    REQUIRE( tokens.tokens[tail + 4].type == Token::Type::t_integer_literal );
+
+    // and no token anywhere carries t_op_custom, which is now only an Operator discriminator
+    for (const auto &token : tokens.tokens) {
+        REQUIRE( token.type != Token::Type::t_op_custom );
+    }
 }
 TEST_CASE( "The pointer-of operator lexes without disturbing colons", "[lexer][pointer]" )
 {

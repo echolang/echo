@@ -1,0 +1,6 @@
+// an operator is an expression, so a void one is a statement written as an operator
+struct S { int32 $x; }
+
+operator (S $a) sum (S $b): void { return; }
+
+echo 1;

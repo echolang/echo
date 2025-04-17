@@ -1,0 +1,15 @@
+// the parser decides which meaning an operator has from the operand types it can see, and inside a
+// generic body that is a bare type parameter. so the declared operator is not reached even though
+// the instantiation's operands would match it - see todo/A32
+struct Point { float64 $x; }
+
+operator (Point $a) + (Point $b): Point { return Point($a->x + $b->x); }
+operator (Point $a) + (int32 $b): Point { return Point($a->x + $b); }
+
+function add<T>(T $a, T $b): T { return $a + $b; }
+
+$p = Point(1.0);
+$q = Point(2.0);
+$r = add<Point>($p, $q);
+
+echo 1;

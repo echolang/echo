@@ -84,6 +84,7 @@ public:
         t_destructor,               // destructor
         t_instanceof,               // instanceof
         t_mv,                       // mv
+        t_operator,                 // operator
         t_unknown
     };
 

@@ -1,5 +1,6 @@
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
 #include "AST/ExprNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -551,6 +552,36 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     auto lhs_expr = lhs.unsafe_ptr<AST::ExprNode>();
     auto rhs_expr = rhs.unsafe_ptr<AST::ExprNode>();
 
+    if (lhs_expr == nullptr || rhs_expr == nullptr) {
+        return AST::make_void_ref();
+    }
+
+    // **a declared operator, before the built-in arms below.** an operator is a function, so all this
+    // does is hand the operands to the same overload resolution every call goes through - which is
+    // why nothing downstream of here has an operator case at all
+    //
+    // the gate is asked of the *operator table*, filled by the type-name pass, rather than of the
+    // overload set, filled by the declaration pass: this function runs during the declaration pass
+    // too, for a struct property's `= ...` initializer, and asking a half-filled overload set there
+    // would answer differently depending on which file was walked first
+    if (op_node != nullptr && op_node->op != nullptr && op_node->op->is_declared()
+        && op_node->op->has_fixity(AST::OpFixity::t_infix)
+        && !AST::binary_has_builtin_meaning(
+            op_node->op, AST::parse_time_operand(lhs_expr), AST::parse_time_operand(rhs_expr))) {
+
+        auto *call = Parser::build_operator_call(
+            payload,
+            AST::operator_function_name(op_node->op->spelling, AST::OpFixity::t_infix),
+            op_node->token_literal,
+            {lhs_expr, rhs_expr});
+
+        if (call == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        return AST::make_ref(*call);
+    }
+
     auto lhs_type = lhs_expr->result_type();
     auto rhs_type = rhs_expr->result_type();
 
@@ -605,7 +636,31 @@ AST::ExprNode *Parser::parse_expr(Parser::Payload &payload, AST::TypeNode *expec
     return ref.unsafe_ptr<AST::ExprNode>();
 }
 
-bool is_expr_token(Parser::Cursor &cursor)
+// a declared operator matching at the cursor, or {} - the sequence lookup the yard, the prefix
+// position and the suffix chain all go through, so "is there an operator here" is asked one way
+//
+// bounded by the cursor's range, because a module's token collection holds every one of its files
+// back to back and a multi-token symbol at the end of one would otherwise match into the next
+AST::OperatorRegistry::Match operator_match_at(Parser::Payload &payload, Parser::Cursor &cursor)
+{
+    if (cursor.is_done()) {
+        return {};
+    }
+
+    return payload.collector.operators.match_at(cursor.current(), cursor.remaining());
+}
+
+// does a **declared** operator with this fixity start at the cursor? the fixity is part of the
+// question because the three positions are different: a suffix-only `mm` must not be tried as an
+// infix operator, and a bare identifier must not become an operator just because some symbol
+// somewhere is spelled that way
+bool starts_declared_operator(Parser::Payload &payload, Parser::Cursor &cursor, AST::OpFixity fixity)
+{
+    const auto match = operator_match_at(payload, cursor);
+    return match.has() && match.op->is_declared() && match.op->has_fixity(fixity);
+}
+
+bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
 {
     if (cursor.is_done()) {
         return false;
@@ -638,6 +693,15 @@ bool is_expr_token(Parser::Cursor &cursor)
            // stop at the keyword - parse_postfix_chain is what actually consumes it
            cursor.is_type(Token::Type::t_instanceof) ||
            cursor.is_type(Token::Type::t_open_bracket) ||
+           // a declared **prefix** operator, which may be spelled out of tokens nothing else in this
+           // list admits - `!!` is two t_exclamation, and neither has a precedence. without this the
+           // loop below never enters for `echo !!'hello';`, `expr_parts` stays empty, and the
+           // sanity assert at the end of parse_expr_ref takes the compiler down
+           //
+           // gated to prefix fixity so a bare identifier - which is already admitted above, as the
+           // start of a call - does not change meaning just because some suffix operator is spelled
+           // that way somewhere in the program
+           starts_declared_operator(payload, cursor, AST::OpFixity::t_prefix) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
 }
@@ -810,6 +874,47 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
         auto &member_access = payload.context.emplace_node<AST::MemberAccessNode>(current_ref, member_token);
         current_ref = AST::make_ref(member_access);
+    }
+
+    return current_ref;
+}
+
+// consumes every declared **suffix** operator following an operand, innermost first, so
+// `1m + 50cm` reads its units before the addition and `"x"_handle` is the whole operand
+//
+// here rather than in the shunting yard for parse_postfix_chain's reason - the yard pops two operands
+// for everything it sees - and its own function rather than an arm of that chain because it has a
+// second caller: a literal does not route through the postfix chain, and `1m` needs it to
+//
+// binding tighter than every binary operator is what the chapter's "the precedence of unary operators
+// is higher than that of binary operators" means, and it is structural here rather than a number
+const AST::NodeReference parse_suffix_operator_chain(Parser::Payload &payload, AST::NodeReference base)
+{
+    auto &cursor = payload.cursor;
+    auto current_ref = base;
+
+    while (current_ref.has() && starts_declared_operator(payload, cursor, AST::OpFixity::t_suffix)) {
+        const auto match = operator_match_at(payload, cursor);
+        const TokenReference symbol_token = cursor.current();
+
+        auto *operand = current_ref.unsafe_ptr<AST::ExprNode>();
+        if (operand == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        cursor.skip(match.token_count);
+
+        auto *call = Parser::build_operator_call(
+            payload,
+            AST::operator_function_name(match.op->spelling, AST::OpFixity::t_suffix),
+            symbol_token,
+            {operand});
+
+        if (call == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        current_ref = AST::make_ref(*call);
     }
 
     return current_ref;
@@ -1128,24 +1233,55 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
 {
     auto &cursor = payload.cursor;
 
-    auto op = payload.collector.operators.get_operator(cursor.current());
-    if (op != nullptr && (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add)) {
-        auto op_token = cursor.current();
-        cursor.skip();
+    // the prefix position: the built-in `-` / `+`, and any symbol a user declared prefix. consumed
+    // here rather than in the shunting yard, which has no notion of a one-operand operator - and that
+    // placement is also what gives the chapter's "the precedence of unary operators is higher than
+    // that of binary operators" for free, since the symbol and its operand are already one operand by
+    // the time the yard sees them
+    const auto match = operator_match_at(payload, cursor);
 
-        // recurse so chained prefixes like `- -$x` resolve right to left
+    const bool builtin_prefix = match.has()
+        && (match.op->type == Token::Type::t_op_sub || match.op->type == Token::Type::t_op_add);
+    const bool declared_prefix = match.has()
+        && match.op->is_declared() && match.op->has_fixity(AST::OpFixity::t_prefix);
+
+    if (builtin_prefix || declared_prefix) {
+        auto op_token = cursor.current();
+        cursor.skip(match.token_count);
+
+        // recurse so chained prefixes like `- -$x` and `!!-$x` resolve right to left
         auto operand = parse_prefix_unary(payload, expected_type);
         if (!operand.has()) {
             return AST::make_void_ref();
         }
 
+        auto *operand_expr = operand.unsafe_ptr<AST::ExprNode>();
+
+        // **which meaning applies is decided here, not at the symbol** - it takes the operand's type,
+        // and that is not known until the operand has been parsed. so a declared `operator -(Point)`
+        // does not stop `-$x` over an int32 from being an ordinary negation
+        if (declared_prefix
+            && !AST::unary_has_builtin_meaning(match.op, AST::parse_time_operand(operand_expr))) {
+
+            auto *call = Parser::build_operator_call(
+                payload,
+                AST::operator_function_name(match.op->spelling, AST::OpFixity::t_prefix),
+                op_token,
+                {operand_expr});
+
+            if (call == nullptr) {
+                return AST::make_void_ref();
+            }
+
+            return Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+        }
+
         // unary plus carries no semantics
-        if (op->type == Token::Type::t_op_add) {
+        if (match.op->type == Token::Type::t_op_add) {
             return operand;
         }
 
-        auto &unary = payload.context.emplace_node<AST::UnaryExprNode>(
-            op_token, operand.unsafe_ptr<AST::ExprNode>());
+        auto &unary = payload.context.emplace_node<AST::UnaryExprNode>(op_token, operand_expr);
         return AST::make_ref(unary);
     }
 
@@ -1159,7 +1295,10 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
         return inner;
     }
 
-    return parse_expr_node(payload, expected_type);
+    // an operand, and then whatever suffix operators follow it. this and the yard's own operand arm
+    // are the two operand positions in the grammar, so wrapping both is what makes `1m` and
+    // `$distance mm` the same rule rather than a literal special case
+    return parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type));
 }
 
 // an aggregate, so it is appended with `push_back({...})` rather than `emplace_back(a, b)`: the
@@ -1239,15 +1378,18 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     auto token = cursor.current();
     auto tvalue = token.value();
 
-    while(is_expr_token(cursor)) {
+    while(is_expr_token(payload, cursor)) {
         // if we have a closing parenthesis and the depth is 0, we can break the loop
         // because we have reached the end of the expression
         if (cursor.is_type(Token::Type::t_close_paren) && depth == 0) {
             break;
         }
 
-        // try to parse an operator
-        auto op = payload.collector.operators.get_operator(cursor.current());
+        // try to parse an operator. a *sequence* lookup, not a single-token one: a declared symbol may
+        // be spelled out of several ordinary tokens (`!!`, `<=>`), and the lexer knows nothing about
+        // any of them
+        const auto match = operator_match_at(payload, cursor);
+        const AST::Operator *op = match.op;
 
         // a '-' or '+' in operand position is a prefix unary operator, not a
         // binary one. detect it and parse the operand it applies to, otherwise
@@ -1256,8 +1398,12 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             (expr_parts.back().opnode != nullptr &&
              expr_parts.back().opnode->op->type != Token::Type::t_close_paren);
 
+        // ...and the same is true of any symbol declared in *prefix* position. without this arm a word
+        // operator in operand position - the plain call `avg(1.0, 2.0)`, where `avg` is also declared
+        // infix - would be read as an operator with nothing on its left
         if (op != nullptr && expects_operand &&
-            (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add))
+            (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add
+                || (op->is_declared() && op->has_fixity(AST::OpFixity::t_prefix))))
         {
             auto node = parse_prefix_unary(payload, expected_type);
             if (!node.has()) {
@@ -1267,10 +1413,26 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             continue;
         }
 
-        auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
+        // **an infix operator, or nothing.** a *custom* symbol declared only in prefix or suffix
+        // position is not one, and has to fall through so it is parsed as part of an operand instead:
+        // `500mm` reaches here after an operand, and reading a suffix-only `mm` as infix would make
+        // the yard pop two operands for it
+        //
+        // a built-in symbol is always usable here whatever anybody declared, because its infix meaning
+        // is the language's - `$a - $b` does not stop being a subtraction because somebody wrote a
+        // prefix `-` for a struct
+        // ...and a custom symbol in **operand** position is not an infix operator either, whatever it
+        // was declared as. that is what keeps a word operator usable as a function name: with `avg`
+        // declared infix, the ordinary call `avg(1.0, 2.0)` arrives here at offset 0, where reading it
+        // as an operator leaves the yard popping two operands for something with no left operand at
+        // all. falling through parses it as the operand it is
+        const bool usable_here = op != nullptr
+            && (!op->is_custom() || (op->has_fixity(AST::OpFixity::t_infix) && !expects_operand));
 
-        if (op != nullptr) {
-            cursor.skip();
+        if (usable_here) {
+            auto &opnode = payload.context.emplace_node<AST::OperatorNode>(cursor.current(), op);
+
+            cursor.skip(match.token_count);
             expr_parts.push_back({AST::make_void_ref(), &opnode});
 
             // if the operator is a open parenthesis, we increase the depth
@@ -1283,9 +1445,9 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             continue;
         }
 
-        // parse the next expression node
-        auto node = parse_expr_node(payload, expected_type);
-        
+        // parse the next expression node, plus any suffix operators applied to it
+        auto node = parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type));
+
         // if the node is empty 
         if (!node.has()) {
             return AST::make_void_ref();
@@ -1325,14 +1487,18 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             node_stack.pop();
 
             // let our binary expresssion parser take over
-            // there is not much to parse here but it will handle type casts 
+            // there is not much to parse here but it will handle type casts
             // and other node transformation to ensure echos expression behavior
-            node_stack.push(parse_binary_expr(
-                payload, 
-                part.opnode, 
-                left, 
-                right
-            ));
+            auto combined = parse_binary_expr(payload, part.opnode, left, right);
+
+            // it can fail now that a declared operator is resolved in there, and a void ref pushed
+            // back onto this stack would be the *next* operator's null left operand - dereferenced
+            // one iteration later, with nothing left to say where it came from
+            if (!combined.has()) {
+                return AST::make_void_ref();
+            }
+
+            node_stack.push(combined);
         }
         else {
             node_stack.push(part.node);

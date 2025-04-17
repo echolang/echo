@@ -1,0 +1,7 @@
+// one symbol binds one way everywhere, or two files would parse the same expression differently
+struct S { int32 $x; }
+
+operator(30, left) (S $a) op (S $b): int32 { return 1; }
+operator(50, left) (S $a) op (S $b): int32 { return 2; }
+
+echo 1;

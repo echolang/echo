@@ -41,11 +41,13 @@ AST::TokenizedFile AST::Module::tokenize(Lexer &lexer, const AST::File &file)
         throw std::runtime_error("Cannot tokenize a file that is not in this module");
     }
 
-    AST::OperatorRegistry ops;
-    lexer.tokenize_prepass_operators(file.content.value(), ops);
-
+    // the lexer knows nothing about custom operators, deliberately. a declared symbol is a
+    // *sequence of ordinary tokens* that AST::OperatorRegistry::match_at recognises in the parser,
+    // so there is nothing to pre-scan here and nothing to re-lex - which is also what lets a
+    // symbol declared in one file be used in another, since the operator table is filled by the
+    // module's first parse pass rather than per file at lex time
     size_t startindex = tokens.size();
-    lexer.tokenize(tokens, file.content.value(), &ops);
+    lexer.tokenize(tokens, file.content.value());
     size_t endindex = tokens.size();
 
     _tokenized_files.push_back(TokenizedFile {

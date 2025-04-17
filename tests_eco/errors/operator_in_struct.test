@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:5
+An operator cannot be declared inside a struct. Declare it at file scope - an operator is not a member of either of its operand types.
+Begin: 'operator'
+End: 'operator'
+Code excerpt:
+ [5]> 
+ [6]>     operator (S $a) + (S $b): S { return $a; }
+          ^
+ [7]> }
+
+Critical issues found, cannot compile.

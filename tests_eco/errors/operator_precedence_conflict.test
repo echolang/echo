@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:27
+'op' is already declared with precedence 30, so it cannot also be declared with precedence 50. A symbol binds one way everywhere.
+Begin: 'op'
+End: 'op'
+Code excerpt:
+ [4]> operator(30, left) (S $a) op (S $b): int32 { return 1; }
+ [5]> operator(50, left) (S $a) op (S $b): int32 { return 2; }
+                                ^
+ [6]> 
+
+---- Issue ----
+Issue at 5:27
+'operator op(S, S)' is already declared with these parameter types. Overloads must differ in their parameters.
+Begin: 'op'
+End: 'op'
+Code excerpt:
+ [4]> operator(30, left) (S $a) op (S $b): int32 { return 1; }
+ [5]> operator(50, left) (S $a) op (S $b): int32 { return 2; }
+                                ^
+ [6]> 
+
+Critical issues found, cannot compile.

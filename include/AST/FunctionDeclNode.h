@@ -17,18 +17,25 @@ namespace AST
     class Namespace;
     class AttributeNode;
 
-    // which of the four species a declaration is. spelled out rather than inferred because there
-    // are now three member kinds, and each is a different shape: a method's `$this` is a borrow
-    // parameter, a constructor's is a body-local of value type and its name is the struct's, a
-    // destructor takes nothing and returns nothing. it used to be readable off the tokens alone
-    // (a constructor is the only thing whose name token differs from its declaration token), which
-    // stopped being true the moment a second keyword-declared member existed
+    // which of the five species a declaration is. spelled out rather than inferred because each is
+    // a different shape: a method's `$this` is a borrow parameter, a constructor's is a body-local
+    // of value type and its name is the struct's, a destructor takes nothing and returns nothing,
+    // an operator's name is a decorated spelling of a symbol nobody can write. it used to be
+    // readable off the tokens alone (a constructor is the only thing whose name token differs from
+    // its declaration token), which stopped being true the moment a second keyword-declared member
+    // existed
     enum class MemberKind
     {
         t_free,
         t_method,
         t_constructor,
         t_destructor,
+
+        // declared `operator (Point $a) + (Point $b) : Point`. a *free* function in every structural
+        // sense - null owner_type, registered through FunctionRegistry like a constructor - and this
+        // tag is what the two readers that must know it apart read: the mangler, whose name has to
+        // survive being a symbol, and the diagnostics, which say "operator" rather than "function"
+        t_operator,
     };
 
     class FunctionDeclNode : public Node
@@ -81,6 +88,10 @@ namespace AST
 
         inline bool is_destructor() const {
             return member_kind == MemberKind::t_destructor;
+        }
+
+        inline bool is_operator() const {
+            return member_kind == MemberKind::t_operator;
         }
 
         inline bool is_member() const {

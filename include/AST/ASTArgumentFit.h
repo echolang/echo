@@ -26,6 +26,15 @@ namespace AST
         // implicitly. see AST::CallResolver::coerce_arguments, which performs exactly this case
         t_borrow,
 
+        // the mirror of it: the argument is a place holding a non-nullable borrow and the parameter
+        // wants the value, so the read goes one level through. PointerAdjuster::as_value_for already
+        // emits that deref - this rank is only the *scoring* of it, which was missing
+        //
+        // beside t_borrow rather than anywhere else because it is the same class of adjustment, and
+        // the two can never compete for one argument: one needs a pointer parameter and a value
+        // argument, the other the reverse
+        t_read_through,
+
         // a numeric conversion that stays inside its family and cannot lose anything: a wider
         // integer of the same signedness, or a wider float. ranked above a plain conversion so
         // that `w(int64)` and `w(float64)` called with an int32 resolves to the integer one
@@ -138,6 +147,28 @@ namespace AST
             const ValueType pointee = ValueType::make_mutable(to.pointee());
             if (ValueType::make_mutable(from) == pointee) {
                 return ArgumentFit::t_borrow;
+            }
+        }
+
+        // reading one level *through* a borrow to fill a value parameter, which is what
+        // `take($b)` means for a `Point& $b` and a `Point` parameter. the deref is inserted
+        // afterwards by PointerAdjuster::as_value_for, exactly as the borrow arm's address-of is
+        // inserted by CallResolver - so both arms score a wrapping that a later pass performs
+        //
+        // AST::unify_type already decays a pointer argument to its pointee for a value parameter
+        // (its `allow_decay` arm), so without this rank inference named an instance that scoring
+        // then rejected. with one candidate the disagreement was invisible, because matching rule 2
+        // wins without consulting types at all; with two it was a hard "no overload accepts these
+        // arguments", so adding an unrelated overload broke a call that had always compiled
+        //
+        // **non-nullable only.** reading through a `ptr<T>` that may be null is an unchecked
+        // dereference, and the one narrowing that does emit a check goes the other way
+        // (book/concept/pointers_and_refs_v2.md, "Nullability"). a nullable argument stays t_none,
+        // which is what it already was
+        if (from.is_pointer() && !from.is_nullable() && !to.is_pointer()
+            && expr != nullptr && is_place_expression(*expr)) {
+            if (ValueType::make_mutable(value_type_of(from)) == ValueType::make_mutable(to)) {
+                return ArgumentFit::t_read_through;
             }
         }
 

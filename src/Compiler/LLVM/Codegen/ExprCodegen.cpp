@@ -901,7 +901,19 @@ void ExprCodegen::gen_null(AST::NullNode &node)
         llvm::PointerType::get(*_ctx.llvm_context, 0)));
 }
 
+// **nothing reaches this, and nothing should.** an `OperatorNode` carries a symbol's identity and
+// precedence for the parser; it is not a value. `gen_binary_expr` reads its operator without visiting
+// it, a *declared* operator is lowered as an ordinary FunctionCallExprNode rather than as a node kind
+// of its own, and `visitOperator` on the recursive visitor is a no-op
+//
+// so this is a throw rather than the empty body it used to be. every other expression visitor leaves
+// exactly one value on `value_stack`, and a silent no-op here desynced it - a defect nothing in the
+// IR could point at afterwards (todo/X1)
 void ExprCodegen::gen_operator(AST::OperatorNode &node)
 {
+    throw Compiler::InternalCompilerException(fmt::format(
+        "an operator node reached codegen: '{}'. an operator is not a value - a declared one is "
+        "lowered as a call, and a built-in one is read by gen_binary_expr without being visited",
+        node.token_literal.value()));
 }
 };
