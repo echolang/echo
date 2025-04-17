@@ -1,0 +1,279 @@
+/**
+ * A growable, contiguous, **owning** sequence of one element type.
+ *
+ * `mem::alloc<T>(n)` gives you memory; this gives you an owner. It knows how many elements it
+ * holds, it knows how much room it has, it grows when you need more, and when its owner goes out of
+ * scope the buffer goes with it. That one difference is what the whole type is.
+ *
+ * Deliberately **not** shaped like `string`. A string is a window plus a reference-counted buffer,
+ * so copying one is a retain and a substring shares its parent's bytes. An array is a value you
+ * own: `$b = $a` duplicates the elements, because that is the honest default for a value type and
+ * anything cheaper would alias silently. Borrow it with `&$a` when the callee only reads, `mv` it
+ * when you are handing it over, and reach for `->clone()` when you want the copy to be visible at
+ * the call site rather than implied by an `=`.
+ *
+ * **The known hole: an element type that owns something.** The copy constructor below is a
+ * `mem::copy`, an element-wise *bitwise* copy, which is correct exactly when `T` owns nothing. An
+ * `Array<Array<int32>>` would need a recursive per-element copy, and there is no way to ask whether
+ * a type owns anything - constraints are a set of concrete types, not a capability. So a nested
+ * owner compiles and is wrong, rather than being refused. See book/concept/arrays.md,
+ * "Not yet specified".
+ *
+ * Counts, capacities and indices are `usize` throughout, matching `mem::`. There is no allocator
+ * parameter and deliberately none yet: mem::alloc is allocator-free and Echo has no function
+ * pointers, so a per-container allocator would be an invented ABI. The intended future shape is a
+ * monomorphized Array<T, A> plus mem::alloc_with, which is purely additive.
+ */
+struct Array<T>
+{
+    ptr<T> $data;
+    usize $len;
+    usize $cap;
+
+    /**
+     * An empty array that has not allocated anything.
+     *
+     * A null buffer is a legitimate state and every method below is written for it: `mem::realloc`
+     * over a null pointer allocates, and `mem::free` over one is a no-op. So there is no
+     * "uninitialized" case separate from "empty".
+     */
+    constructor()
+    {
+        $this->data:$ = null;
+        $this->len = 0;
+        $this->cap = 0;
+    }
+
+    /**
+     * The deep copy. Recognised rather than declared - any constructor taking one non-nullable
+     * borrow of its own type is the copy constructor (`AST::is_copy_constructor`), which is what
+     * makes `$b = $a` and `Array<int32>($a)` the same operation.
+     *
+     * Written out because a declared destructor disqualifies the synthesized copy, and rightly so:
+     * a bitwise duplicate of a struct holding a heap pointer is two owners of one buffer.
+     *
+     * Spelled `Array<T>&`, not `Array&`. Inside a generic struct the bare name is the *template*,
+     * which is not a type; only the applied form matches.
+     */
+    constructor(Array<T>& $other)
+    {
+        $this->data:$ = null;
+        $this->len = 0;
+        $this->cap = 0;
+
+        // an empty source allocates nothing, so an empty array copies to an empty array rather than
+        // to a zero-length allocation
+        //
+        // one branch rather than an early `return`, and that is a limitation being worked around
+        // rather than a preference: a constructor's `return` hands back `$this`, and the ownership
+        // pass merges a returning branch's moved state into the fall-through instead of treating the
+        // return as an exit - so an early return out of an *owning* type's constructor reads as a
+        // conditional move. see todo/C7
+        if ($other->len > 0) {
+            $this->data:$ = mem::alloc<T>($other->len);
+            $this->cap = $other->len;
+            $this->len = $other->len;
+
+            mem::copy<T>($this->data, $other->data, $other->len);
+        }
+    }
+
+    /**
+     * Releases the buffer. Runs at the end of the scope that owns the array, once.
+     *
+     * It does **not** destroy the elements, and that is the hole in the header rather than an
+     * oversight here: there is no way to ask whether `T` needs destroying, so there is nothing to
+     * call. For every `T` the copy above is correct for, there is also nothing to do.
+     */
+    destructor()
+    {
+        mem::free<T>($this->data);
+    }
+
+    /**
+     * How many elements are in it.
+     */
+    function count() : usize
+    {
+        return $this->len;
+    }
+
+    /**
+     * How many it has room for before it has to grow.
+     */
+    function capacity() : usize
+    {
+        return $this->cap;
+    }
+
+    /**
+     * True when it holds no elements. Says nothing about capacity.
+     */
+    function is_empty() : bool
+    {
+        if ($this->len > 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Makes room for at least `$count` elements without changing `count()`.
+     *
+     * Doubling rather than fitting exactly, so a run of appends costs an amortized constant each
+     * instead of being O(n²). Call it up front when you already know the size - that is the one
+     * allocation for the whole loop.
+     *
+     * **This may move the buffer**, so every borrow into the array is stale afterwards: every
+     * `Slice<T>` you took, every `&$a[$i]`. See book/concept/arrays.md, "Growth and invalidation".
+     */
+    function reserve(usize $count) : void
+    {
+        if ($this->cap >= $count) {
+            return;
+        }
+
+        usize $grown = $this->cap * 2;
+
+        if ($grown < $count) {
+            $grown = $count;
+        }
+
+        // re-seated through `:$`, because realloc hands back an address rather than writing through
+        // the old one
+        $this->data:$ = mem::realloc<T>($this->data, $grown);
+        $this->cap = $grown;
+    }
+
+    /**
+     * Appends one element. Exactly what `$a[] = $value` means, written as a call.
+     *
+     * The body *is* `$a[] = $value`, so the growth, the fresh-slot rule and the append itself have
+     * one implementation rather than two that could drift.
+     */
+    function push(T $value) : void
+    {
+        $this[] = $value;
+    }
+
+    /**
+     * Grows by one and hands back a borrow of the new element, so it can be filled in place.
+     *
+     * For a value that has to be built field by field, which is the case a single expression cannot
+     * cover. `&$a[]` is the same thing written as a place, and reads better at most call sites.
+     *
+     * The slot starts out **uninitialized** while `count()` has already grown, so filling it is
+     * part of the contract rather than an option.
+     */
+    function push_slot() : T&
+    {
+        return &$this[];
+    }
+
+    /**
+     * Removes the last element and hands over its ownership.
+     */
+    function pop() : T
+    {
+        assert($this->len > 0, "pop from an empty array");
+
+        $this->len = $this->len - 1;
+
+        return $this->data:$[$this->len];
+    }
+
+    /**
+     * A copy of the element at `$index`, bounds-checked in every build.
+     *
+     * `$a[$index]` is the same element without the copy, and is what to reach for.
+     */
+    function get(usize $index) : T
+    {
+        return $this[$index];
+    }
+
+    /**
+     * A borrow of the element at `$index`. The method form of `$a[$index]`.
+     *
+     * Written *through* the element operator, the way `push()` is written through the append one:
+     * the bounds rule and its message then have one implementation rather than two that could drift
+     * apart, and `$a->at($i)` cannot come to mean something `$a[$i]` does not.
+     */
+    function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * Forgets every element and keeps the buffer, so the next fill reuses the allocation.
+     */
+    function clear() : void
+    {
+        $this->len = 0;
+    }
+
+    /**
+     * A borrowed window over everything.
+     *
+     * Written out rather than implicit. An `Array<T>` does not silently decay to a `Slice<T>` at a
+     * call site - the conversion allocates nothing, but it does hand out a borrow, and handing out
+     * a borrow is a decision you should see. That is a choice, not a limitation.
+     */
+    function slice() : Slice<T>
+    {
+        return $this->slice(0, $this->len);
+    }
+
+    /**
+     * A borrowed window over `$count` elements from `$from`.
+     */
+    function slice(usize $from, usize $count) : Slice<T>
+    {
+        assert($from <= $this->len, "slice start out of range");
+        assert($count <= $this->len - $from, "slice length out of range");
+
+        return Slice<T>($this->data:$ + $from, $count);
+    }
+
+    /**
+     * An explicit deep copy - the same thing `$b = $a` does, said out loud at the call site.
+     */
+    function clone() : Array<T>
+    {
+        return Array<T>($this);
+    }
+}
+
+/**
+ * The element contract. `$a[$i]` reads, writes, takes `&` and chains with `->`, all through the
+ * borrow this hands back, because a place is exactly an address plus what is stored at it.
+ *
+ * Bounds-checked with `assert`, so a debug build catches the mistake and a release build pays
+ * nothing - the same bargain `->at()` and `string::view::byte_at` make.
+ */
+operator<T> (Array<T>& $a)[usize $index] : T&
+{
+    assert($index < $a->len, "array index out of range");
+
+    return &$a->data:$[$index];
+}
+
+/**
+ * The append contract: `$a[] = $value` grows by one and hands back the new slot.
+ *
+ * One operand where the element form has two, which is the whole of how the two are told apart -
+ * they share one overload set and one name, and arity is what `AST::match_function` compares first.
+ *
+ * The slot it returns is **uninitialized**, and the assignment writing into it is an
+ * *initialization*: there is no old value there, so none is torn down. That is the compiler's rule
+ * (`AssignNode::is_initialization`), not this function's, but it is the reason this function is
+ * allowed to hand back a slot it has not filled.
+ */
+operator<T> (Array<T>& $a)[] : T&
+{
+    $a->reserve($a->len + 1);
+    $a->len = $a->len + 1;
+
+    return &$a->data:$[$a->len - 1];
+}

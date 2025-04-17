@@ -41,6 +41,7 @@ namespace AST
     class TypeDeclNode;
     class MemberAccessNode;
     class VarNode;
+    class ArrayLiteralExprNode;
 
     class Visitor
     {
@@ -68,6 +69,7 @@ namespace AST
         virtual void visit_instanceof_expr(InstanceOfExprNode &node) = 0;
         virtual void visit_release(ReleaseNode &node) = 0;
         virtual void visit_index_expr(IndexExprNode &node) = 0;
+        virtual void visit_array_literal_expr(ArrayLiteralExprNode &node) = 0;
         virtual void visitBinaryExpr(BinaryExprNode &node) = 0;
         virtual void visitUnaryExpr(UnaryExprNode &node) = 0;
         virtual void visitNull(NullNode &node) = 0;

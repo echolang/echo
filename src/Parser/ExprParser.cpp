@@ -62,6 +62,43 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
     return true;
 }
 
+// the comma separated expressions between a `[` and its `]`, cursor already past the opening bracket
+// and left after the closing one. answers false having reported when the list does not close
+//
+// **one grammar for what may sit inside brackets**, because two positions ask: an index list
+// (`$m[$r, $c]`) and an array literal (`[1, 2, 3]`). an empty list is legal at both - `$a[]` is the
+// append slot and `[]` is an empty literal - so emptiness is the caller's question, not this one's
+bool parse_bracketed_expr_list(Parser::Payload &payload, std::vector<AST::ExprNode *> &elements)
+{
+    auto &cursor = payload.cursor;
+
+    while (!cursor.is_type(Token::Type::t_close_bracket)) {
+        auto *element = Parser::parse_expr(payload, nullptr);
+
+        if (element == nullptr) {
+            return false;
+        }
+
+        elements.push_back(element);
+
+        if (cursor.is_type(Token::Type::t_comma)) {
+            cursor.skip();
+            continue;
+        }
+
+        break;
+    }
+
+    if (!cursor.is_type(Token::Type::t_close_bracket)) {
+        payload.collect_unexpected_token(Token::Type::t_close_bracket);
+        return false;
+    }
+
+    cursor.skip(); // `]`
+
+    return true;
+}
+
 std::string get_fstring_literal(std::string value)
 {
     // remove trailing zeros
@@ -556,6 +593,12 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
         return AST::make_void_ref();
     }
 
+    // read once, and read here: both the declared-operator gate below and every built-in arm under it
+    // want them, and result_type() walks the operand's subtree - a member access resolves its property
+    // by name - so asking twice is asking a question that cannot answer differently
+    auto lhs_type = lhs_expr->result_type();
+    auto rhs_type = rhs_expr->result_type();
+
     // **a declared operator, before the built-in arms below.** an operator is a function, so all this
     // does is hand the operands to the same overload resolution every call goes through - which is
     // why nothing downstream of here has an operator case at all
@@ -564,15 +607,15 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     // overload set, filled by the declaration pass: this function runs during the declaration pass
     // too, for a struct property's `= ...` initializer, and asking a half-filled overload set there
     // would answer differently depending on which file was walked first
-    if (op_node != nullptr && op_node->op != nullptr && op_node->op->is_declared()
+    if (op_node != nullptr && op_node->op != nullptr
         && op_node->op->has_fixity(AST::OpFixity::t_infix)
         && !AST::binary_has_builtin_meaning(
-            op_node->op, AST::parse_time_operand(lhs_expr), AST::parse_time_operand(rhs_expr))) {
+            op_node->op,
+            AST::parse_time_operand(lhs_expr, lhs_type),
+            AST::parse_time_operand(rhs_expr, rhs_type))) {
 
         auto *call = Parser::build_operator_call(
-            payload,
-            AST::operator_function_name(op_node->op->spelling, AST::OpFixity::t_infix),
-            op_node->token_literal,
+            payload, *op_node->op, AST::OpFixity::t_infix, op_node->token_literal,
             {lhs_expr, rhs_expr});
 
         if (call == nullptr) {
@@ -581,9 +624,6 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
 
         return AST::make_ref(*call);
     }
-
-    auto lhs_type = lhs_expr->result_type();
-    auto rhs_type = rhs_expr->result_type();
 
     // if one of the nodes is has a integer return type and the other a floating one
     // we either convert the literal to a float or cast the referenced expression to a float
@@ -650,14 +690,32 @@ AST::OperatorRegistry::Match operator_match_at(Parser::Payload &payload, Parser:
     return payload.collector.operators.match_at(cursor.current(), cursor.remaining());
 }
 
-// does a **declared** operator with this fixity start at the cursor? the fixity is part of the
-// question because the three positions are different: a suffix-only `mm` must not be tried as an
-// infix operator, and a bare identifier must not become an operator just because some symbol
-// somewhere is spelled that way
-bool starts_declared_operator(Parser::Payload &payload, Parser::Cursor &cursor, AST::OpFixity fixity)
+// the **declared** operator with this fixity at the cursor, or {}. the fixity is part of the question
+// because the three positions are different: a suffix-only `mm` must not be tried as an infix
+// operator, and a bare identifier must not become an operator just because some symbol somewhere is
+// spelled that way
+//
+// answers with the match rather than a bool because a caller that goes on to consume the symbol needs
+// its token_count, and asking twice means matching twice - a sequence scan per declared symbol, at a
+// position the parser is already standing on
+AST::OperatorRegistry::Match declared_operator_at(
+    Parser::Payload &payload, Parser::Cursor &cursor, AST::OpFixity fixity)
 {
     const auto match = operator_match_at(payload, cursor);
-    return match.has() && match.op->is_declared() && match.op->has_fixity(fixity);
+
+    // has_fixity implies is_declared - the fixities *are* the declarations, so asking both reads as
+    // two facts where there is one
+    if (!match.has() || !match.op->has_fixity(fixity)) {
+        return {};
+    }
+
+    return match;
+}
+
+// the same question where only the answer's existence is wanted
+bool starts_declared_operator(Parser::Payload &payload, Parser::Cursor &cursor, AST::OpFixity fixity)
+{
+    return declared_operator_at(payload, cursor, fixity).has();
 }
 
 bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
@@ -693,6 +751,8 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // stop at the keyword - parse_postfix_chain is what actually consumes it
            cursor.is_type(Token::Type::t_instanceof) ||
            cursor.is_type(Token::Type::t_open_bracket) ||
+           // if the token has a operator precendence, it is a valid expression token
+           AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0 ||
            // a declared **prefix** operator, which may be spelled out of tokens nothing else in this
            // list admits - `!!` is two t_exclamation, and neither has a precedence. without this the
            // loop below never enters for `echo !!'hello';`, `expr_parts` stays empty, and the
@@ -701,9 +761,11 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // gated to prefix fixity so a bare identifier - which is already admitted above, as the
            // start of a call - does not change meaning just because some suffix operator is spelled
            // that way somewhere in the program
-           starts_declared_operator(payload, cursor, AST::OpFixity::t_prefix) ||
-           // if the token has a operator precendence, it is a valid expression token
-           AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0;
+           //
+           // **last**, because it is the only arm that costs a lookup: the precedence test above is a
+           // switch on the token type and answers for every built-in operator token, so only a token
+           // that is nothing else in this list reaches the symbol trie
+           starts_declared_operator(payload, cursor, AST::OpFixity::t_prefix);
 }
 
 const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, AST::NodeReference base)
@@ -745,18 +807,23 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
             auto *base = current_ref.unsafe_ptr<AST::ExprNode>();
 
-            auto *index = Parser::parse_expr(payload, nullptr);
-            if (index == nullptr) {
+            // **an empty `[]` is legal here**, and means the slot after the last one. it is not read
+            // as "an index that failed to parse": AST::OperatorRewriter resolves it against the
+            // container's one-operand `operator []`, and Parser refuses it anywhere but an
+            // assignment target - see AST::IndexExprNode::is_append
+            std::vector<AST::ExprNode *> indices;
+
+            if (!parse_bracketed_expr_list(payload, indices)) {
                 return AST::make_void_ref();
             }
 
-            if (!cursor.is_type(Token::Type::t_close_bracket)) {
-                payload.collect_unexpected_token(Token::Type::t_close_bracket);
-                return AST::make_void_ref();
-            }
-            cursor.skip();
+            auto &index_expr = payload.context.emplace_node<AST::IndexExprNode>(
+                base, std::move(indices), bracket_token);
 
-            auto &index_expr = payload.context.emplace_node<AST::IndexExprNode>(base, index, bracket_token);
+            // the `:$` marker is erased by AST::PointerAdjuster long before the pass that has to
+            // know, so whether one was written is recorded here, where it is still in the tree
+            index_expr.base_was_peeled = base->get_node_type() == AST::NodeType::n_expr_peel;
+
             current_ref = AST::make_ref(index_expr);
             continue;
         }
@@ -893,8 +960,15 @@ const AST::NodeReference parse_suffix_operator_chain(Parser::Payload &payload, A
     auto &cursor = payload.cursor;
     auto current_ref = base;
 
-    while (current_ref.has() && starts_declared_operator(payload, cursor, AST::OpFixity::t_suffix)) {
-        const auto match = operator_match_at(payload, cursor);
+    while (current_ref.has()) {
+        // one match per turn: the loop both decides on the symbol and consumes it, and those were two
+        // separate lookups of the same position
+        const auto match = declared_operator_at(payload, cursor, AST::OpFixity::t_suffix);
+
+        if (!match.has()) {
+            break;
+        }
+
         const TokenReference symbol_token = cursor.current();
 
         auto *operand = current_ref.unsafe_ptr<AST::ExprNode>();
@@ -905,10 +979,7 @@ const AST::NodeReference parse_suffix_operator_chain(Parser::Payload &payload, A
         cursor.skip(match.token_count);
 
         auto *call = Parser::build_operator_call(
-            payload,
-            AST::operator_function_name(match.op->spelling, AST::OpFixity::t_suffix),
-            symbol_token,
-            {operand});
+            payload, *match.op, AST::OpFixity::t_suffix, symbol_token, {operand});
 
         if (call == nullptr) {
             return AST::make_void_ref();
@@ -942,6 +1013,25 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     else if (cursor.is_type(Token::Type::t_bool_literal)) {
         return parse_literal_boolean(payload, expected_type);
+    }
+
+    // `[1, 2, 3]`. the elements are parsed with no expected type of their own: each one is typed
+    // where it lands, by the append the rewriter expands this into, which is an ordinary assignment
+    // into a `T` slot - so `autocast_literal_int` and `coerce_value` do the work they already do
+    else if (cursor.is_type(Token::Type::t_open_bracket)) {
+        const auto bracket_token = cursor.current();
+        cursor.skip();
+
+        std::vector<AST::ExprNode *> elements;
+
+        if (!parse_bracketed_expr_list(payload, elements)) {
+            return AST::make_void_ref();
+        }
+
+        auto &literal = payload.context.emplace_node<AST::ArrayLiteralExprNode>(
+            std::move(elements), bracket_token);
+
+        return AST::make_ref(literal);
     }
 
     else if (cursor.is_type(Token::Type::t_null)) {
@@ -1118,6 +1208,13 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
                 return AST::make_void_ref();
             }
 
+            // `&$a[]` borrows the slot an append just grew, to be filled field by field - it does
+            // not read what is in it. see AST::IndexExprNode::slot_is_bound, whose other setter is
+            // the assignment target in Parser::parse_varexpr
+            if (target->get_node_type() == AST::NodeType::n_expr_index) {
+                static_cast<AST::IndexExprNode *>(target)->slot_is_bound = true;
+            }
+
             auto &ptr_expr = payload.context.emplace_node<AST::AddrOfExprNode>(target);
             return AST::make_ref(ptr_expr);
         }
@@ -1242,8 +1339,7 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
 
     const bool builtin_prefix = match.has()
         && (match.op->type == Token::Type::t_op_sub || match.op->type == Token::Type::t_op_add);
-    const bool declared_prefix = match.has()
-        && match.op->is_declared() && match.op->has_fixity(AST::OpFixity::t_prefix);
+    const bool declared_prefix = match.has() && match.op->has_fixity(AST::OpFixity::t_prefix);
 
     if (builtin_prefix || declared_prefix) {
         auto op_token = cursor.current();
@@ -1264,10 +1360,7 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
             && !AST::unary_has_builtin_meaning(match.op, AST::parse_time_operand(operand_expr))) {
 
             auto *call = Parser::build_operator_call(
-                payload,
-                AST::operator_function_name(match.op->spelling, AST::OpFixity::t_prefix),
-                op_token,
-                {operand_expr});
+                payload, *match.op, AST::OpFixity::t_prefix, op_token, {operand_expr});
 
             if (call == nullptr) {
                 return AST::make_void_ref();
@@ -1403,7 +1496,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         // infix - would be read as an operator with nothing on its left
         if (op != nullptr && expects_operand &&
             (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add
-                || (op->is_declared() && op->has_fixity(AST::OpFixity::t_prefix))))
+                || op->has_fixity(AST::OpFixity::t_prefix)))
         {
             auto node = parse_prefix_unary(payload, expected_type);
             if (!node.has()) {
@@ -1445,14 +1538,37 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
             continue;
         }
 
+        // **two operands with nothing joining them**, `echo 1 2`. caught here, where the cursor still
+        // says where the second one starts - it used to fall through to a `node_stack.size() == 1`
+        // assert at the bottom of this function, which takes the compiler down instead of reporting
+        //
+        // the array literal production widened the ways to arrive here, because a `[` that no postfix
+        // chain claimed now parses as one operand rather than being an unexpected token: `f()[0]` is
+        // a call followed by `[0]`, since a call result is not a place and the chain does not run on
+        // one (todo/A13a). so this needs to be a diagnostic before it is anything else
+        if (!expr_parts.empty() && expr_parts.back().opnode == nullptr) {
+            const bool looks_like_indexing = cursor.is_type(Token::Type::t_open_bracket);
+
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                looks_like_indexing
+                    ? "only a place can be indexed - a variable, a field or an element. Bind this "
+                      "expression to a name first, then index that."
+                    : fmt::format(
+                        "unexpected '{}' - two expressions with no operator between them.",
+                        cursor.current().value()));
+
+            return AST::make_void_ref();
+        }
+
         // parse the next expression node, plus any suffix operators applied to it
         auto node = parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type));
 
-        // if the node is empty 
+        // if the node is empty
         if (!node.has()) {
             return AST::make_void_ref();
         }
-        
+
         expr_parts.push_back({node, nullptr});
     }
 
@@ -1505,7 +1621,16 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         }
     }
 
-    // sanity check
-    assert(node_stack.size() == 1);
+    // the operand-after-operand check in the collection loop above is what guarantees this, so a
+    // mismatch here is a parser bug rather than a bad program. reported rather than asserted all the
+    // same: an assert takes the compiler down with no location at all, which is the worst of the
+    // three possible outcomes even when the cause really is ours
+    if (node_stack.size() != 1) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(token),
+            "this expression could not be read as a single value.");
+        return AST::make_void_ref();
+    }
+
     return node_stack.top();
 }

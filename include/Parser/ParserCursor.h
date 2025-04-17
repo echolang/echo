@@ -181,6 +181,15 @@ namespace Parser
         // Note: This function assumes that you are already inside of a scope
         void skip_till_end_of_scope();
 
+        // steps over a balanced `open ... close` group **from its opening token**, landing on the
+        // token after the closing one. does nothing when the cursor is not on an opener
+        //
+        // unlike skip_till_end_of_scope, which starts inside its scope, this is the "walk past a group
+        // I am not parsing" form - a declaration reader stepping over an operand list it will come
+        // back to. one function for both bracket kinds: the loop is the same and two copies of a
+        // depth count are two places to get it wrong
+        void skip_balanced_group(Token::Type open, Token::Type close);
+
         // this function is usally called after an error has been detected
         // it will skip until the next statement or block is found to continue parsing
         void try_skip_to_next_statement();

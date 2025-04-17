@@ -1,0 +1,3 @@
+// several indices are an element contract a collection declares, not address arithmetic
+ptr<int32> $p = mem::alloc<int32>(4);
+echo $p:$[0, 1];

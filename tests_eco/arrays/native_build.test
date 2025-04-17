@@ -1,0 +1,6 @@
+expect: ok
+mode: build
+
+--- OUT --->
+37
+4

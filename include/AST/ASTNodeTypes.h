@@ -36,6 +36,7 @@ namespace AST
         n_expr_peel,
         n_expr_move,
         n_expr_index,
+        n_expr_array_literal,
         n_expr_void,
         n_expr_class_alloc,
         n_expr_retain,

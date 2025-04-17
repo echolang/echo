@@ -1,0 +1,10 @@
+// an index operator's second operand lives *inside* the brackets. a group after them is a shape the
+// grammar has no reading for
+struct Bag { int32 $x; }
+
+operator (Bag& $a)[](Bag& $b) : int32&
+{
+    return &$a->x;
+}
+
+echo 1;

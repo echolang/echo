@@ -1,5 +1,8 @@
 #include "AST/ASTOperatorSemantics.h"
 
+#include "AST/ASTCollector.h"
+#include "AST/ASTModule.h"
+#include "AST/ASTNamespace.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 
@@ -9,16 +12,49 @@ namespace AST
 {
     std::string operator_function_name(const std::string &spelling, OpFixity fixity)
     {
+        // **only the unary fixities carry a word**, and only they need one: a prefix and a suffix
+        // declaration of one symbol take one parameter of the same type, so they are otherwise the
+        // same signature and would clash as a DuplicateFunctionSignature
+        //
+        // infix needs none - it separates from both on arity, which AST::match_function compares
+        // before it looks at any type - and neither does the index form, whose spelling can only ever
+        // be an index operator, since `[` and `]` are refused inside every other symbol
         switch (fixity) {
-            case OpFixity::t_infix:
-                return "operator " + spelling;
             case OpFixity::t_prefix:
                 return "operator prefix " + spelling;
             case OpFixity::t_suffix:
                 return "operator suffix " + spelling;
+            case OpFixity::t_infix:
+            case OpFixity::t_index:
+                break;
         }
 
         return "operator " + spelling;
+    }
+
+    FunctionCallExprNode &build_operator_call_node(
+        Module &module,
+        Collector &collector,
+        const std::string &spelling,
+        OpFixity fixity,
+        const TokenReference &at,
+        std::vector<ExprNode *> operands)
+    {
+        // the overload set's key, derived from the symbol and the position it was consumed in - the
+        // caller names that position once, in the gate that decided to come here
+        const std::string decorated_name = operator_function_name(spelling, fixity);
+
+        // the name is **virtual**, because no token in the source spells it. typed t_identifier so
+        // AST::is_print_call - which keys on t_echo - cannot mistake it for `echo`
+        const TokenReference name_token =
+            module.make_virtual_token(decorated_name, Token::Type::t_identifier, at);
+
+        auto &call = module.nodes.emplace_back<FunctionCallExprNode>(name_token, std::move(operands));
+
+        // the root namespace, for the reason the header gives
+        call.lookup_namespace = &collector.namespaces.root();
+
+        return call;
     }
 
     std::string mangle_operator_name(const std::string &decorated_name)
@@ -52,13 +88,22 @@ namespace AST
         }
     }
 
+    OperandFacts parse_time_operand(const ExprNode *expr, const ValueType &result_type)
+    {
+        if (expr == nullptr) {
+            return {};
+        }
+
+        return OperandFacts{value_result_type(*expr, result_type), written_as_null(expr)};
+    }
+
     OperandFacts parse_time_operand(const ExprNode *expr)
     {
         if (expr == nullptr) {
             return {};
         }
 
-        return OperandFacts{value_result_type(*expr), written_as_null(expr)};
+        return parse_time_operand(expr, expr->result_type());
     }
 
     OperandFacts adjusted_operand(const ExprNode *expr)

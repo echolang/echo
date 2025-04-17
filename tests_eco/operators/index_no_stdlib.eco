@@ -1,0 +1,22 @@
+// **the bracket owes the standard library nothing.** `Array<T>` is a library type that declares an
+// element contract like any other, and here is a container that does the same with the stdlib gone
+// entirely - no `Array`, no `assert`, no `mem::`
+struct Ring
+{
+    ptr<int32> $slots;
+    usize $size;
+}
+
+operator (Ring& $r)[usize $i] : int32&
+{
+    return &$r->slots:$[$i];
+}
+
+int32 $a = 0;
+int32 $b = 0;
+
+// two adjacent locals stand in for a buffer, since there is no allocator without the stdlib
+$r = Ring(&$a, 2);
+
+$r[0] = 11;
+echo $r[0];

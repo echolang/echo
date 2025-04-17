@@ -1,0 +1,22 @@
+// `[1, 2, 3]` takes its type from where it is going, the same expected-type rule that types every
+// scalar literal. AST::OperatorRewriter expands one into a zero-argument constructor of the
+// *destination* type plus one append per element - so it is not Array-specific, and `-ar` shows the
+// ordinary calls it became
+Array<int32> $numbers = [1, 2, 3, 4, 5];
+echo $numbers->count();
+echo $numbers[0];
+echo $numbers[4];
+
+// the elements are typed at the destination, so an int literal in a float array is an ordinary
+// autocast rather than a special case
+Array<float64> $ratios = [0.5, 1.5];
+echo $ratios[1];
+
+// an empty literal has nothing to go on, so it takes its type from the declaration
+Array<int32> $empty = [];
+echo $empty->count();
+
+// an assignment's right-hand side works the same way, and tears the old value down first
+$numbers = [7, 8];
+echo $numbers->count();
+echo $numbers[1];

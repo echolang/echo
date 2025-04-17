@@ -1,0 +1,10 @@
+// `$a[$i]` is a place unconditionally - it reads, writes, takes `&` and chains with `->`. an
+// overload returning by value would make place-ness depend on which overload won
+struct Bag { ptr<int32> $at; }
+
+operator (Bag& $b)[usize $i] : int32
+{
+    return 0;
+}
+
+echo 1;

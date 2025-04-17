@@ -1,0 +1,6 @@
+// `$a[]` names the slot after the last one, so there is nothing there to read. the two positions
+// that *bind* it rather than read it - an assignment target and the operand of `&` - are legal
+$a = Array<int32>();
+$a[] = 1;
+
+echo $a[];

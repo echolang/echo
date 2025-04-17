@@ -316,11 +316,22 @@ void PointerAdjuster::adjust(Node *node)
 
         case NodeType::n_expr_index:
         {
+            auto *index_expr = static_cast<IndexExprNode *>(node);
+
+            // a container's element access is a call by now, and the operands moved into it - so
+            // there is nothing here to adjust that adjusting the call does not already reach, and
+            // adjusting them here too would wrap each one twice
+            if (index_expr->element_call != nullptr) {
+                adjust(index_expr->element_call);
+                break;
+            }
+
             // the base is wanted as the address it holds, so it keeps its pointer and gets no
             // deref - `$p:$[1]` offsets from $p's address, it does not read through it first
-            auto *index_expr = static_cast<IndexExprNode *>(node);
             index_expr->base = adjust_place(index_expr->base);
-            index_expr->index = as_value(index_expr->index);
+            for (auto *&index : index_expr->indices) {
+                index = as_value(index);
+            }
             break;
         }
 

@@ -5,6 +5,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTInstantiation.h"
+#include "AST/ASTOperatorRewriter.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTValueType.h"
 
@@ -51,6 +52,11 @@ namespace AST
         // this fixpoint has to instantiate. it lives in its own translation unit; only the call is
         // here
         OwnershipPass _ownership;
+
+        // operand syntax whose meaning depends on a type this fixpoint is still deciding: a bracket,
+        // and an operator over a bare type parameter. driven from inside here for the ownership
+        // pass's exact reason, and see its header for the ordering the round depends on
+        OperatorRewriter _operators;
 
         // every function declaration mapped to the module that owns it, so instances are
         // cloned into the template's module (keeping copied token references valid)
@@ -116,6 +122,11 @@ namespace AST
         // that resolved but never got concrete arguments the coercion they would have got anyway, so
         // the passes below this one see the tree shape they expect
         void finalize_calls();
+
+        // the wording finalize_calls owes a call whose name resolved to no candidates at all.
+        // AST::CallResolver deliberately does not report that state - "no such function" and "no such
+        // member" are different errors at different tokens - so the last caller words it
+        void report_unknown_name(FunctionCallExprNode &call, const CodeRef &at);
 
         CodeRef code_ref_for(Module &mod, const TokenReference &token);
     };

@@ -3,6 +3,8 @@
 #include "Parser/ExprParser.h"
 
 #include "AST/TypeNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 
 AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
 {
@@ -26,6 +28,23 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     // compiler instead of compiling to a `ret void`
     if (payload.cursor.is_type(Token::Type::t_semicolon)) {
         payload.cursor.skip();
+
+        // **inside a constructor it hands back `$this`**, because that is what a constructor
+        // returns - the implicit one Parser::parse_typedecl appends when a body writes no return at
+        // all is this very node. without this an early `return;` compiled to a `ret void` in a
+        // function typed `Foo`, and the ownership pass, seeing a return, unwound the object being
+        // built: a destructor call on a half-constructed value, then a garbage result
+        //
+        // Context::ctor_this_ptr is exactly the right guard - AST::ConstructorScope clears it for
+        // every declaration nested in the body, so a `function` or closure written inside a
+        // constructor still returns nothing
+        if (payload.context.ctor_this_ptr != nullptr) {
+            auto *this_var = payload.context.emplace_nodep<AST::VarNode>(payload.context.ctor_this_ptr);
+            auto *this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
+
+            return payload.context.emplace_node<AST::ReturnNode>(this_ref, return_token);
+        }
+
         return payload.context.emplace_node<AST::ReturnNode>(nullptr, return_token);
     }
 

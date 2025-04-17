@@ -1,0 +1,49 @@
+// `$a[] = $v` names the slot one past the end, so assigning to it appends. it is the *append*
+// contract - a one-operand `operator []` beside the two-operand element one, told apart by arity
+// alone, which is what AST::match_function compares first
+struct Mat2 { float64 $a; float64 $b; float64 $c; float64 $d; }
+
+$a = Array<int32>();
+echo $a->count();
+echo $a->capacity();
+
+$a[] = 1;
+$a[] = 2;
+$a[] = 3;
+echo $a->count();
+
+// the method form is the same operator, written as a call
+$a->push(4);
+echo $a->count();
+echo $a[3];
+
+// growth is amortized doubling, and `reserve` does it once up front
+$b = Array<int32>();
+$b->reserve(64);
+echo $b->capacity();
+
+usize $i = 0;
+while ($i < 64) {
+    $b[] = 2;
+    $i = $i + 1;
+}
+echo $b->count();
+echo $b->capacity();
+
+// **borrowing the new slot** rather than building a value to copy into it. `&$a[]` and
+// `->push_slot()` are the same thing; neither reads what is in the slot, which is why both are legal
+// where `echo $a[]` is not
+$m = Array<Mat2>();
+Mat2& $slot = &$m[];
+$slot->a = 1.0;
+$slot->d = 1.0;
+echo $m[0]->a + $m[0]->d;
+
+Mat2& $second = $m->push_slot();
+$second->a = 5.0;
+echo $m->count();
+echo $m[1]->a;
+
+// pop hands the element's ownership back
+echo $a->pop();
+echo $a->count();

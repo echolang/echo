@@ -860,19 +860,16 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             parse_funcdecl(payload);
         }
         else if (starts_operatordecl(cursor)) {
-            // **refused here, not parsed.** an operator is not a member of either of its operand
-            // types - it is a free declaration whose symbol is global, and its precedence is one
-            // entry in one table - so there is nothing for a struct body to own. reported at the
-            // keyword and then consumed, so the rest of the members are still read
+            // **refused, but not here.** an operator is not a member of either of its operand types -
+            // it is a free declaration whose symbol is global, and its precedence is one entry in one
+            // table - so there is nothing for a struct body to own. handed to parse_operatordecl
+            // anyway, which refuses it off Context::self_struct_ptr - live over this whole walk - and
+            // consumes it, so the rest of the members are still read
             //
-            // parse_operatordecl refuses it a second time, off Context::self_struct_ptr, for the
-            // reason publish_implicit_conversion refuses a free function: the two other walks reach
-            // it too, and a diagnostic each site owes cannot live only at one of them
-            payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(cursor.current()),
-                "An operator cannot be declared inside a struct. Declare it at file scope - an "
-                "operator is not a member of either of its operand types.");
-            Parser::skip_operatordecl(payload);
+            // that is the reason publish_implicit_conversion refuses a free function rather than each
+            // caller doing it: the declaration's own parser owes the diagnostic, and every walk that
+            // reaches one then gets it. spelling it here as well made the wording a copy
+            Parser::parse_operatordecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
             parse_constructor(payload, struct_node, self_value_type);

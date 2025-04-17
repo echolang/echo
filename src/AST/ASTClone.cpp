@@ -183,8 +183,29 @@ Node *ClassAllocExprNode::clone(CloneContext &cc) const
 Node *IndexExprNode::clone(CloneContext &cc) const
 {
     IndexExprNode *c = cc.shallow(this);
+
+    // **exactly one of the two states owns the operands.** before AST::OperatorRewriter fires they
+    // hang off this node; after it they are the call's arguments and `base` is null. cloning both
+    // unconditionally would duplicate the subtree under two parents, which is precisely what the
+    // rewriter cleared `base` to prevent
+    c->element_call = cc.child(c->element_call);
     c->base = cc.child(c->base);
-    c->index = cc.child(c->index);
+
+    for (auto *&index : c->indices) {
+        index = cc.child(index);
+    }
+
+    return c;
+}
+
+Node *ArrayLiteralExprNode::clone(CloneContext &cc) const
+{
+    ArrayLiteralExprNode *c = cc.shallow(this);
+
+    for (auto *&element : c->elements) {
+        element = cc.child(element);
+    }
+
     return c;
 }
 

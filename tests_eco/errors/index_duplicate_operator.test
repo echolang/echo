@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:19
+'operator [](Bag&, usize)' is already declared with these parameter types. Overloads must differ in their parameters.
+Begin: '['
+End: '['
+Code excerpt:
+ [5]> operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
+ [6]> operator (Bag& $b)[usize $j] : int32& { return &$b->at:$[$j]; }
+                        ^
+ [7]> 
+
+Critical issues found, cannot compile.

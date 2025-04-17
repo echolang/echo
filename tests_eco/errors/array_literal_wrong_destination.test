@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 2:12
+'int32' cannot be built from an array literal - a literal fills a collection, through its constructor and its append operator.
+Begin: '['
+End: '['
+Code excerpt:
+ [1]> // the destination has to be something a literal can fill: a constructor and an append operator
+ [2]> int32 $n = [1, 2];
+                 ^
+ [3]> 
+
+Critical issues found, cannot compile.

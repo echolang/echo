@@ -1,0 +1,99 @@
+/**
+ * A borrowed window over elements somebody else owns.
+ *
+ * Two words - an address and an element count - owning nothing, copying for free, keeping nothing
+ * alive. It is to `Array<T>` what `string::view` is to `string`, and for the same reason: a
+ * function that only *reads* elements should not have to care who owns them.
+ *
+ * Because it owns nothing, a shallow copy is the **correct** copy. It declares no destructor and no
+ * copy constructor, so passing one around duplicates two words and aliases the same elements, which
+ * is the whole point.
+ *
+ * The lifetime rule is the pointer chapter's, unchanged: **a slice must not outlive the array it
+ * came from**, and growing that array ends the slice just as decisively as destroying it. Nothing
+ * enforces this - there is no borrow checker - so it is a rule you keep rather than one you are
+ * held to. See book/concept/arrays.md, "Growth and invalidation".
+ *
+ * Counts and indices are `usize` throughout, matching `mem::`.
+ */
+struct Slice<T>
+{
+    ptr<T> $data;
+    usize $len;
+
+    /**
+     * How many elements the window covers.
+     */
+    function count() : usize
+    {
+        return $this->len;
+    }
+
+    /**
+     * True when the window covers no elements.
+     *
+     * A branch and two `return`s rather than `return $this->len == 0;` - `string.eco` explains why.
+     */
+    function is_empty() : bool
+    {
+        if ($this->len > 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * A copy of the element at `$index`.
+     *
+     * Checked with `assert`, so `echoc build` drops the check - the bargain C's `assert` makes.
+     * `$s[$index]` is the same element without the copy.
+     */
+    function get(usize $index) : T
+    {
+        return $this[$index];
+    }
+
+    /**
+     * A borrow of the element at `$index`, so writing through it writes into the storage.
+     *
+     * The method form of `$s[$index]`, which is the spelling to prefer - a place needs no name to
+     * be bound to before it is useful.
+     *
+     * Written *through* the element operator, so the bounds rule and its message have one
+     * implementation and `$s->at($i)` cannot drift from `$s[$i]`.
+     */
+    function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * A sub-window, `$count` elements from `$from`.
+     *
+     * **Two separate checks rather than one on the sum**, so the sum cannot wrap on the way to
+     * being checked. `string::view::sub` is written the same way and for the same reason.
+     */
+    function slice(usize $from, usize $count) : Slice<T>
+    {
+        assert($from <= $this->len, "slice start out of range");
+        assert($count <= $this->len - $from, "slice length out of range");
+
+        return Slice<T>($this->data:$ + $from, $count);
+    }
+}
+
+/**
+ * The element contract. `$s[$i]` reads, writes, takes `&` and chains with `->`, all through the
+ * borrow this hands back - see book/concept/arrays.md, "Elements".
+ *
+ * There is deliberately **no** one-operand `operator (Slice<T>& $s)[]`: a slice does not own its
+ * storage, so it has nothing to grow. `$s[] = $v` is then an ordinary "no overload accepts these
+ * arguments", with no rule anywhere saying which types may append.
+ */
+operator<T> (Slice<T>& $s)[usize $index] : T&
+{
+    assert($index < $s->len, "slice index out of range");
+
+    return &$s->data:$[$index];
+}

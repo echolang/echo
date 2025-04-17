@@ -46,13 +46,26 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 
         case AST::NodeType::n_expr_index:
         {
-            // GEP over the pointee type scales the offset by the element size, so `+ 1` on a
-            // ptr<int32> advances four bytes rather than one
             auto &index_expr = static_cast<AST::IndexExprNode &>(expr);
 
+            // **a container's element, and it needs nothing of its own.** the element contract
+            // returns a borrow, so the call's value *is* the address this function exists to
+            // produce - the same `{address, what is stored there}` pair the GEP below builds.
+            // that one equivalence is why reading, writing, `&` and `->` all work at once: they
+            // already route through here, and none of them knows which arm answered
+            if (index_expr.element_call != nullptr) {
+                index_expr.element_call->accept(*_ctx.visitor);
+                llvm::Value *address = _ctx.value_stack.top();
+                _ctx.value_stack.pop();
+
+                return LValue{ address, index_expr.result_type() };
+            }
+
+            // GEP over the pointee type scales the offset by the element size, so `+ 1` on a
+            // ptr<int32> advances four bytes rather than one
             llvm::Value *base_address = gen_address_value(*index_expr.base);
 
-            index_expr.index->accept(*_ctx.visitor);
+            index_expr.indices[0]->accept(*_ctx.visitor);
             llvm::Value *offset = _ctx.value_stack.top();
             _ctx.value_stack.pop();
 

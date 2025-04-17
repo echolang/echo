@@ -1,0 +1,44 @@
+// `$a[$i]` is a place, so it works in every position a place works in. this is the case for one
+// arm in gen_lvalue rather than a rule per position: reads, writes, `&` and `->` all route through
+// that one function, and none of them knows which arm answered
+struct Doc { Array<int32> $body; }
+
+function by_value(int32 $v) : int32 { return $v * 2; }
+function by_borrow(int32& $v) : int32 { $v = 99; return 0; }
+function first(Array<int32>& $a) : int32 { return $a[0]; }
+function first_ref(Array<int32>& $a) : int32& { return &$a[0]; }
+
+Array<int32> $a = [4, 5, 6];
+
+// an argument, by value and by borrow - the second writes through
+echo by_value($a[0]);
+echo by_borrow(&$a[1]);
+echo $a[1];
+
+// a return, as a value and as a borrow
+echo first(&$a);
+int32& $r = first_ref(&$a);
+echo $r;
+
+// a condition
+if ($a[0] > 0) { echo 7; }
+
+usize $i = 0;
+while ($a[$i] < 99) { $i = $i + 1; }
+echo $i;
+
+// an index that is itself an element
+Array<int32> $indices = [2];
+echo $a[$indices[0]];
+
+// element to element, and the step form
+$a[0] = $a[2];
+echo $a[0];
+$a[0]++;
+echo $a[0];
+
+// over a member-access base rather than a bare variable
+$d = Doc(Array<int32>());
+$d->body[] = 3;
+$d->body[0] = $d->body[0] + 1;
+echo $d->body[0];

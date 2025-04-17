@@ -48,8 +48,9 @@ namespace AST
     // operands and a precedence - while an implicit conversion is inserted at an argument position
     // where the user wrote nothing at all. there is no operand to hang it on, so `operator` could
     // never have taken it over, and the mislabel is what let a magic name look temporary. the spelling
-    // is `#[implicit]` and it is declared. (`todo/C4`'s bracket is a genuinely different case:
-    // `$a[$i]` *is* operand syntax, and that one really is the operator grammar's to take)
+    // is `#[implicit]` and it is declared. (the **bracket** is the genuinely different case, and it
+    // did turn out to be the operator grammar's to take: `$a[$i]` *is* operand syntax, and it is a
+    // declared `operator []` now)
     //
     // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
     // t_declared_conversion, below every built-in conversion, so an overload taking the owning type

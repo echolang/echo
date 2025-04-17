@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:10
+'[' cannot be part of an operator symbol - a symbol is written out of punctuation or a single word.
+Begin: '['
+End: '['
+Code excerpt:
+ [5]> 
+ [6]> operator [](Bag& $b) : int32&
+               ^
+ [7]> {
+
+Critical issues found, cannot compile.

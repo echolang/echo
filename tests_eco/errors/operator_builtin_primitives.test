@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 3:21
-operator '+' is built in for these operand types, so this declaration would never be used. An overload of a built-in operator needs at least one declared type among its operands.
+operator '+' is built in for these operand types, so this declaration would never be used - where the language spells a meaning, the built-in one wins.
 Begin: '+'
 End: '+'
 Code excerpt:

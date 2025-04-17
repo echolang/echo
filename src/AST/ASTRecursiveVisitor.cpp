@@ -186,8 +186,18 @@ void RecursiveVisitor::visit_release(ReleaseNode &node)
 
 void RecursiveVisitor::visit_index_expr(IndexExprNode &node)
 {
+    if (node.element_call) node.element_call->accept(*this);
     if (node.base) node.base->accept(*this);
-    if (node.index) node.index->accept(*this);
+    for (auto *index : node.indices) {
+        if (index) index->accept(*this);
+    }
+}
+
+void RecursiveVisitor::visit_array_literal_expr(ArrayLiteralExprNode &node)
+{
+    for (auto *element : node.elements) {
+        if (element) element->accept(*this);
+    }
 }
 
 void RecursiveVisitor::visitVarRef(VarRefNode &node)

@@ -35,6 +35,19 @@ namespace
         }
         return nullptr;
     }
+
+    // the *container* index in a module, as opposed to the pointer one inside the element operator's
+    // own body - `return &$b->at:$[$i]` is an index expression too, and it comes first
+    IndexExprNode *first_rewritten_index(Bundle &bundle)
+    {
+        auto &module = bundle.modules.find_module("test");
+        for (auto *node : module.nodes.of_type<IndexExprNode>()) {
+            if (node->element_call != nullptr) {
+                return node;
+            }
+        }
+        return nullptr;
+    }
 }
 
 TEST_CASE("The four place kinds denote storage", "[AST][pointer]")
@@ -197,4 +210,138 @@ TEST_CASE("null is deliberately not an expression node for conversion purposes",
     // and the declaration bound it, which is how null gets a type at all
     REQUIRE(null_node->is_bound());
     REQUIRE(null_node->result_type().is_pointer());
+}
+
+// **a rewritten index is still a place**, and that is the whole reason indexing stays one node.
+// AST::is_place_expression answers on the *tag*, so `$a[$i]` reads, writes, takes `&` and chains
+// with `->` whether the base turned out to be a pointer or a container - a separate "container
+// index" node would have had to re-derive every one of those (the mistake B16 records)
+TEST_CASE("A container index is a place, before and after the rewrite", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "int32 $x = 1;\n"
+        "$g = Bag(&$x);\n"
+        "$g[0] = 5;\n"
+        "echo $g[0];\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *index = first_rewritten_index(*bundle);
+    REQUIRE(index != nullptr);
+
+    // the rewriter ran, so the operands moved into the call and `base` was cleared - one owner per
+    // edge, because PointerAdjuster rewrites edges in place and a shared one is adjusted twice
+    REQUIRE(index->element_call != nullptr);
+    REQUIRE(index->base == nullptr);
+    REQUIRE(index->indices.empty());
+
+    // ...and none of that changes what it *is*
+    REQUIRE(is_place_expression(*index));
+    REQUIRE(is_assignable_target(*index));
+
+    // the element, not the container and not the borrow the operator hands back
+    REQUIRE(index->result_type().is_primitive_of_type(ValueTypePrimitive::t_int32));
+}
+
+// the honest answer while the contract has not been attached yet. peeling the base there would hand
+// back the *container* as though it were the element, and a confidently wrong type is one no later
+// pass could tell from a right one - so an inferred declaration would latch onto it
+TEST_CASE("An unresolved container index answers unknown, not the container", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "int32 $x = 1;\n"
+        "$g = Bag(&$x);\n"
+        "echo $g[0];\n");
+
+    // no element contract, so the rewriter reports rather than attaching one
+    REQUIRE(bundle->collector.has_critical_issues());
+
+    auto *index = first_of<IndexExprNode>(*bundle);
+    REQUIRE(index != nullptr);
+    REQUIRE(index->element_call == nullptr);
+    REQUIRE(index->result_type().is_unknown());
+}
+
+// **the two states of the node, under `clone`.** the monomorphizer clones a template body per
+// instantiation, and exactly one of the two states owns the operands - before the rewrite they hang
+// off the node, after it they are the call's arguments and `base` is null. cloning both would
+// duplicate the subtree under two parents, which AST::PointerAdjuster then rewrites twice
+//
+// no end-to-end case can see this: the second deref it would insert produces a wrong *value*, not a
+// diagnostic, and only for a generic container instantiated more than once
+TEST_CASE("A cloned index carries exactly one owner of its operands", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag<T> { ptr<T> $at; }\n"
+        "operator<T> (Bag<T>& $b)[usize $i] : T& { return &$b->at:$[$i]; }\n"
+        "function first<T>(Bag<T>& $b) : T { return $b[0]; }\n"
+        "int32 $x = 1;\n"
+        "float64 $y = 2.0;\n"
+        "$bi = Bag<int32>(&$x);\n"
+        "$bf = Bag<float64>(&$y);\n"
+        "echo first<int32>(&$bi);\n"
+        "echo first<float64>(&$bf);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+
+    size_t rewritten = 0;
+
+    for (auto *node : module.nodes.of_type<IndexExprNode>()) {
+        // every node is in one state or the other, never both and never neither
+        const bool is_container = node->element_call != nullptr;
+
+        if (is_container) {
+            rewritten++;
+            REQUIRE(node->base == nullptr);
+            REQUIRE(node->indices.empty());
+        } else {
+            REQUIRE(node->base != nullptr);
+        }
+    }
+
+    // `first<T>`'s body was cloned twice, and the template's own copy stays undecided - so the
+    // instances are what carry the rewritten nodes
+    REQUIRE(rewritten >= 2);
+}
+
+// the one answer to "is this a pointer index", read by the rewriter *and* by result_type(). it peels
+// **non-nullable** levels and stops at a nullable one, which is AST::argument_fit's t_read_through
+// line: reading through a `ptr<T>` that may be null is an unchecked dereference. that is the whole
+// of what makes `$a[0]` over an `Array<T>&` parameter index the array while `$p[0]` stays a pointer
+TEST_CASE("indexed_base_type peels borrows but stops at a nullable pointer", "[AST][pointer]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "function through(Bag& $b) : int32 { return $b[0]; }\n"
+        "int32 $x = 1;\n"
+        "$g = Bag(&$x);\n"
+        "echo through(&$g);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    // `$b[0]` inside `through` indexes through a `Bag&` parameter, so the borrow is peeled and the
+    // container is what answers - it resolved, which is the observable form of that
+    auto *rewritten = first_rewritten_index(*bundle);
+    REQUIRE(rewritten != nullptr);
+
+    // the pointer index inside the operator's own body kept its base: `$b->at:$` is a `ptr<int32>`,
+    // nullable, so nothing is peeled and the GEP arm is what lowers it
+    auto &module = bundle->modules.find_module("test");
+    bool saw_pointer_index = false;
+
+    for (auto *node : module.nodes.of_type<IndexExprNode>()) {
+        if (node->element_call == nullptr && node->base != nullptr) {
+            REQUIRE(node->indexed_base_type().is_pointer());
+            REQUIRE(node->base_was_peeled);
+            saw_pointer_index = true;
+        }
+    }
+
+    REQUIRE(saw_pointer_index);
 }

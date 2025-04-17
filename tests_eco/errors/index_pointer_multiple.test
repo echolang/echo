@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:10
+a pointer takes exactly one index, but 2 were written. Several indices are an element contract a collection declares, not address arithmetic.
+Begin: '['
+End: '['
+Code excerpt:
+ [2]> ptr<int32> $p = mem::alloc<int32>(4);
+ [3]> echo $p:$[0, 1];
+               ^
+ [4]> 
+
+Critical issues found, cannot compile.

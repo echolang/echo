@@ -1,0 +1,3 @@
+// two expressions with nothing joining them. it used to reach a `node_stack.size() == 1` assert at
+// the bottom of the shunting yard, which takes the compiler down instead of reporting
+echo 1 2;

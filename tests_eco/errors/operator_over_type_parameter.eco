@@ -1,0 +1,8 @@
+// the language already spells a meaning for `+` over the primitives a bare parameter may be bound
+// to, so such a declaration would register and never fire. declare it for the type itself
+operator<T> (T $a) + (T $b) : T
+{
+    return $a;
+}
+
+echo 1;

@@ -14,12 +14,20 @@
 #include "Parser/ExprParser.h"
 #include "Parser/ScopeParser.h"
 
+#include <fmt/core.h>
+
+// a closing bracket is here for the same reason a closing parenthesis is: an index operator's
+// `[usize $i]` is an ordinary parameter list that happens to be enclosed differently, and it reaches
+// this function through the very same Parser::parse_parameter_list
 bool is_vardecl_end_token(const Parser::Cursor &cursor)
 {
-    return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma) || cursor.is_type(Token::Type::t_close_paren);
+    return cursor.is_type(Token::Type::t_semicolon)
+        || cursor.is_type(Token::Type::t_comma)
+        || cursor.is_type(Token::Type::t_close_paren)
+        || cursor.is_type(Token::Type::t_close_bracket);
 }
 
-// we do not want to actually skip a closing parenthesis
+// we do not want to actually skip a closing parenthesis or bracket
 // because the parent parse will check it to ensure it has parsed all arguments
 bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
 {
@@ -156,6 +164,13 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             return nullptr;
         }
 
+        // an assignment target binds its storage rather than reading it, which is what makes
+        // `$a[] = 5` legal where `echo $a[]` is not. see AST::IndexExprNode::slot_is_bound, whose
+        // other setter is the `&` arm of Parser::parse_postfix_chain's caller
+        if (target->get_node_type() == AST::NodeType::n_expr_index) {
+            static_cast<AST::IndexExprNode *>(target)->slot_is_bound = true;
+        }
+
         // `$obj->push(5);` reaches here because the statement dispatch routes anything starting
         // `$var ->` to an assignment, and the postfix chain is what discovers the call. it is a
         // statement in its own right, so there is no `=` to demand - the same shape the call
@@ -241,6 +256,15 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
             assign->is_initialization = true;
         }
 
+        // **an append writes a slot that has just been grown into existence**, so there is no old
+        // value and none is owed a teardown - running one would destroy whatever bytes the buffer
+        // happened to hold. the same question the constructor case above asks, "is this storage
+        // fresh", asked of the other way a program can produce fresh storage
+        if (target->get_node_type() == AST::NodeType::n_expr_index
+            && static_cast<AST::IndexExprNode *>(target)->is_append()) {
+            assign->is_initialization = true;
+        }
+
         // skip the end of the statement
         if (is_vardecl_end_token(cursor)) {
             if (should_skip_vardecl_end_token(cursor)) {
@@ -279,6 +303,22 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     // parse the expression
     auto expr = parse_expr(payload, vardecl->optional_type_node());
     vardecl->init_expr = expr;
+
+    // **an array literal has no type of its own**, so a declaration with nothing else to go on has
+    // nothing to infer from. reported here rather than left to the inference below, which would say
+    // "cannot infer" about an initializer that is right there - the missing half is the *element*
+    // type, and only the declaration can supply it
+    if (!vardecl->has_type() && vardecl->init_expr != nullptr
+        && vardecl->init_expr->get_node_type() == AST::NodeType::n_expr_array_literal) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(nametoken),
+            fmt::format(
+                "nothing says what '{}' holds - an array literal takes its type from where it is "
+                "going. Write the type, e.g. 'Array<int32> {} = [...];'.",
+                nametoken.value(), nametoken.value()));
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
 
     if (!vardecl->has_type()) {
         // if there is no explicit type we need to be able to infer it

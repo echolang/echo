@@ -1,0 +1,55 @@
+// `operator (C& $c)[usize $i] : T&` is the element contract, and it is an ordinary function - so
+// overload resolution, mangling, ownership, the pointer adjuster and codegen have no arm for it.
+// nothing here is a collection: these are three unrelated types that each declare a bracket
+struct Grid { ptr<float64> $cells; usize $cols; }
+
+// **more than one index.** arity is what tells one `operator []` overload from another, and
+// match_function compares it first - so a two-index bracket needs no rule of its own
+operator (Grid& $g)[usize $row, usize $col] : float64&
+{
+    return &$g->cells:$[$row * $g->cols + $col];
+}
+
+// a **generic** operator, `operator<T>`. the list sits where a function writes one, and `T` is
+// inferred from the operand exactly as it is at any other call site
+struct Pair<T> { T $first; T $second; }
+
+operator<T> (Pair<T>& $p)[usize $i] : T&
+{
+    if ($i == 0) {
+        return &$p->first;
+    }
+
+    return &$p->second;
+}
+
+// an index over a **string** key, which is the same declaration with a different operand type
+struct Named { int32 $a; int32 $b; }
+
+operator (Named& $n)[string $key] : int32&
+{
+    if ($key->equals("a")) {
+        return &$n->a;
+    }
+
+    return &$n->b;
+}
+
+$g = Grid(mem::alloc<float64>(4), 2);
+$g[0, 0] = 1.0;
+$g[1, 1] = 4.0;
+echo $g[0, 0] + $g[1, 1];
+mem::free<float64>($g->cells);
+
+$p = Pair<int32>(10, 20);
+echo $p[0];
+$p[1] = 200;
+echo $p[1];
+
+$q = Pair<float64>(1.5, 2.5);
+echo $q[1];
+
+$n = Named(7, 9);
+echo $n["a"];
+$n["b"] = 90;
+echo $n["b"];

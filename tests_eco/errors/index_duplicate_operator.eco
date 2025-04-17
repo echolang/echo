@@ -1,0 +1,8 @@
+// an element contract is an ordinary declaration, so declaring the same signature twice is the
+// ordinary duplicate - the parameter *names* differ and that changes nothing
+struct Bag { ptr<int32> $at; }
+
+operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
+operator (Bag& $b)[usize $j] : int32& { return &$b->at:$[$j]; }
+
+echo 1;

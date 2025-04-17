@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 8:5
+An operator cannot be declared inside a struct. Declare it at file scope - an operator is not a member of either of its operand types.
+Begin: 'operator'
+End: 'operator'
+Code excerpt:
+ [7]> 
+ [8]>     operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
+          ^
+ [9]> }
+
+Critical issues found, cannot compile.

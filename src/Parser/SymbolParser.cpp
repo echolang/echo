@@ -50,7 +50,20 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // is what makes this reachable from a pass whose whole contract is that it validates nothing
         // about declarations, and it is the deleted lexer prepass's job done at the right layer
         if (starts_operatordecl(cursor)) {
-            publish_operator_symbol(payload, read_operator_header(payload));
+            const OperatorHeader header = read_operator_header(payload);
+
+            // **only a declaration at file scope publishes.** an operator written inside a `struct`
+            // body or inside a block is refused by parse_operatordecl, and a refusal has to decline to
+            // *publish* to be worth anything: the symbol it would leave behind changes how every
+            // expression in the program parses, so a declaration the compiler rejects would still
+            // have rewritten the grammar the rest of the diagnostics are computed against
+            //
+            // one test for both, because any brace open here is one or the other - a namespace is a
+            // statement in this language, not a block. reported by parse_operatordecl in the passes
+            // that follow, which is what keeps this pass one that validates nothing
+            if (brace_depth == 0) {
+                publish_operator_symbol(payload, header);
+            }
 
             // the rest of the declaration - its operand lists, return type and body - is walked token
             // by token by the loop below, which is what keeps `brace_depth` right

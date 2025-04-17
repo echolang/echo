@@ -1,0 +1,10 @@
+// a use site has no spelling for explicit type arguments - `$a[$i]` carries nothing but its
+// operands - so a parameter no operand mentions could never be bound
+struct Bag { ptr<int32> $at; }
+
+operator<T> (Bag& $a) avg (Bag& $b) : int32
+{
+    return 0;
+}
+
+echo 1;

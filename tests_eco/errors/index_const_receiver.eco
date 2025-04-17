@@ -1,0 +1,7 @@
+// an element contract takes its container as a mutable borrow, like every method, so a `const`
+// value cannot be indexed even to read it. that is todo/A25 - no method is callable on a `const`
+// local - reaching the bracket rather than a rule of its own
+Array<int32> $source = [1, 2];
+const $frozen = $source;
+
+echo $frozen[0];

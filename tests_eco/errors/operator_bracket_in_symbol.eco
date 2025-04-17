@@ -1,0 +1,11 @@
+// `[` and `]` belong to exactly one production - the index form - and that exclusivity is what lets
+// a use site's `[` be claimed unconditionally by the postfix chain, which is in turn what makes
+// `$p:$[0]` the only spelling of pointer indexing (todo/B9)
+struct Bag { int32 $x; }
+
+operator [](Bag& $b) : int32&
+{
+    return &$b->x;
+}
+
+echo 1;

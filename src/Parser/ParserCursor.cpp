@@ -37,7 +37,31 @@ void Parser::Cursor::skip_till_end_of_scope()
     }
 }
 
-void Parser::Cursor::try_skip_to_next_statement() 
+void Parser::Cursor::skip_balanced_group(Token::Type open, Token::Type close)
+{
+    if (!is_type(open)) {
+        return;
+    }
+
+    int depth = 0;
+
+    while (!is_done()) {
+        if (is_type(open)) {
+            depth++;
+        } else if (is_type(close)) {
+            depth--;
+
+            if (depth == 0) {
+                skip(); // past the closing token
+                return;
+            }
+        }
+
+        skip();
+    }
+}
+
+void Parser::Cursor::try_skip_to_next_statement()
 {
     skip_until({ Token::Type::t_semicolon, Token::Type::t_close_brace });
     skip();

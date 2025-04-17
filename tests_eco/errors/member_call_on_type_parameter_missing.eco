@@ -1,0 +1,12 @@
+// the mirror of tests_eco/generics/member_call_on_type_parameter: once substitution has answered
+// what the receiver is, a member it does not declare is an ordinary "no such member" - located at
+// the call in the *instance*, and worded by the fixpoint's finalizing sweep rather than the parser
+struct Point { int32 $x; }
+
+function count_of<T>(T& $container) : usize
+{
+    return $container->count();
+}
+
+$p = Point(1);
+echo count_of<Point>(&$p);

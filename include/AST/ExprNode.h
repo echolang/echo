@@ -579,30 +579,93 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
-    // `E[n]` - the element n positions along from the address E holds
+    // `E[...]` - an element of whatever E names. **one node for both meanings of a bracket**, because
+    // place-ness is structural: AST::is_place_expression answers on the tag, and a second "container
+    // index" node would have to re-derive it (the mistake MemberAccessNode::result_type() made, B16)
     //
-    // a place, so it reads and writes alike, and `$p:$[0]` is the same storage as `$p`. the
-    // offset is scaled by the size of the pointee, never by bytes: `$it:$ + 1` on a ptr<int32>
-    // advances four bytes (book/concept/pointers_and_refs_v2.md, "Pointer arithmetic")
+    // which meaning it has is decided from the base's type by AST::OperatorRewriter, inside the
+    // monomorphizer's fixpoint - the parser cannot know, because the base may be typed from a call
+    // that has not settled or from a type parameter that has not been substituted:
+    //
+    //  - **a pointer**, and then only when the base was written `:$`. the element n positions along
+    //    from the address, offset scaled by the size of the pointee, never by bytes
+    //    (book/concept/pointers_and_refs_v2.md, "Pointer arithmetic")
+    //  - **a container**, and then `element_call` holds the `operator []` the base's type declares.
+    //    the operator returns a borrow, so what the call yields *is* the element's address, which is
+    //    exactly what gen_lvalue's other arm produces itself
     class IndexExprNode : public ExprNode
     {
     public:
         ECO_AST_NODE_TYPE(n_expr_index);
 
-        // evaluated as a pointer-typed value: the address to offset from
+        // the pointer-typed value to offset from. **null once `element_call` is set**: the operands
+        // move into the call rather than being shared with it, because an edge with two parents is
+        // one PointerAdjuster rewrites twice
         ExprNode *base;
-        ExprNode *index;
+
+        // `$a[$i]`, `$m[$row, $col]`, and **empty** for the append form `$a[]`. a list because arity
+        // is what tells one `operator []` overload from another, and match_function compares it first
+        std::vector<ExprNode *> indices;
+
+        // was the base written with `:$`? recorded at parse time because the marker does not survive
+        // to the pass that needs it - PointerValueNode is erased by PointerAdjuster - and indexing a
+        // raw pointer without it is refused, so that a bare `[` always means "ask the container"
+        // (todo/B9)
+        bool base_was_peeled = false;
+
+        // the container's element contract, once the rewriter has found it. null while the base is a
+        // pointer, and null while the round that would decide has not run yet
+        FunctionCallExprNode *element_call = nullptr;
+
+        // has AST::OperatorRewriter finished with this node? a null `element_call` is three different
+        // states - a pointer index, a base whose type is not known yet, and one already reported as
+        // an error - and only the middle one is worth asking about again. without this the fixpoint
+        // would re-report every round and never converge
+        //
+        // false on a clone, which is right: a template body is never decided, because the operand
+        // types it would be decided from are the ones substitution supplies
+        bool resolution_decided = false;
 
         TokenReference token_bracket;
 
-        IndexExprNode(ExprNode *base, ExprNode *index, TokenReference token_bracket) :
-            base(base), index(index), token_bracket(token_bracket)
+        IndexExprNode(ExprNode *base, std::vector<ExprNode *> indices, TokenReference token_bracket) :
+            base(base), indices(std::move(indices)), token_bracket(token_bracket)
         {
             assert(base != nullptr && "IndexExprNode requires a base");
-            assert(index != nullptr && "IndexExprNode requires an index");
         };
 
         ~IndexExprNode() {}
+
+        // does this bracket sit where the storage is *bound* rather than *read*? two spellings do -
+        // the left of an `=`, and the operand of `&` - and they are the two the append form needs,
+        // because `$a[]` names a slot that has just been grown into existence and holds nothing:
+        //
+        //     $a[] = 5;                 // built in the slot
+        //     Point& $p = &$a[];        // the slot borrowed, to be filled field by field
+        //     echo $a[];                // refused - there is nothing there to read
+        //
+        // a syntactic question, so the parser is what answers it. it also decides that the write is
+        // an *initialization*, since a slot that holds nothing owes no teardown
+        bool slot_is_bound = false;
+
+        // true for `$a[]`, which names the slot after the last one rather than an existing element
+        bool is_append() const {
+            return indices.empty();
+        }
+
+        // **what is actually being indexed** - the base's type with every *transparent* level taken
+        // off it, because a borrow is not part of the answer: `$a[0]` over an `Array<int32>& $a`
+        // parameter indexes the array, not the pointer that reaches it
+        //
+        // non-nullable pointer levels are peeled and a nullable one is not, which is exactly the line
+        // AST::argument_fit's t_read_through draws and for the same reason - reading through a
+        // `ptr<T>` that may be null is an unchecked dereference. so a `ptr<int32>` is still a pointer
+        // here, which is what sends `$p[0]` to the ':$' refusal and `$a[0]` to the element contract,
+        // with no rule anywhere about which *kind* of type either one is
+        //
+        // one function, two askers: result_type() below and AST::OperatorRewriter. two copies would
+        // be two answers to "is this a pointer index", and they would disagree exactly where it costs
+        ValueType indexed_base_type() const;
 
         ValueType result_type() const override;
 
@@ -610,6 +673,56 @@ namespace AST
 
         void accept(Visitor &visitor) override {
             visitor.visit_index_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `[1, 2, 3]` - a bracketed list of elements, which the *destination* types.
+    //
+    // it has no type of its own and `result_type()` says so: a literal is a list of values, and what
+    // collection they go into is decided by the storage they are written to, the same expected-type
+    // rule that types every scalar literal.
+    //
+    // **not `Array<T>`-specific.** AST::OperatorRewriter expands one into a zero-argument constructor
+    // of the destination type plus one `$dest[] = element` per element, so any type with both works -
+    // which is what a `Map<K, V>` literal will reuse rather than re-derive.
+    //
+    // it is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
+    // the appends, and only the enclosing scope has both. legal as a declaration's initializer or as
+    // an assignment's right-hand side, and a located error anywhere else - `f([1, 2, 3])` included,
+    // because there is no temporary to expand into yet (todo/A13b)
+    class ArrayLiteralExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_array_literal);
+
+        std::vector<ExprNode *> elements;
+
+        TokenReference token_bracket;
+
+        // has AST::OperatorRewriter finished with this node? the same three-state problem
+        // IndexExprNode::resolution_decided solves, and the same answer: without it a destination
+        // that never becomes concrete is reported once per round
+        bool expansion_decided = false;
+
+        ArrayLiteralExprNode(std::vector<ExprNode *> elements, TokenReference token_bracket) :
+            elements(std::move(elements)), token_bracket(token_bracket)
+        {
+        }
+
+        ~ArrayLiteralExprNode() {}
+
+        // **always unknown, deliberately.** the elements say what goes in, never what holds them, and
+        // answering with a guess is what would let an inferred declaration latch onto a wrong type
+        ValueType result_type() const override {
+            return ValueType::make_unknown();
+        }
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_array_literal_expr(*this);
         }
 
         Node *clone(CloneContext &cc) const override;

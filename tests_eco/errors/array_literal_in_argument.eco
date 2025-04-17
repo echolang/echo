@@ -1,0 +1,5 @@
+// an array literal fills storage, so it has to name it. an argument position has no storage to fill
+// and no temporary to expand into yet - see todo/A13b
+function take(Array<int32>& $a) : int32 { return $a[0]; }
+
+echo take([1, 2]);

@@ -1,0 +1,11 @@
+// an operator is not a member of either of its operand types, and the bracket is no exception -
+// the struct member walk routes one here rather than refusing it itself, so this is the only
+// spelling of that diagnostic
+struct Bag
+{
+    ptr<int32> $at;
+
+    operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
+}
+
+echo 1;

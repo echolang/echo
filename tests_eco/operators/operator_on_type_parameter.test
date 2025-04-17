@@ -1,0 +1,14 @@
+expect: ok
+
+--- OUT --->
+3.000000
+-1.000000
+7
+-5
+--- RAST --->
+// the rewrite produces an ordinary resolved call, which is the whole claim: nothing downstream of
+// the fixpoint has an operator case, so this is what the instance's body looks like
+CHECK: function add
+CHECK: call operator +
+CHECK: function neg
+CHECK: call operator prefix -

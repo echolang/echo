@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 8:18
+Invalid type conversion: cannot implicitly convert '[unknown]' to 'Array<int32>'
+Begin: '$body'
+End: '$body'
+Code excerpt:
+ [7]> {
+ [8]>     Array<int32> $body = [1, 2];
+                       ^
+ [9]> }
+
+Critical issues found, cannot compile.

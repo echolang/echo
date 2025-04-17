@@ -1,0 +1,5 @@
+expect: ok
+stdlib: off
+
+--- OUT --->
+8

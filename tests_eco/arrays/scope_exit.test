@@ -1,0 +1,8 @@
+expect: ok
+
+--- OUT --->
+3
+9
+--- RAST --->
+// the drop, as an ordinary resolved call
+CHECK: call destructor(addrof<Array<int32>&>

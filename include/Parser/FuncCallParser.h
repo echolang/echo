@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCallResolution.h"
+#include "AST/ASTOps.h"
 #include "AST/ExprNode.h"
 #include "Parser/ParserPayload.h"
 
@@ -12,8 +13,13 @@ namespace Parser
     AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace = nullptr);
 
     // the call a user operator lowers to: an ordinary FunctionCallExprNode over the root namespace's
-    // overload set for `decorated_name`, with the operands as its arguments. `at` is the operator's
+    // overload set for `op` at `fixity`, with the operands as its arguments. `at` is the operator's
     // symbol token, which is where the name is positioned and where a diagnostic points
+    //
+    // takes the fixity rather than the decorated name so a use site names its position **once**: the
+    // three of them gate on a fixity and then have to spell the same one again to build the name, and
+    // the name is the overload set's key - so a site that gated on suffix and named the prefix set
+    // would compile and resolve against the wrong declarations
     //
     // from here on it is a call like any other - the fixpoint settles it, CallResolver coerces its
     // arguments, OwnershipPass copies what needs copying, and codegen emits a CreateCall. that is
@@ -28,7 +34,8 @@ namespace Parser
     // null only when the operands are not usable at all
     AST::FunctionCallExprNode *build_operator_call(
         Parser::Payload &payload,
-        const std::string &decorated_name,
+        const AST::Operator &op,
+        AST::OpFixity fixity,
         const TokenReference &at,
         std::vector<AST::ExprNode *> operands);
 

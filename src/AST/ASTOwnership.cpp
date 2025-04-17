@@ -139,7 +139,7 @@ CodeRef OwnershipPass::code_ref_for(const TokenReference &token)
 
 TokenReference OwnershipPass::virtual_token(const std::string &value, Token::Type type, const TokenReference &at)
 {
-    return _current_module->tokens[_current_module->tokens.push(value, type, at.line(), at.char_offset())];
+    return _current_module->make_virtual_token(value, type, at);
 }
 
 bool OwnershipPass::run_round()
@@ -805,8 +805,11 @@ void OwnershipPass::walk_expression(ExprNode *expr)
         case NodeType::n_expr_index:
         {
             auto *index_expr = static_cast<IndexExprNode *>(expr);
+            walk_expression(index_expr->element_call);
             walk_expression(index_expr->base);
-            walk_expression(index_expr->index);
+            for (auto *index : index_expr->indices) {
+                walk_expression(index);
+            }
             break;
         }
 

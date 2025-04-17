@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:12
+only a place can be indexed - a variable, a field or an element. Bind this expression to a name first, then index that.
+Begin: '['
+End: '['
+Code excerpt:
+ [9]> 
+ [10]> echo make()[0];
+                 ^
+ [11]> 
+
+Critical issues found, cannot compile.

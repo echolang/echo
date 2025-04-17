@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:8
+Invalid type conversion: cannot implicitly convert 'string' to 'usize'
+Begin: 'operator []'
+End: 'operator []'
+Code excerpt:
+ [4]> 
+ [5]> echo $a["nope"];
+             ^
+ [6]> 
+
+Critical issues found, cannot compile.

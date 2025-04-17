@@ -981,6 +981,13 @@ namespace AST
     // free of these; anything left is a resolution bug rather than a legitimate type.
     bool contains_type_param(const ValueType &type);
 
+    // the same walk, asked about **one** declaration rather than about any of them: does this type
+    // mention `param`? a null `param` asks the coarse question above, so one call site can do either
+    //
+    // the asker is a declaration validating its own list - an operator refusing a parameter no
+    // operand mentions, because nothing at a use site could ever bind it
+    bool contains_type_param(const ValueType &type, const TypeParamDecl *param);
+
     // true when nothing has answered what this type is yet: unknown, void, or still mentioning a
     // type parameter that a substitution has not bound
     //

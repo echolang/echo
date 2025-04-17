@@ -247,8 +247,8 @@ TEST_CASE("a declaration that could never be reached is refused", "[operator_dec
 
     SECTION("...and so is an operator over a concrete instantiation")
     {
-        // the grammar gives an operator no name for a `<T>` to follow, so a *generic* operator cannot
-        // be written at all - todo/A32. one over a concrete instantiation is an ordinary declaration
+        // an operator over a *concrete* instantiation needs no type-parameter list at all - there is
+        // nothing left generic to bind. `operator<T>` is the other spelling, tested above
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "struct Vec<T> { T $first; }\n"
             "operator (Vec<int32> $a) + (Vec<int32> $b): Vec<int32> {\n"
@@ -367,5 +367,157 @@ TEST_CASE("an operator's decorated name is unspellable and manglable", "[operato
         const bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
             || (c >= '0' && c <= '9') || c == '_';
         REQUIRE(safe);
+    }
+}
+
+// **the bracket is a fixity, not a symbol run.** its two tokens are not adjacent in the declaration
+// (`[usize $i]` has an operand between them) and they *are* adjacent at an append site (`$a[]`), so
+// neither the symbol reader nor the trie can be the thing that recognises it. no end-to-end case can
+// see either half of that
+TEST_CASE("an index operator is registered by spelling, never in the symbol trie", "[operator_decl]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "operator (Bag& $b)[] : int32& { return &$b->at:$[0]; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    // the symbol is published, and in the index position
+    const Operator *bracket = op_named(*bundle, OperatorRegistry::bracket_spelling());
+    REQUIRE(bracket != nullptr);
+    REQUIRE(bracket->has_fixity(OpFixity::t_index));
+    REQUIRE_FALSE(bracket->has_fixity(OpFixity::t_infix));
+    REQUIRE_FALSE(bracket->has_fixity(OpFixity::t_suffix));
+
+    // both declarations land in **one** overload set under one name, told apart by arity alone -
+    // which is what AST::match_function compares first, so this needs no resolution rule of its own
+    auto declared = decls_named(bundle->modules.find_module("test"), operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index));
+
+    REQUIRE(declared.size() == 2);
+    REQUIRE(declared[0]->args.size() != declared[1]->args.size());
+}
+
+// the trie half of the above, asked directly: a `[` in the token stream must never match as a
+// declared symbol, because parse_postfix_chain has already claimed it. a trie entry would make the
+// *append* form `$a[]` - whose two brackets genuinely are adjacent - match inside the shunting yard
+TEST_CASE("match_at never answers for a bracket", "[operator_decl]")
+{
+    OperatorRegistry registry;
+
+    REQUIRE(registry.find_or_declare_bracket() != nullptr);
+
+    // registered by spelling, so a declaration finds it...
+    REQUIRE(registry.get_operator(std::string(OperatorRegistry::bracket_spelling())) != nullptr);
+
+    // ...and minting it twice is the same operator, the way find_or_declare is idempotent
+    REQUIRE(registry.find_or_declare_bracket() == registry.find_or_declare_bracket());
+}
+
+// the index fixity's decorated name carries **no fixity word**, unlike prefix and suffix - a bracket
+// spelling can only ever be an index operator, because `[` and `]` are refused inside every other
+// symbol, so there is no second declaration for it to be told apart from
+TEST_CASE("the index fixity's name and mangling", "[operator_decl]")
+{
+    const std::string name = operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index);
+
+    REQUIRE(name == "operator []");
+    REQUIRE(name.find(' ') != std::string::npos);
+    REQUIRE(mangle_operator_name(name) == "operatorx20x5bx5d");
+    REQUIRE(std::string(op_fixity_name(OpFixity::t_index)) == "index");
+}
+
+// **`operator<T>` versus a prefix `<`**, which is the one ambiguity the type-parameter list
+// introduced. the lookahead is `<` + identifier + one of `,` `>` `:`, and a prefix declaration has a
+// `(` there instead - so both spellings have to keep parsing
+TEST_CASE("a generic operator's type parameter list is told from a prefix '<'", "[operator_decl]")
+{
+    auto generic = EchoTests::tests_make_parsed_bundle(
+        "struct Bag<T> { ptr<T> $at; }\n"
+        "operator<T> (Bag<T>& $a) merge (Bag<T>& $b) : Bag<T> { return $a; }\n");
+
+    REQUIRE_FALSE(generic->collector.has_critical_issues());
+
+    auto declared = decls_named(
+        generic->modules.find_module("test"), operator_function_name("merge", OpFixity::t_infix));
+    REQUIRE(declared.size() == 1);
+    REQUIRE(declared[0]->is_generic());
+
+    // a prefix `<` is still a symbol, because what follows the angle is a parenthesis
+    auto prefix = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { int32 $x; }\n"
+        "operator <(Bag $b) : bool { return true; }\n");
+
+    REQUIRE_FALSE(prefix->collector.has_critical_issues());
+    REQUIRE(decls_named(
+        prefix->modules.find_module("test"),
+        operator_function_name("<", OpFixity::t_prefix)).size() == 1);
+}
+
+// **the index form's operand list is a parameter list**, `[usize $i]` with one token changed - so
+// the arity range, not a count, is what separates the two forms. no end-to-end case can see that
+// they land in one overload set rather than two, because both spellings work either way
+TEST_CASE("an index operator's arity range", "[operator_decl]")
+{
+    SECTION("no operands at all is refused - the container is the first one")
+    {
+        // `operator []` with nothing before the bracket is read as a *prefix* symbol, and `[` is
+        // refused inside every symbol - which is the same refusal reached from the other direction
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Bag { ptr<int32> $at; }\n"
+            "operator [](Bag& $b) : int32& { return &$b->at:$[0]; }\n");
+
+        REQUIRE(has_issue_containing(*bundle, "cannot be part of an operator symbol"));
+    }
+
+    SECTION("three operands is an ordinary multi-index contract, not an arity error")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Grid { ptr<int32> $at; usize $cols; }\n"
+            "operator (Grid& $g)[usize $r, usize $c] : int32&\n"
+            "{ return &$g->at:$[$r * $g->cols + $c]; }\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto declared = decls_named(bundle->modules.find_module("test"), operator_function_name(
+            OperatorRegistry::bracket_spelling(), OpFixity::t_index));
+
+        REQUIRE(declared.size() == 1);
+        REQUIRE(declared[0]->args.size() == 3);
+    }
+}
+
+// a type parameter has to be *inferable*, and an operator use site writes nothing but its operands -
+// so the check is "does some operand mention it", asked per declaration. the positive half matters
+// as much as the refusal: a parameter mentioned only in a nested position still counts
+TEST_CASE("a generic operator's parameters must be reachable from its operands", "[operator_decl]")
+{
+    SECTION("mentioned inside a generic application, which is still a mention")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Bag<T> { ptr<T> $at; }\n"
+            "operator<T> (Bag<T>& $b)[usize $i] : T& { return &$b->at:$[$i]; }\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+    }
+
+    SECTION("mentioned only in the return type is not enough")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Bag { ptr<int32> $at; }\n"
+            "operator<T> (Bag& $b)[usize $i] : T& { return &$b->at:$[$i]; }\n");
+
+        REQUIRE(has_issue_containing(*bundle, "is not mentioned by any operand"));
+    }
+
+    SECTION("one bound and one unbound reports the unbound one by name")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Bag<T> { ptr<T> $at; }\n"
+            "operator<T, U> (Bag<T>& $b)[usize $i] : T& { return &$b->at:$[$i]; }\n");
+
+        REQUIRE(has_issue_containing(*bundle, "type parameter 'U' is not mentioned"));
     }
 }

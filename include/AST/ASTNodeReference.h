@@ -71,6 +71,7 @@ namespace AST
                    parent_type == NodeType::n_expr_peel ||
                    parent_type == NodeType::n_expr_move ||
                    parent_type == NodeType::n_expr_index ||
+                   parent_type == NodeType::n_expr_array_literal ||
                    parent_type == NodeType::n_expr_void ||
                    parent_type == NodeType::n_expr_class_alloc ||
                    parent_type == NodeType::n_expr_retain ||

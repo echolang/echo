@@ -158,7 +158,7 @@ TEST_CASE( "a declared symbol is matched as a token sequence", "[AST Ops]" )
         AST::Operator *second = registry.find_or_declare({"avg"});
 
         REQUIRE( first == second );
-        REQUIRE( registry.get_custom_operators().size() == 1 );
+        REQUIRE( registry.get_operator("avg") == first );
     }
 }
 

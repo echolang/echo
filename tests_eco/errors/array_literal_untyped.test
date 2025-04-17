@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:1
+nothing says what '$a' holds - an array literal takes its type from where it is going. Write the type, e.g. 'Array<int32> $a = [...];'.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [2]> // on has nothing to infer from - the missing half is the *element* type
+ [3]> $a = [1, 2, 3];
+      ^
+ [4]> 
+
+Critical issues found, cannot compile.

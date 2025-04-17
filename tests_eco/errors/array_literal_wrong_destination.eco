@@ -1,0 +1,2 @@
+// the destination has to be something a literal can fill: a constructor and an append operator
+int32 $n = [1, 2];

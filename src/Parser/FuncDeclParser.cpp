@@ -103,14 +103,15 @@ bool Parser::parse_parameter_list(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &into,
-    const TokenReference &report_at)
+    const TokenReference &report_at,
+    Token::Type closing)
 {
     auto &cursor = payload.cursor;
 
-    while (!cursor.is_type(Token::Type::t_close_paren)) {
+    while (!cursor.is_type(closing)) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(report_at), Token::Type::t_close_paren, Token::Type::t_unknown);
+                payload.context.code_ref(report_at), closing, Token::Type::t_unknown);
             cursor.try_skip_to_next_statement();
             return false;
         }
@@ -132,7 +133,7 @@ bool Parser::parse_parameter_list(
         decl.args.push_back(param);
     }
 
-    // skip the close parenthesis
+    // skip the closing token
     cursor.skip();
 
     return true;

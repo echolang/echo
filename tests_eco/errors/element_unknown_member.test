@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 9:17
+The type 'Slice<int32>' has no member named 'nope'
+Begin: 'nope'
+End: 'nope'
+Code excerpt:
+ [8]> 
+ [9]> echo $views[0]->nope();
+                      ^
+ [10]> 
+
+Critical issues found, cannot compile.

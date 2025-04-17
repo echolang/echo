@@ -284,3 +284,24 @@ TEST_CASE("A generic template body is left alone until it is instantiated", "[se
     // and no deref was written into a body whose T is still open
     REQUIRE_FALSE(contains(d, "deref<T>"));
 }
+
+TEST_CASE("A rewritten index is adjusted as the call it became", "[sema][pointer]")
+{
+    // the adjuster's index arm has two shapes to serve now. once AST::OperatorRewriter has attached
+    // the element contract, the operands are the *call's* arguments - so adjusting them here as well
+    // would wrap each one twice, which for a borrow receiver is a ptr<ptr<Bag>> the callee cannot
+    // take. the receiver's address-of below is AST::CallResolver's, inserted exactly once
+    auto d = desc(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "int32 $x = 1;\n"
+        "$g = Bag(&$x);\n"
+        "echo $g[0];\n");
+
+    REQUIRE(contains(d, "index<int32>(call operator []("));
+    REQUIRE(contains(d, "addrof<Bag&>(varref<Bag>(var($g)))"));
+
+    // exactly one address-of, and no deref of it
+    REQUIRE_FALSE(contains(d, "addrof<Bag&&>"));
+    REQUIRE_FALSE(contains(d, "deref<Bag>(addrof<Bag&>"));
+}

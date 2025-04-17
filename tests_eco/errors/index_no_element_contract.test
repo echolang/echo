@@ -1,0 +1,18 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:8
+No overload of 'operator []' accepts these arguments. Candidates are:
+  operator []<T>(Array<T>&, usize)
+  operator []<T>(Array<T>&)
+  operator []<T>(Slice<T>&, usize)
+Begin: 'operator []'
+End: 'operator []'
+Code excerpt:
+ [5]> $s = Plain(1);
+ [6]> echo $s[0];
+             ^
+ [7]> 
+
+Critical issues found, cannot compile.

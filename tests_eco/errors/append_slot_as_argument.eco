@@ -1,0 +1,6 @@
+// an argument position *reads* its expression, and the append slot has nothing in it to read
+function take(int32 $v) : int32 { return $v; }
+
+Array<int32> $a = [];
+
+echo take($a[]);

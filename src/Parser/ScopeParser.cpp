@@ -119,9 +119,11 @@ AST::ScopeNode & Parser::parse_scope(
             starts_vardecl(payload) ||
             // a write through a place rather than into a bare name. these are statements only,
             // so they are not part of what a declaration looks like: `$p:$ = ...` re-seats a
-            // pointer, `$s->x = ...` writes a member, and `$i++` desugars to an assignment
+            // pointer, `$s->x = ...` writes a member, `$a[$i] = ...` writes an element, and `$i++`
+            // desugars to an assignment
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_accessorlr }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_ptr_of }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_open_bracket }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
         ) {

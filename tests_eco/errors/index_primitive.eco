@@ -1,0 +1,3 @@
+// a primitive has no elements and never will
+int32 $n = 5;
+echo $n[0];

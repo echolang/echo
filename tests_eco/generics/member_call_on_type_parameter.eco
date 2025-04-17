@@ -1,0 +1,29 @@
+// **a method called on a bare type-parameter receiver.** the candidates for a member call come from
+// the receiver's *type*, and in a template body that is `T` - so this used to be reported at parse
+// time, one round before the answer existed.
+//
+// deferring it is what the bracket needed anyway (an element's type is attached mid-fixpoint), and
+// this falls out of the same change: an undetermined receiver is a not-yet, the fixpoint's
+// finalizing sweep owns the diagnostic, and a receiver that *still* mentions a type parameter is a
+// template's own copy - whose clones carry the real answer, so it stays silent
+function count_of<T>(T& $container) : usize
+{
+    return $container->count();
+}
+
+Array<int32> $numbers = [1, 2, 3];
+echo count_of<Array<int32>>(&$numbers);
+
+Array<string> $names = [];
+$names[] = "a";
+$names[] = "b";
+echo count_of<Array<string>>(&$names);
+
+$window = $numbers->slice(1, 2);
+echo count_of<Slice<int32>>(&$window);
+
+// a template nobody instantiates is silent, not an error - reporting it would blame a declaration
+// for going unused
+function never_used<T>(T& $c) : usize { return $c->count(); }
+
+echo 0;

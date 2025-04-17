@@ -27,6 +27,12 @@ namespace AST
         t_infix,
         t_prefix,
         t_suffix,
+
+        // `$a[$i]` - the symbol brackets its *second* operand rather than standing beside it, which
+        // is why it is a fixity of its own rather than an infix `[`. it is also the one fixity no
+        // expression position consumes by looking it up: `[` is claimed unconditionally by the
+        // postfix chain, and which meaning it has is decided from the base's type afterwards
+        t_index,
     };
 
     const char *op_fixity_name(OpFixity fixity);
@@ -111,9 +117,12 @@ namespace AST
             return (_fixities & (1u << static_cast<unsigned>(fixity))) != 0;
         }
 
-        // is there any declared `operator` for this symbol at all? the gate the expression parser
-        // reads to decide whether `$a + $b` could be a call, and deliberately *this* rather than
-        // "does the overload set have candidates": the overload set is filled by the declaration
+        // is there any declared `operator` for this symbol at all? a use site asks `has_fixity`
+        // instead - each of the three positions is a different question, and a fixity implies a
+        // declaration - so this is the coarse form, for asking whether a symbol has been claimed
+        //
+        // both are read off the *operator table*, filled by the type-name pass, and deliberately not
+        // off "does the overload set have candidates": the overload set is filled by the declaration
         // pass, which itself parses expressions (a struct property initializer), so asking it there
         // would answer differently depending on file order
         inline bool is_declared() const {
@@ -136,16 +145,9 @@ namespace AST
 
     struct CustomOperator : public Operator
     {
-        // the symbol split into the ordinary tokens it lexes as, by *value*: {"avg"}, {"!","!"},
-        // {"<=",">"}. matching whole token values is what keeps a word operator from eating the head
-        // of an identifier - the trap the old prefix-matching lexer entry had, where `mm` matched
-        // the front of `mmap`
-        const std::vector<std::string> symbol_tokens;
-
-        CustomOperator(const std::vector<std::string> &symbol_tokens, const std::string &spelling) :
+        CustomOperator(const std::string &spelling) :
             Operator(Token::Type::t_op_custom, spelling,
-                OpPrecedence{OpAssociativity::left, CUSTOM_OP_DEFAULT_PRECEDENCE}),
-            symbol_tokens(symbol_tokens)
+                OpPrecedence{OpAssociativity::left, CUSTOM_OP_DEFAULT_PRECEDENCE})
         {
         }
     };
@@ -181,6 +183,20 @@ namespace AST
         // in it by string, so minting a custom `+` would retype every `$i++` in the program
         Operator *find_or_declare(const std::vector<std::string> &symbol_tokens);
 
+        // the bracket operator, `operator (Array<T>& $a)[usize $i]`, minted on first declaration.
+        //
+        // **it is registered by spelling only, never into the symbol trie**, and that is the whole
+        // reason it is not find_or_declare({"[", "]"}). the trie is keyed on *adjacent* token values,
+        // and in the append form `$a[]` the two brackets genuinely are adjacent - so a trie entry
+        // would make `$a[]` match as a custom symbol inside the shunting yard, in the one position
+        // where the postfix chain has already claimed the token. nothing may ever match `[`:
+        // parse_postfix_chain owns it unconditionally, and AST::OperatorRewriter decides what it means
+        Operator *find_or_declare_bracket();
+
+        // the spelling every bracket operator shares. one constant rather than a literal at the four
+        // sites that build or compare the decorated name
+        static const char *bracket_spelling();
+
         const Operator *get_operator(const TokenReference &token) const;
         const Operator *get_operator(const std::string &symbol) const;
 
@@ -195,13 +211,54 @@ namespace AST
         // `!!`. a longer symbol wins over a shorter one, so `+++` is not read as `++` then `+`
         Match match_at(const TokenReference &start, size_t available) const;
 
-        inline const std::vector<CustomOperator *> &get_custom_operators() const {
-            return _custom_operators;
-        }
+        // **are two tokens written with nothing between them?** the whole of what makes several
+        // tokens one symbol, and it is one predicate because both sides of the feature ask it: the
+        // declaration, deciding where the symbol ends, and match_at, deciding whether a use site
+        // spells one. two copies could disagree, and what disagreement looks like is a symbol
+        // declarable in a shape no use site ever matches
+        //
+        // asked of the source positions rather than by counting, because a token's value is its own
+        // spelling
+        static bool tokens_are_adjacent(const TokenReference &first, const TokenReference &second);
 
     private:
+        // **a node of the declared-symbol trie, keyed on token values.** the root's children are every
+        // token a declared symbol may start with, a path from the root spells one symbol's tokens in
+        // order, and `symbol` is set on the node where a symbol ends
+        //
+        // this is the structure rather than a list because match_at is asked at every operand and
+        // every operator position of every expression in the program: scanning the declared symbols
+        // there made parsing cost (symbols x positions), and measured, 64 declared operators put 57%
+        // on top of parsing a 670 KB file - a cost that grew with how much a program used the feature.
+        // a descent costs the length of the longest symbol that could match, whatever the program
+        // declared, and it is the same shape as the lexer's LexerFunction::TreeNode one level down
+        //
+        // it also *is* the longest-match rule rather than implementing it: descending past a match
+        // and keeping the deepest one is what makes `+++` not `++` then `+`
+        //
+        // the children are keyed on whole token *values*, which is what keeps a word operator from
+        // eating the head of an identifier - the trap the old prefix-matching lexer entry had, where
+        // `mm` matched the front of `mmap`
+        struct SymbolTrieNode
+        {
+            std::unordered_map<std::string, std::unique_ptr<SymbolTrieNode>> children;
+            CustomOperator *symbol = nullptr;
+        };
+
+        // the deepest declared symbol spelled by the tokens at `start`, or {}. split out of match_at
+        // so the predefined answer stays one comparison away from the top of it
+        Match match_custom_at(const TokenReference &start, size_t available) const;
+
+        // the two halves both declaring paths share: is this spelling already claimed, and mint one
+        // that is not. **interning lives here and only here** - the two declaring entry points differ
+        // in exactly one thing, whether the symbol also enters the trie, and everything else about how
+        // an Operator is stored has one owner
+        Operator *find_known_symbol(const std::string &spelling) const;
+        CustomOperator *mint_symbol(const std::string &spelling);
+
         std::vector<std::unique_ptr<Operator>> _operators;
-        std::vector<CustomOperator *> _custom_operators;
+        SymbolTrieNode _symbol_trie;
+
         std::unordered_map<std::string, Operator *> _operator_symbol_map;
         std::array<Operator *, static_cast<size_t>(Token::Type::t_unknown)> _predefined_operator_map;
     };

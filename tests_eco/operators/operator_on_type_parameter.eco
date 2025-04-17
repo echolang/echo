@@ -1,0 +1,29 @@
+// an operator applied to a bare type parameter. the *parser* cannot decide what it means - inside a
+// generic body the operands are `T`, which AST::binary_has_builtin_meaning is deliberately
+// non-committal about - so AST::OperatorRewriter asks the same question again per fixpoint round,
+// once substitution has said what `T` is. this was todo/A32's half (1)
+struct Point { float64 $x; }
+
+operator (Point $a) + (Point $b): Point { return Point($a->x + $b->x); }
+operator (Point $a) + (int32 $b): Point { return Point($a->x + $b); }
+
+operator -(Point $a): Point { return Point(0.0 - $a->x); }
+
+function add<T>(T $a, T $b): T { return $a + $b; }
+function neg<T>(T $v): T { return -$v; }
+
+$p = Point(1.0);
+$q = Point(2.0);
+
+// the declared `operator +(Point, Point)` is reached
+$r = add<Point>($p, $q);
+echo $r->x;
+
+// and the prefix one, through the same rewrite
+$n = neg<Point>($p);
+echo $n->x;
+
+// the *same* templates over a primitive still take the built-in meaning, which is what makes this a
+// second moment rather than a second rule
+echo add<int32>(3, 4);
+echo neg<int32>(5);

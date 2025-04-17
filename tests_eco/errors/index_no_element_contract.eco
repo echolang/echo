@@ -1,0 +1,6 @@
+// a type with no `operator []` is a *located* error naming the type, rather than an unlocated throw
+// from the codegen's index arm
+struct Plain { int32 $x; }
+
+$s = Plain(1);
+echo $s[0];

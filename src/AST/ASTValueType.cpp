@@ -526,23 +526,30 @@ bool AST::can_type_a_literal(const ValueType &type)
 
 bool AST::contains_type_param(const ValueType &type)
 {
+    return contains_type_param(type, nullptr);
+}
+
+bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
+{
     if (type.is_type_param()) {
-        return true;
+        // a null `param` is the coarse question - any parameter at all - so the two share one walk
+        // rather than one being a copy of the other with a comparison added
+        return param == nullptr || type.get_type_param() == param;
     }
 
     if (type.is_pointer()) {
-        return contains_type_param(type.pointee());
+        return contains_type_param(type.pointee(), param);
     }
 
     // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
     // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away
     if (type.is_callable()) {
-        if (contains_type_param(type.signature().return_type)) {
+        if (contains_type_param(type.signature().return_type, param)) {
             return true;
         }
 
-        for (const auto &param : type.signature().parameter_types) {
-            if (contains_type_param(param)) {
+        for (const auto &parameter_type : type.signature().parameter_types) {
+            if (contains_type_param(parameter_type, param)) {
                 return true;
             }
         }
@@ -555,7 +562,7 @@ bool AST::contains_type_param(const ValueType &type)
         ComplexType *ct = type.get_complex_type();
         if (ct && ct->is_instantiated()) {
             for (const auto &arg : ct->instantiation_args) {
-                if (contains_type_param(arg)) {
+                if (contains_type_param(arg, param)) {
                     return true;
                 }
             }

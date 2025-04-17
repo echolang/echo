@@ -10,6 +10,7 @@
 #include "Parser/SymbolParser.h"
 #include "Parser/TypeParser.h"
 
+#include <algorithm>
 #include <fmt/core.h>
 
 namespace
@@ -37,6 +38,12 @@ namespace
     // which tokens a symbol may be spelled out of: an identifier, which is how a word operator like
     // `avg` or `mm` arrives, or one of the punctuation tokens the lexer already has
     //
+    // **`[` and `]` are not on it**, and their absence is load-bearing rather than an omission. a
+    // bracket belongs to exactly one production - the index form read above this list's caller - and
+    // that exclusivity is what lets a use site's `[` be claimed unconditionally by the postfix chain,
+    // which is in turn what makes `$p:$[0]` the only spelling of pointer indexing (todo/B9). a symbol
+    // allowed to contain one would be a second contract on the same character
+    //
     // a **keyword** is refused, and that is the whole of what this list is for: matching happens on
     // token *values*, so a symbol spelled `if` would turn every `if` in the program into an operator.
     // spelled as an allow-list rather than "everything that is not a keyword", so a keyword added
@@ -51,8 +58,6 @@ namespace
             case Token::Type::t_accessorlr:
             case Token::Type::t_ptr_of:
             case Token::Type::t_hash:
-            case Token::Type::t_open_bracket:
-            case Token::Type::t_close_bracket:
             case Token::Type::t_ref:
             case Token::Type::t_namespace_sep:
                 return true;
@@ -63,38 +68,18 @@ namespace
         }
     }
 
-    // are two tokens written with nothing between them? what makes `!!` one symbol and `! !` two of
-    // something else. asked of the source positions rather than by counting, because a token's value
-    // is its own spelling
-    bool tokens_are_adjacent(const TokenReference &first, const TokenReference &second)
-    {
-        return first.line() == second.line()
-            && second.char_offset() == first.char_offset() + first.value().length();
-    }
-
-    // skips a balanced `( ... )` group from its opening parenthesis. the header reader steps over a
-    // parameter list it is not parsing - the type-name pass wants the symbol and nothing else
+    // steps over a parameter list this reader is not parsing - the type-name pass wants the symbol and
+    // nothing else, and the two later passes come back to a recorded position. the depth walk itself
+    // is Parser::Cursor::skip_balanced_group, which owns the skip vocabulary
     void skip_paren_group(Parser::Cursor &cursor)
     {
-        if (!cursor.is_type(Token::Type::t_open_paren)) {
-            return;
-        }
+        cursor.skip_balanced_group(Token::Type::t_open_paren, Token::Type::t_close_paren);
+    }
 
-        int depth = 0;
-
-        while (!cursor.is_done()) {
-            if (cursor.is_type(Token::Type::t_open_paren)) {
-                depth++;
-            } else if (cursor.is_type(Token::Type::t_close_paren)) {
-                depth--;
-                if (depth == 0) {
-                    cursor.skip();
-                    return;
-                }
-            }
-
-            cursor.skip();
-        }
+    // the same, for the index form's `[ ... ]`
+    void skip_bracket_group(Parser::Cursor &cursor)
+    {
+        cursor.skip_balanced_group(Token::Type::t_open_bracket, Token::Type::t_close_bracket);
     }
 }
 
@@ -123,23 +108,19 @@ namespace
                 continue;
             }
 
+            // an index operator's operand list, stepped over whole for the same reason the
+            // parenthesised ones are: what is inside an operand list is not where this declaration
+            // ends, whichever bracket encloses it
+            if (cursor.is_type(Token::Type::t_open_bracket)) {
+                skip_bracket_group(cursor);
+                continue;
+            }
+
             cursor.skip();
         }
 
         Parser::skip_declaration_body(payload);
     }
-}
-
-void Parser::skip_operatordecl(Parser::Payload &payload)
-{
-    auto &cursor = payload.cursor;
-
-    if (!starts_operatordecl(cursor)) {
-        return;
-    }
-
-    cursor.skip(); // the `operator` keyword
-    skip_operator_remainder(payload);
 }
 
 Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
@@ -153,6 +134,26 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
 
     const TokenReference operator_token = cursor.current();
     cursor.skip();
+
+    // the type-parameter list, `operator<T>`. it sits where a function writes one - immediately after
+    // the thing that names the declaration - and the `operator` keyword is that thing, since an
+    // operator has no name token of its own
+    //
+    // told from a **prefix `<` operator** by looking two tokens past the angle: a type parameter is an
+    // identifier followed by `,`, `>` or a `:` constraint, while `operator <(int32 $a) : bool` has a
+    // `(` there. the same shape as the precedence clause's lookahead below, and the same reason - one
+    // token of context is what separates two productions that start alike
+    if (cursor.is_type(Token::Type::t_open_angle)
+        && cursor.peek_is_type(1, Token::Type::t_identifier)
+        && (cursor.peek_is_type(2, Token::Type::t_comma)
+            || cursor.peek_is_type(2, Token::Type::t_close_angle)
+            || cursor.peek_is_type(2, Token::Type::t_colon))) {
+
+        // parsed rather than skipped, so the list's grammar has one owner - and **kept**, so it is
+        // parsed once: minting the declarations from it is parse_operatordecl's step, and in the two
+        // later passes this walk resolves every constraint atom, which is not work to do twice
+        header.type_params = Parser::parse_type_param_list(payload);
+    }
 
     // the precedence clause, `operator(45, left)`. told from a parameter group by the one token after
     // the parenthesis: a parameter list opens with a type, and no type production in the language
@@ -193,7 +194,29 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
     const bool has_left_operand = cursor.is_type(Token::Type::t_open_paren);
 
     if (has_left_operand) {
+        // where the list starts, for parse_operatordecl to come back to
+        header.left_params = cursor.snapshot();
         skip_paren_group(cursor);
+    }
+
+    // **the index form**, `operator (Array<T>& $a)[usize $i]`. it is recognised here, ahead of the
+    // symbol run, and never *by* the symbol run: its two tokens are not adjacent, so there is no run
+    // to read. the bracket also cannot appear in any other symbol - is_allowed_symbol_token refuses
+    // both of them - so a `[` in this position can only mean one thing and needs no lookahead
+    //
+    // the spelling is synthesised rather than concatenated from what was written, because what was
+    // written has an operand list in the middle of it
+    if (has_left_operand && cursor.is_type(Token::Type::t_open_bracket)) {
+        header.symbol_token.emplace(cursor.current());
+        header.spelling = AST::OperatorRegistry::bracket_spelling();
+        header.symbol_tokens.push_back(header.spelling);
+        header.fixity = AST::OpFixity::t_index;
+        header.index_params = cursor.snapshot();
+
+        skip_bracket_group(cursor);
+
+        header.valid = true;
+        return header;
     }
 
     // the symbol: a maximal run of adjacent, non-structural tokens. both halves matter - the
@@ -206,8 +229,10 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
         const TokenReference token = cursor.current();
 
         // adjacency is against the token just consumed, so a three token symbol checks each
-        // neighbour rather than everything against the first
-        if (previous.has_value() && !tokens_are_adjacent(*previous, token)) {
+        // neighbour rather than everything against the first. the registry's predicate, because a use
+        // site is matched with the same one - see AST::OperatorRegistry::tokens_are_adjacent
+        if (previous.has_value()
+            && !AST::OperatorRegistry::tokens_are_adjacent(*previous, token)) {
             break;
         }
 
@@ -274,7 +299,12 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
         return;
     }
 
-    AST::Operator *op = payload.collector.operators.find_or_declare(header.symbol_tokens);
+    // the bracket is minted through its own path, which registers the spelling and stops there. see
+    // OperatorRegistry::find_or_declare_bracket: a trie entry for `[` `]` would match the append form
+    // `$a[]` in the shunting yard, where the postfix chain has already claimed the token
+    AST::Operator *op = header.fixity == AST::OpFixity::t_index
+        ? payload.collector.operators.find_or_declare_bracket()
+        : payload.collector.operators.find_or_declare(header.symbol_tokens);
 
     if (op == nullptr) {
         return;
@@ -287,7 +317,7 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
         (header.fixity == AST::OpFixity::t_infix && op->has_fixity(AST::OpFixity::t_suffix))
         || (header.fixity == AST::OpFixity::t_suffix && op->has_fixity(AST::OpFixity::t_infix));
 
-    if (infix_suffix_clash && header.symbol_token.has_value()) {
+    if (infix_suffix_clash) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(*header.symbol_token),
             fmt::format(
@@ -300,10 +330,22 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
     }
 
     if (header.precedence.has_value()) {
+        // **an index operator has no precedence to declare.** `[` is consumed by the postfix chain,
+        // which binds tighter than every binary operator by construction and never reaches the
+        // shunting yard - so a number here would be stored, compared against nothing and silently do
+        // nothing. refused where it is written, like every other unreachable spelling in this file
+        if (header.fixity == AST::OpFixity::t_index) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(*header.symbol_token),
+                "An index operator cannot declare a precedence - '[' binds like '->', tighter than "
+                "every binary operator, and never reaches the precedence table.");
+            return;
+        }
+
         // a *built-in* symbol's precedence is the language's, not a declaration's: `+` binds the way
         // it binds whatever anyone overloads it for, or two files would parse the same expression
         // differently
-        if (!op->is_custom() && header.symbol_token.has_value()) {
+        if (!op->is_custom()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(*header.symbol_token),
                 fmt::format(
@@ -320,8 +362,7 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
         // conflict; one writing no clause at all is not, so the check is against
         // `precedence_declared` rather than against the value the default left behind
         if (op->precedence_declared
-            && (op->precedence.sequence != declared.sequence || op->precedence.assoc != declared.assoc)
-            && header.symbol_token.has_value()) {
+            && (op->precedence.sequence != declared.sequence || op->precedence.assoc != declared.assoc)) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(*header.symbol_token),
                 fmt::format(
@@ -348,12 +389,19 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
 
     const TokenReference operator_token = cursor.current();
 
-    // the header walks *over* the left operand list on its way to the symbol, because the fixity - and
-    // therefore whether there is a left operand list at all - is not known until the symbol has been
-    // read. so the position is kept and returned to, rather than the header parsing half a signature
-    const auto at_keyword = cursor.snapshot();
-
     const OperatorHeader header = read_operator_header(payload);
+
+    // every refusal below is "report it here, then consume the declaration whole", which is what lets
+    // the struct member walk hand one to this function instead of refusing it itself. one lambda
+    // rather than the three statements written out per refusal, publish_implicit_conversion's shape -
+    // nine copies of a recovery is nine chances for one of them to recover differently
+    const auto refuse = [&](const TokenReference &at, const std::string &message)
+        -> AST::FunctionDeclNode * {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at), message);
+        skip_operator_remainder(payload);
+        return nullptr;
+    };
 
     if (!header.valid) {
         skip_operator_remainder(payload);
@@ -366,25 +414,20 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // could otherwise be written are refused here rather than half-supported:
     //
     //  - inside a `struct`, where it would read as a member of a type it is not a member of. the
-    //    struct member walk refuses it before reaching this function, so this is the second gate
+    //    struct member walk routes one here rather than reporting it there, so this is the only
+    //    spelling of that diagnostic
     //  - inside a `{ }` block, where every other declaration is block-scoped while this one's symbol
     //    would still be visible to the whole program - the shunting yard has one precedence table
     if (payload.context.self_struct_ptr != nullptr) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(operator_token),
+        return refuse(operator_token,
             "An operator cannot be declared inside a struct. Declare it at file scope - an operator "
             "is not a member of either of its operand types.");
-        skip_operator_remainder(payload);
-        return nullptr;
     }
 
     if (payload.context.current_namespace != nullptr && payload.context.current_namespace->is_lexical()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(operator_token),
+        return refuse(operator_token,
             "An operator cannot be declared inside a block. Declare it at file scope - its symbol is "
             "visible to the whole program, so it cannot be scoped to one.");
-        skip_operator_remainder(payload);
-        return nullptr;
     }
 
     const std::string decorated_name = AST::operator_function_name(header.spelling, header.fixity);
@@ -419,26 +462,26 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // would hide every unrelated one. the precedence table is already global, so the set is too
     funcdecl->ast_namespace = &payload.collector.namespaces.root();
 
+    // the type parameters, declared and made visible before a single operand type is read - a
+    // parameter mentioned in `(Array<T>& $a)` has to resolve while that list is parsed.
+    // parse_funcdecl's order exactly, and the same two calls: declare_type_parameters owns the shape
+    // of FunctionDeclNode::type_parameters, TypeParamScope owns their visibility
+    //
+    // no inherited parameters are passed: an operator is never a member, so there is no owner whose
+    // list would sit ahead of its own. the list itself was parsed by read_operator_header, which had
+    // to walk it to reach the symbol
+    declare_type_parameters(payload, *funcdecl, header.type_params);
+
+    AST::TypeParamScope type_param_scope(payload.context, funcdecl->type_parameters);
+
     auto &funcscope = payload.context.emplace_node<AST::ScopeNode>();
 
     // the operand lists, in the order the fixity says they are written. an infix declaration has two
     // groups around the symbol, so the left one has to be parsed from a position the header already
-    // walked past - the cursor is restored to it rather than the header returning half a parse
+    // walked past - the cursor is restored to the position the header recorded rather than that
+    // position being derived a second time
     if (header.fixity != AST::OpFixity::t_prefix) {
-        cursor.restore(at_keyword);
-        cursor.skip(); // the `operator` keyword
-
-        // ...past the precedence clause, if there was one
-        if (cursor.is_type(Token::Type::t_open_paren) && cursor.peek_is_type(1, Token::Type::t_integer_literal)) {
-            skip_paren_group(cursor);
-        }
-
-        if (!cursor.is_type(Token::Type::t_open_paren)) {
-            payload.collect_unexpected_token(Token::Type::t_open_paren);
-            skip_declaration_body(payload);
-            return nullptr;
-        }
-
+        cursor.restore(*header.left_params);
         cursor.skip(); // `(`
 
         if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token)) {
@@ -448,10 +491,26 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         cursor.restore(after_symbol);
     }
 
-    if (header.fixity != AST::OpFixity::t_suffix) {
+    // the index form's second operand list sits *inside* the symbol, so it is parsed from its own
+    // recorded position rather than from wherever the symbol ended. an empty `[]` is the append form
+    // and parses to no parameters at all, which is the whole of how the two are told apart later:
+    // one overload set, separated by arity, which is what match_function compares first
+    if (header.fixity == AST::OpFixity::t_index) {
+        cursor.restore(*header.index_params);
+        cursor.skip(); // `[`
+
+        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token,
+                Token::Type::t_close_bracket)) {
+            return nullptr;
+        }
+
+        cursor.restore(after_symbol);
+    }
+
+    if (header.fixity == AST::OpFixity::t_prefix || header.fixity == AST::OpFixity::t_infix) {
         if (!cursor.is_type(Token::Type::t_open_paren)) {
             payload.collect_unexpected_token(Token::Type::t_open_paren);
-            skip_declaration_body(payload);
+            skip_operator_remainder(payload);
             return nullptr;
         }
 
@@ -486,47 +545,65 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // an operator is an expression, so a void one is a statement written as an operator. refused
     // rather than lowered, because `$a = $b avg $c` would then declare a void variable
     if (funcdecl->get_return_type().is_void()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(*header.symbol_token),
+        return refuse(*header.symbol_token,
             fmt::format(
                 "operator '{}' returns void. An operator is an expression, so it has to return "
                 "something.",
                 header.spelling));
-        skip_operator_remainder(payload);
-        return nullptr;
+    }
+
+    // **an index operator hands back the element itself**, and `$a[$i]` is a place unconditionally -
+    // it reads, writes, takes `&` and chains with `->` through the one address path, exactly as
+    // `$p:$[$i]` does. an overload returning by value would make place-ness depend on which overload
+    // won, which is the split AST::is_place_expression exists to prevent, so the contract is the
+    // return type: a non-nullable borrow, nothing else
+    if (header.fixity == AST::OpFixity::t_index
+        && !(funcdecl->get_return_type().is_pointer() && !funcdecl->get_return_type().is_nullable())) {
+        return refuse(*header.symbol_token,
+            fmt::format(
+                "an index operator returns a borrow of the element - 'T&', not '{}'. `$a[$i]` is a "
+                "place, so what it names has to have an address.",
+                funcdecl->get_return_type().get_type_desciption()));
     }
 
     // the arity the fixity promises. checked here rather than trusted, because a wrong count would
     // otherwise register a declaration no use site can ever reach: `match_function` compares arity
     // first, so it would simply never match and the operator would silently do nothing
-    const size_t wanted_arity = header.fixity == AST::OpFixity::t_infix ? 2 : 1;
+    //
+    // the index form is the one with a *range* rather than a count. one operand is the append slot,
+    // `$a[] = $v`; two or more is an element, `$a[$i]` and `$m[$row, $col]`. they share one overload
+    // set and one decorated name, and arity is what tells them apart - so the rule here is only that
+    // the receiver is present, and match_function does the rest with no new rule at all
+    if (header.fixity == AST::OpFixity::t_index) {
+        if (funcdecl->args.empty()) {
+            return refuse(*header.symbol_token,
+                "an index operator takes the container as its first operand, e.g. "
+                "'operator (Array<int32>& $a)[usize $i] : int32&'.");
+        }
+    } else {
+        const size_t wanted_arity = header.fixity == AST::OpFixity::t_infix ? 2 : 1;
 
-    if (funcdecl->args.size() != wanted_arity) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(*header.symbol_token),
-            fmt::format(
-                "an {} operator takes {} operand{}, but '{}' declares {}.",
-                AST::op_fixity_name(header.fixity),
-                wanted_arity,
-                wanted_arity == 1 ? "" : "s",
-                header.spelling,
-                funcdecl->args.size()));
-        skip_operator_remainder(payload);
-        return nullptr;
+        if (funcdecl->args.size() != wanted_arity) {
+            return refuse(*header.symbol_token,
+                fmt::format(
+                    "an {} operator takes {} operand{}, but '{}' declares {}.",
+                    AST::op_fixity_name(header.fixity),
+                    wanted_arity,
+                    wanted_arity == 1 ? "" : "s",
+                    header.spelling,
+                    funcdecl->args.size()));
+        }
     }
 
     // **two spellings no use site can reach**, this one and the suffix `++` below. both are refused
-    // ahead of the all-primitive check further down, because "this spelling is not reachable" is the
-    // more specific thing to say and it would otherwise be reported as the vaguer one
+    // ahead of the built-in-meaning check further down, because "this spelling is not reachable" is
+    // the more specific thing to say and it would otherwise be reported as the vaguer one
     //
     // `=` first: assignment is a statement, not an expression the shunting yard ever sees, so an
     // overload of it would register, mangle, be emitted, and never fire
     if (header.spelling == "=") {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(*header.symbol_token),
+        return refuse(*header.symbol_token,
             "'=' cannot be declared as an operator - assignment is a statement, not an expression.");
-        skip_operator_remainder(payload);
-        return nullptr;
     }
 
     // **a suffix `++` / `--` cannot be reached.** `$i++;` is a statement, dispatched straight to
@@ -535,57 +612,104 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // spelling of it that parses - said out loud rather than left as a puzzle
     if (header.fixity == AST::OpFixity::t_suffix
         && (header.spelling == "++" || header.spelling == "--")) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(*header.symbol_token),
+        return refuse(*header.symbol_token,
             fmt::format(
                 "'{}' cannot be declared as an operator: `$i{}` is a statement, and it always means "
                 "`$i = $i {} 1`.",
                 header.spelling, header.spelling, header.spelling.substr(0, 1)));
-        skip_operator_remainder(payload);
-        return nullptr;
     }
 
-    // **a built-in symbol needs at least one declared operand.** codegen lowers every primitive and
-    // pointer combination itself, and the built-in meaning wins - so an all-primitive overload of `+`
-    // would register, mangle and be emitted, and then never fire. that is the class of silent no-op
-    // publish_implicit_conversion refuses seven shapes for
+    // **a declaration the built-in meaning would win over.** codegen lowers a whole matrix of operand
+    // types itself, and where it does, a declaration would register, mangle and be emitted, and then
+    // never fire. that is the class of silent no-op publish_implicit_conversion refuses seven shapes
+    // for
     //
-    // a *custom* symbol is exempt, and has to be: `operator (int32 $a)mm : Distance` is the point of
-    // the whole feature, and its operand is a primitive
-    const AST::Operator *op = payload.collector.operators.get_operator(header.spelling);
+    // asked of **the** predicate, AST::binary_has_builtin_meaning, which is also what the parser reads
+    // at a use site to decide whether to look for a declaration and what the type checker reads to
+    // report that none was found. re-deriving it here as "does any operand have a complex type" was a
+    // third answer to one question, and it differed: `==` over two class handles is an address
+    // comparison codegen *does* lower, so such a declaration was accepted and could never fire
+    //
+    // a custom symbol answers false for every operand, which is what keeps
+    // `operator (int32 $a)mm : Distance` - the point of the whole feature, over a primitive - declarable
+    // the index form is exempt, and not by omission: `[` has no built-in meaning over a *complex*
+    // base at all - the language spells one only for a pointer, which the rewriter keeps for itself -
+    // so there is nothing for a declaration to be shadowed by
+    if (header.fixity != AST::OpFixity::t_index) {
+        const AST::Operator *op = payload.collector.operators.get_operator(header.spelling);
 
-    if (op != nullptr && !op->is_custom()) {
-        bool has_declared_operand = false;
-
+        // the declared operand types as the predicate wants them: value-position, which is what a
+        // parameter written `Point&` means once its operand has been read through
+        std::vector<AST::OperandFacts> operands;
         for (const auto *arg : funcdecl->args) {
             const AST::ValueType type = arg->has_type() ? arg->type() : AST::ValueType::make_unknown();
-            has_declared_operand |= AST::value_type_of(type).has_complex_type() || type.is_type_param();
+            operands.push_back(AST::OperandFacts{AST::value_type_of(type)});
         }
 
-        if (!has_declared_operand) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(*header.symbol_token),
+        const bool builtin_wins = header.fixity == AST::OpFixity::t_infix
+            ? AST::binary_has_builtin_meaning(op, operands[0], operands[1])
+            : AST::unary_has_builtin_meaning(op, operands[0]);
+
+        if (builtin_wins) {
+            // **a bare type parameter is the same refusal with a different reason.** the predicate
+            // admits an undeterminable operand deliberately - it says nothing either way - so
+            // `operator<T> (T $a) + (T $b)` lands here, and "built in for these operand types" is
+            // not what a reader wrote. an operator over a type parameter would have to be chosen
+            // per instantiation, and the symbol is one global set with no receiver to key on
+            const bool over_bare_param = std::any_of(operands.begin(), operands.end(),
+                [](const AST::OperandFacts &facts) { return facts.type.is_type_param(); });
+
+            if (over_bare_param) {
+                return refuse(*header.symbol_token,
+                    fmt::format(
+                        "operator '{}' cannot be declared over a bare type parameter - the language "
+                        "already spells a meaning for '{}' over the primitives a parameter may be "
+                        "bound to. Declare it for the type itself, e.g. 'operator (Vec<T> $a) {} "
+                        "(Vec<T> $b)'.",
+                        header.spelling, header.spelling, header.spelling));
+            }
+
+            return refuse(*header.symbol_token,
                 fmt::format(
                     "operator '{}' is built in for these operand types, so this declaration would "
-                    "never be used. An overload of a built-in operator needs at least one declared "
-                    "type among its operands.",
+                    "never be used - where the language spells a meaning, the built-in one wins.",
                     header.spelling));
-            skip_declaration_body(payload);
-            return nullptr;
         }
     }
 
-    // **no type-parameter refusal, and deliberately none.** the grammar gives an operator no name for
-    // a `<T>` to follow, so there is no way to introduce a type parameter and nothing to refuse - a
-    // check for one would be dead code. an operator over a *concrete instantiation*,
-    // `operator (Vec<int32> $a) + (Vec<int32> $b)`, is an ordinary declaration and works today. the
-    // missing spelling is a grammar question, and it is todo/A32's
+    // **a type parameter that no operand mentions can never be bound.** a call site has a spelling
+    // for explicit type arguments and an operator use site does not - `$a[$i]` carries nothing but
+    // its operands - so inference is the only way one is ever decided. left unrefused, the
+    // declaration would register and every single use site would report UnresolvedTypeParameter,
+    // which is the same class of silent-until-used failure the built-in check above prevents
+    for (const auto *param : funcdecl->type_parameters) {
+        const bool mentioned = std::any_of(funcdecl->args.begin(), funcdecl->args.end(),
+            [param](const AST::VarDeclNode *arg) {
+                return arg != nullptr && arg->has_type() && AST::contains_type_param(arg->type(), param);
+            });
+
+        if (!mentioned) {
+            return refuse(*header.symbol_token,
+                fmt::format(
+                    "type parameter '{}' is not mentioned by any operand of operator '{}', so nothing "
+                    "could ever bind it - an operator use site has no spelling for explicit type "
+                    "arguments.",
+                    param->name, header.spelling));
+        }
+    }
 
     // the signature is complete, so this is the earliest point it can join its overload set.
     // registering in both passes is intentional: the declaration pass makes it visible to use sites
     // written above it and in other files, and the body pass finds the same declaration site
     payload.collector.functions.register_function(
         payload.collector, payload.context.code_ref(*header.symbol_token), funcdecl);
+
+    // what the attributes drained above publish about this declaration, through the one list of it -
+    // so a marker added there reaches this site too rather than being remembered at a fourth. a null
+    // owner is what tells `#[implicit]` that this is a free declaration, which is the refusal an
+    // operator owes: a conversion is inserted where the user wrote *nothing*, and every spelling an
+    // operator has is operand syntax the user writes
+    publish_declaration_markers(payload, funcdecl, nullptr, *header.symbol_token);
 
     if (symbol_only) {
         if (cursor.is_type(Token::Type::t_open_brace)) {

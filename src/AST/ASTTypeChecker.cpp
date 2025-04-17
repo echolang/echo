@@ -599,15 +599,23 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
     // per-branch primitive gaps (e.g. `%` on two bools) are left to the enriched codegen throw
     // rather than re-encoding codegen's full operator matrix and risking false positives
     if (node.lhs && node.rhs && node.op_node) {
-        ValueType lhs = node.lhs->result_type();
-        ValueType rhs = node.rhs->result_type();
+        // **the operands as every rule below wants them**, read once: the type a value-position read
+        // yields, plus whether the user wrote `null` there. `adjusted_operand` rather than
+        // `parse_time_operand` because this pass runs after PointerAdjuster, where every deref is
+        // already a node and result_type() is the truth - the asymmetry those two named constructors
+        // exist for. asking result_type() again per rule also re-walks the operand subtree each time
+        const OperandFacts lhs_facts = adjusted_operand(node.lhs);
+        const OperandFacts rhs_facts = adjusted_operand(node.rhs);
+
+        const ValueType &lhs = lhs_facts.type;
+        const ValueType &rhs = rhs_facts.type;
 
         // comparing against null only means something on an address. `$p == null` would read
         // the int32 at address zero - exactly the crash the check is meant to prevent - so it
         // is rejected and `$p:$ == null` is the way to ask
         // (book/concept/pointers_and_refs_v2.md, "Nullability")
-        const bool lhs_null = node.lhs->get_node_type() == NodeType::n_null;
-        const bool rhs_null = node.rhs->get_node_type() == NodeType::n_null;
+        const bool lhs_null = lhs_facts.is_null;
+        const bool rhs_null = rhs_facts.is_null;
 
         if (lhs_null != rhs_null) {
             const ValueType &other = lhs_null ? rhs : lhs;
@@ -646,21 +654,16 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         // used to be spelled out here, and the parser asking the same question its own way is exactly
         // how the two would come to different answers - one of them silently
         //
-        // the operands are handed over as **adjusted** facts: this pass runs after PointerAdjuster, so
-        // every deref is already a node and result_type() is the truth. the parser normalizes
-        // differently, and that asymmetry is the reason those are two named constructors
         // an undeterminable operand needs no guard here: has_complex_type() is false for unknown, void
         // and a bare type parameter, so the predicate already answers "there is a meaning" for them and
         // leaves the diagnostic to whichever pass actually knows what went wrong
-        if (!binary_has_builtin_meaning(
-                node.op_node->op, adjusted_operand(node.lhs), adjusted_operand(node.rhs))) {
+        if (!binary_has_builtin_meaning(node.op_node->op, lhs_facts, rhs_facts)) {
 
             // **a declared operator that did not fire** is a different thing to say, and the only
             // place it can be said. the parser decides from the operand types it can see, so inside a
             // generic body it saw `T`, took the built-in path, and this node is the substituted clone -
             // a use site that looks like it should have worked. see todo/A32
-            const bool declared_but_unreached = node.op_node->op->is_declared()
-                && node.op_node->op->has_fixity(OpFixity::t_infix);
+            const bool declared_but_unreached = node.op_node->op->has_fixity(OpFixity::t_infix);
 
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.op_node->token_literal),
@@ -668,7 +671,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
                     ? fmt::format(
                         "operator '{}' is declared for '{}' and '{}', but an operator applied to a "
                         "type parameter is not resolved yet - the operand types are only known after "
-                        "substitution. Call the operator's function form instead. See todo/A32.",
+                        "substitution. Write a named function and call that instead. See todo/A32.",
                         node.op_node->op->spelling,
                         lhs.get_type_desciption(),
                         rhs.get_type_desciption())

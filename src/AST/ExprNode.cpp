@@ -206,15 +206,78 @@ const std::string AST::RetainExprNode::node_description()
     return "retain<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
+AST::ValueType AST::IndexExprNode::indexed_base_type() const
+{
+    if (base == nullptr) {
+        return ValueType::make_unknown();
+    }
+
+    ValueType type = base->result_type();
+
+    while (type.is_pointer() && !type.is_nullable()) {
+        type = type.pointee();
+    }
+
+    return type;
+}
+
 AST::ValueType AST::IndexExprNode::result_type() const
 {
+    // a container's element contract hands back a borrow of the element, so the element itself is
+    // one level in from what the call yields - the same peel a pointer base gets below, asked of the
+    // operator's return type instead of the base's
+    if (element_call != nullptr) {
+        return value_type_of(element_call->result_type());
+    }
+
+    const ValueType indexed = indexed_base_type();
+
+    // **only a pointer answers for its own element.** anything else is a container whose contract
+    // AST::OperatorRewriter has not attached yet, and peeling the base there would hand back the
+    // *container* as though it were the element - a confidently wrong type that no later pass could
+    // tell from a right one. unknown is the honest answer, and it is the one every pass already
+    // knows how to wait on
+    if (!indexed.is_pointer()) {
+        return ValueType::make_unknown();
+    }
+
     // indexing a ptr<T> yields a T, the element itself
-    return value_type_of(base->result_type());
+    return value_type_of(indexed);
 }
 
 const std::string AST::IndexExprNode::node_description()
 {
-    return "index<" + result_type().get_type_desciption() + ">(" + base->node_description() + "[" + index->node_description() + "])";
+    // the rewritten form prints the call, because the call is what is there - `-ar` showing an
+    // ordinary resolved `operator []` is the whole claim that a subscript is not a special case
+    if (element_call != nullptr) {
+        return "index<" + result_type().get_type_desciption() + ">("
+            + element_call->node_description() + ")";
+    }
+
+    std::string arguments;
+    for (auto *index : indices) {
+        if (!arguments.empty()) {
+            arguments += ", ";
+        }
+        arguments += index->node_description();
+    }
+
+    return "index<" + result_type().get_type_desciption() + ">("
+        + (base != nullptr ? base->node_description() : "?") + "[" + arguments + "])";
+}
+
+const std::string AST::ArrayLiteralExprNode::node_description()
+{
+    std::string rendered;
+
+    for (auto *element : elements) {
+        if (!rendered.empty()) {
+            rendered += ", ";
+        }
+        rendered += element->node_description();
+    }
+
+    return "arraylit([" + rendered + "])";
 }
 
 AST::ValueType AST::DerefExprNode::result_type() const

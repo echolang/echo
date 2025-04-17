@@ -1,0 +1,32 @@
+// an array is a value type that owns a buffer, so book/concept/ownership_and_moving.md already
+// answers every question about it - there is no array-specific rule here at all
+function total(Slice<int32>& $s) : int32
+{
+    int32 $sum = 0;
+    usize $i = 0;
+    while ($i < $s->count()) { $sum = $sum + $s[$i]; $i = $i + 1; }
+    return $sum;
+}
+
+Array<int32> $a = [1, 2, 3];
+
+// `$b = $a` copies the elements. two arrays, two buffers
+$b = $a;
+$b[0] = 99;
+echo $a[0];
+echo $b[0];
+
+// `->clone()` is the same copy, said out loud at the call site
+$c = $a->clone();
+$c[1] = 88;
+echo $a[1];
+echo $c[1];
+
+// borrowing copies nothing
+$w = $a->slice();
+echo total(&$w);
+
+// a move hands the buffer over; `$d` owns it and `$a` is unset
+$d = mv $a;
+echo $d->count();
+echo $d[2];

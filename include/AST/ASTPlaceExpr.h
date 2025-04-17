@@ -56,10 +56,17 @@ namespace AST
     // reading a place that holds a pointer auto-dereferences it once, so `$copy = $r` over an
     // `int32&` infers int32 and copies the value. an expression that is not a place is already
     // the value it means - `&$x` yields an address, so `$ref = &$var` still infers a pointer
+    // the overload taking a `result_type()` the caller already has, for a site that wants both the
+    // read type and the raw one - result_type() walks the expression's subtree, so a caller holding
+    // the answer passes it rather than provoking it again. the place rule stays in one place
+    inline ValueType value_result_type(const ExprNode &expr, const ValueType &result_type)
+    {
+        return is_place_expression(expr) ? value_type_of(result_type) : result_type;
+    }
+
     inline ValueType value_result_type(const ExprNode &expr)
     {
-        ValueType type = expr.result_type();
-        return is_place_expression(expr) ? value_type_of(type) : type;
+        return value_result_type(expr, expr.result_type());
     }
 
     // **the** type an inferred declaration takes from its initializer: the value the initializer

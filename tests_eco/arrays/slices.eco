@@ -1,0 +1,32 @@
+// a `Slice<T>` is a borrowed window over elements somebody else owns - two words, owning nothing.
+// a function should take its elements this way, because it does not care who owns them
+function total(Slice<int32>& $s) : int32
+{
+    int32 $sum = 0;
+    usize $i = 0;
+
+    while ($i < $s->count()) {
+        $sum = $sum + $s[$i];
+        $i = $i + 1;
+    }
+
+    return $sum;
+}
+
+Array<int32> $a = [1, 2, 3, 4, 5];
+
+$whole = $a->slice();
+echo total(&$whole);
+
+$tail = $a->slice(2, 2);
+echo total(&$tail);
+echo $tail->count();
+echo $tail[0];
+
+// a sub-window shares storage with its parent, so a write through one is visible through the other
+$tail[0] = 30;
+echo $a[2];
+
+// `->slice()` is written out rather than implicit: an Array does not silently decay to a Slice
+$sub = $whole->slice(1, 2);
+echo total(&$sub);

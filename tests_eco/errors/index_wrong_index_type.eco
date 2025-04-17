@@ -1,0 +1,5 @@
+// the index is an ordinary argument, checked by the ordinary conversion rule against the operand
+// the contract declares
+Array<int32> $a = [1];
+
+echo $a["nope"];

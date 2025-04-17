@@ -10,6 +10,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
@@ -280,7 +281,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
 
 AST::FunctionCallExprNode *Parser::build_operator_call(
     Parser::Payload &payload,
-    const std::string &decorated_name,
+    const AST::Operator &op,
+    AST::OpFixity fixity,
     const TokenReference &at,
     std::vector<AST::ExprNode *> operands)
 {
@@ -290,19 +292,11 @@ AST::FunctionCallExprNode *Parser::build_operator_call(
         }
     }
 
-    // the name is **virtual**, because no token in the source spells it: the decorated name is what
-    // FunctionRegistry keys the overload set on, and the position is the symbol, so a diagnostic about
-    // this call points at the operator a reader wrote. typed t_identifier so AST::is_print_call -
-    // which keys on t_echo - cannot mistake it for `echo`
-    const TokenReference name_token =
-        payload.context.make_virtual_token(decorated_name, Token::Type::t_identifier, at);
-
-    auto &call = payload.context.emplace_node<AST::FunctionCallExprNode>(name_token, std::move(operands));
-
-    // the **root** namespace, which is where every operator declaration registers. one symbol names
-    // one set for the whole program, so there is no outward walk to do and nothing an inner namespace
-    // could hide - see Parser::parse_operatordecl, which is the other half of that decision
-    call.lookup_namespace = &payload.collector.namespaces.root();
+    // the node itself is AST::build_operator_call_node's, shared with AST::OperatorRewriter - the
+    // decorated name, the virtual token and the root namespace are one operator use site's shape,
+    // whichever moment builds it
+    auto &call = AST::build_operator_call_node(
+        payload.context.module, payload.collector, op.spelling, fixity, at, std::move(operands));
 
     // driven, but not judged. an unresolved operator call is a legitimate intermediate state for the
     // reason the header gives, and the fixpoint's finalizing sweep reports whatever is still
@@ -382,10 +376,21 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     auto &funcall = payload.context.emplace_node<AST::FunctionCallExprNode>(member_token, args);
     funcall.explicit_type_args = explicit_type_args;
 
+    // **an undetermined receiver is "ask again later", not an error.** the type may be a parameter
+    // nothing has substituted, an unsettled call's void, or - the case that made this matter - an
+    // element access whose contract AST::OperatorRewriter attaches inside the fixpoint, so
+    // `$views[0]->count()` has no receiver type at all while the parser is looking at it
+    //
+    // the same standing a pending free call already has, and the same reason: `resolve_funccall`'s
+    // header says a null `decl` between here and codegen is legitimate, and the fixpoint's
+    // finalizing sweep reports whatever never resolved. this used to report at parse time, which is
+    // one round too early for every receiver whose type a later round answers
+    const bool receiver_is_undetermined = AST::is_undetermined_type(receiver_type);
+
     // the receiver's type says where to look - the type the deref walk above landed on, which is
     // AST::target_type_of by construction: `->` follows every pointer level, the same rule
     // MemberAccessNode resolves its base with
-    if (!receiver_type.has_complex_type()) {
+    if (!receiver_type.has_complex_type() && !receiver_is_undetermined) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(member_token),
             fmt::format(
@@ -399,6 +404,12 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     // the tree already holds
     switch (resolve_funccall(payload, funcall)) {
     case AST::CallResolver::Result::t_unknown_name:
+        // retryable when the receiver is not typed yet - CallResolver::settle says so itself, and
+        // keeping the node is what lets the fixpoint try again
+        if (receiver_is_undetermined) {
+            return &funcall;
+        }
+
         // a type that declares no such member at all is a different error from one whose overloads do
         // not answer this call, exactly as UnknownFunction is for a free call
         payload.collector.collect_issue<AST::Issue::UnknownMember>(

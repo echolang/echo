@@ -1,0 +1,9 @@
+// a block-scoped declaration with a program-wide symbol would be a contradiction: the operator
+// table has no notion of scope, and neither does the shunting yard's precedence table
+struct Bag { ptr<int32> $at; }
+
+{
+    operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
+}
+
+echo 1;

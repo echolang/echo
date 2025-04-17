@@ -7,10 +7,14 @@
 #include "AST/ASTValueType.h"
 
 #include <string>
+#include <vector>
 
 namespace AST
 {
+    class Collector;
     class ExprNode;
+    class FunctionCallExprNode;
+    class Module;
 
     // the name an `operator` declaration is registered under in the root namespace's overload set,
     // and the name a use site looks up: "operator +", "operator prefix !!", "operator suffix mm"
@@ -34,6 +38,27 @@ namespace AST
     // carrying those is at best unportable and at worst rejected by the assembler
     std::string mangle_operator_name(const std::string &decorated_name);
 
+    // **the call an operator use site is.** an operator is a function, so a use site has nothing of
+    // its own: a virtual name token holding the decorated name, positioned at the symbol so a
+    // diagnostic points where a reader wrote it, and the root namespace as the lookup point - which
+    // is where every `operator` declaration registers, so there is no outward walk to do and nothing
+    // an inner namespace could hide (see Parser::parse_operatordecl, the other half of that decision)
+    //
+    // one owner, because there are two moments that build one: Parser::build_operator_call, where the
+    // operand types are already known, and AST::OperatorRewriter, where they only became known this
+    // round. the fixity is the caller's to name, once, in the gate that decided to come here
+    //
+    // the call is left **unresolved**. the parser drives its own settlement right after, the rewriter
+    // leaves it to the fixpoint's settle_calls - and either way an unresolved operator call is a
+    // legitimate intermediate state, because the declaration it names may still be instantiated
+    FunctionCallExprNode &build_operator_call_node(
+        Module &module,
+        Collector &collector,
+        const std::string &spelling,
+        OpFixity fixity,
+        const TokenReference &at,
+        std::vector<ExprNode *> operands);
+
     // one operand as the rules below see it: the type a **value-position** read of it yields, plus
     // whether the user wrote `null` there - which has no type of its own, so it cannot be read back
     // off one
@@ -47,6 +72,10 @@ namespace AST
     // is a `Point&` and the deref that makes it a `Point` is inserted later by AST::PointerAdjuster.
     // so the value-position type is value_result_type's answer, not result_type's
     OperandFacts parse_time_operand(const ExprNode *expr);
+
+    // the same, for a caller that already holds the operand's `result_type()` because the built-in
+    // arms below the gate want the raw type too - Parser::parse_binary_expr is the one such site
+    OperandFacts parse_time_operand(const ExprNode *expr, const ValueType &result_type);
 
     // the operand facts **after AST::PointerAdjuster**, where every deref is already a node in the
     // tree - so result_type() is the truth and asking value_result_type again would peel twice

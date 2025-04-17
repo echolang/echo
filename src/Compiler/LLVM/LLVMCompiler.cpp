@@ -184,6 +184,16 @@ void LLVMCompiler::visit_addr_of_expr(AST::AddrOfExprNode &node) { _expr.gen_add
 void LLVMCompiler::visit_deref_expr(AST::DerefExprNode &node) { _expr.gen_deref(node); }
 void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(node); }
 
+// an array literal is a *statement-level* construct that AST::OperatorRewriter expands into a
+// constructor call plus one append per element, so nothing reaches codegen with one still in the
+// tree. it throws for AST::PointerValueNode's reason: a marker a pass is supposed to have erased is
+// a compiler bug, and answering with something plausible would hide it
+void LLVMCompiler::visit_array_literal_expr(AST::ArrayLiteralExprNode &node)
+{
+    throw _ctx.error("an array literal survived to codegen - it should have been expanded into a "
+        "constructor and appends " + _ctx.function_context());
+}
+
 // a peel marker is erased by the pointer adjustment pass; one surviving to codegen means the
 // pass missed a position, which would otherwise silently emit the wrong number of loads
 void LLVMCompiler::visit_pointer_value(AST::PointerValueNode &node)

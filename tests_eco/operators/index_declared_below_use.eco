@@ -1,0 +1,16 @@
+// an operator may be declared anywhere and used everywhere in its module, because its symbol is
+// published by the *type-name* pass - a pass earlier than any other declaration publishes anything.
+// the bracket inherits that with no work: it is read positionally in the same header reader
+struct Bag { ptr<int32> $at; }
+
+int32 $x = 3;
+$b = Bag(&$x);
+
+$b[0] = 8;
+echo $b[0];
+
+// ...declared here, below every use above
+operator (Bag& $b)[usize $i] : int32&
+{
+    return &$b->at:$[$i];
+}

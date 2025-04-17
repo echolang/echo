@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:13
+'$a[]' names the slot after the last one, so there is nothing there to read. Write to it ('$a[] = ...'), borrow it ('&$a[]'), or index an existing element.
+Begin: '['
+End: '['
+Code excerpt:
+ [5]> 
+ [6]> echo take($a[]);
+                  ^
+ [7]> 
+
+Critical issues found, cannot compile.

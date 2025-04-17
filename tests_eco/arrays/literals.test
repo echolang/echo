@@ -1,0 +1,15 @@
+expect: ok
+
+--- OUT --->
+5
+1
+5
+1.500000
+0
+2
+8
+--- RAST --->
+// the expansion, in the tree: a constructor call and one append assignment per element. no node
+// kind survives that codegen would have to know about
+CHECK: call Array()
+CHECK: index<int32>(call operator []

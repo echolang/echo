@@ -1,0 +1,38 @@
+// `$a[$i]` is a **place**: reading it, writing it, taking its address and reaching through it are
+// all the same expression, because they all route through the one address path in gen_lvalue.
+// nothing here is array-specific - `operator []` is an ordinary function and this is an ordinary call
+struct Point { int32 $x; int32 $y; }
+
+$a = Array<int32>();
+$a[] = 10;
+$a[] = 20;
+$a[] = 30;
+
+// read
+echo $a[0];
+echo $a[2];
+
+// write
+$a[1] = 99;
+echo $a[1];
+
+// a copy, not an alias - `$a[0]` is a place of type int32, not an expression of type int32&
+int32 $copy = $a[0];
+$a[0] = 1;
+echo $copy;
+echo $a[0];
+
+// the address of an element, and a write through it
+ptr<int32> $e = &$a[2];
+$e = 300;
+echo $a[2];
+
+// `->` reaches through to a field
+$pts = Array<Point>();
+$pts[] = Point(3, 4);
+$pts[0]->x = 7;
+echo $pts[0]->x + $pts[0]->y;
+
+// the method forms of the same thing
+echo $a->get(1);
+echo $a->count();

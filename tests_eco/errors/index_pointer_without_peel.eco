@@ -1,0 +1,7 @@
+// every operation on an address goes through `:$` - comparison, arithmetic, casting - and indexing
+// used to be the one hole in that rule (todo/B9). closing it is what lets a bare `[` mean exactly
+// one thing: ask the collection
+ptr<int32> $p = mem::alloc<int32>(2);
+$p:$[0] = 1;
+
+echo $p[0];

@@ -46,7 +46,18 @@ namespace AST
 
         bool is_owner_of(const TokenReference &tokenref) const {
             return tokenref.belongs_to(tokens);
-        }   
+        }
+
+        // a token no source file spells, appended to this module's collection at the position of an
+        // existing one - a decorated operator name, a closure's `closure$N`, a drop's callee
+        //
+        // the module owns `tokens`, so it owns minting: AST::Context and the passes that rewrite the
+        // tree after parsing all reach for the same two steps, and a copy per site is a copy of "push
+        // then read back the handle" that has to keep answering the same way
+        TokenReference make_virtual_token(
+            const std::string &value, Token::Type type, const TokenReference &at) {
+            return tokens[tokens.push(value, type, at.line(), at.char_offset())];
+        }
 
         // file iterator
         FileIterable files() { return FileIterable(_files); }

@@ -33,7 +33,7 @@ namespace AST
     }
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
-        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle)
+        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle), _operators(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -365,6 +365,36 @@ namespace AST
         return progressed;
     }
 
+    void Monomorphizer::report_unknown_name(FunctionCallExprNode &call, const CodeRef &at)
+    {
+        // which of the two errors it is, is which kind of call it is - and that is `lookup_namespace`,
+        // the one field that distinguishes them: a member call has none, because its candidates come
+        // from the receiver sitting in argument 0
+        if (call.lookup_namespace == nullptr
+            && !call.arguments.empty() && call.arguments[0] != nullptr) {
+
+            const ValueType receiver = target_type_of(call.arguments[0]->result_type());
+
+            // **a receiver that still mentions a type parameter is a template's, not a program's.**
+            // this call sits in an un-instantiated body, and the clones the fixpoint made are what
+            // carry the concrete receiver - so `$c->count()` inside `f<T>(T& $c)` is answered by
+            // `f<Array<int32>>`'s copy and reporting the template's would blame the one body that
+            // was never going to be emitted
+            //
+            // the same silence determine_type_args keeps for t_undecided_parameter, and the same
+            // silence the generic-decl arm in finalize_calls keeps one branch up
+            if (is_undetermined_type(receiver)) {
+                return;
+            }
+
+            _collector.collect_issue<Issue::UnknownMember>(
+                at, call.token_function_name.value(), receiver.get_type_desciption());
+            return;
+        }
+
+        _collector.collect_issue<Issue::UnknownFunction>(at, call.token_function_name.value());
+    }
+
     void Monomorphizer::finalize_calls()
     {
         CallResolver resolver(_collector);
@@ -392,7 +422,17 @@ namespace AST
             // on (kind, token range, message), so a template body's call and each of its clones
             // report once between them
             if (call->decl == nullptr) {
-                resolver.settle(*call, mod->nodes, at, true);
+                // **`t_unknown_name` is deliberately not reported by settle()** - "no such function"
+                // and "no such member" are different errors at different tokens, so each caller words
+                // its own. this sweep is the last caller, and it is the only one that can word a
+                // *member* call whose receiver never became concrete: `parse_member_call` defers
+                // those rather than reporting a receiver type the fixpoint had not answered yet,
+                // which is what makes `$views[0]->count()` - an element access whose contract the
+                // rewriter attaches mid-fixpoint - resolve at all
+                if (resolver.settle(*call, mod->nodes, at, true) == CallResolver::Result::t_unknown_name) {
+                    report_unknown_name(*call, at);
+                }
+
                 continue;
             }
 
@@ -438,6 +478,13 @@ namespace AST
             }
 
             progressed |= instantiate_generic_calls(rounds);
+
+            // operand syntax whose meaning the types just settled: a bracket over a container, an
+            // operator over what was a bare type parameter. **ahead of the re-derivation below**,
+            // because a declaration inferred from `$a[0]` has no type at all until the element call
+            // is attached - and behind the instantiation above, because it needs that round's types
+            progressed |= _operators.run_round();
+
             progressed |= rederive_stale_variable_types();
             progressed |= rederive_stale_capture_types();
             progressed |= settle_calls();
