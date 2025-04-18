@@ -44,8 +44,11 @@ namespace Compiler::LLVM
         void gen_retain_expr(AST::RetainExprNode &node);
         void gen_release_stmt(AST::ReleaseNode &node);
 
-        // `E instanceof T`: the block's identity word against T's identity global. one comparison,
-        // because there is no inheritance for a subtype check to walk
+        // `E instanceof T`: dispatches on what `T` is, because the two questions have different shapes.
+        // against a **class** it is one address comparison of the block's identity word against T's
+        // identity global - there is no inheritance for a subtype check to walk. against an
+        // **interface** it is a scan of the block's conformance table, since conformance is a set and
+        // not an identity. against a struct it folds to false, which needs no runtime at all
         void gen_instanceof(AST::InstanceOfExprNode &node);
 
 
@@ -61,6 +64,21 @@ namespace Compiler::LLVM
         // gen_class_alloc and by a closure's environment, which is a class the compiler declared rather
         // than one the user did - so the two cannot end up with differently shaped blocks
         llvm::Value *gen_class_box_alloc(const AST::ValueType &class_type);
+
+        // the one release implementation per class per compilation unit, created on first use
+        //
+        //   void __eco_release_<mangled>(ptr handle)
+        //
+        // null-check, decrement, return unless zero, call the class's deinit if it has one, free.
+        // the deinit is an ordinary Echo function the ownership pass synthesized out of the same
+        // emit_drop recursion a struct's scope exit uses - so what a class destroys at zero and what a
+        // struct destroys at scope end are decided in exactly one place
+        //
+        // **public**, because an interface vtable holds it in slot 0: an erased value owns a reference and
+        // the release site knows only the interface, so the thunk has to be reachable from the value. see
+        // Codegen/IfaceValue.h. that caller wants the function as a *constant*, not a call to it, which
+        // is why it takes this rather than gen_release_value below
+        llvm::Function *get_or_create_release_thunk(const AST::ValueType &class_type);
 
         // the strong count of `handle` as an i64, or **0 when it is null**. the third reference-count
         // operation, here rather than at its caller so `ClassBox::strong_index` keeps one owner.
@@ -85,6 +103,16 @@ namespace Compiler::LLVM
         llvm::Value *gen_callable_retain(llvm::Value *callable);
         void gen_callable_release(llvm::Value *callable);
 
+        // the interface arms. an erased value counts the *object* it holds - the count is in that block,
+        // where a class handle's is - so the retain is the ordinary one over field 0.
+        //
+        // the release is the interesting half: which thunk to call is not knowable from the static type,
+        // so it is read out of the value's own vtable at the reserved release slot. that is the same trade
+        // the whole fat pointer makes - resolve at the widening what would otherwise be searched for -
+        // and it is why an erased release is one indirect call rather than a conformance scan
+        llvm::Value *gen_iface_retain(llvm::Value *erased);
+        void gen_iface_release(llvm::Value *erased);
+
         // += 1 on the strong count of `block`, guarded on `block` being non-null - a class handle is
         // nullable and a retain of null is how `Foo $a = $b;` behaves when `$b` holds nothing.
         //
@@ -92,15 +120,20 @@ namespace Compiler::LLVM
         // reached: the one thing a callable does not know is a class layout
         void gen_strong_inc(llvm::Value *block, const ClassLayout *layout, const char *label);
 
-        // the one release implementation per class per compilation unit, created on first use
+        // the interface half of gen_instanceof: walk the block's conformance table looking for the
+        // interface's identity global. a loop rather than a comparison because conformance is a *set* -
+        // a class may answer several interfaces, and which slot one sits in is not knowable from the
+        // interface alone. pushes an i1
         //
-        //   void __eco_release_<mangled>(ptr handle)
+        // `handle` is already evaluated and already known non-null: the null guard is the caller's, since
+        // it is the same guard the class arm needs and a second one would be a second answer to "is null
+        // an instance of anything"
         //
-        // null-check, decrement, return unless zero, call the class's deinit if it has one, free.
-        // the deinit is an ordinary Echo function the ownership pass synthesized out of the same
-        // emit_drop recursion a struct's scope exit uses - so what a class destroys at zero and what a
-        // struct destroys at scope end are decided in exactly one place
-        llvm::Function *get_or_create_release_thunk(const AST::ValueType &class_type);
+        // `box_type` rather than a ClassLayout, because the box is the only field of one this needs and
+        // an erased operand has no layout to fill the rest of - handing over a default-constructed
+        // ClassLayout with one field set makes a half-valid value the callee has to be trusted not to read
+        llvm::Value *gen_conformance_scan(
+            llvm::Value *handle, llvm::Type *box_type, const AST::ComplexType &interface);
 
         // the environment counterpart, one per compilation unit rather than one per type:
         //
@@ -125,6 +158,11 @@ namespace Compiler::LLVM
 
         // the strong count's address inside `handle`'s block
         llvm::Value *gen_strong_ptr(llvm::Value *handle, const ClassLayout &layout);
+
+        // the typeinfo word's address inside `handle`'s block, the counterpart of gen_strong_ptr. takes
+        // the box type rather than a layout: the two instanceof arms ask it, and one of them holds an
+        // erased operand whose only known type is the shared class header
+        llvm::Value *gen_typeinfo_ptr(llvm::Value *handle, llvm::Type *box_type);
     };
 };
 

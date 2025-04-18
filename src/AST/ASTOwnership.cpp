@@ -855,6 +855,46 @@ ExprNode *OwnershipPass::resolve_value_arrival(
         return nullptr;
     }
 
+    if (wanted.is_interface()) {
+        // **the widening usually arrives as an implicit cast**, inserted by AST::CallResolver to reconcile
+        // the argument with the parameter - and a cast is not a place, so the retain further down took the
+        // non-place early return and never fired. the callee still released its by-value parameter, so the
+        // caller gave away a reference it never added and the object was freed while still in use.
+        //
+        // the retain belongs *inside* the cast, around the class place: RetainExprNode has to be typed as
+        // the **class** for codegen to move the right count, and the cast then widens the retained value.
+        // idempotent across rounds by the same mechanism the direct case is - next round the operand is a
+        // RetainExprNode, which is not a place, so this cannot wrap twice
+        if (expr->get_node_type() == NodeType::n_type_cast) {
+            auto *cast = static_cast<TypeCastNode *>(expr);
+
+            if (cast->is_implcit && cast->expr != nullptr
+                && cast->expr->result_type().is_class()
+                && is_place_expression(*cast->expr)) {
+                ensure_class_deinit(cast->expr->result_type(), location_of(cast->expr));
+
+                cast->expr = &_current_module->nodes.emplace_back<RetainExprNode>(cast->expr);
+                _changed = true;
+                return expr;
+            }
+        }
+
+        // **wherever a class is about to be erased, its deinit has to exist** - and this is the last place
+        // the concrete class is known. an erased value's release reaches the class's release thunk through
+        // its vtable, and that thunk runs the deinit when the count hits zero; without one it frees the
+        // block and the destructor never fires
+        //
+        // at the top rather than in the t_retain arm below, because a widening is not always a retain: a
+        // *call result* is already one reference nobody else holds and takes an early return further down,
+        // so `Drawable $d = Circle(1.0);` - a program whose only handle is erased - skipped that arm and
+        // silently tore the object down without its destructor
+        const ValueType source = expr->result_type();
+
+        if (source.is_class()) {
+            ensure_class_deinit(source, location_of(expr));
+        }
+    }
+
     const bool explicit_move = expr->get_node_type() == NodeType::n_expr_move;
 
     if (explicit_move) {
@@ -1080,6 +1120,20 @@ void OwnershipPass::emit_drop(
     // before the ComplexType it does not have is asked for. no deinit to ensure either: the environment's
     // teardown is uniform, because a callable's static type never says which environment it holds
     if (type.is_callable()) {
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        _changed = true;
+        return;
+    }
+
+    // an interface value owes exactly what a class does - one reference less - and for the same reason it
+    // owes nothing else: what the object holds is decided at the moment its count reaches zero, by the
+    // concrete class's own release thunk. answered here, before the ComplexType below, because an
+    // interface *has* one and it is the wrong one to walk: it declares no destructor and no properties,
+    // so falling through emitted nothing at all and the object leaked
+    //
+    // no deinit to ensure at this end - the type does not say which class is inside. that is done at the
+    // widening, in resolve_value_arrival, which is the last place it is known
+    if (type.is_interface()) {
         out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
         _changed = true;
         return;

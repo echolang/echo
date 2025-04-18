@@ -1,0 +1,21 @@
+// an operator is a free declaration with no receiver, so it has no vtable slot to dispatch through. an
+// interface requiring one stays perfectly usable as a constraint and with `instanceof` - it just is not
+// a type a value can have
+
+interface Comparable<T>
+{
+    operator (T $a) < (T $b) : bool;
+}
+
+class Money : Comparable<Money>
+{
+    int32 $cents;
+}
+
+operator (Money $a) < (Money $b) : bool
+{
+    return $a->cents < $b->cents;
+}
+
+$money = Money(100);
+Comparable<Money> $erased = $money;

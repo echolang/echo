@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 7:8
+'Square' says it conforms to 'Drawable' but does not satisfy 'area() : float64' - it declares no 'area'.
+Begin: 'Square'
+End: 'Square'
+Code excerpt:
+ [6]> 
+ [7]> struct Square : Drawable
+             ^
+ [8]> {
+
+Critical issues found, cannot compile.

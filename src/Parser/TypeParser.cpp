@@ -277,6 +277,10 @@ static std::optional<std::vector<AST::ValueType>> expand_type_alias(const std::s
 
 // resolves a single constraint atom to the set of concrete types it admits. an atom is an
 // alias, a primitive, or a user struct/class name. returns nullopt if it resolves to none
+//
+// a generic *application* (`Iterable<int32>`) is not resolved here - it is handed to Parser::parse_type
+// by the caller, which owns every spelling of a type including the arity check and the `>>` split. this
+// stays the bare-name rule
 static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser::Payload &payload, const std::string &name)
 {
     if (auto alias = expand_type_alias(name)) {
@@ -451,7 +455,7 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
 
     cursor.skip(); // skip '<'
 
-    while (!cursor.is_type(Token::Type::t_close_angle)) {
+    while (!cursor.is_generic_close()) {
         if (cursor.is_done()) {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(payload.context.code_ref(cursor.current()), Token::Type::t_close_angle, Token::Type::t_unknown);
             return type_parameters;
@@ -502,12 +506,62 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
                 auto atom_token = cursor.current();
                 auto atom_name = atom_token.value();
 
-                if (resolve_atoms) {
+                // an atom may be a generic *application* - `C: Iterable<int32>` - and not only a bare
+                // name. an interface is what made that worth having: `Iterable` alone resolves to the
+                // template, which is not a type any value ever has, so a constraint naming one could
+                // never be satisfied by anything
+                const bool is_application = cursor.peek_is_type(1, Token::Type::t_open_angle);
+
+                if (!resolve_atoms) {
+                    // walked with skip_type_shape, the one owner of "how far does a written type
+                    // extend" - a second scanner counting angle brackets is a second answer to where
+                    // `Iterable<Box<int32>>` ends, and the cursor's `>>` split is exactly what the
+                    // resolving arm below reaches through parse_type. this pass validates nothing, so a
+                    // shape it cannot walk is left for the declaration pass to report
+                    skip_type_shape(cursor);
+                }
+                else if (is_application) {
+                    // parse_type owns every spelling of a type - the arity check against the template,
+                    // the interning, and the `>>` split its closing brackets need - so an applied atom
+                    // is read by it rather than by a second scanner here. it leaves the cursor after
+                    // the list, which is why this arm does not skip
+                    AST::TypeNode *applied = Parser::parse_type(payload);
+
+                    if (applied == nullptr) {
+                        // parse_type has reported
+                        cursor.try_skip_to_next_statement();
+                        return type_parameters;
+                    }
+
+                    param.constraint.push_back(applied->type);
+                    if (!param.constraint_spelling.empty()) {
+                        param.constraint_spelling += "|";
+                    }
+                    param.constraint_spelling += applied->type.get_type_desciption();
+                }
+                else {
                     auto atom_types = resolve_constraint_atom(payload, atom_name);
                     if (!atom_types) {
                         payload.collector.collect_issue<AST::Issue::GenericError>(
                             payload.context.code_ref(atom_token),
                             fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
+                        );
+                        cursor.try_skip_to_next_statement();
+                        return type_parameters;
+                    }
+
+                    // a *generic* type named bare is refused rather than pushed: it resolves to the
+                    // template, which no value's type ever equals and no conformance ever names, so the
+                    // constraint would reject every argument with the atom looking perfectly correct.
+                    // `Iterable<int32>` is the spelling the arm above now accepts
+                    if (atom_types->size() == 1 && atom_types->front().has_complex_type()
+                        && atom_types->front().get_complex_type()->is_generic()) {
+                        payload.collector.collect_issue<AST::Issue::GenericError>(
+                            payload.context.code_ref(atom_token),
+                            fmt::format(
+                                "'{}' is generic, so it needs its type arguments in the constraint of "
+                                "type parameter '{}' - write '{}<...>'.",
+                                atom_name, param.name(), atom_name)
                         );
                         cursor.try_skip_to_next_statement();
                         return type_parameters;
@@ -520,9 +574,9 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
                         param.constraint_spelling += "|";
                     }
                     param.constraint_spelling += atom_name;
-                }
 
-                cursor.skip();
+                    cursor.skip();
+                }
 
                 // more atoms are separated by '|'
                 if (cursor.is_type(Token::Type::t_or)) {
@@ -536,16 +590,22 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
         type_parameters.push_back(std::move(param));
 
         // comma separator or closing angle
+        //
+        // is_generic_close/consume_generic_close rather than a plain t_close_angle test: a constraint
+        // atom may now be a generic *application*, so this list can be the outer one of a `>>` pair -
+        // `<C: Iterable<int32>>` ends in one token that closes both levels. every other closing angle in
+        // the parser already goes through the cursor's split for this reason; this list had no way to be
+        // an outer level until an applied atom existed
         if (cursor.is_type(Token::Type::t_comma)) {
             cursor.skip();
-        } else if (!cursor.is_type(Token::Type::t_close_angle)) {
+        } else if (!cursor.is_generic_close()) {
             payload.collect_unexpected_token(Token::Type::t_close_angle);
             cursor.try_skip_to_next_statement();
             return type_parameters;
         }
     }
 
-    cursor.skip(); // skip '>'
+    cursor.consume_generic_close();
     return type_parameters;
 }
 

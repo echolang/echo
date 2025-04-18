@@ -1,0 +1,40 @@
+// a generic implementor conforms through its own type parameter: `Bag<E>` satisfies `Sized<E>`. the
+// check is made on the *template*, where both sides mention the same declaration, so it happens once
+// rather than per instantiation - and an instantiation's conformance is substituted when it is interned,
+// so `Bag<int32>` says `Sized<int32>` and not `Sized<E>`
+
+interface Sized<T>
+{
+    function first() : T;
+    function count() : usize;
+}
+
+struct Bag<E> : Sized<E>
+{
+    E $item;
+    usize $used;
+
+    function first() : E {
+        return $this->item;
+    }
+
+    function count() : usize {
+        return $this->used;
+    }
+}
+
+// the constraint names an *application*, which is what a generic interface has to be spelled as: the
+// bare template is not a type any value ever has
+function head<C: Sized<int32>>(C& $container) : int32
+{
+    return $container->first();
+}
+
+$ints = Bag<int32>(7, 1);
+echo head($ints);
+echo $ints->count();
+
+// a second instantiation is a distinct type with its own substituted conformance
+$floats = Bag<float64>(2.5, 3);
+echo $floats->first();
+echo $floats->count();

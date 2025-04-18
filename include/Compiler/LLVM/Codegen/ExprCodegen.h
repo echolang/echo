@@ -79,6 +79,17 @@ namespace Compiler::LLVM
         // null when nothing was emitted for it; the caller phrases the diagnostic
         llvm::Function *find_llvm_function(const AST::FunctionDeclNode *decl);
 
+        // a call whose declaration is an interface **requirement**: the callee is loaded out of the
+        // receiver's own vtable rather than looked up in the function table, because a requirement has no
+        // symbol - the implementors have the bodies, under their own names
+        //
+        // it needed no new node and no new resolution rule. the requirement answers four of the five
+        // things `decl` is at a direct call - the return type, the parameter list, the coercion walk and
+        // the diagnostic name - and only the *symbol* differs, which is exactly this one arm. what makes
+        // the receiver free is `%eco.iface`'s field order: a class method's `$this` is the address of a
+        // slot holding a handle, and the address of the object field is precisely that
+        void gen_virtual_call(AST::FunctionCallExprNode &node);
+
         // `size_of` / `align_of`: folded to a constant, asked of the instance's single type
         // argument, which the monomorphizer stamped on when it resolved `size_of<int32>()` from
         // `size_of<T>()`. the only builtin family that pushes a value

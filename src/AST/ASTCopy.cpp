@@ -45,6 +45,15 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         return AST::CopyKind::t_retain;
     }
 
+    // an interface value is a class handle wearing an erased type, so it is copied the way a class is
+    // and for the same reason a callable is: what is inside is a different question, and the type cannot
+    // answer it. beside these two rather than below, because an interface declares no copy constructor
+    // (refused at its declaration) and has no properties for either arm below to walk - asking them
+    // would answer t_none, which reads to the author as "this type cannot be copied at all"
+    if (type.is_interface()) {
+        return AST::CopyKind::t_retain;
+    }
+
     if (AST::copy_constructor_for(type) != nullptr) {
         return AST::CopyKind::t_constructor;
     }

@@ -91,6 +91,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
+        case Token::Type::t_interface: return "interface";
         case Token::Type::t_enum: return "enum";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";
@@ -160,6 +161,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
+        case Token::Type::t_interface: return "interface";
         case Token::Type::t_enum: return "enum";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";

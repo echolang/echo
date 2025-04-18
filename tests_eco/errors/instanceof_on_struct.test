@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 7:9
-'instanceof' needs a class on the left - a 'Rock' carries no runtime type to check
+'instanceof' needs a class or an interface on the left - a 'Rock' carries no runtime type to check
 Begin: 'instanceof'
 End: 'instanceof'
 Code excerpt:

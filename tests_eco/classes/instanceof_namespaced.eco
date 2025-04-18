@@ -1,0 +1,34 @@
+// a class's runtime identity is its `.typeinfo` global, and that global is linkonce_odr - so the
+// linker folds two definitions that share a symbol name. naming it from the written name therefore
+// made `a::Shape` and `b::Shape` one identity, and instanceof answered true across two unrelated
+// classes. the name is the mangled token, which is the compiler's existing answer to "which type is
+// this" and already carries the namespace path
+
+namespace a;
+
+class Shape { int32 $sides; }
+
+function make_a() : Shape {
+    return Shape(3);
+}
+
+namespace b;
+
+class Shape { int32 $sides; }
+
+function make_b() : Shape {
+    return Shape(4);
+}
+
+namespace;
+
+$from_a = a::make_a();
+$from_b = b::make_b();
+
+// each is itself
+echo $from_a instanceof a::Shape;
+echo $from_b instanceof b::Shape;
+
+// and neither is the other, which is the whole point
+echo $from_a instanceof b::Shape;
+echo $from_b instanceof a::Shape;

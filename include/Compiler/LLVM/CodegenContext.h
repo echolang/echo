@@ -74,6 +74,22 @@ namespace Compiler::LLVM
             return string_layout.value();
         }
 
+        // the registry an interface **widening** needs, published here by compile_bundle for the reason
+        // core_types_ptr above is - so codegen still never holds the whole collector.
+        //
+        // why codegen needs it at all: an erased value carries its vtable, and the vtable is resolved
+        // where the concrete class is still known, which is the widening site. filling it means asking
+        // AST::interface_implementations which declaration answers each requirement, and matching a
+        // *generic* interface's requirement (`Comparable<Money>`'s `T`) against its implementor
+        // re-substitutes that type. every such lookup is a cache hit by now - the type checker resolved
+        // the same conformance before codegen ran - so this interns nothing new
+        AST::TypeRegistry *type_registry_ptr = nullptr;
+
+        AST::TypeRegistry &type_registry() const {
+            assert(type_registry_ptr && "type registry not published - compile_bundle must set it");
+            return *type_registry_ptr;
+        }
+
         // the host target's data layout and triple, published by Backend::init_target before any
         // module is created so that every module carries them from the start. this is what makes
         // a compile-time `size_of<T>()` answer the same number the running program will see -

@@ -1,6 +1,7 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/OperatorDeclParser.h"
 
+#include "AST/ASTConformance.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
@@ -37,6 +38,100 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
     }
 
     return decl;
+}
+
+// reads `: Drawable, Iterable<E>` and publishes what it resolves onto the type, modelled on
+// publish_implicit_conversion: each refusal declines to *publish*, so ComplexType::conformances() only
+// ever holds valid, deduplicated interface types and no reader has to re-filter
+//
+// the cursor is restored to where it was, so the caller's own walk is unaffected - the clause was
+// already skipped past to find the opening brace, and this re-reads it once the type's own parameters
+// are in scope
+static void parse_conformance_clause(
+    Parser::Payload &payload,
+    AST::TypeDeclNode &struct_node,
+    const Parser::Cursor::Snapshot &clause_start,
+    const TokenReference &colon_token)
+{
+    auto &cursor = payload.cursor;
+    const auto resume = cursor.snapshot();
+    cursor.restore(clause_start);
+
+    cursor.skip(); // the colon
+
+    AST::ComplexType &owner = struct_node.complex_type();
+
+    // an interface conforming to an interface is interface *inheritance*, and it is refused rather
+    // than half-supported: a requirement set that is the union of others needs the requirements
+    // flattened into the vtable in a stable order, which is a layout decision nothing else here makes
+    // yet.
+    //
+    // asked *before* the loop, not inside it: it is a fact about the owner, so it cannot change per
+    // entry - tested per entry, `interface A : B, C` reported the same sentence twice, which is what
+    // the "reported once, at the clause" this is written for means. nothing is published either way,
+    // so there is no second entry worth reading
+    if (owner.is_interface_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(colon_token),
+            fmt::format(
+                "'{}' is an interface, and an interface cannot conform to another one - "
+                "declare the requirements it needs directly.",
+                struct_node.type_name()));
+
+        cursor.restore(resume);
+        return;
+    }
+
+    while (!cursor.is_done() && !cursor.is_type(Token::Type::t_open_brace)) {
+        const TokenReference entry_token = cursor.current();
+        AST::TypeNode *entry = Parser::parse_type(payload);
+
+        if (entry == nullptr) {
+            // parse_type has reported; skip to the next entry rather than spinning on one bad token
+            cursor.skip_until({ Token::Type::t_comma, Token::Type::t_open_brace });
+            if (cursor.is_type(Token::Type::t_comma)) {
+                cursor.skip();
+            }
+            continue;
+        }
+
+        const AST::ValueType conformance = entry->type;
+
+        if (!conformance.is_interface()) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(entry_token),
+                fmt::format(
+                    "'{}' is not an interface, so '{}' cannot conform to it. Only an `interface` may "
+                    "appear after ':'.",
+                    conformance.get_type_desciption(), struct_node.type_name()));
+        }
+        else {
+            // the duplicate check is what makes the published list a set, which is what lets
+            // AST::conforms_to be a membership test and the runtime table a plain array - and it is
+            // asked *through* conforms_to, so "does this type already conform" has one answer here and
+            // at every use site. spelled as a std::find it was a second one, which inheritance would
+            // have made diverge the moment the list stopped being flat
+            if (AST::conforms_to(&owner, conformance)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(entry_token),
+                    fmt::format(
+                        "'{}' already conforms to '{}'.",
+                        struct_node.type_name(), conformance.get_type_desciption()));
+            }
+            else {
+                owner.add_conformance(conformance);
+            }
+        }
+
+        if (cursor.is_type(Token::Type::t_comma)) {
+            cursor.skip();
+            continue;
+        }
+
+        break;
+    }
+
+    cursor.restore(resume);
 }
 
 // opens a member body, and answers whether there is one to parse here. false means the caller is done
@@ -184,7 +279,7 @@ static void publish_copy_constructor(
     // parameter cannot be the borrow of `Box<T>` and the recognition above rightly declines it
     // reported here because the alternative is silence: nothing else would fire until an implicit copy
     // is rejected somewhere else entirely, naming a type the author believes they wrote a copy for
-    if (!self_value_type.has_complex_type() || ctor_decl->args.size() != 1) {
+    if (!self_value_type.has_property_layout() || ctor_decl->args.size() != 1) {
         return;
     }
 
@@ -195,7 +290,7 @@ static void publish_copy_constructor(
         return;
     }
 
-    if (!param.pointee().has_complex_type() || param.pointee().get_complex_type() != self_ct->template_ref) {
+    if (!param.pointee().has_property_layout() || param.pointee().get_complex_type() != self_ct->template_ref) {
         return;
     }
 
@@ -665,6 +760,21 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // optional generic type parameters: struct Foo<T, U> { ... }
     std::vector<ParsedTypeParam> parsed_type_params = parse_type_param_list(payload);
 
+    // the conformance clause - `struct Point : Comparable<Point>, Hashable`. read here so the cursor is
+    // right in every pass, and *resolved* only in the two later ones: an interface may be declared
+    // further down or in another file, and a conformance may be a generic application, which needs the
+    // type grammar. the type-name pass walks these tokens through its own loop and never gets here
+    //
+    // the tokens are read before the type parameters are declared below, so they are re-read after the
+    // TypeParamScope is open - `: Iterable<E>` mentions this type's own E
+    const std::optional<TokenReference> conformance_token =
+        cursor.is_type(Token::Type::t_colon) ? std::optional(cursor.current()) : std::nullopt;
+    const auto conformance_snapshot = cursor.snapshot();
+
+    if (conformance_token.has_value()) {
+        cursor.skip_until({ Token::Type::t_open_brace });
+    }
+
     // next token needs to be an open brace
     if (!payload.expect_token(Token::Type::t_open_brace)) {
         return nullptr;
@@ -770,6 +880,24 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     const std::vector<AST::TypeParamDecl *> &type_parameters = struct_node->type_parameters();
     AST::TypeParamScope type_param_scope(payload.context, type_parameters);
 
+    // only the first pass to walk this body keeps what it parsed - see TypeDeclNode's
+    // members_collected(). the second walks the same code, rather than skipping to each member's end,
+    // for two reasons: the two cannot then disagree about where a member ends, and re-reading a
+    // property type calls TypeRegistry::get_or_create_instantiation again, which is what *refreshes*
+    // a generic application interned during the declaration pass before its template had properties
+    // (the stale-instance path in get_or_create_instantiation). the re-read's own VarDeclNode is
+    // discarded; the refresh is a side effect on the registry, which is global
+    //
+    // hoisted above the body walk because the conformance clause is kept under the very same rule: it
+    // is written once and both later passes read it, so appending twice would double the list
+    const bool collect_members = !struct_node->members_collected();
+
+    // the conformance clause, now that this type's own parameters resolve - `struct Bag<E> : Iterable<E>`
+    // names E
+    if (conformance_token.has_value() && collect_members) {
+        parse_conformance_clause(payload, *struct_node, conformance_snapshot, conformance_token.value());
+    }
+
     // the struct as seen from inside its own body: the plain struct for a non-generic one, or the
     // self-application Foo<T...> for a generic one. giving a constructor generic type parameters +
     // this return type lets the monomorphizer instantiate it alongside Foo<int>, and a method's
@@ -811,14 +939,35 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // create an empty base scope for the properties to sit in
     auto &structscope = payload.context.emplace_node<AST::ScopeNode>();
 
-    // only the first pass to walk this body keeps what it parsed - see TypeDeclNode's
-    // members_collected(). the second walks the same code, rather than skipping to each member's end,
-    // for two reasons: the two cannot then disagree about where a member ends, and re-reading a
-    // property type calls TypeRegistry::get_or_create_instantiation again, which is what *refreshes*
-    // a generic application interned during the declaration pass before its template had properties
-    // (the stale-instance path in get_or_create_instantiation). the re-read's own VarDeclNode is
-    // discarded; the refresh is a side effect on the registry, which is global
-    const bool collect_members = !struct_node->members_collected();
+    // an interface body admits exactly one thing: a bodyless `function` or `operator` requirement.
+    // everything else is refused *here*, at the member, because this walk is the only place that knows
+    // which member shape was written - and each refusal declines to publish rather than reporting on
+    // the way past, so an interface never carries a property, a constructor or a destructor that a
+    // later pass could find and believe in
+    const bool is_interface_body = struct_node->complex_type().is_interface_kind();
+
+    // reports a member shape an interface cannot hold, and consumes it so the rest of the body is still
+    // read. one lambda rather than the wording repeated at four arms, which is what keeps the four
+    // consistent - and the shape is named rather than the token quoted, since `constructor` and a
+    // property read nothing alike
+    auto refuse_interface_member = [&](const TokenReference &at, const std::string &shape) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(at),
+            fmt::format(
+                "'{}' is an interface, so it cannot declare {}. An interface holds requirements only - "
+                "a `function` or `operator` signature ending in ';'.",
+                struct_node->type_name(), shape));
+    };
+
+    // and the three shapes that are refused *with a body* - a nested type, a constructor, a destructor.
+    // consuming them is the half most likely to drift, since the wording was already shared and the two
+    // skips were not: a copy that forgets skip_till_end_of_scope reads the refused member's own body as
+    // more members and reports every statement in it
+    auto refuse_braced_member = [&](const std::string &shape) {
+        refuse_interface_member(cursor.current(), shape);
+        cursor.skip_until({ Token::Type::t_open_brace });
+        cursor.skip_till_end_of_scope();
+    };
 
     while (!cursor.is_done()) {
         if (cursor.is_type(Token::Type::t_hash)) {
@@ -839,13 +988,25 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // ahead of starts_vardecl because this is an unambiguous keyword and that one scans the
             // type grammar - the order costs nothing and means the two can never race
+            if (is_interface_body) {
+                refuse_braced_member("a nested type");
+                continue;
+            }
+
             parse_typedecl(payload);
         }
         else if (starts_vardecl(payload)) {
             auto var = parse_varexpr(payload, &structscope);
 
+            // a requirement is behaviour, not storage. a required *property* would fix the layout of
+            // every implementor and mean nothing without a stored offset, so it is refused - which also
+            // keeps ComplexType::has_property_layout() true of exactly the two kinds that have one
+            if (is_interface_body) {
+                refuse_interface_member(
+                    var != nullptr ? var->token_varname : cursor.current(), "a property");
+            }
             // append the var as a property of the struct
-            if (var && collect_members) {
+            else if (var && collect_members) {
                 struct_node->add_property(var);
             }
         }
@@ -857,7 +1018,21 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // the declaration pass's body is parse_funcdecl's own to consume: it walks the body's
             // declaration surface so a `function` nested in a method joins its block's overload set.
             // skipping it here as well would eat the token after the body
-            parse_funcdecl(payload);
+            //
+            // an interface's method needs no arm of its own: a bodyless `function f() : void;` already
+            // parses and registers through register_member_function, which is all a requirement is.
+            // only the *body* has to be refused, and that is asked of the returned node below - in the
+            // body pass, since the declaration pass returns before it ever reaches one
+            AST::FunctionDeclNode *member = parse_funcdecl(payload);
+
+            if (is_interface_body && member != nullptr && member->body != nullptr) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(member->declaration_site_token()),
+                    fmt::format(
+                        "'{}' is a requirement of the interface '{}', so it cannot have a body - end it "
+                        "with ';' and let each implementor write one.",
+                        member->signature_description(), struct_node->type_name()));
+            }
         }
         else if (starts_operatordecl(cursor)) {
             // **refused, but not here.** an operator is not a member of either of its operand types -
@@ -872,11 +1047,26 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             Parser::parse_operatordecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
+            // an interface is never constructed - a value of one is always some implementor's object
+            // widened to it - so a constructor here could not be called by anything
+            if (is_interface_body) {
+                refuse_braced_member("a constructor");
+                continue;
+            }
+
             parse_constructor(payload, struct_node, self_value_type);
         }
         else if (cursor.is_type(Token::Type::t_destructor)) {
             // a real token, unlike `constructor` above: it has to be one so no member can be named
             // `destructor` and collide with the mangled name of the real thing
+            //
+            // an interface owns no storage of its own, and what a value of one holds is torn down by
+            // the concrete class's own destructor, reached through the object's typeinfo
+            if (is_interface_body) {
+                refuse_braced_member("a destructor");
+                continue;
+            }
+
             parse_destructor(payload, struct_node, &self_type_node);
         }
         else if (cursor.is_type(Token::Type::t_close_brace)) {
@@ -906,7 +1096,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // there is one field-wise constructor per struct, and its parameter list is the layout this walk
     // just collected. after the walk, so the suppression rule sees every constructor the user wrote -
     // however far down the body they wrote it
-    if (collect_members) {
+    // never for an interface: it has no fields to take, so what would be synthesized is a zero-argument
+    // constructor of a type that is never constructed - and unlike the refusals in the body walk above
+    // this one nobody wrote, so there would be no token to report it at
+    if (collect_members && !is_interface_body) {
         synthesize_field_wise_constructor(payload, struct_node, self_value_type);
     }
 

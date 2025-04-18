@@ -1,0 +1,25 @@
+// what an interface constraint buys over a concrete-set one: the set of admitted types is *open*. adding
+// a third implementor needs no change to `render`, and each call site is still monomorphized to a direct
+// call - there is no dispatch cost for a struct at all
+
+interface Shape
+{
+    function sides() : int32;
+}
+
+struct Triangle : Shape { int32 $unused; function sides() : int32 { return 3; } }
+struct Square : Shape   { int32 $unused; function sides() : int32 { return 4; } }
+struct Hexagon : Shape  { int32 $unused; function sides() : int32 { return 6; } }
+
+function describe<T: Shape>(T& $shape) : void
+{
+    echo $shape->sides();
+}
+
+$t = Triangle(0);
+$s = Square(0);
+$h = Hexagon(0);
+
+describe($t);
+describe($s);
+describe($h);

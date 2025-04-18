@@ -473,6 +473,18 @@ void Parser::publish_implicit_conversion(
         return;
     }
 
+    // an interface is a declared type, and is refused all the same: a value reaches an interface-typed
+    // destination by *widening*, which the compiler already knows how to rank and lower. accepting a
+    // marker here would give one conversion two routes with different ranks, and which one fired would
+    // depend on nothing the author wrote. conformance is declared on the type, not per method
+    if (target.is_interface()) {
+        report(fmt::format(
+            "An implicit conversion cannot return the interface '{}' - declare the conformance on the "
+            "type instead, and a value of it widens on its own.",
+            target.get_type_desciption()));
+        return;
+    }
+
     // a conversion to its own type can never fire: AST::argument_fit answers t_exact for an identical
     // type long before it reaches the conversion arm. so this is a marker that does nothing, which is
     // the thing this whole spelling exists to stop being possible
@@ -763,6 +775,13 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
             AST::FunctionBodyScope body_scope(payload.context, funcdecl);
 
             Parser::parse_declaration_surface(payload, cursor.current());
+        }
+        // a **bodyless** declaration's terminator, consumed in this pass too - the same reason the
+        // extern arm above consumes its own: a declaration's tail belongs to the parser that knows the
+        // declaration's shape, and leaving it means the caller's walk meets a stray ';'. at file scope
+        // that was silently tolerated, so only an interface requirement in a body walk surfaced it
+        else if (cursor.is_type(Token::Type::t_semicolon)) {
+            cursor.skip();
         }
 
         return funcdecl;

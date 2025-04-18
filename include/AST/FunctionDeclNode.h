@@ -98,6 +98,19 @@ namespace AST
             return owner_type != nullptr;
         }
 
+        // a method declared in an `interface` body: a **requirement**, not an implementation. it is an
+        // ordinary member declaration in every other respect - registered through
+        // register_member_function, found by find_member_functions, and so callable through a receiver
+        // of the interface - but it has no body and no symbol of its own, so nothing may emit or
+        // declare one. the three readers are the two loops in TypeLowering::build_function_maps and
+        // StmtCodegen::gen_function_decl, exactly the set is_builtin() is skipped in and for the same
+        // reason: a `declare` nobody defines fails at link time rather than at the mistake
+        //
+        // derived from the owner rather than stored as a sixth MemberKind, because a requirement *is*
+        // a method - the kind it needs is t_free's method shape, and a second tag would let the two
+        // disagree about what the receiver is. defined out of line, ComplexType being incomplete here
+        bool is_interface_requirement() const;
+
         // the body of a `function(...) { ... }` written as an expression. it is an ordinary declaration
         // in every other respect - hoisted to the file root, mangled, emitted - but it is in no overload
         // set, no name reaches it, and its `args[0]` is the environment its captures live in

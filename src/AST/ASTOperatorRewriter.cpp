@@ -278,7 +278,11 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
 
     literal.expansion_decided = true;
 
-    ComplexType *ct = destination_type.has_complex_type() ? destination_type.get_complex_type() : nullptr;
+    // has_property_layout, not has_complex_type: the expansion below asks the destination for a
+    // zero-argument constructor and appends into the places it makes, and an interface declares
+    // neither. so an array literal assigned to an interface-typed destination is the "cannot be built
+    // from a literal" diagnostic below rather than a lookup that finds nothing
+    ComplexType *ct = destination_type.has_property_layout() ? destination_type.get_complex_type() : nullptr;
 
     if (ct == nullptr) {
         _collector.collect_issue<Issue::GenericError>(

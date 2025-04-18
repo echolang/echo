@@ -49,6 +49,14 @@ bool AST::needs_destruction(const AST::ValueType &type)
         return true;
     }
 
+    // an interface *value* is a retained class handle, so it owes a release for the same reason a
+    // class does and without looking inside for the same reason: the type does not say which object
+    // is behind it. beside the class arm rather than after the property walk, because an interface has
+    // no properties at all - asking that walk would answer a confident, wrong "owns nothing"
+    if (type.is_interface()) {
+        return true;
+    }
+
     const AST::ComplexType *ct = type.get_complex_type();
 
     // a struct that contains an owner is itself an owner

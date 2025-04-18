@@ -1,0 +1,14 @@
+interface Drawable
+{
+    function draw() : void;
+    function area() : float64;
+}
+
+struct Square : Drawable
+{
+    float64 $side;
+
+    function draw() : void {
+        echo 1;
+    }
+}

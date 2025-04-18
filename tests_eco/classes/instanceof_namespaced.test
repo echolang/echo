@@ -1,0 +1,14 @@
+expect: ok
+
+--- OUT --->
+1
+1
+0
+0
+--- IR --->
+// the identity global is named from the mangled token, so the namespace path is part of the symbol
+// and the linker cannot fold two same-named classes onto one identity. `N1a5ShapeE` is
+// ComplexType::mangled_token() for a::Shape - the written name alone would be `Shape` for both
+CHECK: @N1a5ShapeE.typeinfo = linkonce_odr constant
+CHECK: @N1b5ShapeE.typeinfo = linkonce_odr constant
+CHECK: icmp eq ptr %typeinfo, @N1a5ShapeE.typeinfo

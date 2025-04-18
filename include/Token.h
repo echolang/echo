@@ -78,6 +78,7 @@ public:
         t_null,                     // null
         t_struct,                   // struct
         t_class,                    // class
+        t_interface,                // interface
         t_enum,                     // enum
         t_extern,                   // extern
         t_as,                       // as

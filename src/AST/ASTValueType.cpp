@@ -122,9 +122,22 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
 
     assert(complex_type != nullptr);
 
-    return ValueType(
-        complex_type->is_class_kind() ? ValueTypeKind::t_class : ValueTypeKind::t_struct,
-        complex_type);
+    // a switch rather than a chain of ternaries, so a ComplexTypeKind added without an arm here is a
+    // compile error instead of quietly becoming a struct
+    ValueTypeKind value_kind = ValueTypeKind::t_struct;
+    switch (complex_type->kind) {
+    case ComplexTypeKind::t_struct:
+        value_kind = ValueTypeKind::t_struct;
+        break;
+    case ComplexTypeKind::t_class:
+        value_kind = ValueTypeKind::t_class;
+        break;
+    case ComplexTypeKind::t_interface:
+        value_kind = ValueTypeKind::t_interface;
+        break;
+    }
+
+    return ValueType(value_kind, complex_type);
 }
 
 AST::ValueType AST::ValueType::make_struct(ComplexType *complex_type, const std::vector<ValueType> &args, TypeRegistry *registry)
@@ -389,16 +402,14 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     auto key = std::make_tuple(tmpl, args);
     if (auto it = _instantiations.find(key); it != _instantiations.end()) {
         ComplexType *inst = it->second;
-        // refresh if the template gained properties after this instance was interned - this
-        // happens when an application (e.g. a return type) is parsed during the symbol pass,
-        // before the struct body populates the template's properties
-        if (inst != tmpl && inst->property_count() < tmpl->property_count()) {
-            TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
-            inst->_properties.clear();
-            inst->_property_map.clear();
-            for (const auto &prop : tmpl->_properties) {
-                inst->add_property(prop.name, substitute_type(prop.type, subst, *this));
-            }
+        // refresh if the template gained properties or conformances after this instance was interned -
+        // this happens when an application (e.g. a return type) is parsed during the symbol pass,
+        // before the struct body populates the template
+        const bool stale = inst->property_count() < tmpl->property_count()
+            || inst->conformances().size() < tmpl->conformances().size();
+
+        if (inst != tmpl && stale) {
+            derive_instantiation(inst, tmpl, args);
         }
         return inst;
     }
@@ -422,14 +433,42 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // instead of recursing forever
     _instantiations[key] = instantiated;
 
-    // one substitution for the whole layout: the arguments arrive positionally, matching the
-    // template's declared parameter order, and positional() is where that arity is checked
-    TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
-    for (const auto &prop : tmpl->_properties) {
-        instantiated->add_property(prop.name, substitute_type(prop.type, subst, *this));
-    }
+    derive_instantiation(instantiated, tmpl, args);
 
     return instantiated;
+}
+
+void AST::TypeRegistry::derive_instantiation(
+    ComplexType *inst, ComplexType *tmpl, const std::vector<ValueType> &args)
+{
+    // a self-referential argument comes back through get_or_create_instantiation, finds this instance
+    // in the cache mid-build and reads it as stale. without this the pair would recurse until the stack
+    // ran out; with it the inner call hands back the in-progress instance and the outer one finishes
+    if (!_deriving.insert(inst).second) {
+        return;
+    }
+
+    // one substitution for everything derived below: the arguments arrive positionally, matching the
+    // template's declared parameter order, and positional() is where that arity is checked
+    TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
+
+    inst->_properties.clear();
+    inst->_property_map.clear();
+    for (const auto &prop : tmpl->_properties) {
+        inst->add_property(prop.name, substitute_type(prop.type, subst, *this));
+    }
+
+    // the conformances, at the same moment and through the same substitution as the properties, because
+    // they go stale together: `struct Bag<E> : Iterable<E>` conforms to `Iterable<int32>` once E is
+    // bound. done here rather than redirected through template_or_self at read time, which is what lets
+    // AST::conforms_to stay a pure membership test - it has no TypeRegistry to re-intern
+    // `Iterable<int32>` with, and neither has TypeParamDecl::allows(), its caller
+    inst->_conformances.clear();
+    for (const auto &conformance : tmpl->_conformances) {
+        inst->_conformances.push_back(substitute_type(conformance, subst, *this));
+    }
+
+    _deriving.erase(inst);
 }
 
 std::string AST::TypeRegistry::args_description(const std::vector<ValueType> &args) const

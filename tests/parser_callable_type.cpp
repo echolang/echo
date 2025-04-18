@@ -622,7 +622,7 @@ TEST_CASE("instanceof rejects a callable operand", "[callable]")
         "echo $f instanceof int32;\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "'instanceof' needs a class on the left"));
+    REQUIRE(has_issue_containing(*bundle, "'instanceof' needs a class or an interface on the left"));
 }
 
 // -- recovery ----------------------------------------------------------------

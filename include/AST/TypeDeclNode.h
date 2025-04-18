@@ -82,6 +82,14 @@ namespace AST
             return _complex_type;
         }
 
+        // the read-only half, for a consumer that only wants to *ask* the layout something - codegen
+        // naming the typeinfo global from mangled_token() is the caller. it goes through here rather
+        // than through value_type().get_complex_type(), which const_casts to hand back a mutable
+        // pointer and so says the opposite of what such a caller means
+        const ComplexType &complex_type() const {
+            return _complex_type;
+        }
+
         const std::vector<TypeParamDecl *> &type_parameters() const {
             return _complex_type.type_parameters;
         }

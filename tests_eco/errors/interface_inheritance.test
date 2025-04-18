@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:20
+'Seekable' is an interface, and an interface cannot conform to another one - declare the requirements it needs directly.
+Begin: ':'
+End: ':'
+Code excerpt:
+ [5]> 
+ [6]> interface Seekable : Readable
+                         ^
+ [7]> {
+
+Critical issues found, cannot compile.

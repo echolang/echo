@@ -1,0 +1,65 @@
+// **a class may be stored as an interface it conforms to.** the value is a fat pointer,
+// `{ ptr object, ptr vtable }` - the object is the handle unchanged, and the vtable is resolved at the
+// *widening*, where the concrete class is still statically known. so a dispatch is one load and an
+// indirect call rather than a scan of the conformance table
+
+interface Drawable
+{
+    function draw() : void;
+    function scaled(float64 $by) : float64;
+}
+
+class Circle : Drawable
+{
+    float64 $radius;
+
+    function draw() : void {
+        echo 1;
+    }
+
+    function scaled(float64 $by) : float64 {
+        return $this->radius * $by;
+    }
+}
+
+class Square : Drawable
+{
+    float64 $side;
+
+    function draw() : void {
+        echo 2;
+    }
+
+    function scaled(float64 $by) : float64 {
+        return $this->side * $by;
+    }
+}
+
+$circle = Circle(3.0);
+$square = Square(5.0);
+
+// a declaration erases, and the call dispatches to the concrete class
+Drawable $shape = $circle;
+$shape->draw();
+echo $shape->scaled(2.0);
+
+// an assignment re-seats it, vtable and all - the second class dispatches differently
+$shape = $square;
+$shape->draw();
+echo $shape->scaled(2.0);
+
+// a parameter is an arrival site like any other, and by value it is +1
+function render(Drawable $d) : void
+{
+    $d->draw();
+}
+
+render($circle);
+render($square);
+
+// the concrete handle is untouched by any of it
+$circle->draw();
+
+// and an erased value still answers instanceof, both ways
+echo $shape instanceof Drawable;
+echo $shape instanceof Square;

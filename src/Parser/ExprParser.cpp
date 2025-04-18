@@ -894,7 +894,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // interesting condition: find_property is an O(1) map hit, where find_member_functions is a
             // linear scan that builds a vector. `->name(` is overwhelmingly an ordinary method call, and
             // in that shape there is no callable property, so this way it never pays for the scan
-            const AST::ComplexType::Property *property = base_type.has_complex_type()
+            const AST::ComplexType::Property *property = base_type.has_property_layout()
                 ? base_type.get_complex_type()->find_property(member_token.value())
                 : nullptr;
 

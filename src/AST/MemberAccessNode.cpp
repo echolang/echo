@@ -24,10 +24,12 @@ AST::ValueType AST::MemberAccessNode::base_target_type() const
 
 AST::ValueType AST::MemberAccessNode::result_type() const
 {
-    // either storage class: a property lives at the same place in the same layout, and reaching it
-    // through a class handle rather than into a stack aggregate is gen_member_lvalue's business
+    // either *storage* class: a property lives at the same place in the same layout, and reaching it
+    // through a class handle rather than into a stack aggregate is gen_member_lvalue's business.
+    // an interface is excluded - it declares requirements and stores nothing, so a `->x` over one has
+    // no property table to answer from and the type checker reports it as an unknown member
     auto base_type = base_target_type();
-    if (!base_type.has_complex_type()) {
+    if (!base_type.has_property_layout()) {
         return ValueType::void_type();
     }
 

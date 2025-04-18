@@ -1,0 +1,32 @@
+// an interface may require an *operator*, not only a method. the operator itself is still declared at
+// file scope in the one global set - an operator is not a member of either operand's type - so what the
+// interface holds is the requirement, and the conformance check looks the real declaration up there
+
+interface Comparable<T>
+{
+    operator (T $a) < (T $b) : bool;
+}
+
+struct Money : Comparable<Money>
+{
+    int32 $cents;
+}
+
+operator (Money $a) < (Money $b) : bool
+{
+    return $a->cents < $b->cents;
+}
+
+$cheap = Money(100);
+$dear = Money(250);
+
+echo $cheap < $dear;
+echo $dear < $cheap;
+
+// the requirement is satisfied by conformance, so a constrained generic may rely on the operator
+function is_cheaper<T: Comparable<Money>>(T& $a, T& $b) : bool
+{
+    return $a < $b;
+}
+
+echo is_cheaper($cheap, $dear);

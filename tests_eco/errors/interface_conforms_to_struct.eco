@@ -1,0 +1,9 @@
+struct Base
+{
+    int32 $x;
+}
+
+struct Derived : Base
+{
+    int32 $y;
+}

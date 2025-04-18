@@ -1,0 +1,9 @@
+interface Readable
+{
+    function read() : int32;
+}
+
+interface Seekable : Readable
+{
+    function seek(int32 $to) : void;
+}

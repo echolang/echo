@@ -1,0 +1,19 @@
+// a struct conforms at compile time and has no runtime type, so it cannot be *stored* as an interface.
+// the constrained-generic path is what a struct uses, and it costs nothing at runtime
+
+interface Drawable
+{
+    function draw() : void;
+}
+
+struct Square : Drawable
+{
+    float64 $side;
+
+    function draw() : void {
+        echo 1;
+    }
+}
+
+$square = Square(2.0);
+Drawable $erased = $square;

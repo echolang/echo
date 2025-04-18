@@ -1,0 +1,52 @@
+// an interface for a struct exists only at compile time: there is no runtime metadata on a struct, so
+// what a conformance buys is a *checked* contract and a constraint a generic can name. dispatch stays
+// static - `render` is monomorphized once per implementor, exactly as any other generic call is
+
+interface Drawable
+{
+    function draw() : void;
+    function area() : float64;
+}
+
+struct Square : Drawable
+{
+    float64 $side;
+
+    function draw() : void {
+        echo 1;
+    }
+
+    function area() : float64 {
+        return $this->side * $this->side;
+    }
+}
+
+struct Circle : Drawable
+{
+    float64 $radius;
+
+    function draw() : void {
+        echo 2;
+    }
+
+    function area() : float64 {
+        return 3.0 * $this->radius * $this->radius;
+    }
+}
+
+// the constraint is satisfied by conformance, not by a listed set of types - which is the one thing a
+// concrete-set constraint could never express
+function render<T: Drawable>(T& $shape) : void
+{
+    $shape->draw();
+    echo $shape->area();
+}
+
+$square = Square(3.0);
+$circle = Circle(2.0);
+
+render($square);
+render($circle);
+
+// the methods are still callable directly - a conformance takes nothing away
+$square->draw();

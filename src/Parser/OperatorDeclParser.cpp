@@ -5,6 +5,7 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTValueType.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/TypeNode.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/SymbolParser.h"
@@ -418,10 +419,23 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     //    spelling of that diagnostic
     //  - inside a `{ }` block, where every other declaration is block-scoped while this one's symbol
     //    would still be visible to the whole program - the shunting yard has one precedence table
+    // **an interface body is the one exception, and it declares a requirement rather than an operator.**
+    // the refusal above is about a *definition*: an operator is not a member of its operand types, so a
+    // struct body has nothing to own. an interface owns no operator either - the implementor still
+    // declares it at file scope, in the one global set - but it may *require* one, and a requirement is
+    // exactly the kind of thing an interface body holds. so this is not a fourth registration path, it
+    // is the method-requirement path with an operator's signature
+    AST::TypeDeclNode *interface_owner = nullptr;
+
     if (payload.context.self_struct_ptr != nullptr) {
-        return refuse(operator_token,
-            "An operator cannot be declared inside a struct. Declare it at file scope - an operator "
-            "is not a member of either of its operand types.");
+        if (payload.context.self_struct_ptr->complex_type().is_interface_kind()) {
+            interface_owner = payload.context.self_struct_ptr;
+        }
+        else {
+            return refuse(operator_token,
+                "An operator cannot be declared inside a struct. Declare it at file scope - an operator "
+                "is not a member of either of its operand types.");
+        }
     }
 
     if (payload.context.current_namespace != nullptr && payload.context.current_namespace->is_lexical()) {
@@ -635,7 +649,14 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // the index form is exempt, and not by omission: `[` has no built-in meaning over a *complex*
     // base at all - the language spells one only for a pointer, which the rewriter keeps for itself -
     // so there is nothing for a declaration to be shadowed by
-    if (header.fixity != AST::OpFixity::t_index) {
+    //
+    // **not asked of a requirement.** both this and the bare-type-parameter refusal inside it are about a
+    // declaration that would be *chosen* at a use site and then never fire. a requirement is chosen at no
+    // use site at all - it names the shape an implementor's own file-scope operator has to have, and that
+    // declaration is the one these refusals judge. `interface Comparable<T> { operator (T $a) < (T $b); }`
+    // is precisely the shape the bare-parameter arm exists to reject in a definition, and precisely the
+    // shape a requirement is for
+    if (header.fixity != AST::OpFixity::t_index && interface_owner == nullptr) {
         const AST::Operator *op = payload.collector.operators.get_operator(header.spelling);
 
         // the declared operand types as the predicate wants them: value-position, which is what a
@@ -701,8 +722,22 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // the signature is complete, so this is the earliest point it can join its overload set.
     // registering in both passes is intentional: the declaration pass makes it visible to use sites
     // written above it and in other files, and the body pass finds the same declaration site
-    payload.collector.functions.register_function(
-        payload.collector, payload.context.code_ref(*header.symbol_token), funcdecl);
+    //
+    // **a requirement joins its interface's member table instead of the global operator set.** it has no
+    // body and no symbol, so a use site must never be able to choose it - `$a < $b` has to resolve to the
+    // implementor's own declaration or to nothing. `ast_namespace` stays the root above, because that is
+    // where AST::first_unmet_requirement looks the implementor's operator *up*
+    if (interface_owner != nullptr) {
+        funcdecl->owner_type = &interface_owner->complex_type();
+
+        payload.collector.functions.register_member_function(
+            payload.collector, payload.context.code_ref(*header.symbol_token), funcdecl,
+            interface_owner->complex_type());
+    }
+    else {
+        payload.collector.functions.register_function(
+            payload.collector, payload.context.code_ref(*header.symbol_token), funcdecl);
+    }
 
     // what the attributes drained above publish about this declaration, through the one list of it -
     // so a marker added there reaches this site too rather than being remembered at a fourth. a null
@@ -710,6 +745,22 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // operator owes: a conversion is inserted where the user wrote *nothing*, and every spelling an
     // operator has is operand syntax the user writes
     publish_declaration_markers(payload, funcdecl, nullptr, *header.symbol_token);
+
+    // a requirement ends here, in every pass, and it is deliberately **not** added to the declaration
+    // scope: codegen emits bodies from that list, and there is no body to emit. the same tail an
+    // `extern` owns, and for the same reason - the shape of the declaration decides where it ends
+    if (interface_owner != nullptr) {
+        if (!cursor.is_type(Token::Type::t_semicolon)) {
+            return refuse(*header.symbol_token,
+                fmt::format(
+                    "operator '{}' is a requirement of the interface '{}', so it cannot have a body - "
+                    "end it with ';' and declare the operator itself at file scope.",
+                    header.spelling, interface_owner->type_name()));
+        }
+
+        cursor.skip(); // the semicolon
+        return funcdecl;
+    }
 
     if (symbol_only) {
         if (cursor.is_type(Token::Type::t_open_brace)) {

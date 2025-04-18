@@ -104,6 +104,11 @@ ISSUE_MESSAGE_FNC(UnsatisfiedTypeConstraint)
 {
     return _message;
 }
+
+ISSUE_MESSAGE_FNC(UnmetInterfaceRequirement)
+{
+    return _message;
+}
 ISSUE_MESSAGE_FNC(DuplicateFunctionSignature)
 {
     return _message;

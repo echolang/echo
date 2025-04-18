@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTConformance.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTValueType.h"
@@ -44,6 +45,18 @@ namespace AST
         // any other primitive that reaches the parameter through TypeLowering::coerce_value - a
         // narrowing, a sign change, int to float. always possible, never free
         t_conversion,
+
+        // a class handle reaching a parameter of an interface it conforms to - the value keeps its
+        // object and loses its static type, gaining a vtable. **below every built-in conversion
+        // above**, so an overload taking the concrete class always beats one taking the interface: the
+        // widening is what lets a caller hand a `Circle` to a `Drawable` parameter without writing
+        // anything, never a way to hide a better-matching overload. that is `t_declared_conversion`'s
+        // reasoning one rank earlier, and above it because this one is the compiler's own rule while
+        // that one is something a type declared about itself
+        //
+        // deliberately **not** folded into is_implicitly_convertible, which would rank it t_widening
+        // and make erasing a static type look as free as `T&` -> `ptr<T>`
+        t_interface_widening,
 
         // the argument's own type declared how to convert itself, `#[implicit]`. below every
         // built-in conversion above rather than beside them, because that is what makes an
@@ -178,6 +191,17 @@ namespace AST
             return is_value_preserving_promotion(from, to)
                 ? ArgumentFit::t_promotion
                 : ArgumentFit::t_conversion;
+        }
+
+        // a class handle widening to an interface it conforms to. asked of AST::conforms_to, the one
+        // answer to that question, so the ranking and the lowering cannot disagree about which
+        // conversions exist
+        //
+        // **a class only.** a struct's conformance is a compile-time contract - it has no runtime type
+        // for a dispatch to read - so a struct argument answers t_none here and the type checker
+        // reports it against the destination, which is where the reason belongs
+        if (to.is_interface() && from.is_class() && conforms_to(from, to)) {
+            return ArgumentFit::t_interface_widening;
         }
 
         // a value converts to another type when its own type declared how - a method marked

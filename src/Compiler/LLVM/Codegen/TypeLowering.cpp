@@ -1,9 +1,12 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/IfaceValue.h"
+#include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "eco.h"
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTConformance.h"
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -199,7 +202,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
     // a class needs the block around that payload before anything can allocate one. built eagerly
     // here, alongside the payload, so the unit that declares the class always has it
     if (node->is_class()) {
-        build_class_box(cmp_unit.structure_table->get_structure(struct_id), type_name, cmp_unit);
+        build_class_box(cmp_unit.structure_table->get_structure(struct_id), node->complex_type(), cmp_unit);
     }
 
     return llvm_struct_type;
@@ -222,20 +225,22 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
 
     // the block, once the payload is complete - it is a member of the block, so it has to be
     if (type->is_class_kind()) {
-        build_class_box(cmp_unit.structure_table->get_structure(struct_id), type_name, cmp_unit);
+        build_class_box(cmp_unit.structure_table->get_structure(struct_id), *type, cmp_unit);
     }
 
     return llvm_struct_type;
 }
 
 void TypeLowering::build_class_box(
-    Structure &structure, const std::string &type_name, const Compiler::LLVM::CmpUnit &cmp_unit)
+    Structure &structure, const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
 {
     assert(structure.llvm_struct != nullptr);
 
     if (structure.llvm_box != nullptr) {
         return;
     }
+
+    const std::string type_name = type.name.value_or("anon");
 
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
@@ -249,22 +254,105 @@ void TypeLowering::build_class_box(
 
     structure.llvm_box = llvm::StructType::create(*_ctx.llvm_context, box_members, type_name + ".box");
 
-    // one byte whose *address* is the class's identity. linkonce_odr so every unit may define it and
-    // the linker keeps one - which is what makes the address comparable across modules without a
+    // the descriptor whose *address* is the class's identity. linkonce_odr so every unit may define it
+    // and the linker keeps one - which is what makes the address comparable across modules without a
     // numbering scheme anybody has to keep stable
-    const std::string typeinfo_name = type_name + ".typeinfo";
-    structure.typeinfo = cmp_unit.llvm_module->getGlobalVariable(typeinfo_name, true);
+    //
+    // named from the **mangled token**, never the written or displayed name, for exactly the reason
+    // the release thunk beside it is: linkonce_odr folds by symbol name, so `a::Foo` and `b::Foo`
+    // sharing one spelling here made them one identity, and instanceof then answered true across two
+    // unrelated classes. ComplexType::mangled_token() is the existing answer to "which type is this",
+    // including the namespace path, a nested owner and an instantiation's arguments
+    structure.typeinfo = get_or_create_odr_constant(
+        type.mangled_token() + ".typeinfo",
+        [&] {
+            // `{ i64 count, ptr conformances }` - see Codegen/ClassLayout.h. it used to be a bare `i8 0`,
+            // and the *address* is still all that identity needs; the body is what answers the second
+            // question a class can be asked, which interfaces it conforms to
+            llvm::Constant *conformances = build_conformance_table(type, cmp_unit);
+            auto *info_type = typeinfo_llvm_type();
 
-    if (structure.typeinfo == nullptr) {
-        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
-        structure.typeinfo = new llvm::GlobalVariable(
-            *cmp_unit.llvm_module,
-            i8,
-            /*isConstant=*/true,
-            llvm::GlobalValue::LinkOnceODRLinkage,
-            llvm::ConstantInt::get(i8, 0),
-            typeinfo_name);
+            std::vector<llvm::Constant *> info_values(2);
+            info_values[ClassTypeInfo::conformance_count_index] =
+                llvm::ConstantInt::get(i64, type.conformances().size());
+            info_values[ClassTypeInfo::conformances_index] = conformances != nullptr
+                ? conformances
+                : llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr));
+
+            return llvm::ConstantStruct::get(info_type, info_values);
+        },
+        cmp_unit);
+}
+
+llvm::GlobalVariable *TypeLowering::get_or_create_interface_identity(
+    const AST::ComplexType &interface, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    // one byte, and only its address is ever read - the same shape a class's typeinfo had before it
+    // grew a body, and for the same reason: an interface has nothing to say about itself at runtime
+    // beyond being itself
+    return get_or_create_odr_constant(
+        interface.mangled_token() + ".itype",
+        [&] { return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0); },
+        cmp_unit);
+}
+
+llvm::Constant *TypeLowering::build_conformance_table(
+    const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    const auto &conformances = type.conformances();
+
+    if (conformances.empty()) {
+        return nullptr;
     }
+
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    std::vector<llvm::Constant *> identities;
+    identities.reserve(conformances.size());
+
+    for (const AST::ValueType &conformance : conformances) {
+        // only valid interface types are ever published on a ComplexType - parse_typedecl refuses
+        // anything else at the declaration - so this asserts rather than filters. filtering made the
+        // table shorter than the count the descriptor beside it carries, which are two numbers derived
+        // from one list in two places: a scan bounded by the longer one reads past the array
+        assert(conformance.is_interface() && "a non-interface reached ComplexType::conformances()");
+
+        identities.push_back(
+            get_or_create_interface_identity(*conformance.get_complex_type(), cmp_unit));
+    }
+
+    auto *table_type = llvm::ArrayType::get(opaque_ptr, identities.size());
+
+    // linkonce_odr like the typeinfo that points at it, and named off the same mangled token: two units
+    // that both lower this class emit identical tables and the linker keeps one
+    return get_or_create_odr_constant(
+        type.mangled_token() + ".conformances",
+        [&] { return llvm::ConstantArray::get(table_type, identities); },
+        cmp_unit);
+}
+
+llvm::GlobalVariable *TypeLowering::get_or_create_odr_constant(
+    const std::string &name,
+    const std::function<llvm::Constant *()> &build,
+    const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (auto *existing = cmp_unit.llvm_module->getGlobalVariable(name, true)) {
+        return existing;
+    }
+
+    llvm::Constant *initializer = build();
+
+    if (initializer == nullptr) {
+        return nullptr;
+    }
+
+    return new llvm::GlobalVariable(
+        *cmp_unit.llvm_module,
+        initializer->getType(),
+        /*isConstant=*/true,
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        initializer,
+        name);
 }
 
 Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
@@ -297,7 +385,7 @@ Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
     // settled in the type-name pass - but the box may still be missing if the payload was lowered
     // through the struct path, so build it rather than assuming
     if (structure.llvm_box == nullptr) {
-        build_class_box(structure, type->name.value_or("anon"), cmp_unit);
+        build_class_box(structure, *type, cmp_unit);
     }
 
     return ClassLayout{ structure.llvm_struct, structure.llvm_box, structure.typeinfo };
@@ -315,6 +403,11 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
             // a builtin is answered at the call site and has no symbol, so declaring one would
             // emit a `declare` nobody defines and the call would fail to resolve at link time
             if (fncdecl->is_builtin()) {
+                continue;
+            }
+            // an interface requirement is a signature with no implementation - the implementors have
+            // the bodies, under their own symbols. declaring one would emit a `declare` nobody defines
+            if (fncdecl->is_interface_requirement()) {
                 continue;
             }
             create_llvm_func_decl(fncdecl, *cmp_unit);
@@ -341,6 +434,12 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
 
             // as above: a builtin call folds to a constant, there is nothing to link
             if (decl->is_builtin()) {
+                continue;
+            }
+
+            // a call whose declaration is an interface requirement is dispatched through the receiver's
+            // vtable rather than to a symbol, so there is nothing to link here either
+            if (decl->is_interface_requirement()) {
                 continue;
             }
 
@@ -380,6 +479,118 @@ llvm::StructType *TypeLowering::callable_llvm_type()
     }
 
     return llvm::StructType::create(*_ctx.llvm_context, { ptr_type, ptr_type }, "eco.callable");
+}
+
+llvm::StructType *TypeLowering::iface_llvm_type()
+{
+    auto *ptr_type = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    // named and looked up before creating, exactly as eco.callable is: one type shared by every unit and
+    // every interface, so two spellings of one erased value are one llvm::Type
+    if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, "eco.iface")) {
+        return existing;
+    }
+
+    return llvm::StructType::create(*_ctx.llvm_context, { ptr_type, ptr_type }, "eco.iface");
+}
+
+llvm::StructType *TypeLowering::class_header_llvm_type()
+{
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *ptr_type = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, "eco.classheader")) {
+        return existing;
+    }
+
+    return llvm::StructType::create(*_ctx.llvm_context, { i64, ptr_type }, "eco.classheader");
+}
+
+llvm::StructType *TypeLowering::typeinfo_llvm_type()
+{
+    std::vector<llvm::Type *> members(2);
+    members[ClassTypeInfo::conformance_count_index] = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    members[ClassTypeInfo::conformances_index] = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+    // by slot index rather than in written order, so the names in Codegen/ClassLayout.h are what decides
+    // the layout - the one place the descriptor's shape is spelled, for the writer and the scan both
+    return llvm::StructType::get(*_ctx.llvm_context, members);
+}
+
+llvm::Constant *TypeLowering::get_or_create_vtable(
+    const AST::ValueType &class_type,
+    const AST::ValueType &interface,
+    const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (!class_type.has_complex_type() || !interface.is_interface()) {
+        return nullptr;
+    }
+
+    const AST::ComplexType *implementor = class_type.get_complex_type();
+    const AST::ComplexType *iface = interface.get_complex_type();
+
+    // both mangled tokens, so `a::Circle` conforming to `b::Drawable` cannot share a table with any other
+    // pairing - the same identity rule the typeinfo global follows
+    //
+    // the walk below only runs on a miss, which is what the callback shape buys: a widening asks for its
+    // table every time it is lowered, and resolving which declaration answers each requirement is the
+    // expensive half
+    return get_or_create_odr_constant(
+        implementor->mangled_token() + "." + iface->mangled_token() + ".vtable",
+        [&]() -> llvm::Constant * {
+            // which declaration answers each requirement, in slot order. asked of the one walk that
+            // decides it, so the table and every dispatch site agree about which entry a method is
+            const std::vector<AST::FunctionDeclNode *> implementations =
+                AST::interface_implementations(implementor, interface, _ctx.type_registry());
+
+            if (implementations.empty()) {
+                return nullptr;
+            }
+
+            llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+
+            std::vector<llvm::Constant *> slots;
+            slots.reserve(implementations.size() + IfaceValue::first_method_slot);
+
+            // slot 0 is the implementor's release thunk - see Codegen/IfaceValue.h. an erased value owns
+            // a reference and its release site knows only the interface, so this is the one way to reach
+            // the concrete teardown. filled here, at the widening, which is late enough that the layout
+            // the thunk is built from exists - the typeinfo descriptor is built during type lowering and
+            // could not have held it
+            slots.push_back(_ctx.classes->get_or_create_release_thunk(class_type));
+
+            // the table is written into, which every lowering path here already does through a const
+            // CmpUnit - the constness is about the *unit* not being replaced, not its tables being frozen
+            auto &unit = const_cast<Compiler::LLVM::CmpUnit &>(cmp_unit);
+
+            for (AST::FunctionDeclNode *impl : implementations) {
+                // an operator requirement has no slot - such an interface is refused as a storable type
+                // before anything asks for its table, so reaching here means that refusal is missing
+                if (impl == nullptr) {
+                    return nullptr;
+                }
+
+                auto function_id = unit.function_table.get_function_id(impl);
+
+                // the implementation may not have been declared into *this* unit yet: the class can be
+                // declared in another module, exactly as a class layout can. declaring it is the same
+                // idempotent call build_function_maps makes
+                if (function_id == 0) {
+                    create_llvm_func_decl(impl, unit);
+                    function_id = unit.function_table.get_function_id(impl);
+                }
+
+                if (function_id == 0) {
+                    return nullptr;
+                }
+
+                slots.push_back(unit.function_table.get_llvm_function(function_id));
+            }
+
+            auto *table_type = llvm::ArrayType::get(opaque_ptr, slots.size());
+            return llvm::ConstantArray::get(table_type, slots);
+        },
+        cmp_unit);
 }
 
 llvm::FunctionType *TypeLowering::get_llvm_function_type(
@@ -426,6 +637,16 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     // Echo type and must be one llvm::Type, which an anonymous StructType gives for free
     if (type.is_callable()) {
         return callable_llvm_type();
+    }
+
+    // an interface *value* is a fat pointer too, `{ ptr object, ptr vtable }`, and for the callable's
+    // reason: the object alone cannot answer which method to call without a scan at every call site,
+    // so the vtable is resolved once at the **widening**, where the concrete class is still known
+    //
+    // field 0 holds the class handle, which is what makes a receiver free: a class method's `$this` is
+    // `Circle&` - the address of a slot holding a handle - and `&iface.object` is exactly that shape
+    if (type.is_interface()) {
+        return iface_llvm_type();
     }
 
     if (type.is_primitive()) {
@@ -534,6 +755,33 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
 
     if (source == target) {
         return value;
+    }
+
+    // **the interface widening.** a class handle becomes `{ object, vtable }` - the object is the handle
+    // unchanged and the vtable is resolved here, from the concrete class, which is the whole reason the
+    // conversion lives at this end rather than at the call site
+    //
+    // it is here, in the one conversion table, so that every destination gets it from one change:
+    // an initializer, an assignment, a member write, an argument and a return all route through
+    // coerce_value. ahead of the pointer arm below because a class handle *is* a pointer under the hood
+    // and that arm would pass it straight through as one
+    if (target.is_interface() && source.is_class()) {
+        llvm::Constant *vtable = get_or_create_vtable(source, target, cmp_unit);
+
+        // every shape that has no table - a non-conforming class, an unmet requirement, an operator
+        // requirement, a generic implementor - is refused with a located diagnostic before codegen, so
+        // this is a compiler bug rather than a program error
+        if (vtable == nullptr) {
+            throw _ctx.error(fmt::format(
+                "no vtable for '{}' as '{}' {}",
+                source.get_type_desciption(), target.get_type_desciption(), _ctx.function_context()));
+        }
+
+        llvm::Value *erased = llvm::UndefValue::get(iface_llvm_type());
+        erased = _ctx.builder->CreateInsertValue(erased, value, { IfaceValue::object_index }, "iface.obj");
+        erased = _ctx.builder->CreateInsertValue(erased, vtable, { IfaceValue::vtable_index }, "iface.vt");
+
+        return erased;
     }
 
     // an address is passed along as the address it is. reinterpreting one as pointing at a

@@ -1,0 +1,4 @@
+interface Sized
+{
+    int32 $count;
+}

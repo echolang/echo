@@ -102,6 +102,12 @@ namespace AST
         MAKE_ISSUE_DEF1(UnresolvedTypeParameter, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnsatisfiedTypeConstraint, IssueSeverity::Error, const std::string, _message);
 
+        // a declared `: SomeInterface` whose requirements the type does not answer. its own kind rather
+        // than a GenericError because it is the one diagnostic that makes a *declared* conformance mean
+        // anything - every use site trusts the claim without re-deriving it, so this is where the claim
+        // is paid for
+        MAKE_ISSUE_DEF1(UnmetInterfaceRequirement, IssueSeverity::Error, const std::string, _message);
+
         // overload resolution. a name that is not declared at all stays UnknownFunction - these
         // three are the cases where candidates exist but none or several of them answer the call
         MAKE_ISSUE_DEF1(DuplicateFunctionSignature, IssueSeverity::Error, const std::string, _message);

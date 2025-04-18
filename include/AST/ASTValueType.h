@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <tuple>
 #include <optional>
+#include <unordered_set>
 #include <cstdint>
 #include <cassert>
 #include <concepts>
@@ -41,6 +42,11 @@ namespace AST
         t_primitive,
         t_class,
         t_struct,
+        // a declared capability: `interface Drawable`. a named type like the two above and reached
+        // through the same ComplexType, so member lookup, mangling and rendering are shared - what
+        // separates it is that it has no properties of its own and never a layout. as a *value* it
+        // exists only over a class, because dispatch needs the runtime identity only a class carries
+        t_interface,
         t_generic,
         t_pointer,
         // a callable value: `function<R(P...)>`. structural like a pointer and for the same reason -
@@ -49,14 +55,20 @@ namespace AST
         t_unknown
     };
 
-    // which of the two storage classes a named type was declared as. the distinction is one bit and
-    // everything else about the two is identical - one parser, one declaration node, one layout - so
-    // it is a tag rather than a separate type. carried on ComplexType, since that is the only thing a
-    // generic instantiation has
+    // which of the three storage classes a named type was declared as. the distinction is one tag and
+    // nearly everything else about them is identical - one parser, one declaration node, one member
+    // store - so it is a tag rather than separate types. carried on ComplexType, since that is the
+    // only thing a generic instantiation has
+    //
+    // t_interface is the odd one and deliberately sits here rather than in a node of its own: an
+    // interface is declared, named, namespaced, generic and mangled exactly as the other two are, and
+    // its requirements live in the same `_methods` list a struct's methods do. what it does *not* have
+    // is properties or a layout, which is a refusal at its declaration rather than a different shape
     enum class ComplexTypeKind
     {
         t_struct,
         t_class,
+        t_interface,
     };
 
     // flags apply to the level they sit on, which is what makes `ptr<const T>` (const pointee)
@@ -125,6 +137,10 @@ namespace AST
 
     constexpr bool is_class(ValueTypeKind kind) {
         return kind == ValueTypeKind::t_class;
+    }
+
+    constexpr bool is_interface(ValueTypeKind kind) {
+        return kind == ValueTypeKind::t_interface;
     }
 
     std::string get_primitive_name(ValueTypePrimitive primitive);
@@ -280,11 +296,27 @@ namespace AST
             return kind == ValueTypeKind::t_class;
         }
 
-        // a named user type of either storage class - exactly the kinds get_complex_type() answers
+        bool is_interface() const {
+            return kind == ValueTypeKind::t_interface;
+        }
+
+        // a named user type of any storage class - exactly the kinds get_complex_type() answers
         // for. this is what a *member* question wants: `->x` resolves the same property table either
         // way, and the difference is only in how codegen reaches it. asking is_struct() where this
         // was meant is what made every class member read type as void
+        //
+        // an interface is one of these, which is what gives it member lookup, mangling and rendering
+        // for free. so this is deliberately **not** the question "does this have a layout" - use
+        // has_property_layout() below for that. the two were one predicate while there were only two
+        // kinds, and every reader that meant the second one has to say so now
         bool has_complex_type() const {
+            return is_struct() || is_class() || is_interface();
+        }
+
+        // a named user type that has *properties* - a place a `->x` can be stored in and a thing
+        // codegen can lower to an llvm struct. an interface declares requirements and no storage, so
+        // it is excluded: this is the half of the old has_complex_type() that meant "a layout"
+        bool has_property_layout() const {
             return is_struct() || is_class();
         }
 
@@ -410,10 +442,12 @@ namespace AST
                 case ValueTypeKind::t_pointer:
                     return *_pointee == *other._pointee;
 
-                // for struct and class types, compare the complex type pointers
-                // two struct/class types are equal if they point to the same ComplexType
+                // for struct, class and interface types, compare the complex type pointers
+                // two named types are equal if they point to the same ComplexType, so an
+                // instantiation is a distinct type from its template and from another instantiation
                 case ValueTypeKind::t_struct:
                 case ValueTypeKind::t_class:
+                case ValueTypeKind::t_interface:
                     return _complex_type == other._complex_type;
 
                 // structural, like a pointer: a signature carries no identity of its own, so two
@@ -536,6 +570,16 @@ namespace AST
 
         bool is_class_kind() const {
             return kind == ComplexTypeKind::t_class;
+        }
+
+        bool is_interface_kind() const {
+            return kind == ComplexTypeKind::t_interface;
+        }
+
+        // has properties, and so a layout codegen can lower. false for an interface, which declares
+        // requirements and stores nothing - the mirror of ValueType::has_property_layout()
+        bool has_property_layout() const {
+            return kind != ComplexTypeKind::t_interface;
         }
 
         // the namespace the type was declared in, null when unknown or root. instantiations
@@ -771,6 +815,27 @@ namespace AST
             return _implicit_conversions;
         }
 
+        // the interfaces this type declared it conforms to - the `: Drawable, Iterable<E>` clause. what
+        // AST::conforms_to answers from, which is what a type-parameter constraint and an `instanceof`
+        // over an interface read, and what the runtime conformance table is built from
+        //
+        // **types, not declarations** - and so the one member field here that substituted_copy has to
+        // substitute. that is the opposite of _implicit_conversions above, which deliberately stores
+        // declarations so that no ValueType on this class ever needs substituting; the difference is
+        // that a conversion's target is already spelled by the declaration's return type while a
+        // conformance has no declaration of its own at all. `struct Bag<E> : Iterable<E>` has to become
+        // `Iterable<int32>` on `Bag<int32>`, or a constraint would be checked against a template
+        //
+        // only valid, deduplicated entries are ever pushed - parse_typedecl refuses a non-interface and
+        // a repeat at the declaration - so no reader re-filters
+        void add_conformance(ValueType interface) {
+            _conformances.push_back(std::move(interface));
+        }
+
+        const std::vector<ValueType> &conformances() const {
+            return _conformances;
+        }
+
         // a concrete copy of this type: every property type run through `substitute`, and nothing
         // left that identifies it as a template or as somebody's instantiation
         //
@@ -795,6 +860,15 @@ namespace AST
                 prop.type = substitute(prop.type);
             }
 
+            // the *only* other type-carrying field, and so the only other one that has to be
+            // substituted: `struct Bag<E> : Iterable<E>` becomes `Iterable<int32>` on `Bag<int32>`.
+            // without this a constraint asked of the instantiation would compare against a conformance
+            // still mentioning the template's E and answer no - see the note on _conformances for why
+            // this field cannot hold declarations the way _implicit_conversions does
+            for (auto &conformance : copy._conformances) {
+                conformance = substitute(conformance);
+            }
+
             return copy;
         }
 
@@ -807,6 +881,7 @@ namespace AST
         FunctionDeclNode *_copy_constructor = nullptr;
         FunctionDeclNode *_deinit = nullptr;
         std::vector<FunctionDeclNode *> _implicit_conversions;
+        std::vector<ValueType> _conformances;
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };
@@ -962,10 +1037,23 @@ namespace AST
     private:
         std::string args_description(const std::vector<ValueType> &args) const;
 
+        // (re-)derives everything an instantiation takes from its template through `args`: the property
+        // layout, and the conformance list. one function for both, because they are the same operation
+        // on the same substitution and go stale together - a generic application can be interned during
+        // the declaration pass, *before* the template's own body has been walked, so an instance may
+        // have to be refilled later (todo/A7)
+        //
+        // re-entrant: substituting `struct Bag<E> : Iterable<Bag<E>>` asks this registry for
+        // `Bag<int32>`, which is already in the cache but mid-derivation, and the staleness test would
+        // then send it straight back in here. `_deriving` is what makes the inner call a no-op and lets
+        // the outer one finish the job
+        void derive_instantiation(ComplexType *inst, ComplexType *tmpl, const std::vector<ValueType> &args);
+
         // owns the instantiation ComplexTypes this registry creates. Templates are owned elsewhere
         // (embedded on their TypeDeclNode) and only appear here as map values, never in _owned
         std::vector<std::unique_ptr<ComplexType>> _owned;
         std::unordered_map<std::tuple<ComplexType*, std::vector<ValueType>>, ComplexType*, TypeRegistryKeyHash> _instantiations;
+        std::unordered_set<ComplexType *> _deriving;
     };
 
     // the single, unified type-substitution routine, shared by struct and function generics

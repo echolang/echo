@@ -1,0 +1,65 @@
+// an interface value **owns a reference**, exactly as a class handle does, and for the same reason a
+// callable owns its environment: the type does not say which object is inside, so a copy is one more
+// reference and a drop is one less. what makes the drop possible at all is the vtable's reserved release
+// slot - the release site knows only `Drawable`, which says nothing about which block to free
+
+interface Drawable
+{
+    function draw() : void;
+}
+
+class Circle : Drawable
+{
+    float64 $radius;
+
+    function draw() : void {
+        echo 1;
+    }
+
+    destructor()
+    {
+        echo 9;
+    }
+}
+
+// erasing a place is a retain: two handles, one object
+function shared() : void
+{
+    $circle = Circle(1.0);
+    Drawable $erased = $circle;
+
+    $erased->draw();
+    echo ref_count($circle);
+}
+
+// ...and the object is destroyed once, when both have gone
+shared();
+echo 100;
+
+// the only handle being an erased one still destroys it - which is the case a *call result* takes, since
+// it is already one reference nobody else holds and so is never retained
+function only_erased() : void
+{
+    Drawable $erased = Circle(2.0);
+    $erased->draw();
+}
+
+only_erased();
+echo 200;
+
+// a by-value parameter is +1 at the call and released by the callee, so the caller's handle survives it
+function consume(Drawable $d) : void
+{
+    $d->draw();
+}
+
+function borrowed() : void
+{
+    $circle = Circle(3.0);
+    consume($circle);
+    consume($circle);
+    $circle->draw();
+}
+
+borrowed();
+echo 300;

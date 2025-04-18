@@ -41,6 +41,17 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     // constant of it, so it has to be answerable from the first expression onward
     _ctx.core_types_ptr = &bundle.collector.core_types;
 
+    // the registry an interface widening reads, published beside the core types and for the same
+    // reason - see CodegenContext. a widening resolves its vtable from the concrete class, which means
+    // asking which declaration answers each requirement
+    //
+    // the bundle arrives const and TypeRegistry's interning is a mutating operation, so this casts it
+    // away. that is sound rather than convenient: the type checker resolved every one of these
+    // conformances before codegen ran, so each substitution the vtable walk performs is a lookup that
+    // hits the cache. it interns nothing new, which is exactly the property that has to hold after
+    // monomorphization anyway
+    _ctx.type_registry_ptr = const_cast<AST::TypeRegistry *>(&bundle.collector.type_registry);
+
     // and *where its fields sit*, resolved here, once. absence of a binding is not an error - a program
     // compiled without the stdlib has no string - but a bound type of the wrong shape is, and reporting
     // it here rather than at whichever literal happened to be lowered first is what makes the message

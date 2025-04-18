@@ -1,5 +1,6 @@
 #include "AST/ASTTypeParam.h"
 
+#include "AST/ASTConformance.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <cassert>
@@ -18,6 +19,19 @@ bool AST::TypeParamDecl::allows(const ValueType &type) const
 
     for (const auto &allowed : constraint) {
         if (bare == allowed) {
+            return true;
+        }
+
+        // **the one arm interfaces needed.** an interface atom is satisfied by conformance rather than
+        // by identity - it names a capability, and the set of types answering it is open, which is
+        // exactly what a concrete-set constraint could never express
+        //
+        // this is the whole of it: first_constraint_violation, can_instantiate, unify_type,
+        // match_function and Monomorphizer::determine_type_args are unchanged, because "does this
+        // argument satisfy this parameter's constraint" already had one owner and this is it. a
+        // violation still reports through Issue::UnsatisfiedTypeConstraint, naming
+        // constraint_spelling - which for an interface reads as the interface's own name
+        if (allowed.is_interface() && AST::conforms_to(bare, allowed)) {
             return true;
         }
     }

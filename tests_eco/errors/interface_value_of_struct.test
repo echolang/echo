@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 19:10
+Invalid type conversion: 'Square' is a struct, so it cannot be stored as 'Drawable' - a struct carries no runtime type to dispatch through. Take it through a constrained generic instead, e.g. 'function f<T: Drawable>(T& $v)'.
+Begin: '$erased'
+End: '$erased'
+Code excerpt:
+ [18]> $square = Square(2.0);
+ [19]> Drawable $erased = $square;
+               ^
+ [20]> 
+
+Critical issues found, cannot compile.

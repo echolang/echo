@@ -28,6 +28,28 @@ namespace Compiler::LLVM
         static constexpr unsigned payload_index = 2;
     };
 
+    // what the typeinfo global *holds*. it began as one `i8 0` whose address was the whole of a class's
+    // identity, and that stays true - `$obj instanceof Circle` is still one address comparison, and the
+    // struct below is source-compatible with it for exactly that reason. what it grew for is the second
+    // question a class can now be asked: which **interfaces** does it conform to
+    //
+    //     %eco.typeinfo = { i64 conformance_count, ptr conformances }
+    //
+    // `conformances` points at a `[N x ptr]` of interface identities - `@Drawable.itype` and friends,
+    // each its own `linkonce_odr` byte whose address is that interface's identity, exactly as a class's
+    // typeinfo address is the class's. null when the count is zero, which is every class today that
+    // declares no conformance and every closure environment
+    //
+    // **the vtable is deliberately not in here.** dispatch resolves its vtable at the *widening* site,
+    // where the concrete class is statically known, so an interface value carries it directly and a call
+    // costs one load rather than a scan. that leaves each structure answering exactly one question: this
+    // table answers "is it one", the value's own vtable pointer answers "which method"
+    namespace ClassTypeInfo
+    {
+        static constexpr unsigned conformance_count_index = 0;
+        static constexpr unsigned conformances_index = 1;
+    };
+
     // what a class needs from codegen beyond the handle. resolved together because the box cannot be
     // built without the payload and the typeinfo global has the same lifetime as both
     struct ClassLayout

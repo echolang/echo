@@ -17,6 +17,7 @@
 #include "AST/ReturnNode.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTConformance.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/LiteralValueNode.h"
@@ -225,6 +226,14 @@ void TypeChecker::visitReturn(ReturnNode &node)
 
 void TypeChecker::visit_type_decl(TypeDeclNode &node)
 {
+    // **ahead of the generic early-return below, deliberately.** a conformance is checked on the
+    // *template*: `struct Bag<E> : Iterable<E>`'s requirements mention the very `E` that Bag's own
+    // methods mention, and both sides are the same TypeParamDecl *, so the exact comparison works
+    // without any instantiation - and the check is then done once rather than per instance. checking it
+    // behind the return would mean a generic implementor was never checked at all, since an
+    // instantiation has no TypeDeclNode for this visitor to reach
+    check_conformances(node);
+
     // a generic struct template's property types legitimately mention its type parameters (the T
     // in `struct Box<T> { T $value; }`); it is only meaningful once instantiated with concrete
     // types. concrete/non-generic struct declarations are still checked
@@ -232,6 +241,48 @@ void TypeChecker::visit_type_decl(TypeDeclNode &node)
         return;
     }
     RecursiveVisitor::visit_type_decl(node);
+}
+
+void TypeChecker::check_conformances(TypeDeclNode &node)
+{
+    const AST::ComplexType &ct = node.complex_type();
+
+    for (const ValueType &interface : ct.conformances()) {
+        auto unmet = AST::first_unmet_requirement(
+            &ct, interface, _collector.type_registry, &_collector.functions);
+
+        if (!unmet.has_value()) {
+            continue;
+        }
+
+        // located on the *implementor's* name, not on the requirement: the type is what has to change,
+        // and the interface may well be in another file the author does not own
+        //
+        // an operator is worded apart from a method because it is not a member of anything: what is
+        // missing is a *file scope* declaration over this type, not something the type failed to declare
+        std::string detail;
+
+        if (unmet->requirement->is_operator()) {
+            detail = fmt::format(
+                "no '{}' over '{}' is declared at file scope",
+                unmet->requirement->func_name(), node.type_name());
+        }
+        else if (unmet->found_signature.empty()) {
+            detail = fmt::format("it declares no '{}'", unmet->requirement->func_name());
+        }
+        else {
+            detail = fmt::format("the closest it declares is '{}'", unmet->found_signature);
+        }
+
+        _collector.collect_issue<Issue::UnmetInterfaceRequirement>(
+            code_ref_for(node.declaration_site_token()),
+            fmt::format(
+                "'{}' says it conforms to '{}' but does not satisfy '{}' - {}.",
+                node.type_name(),
+                interface.get_type_desciption(),
+                unmet->wanted_signature,
+                detail));
+    }
 }
 
 void TypeChecker::visitMemberAccess(MemberAccessNode &node)
@@ -280,19 +331,27 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
     // there is no block and no identity word, so the value never carried an answer. a *class* operand
     // against a struct type is a different matter and folds to false, which is why only the left side
     // is checked here
-    if (!operand_type.is_class()) {
+    // an **interface** operand carries one too: it holds a class handle, and that block's typeinfo word is
+    // the same answer a class-typed operand's is. so an erased value can be asked both which interface it
+    // answers and which concrete class is inside it - the downcast test. a struct is still the refusal,
+    // and still for CONCEPT.md's reason
+    if (!operand_type.is_class() && !operand_type.is_interface()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_instanceof),
             fmt::format(
-                "'instanceof' needs a class on the left - a '{}' carries no runtime type to check",
+                "'instanceof' needs a class or an interface on the left - a '{}' carries no runtime type "
+                "to check",
                 operand_type.get_type_desciption()));
     }
 
+    // a declared type of any kind. a class is the exact-identity question, an interface the conformance
+    // one, and a struct folds to false - has_complex_type() is already the predicate for "a declared
+    // type", so admitting interfaces needed nothing but this wording
     if (!node.queried_type.has_complex_type()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_instanceof),
             fmt::format(
-                "'instanceof' needs a struct or a class on the right, not '{}'",
+                "'instanceof' needs a struct, a class or an interface on the right, not '{}'",
                 node.queried_type.get_type_desciption()));
     }
 
@@ -405,6 +464,13 @@ void TypeChecker::check_call_argument(
     //
     // the argument as written is passed, so this scores it exactly as the matcher did
     const ValueType arg_type = argument->result_type();
+
+    // an interface parameter is an arrival site like any other, so the storable question is asked here
+    // too - and ahead of the fit below for the same reason: a struct argument *conforms*, and the vaguer
+    // "does not accept" would say nothing about why storing it is what fails
+    if (check_interface_erasure(param_type, *argument, at)) {
+        return;
+    }
 
     if (!arg_assignable_to(arg_type, argument, param_type)) {
         _collector.collect_issue<Issue::ArgumentTypeMismatch>(
@@ -579,6 +645,16 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
     // a context-free "Unsupported type cast" deep in codegen. report it here, located
     if (node.is_implcit && node.expr && _context_token) {
         ValueType from = node.expr->result_type();
+
+        // an interface target is asked the *storable* question first. an implicit cast to one is how a
+        // widening reaches an argument position, so this is the arrival site for a call - and a
+        // conforming struct would otherwise be reported as "cannot implicitly convert", which is true and
+        // says nothing about the reason
+        if (check_interface_erasure(node.cast_to, *node.expr, *_context_token)) {
+            RecursiveVisitor::visitTypeCast(node);
+            return;
+        }
+
         if (!implicit_conversion_is_legal(from, node.cast_to)) {
             _collector.collect_issue<Issue::InvalidTypeConversion>(
                 code_ref_for(*_context_token),
@@ -764,6 +840,30 @@ void TypeChecker::check_const_target(AssignNode &node)
             : fmt::format("cannot assign to '{}' - it is declared const", name));
 }
 
+// the shapes that conform but cannot be *stored* - a struct, a generic instantiation, an interface with an
+// operator requirement. answered by AST::interface_erasure_refusal, the one owner of the question, and
+// reported here at every arrival site: codegen's widening has no table to fall back on, so an unreported
+// one is an internal error rather than a diagnostic
+//
+// true when it reported, so a caller stops rather than adding a second, vaguer message about the same
+// value. that is why this is checked *before* argument_fit: `Square` conforms perfectly well, and
+// "cannot implicitly convert" would say nothing about why storing it is the problem
+bool TypeChecker::check_interface_erasure(const ValueType &to, const ExprNode &value, const TokenReference &at)
+{
+    if (!to.is_interface()) {
+        return false;
+    }
+
+    const std::string refusal = AST::interface_erasure_refusal(value.result_type(), to);
+
+    if (refusal.empty()) {
+        return false;
+    }
+
+    _collector.collect_issue<Issue::InvalidTypeConversion>(code_ref_for(at), refusal);
+    return true;
+}
+
 void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, const ExprNode &value, const TokenReference &at)
 {
     const ValueType from = value.result_type();
@@ -778,6 +878,19 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
         || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
         || is_implicitly_convertible(from, to)) {
         return;
+    }
+
+    // **an interface destination takes a class that conforms.** asked through AST::argument_fit, which is
+    // already the one answer to "does this value reach that type" and where the widening's rank lives -
+    // so a declaration, an assignment and a return accept exactly what an argument position does
+    if (to.is_interface()) {
+        if (check_interface_erasure(to, value, at)) {
+            return;
+        }
+
+        if (arg_assignable_to(from, &value, to)) {
+            return;
+        }
     }
 
     // the hints are properties of the type pair rather than of the destination, so they are

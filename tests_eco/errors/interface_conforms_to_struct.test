@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:18
+'Base' is not an interface, so 'Derived' cannot conform to it. Only an `interface` may appear after ':'.
+Begin: 'Base'
+End: 'Base'
+Code excerpt:
+ [5]> 
+ [6]> struct Derived : Base
+                       ^
+ [7]> {
+
+Critical issues found, cannot compile.

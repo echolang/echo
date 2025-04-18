@@ -1,0 +1,4 @@
+interface Drawable
+{
+    function draw() : void { echo 1; }
+}

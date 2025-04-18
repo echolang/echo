@@ -1,0 +1,12 @@
+expect: ok
+
+--- OUT --->
+3
+4
+6
+--- IR --->
+// a struct's conformance costs nothing at runtime: there is no erased value, no vtable and no
+// conformance table anywhere in the module - each call is monomorphized to a direct one
+CHECK-NOT: eco.iface
+CHECK-NOT: vtable
+CHECK: define i32 @main()

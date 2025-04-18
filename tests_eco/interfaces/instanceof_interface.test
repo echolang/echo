@@ -1,0 +1,23 @@
+expect: ok
+
+--- OUT --->
+1
+1
+0
+1
+0
+1
+0
+0
+0
+7
+--- IR --->
+// an interface's identity is an address too, exactly as a class's is
+CHECK: @"8Drawable.itype" = linkonce_odr constant i8 0
+CHECK: @"8Hashable.itype" = linkonce_odr constant i8 0
+// the table is the interfaces the class declared, in declaration order
+CHECK: @"6Circle.conformances" = linkonce_odr constant [2 x ptr] [ptr @"8Drawable.itype", ptr @"8Hashable.itype"]
+// and the descriptor points at it, with the count that bounds the scan
+CHECK: @"6Circle.typeinfo" = linkonce_odr constant { i64, ptr } { i64 2, ptr @"6Circle.conformances" }
+// a class conforming to nothing carries a zero count and a null table rather than an empty array
+CHECK: @"5Plain.typeinfo" = linkonce_odr constant { i64, ptr } zeroinitializer

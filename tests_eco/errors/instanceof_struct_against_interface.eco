@@ -1,0 +1,22 @@
+// the asymmetry the whole interface design rests on: a struct's conformance is a compile-time contract
+// and nothing more. it has no block and no identity word, so there is no runtime answer to give - which
+// is CONCEPT.md's "you can also not perform any runtime reflection checks on them" applied to interfaces
+
+interface Drawable
+{
+    function draw() : void;
+}
+
+struct Square : Drawable
+{
+    float64 $side;
+
+    function draw() : void {
+        echo 1;
+    }
+}
+
+$square = Square(2.0);
+
+// the conformance is real and usable through a constraint - it is only `instanceof` that cannot answer
+echo $square instanceof Drawable;

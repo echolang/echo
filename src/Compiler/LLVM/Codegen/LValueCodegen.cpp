@@ -145,7 +145,7 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
         base_place = deref_once(base_place);
     }
 
-    if (!base_place.storage_type.has_complex_type() || !base_place.storage_type.get_complex_type()) {
+    if (!base_place.storage_type.has_property_layout() || !base_place.storage_type.get_complex_type()) {
         throw _ctx.error(fmt::format(
             "Cannot access member '{}' of '{}' {}",
             node.get_member_name().value(),

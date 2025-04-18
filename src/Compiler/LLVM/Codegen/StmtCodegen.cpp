@@ -141,6 +141,13 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             return;
         }
 
+        // an interface requirement has no body by construction - the implementors do, under their own
+        // symbols. spelled out beside the builtin above rather than left to the fallback, so the reason
+        // is visible where the two other readers of the same predicate are
+        if (node.is_interface_requirement()) {
+            return;
+        }
+
         // skip instantiated generic functions that don't have bodies yet
         // this is a temporary measure while we implement proper body cloning
         // (is_generic() is exactly !type_parameters.empty(), so one check covers it)

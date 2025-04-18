@@ -1,4 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
+#include "Compiler/LLVM/Codegen/IfaceValue.h"
+
+#include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
@@ -167,8 +170,9 @@ void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
     const AST::ValueType type = node.result_type();
 
     // no stdlib, no `string` type - the literal stays the bare address it has always been. this is the
-    // path that compiles `stdlib/core/string.eco` itself
-    if (!type.has_complex_type()) {
+    // path that compiles `stdlib/core/string.eco` itself. asks for a *layout*, since what follows
+    // GEPs the window out of it
+    if (!type.has_property_layout()) {
         _ctx.push(byte_pointer);
         return;
     }
@@ -520,6 +524,13 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         }
     }
 
+    // a requirement of an interface has no symbol of its own, so the callee comes out of the receiver's
+    // vtable. checked before the lookup below, which would otherwise fail to find a function that
+    // deliberately does not exist
+    else if (node.decl != nullptr && node.decl->is_interface_requirement()) {
+        gen_virtual_call(node);
+    }
+
     else {
         llvm::Function *func = find_llvm_function(node.decl);
 
@@ -548,6 +559,81 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         if (!ret->getType()->isVoidTy()) {
             _ctx.value_stack.push(ret);
         }
+    }
+}
+
+void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
+{
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    auto *iface_type = _ctx.types->iface_llvm_type();
+
+    if (node.arguments.empty() || node.arguments[0] == nullptr) {
+        throw _ctx.error(fmt::format(
+            "'{}' is dispatched through a receiver it does not have {}",
+            node.decl->func_name(), _ctx.function_context()));
+    }
+
+    // which slot the requirement occupies, asked of the one walk that decides it - so the entry read here
+    // and the entry the vtable was built with cannot disagree
+    const std::optional<size_t> slot =
+        AST::interface_method_slot(node.decl->owner_type, node.decl);
+
+    if (!slot.has_value()) {
+        throw _ctx.error(fmt::format(
+            "'{}' has no vtable slot on '{}' {}",
+            node.decl->func_name(),
+            node.decl->owner_type != nullptr ? node.decl->owner_type->namespaced_name() : "<none>",
+            _ctx.function_context()));
+    }
+
+    // the erased receiver, addressed by the parser exactly as any other receiver is - `&$d`
+    node.arguments[0]->accept(*_ctx.visitor);
+    llvm::Value *iface_ptr = _ctx.pop();
+
+    // **the address of the object field is the `$this` the concrete method already expects.** a class
+    // method's receiver is `Circle&`, the address of a slot holding a handle, and field 0 of the fat
+    // pointer is such a slot - so the erasure costs no shim
+    llvm::Value *self = _ctx.builder->CreateStructGEP(
+        iface_type, iface_ptr, IfaceValue::object_index, "iface.self");
+
+    llvm::Value *vtable = _ctx.builder->CreateLoad(
+        opaque_ptr,
+        _ctx.builder->CreateStructGEP(iface_type, iface_ptr, IfaceValue::vtable_index, "iface.vtable_ptr"),
+        "iface.vtable");
+
+    llvm::Value *callee = _ctx.builder->CreateLoad(
+        opaque_ptr,
+        _ctx.builder->CreateConstGEP1_64(
+            opaque_ptr, vtable, IfaceValue::first_method_slot + slot.value(), "iface.slot"),
+        "iface.callee");
+
+    std::vector<llvm::Value *> args;
+    args.reserve(node.decl->args.size());
+    args.push_back(self);
+
+    for (size_t i = 1; i < node.arguments.size(); i++) {
+        node.arguments[i]->accept(*_ctx.visitor);
+        args.push_back(_ctx.pop());
+    }
+
+    // the signature comes off the *requirement*, which is the whole reason this needed no new node: it
+    // spells the return type and every parameter, and the implementor's own signature equals it below the
+    // receiver by construction - AST::interface_implementations compared them
+    //
+    // through get_llvm_function_type rather than assembled here, because the leading opaque pointer this
+    // needs is exactly the one it already puts first: a callable's environment and a method's receiver
+    // occupy one slot by design, which is what lets an erased receiver need no shim. built by hand, the
+    // callee's type here and the type create_llvm_func_decl gave the real symbol were two answers that
+    // agree only by grace of opaque pointers. callable_type() strips the receiver, implicit_arg_count()'s
+    // own job, and get_llvm_function_type puts it back
+    llvm::FunctionType *fn_type =
+        _ctx.types->get_llvm_function_type(node.decl->callable_type().signature(), *_ctx.current_cmp_unit);
+
+    llvm::Value *ret = _ctx.builder->CreateCall(fn_type, callee, args);
+
+    // a void call produces no value, exactly as at a direct one
+    if (!ret->getType()->isVoidTy()) {
+        _ctx.value_stack.push(ret);
     }
 }
 

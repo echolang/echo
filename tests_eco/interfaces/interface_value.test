@@ -1,0 +1,25 @@
+expect: ok
+
+--- OUT --->
+1
+6.000000
+2
+10.000000
+1
+2
+1
+1
+1
+--- IR --->
+// one shape for every interface, exactly as eco.callable is one shape for every signature
+CHECK: %eco.iface = type { ptr, ptr }
+// three slots for two requirements: slot 0 is the implementor's release thunk, so an erased value can
+// give its reference back without knowing which class it holds. the requirements follow in declaration
+// order, which is the order AST::interface_requirements walks and the order a dispatch site indexes
+CHECK: @"6Circle.8Drawable.vtable" = linkonce_odr constant [3 x ptr] [ptr @__eco_release_6Circle, ptr @_M6Circle_draw
+CHECK: @"6Square.8Drawable.vtable" = linkonce_odr constant [3 x ptr] [ptr @__eco_release_6Square, ptr @_M6Square_draw
+// the widening is two insertvalues - no allocation and no table lookup
+CHECK: insertvalue %eco.iface undef, ptr
+CHECK: insertvalue %eco.iface
+// and a dispatch is a load of the vtable then a load of the slot, past the reserved release entry
+CHECK: getelementptr ptr, ptr %iface.vtable, i64 1

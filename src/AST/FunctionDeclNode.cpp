@@ -4,6 +4,11 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 
+bool AST::FunctionDeclNode::is_interface_requirement() const
+{
+    return owner_type != nullptr && owner_type->is_interface_kind();
+}
+
 const std::string AST::FunctionDeclNode::node_description()
 {
     std::string buffer = "function " + namespaced_func_name() + " -> " + get_return_type_description() + "\n";

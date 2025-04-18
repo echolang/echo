@@ -63,6 +63,15 @@ namespace AST
 
         CodeRef code_ref_for(const TokenReference &token);
 
+        // validates every `: SomeInterface` this declaration wrote, reporting the first requirement each
+        // one leaves unanswered. **called ahead of the generic early-return** in visit_type_decl, since a
+        // generic implementor is checked on its template - see the note there
+        void check_conformances(TypeDeclNode &node);
+
+        // does this value conform but still fail to be *storable* as `to`? reports and answers true when
+        // so. see the implementation for why it runs ahead of the ordinary conversion check
+        bool check_interface_erasure(const ValueType &to, const ExprNode &value, const TokenReference &at);
+
         // the destinations that a value can be written into. only the phrasing of the diagnostic
         // differs between them - the rule that decides whether the value fits does not
         enum class Destination

@@ -1,0 +1,50 @@
+// a class carries runtime metadata, so it can be asked about its interfaces as well as its exact type.
+// the block's typeinfo word points at a descriptor holding the conformance table, and `instanceof` over
+// an interface scans it - conformance is a *set*, so it is a walk rather than the one address comparison
+// an exact class check is
+
+interface Drawable { function draw() : void; }
+interface Hashable { function hash() : int32; }
+
+class Circle : Drawable, Hashable
+{
+    float64 $radius;
+    function draw() : void { echo 1; }
+    function hash() : int32 { return 7; }
+}
+
+class Rock : Hashable
+{
+    int32 $mass;
+    function hash() : int32 { return 3; }
+}
+
+// a class that conforms to nothing has a count of zero, which is the arm that also guards the null table
+class Plain { int32 $n; }
+
+$circle = Circle(2.0);
+$rock = Rock(5);
+$plain = Plain(1);
+
+// found at either position in the table
+echo $circle instanceof Drawable;
+echo $circle instanceof Hashable;
+
+// and absent when the class does not declare it
+echo $rock instanceof Drawable;
+echo $rock instanceof Hashable;
+echo $plain instanceof Drawable;
+
+// the exact-class question is untouched: the descriptor's *address* is still the identity
+echo $circle instanceof Circle;
+echo $circle instanceof Rock;
+
+// null points at no block, so it is an instance of nothing - interface or class
+Circle $none = null;
+echo $none instanceof Drawable;
+echo $none instanceof Circle;
+
+// it composes like any other bool
+if ($circle instanceof Hashable) {
+    echo $circle->hash();
+}
