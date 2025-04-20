@@ -1,0 +1,27 @@
+// a wrapped `T?` is `{ i1 __has, T }`, so it is the second runtime question dprint asks. present or
+// absent, it prints under the *optional's* own name - otherwise nothing in the output distinguishes an
+// `int32?` holding 12 from an `int32` holding 12
+
+int32? $some = 12;
+dprint($some);
+
+int32? $none = null;
+dprint($none);
+
+struct Row
+{
+    int32? $count;
+
+    constructor(int32? $count)
+    {
+        $this->count = $count;
+    }
+}
+
+// through a variable rather than a bare `null` argument: binding an untyped null at an argument
+// position is an unrelated open hole that crashes codegen
+int32? $absent = null;
+dprint(Row($absent));
+
+int32? $present = 3;
+dprint(Row($present));

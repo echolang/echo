@@ -88,6 +88,21 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
             return gen_place(*deref.operand);
         }
 
+        case AST::NodeType::n_expr_chain_base:
+        {
+            // the slot a `?->` spilled its unwrapped base into, before running the continuation this
+            // marker sits inside. so a method call in a chain gets an ordinary receiver address, and a
+            // write through a chain has somewhere to write - both without the chain node knowing anything
+            // about member access
+            auto &chain_base = static_cast<AST::ChainBaseNode &>(expr);
+            if (_ctx.chain_base_slots.empty()) {
+                throw _ctx.error(fmt::format(
+                    "a chain base marker was addressed outside a '?->' chain {}", _ctx.function_context()));
+            }
+
+            return LValue{ _ctx.chain_base_slots.back(), chain_base.type };
+        }
+
         default:
             throw _ctx.error(fmt::format(
                 "Expression is not addressable {}", _ctx.function_context()));
@@ -120,6 +135,27 @@ LValue LValueCodegen::deref_once(const LValue &place)
 
 LValue LValueCodegen::gen_place(AST::ExprNode &expr)
 {
+    // **a pointer with no slot of its own.** a call returning `T&` hands the address back as its
+    // value - there is no storage holding it, which is why gen_lvalue has no arm for it and why
+    // `$o->get()->x` and `$o->get()->m()` both died on "Expression is not addressable", an internal
+    // exception with no location (todo/A13a). that value *is* the place, the same equivalence the
+    // element arm above rests on: the borrow a contract returns is the address
+    //
+    // the guard is the exact complement of gen_lvalue's switch - a place is what it has arms for -
+    // so this can only answer where that used to throw. nothing that compiles today changes
+    //
+    // and it belongs here rather than in that switch, one level in rather than two: gen_lvalue would
+    // have to invent a slot to hand back, and deref_once would then peel a level the expression never
+    // had. for a `ptr<ptr<T>>` result that is not cosmetic - `gen_lvalue(Deref(E))` is this function,
+    // and the parser spells one deref *per pointer level* into a receiver, so one peel too many points
+    // `$this` at whatever the pointee happens to hold
+    //
+    // AST::is_place_expression stays as it is: a call is still not a place, so `&$o->get()` is still
+    // refused in the parser. reading *through* the address a call returned is a different question
+    if (!AST::is_place_expression(expr) && expr.result_type().is_pointer()) {
+        return LValue{ gen_address_value(expr), AST::value_type_of(expr.result_type()) };
+    }
+
     return deref_once(gen_lvalue(expr));
 }
 

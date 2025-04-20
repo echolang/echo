@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 26:18
+'Buffer' has no storage of its own, so the pointer in its member 'data' would be an address into a value destroyed at the end of this statement. Bind it to a variable first.
+Begin: 'data'
+End: 'data'
+Code excerpt:
+ [25]> $b = Box();
+ [26]> $q = $b->make()->data;
+                       ^
+ [27]> 
+
+Critical issues found, cannot compile.

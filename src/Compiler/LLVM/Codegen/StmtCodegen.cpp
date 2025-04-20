@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTNullability.h"
 #include "AST/ScopeNode.h"
 #include "AST/ASTMangler.h"
 #include "AST/VarDeclNode.h"
@@ -17,6 +18,7 @@
 #include "AST/TypeCastNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -35,6 +37,25 @@ namespace Compiler::LLVM
 {
 void StmtCodegen::gen_scope(AST::ScopeNode &node)
 {
+    // asked before the slots below rather than only between statements: an alloca is an instruction, and
+    // a block that already ends cannot take one - a second terminator in one block fails the verifier.
+    // the same question gen_temporary_bind asks for the same reason
+    if (_ctx.block_is_terminated()) {
+        return;
+    }
+
+    // every declaration this scope makes gets its storage here, before the first statement runs. the slot
+    // therefore exists for the whole scope, which is what stops a declaration's *position* among its
+    // siblings from being load-bearing: a statement above it reads a slot that is already there
+    //
+    // direct children only. a declaration nested in an `if` arm or a loop body belongs to that scope's
+    // entry, and hoisting it here would carry its zero-init out of the block it has to be re-run in
+    for (auto &child : node.children) {
+        if (child.has_type<AST::VarDeclNode>()) {
+            ensure_var_slot(*child.get_ptr<AST::VarDeclNode>());
+        }
+    }
+
     for (auto &child : node.children) {
 
         // skip function declarations
@@ -74,13 +95,29 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     }
 }
 
-void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
+llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
 {
-    auto varname = node.name();
+    // a declaration carrying no type describes no slot. unreachable for a program that got this far -
+    // every declaration the parser builds has a type node and AST::TypeChecker refuses an unresolved one -
+    // but asked rather than left to type_node()'s assert, because the sweep in gen_scope reaches
+    // declarations codegen never used to visit at all: one written after a `return` is now seated too
+    if (!node.has_type()) {
+        return nullptr;
+    }
+
+    // idempotent, and deliberately not by presence alone: var_map is keyed by declaration and never
+    // cleared between functions, so a hit that was emitted into *another* llvm::Function is not this
+    // scope's slot - reusing it would build a body reading an alloca that does not dominate its uses
+    auto found = _ctx.var_map.find(&node);
+    if (found != _ctx.var_map.end() &&
+        found->second->getFunction() == _ctx.builder->GetInsertBlock()->getParent()) {
+        return found->second;
+    }
+
     llvm::Type *type = _ctx.types->get_llvm_type(node.type_node()->type, *_ctx.current_cmp_unit);
 
     // alloc the variable on the stack
-    llvm::AllocaInst *alloca = _ctx.builder->CreateAlloca(type, nullptr, varname);
+    llvm::AllocaInst *alloca = _ctx.builder->CreateAlloca(type, nullptr, node.name());
 
     // store the variable in the map
     _ctx.var_map[&node] = alloca;
@@ -89,17 +126,48 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
     // writes only some of its fields then read back as garbage. it is a prerequisite of scope-exit
     // destruction rather than a tidy-up: a destructor over an undef pointer field frees whatever
     // happened to be in those bytes. only aggregates, and only when nothing else writes the slot -
-    // a scalar with an initializer is fully covered by the store below
+    // a scalar with an initializer is fully covered by the store gen_var_decl emits
     //
     // a class local is a scalar - one handle - but needs the same treatment for the same reason and
     // one step more urgently: the scope-exit release reads that slot unconditionally, so an
     // uninitialized `Foo $x;` would decrement a count at whatever address was on the stack. null is
     // a legitimate value of the type, and releasing null is a no-op
+    //
+    // it belongs *with* the alloca and travels no further. left behind at the declaration's position it
+    // would zero a value the statements above already built; hoisted past scope entry - to the function's
+    // entry block, which is where an alloca in a loop body would rather be - a `Foo $x;` inside a loop
+    // would stop being re-zeroed each turn. scope entry is the one height that is right for both
+    // **a guard's binding counts as having no initializer here**, and for exactly the reason this
+    // zero-init exists. it is only written on the path where the value was there, but the scope-exit
+    // release reads the slot on *both* - the else arm's unwind releases it too, because the frame's local
+    // list is positional and does not know the arm cannot reach the binding. so on that path the slot
+    // would hold whatever was on the stack, and the release would decrement a count at that address
+    //
+    // null is a legitimate value of every type this applies to, and releasing null is a no-op
     const bool needs_zero_init = type->isAggregateType() || node.type_node()->type.is_class();
-    if (needs_zero_init && !node.init_expr) {
+    if (needs_zero_init && (!node.init_expr || node.binds_unwrapped)) {
         _ctx.builder->CreateStore(llvm::Constant::getNullValue(type), alloca);
     }
 
+    return alloca;
+}
+
+void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
+{
+    // gen_scope seated this already for a declaration that is a scope's child, which is all of them a
+    // program writes. asked again rather than assumed, because a temporary is *not* a scope's child -
+    // gen_temporary_bind visits its declarations directly - and one owner of the slot is what keeps the
+    // two paths from disagreeing about whether it has been created
+    llvm::AllocaInst *alloca = ensure_var_slot(node);
+
+    if (!alloca) {
+        return;
+    }
+
+    // the initializer stays at the declaration's position and is *not* hoisted with the slot: it is a
+    // statement, and statements run in the order they were written. for a class constructor's `$this`
+    // that is load-bearing rather than tidy - Parser::seat_this_storage puts the heap allocation in this
+    // initializer, so the declaration still has to precede every field write that stores through it
     if (node.init_expr) {
         node.init_expr->accept(*_ctx.visitor);
 
@@ -254,6 +322,58 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     emit_unwind();
 
     _ctx.builder->CreateRet(ret);
+}
+
+void StmtCodegen::gen_guard(AST::GuardNode &node)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    auto *bound_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "guard.bound", function);
+    auto *else_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "guard.else", function);
+
+    // the slot before the branch, like every other local: ensure_var_slot allocates in the function's
+    // entry block, so where the declaration sits among its siblings decides nothing
+    llvm::AllocaInst *slot = ensure_var_slot(*node.decl);
+
+    // **evaluated exactly once.** the same value is tested and then stored, which is what makes
+    // `guard $n = $cache->lookup($k) else {...}` call `lookup` once rather than once per path
+    node.decl->init_expr->accept(*_ctx.visitor);
+    llvm::Value *optional = _ctx.pop();
+
+    const AST::ValueType optional_type = node.decl->init_expr->result_type();
+
+    _ctx.builder->CreateCondBr(
+        _ctx.types->gen_has_value(optional, optional_type), bound_block, else_block);
+
+    // the bound path: unwrap and store. `coerce_value` is still asked, because the declared type may be a
+    // widening of the payload - `guard int64 $v = lookup($k)` over an `int32?`
+    _ctx.builder->SetInsertPoint(bound_block);
+
+    llvm::Value *value = _ctx.types->gen_unwrapped(optional, optional_type);
+    _ctx.builder->CreateStore(
+        _ctx.types->coerce_value(
+            value,
+            AST::unwrapped_type_of(optional_type),
+            node.decl->type(),
+            *_ctx.current_cmp_unit),
+        slot);
+
+    // and control falls out of the *bound* block into whatever follows the guard, which is the whole
+    // shape of the statement: the binding is in scope from here, unconditionally
+    auto *continue_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "guard.continue", function);
+    _ctx.builder->CreateBr(continue_block);
+
+    // the absent path. it never rejoins - AST::scope_always_exits refused an else arm that could fall
+    // through - but the branch is emitted defensively rather than assumed: an unterminated block is an
+    // llvm verifier failure with no source location, and this is cheap insurance against one
+    _ctx.builder->SetInsertPoint(else_block);
+    node.else_scope->accept(*_ctx.visitor);
+
+    if (!_ctx.block_is_terminated()) {
+        _ctx.builder->CreateBr(continue_block);
+    }
+
+    _ctx.builder->SetInsertPoint(continue_block);
 }
 
 void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)

@@ -1,0 +1,14 @@
+// a weak reference is not readable, and only a class has a count for one to opt out of. reading one is
+// refused rather than checked at runtime, because the object may be gone and the type is the only thing
+// that can say so before it is too late
+
+class Node { int32 $tag; }
+struct Point { int32 $x; }
+
+$here = Node(1);
+weak<Node> $w = &$here;
+
+echo $w->tag;
+
+weak<int32> $bad = null;
+weak<Point> $alsoBad = null;

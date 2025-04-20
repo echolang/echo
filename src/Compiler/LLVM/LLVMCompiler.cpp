@@ -14,7 +14,7 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _backend(_ctx)
+      _abort(_ctx), _debug_print(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -26,6 +26,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.lvalues = &_lvalues;
     _ctx.classes = &_classes;
     _ctx.abort = &_abort;
+    _ctx.debug_print = &_debug_print;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -74,10 +75,10 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle)
     _types.create_cmp_units(bundle);
 
     // build the struct maps
-    _types.build_struct_maps(bundle);
+    _types.build_struct_maps();
 
     // build the function maps
-    _types.build_function_maps(bundle);
+    _types.build_function_maps();
 
     // always declare printf @TODO make this a bit more dynamic..
     //
@@ -220,9 +221,15 @@ void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node)
 }
 void LLVMCompiler::visit_class_alloc_expr(AST::ClassAllocExprNode &node) { _classes.gen_class_alloc(node); }
 void LLVMCompiler::visit_retain_expr(AST::RetainExprNode &node) { _classes.gen_retain_expr(node); }
+void LLVMCompiler::visit_strong_expr(AST::StrongExprNode &node) { _expr.gen_strong_expr(node); }
+void LLVMCompiler::visit_guard(AST::GuardNode &node) { _stmt.gen_guard(node); }
+void LLVMCompiler::visit_null_coalesce(AST::NullCoalesceExprNode &node) { _expr.gen_null_coalesce(node); }
+void LLVMCompiler::visit_optional_chain(AST::OptionalChainExprNode &node) { _expr.gen_optional_chain(node); }
+void LLVMCompiler::visit_chain_base(AST::ChainBaseNode &node) { _expr.gen_chain_base(node); }
 void LLVMCompiler::visit_closure_expr(AST::ClosureExprNode &node) { _expr.gen_closure_expr(node); }
 void LLVMCompiler::visit_indirect_call_expr(AST::IndirectCallExprNode &node) { _expr.gen_indirect_call(node); }
 void LLVMCompiler::visit_instanceof_expr(AST::InstanceOfExprNode &node) { _classes.gen_instanceof(node); }
+void LLVMCompiler::visit_temporary_bind(AST::TemporaryBindExprNode &node) { _expr.gen_temporary_bind(node); }
 void LLVMCompiler::visit_release(AST::ReleaseNode &node) { _classes.gen_release_stmt(node); }
 void LLVMCompiler::visitBinaryExpr(AST::BinaryExprNode &node) { _expr.gen_binary_expr(node); }
 void LLVMCompiler::visitUnaryExpr(AST::UnaryExprNode &node) { _expr.gen_unary_expr(node); }

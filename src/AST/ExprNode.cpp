@@ -41,8 +41,15 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     // anything - both bool. every other operator on a class is rejected by the type checker, so
     // falling through to the "same type on both sides" rule below would answer `Counter` for a
     // comparison and hand echo a class where it expected a bool
+    //
+    // and a nullable of any kind, for the same reason and with the same answer: `$x == null` asks whether
+    // a value is there. that covers the wrapped shapes - `int32?`, a nullable struct - which have no
+    // address at all, so without this arm they fell through to "same type on both sides" and an
+    // `int32? == null` answered `int32?`
     if (op_node != nullptr && op_node->op->is_identity_comparison()
-        && (raw_left.is_class() || raw_right.is_class())) {
+        && (raw_left.is_class() || raw_right.is_class()
+            || raw_left.is_nullable() || raw_right.is_nullable()
+            || raw_left.is_weak() || raw_right.is_weak())) {
         return AST::ValueType(AST::ValueTypePrimitive::t_bool);
     }
 
@@ -99,18 +106,103 @@ const std::string AST::FunctionCallExprNode::node_description()
 
 AST::ValueType AST::AddrOfExprNode::result_type() const
 {
+    // a written `&` over a counted object is a **weak reference** to it, not the address of the slot
+    // holding the handle. the slot address is what the uniform rule below would give, and it is
+    // essentially never what a program means: a class handle is already an address, so `ptr<Foo>` is a
+    // pointer to a pointer, while what `&$obj` is reaching for is a second name that does not own
+    //
+    // see the node's header for why this is one bit rather than a second node, and why it is answered
+    // here rather than in the parser
+    const ValueType operand_type = operand->result_type();
+
+    if (denotes_weak_reference(operand_type)) {
+        return ValueType::make_weak(operand_type);
+    }
+
     // `&$x` yields the non-nullable borrow `T&`, which widens implicitly to `ptr<T>`. that one
     // rule is what makes both `int32& $r = &$var;` and `ptr<int32> $p = &$var;` legal without a
     // cast (book/concept/pointers_and_refs_v2.md, "Two pointer types")
     //
     // built over the operand's own result type, with no peeling: taking the address of a
     // pointer variable must yield a pointer to that variable's slot
-    return ValueType::make_pointer(operand->result_type(), false);
+    return ValueType::make_pointer(operand_type, false);
 }
 
 const std::string AST::AddrOfExprNode::node_description()
 {
-    return "addrof<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+    // the two meanings read differently in a dump, because a `-ar` reader chasing a missing weak release
+    // needs to see which one the tree holds without deducing it from the rendered type
+    const std::string form = denotes_weak_reference() ? "weakref" : "addrof";
+
+    return form + "<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
+}
+
+AST::ValueType AST::StrongExprNode::result_type() const
+{
+    const ValueType operand_type = operand->result_type();
+
+    // not a weak: unknown rather than an assert, so TypeChecker can report it against the token this node
+    // carries. `unknown` is read everywhere as "says nothing" rather than as a mismatch, which is also
+    // what keeps a generic whose operand is still a bare `T` from being judged a round too early
+    if (!operand_type.is_weak()) {
+        return ValueType::make_unknown();
+    }
+
+    // the class it names, **nullable** - a dead object is a real answer, and it is the type that makes the
+    // program acknowledge it rather than a convention. see book/concept/nullability.md
+    return ValueType::make_nullable(operand_type.weak_target());
+}
+
+AST::ValueType AST::NullCoalesceExprNode::result_type() const
+{
+    const ValueType right = rhs->result_type();
+
+    // a nullable right side leaves the whole expression nullable - `$a ?? $b` over two `int32?`s can still
+    // be absent, and saying so is what lets it chain into another `??`
+    if (right.is_nullable()) {
+        return right;
+    }
+
+    // otherwise the left's payload, which is the point: the value is there on both paths, so the type
+    // stops carrying a `?` and the result needs no further unwrapping
+    return ValueType::make_non_nullable(lhs->result_type());
+}
+
+const std::string AST::NullCoalesceExprNode::node_description()
+{
+    return "coalesce<" + result_type().get_type_desciption() + ">("
+        + lhs->node_description() + ", " + rhs->node_description() + ")";
+}
+
+AST::ValueType AST::OptionalChainExprNode::result_type() const
+{
+    if (continuation == nullptr) {
+        return ValueType::make_unknown();
+    }
+
+    const ValueType reached = continuation->result_type();
+
+    // a call that answers nothing has nothing to be absent. `$a?->save()` is a statement either way, and
+    // wrapping void would invent a value for the statement to discard
+    if (reached.is_void() || is_undetermined_type(reached)) {
+        return reached;
+    }
+
+    // **not wrapped twice.** there is one `null` in the language, so a continuation that is already
+    // nullable stays exactly as nullable - `$a?->maybeB()` is one `B?`, not an absence inside an absence
+    return ValueType::make_nullable(reached);
+}
+
+const std::string AST::OptionalChainExprNode::node_description()
+{
+    return "optchain<" + result_type().get_type_desciption() + ">("
+        + base->node_description() + ", "
+        + (continuation != nullptr ? continuation->node_description() : "<none>") + ")";
+}
+
+const std::string AST::StrongExprNode::node_description()
+{
+    return "strong<" + result_type().get_type_desciption() + ">(" + operand->node_description() + ")";
 }
 
 AST::ValueType AST::PointerValueNode::result_type() const

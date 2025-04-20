@@ -65,6 +65,36 @@ namespace AST
         // way to hide a better-matching overload. see AST::find_implicit_conversion
         t_declared_conversion,
 
+        // the parameter is a borrow and the argument is a value with no storage at all - a literal,
+        // a call result, an arithmetic result - so a temporary is materialised to hold it and *its*
+        // address is passed. AST::OwnershipPass binds the temporary and destroys it once the call has
+        // returned (AST::TemporaryBindExprNode); AST::CallResolver writes the same AddrOfExprNode
+        // t_borrow gets, because the difference between the two is a question about the operand's
+        // shape and not one codegen should be able to see
+        //
+        // **the last real rank, below even t_declared_conversion**, and for a reason none of the ranks
+        // above share: every one of them describes how a value that already exists is read or
+        // converted. this one adds a *declaration* to the program - an alloca, a lifetime, possibly a
+        // destructor call. so it is the fallback that lets a caller hand a value where a borrow is
+        // wanted, never a way to hide a better-matching overload - which is t_interface_widening's and
+        // t_declared_conversion's reasoning one and two ranks earlier
+        //
+        // concretely: `w(int64)` beats `w(int32&)` for `w(42)`, so a free integer promotion is not
+        // out-ranked by fabricating storage; and t_borrow, six ranks up, means a borrow of real storage
+        // always beats a borrow of a value the compiler had to invent
+        //
+        // below t_declared_conversion specifically because the two *compose* on one argument -
+        // `f('hello')` against a view parameter converts first and then borrows the conversion's result
+        // - and CallResolver::coerce_arguments re-asks the fit after that wrapping. keeping this last
+        // makes the re-ask monotone: the coercion can only ever move the fit downward, never below what
+        // the matcher already scored the candidate at
+        //
+        // the compiler cannot tell a mutating callee from a reading one, so a write through a `T&`
+        // bound to a literal lands in storage nobody will read again. Echo already has the spelling
+        // that says which - `const T&` - and gating this rank on it instead would refuse `f('hello')`
+        // against the stdlib, whose borrow parameters are written bare
+        t_borrow_temporary,
+
         // the argument's type says nothing yet: a string literal, an unbound `null`, a member of
         // an incomplete struct, a mixed-operand binary expression, or anything still mentioning a
         // type parameter. neutral - it neither qualifies nor disqualifies a candidate
@@ -146,6 +176,26 @@ namespace AST
             return ArgumentFit::t_exact;
         }
 
+        // **a weak fits a weak of the same class and nothing else.** so the equality above is the only
+        // arm that can admit one, and everything below is skipped rather than merely happening to answer
+        // no - the interface-widening arm would ask `conforms_to` about a type with no ComplexType, and
+        // the declared-conversion arm would ask for a `#[implicit]` method on one. neither is a question
+        // a weak can answer, and asking gets an assert rather than a false
+        if (from.is_weak() || to.is_weak()) {
+            // except through a borrow: a `weak<Foo>& $w` parameter takes the address of a weak place,
+            // which is the ordinary auto-borrow and says nothing about the count
+            //
+            // a *place* only, and deliberately not the t_borrow_temporary arm at the bottom: a weak
+            // exists to outlive the handle it watches, so binding one to storage that dies with the
+            // statement is a shape nobody can have meant
+            if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)
+                && ValueType::make_mutable(from) == ValueType::make_mutable(to.pointee())) {
+                return ArgumentFit::t_borrow;
+            }
+
+            return ArgumentFit::t_none;
+        }
+
         // before the borrow rule, so an argument that already fits a borrow parameter is not
         // wrapped in a second address-of. that ordering is load-bearing in
         // AST::CallResolver::coerce_arguments, where taking the address of a ptr<int32> for a
@@ -210,11 +260,33 @@ namespace AST
         // alone rather than by asking the lookup a second time.
         //
         // a **place**, for the borrow arm's reason one rule up: the conversion is a call whose receiver is
-        // `$this`, so it needs an address. materialising a temporary for a non-place argument is todo/A13
-        // (its A13b half), and until that lands `f('literal')` against a view parameter reports an
-        // ordinary mismatch rather than being lowered wrong
+        // `$this`, so it needs an address. a temporary for a non-place argument *exists* now
+        // (AST::TemporaryBindExprNode, todo/A13b) and both a method receiver and the borrow arm below
+        // already get one - what is still missing is that this arm asks for it too, which is the
+        // remaining half of todo/A13c. until that lands `f('literal')` against a view parameter reports
+        // an ordinary mismatch rather than being lowered wrong
         if (expr != nullptr && is_place_expression(*expr) && find_implicit_conversion(from, to) != nullptr) {
             return ArgumentFit::t_declared_conversion;
+        }
+
+        // and the same borrow parameter filled by a value that has no storage at all, which the
+        // compiler answers by materialising a slot for it. the type test is the borrow arm's *verbatim*
+        // - only the expression test differs, is_place_expression there and can_bind_temporary here -
+        // so the two cannot come to different answers about which pointee a borrow accepts
+        //
+        // **last**, so that no arm above changes behaviour: a place reaches t_borrow twelve lines up and
+        // returns there, never seeing this one. that is the whole of why this is an additive change
+        //
+        // **`from` must not itself be a pointer.** a `ptr<ptr<T>>` parameter would otherwise take a
+        // pointer-typed non-place and ask AST::OwnershipPass for a slot it refuses to hand out ("a
+        // pointer read out of a temporary is an address into it"), and the AddrOf CallResolver already
+        // wrote would then reach gen_lvalue with nothing to address
+        if (parameter_auto_borrows(to) && expr != nullptr && !from.is_pointer()
+            && !is_place_expression(*expr) && can_bind_temporary(*expr)) {
+            const ValueType pointee = ValueType::make_mutable(to.pointee());
+            if (ValueType::make_mutable(from) == pointee) {
+                return ArgumentFit::t_borrow_temporary;
+            }
         }
 
         return ArgumentFit::t_none;

@@ -1,0 +1,31 @@
+// a temporary inside a `return` value is destroyed by the expression that read it, before the return's
+// own unwind drops the function's locals - so 800 (the local) follows nothing of the temporary's, and
+// the value travels out intact (todo/A13b)
+
+struct Inner { int32 $tag; }
+
+struct Outer
+{
+    Inner $in;
+    function get() : Inner { return $this->in; }
+}
+
+struct Owner
+{
+    ptr<uint8> $d;
+
+    destructor()
+    {
+        echo 800;
+        mem::free($this->d);
+    }
+}
+
+function pick(Outer& $o) : int32
+{
+    $keep = Owner(mem::alloc<uint8>(4));
+    return $o->get()->tag;
+}
+
+$o = Outer(Inner(5));
+echo pick(&$o);

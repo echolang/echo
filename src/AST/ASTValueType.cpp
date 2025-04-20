@@ -277,13 +277,28 @@ std::string AST::ValueType::get_mangled_name() const
     // giving R a payload means every pointer-free signature mangles byte for byte as before,
     // so only functions that actually take a pointer get a new symbol
     //
-    //   <type> ::= [C|M] ( 'L' <leaf> | 'R' [N|B] <type> )
+    //   <type> ::= [C|M] [Q] ( 'L' <leaf> | 'R' [N|B] <type> | 'W' <type> )
     //
     // N is a nullable ptr<T>, B a borrow T&. self delimiting and prefix free
+    //
+    // `Q` marks a nullable **non-pointer** level, `T?`. it is emitted here rather than folded into the
+    // R slot because a pointer level already spells the same bit with N/B, and reusing that would make
+    // `ptr<T>` and `T?` collide. only levels that can now carry the flag and could not before get a new
+    // character, so **no existing symbol changes** - the same property the R slot was introduced with
+    if (is_nullable() && !is_pointer()) {
+        mangled_name += "Q";
+    }
+
     if (is_pointer()) {
         mangled_name += "R";
         mangled_name += is_nullable() ? "N" : "B";
         return mangled_name + pointee().get_mangled_name();
+    }
+
+    // its own recursive slot beside R rather than a third letter under it: a weak is not a pointer level,
+    // so `weak<Foo>` and `Foo&` have to mangle differently or two overloads taking them would collide
+    if (is_weak()) {
+        return mangled_name + "W" + weak_target().get_mangled_name();
     }
 
     mangled_name += "L"; // lvalue
@@ -325,6 +340,15 @@ std::string AST::ValueType::get_type_desciption() const
 {
     std::string prefix = is_const() ? "const " : "";
 
+    // `T?`, rendered on the level that carries the flag. a pointer level is excluded because it has its
+    // own two spellings for the same bit - `ptr<T>` is nullable and `T&` is not - so appending a `?` there
+    // would render `ptr<int32>?`
+    //
+    // it has to be rendered *somewhere*: while it was not, a diagnostic about a nullable arriving where a
+    // non-nullable was wanted read "cannot implicitly convert 'Node' to 'Node'", which names the one thing
+    // the reader can already see and hides the only thing that differs
+    const std::string suffix = (is_nullable() && !is_pointer()) ? "?" : "";
+
     // recursive rather than a prefix/suffix accumulator: an accumulator cannot render
     // `const ptr<const int32>`, where two different levels are each const
     if (is_pointer()) {
@@ -341,15 +365,21 @@ std::string AST::ValueType::get_type_desciption() const
         return pointee().get_type_desciption() + "&";
     }
 
+    // recursive for the same reason, and lowercase for the same reason `ptr` is: it is a type
+    // constructor the compiler owns, not a library type the user could have written
+    if (is_weak()) {
+        return prefix + "weak<" + weak_target().get_type_desciption() + ">" + suffix;
+    }
+
     if (is_primitive()) {
-        return prefix + get_primitive_name(primitive);
+        return prefix + get_primitive_name(primitive) + suffix;
     }
 
     // the name the user wrote, unqualified: this feeds the interned name of every generic
     // application, so qualifying it here would render Box<int> as Box<Box::T> in the template.
     // TypeParamDecl::describe() is the qualified form, for diagnostics
     if (is_type_param()) {
-        return prefix + _type_param->name;
+        return prefix + _type_param->name + suffix;
     }
 
     if (is_callable()) {
@@ -359,23 +389,23 @@ std::string AST::ValueType::get_type_desciption() const
             buffer += (i > 0 ? ", " : "") + _signature->parameter_types[i].get_type_desciption();
         }
 
-        return buffer + ")>";
+        return buffer + ")>" + suffix;
     }
 
     if (has_complex_type()) {
         ComplexType *ct = get_complex_type();
         if (!ct->name.has_value()) {
-            return prefix + "[unknown]";
+            return prefix + "[unknown]" + suffix;
         }
 
         // if this is an instantiated generic type, the name already includes template args
         // from the TypeRegistry's args_description method. the namespace is prepended here so
         // two same-named types from different namespaces are distinguishable in diagnostics
-        return prefix + ct->namespaced_name();
+        return prefix + ct->namespaced_name() + suffix;
     }
 
     // handle unknown or other types
-    return prefix + "[unknown]";
+    return prefix + "[unknown]" + suffix;
 }
 
 AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
@@ -527,6 +557,22 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
         return true;
     }
 
+    // **a value widens into `T?`, and a `T?` never narrows back.** one direction only, and it is the same
+    // asymmetry `T&` -> `ptr<T>` already has one arm down: widening discards a guarantee, which is always
+    // safe, while narrowing *asserts* one and needs somewhere to put the failure
+    //
+    // so `Foo? $x = $foo;` and `f($foo)` against a `Foo?` parameter are free, and `Foo $y = $maybe;` is a
+    // located error naming the three ways through - `guard`, `??`, `?->`. that refusal is the entire
+    // safety story of book/concept/nullability.md: a dead weak upgrades to `Foo?`, and there is no step from
+    // to a `Foo` anybody can read
+    //
+    // pointer levels are excluded and keep their own arm below: on one of them this same flag is the
+    // `ptr<T>` / `T&` distinction, which already has a rule and a narrowing that emits a runtime trap
+    if (!bare_from.is_pointer() && !bare_to.is_pointer()
+        && bare_to.is_nullable() && !bare_from.is_nullable()) {
+        return ValueType::make_non_nullable(bare_to) == bare_from;
+    }
+
     if (bare_from.is_pointer() && bare_to.is_pointer()) {
         // the pointee has to be the same type, but the target may add const to it: a `const
         // int32&` only promises to read, so every `int32&` satisfies it. going the other way
@@ -547,6 +593,15 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
         // happens to be known non-null, so the conversion only discards a guarantee. the
         // reverse asserts non-nullness and needs the explicit cast
         return bare_from.is_nullable() == bare_to.is_nullable() || bare_to.is_nullable();
+    }
+
+    // **a weak converts to nothing and nothing converts to a weak.** it reaches here only through the
+    // equality above, which is what refuses `Foo $x = $w` and `weak<Foo> $w = $obj` alike. taking a weak
+    // reference is a written operation - `&$obj`, `weak($obj)` - and reading one is `strong($w)`, because
+    // both move a count and an implicit conversion that moved a count would be invisible at the site
+    // that pays for it
+    if (bare_from.is_weak() || bare_to.is_weak()) {
+        return false;
     }
 
     // note there is deliberately no "a pointer converts to its pointee" rule. the auto-deref
@@ -578,6 +633,12 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
 
     if (type.is_pointer()) {
         return contains_type_param(type.pointee(), param);
+    }
+
+    // recursive for the pointer's reason: a `weak<T>` is as unresolved as a `ptr<T>`, and answering
+    // false here would have the monomorphizer stop chasing it and TypeLowering throw on the T far away
+    if (type.is_weak()) {
+        return contains_type_param(type.weak_target(), param);
     }
 
     // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
@@ -626,6 +687,23 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
         return type.is_const() ? ValueType::make_const(result) : result;
     }
 
+    // and a weak substitutes through its target, so `weak<T>` inside a template becomes `weak<Node>` in
+    // the instance. an *unbound* target is rebuilt unchanged rather than skipped, for the reason the
+    // pointer arm is rebuilt: partial substitution has to stay well defined
+    if (type.is_weak()) {
+        ValueType inner = substitute_type(type.weak_target(), subst, registry);
+
+        // a target that substituted to something uncounted is not this function's to report - the
+        // constraint that admits only a class belongs at the declaration, and rebuilding here would
+        // trip make_weak's assert on a program that merely has a diagnostic waiting for it
+        if (!inner.is_class() && !inner.is_type_param()) {
+            return type;
+        }
+
+        ValueType result = ValueType::make_weak(inner);
+        return type.is_const() ? ValueType::make_const(result) : result;
+    }
+
     // and structurally through a signature, for the same reason - returning it unchanged would leave
     // `function<void(T)>` generic forever inside an instantiated body
     if (type.is_callable()) {
@@ -655,9 +733,30 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             return type;
         }
 
-        // only const carries over: a type parameter reference can no longer itself be a
-        // pointer, the pointer level above handles that
-        return type.is_const() ? ValueType::make_const(*bound) : *bound;
+        // **every flag on the reference carries over**, because a flag describes the level it sits on and
+        // this level is being replaced by what it named. `const T` with T := Node is a `const Node`, and
+        // `T?` is a `Node?` - both are properties the *use* declared, not the bound type's to have
+        //
+        // it used to carry only const, from when nullability could sit nowhere but a pointer level. once
+        // `T?` became writable that omission made a generic silently disagree with itself: the declared
+        // type of `T? $s` substituted to `Node` while its initializer substituted to `Node?`, so a body
+        // that compiled as a template failed at every instantiation, naming a conversion neither half of
+        // the program had asked for
+        //
+        // OR'd rather than re-derived, so a bound type that is *already* nullable stays so - `T?` with
+        // T := Node? is a Node?, which is what make_nullable being idempotent means
+        ValueType result = *bound;
+        if (type.is_const()) {
+            result = ValueType::make_const(result);
+        }
+        if (type.is_nullable() && !result.is_pointer()) {
+            // a pointer level spells this bit with its own two forms, `ptr<T>` and `T&`, so setting it on
+            // one would silently turn a borrow into a nullable pointer - a promise laundered away rather
+            // than a flag copied. `T?` with T := int32& is a case the grammar has no spelling for anyway
+            result = ValueType::make_nullable(result);
+        }
+
+        return result;
     }
 
     // a generic application: recursively substitute its arguments, then re-intern

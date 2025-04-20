@@ -57,6 +57,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_op_mod: return "op_mod (%)";
         case Token::Type::t_op_pow: return "op_pow (**)";
         case Token::Type::t_qmark: return "qmark (?)";
+        case Token::Type::t_qmark_qmark: return "null coalesce (??)";
+        case Token::Type::t_optional_arrow: return "optional accessor (?->)";
         case Token::Type::t_exclamation: return "exclamation (!)";
         case Token::Type::t_open_angle: return "open_angle (<)";
         case Token::Type::t_close_angle: return "close_angle (>)";
@@ -80,6 +82,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_function: return "function";
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
+        case Token::Type::t_guard: return "guard";
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
@@ -88,6 +91,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_namespace: return "namespace";
         case Token::Type::t_namespace_sep: return "namespace_sep (::)";
         case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_weak: return "weak";
+        case Token::Type::t_strong: return "strong";
         case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
@@ -135,6 +140,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_op_mod: return "%";
         case Token::Type::t_op_pow: return "**";
         case Token::Type::t_qmark: return "?";
+        case Token::Type::t_qmark_qmark: return "??";
+        case Token::Type::t_optional_arrow: return "?->";
         case Token::Type::t_exclamation: return "!";
         case Token::Type::t_open_angle: return "<";
         case Token::Type::t_close_angle: return ">";
@@ -150,6 +157,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_function: return "function";
         case Token::Type::t_return: return "return";
         case Token::Type::t_if: return "if";
+        case Token::Type::t_guard: return "guard";
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
@@ -158,6 +166,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_namespace: return "namespace";
         case Token::Type::t_namespace_sep: return "::";
         case Token::Type::t_ptr: return "ptr";
+        case Token::Type::t_weak: return "weak";
+        case Token::Type::t_strong: return "strong";
         case Token::Type::t_null: return "null";
         case Token::Type::t_struct: return "struct";
         case Token::Type::t_class: return "class";
@@ -185,6 +195,7 @@ bool Token::is_operator_type() const
         Token::Type::t_xor,
         Token::Type::t_open_paren,
         Token::Type::t_close_paren,
+        Token::Type::t_qmark_qmark,
         Token::Type::t_logical_or,
         Token::Type::t_logical_and,
         Token::Type::t_logical_eq,

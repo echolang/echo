@@ -1,0 +1,27 @@
+// the two arms of debug/addresses that have no null spelling to reach for, so their value would print a
+// *machine-specific* address - what is asserted here is the format global dprint built, and nothing is
+// executed at all
+//
+// the `if (false)` is the point: codegen still lowers the body, so the formats are in the IR, while OUT
+// stays empty and is a byte golden on any machine. a callable has no null spelling to reach for the way a
+// pointer and a weak do, so this is the only place its two slots are pinned
+
+class Obj
+{
+    int32 $x;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+}
+
+$o = Obj(1);
+weak<Obj> $w = &$o;
+
+$fn = function(int32 $a) : int32 { return $a; };
+
+if (false) {
+    dprint($w);
+    dprint($fn);
+}

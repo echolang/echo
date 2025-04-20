@@ -1,0 +1,19 @@
+// reading *through* the address a borrow-returning call handed back works (tests_eco/structs/
+// member_of_borrow_result.eco). taking the address *of the call* does not: a call is not a place,
+// whatever it returns, so there is no slot for `&` to name - and `$o->get()` already is the address,
+// which is what `Inner& $r = $o->get();` says (todo/A13a)
+
+struct Inner { int32 $x; }
+
+struct Outer
+{
+    Inner $i;
+
+    function get() : Inner&
+    {
+        return &$this->i;
+    }
+}
+
+$o = Outer(Inner(5));
+Inner& $r = &$o->get();

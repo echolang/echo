@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 9:6
+'Node' cannot be null - add '?' to its type if it may be absent
+Begin: '$mustBeThere'
+End: '$mustBeThere'
+Code excerpt:
+ [8]> 
+ [9]> Node $mustBeThere = null;
+           ^
+ [10]> 
+
+---- Issue ----
+Issue at 11:7
+'int32' cannot be null - add '?' to its type if it may be absent
+Begin: '$alsoNot'
+End: '$alsoNot'
+Code excerpt:
+ [10]> 
+ [11]> int32 $alsoNot = null;
+            ^
+ [12]> 
+
+Critical issues found, cannot compile.

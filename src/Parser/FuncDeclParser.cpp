@@ -42,7 +42,9 @@ void Parser::push_implicit_param(
 
     // declared in the argument scope, not in the body, so it resolves the same way every other
     // parameter does. the argument scope's children are never emitted - the body is a separate child
-    // scope and codegen allocas from `args` - so this costs no second slot
+    // scope and codegen allocas from `args` - so this costs no second slot, and it is what keeps
+    // StmtCodegen::gen_scope's sweep over a scope's declarations off the parameters: gen_scope only ever
+    // runs on a body or a block, never on an argument scope, so a parameter is seated exactly once
     into.add_vardecl(*vardecl);
 }
 
@@ -85,7 +87,7 @@ bool Parser::parse_function_body(
         // the closure is the one thing passed *on* rather than cleared, and only to its own body
         AST::FunctionBodyScope body_scope(payload.context, &decl, closure);
 
-        decl.body = &parse_scope(payload, nullptr, body_brace);
+        decl.body = &parse_scope(payload, body_brace);
     }
 
     if (!payload.expect_token(Token::Type::t_close_brace)) {
@@ -448,10 +450,10 @@ void Parser::publish_implicit_conversion(
     // the whole conversion rule compares the declared return type with the parameter type, exactly.
     // on a generic owner the walk reaches the *template*, whose return type still mentions the
     // owner's `T`, and that never equals a concrete `Slice<int32>` - so the declaration would be
-    // accepted and then silently never fire. the walk reaches the template because
-    // ComplexType::substituted_copy copies `_methods` as template pointers - which is the same reason
-    // AST::find_member_functions redirects an instantiation through `template_ref` - so an
-    // instantiation's conversions hold declarations whose return type still mentions `T`, wherever
+    // accepted and then silently never fire. the walk reaches the template because an instantiation
+    // holds no `_methods` of its own and reaches the template's through the template_or_self redirect -
+    // the same reason AST::find_member_functions redirects an instantiation through `template_ref` - so
+    // an instantiation's conversions hold declarations whose return type still mentions `T`, wherever
     // the comparison is made. answering the concrete target means substituting that return type per
     // instantiation. refuse the case rather than ship a marker that does nothing
     if (owner_struct->is_generic() || AST::contains_type_param(target)) {

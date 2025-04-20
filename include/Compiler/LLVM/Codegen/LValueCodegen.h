@@ -59,9 +59,14 @@ namespace Compiler::LLVM
         // result addresses the pointee. that is what a plain read or write of a transparent
         // pointer wants: `$p = 20` stores into the pointee, never into the slot
         //
-        // deliberately temporary. once an explicit deref node exists, every value position
-        // carries its own deref in the tree and this collapses into
-        // gen_lvalue(Deref(E)) - do not build anything new on it
+        // two callers, and between them the whole of the rule: gen_lvalue's own deref arm - so this
+        // *is* what a DerefExprNode lowers to, which is the collapse this comment used to predict
+        // rather than the retirement it expected - and a member access's base, which
+        // AST::PointerAdjuster deliberately leaves un-derefed because `->` reaches through every
+        // level where that pass only ever inserts one (its n_member_access arm says so)
+        //
+        // also the one place that answers for an expression with *no* storage of its own: the value
+        // of a pointer-typed non-place already is the address. see the body
         LValue gen_place(AST::ExprNode &expr);
 
         // evaluates `expr` as a pointer-typed rvalue, i.e. the address it holds rather than

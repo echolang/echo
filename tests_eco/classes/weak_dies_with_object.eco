@@ -1,0 +1,43 @@
+// **what a weak reference does when its object is gone**, which is the question the second count in the
+// reason the block grew a second count. the reference outlives the object here on purpose: it is returned
+// from the function that owned the only strong reference, so by the time it is upgraded the payload has
+// been torn down and the block is being kept readable by nothing but this handle
+//
+// `strong` answers null. it does not trap and it does not dangle - the count it reads is still there,
+// which is exactly what the block outliving its payload buys
+
+class Res
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function outlive() : weak<Res>
+{
+    Res $r = Res(5);
+    weak<Res> $w = &$r;
+
+    // the one the strong references hold together, plus $w
+    echo weak_count($r);
+
+    return $w;
+}
+
+// the destructor runs *inside* the call, at the end of the scope that owned the object - so the 5 below
+// is printed before the 100, and the weak reference we are left holding names a dead object
+weak<Res> $dangling = outlive();
+
+echo 100;
+
+// and it says so, rather than reading through into freed memory. the type is inferred because `strong`
+// hands back a **nullable** `Res?`, and writing `Res $up` here is refused - which is the point: the type
+// system is what stops a dead object being read, not a convention the caller has to remember
+$up = strong($dangling);
+
+if ($up == null) {
+    echo 0;
+}

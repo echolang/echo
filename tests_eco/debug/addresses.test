@@ -1,0 +1,7 @@
+--- OUT --->
+[Ref] {
+  [int32] $tag = 7
+  [ptr<int32>] $at = 0x0
+}
+[weak<Obj>] weak(0x0)
+[Shape] <interface>

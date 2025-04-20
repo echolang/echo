@@ -6,6 +6,8 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
 
+#include <vector>
+
 namespace llvm
 {
     class Value;
@@ -27,7 +29,12 @@ namespace AST
     class ClosureExprNode;
     class IndirectCallExprNode;
     class AddrOfExprNode;
+    class StrongExprNode;
+    class NullCoalesceExprNode;
+    class OptionalChainExprNode;
+    class ChainBaseNode;
     class DerefExprNode;
+    class TemporaryBindExprNode;
     class IndexExprNode;
     class NullNode;
     class OperatorNode;
@@ -66,7 +73,28 @@ namespace Compiler::LLVM
         // has no symbol at all. dispatches on AST::BuiltinKind to one of the three below
         void gen_builtin_call(AST::FunctionCallExprNode &node);
         void gen_addr_of(AST::AddrOfExprNode &node);
+
+        // `strong($w)`. the branch-and-phi lives in ClassCodegen beside the counts it reads, so this arm
+        // only evaluates the operand and routes - the same split gen_ref_count_builtin makes
+        void gen_strong_expr(AST::StrongExprNode &node);
+
+        // `A ?? B`: evaluate A, test it, and take B only when it is absent. a branch and a phi rather than
+        // a select, because **B must not be evaluated on the present path** - it may be a call
+        void gen_null_coalesce(AST::NullCoalesceExprNode &node);
+
+        // `A?->b`: evaluate A, test it, and run the continuation only when it is there. the same shape as
+        // `??` with the arms the other way round, and the absent arm supplying the destination's null
+        void gen_optional_chain(AST::OptionalChainExprNode &node);
+
+        // the marker standing for a chain's unwrapped base. pushes the value the enclosing chain stashed -
+        // it evaluates nothing, because the base was already evaluated once, before the branch
+        void gen_chain_base(AST::ChainBaseNode &node);
+
         void gen_deref(AST::DerefExprNode &node);
+
+        // binds the temporaries, evaluates the body, runs the teardown, and hands back the body's
+        // value - the four steps AST::TemporaryBindExprNode is, in that order
+        void gen_temporary_bind(AST::TemporaryBindExprNode &node);
         void gen_index(AST::IndexExprNode &node);
         void gen_null(AST::NullNode &node);
         void gen_operator(AST::OperatorNode &node);
@@ -105,9 +133,16 @@ namespace Compiler::LLVM
         // not even the condition, which is what CompilerOptions::assertions_enabled decides
         void gen_assert_builtin(AST::FunctionCallExprNode &node);
 
-        // `ref_count<T>(T& $handle)`. the one builtin that is both generic and takes an argument, so it
-        // shares neither family's shape - see AST::BuiltinKind::t_ref_count
-        void gen_ref_count_builtin(AST::FunctionCallExprNode &node);
+        // `ref_count<T>(T& $handle)` and `weak_count<T>(T& $handle)`. the builtins that are both generic
+        // and take an argument, so they share neither family's shape - see AST::BuiltinKind::t_ref_count.
+        // one arm for both because they differ only in which header word they load
+        void gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
+
+        // `dprint<T>(T& $value)`. the same generic-plus-borrow shape as the two counts above, but the only
+        // builtin that *emits* rather than folding - and the only one whose lowering creates basic blocks,
+        // which is why everything after the address is DebugPrintCodegen's. this arm reads the subject
+        // type and the slot, and routes
+        void gen_dprint_builtin(AST::FunctionCallExprNode &node);
 
         // `echo` of a string or a string view: a length-counted write(2) rather than a printf, because
         // the bytes are not NUL-terminated in general. the codegen half of the rule

@@ -243,6 +243,25 @@ namespace AST
     // deliberately takes the *storage* type, with no transparency peeling, so `&$buf` on a
     // `ptr<uint8>` is a `ptr<ptr<uint8>>`: the address of $buf's own slot, not the address
     // $buf holds (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+    //
+    // **over a class, where a weak reference is what is being asked for, it means one instead.** a class
+    // handle already *is* an address, so the address of a slot holding one is rarely what a program wants;
+    // what it wants is a second reference that does not own. `weak<Foo> $w = &$obj;` says so, and that
+    // see book/concept/ownership_and_moving.md, "Weak references and cycles"
+    //
+    // **the destination decides, not the operand's type.** that is the rule this chapter already runs on -
+    // a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what turns
+    // a place argument into an address. it also has to be the rule here rather than "a written `&` over a
+    // class", which was tried: six generic accessors in stdlib/core take `&` of a `T` place and need the
+    // slot address, so keying on the operand made `Array<int32>` compile and `Array<Counter>` not - a
+    // generic body whose meaning depends on its instantiation, which is the one thing a generic must not be
+    //
+    // this node is also how every *compiler-inserted* borrow is spelled - a method receiver
+    // (FuncCallParser), a borrow-parameter coercion (CallResolver), a drop's receiver (OwnershipPass) -
+    // and those must keep meaning the slot's address, or `$this` would stop being `Foo&`. one bit
+    // separates them, rather than a second node, because every pass that special-cases `n_expr_addrof`
+    // - place_root_of, PointerAdjuster::adjust_call_arguments, OwnershipPass's place edge - would
+    // otherwise need a duplicate arm that could drift
     class AddrOfExprNode : public ExprNode
     {
     public:
@@ -252,11 +271,39 @@ namespace AST
         // and later an index; not a temporary, which has no address to take
         ExprNode *operand;
 
-        AddrOfExprNode(ExprNode *operand) :
-            operand(operand)
+        // **was a weak reference what this `&` was asked for?** set by the unary arm in ExprParser when the
+        // destination is a `weak<T>`, and unconditionally by `weak($obj)`, which says so itself. never by
+        // a pass inserting a borrow, and never by the `$x:$:$` collapse - both mean the slot's address
+        //
+        // a stored bit rather than something derivable, because the destination is knowable only where the
+        // node is built. read through denotes_weak_reference() below, so "what does this `&` denote" still
+        // has exactly one owner
+        bool weak_wanted = false;
+
+        AddrOfExprNode(ExprNode *operand, bool weak_wanted = false) :
+            operand(operand),
+            weak_wanted(weak_wanted)
         {
             assert(operand != nullptr && "AddrOfExprNode requires an operand");
         };
+
+        // true when this `&` denotes a weak reference rather than a slot address. the one place the rule
+        // lives, asked by result_type(), node_description() and codegen
+        //
+        // the operand still has to be something *counted*, and a type parameter counts as maybe: inside a
+        // template `&$t` has no answer yet, and after substitution the clone's operand is the concrete
+        // class. that is the standing "ask again later" rule, and it is why this is a method rather than
+        // the bit itself. an operand that substitutes to something uncounted falls back to the slot
+        // address and fails to fit its `weak<T>` destination, which is a located error at the right place
+        // the rule over a type the caller already holds. result_type() needs the operand's type either
+        // way, and deriving it twice walks the operand's subtree twice - a `->` chain re-walks per link
+        bool denotes_weak_reference(const ValueType &operand_type) const {
+            return weak_wanted && (operand_type.is_class() || operand_type.is_type_param());
+        }
+
+        bool denotes_weak_reference() const {
+            return weak_wanted && denotes_weak_reference(operand->result_type());
+        }
 
         ~AddrOfExprNode() {}
 
@@ -533,6 +580,185 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
+    // `strong(E)` - the upgrade of a weak reference back to a usable one
+    //
+    // the inverse of a written `&` over a class, and the only way to read through a `weak<T>` at all. it
+    // is a written operation rather than an implicit deref for two reasons, and both matter: it moves the
+    // strong count, so it must be visible at the site that pays for it, and **it can fail** - the object
+    // may already be gone - so its result is a `T?` the program has to acknowledge before using
+    //
+    // a keyword form rather than a `#[builtin:]` in stdlib/core/rc.eco, unlike `ref_count` beside it,
+    // because `weak` has to be a keyword anyway to be a type constructor, and a language whose two halves
+    // of one idea live in different places - one in the grammar, one in a library that `--no-stdlib`
+    // removes - would be answering "where is weak from" twice
+    class StrongExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_strong);
+
+        // an expression of weak type. a place is not required: the upgrade reads the handle, and a weak
+        // handed back by a call is as upgradable as one sitting in a variable
+        ExprNode *operand;
+
+        // where `strong` was written, for the diagnostic when the operand is not a weak
+        TokenReference token;
+
+        StrongExprNode(ExprNode *operand, TokenReference token) :
+            operand(operand),
+            token(token)
+        {
+            assert(operand != nullptr && "StrongExprNode requires an operand");
+        };
+
+        ~StrongExprNode() {}
+
+        // `T?` for a `weak<T>` operand - nullable, which is the whole point. an operand that is not a
+        // weak answers unknown rather than asserting: the type checker reports it with a location, and a
+        // generic whose operand is still a bare parameter has to be able to be asked early
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_strong_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `A ?? B` - A when it is there, B otherwise
+    //
+    // one of the three forms that read through a `T?`, and the one for when there is a sensible stand-in.
+    // it works on any nullable whatever the payload is - `lookup($k) ?? 0`, `$p ?? Point(0, 0)`,
+    // `$maybeNode ?? $fallback` - and on a `weak<T>`, which AST::optional_operand_of upgrades first
+    //
+    // **B is evaluated only when A is absent.** so the right side may be as expensive as it likes, and
+    // may have effects that must not happen on the common path
+    class NullCoalesceExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_null_coalesce);
+
+        // already a nullable by the time this node exists - a weak operand was rewritten at construction
+        ExprNode *lhs;
+        ExprNode *rhs;
+
+        TokenReference token;
+
+        NullCoalesceExprNode(ExprNode *lhs, ExprNode *rhs, TokenReference token) :
+            lhs(lhs), rhs(rhs), token(token)
+        {
+            assert(lhs != nullptr && rhs != nullptr && "NullCoalesceExprNode requires both operands");
+        };
+
+        ~NullCoalesceExprNode() {}
+
+        // the non-null of the left, which is the point of the whole form: `int32? ?? int32` is an `int32`,
+        // and the result needs no further unwrapping
+        //
+        // unless the right side is *itself* nullable, in which case the answer still may be absent and the
+        // type says so - `$a ?? $b` over two `int32?`s is an `int32?`, which chains
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_null_coalesce(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // stands for the **unwrapped base** inside the continuation of a `?->` chain
+    //
+    // `$a?->b->c` is one `OptionalChainExprNode` whose continuation is `<base>->b->c`, and this node is
+    // that `<base>`: the value the chain already tested, with its `?` taken off. it is not an expression a
+    // program can write, and it never appears outside a chain's continuation
+    //
+    // it exists so the continuation is an **ordinary member-access subtree** - the same nodes `->` always
+    // builds, resolving members and calls through exactly the usual rules. the alternative was a chain node
+    // that re-implemented member lookup for itself, which is the kind of second answer this compiler
+    // reliably regrets
+    class ChainBaseNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_chain_base);
+
+        // the non-null type of the chain's base. stored rather than derived, because by the time this is
+        // asked the base expression belongs to the enclosing chain node and this one has no edge to it
+        ValueType type;
+
+        TokenReference token;
+
+        ChainBaseNode(ValueType type, TokenReference token) : type(type), token(token) {}
+
+        ~ChainBaseNode() {}
+
+        ValueType result_type() const override {
+            return type;
+        }
+
+        const std::string node_description() override {
+            return "chainbase<" + type.get_type_desciption() + ">";
+        }
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_chain_base(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
+    // `A?->b` - reach through A when it is there, and answer null when it is not
+    //
+    // the third of the forms, and the one for when absence simply means "nothing to do". it short-circuits:
+    // if the base is absent the continuation does not run at all, so `$a?->save()` on an absent `$a` calls
+    // nothing rather than calling something on null
+    //
+    // the continuation is an ordinary member-access or call subtree rooted at a ChainBaseNode, so `->`
+    // resolves through the rules it always does. the parser wraps once per `?->`, which is what makes
+    // `$a?->b?->c` nest and stop at the first absent link
+    class OptionalChainExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_optional_chain);
+
+        // the nullable being reached through - already upgraded if it was a weak
+        ExprNode *base;
+
+        // rooted at `chain_base`, which stands for `base` with its `?` removed
+        ExprNode *continuation;
+
+        ChainBaseNode *chain_base;
+
+        TokenReference token;
+
+        OptionalChainExprNode(
+            ExprNode *base, ExprNode *continuation, ChainBaseNode *chain_base, TokenReference token) :
+            base(base), continuation(continuation), chain_base(chain_base), token(token)
+        {
+            assert(base != nullptr && "OptionalChainExprNode requires a base");
+        };
+
+        ~OptionalChainExprNode() {}
+
+        // the continuation's type made nullable - because the whole expression is absent whenever the base
+        // was. `void` stays `void`: a call that answers nothing has nothing to be absent, and wrapping it
+        // would invent a value for a statement to discard
+        //
+        // an already-nullable continuation is **not** wrapped twice. there is one `null` in the language,
+        // so `$a?->maybeB()` is one `B?` rather than a nested absence nobody could spell
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_optional_chain(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
     // `E instanceof T` - is the object E names an instance of exactly T?
     //
     // total over a class operand and constant-false against a struct, because a class block carries a
@@ -691,7 +917,7 @@ namespace AST
     // it is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
     // the appends, and only the enclosing scope has both. legal as a declaration's initializer or as
     // an assignment's right-hand side, and a located error anywhere else - `f([1, 2, 3])` included,
-    // because there is no temporary to expand into yet (todo/A13b)
+    // because an argument has no temporary to expand into yet (todo/A13c)
     class ArrayLiteralExprNode : public ExprNode
     {
     public:

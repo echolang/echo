@@ -1,0 +1,23 @@
+// a bound core string inlines into the surrounding printf with `%.*s`, rather than costing the
+// fflush + write(2) `echo` pays. the substring is the case that proves it: it shares its owner's buffer
+// and simply stops early, so its bytes are **not** NUL-terminated and `%s` would run off the end
+
+$s = "hello world";
+dprint($s);
+
+$sub = $s->sub(0, 5);
+dprint($sub);
+
+struct Named
+{
+    string $name;
+    int32 $id;
+
+    constructor(string $name, int32 $id)
+    {
+        $this->name = $name;
+        $this->id = $id;
+    }
+}
+
+dprint(Named("echo", 7));

@@ -1,0 +1,8 @@
+stdlib: off
+
+--- OUT --->
+[Pair] {
+  [int32] $a = 1
+  [int32] $b = 2
+}
+[int32] 42

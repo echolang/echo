@@ -37,6 +37,17 @@ bool AST::needs_destruction(const AST::ValueType &type)
         return true;
     }
 
+    // a weak reference owes one weak release. it does **not** own its object - that is the whole point of
+    // it - but it does own the block's readability, which is a real obligation with a real count behind it
+    //
+    // it has to be answered here, ahead of the leaf below: a weak has no ComplexType of its own, so it
+    // would otherwise fall out as "owns nothing" and a `weak<T>` field would leak its block forever. and
+    // it is answered *without* descending into the class it names, for the reason the class arm below
+    // gives - which is also what keeps `class Node { weak<Node> $prev; }` from recursing
+    if (type.is_weak()) {
+        return true;
+    }
+
     // a primitive owns its own bytes and nothing else. a pointer and a borrow own nothing at all -
     // see the header, this is the leaf of the whole recursion
     if (!type.has_complex_type()) {

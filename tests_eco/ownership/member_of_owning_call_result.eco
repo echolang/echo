@@ -1,0 +1,31 @@
+// the intermediate is destroyed exactly once, and *after* the read. the destructor echoes, so both are
+// visible in the output rather than inferred: 900 lands between the two markers because the temporary
+// dies at the end of the expression that read it, and 7 - the value it was read for - is printed by the
+// echo that follows (todo/A13b)
+
+struct Buffer
+{
+    int32 $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo 900;
+        mem::free($this->data);
+    }
+}
+
+struct Box
+{
+    int32 $seed;
+
+    function make() : Buffer
+    {
+        return Buffer($this->seed, mem::alloc<uint8>(8));
+    }
+}
+
+$b = Box(7);
+echo 1;
+echo $b->make()->tag;
+echo 2;

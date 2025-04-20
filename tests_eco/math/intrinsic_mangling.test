@@ -1,0 +1,33 @@
+--- OUT --->
+4.000000
+4.000000
+1024.000000
+3.000000
+10.000000
+3
+9
+--- IR --->
+# scoped to main, because the stdlib's own clamp bodies call minnum/maxnum further down and would
+# otherwise satisfy checks meant for the calls written in this program
+CHECK: define i32 @main()
+
+# the same source spelling reaching two different intrinsics is the whole point of declaring each
+# function at both precisions
+CHECK: call double @llvm.sqrt.f64(double
+CHECK: call float @llvm.sqrt.f32(float
+
+# a one-overload-type, two-argument intrinsic, and the regression guard for this whole change: the
+# overload-type vector used to be the *argument* list, so pow mangled as `llvm.pow.f64.f64` - a name
+# LLVM never defined - and every intrinsic with more than one argument was undeclarable
+#
+# each check runs up to the `(` on purpose. `llvm.pow.f64` is a prefix of `llvm.pow.f64.f64`, so a
+# check that stopped at the type would match the broken mangling too and assert nothing
+CHECK: call double @llvm.pow.f64(double
+CHECK: call double @llvm.copysign.f64(double
+
+# three arguments, still one overload type
+CHECK: call double @llvm.fma.f64(double
+
+# and for integers it is signedness, not width, that picks the intrinsic
+CHECK: call i32 @llvm.smin.i32(i32
+CHECK: call i32 @llvm.umax.i32(i32

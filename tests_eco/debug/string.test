@@ -1,0 +1,7 @@
+--- OUT --->
+[string] "hello world"
+[string] "hello"
+[Named] {
+  [string] $name = "echo"
+  [int32] $id = 7
+}

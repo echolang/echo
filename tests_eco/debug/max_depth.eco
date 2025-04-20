@@ -1,0 +1,33 @@
+// **the second guard, and it is not the same guard.** the path set cuts a type that reaches itself;
+// this cuts a chain of *distinct* types that never repeats, which the path set cannot see at all.
+// without it the only bound on the recursion is the compiler's own stack
+//
+// twelve levels against a limit of eight, so the cut is asserted rather than merely not reached
+
+struct L12 { int32 $v; }
+struct L11 { L12 $next; }
+struct L10 { L11 $next; }
+struct L9 { L10 $next; }
+struct L8 { L9 $next; }
+struct L7 { L8 $next; }
+struct L6 { L7 $next; }
+struct L5 { L6 $next; }
+struct L4 { L5 $next; }
+struct L3 { L4 $next; }
+struct L2 { L3 $next; }
+struct L1 { L2 $next; }
+
+L12 $deepest = L12(7);
+L11 $l11 = L11($deepest);
+L10 $l10 = L10($l11);
+L9 $l9 = L9($l10);
+L8 $l8 = L8($l9);
+L7 $l7 = L7($l8);
+L6 $l6 = L6($l7);
+L5 $l5 = L5($l6);
+L4 $l4 = L4($l5);
+L3 $l3 = L3($l4);
+L2 $l2 = L2($l3);
+L1 $l1 = L1($l2);
+
+dprint($l1);

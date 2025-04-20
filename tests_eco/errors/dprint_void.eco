@@ -1,0 +1,10 @@
+// `argument_fit` treats void as t_undetermined, which is *neutral* rather than a mismatch - so a void
+// argument resolves with T = void and would reach codegen, where the failure is an internal compiler
+// error with no source location. reported here instead, which is check_ref_count_argument's reason
+
+function nothing() : void
+{
+    echo 1;
+}
+
+dprint(nothing());

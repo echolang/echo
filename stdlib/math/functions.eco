@@ -26,11 +26,19 @@ function abs<T>(T $value) : T
  */
 function clamp(float $value, float $min, float $max) : float
 {
-    if ($value < $min) {
-        return $min;
-    }
-    if ($value > $max) {
-        return $max;
-    }
-    return $value;
+    return math::min(math::max($value, $min), $max);
+}
+
+/**
+ * Clamps a value between a minimum and maximum value.
+ *
+ * @param $value The value to clamp.
+ * @param $min The minimum value.
+ * @param $max The maximum value.
+ *
+ * @return The clamped value.
+ */
+function clamp(float64 $value, float64 $min, float64 $max) : float64
+{
+    return math::min(math::max($value, $min), $max);
 }

@@ -21,6 +21,7 @@
 #include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
 
@@ -572,6 +573,25 @@ void OperatorRewriter::rewrite(Node *node)
         {
             auto *instance_of = static_cast<InstanceOfExprNode *>(node);
             instance_of->operand = rewrite_expr(instance_of->operand);
+            break;
+        }
+
+        case NodeType::n_expr_temp_bind:
+        {
+            // an operator or a bracket can sit anywhere inside a bound subtree, so all three edges get
+            // their round - a temporary is bound around a member chain, and `$o->mid()->tag + 1` puts a
+            // declared `+` directly above one
+            auto *bind = static_cast<TemporaryBindExprNode *>(node);
+
+            for (VarDeclNode *temp : bind->temporaries) {
+                rewrite(temp);
+            }
+
+            bind->body = rewrite_expr(bind->body);
+
+            for (auto &drop : bind->teardown) {
+                rewrite(drop.node());
+            }
             break;
         }
 

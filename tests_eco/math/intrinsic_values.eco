@@ -1,0 +1,61 @@
+// one call per family, checked for its value rather than its lowering. the point is that a
+// declaration whose signature merely *satisfies* LLVM can still compute the wrong thing - a
+// swapped argument order or a wrong overload would pass intrinsic_mangling and fail here
+
+// trigonometry, at values whose results print exactly
+float64 $sin = math::sin(0.0);
+float64 $cos = math::cos(0.0);
+float64 $tanh = math::tanh(0.0);
+
+// atan2 takes y first, then x. atan2(1, 1) is an eighth of a turn, ~0.785398
+float64 $atan2 = math::atan2(1.0, 1.0);
+
+// powers and logarithms
+float64 $pow = math::pow(2.0, 10.0);
+float64 $exp2 = math::exp2(10.0);
+float64 $log2 = math::log2(1024.0);
+float64 $log10 = math::log10(1000.0);
+
+// rounding. round() and roundeven() disagree on exact halves, which is the reason both exist
+float64 $round = math::round(2.5);
+float64 $roundeven = math::roundeven(2.5);
+float64 $floor = math::floor(2.7);
+float64 $ceil = math::ceil(2.1);
+float64 $trunc = math::trunc(2.7);
+
+// sign. copysign takes the magnitude first and the sign second
+float64 $neg = 0.0 - 1.0;
+float64 $copysign = math::copysign(3.0, $neg);
+float64 $abs = math::abs($neg);
+
+// min, max and the clamp built on top of them
+float64 $min = math::min(3.0, 9.0);
+float64 $max = math::max(3.0, 9.0);
+float64 $clamp_high = math::clamp(9.0, 0.0, 5.0);
+float64 $clamp_low = math::clamp(0.0 - 9.0, 0.0, 5.0);
+float64 $clamp_in = math::clamp(2.0, 0.0, 5.0);
+
+// fused multiply-add: a * b + c
+float64 $fma = math::fma(2.0, 3.0, 4.0);
+
+echo $sin;
+echo $cos;
+echo $tanh;
+echo $atan2;
+echo $pow;
+echo $exp2;
+echo $log2;
+echo $log10;
+echo $round;
+echo $roundeven;
+echo $floor;
+echo $ceil;
+echo $trunc;
+echo $copysign;
+echo $abs;
+echo $min;
+echo $max;
+echo $clamp_high;
+echo $clamp_low;
+echo $clamp_in;
+echo $fma;

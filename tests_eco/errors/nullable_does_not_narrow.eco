@@ -1,0 +1,9 @@
+// a `T?` never narrows back on its own. that one-way rule is the whole safety story: widening discards a
+// guarantee, which is always safe, while narrowing *asserts* one and needs somewhere to put the failure -
+// which is exactly what `guard`, `??` and `?->` are
+
+class Node { int32 $tag; }
+
+Node? $some = Node(1);
+
+Node $narrowed = $some;

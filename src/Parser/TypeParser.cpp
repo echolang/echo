@@ -31,10 +31,11 @@ bool Parser::can_parse_type(Parser::Payload &payload)
         offset++;
     }
 
-    // a type can be an identifier or ptr
+    // a type can be an identifier, or one of the two type constructors the compiler spells
     if (
         payload.cursor.peek_is_type(offset, Token::Type::t_identifier) ||
-        payload.cursor.peek_is_type(offset, Token::Type::t_ptr)
+        payload.cursor.peek_is_type(offset, Token::Type::t_ptr) ||
+        payload.cursor.peek_is_type(offset, Token::Type::t_weak)
     ) {
         return true;
     }
@@ -50,8 +51,9 @@ bool Parser::can_parse_type(Parser::Payload &payload)
 // silently `unknown` rather than a diagnostic
 //
 // the grammar it walks mirrors parse_value_type:
-//   type      := 'const'? ( 'ptr' '<' type '>' | qualified ) ref?
+//   type      := 'const'? ( 'ptr' '<' type '>' | 'weak' '<' type '>' | qualified ) nullable? ref?
 //   qualified := ( identifier '::' )* identifier ( '<' type ( ',' type )* '>' )?
+//   nullable  := '?'
 //   ref       := '&'
 // it consumes its closing angle brackets through the cursor's own '>>' split rather than counting
 // them, so `Box<Box<int32>>` cannot end in a different place here than it does in
@@ -59,6 +61,25 @@ bool Parser::can_parse_type(Parser::Payload &payload)
 //
 // only the bounds-safe cursor accessors are used (never current(), which asserts), so a truncated
 // type runs out of tokens and answers false instead of aborting
+// **the one place a `?` suffix is consumed.** two walks reach it - skip_type_shape, which only decides
+// *which parser runs*, and parse_nullable_suffix, which builds the type - and they have to agree on how
+// many `?`s a type ends with. when they did not, `Foo? $x` scanned as a declaration in one and not the
+// other, and the disagreement was silent because neither reports anything about the suffix
+//
+// idempotent: `T??` is `T?`. there is one `null` in the language, so a second level of absence has
+// nothing to mean - deliberately the opposite of `ptr<ptr<T>>`, where a second level is a different type
+static bool skip_nullable_suffix(Parser::Cursor &cursor)
+{
+    bool seen = false;
+
+    while (cursor.is_type(Token::Type::t_qmark)) {
+        cursor.skip();
+        seen = true;
+    }
+
+    return seen;
+}
+
 static bool skip_type_shape(Parser::Cursor &cursor);
 
 // skips a comma-separated list of type shapes, up to but not through whatever closes it. the grammar
@@ -115,8 +136,10 @@ static bool skip_type_shape(Parser::Cursor &cursor)
         }
         cursor.consume_generic_close();
     }
-    // `ptr<T>` is a type constructor, so it recurses on its pointee exactly as the parser does
-    else if (cursor.is_type(Token::Type::t_ptr)) {
+    // `ptr<T>` and `weak<T>` are type constructors, so they recurse on their argument exactly as the
+    // parser does. one arm because their *shape* is identical - what differs is only which ValueType
+    // parse_value_type builds, and whether the argument has to be a class, neither of which is a shape
+    else if (cursor.is_type(Token::Type::t_ptr) || cursor.is_type(Token::Type::t_weak)) {
         cursor.skip();
 
         if (!cursor.is_type(Token::Type::t_open_angle)) {
@@ -154,7 +177,10 @@ static bool skip_type_shape(Parser::Cursor &cursor)
         }
     }
 
-    // the borrow suffix, in either of the two spellings the lexer produces (see parse_ref_suffix)
+    // the nullable suffix, then the borrow suffix, in that order and in either of the two spellings the
+    // lexer produces for the latter (see parse_ref_suffix). the order has to match parse_value_type's
+    skip_nullable_suffix(cursor);
+
     if (cursor.is_type(Token::Type::t_ref) || cursor.is_type(Token::Type::t_and)) {
         cursor.skip();
     }
@@ -166,10 +192,16 @@ bool Parser::starts_vardecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
-    // `const` and `ptr` begin nothing else at a statement head, so they answer without a scan.
+    // `const`, `ptr` and `weak` begin nothing else at a statement head, so they answer without a scan.
     // that keeps a malformed one reported by parse_varexpr, which knows what it was reading,
     // rather than by the statement dispatch's catch-all
-    if (cursor.is_type(Token::Type::t_const) || cursor.is_type(Token::Type::t_ptr)) {
+    //
+    // `weak` is only *almost* true here: `weak($obj)` is an expression too. it is still safe, because a
+    // declaration is the reading that needs the whole statement and the expression form is reached from
+    // parse_varexpr either way - see the arm in ExprParser
+    if (cursor.is_type(Token::Type::t_const)
+        || cursor.is_type(Token::Type::t_ptr)
+        || cursor.is_type_sequence(0, { Token::Type::t_weak, Token::Type::t_open_angle })) {
         return true;
     }
 
@@ -691,8 +723,21 @@ void Parser::declare_type_parameters(
 // arrives as t_and and used to lose its reference silently. in type position a following `&`
 // can never be a binary operator, so accepting both is unambiguous and needs no lexer change -
 // which matters, because the binary/reference distinction elsewhere depends on that rule
+// `T?` - the nullable suffix, read before the borrow suffix so it binds to the type it is written on:
+// `Foo?&` is a borrow of a `Foo?`, which is the only grouping either spelling could sensibly have
+//
+// there is deliberately no `T&?`. a nullable borrow already has a name and has had one since before this
+// existed - it is `ptr<T>`, and that *is* this same flag on a pointer level. giving it a second spelling
+// would be two ways to write one type, which is the thing generalising the flag was meant to end
+static AST::ValueType parse_nullable_suffix(Parser::Payload &payload, AST::ValueType type)
+{
+    return skip_nullable_suffix(payload.cursor) ? AST::ValueType::make_nullable(type) : type;
+}
+
 static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type)
 {
+    type = parse_nullable_suffix(payload, type);
+
     if (!payload.cursor.is_type(Token::Type::t_ref) && !payload.cursor.is_type(Token::Type::t_and)) {
         return type;
     }
@@ -806,6 +851,62 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
 
         auto pointer_type = AST::ValueType::make_pointer(pointee.value(), true);
         return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(pointer_type) : pointer_type);
+    }
+
+    // `weak<T>`, the non-owning handle on a counted object. the same shape as `ptr<T>` above and
+    // deliberately spelled like it - both are type constructors the compiler owns rather than library
+    // types, which is what the lowercase says
+    if (payload.cursor.is_type(Token::Type::t_weak)) {
+        auto weak_token = payload.cursor.current();
+        payload.cursor.skip();
+
+        if (!payload.cursor.is_type(Token::Type::t_open_angle)) {
+            payload.collect_unexpected_token(Token::Type::t_open_angle);
+
+            return std::nullopt;
+        }
+
+        payload.cursor.skip();
+
+        auto target = parse_value_type(payload);
+        if (!target.has_value()) {
+            return std::nullopt;
+        }
+
+        if (!payload.cursor.is_generic_close()) {
+            payload.collect_unexpected_token(Token::Type::t_close_angle);
+
+            return std::nullopt;
+        }
+
+        payload.cursor.consume_generic_close();
+
+        // **only a class may be weakly referenced**, because only a class is counted - there is nothing
+        // for a weak reference to a struct or an `int32` to be non-owning *of*. reported here, at the
+        // type, rather than left to make_weak's assert: this is the one place that has a token to point at
+        //
+        // a type parameter is admitted and checked after substitution, the way every other constraint on
+        // a parameter is - `weak<T>` inside a template is exactly how a generic cache spells its entries
+        if (!target->is_class() && !AST::is_undetermined_type(target.value())) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(weak_token),
+                fmt::format(
+                    "'weak<{}>' is not a weak reference to anything - only a class is reference counted, "
+                    "so only a class has a count to opt out of",
+                    target->get_type_desciption()));
+
+            return std::nullopt;
+        }
+
+        // an undetermined target cannot be built into a weak yet, and saying so is not this pass's job -
+        // the monomorphizer reports whatever never resolved. handing the target back unchanged keeps the
+        // parse going without minting a type whose invariant make_weak would refuse
+        if (!target->is_class() && !target->is_type_param()) {
+            return parse_ref_suffix(payload, target.value());
+        }
+
+        auto weak_type = AST::ValueType::make_weak(target.value());
+        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(weak_type) : weak_type);
     }
 
     // `Owner::Nested` before `a::b::Foo`: the two spellings are indistinguishable until the leading

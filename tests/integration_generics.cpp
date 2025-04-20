@@ -323,3 +323,39 @@ TEST_CASE("An unresolvable generic parameter is named in the diagnostic", "[gene
 
     REQUIRE(has_issue_containing(*bundle, "'U'"));
 }
+
+TEST_CASE("One instantiation has one layout, whichever site names it", "[generics][types]")
+{
+    // A5's acceptance criterion. Struct equality is ComplexType* pointer identity, so "the same
+    // instantiation" has to mean "the same pointer" across every path that can produce one. Two paths
+    // exist: a `Q<int32>` the parser reads as a type application, and a `Q<int32>` a constructor's
+    // return type carries into an inferred local. TypeRegistry::get_or_create_instantiation interns both
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Q<T> { T $value; }\n"
+        "function byval(Q<int32> $q) : int32 { return $q->value; }\n"
+        "$inferred = Q<int32>(7);\n"
+        "echo byval($inferred);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    // the written spelling, off the parameter of `byval`
+    auto calls = calls_to(m, "byval");
+    REQUIRE(calls.size() == 1);
+    REQUIRE(calls[0]->decl != nullptr);
+    REQUIRE(calls[0]->decl->args.size() == 1);
+    ValueType written = calls[0]->decl->args[0]->type();
+
+    // the inferred spelling, off the constructor's return type
+    auto ctors = calls_to(m, "Q");
+    REQUIRE(ctors.size() >= 1);
+    REQUIRE(ctors[0]->decl != nullptr);
+    ValueType inferred = ctors[0]->decl->get_return_type();
+
+    REQUIRE(written.is_struct());
+    REQUIRE(inferred.is_struct());
+    REQUIRE(written == inferred);
+    REQUIRE(written.get_complex_type() == inferred.get_complex_type());
+    REQUIRE(written.get_mangled_name() == inferred.get_mangled_name());
+}

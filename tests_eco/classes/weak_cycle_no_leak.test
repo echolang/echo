@@ -1,0 +1,17 @@
+--- OUT --->
+1
+2
+2
+1
+2
+99
+--- IR --->
+# `$b->prev = &$a` takes a weak reference, so the second count moves where the first one would have
+CHECK: %weak.inc = add i64 %weak, 1
+
+# and the strong release *reaches* the weak one rather than freeing the block itself. that is what makes
+# the payload's teardown and the block's free two moments instead of one, which is the whole layout change
+# behind the second count - a weak handle stays readable long enough to answer whether its object is there
+CHECK: define linkonce_odr void @__eco_release_4Node(ptr %obj)
+CHECK: call void @__eco_weak_release(ptr %obj)
+CHECK: define linkonce_odr void @__eco_weak_release(ptr %obj)

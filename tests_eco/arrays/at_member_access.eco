@@ -1,0 +1,21 @@
+// `->at()` and `->push_slot()` return `T&`, and reading a member off that borrow used to abort the
+// compiler - which is why arrays.md counted it as one of the reasons element access is specified as a
+// place rather than as sugar for a method call. it works now, so filling an element field by field
+// through the slot the container handed back is a thing that can be written (todo/A13a)
+
+struct Point { int32 $x; int32 $y; }
+
+Array<Point> $a = [];
+
+// the slot is a borrow of the new element, so each field is written straight into the buffer
+$a->push_slot()->x = 1;
+$a->push_slot()->x = 3;
+
+echo $a->at(0)->x;
+echo $a->at(1)->x;
+
+// written through `at()`, read back through the bracket: the same storage either way
+$a->at(1)->x = 30;
+echo $a[1]->x;
+
+echo $a->count();

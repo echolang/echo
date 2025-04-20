@@ -354,12 +354,20 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
         receiver_type = receiver_type.pointee();
     }
 
-    if (!AST::is_place_expression(*self_arg)) {
+    // a receiver needs an address, so it needs storage - but a value that has none can be *given* some.
+    // AST::OwnershipPass binds a temporary for the address below and destroys it once the call has
+    // returned (todo/A13b), so a call result is a legal receiver and `$o->get()->size()` reads the way
+    // it looks. since todo/A13c the predicate also admits a literal and an arithmetic result, which is
+    // right in principle - a receiver *is* a borrow argument in position 0, so it should take a value
+    // wherever an ordinary borrow parameter would - but unreachable in practice from here: a `->` base is
+    // read by parse_postfix_chain, which does not accept a parenthesised group, and a primitive declares
+    // no methods to call. so what actually reaches this refusal is unchanged
+    if (!AST::is_place_expression(*self_arg) && !AST::can_bind_temporary(*self_arg)) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(member_token),
             fmt::format(
                 "'{}' needs a receiver with storage to be called on - a method takes the address of "
-                "the value it is called on, and a temporary has none",
+                "the value it is called on, and this expression has none to take",
                 member_token.value()));
         cursor.try_skip_to_next_statement();
         return nullptr;

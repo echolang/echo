@@ -1,0 +1,19 @@
+// **the printer must not perturb what it observes.** the payload is read in place through the handle and
+// nothing is retained - which is also why the parameter is a borrow rather than a value, since a by-value
+// class argument would be one more reference before dprint ever ran
+
+class Handle
+{
+    int32 $x;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+}
+
+$h = Handle(5);
+
+echo ref_count($h);
+dprint($h);
+echo ref_count($h);

@@ -17,6 +17,11 @@ namespace AST
     // a later and separate question, asked by class_needs_deinit below. that split is what
     // terminates the recursion - `class Node { Node $next; }` is ordinary Echo
     //
+    // **a weak reference also always answers true**, and it is worth being clear about what it owes.
+    // it does not own its object - that is what it is for - but it does hold the block readable, and
+    // that is a count somebody has to give back. so a `weak<T>` is destroyed at scope end exactly as a
+    // class is; what differs is which of the two counts moves
+    //
     // **a pointer is not an owner**, nor is a borrow `T&`: an address says nothing about what is
     // behind it, which is exactly why a type holding one must spell out a destructor. this is the
     // one line that makes the leaf case of every owning type explicit
@@ -24,8 +29,9 @@ namespace AST
     // a type parameter answers false - a not-yet rather than an error. callers gate on
     // AST::contains_type_param, and the ownership pass only ever asks about concrete types
     //
-    // deliberately **not cached** on ComplexType: `substituted_copy` is copy-then-modify, so a
-    // cached bool would carry from a template shared by `Box<Buffer>` and `Box<int32>`
+    // deliberately **not cached** on ComplexType: an instantiation reaches most of its template
+    // through the template_or_self redirect rather than owning a copy, so a cached bool would be
+    // read off the one template shared by `Box<Buffer>` and `Box<int32>`
     bool needs_destruction(const ValueType &type);
 
     // does a *class's payload* need tearing down when its last reference goes away, as opposed to just

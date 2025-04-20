@@ -1,0 +1,48 @@
+// **the reference cycle, collected.** two objects that refer to each other, with one edge weak, and both
+// are torn down. the same program with both edges strong tears down neither - that is the leak the
+// chapter describes, and `cycle_leaks_when_both_edges_own` beside this file is it, pinned deliberately
+// so the two can be read together
+//
+// the counts are asserted rather than inferred from the destructor output, because output alone cannot
+// tell a collected cycle from one that happens to be unreachable: `ref_count` says who owns the object
+// and `weak_count` says who is merely watching it, and only the pair of them shows the edge doing its job
+
+class Node
+{
+    int32 $tag;
+    Node? $next;
+    weak<Node> $prev;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function linked() : void
+{
+    Node $a = Node(1, null, null);
+    Node $b = Node(2, null, null);
+
+    // forward, owning: `$a` keeps `$b` alive
+    $a->next = $b;
+
+    // back, not owning. `&` over a class yields a weak reference exactly because the destination is one
+    $b->prev = &$a;
+
+    // one owner of $a - the local. the back edge is not one, which is the whole point
+    echo ref_count($a);
+
+    // two owners of $b - the local and $a->next
+    echo ref_count($b);
+
+    // and the back edge shows up here instead: the one the strong references hold together, plus $b->prev
+    echo weak_count($a);
+}
+
+// so the scope end collects everything, in reverse declaration order: $b's local reference goes (2 -> 1),
+// then $a's last one goes (1 -> 0), which runs $a's destructor and releases $a->next, taking $b to 0 and
+// running its destructor too. tags 1 then 2, and nothing left behind
+linked();
+
+echo 99;

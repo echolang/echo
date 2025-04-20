@@ -42,7 +42,22 @@ namespace AST
         // a distinction a call can be resolved on
         bool takes_ownership = false;
 
-        VarDeclNode(TokenReference token_varname, TypeNode *type) : 
+        // written `guard T $x = <nullable> else {...}`: this declaration's initializer is one level more
+        // *nullable* than the declaration is, because the statement around it tests the value and only
+        // binds on the path where it was there
+        //
+        // so the ordinary "does the initializer fit the declared type" rule does not apply, and the one
+        // check that has to know is AST::TypeChecker's - which would otherwise report exactly the
+        // conversion the guard exists to perform. everything else about the declaration is ordinary: it is
+        // a local in the enclosing scope, the ownership pass makes it an owner, and it is dropped at the
+        // scope's end like any other. that is the whole reason this is one bit rather than a second kind
+        // of declaration
+        //
+        // here rather than on the ValueType for takes_ownership's reason above: it is a fact about *this
+        // declaration*, not a distinction two types could be told apart by
+        bool binds_unwrapped = false;
+
+        VarDeclNode(TokenReference token_varname, TypeNode *type) :
             _type_node(type), token_varname(token_varname)
         {
             symbol_name = token_varname.value().substr(1);

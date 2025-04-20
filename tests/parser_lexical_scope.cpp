@@ -440,6 +440,24 @@ TEST_CASE("a body-local struct's constructor is emitted", "[lexical]")
     REQUIRE(is_file_root_child(m, ctors[0]));
 }
 
+TEST_CASE("a body-local struct is refused where a type parameter is visible", "[lexical][generics]")
+{
+    // the third case of the rule a nested `function` and a closure already obey: `T` resolves through
+    // the type-param scope stack, and nothing would ever hand this declaration a substitution for it.
+    // A type is the case where accepting it was *silent* - the monomorphizer clones a generic body once
+    // per instantiation, and TypeDeclNode::clone had to mint a substituted layout of its own, so one
+    // type ended up with two unequal ComplexType* identities. see todo/A5 in todo/README.md
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer<T>(T $v) : int32 {\n"
+        "    struct P { int32 $x; }\n"
+        "    return 1;\n"
+        "}\n"
+        "echo outer<int32>(1);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "cannot be declared inside a generic function's body"));
+}
+
 // -- more of the surface -----------------------------------------------------
 
 TEST_CASE("a function declared in a destructor body resolves", "[lexical]")

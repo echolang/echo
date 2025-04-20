@@ -1,0 +1,19 @@
+// two temporaries for one call. `TemporaryBindExprNode::temporaries` is a vector for exactly this and
+// nothing else exercised it - the receiver case that predates todo/A13c can only ever ask for one
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x, int32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+}
+
+function sum(Point& $p) : int32 { return $p->x + $p->y; }
+function pair(Point& $a, Point& $b) : int32 { return sum($a) + sum($b); }
+
+echo pair(Point(1, 2), Point(10, 20));

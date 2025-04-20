@@ -1,0 +1,15 @@
+// a `struct` written inside a generic function's body has no way to receive a substitution for the
+// enclosing type parameters, so it is refused - the same reason a plain nested `function` and a closure
+// are. a type is the case where accepting it would be *silent*: the monomorphizer's clone had to mint a
+// substituted layout of its own, and struct equality is ComplexType* identity, so one type wore two
+//
+// this shape used to abort the compiler outright, on the assert in ComplexType::add_property, because a
+// non-generic declaration cannot hold a property typed `T`
+
+function outer<T>(T $value) : int32
+{
+    struct P { T $x; }
+    return 1;
+}
+
+echo outer<int32>(1);

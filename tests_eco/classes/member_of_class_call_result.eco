@@ -1,0 +1,28 @@
+// a class-typed call result hands back +1, so the temporary owes exactly one release - and the class's
+// destructor echoing is what proves it ran, once. the handle a class-typed call yields *is* the address
+// the member is reached from, which is why this needs nothing the struct case did not (todo/A13b)
+
+class Node
+{
+    int32 $v;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+struct Box
+{
+    int32 $seed;
+
+    function make() : Node
+    {
+        return Node($this->seed);
+    }
+}
+
+$b = Box(4);
+echo 1;
+echo $b->make()->v;
+echo 2;

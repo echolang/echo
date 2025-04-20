@@ -17,6 +17,7 @@
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeDeclCodegen.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
 #include <string>
@@ -48,9 +49,15 @@ public:
     void visit_move_expr(AST::MoveExprNode &node);
     void visit_class_alloc_expr(AST::ClassAllocExprNode &node);
     void visit_retain_expr(AST::RetainExprNode &node);
+    void visit_strong_expr(AST::StrongExprNode &node);
+    void visit_guard(AST::GuardNode &node);
+    void visit_null_coalesce(AST::NullCoalesceExprNode &node);
+    void visit_optional_chain(AST::OptionalChainExprNode &node);
+    void visit_chain_base(AST::ChainBaseNode &node);
     void visit_closure_expr(AST::ClosureExprNode &node);
     void visit_indirect_call_expr(AST::IndirectCallExprNode &node);
     void visit_instanceof_expr(AST::InstanceOfExprNode &node);
+    void visit_temporary_bind(AST::TemporaryBindExprNode &node);
     void visit_release(AST::ReleaseNode &node);
     void visit_index_expr(AST::IndexExprNode &node);
     void visit_array_literal_expr(AST::ArrayLiteralExprNode &node);
@@ -87,6 +94,7 @@ private:
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
+    Compiler::LLVM::DebugPrintCodegen _debug_print;
     Compiler::LLVM::Backend _backend;
 };
 

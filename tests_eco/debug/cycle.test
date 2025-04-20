@@ -1,0 +1,16 @@
+--- OUT --->
+[Node] {
+  [int32] $v = 1
+  [Node?] $next = <cycle>
+}
+[Ping] {
+  [int32] $tp = 1
+  [Pong?] $pong = {
+    [int32] $tq = 2
+    [Ping?] $ping = <cycle>
+  }
+}
+[Self] {
+  [int32] $v = 9
+  [Self?] $me = <cycle>
+}

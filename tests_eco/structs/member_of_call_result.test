@@ -1,0 +1,8 @@
+--- OUT --->
+5
+--- RAST --->
+// the temporary, and the base rewritten into a place reading out of it
+CHECK: tempbind<int32>(vardecl<type<Inner>>($__temp) = call get(
+CHECK: ma<int32>(varref<Inner>(var($__temp))->tag)
+// a struct that owns nothing owes nothing
+CHECK-NOT: destructor

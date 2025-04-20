@@ -1,0 +1,5 @@
+--- OUT --->
+[Handle] {
+  [int32] $x = 5
+}
+[Handle?] null

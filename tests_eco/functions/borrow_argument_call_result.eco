@@ -1,0 +1,21 @@
+// a call result as a borrow argument. the temporary is bound around the *call* rather than around the
+// argument edge, which is what lets one bind node serve every request in a statement
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    constructor(int32 $x, int32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+}
+
+function sum(Point& $p) : int32
+{
+    return $p->x + $p->y;
+}
+
+echo sum(Point(3, 4));

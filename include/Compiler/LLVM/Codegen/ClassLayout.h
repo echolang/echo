@@ -13,19 +13,44 @@ namespace Compiler::LLVM
     // built by the same code. that nesting is the whole trick: below the payload every member GEP is
     // the struct path unchanged, so classes needed no second member-access implementation
     //
-    //     %Foo.box = { i64 __strong, ptr __typeinfo, %Foo }
+    //     %Foo.box = { i64 __strong, i64 __weak, ptr __typeinfo, %Foo }
     //
-    // the strong count is at offset 0 so retain and release reach it without an offset. __typeinfo
-    // holds the address of the class's own `@Foo.typeinfo` global, which is what `instanceof` compares
-    // - an address is exact identity across modules and needs no numbering scheme to keep stable
+    // __typeinfo holds the address of the class's own `@Foo.typeinfo` global, which is what `instanceof`
+    // compares - an address is exact identity across modules and needs no numbering scheme to keep stable
+    //
+    // **the two counts are two different questions and they end at two different moments.** __strong is
+    // how many owners the *object* has; at zero its deinit runs and the payload is dead. __weak is how
+    // many handles need the *block* to stay readable, and only at zero is the block freed - so a
+    // `weak<Foo>` can always be asked whether the object is still there rather than dangling to find out.
+    // the strong references collectively hold **one** __weak, seated with the first __strong and dropped
+    // by the release that takes __strong to zero: that convention is what keeps exactly one `free` in the
+    // whole runtime, in `__eco_weak_release`, rather than one per count that could disagree
+    //
+    // the header is the same shape in every box because the payload is *wrapped* - so an erased operand,
+    // or a closure environment that has no ClassLayout at all, reaches either count through
+    // `TypeLowering::class_header_llvm_type()`. see ClassCodegen::gen_header_ptr
     //
     // a class-typed value is *not* this type: it is an opaque `ptr` to a block of it. the layout is
-    // only ever needed to size an allocation, to reach the payload, and to touch the count
+    // only ever needed to size an allocation, to reach the payload, and to touch the counts
     namespace ClassBox
     {
         static constexpr unsigned strong_index = 0;
-        static constexpr unsigned typeinfo_index = 1;
-        static constexpr unsigned payload_index = 2;
+        static constexpr unsigned weak_index = 1;
+        static constexpr unsigned typeinfo_index = 2;
+        static constexpr unsigned payload_index = 3;
+    };
+
+    // the two slots of a wrapped `T?`, `{ i1 __has, T }` - the shape a nullable takes when `T` has no
+    // spare null value to mean "absent" with. see TypeLowering::optional_llvm_type
+    //
+    // here beside ClassBox rather than in TypeLowering for exactly ClassBox's reason: three subsystems
+    // reach into this shape - the lowering that mints it, the coercion that wraps and unwraps, and the
+    // comparison that tests one against `null` - and a slot index spelled 0 and 1 at each of them is a
+    // wrong load with no diagnostic
+    namespace OptionalBox
+    {
+        static constexpr unsigned has_index = 0;
+        static constexpr unsigned value_index = 1;
     };
 
     // what the typeinfo global *holds*. it began as one `i8 0` whose address was the whole of a class's

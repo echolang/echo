@@ -1,0 +1,51 @@
+// a postfix chain rooted in a *free* call, in every position a chain can stand: an expression, a write,
+// and a statement that is itself a call. the identifier-call arm of the expression parser was the one
+// operand producer that did not continue into the chain, and the statement dispatch had the matching
+// hole - so `echo first(&$o)->in->x;` was `Unexpected '->'` rather than a decision about anything
+//
+// both kinds of result: a borrow, which is already the address, and a value, which is given a temporary
+
+struct Inner
+{
+    int32 $x;
+
+    function bump(int32 $by) : void
+    {
+        $this->x = $this->x + $by;
+    }
+}
+
+struct Middle { Inner $in; }
+struct Outer { Middle $mid; }
+
+function first_ref(Outer& $o) : Middle&
+{
+    return &$o->mid;
+}
+
+function by_value(Outer& $o) : Middle
+{
+    return $o->mid;
+}
+
+$o = Outer(Middle(Inner(5)));
+
+// read, through a borrow and through a temporary
+echo first_ref(&$o)->in->x;
+echo by_value(&$o)->in->x;
+
+// a write through the borrow, as a statement
+first_ref(&$o)->in->x = 42;
+echo $o->mid->in->x;
+
+// a method call on the chain, as a statement
+first_ref(&$o)->in->bump(3);
+echo $o->mid->in->x;
+
+// and a method on the temporary a value result is bound to. **the write is lost, and that is correct**:
+// `bump` mutates the copy the call handed back, which is destroyed at the end of the statement, so the
+// receiver is untouched. the same thing calling a method on a temporary means in any language that has
+// them - what is refused is only writing to a member of one directly, where nothing at all could have
+// read it (tests_eco/errors/write_to_member_of_temporary.eco)
+by_value(&$o)->in->bump(100);
+echo $o->mid->in->x;

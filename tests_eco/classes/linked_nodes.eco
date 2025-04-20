@@ -7,7 +7,10 @@
 class Node
 {
     int32 $tag;
-    Node $next;
+
+    // `Node?`, because a chain ends: the last link holds nothing. a bare `Node` is now a promise that
+    // there *is* an object, so the type is where "this one may be the end" gets said
+    Node? $next;
 
     destructor()
     {
@@ -22,11 +25,13 @@ function chain() : void
     Node $a = Node(1, $b);
 
     echo $a->tag;
-    echo $a->next->tag;
-    echo $a->next->next->tag;
+    // `$a` is a `Node` and certainly there, so the first hop is a plain `->`. every hop after it goes
+    // through a `Node?` - the field that ends the list - and `?->` is what reaches through one
+    echo $a->next?->tag;
+    echo $a->next?->next?->tag;
 
-    // a class is nullable, and the tail of a list is how you notice
-    echo $a->next->next->next == null;
+    // the tail of a list is how you notice, and the type is what made you handle it
+    echo $a->next?->next?->next == null;
     echo 10;
 }
 

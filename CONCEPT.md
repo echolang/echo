@@ -592,14 +592,19 @@ class String2 {
 }
 
 $stackString = String("Hey Whats up"); // allocated on the stack 
-$arcString = new String("Something else"); // same as Shared<String>
 
-// you can convrt both into references Ref<String> aka &String
+// NOTE: `&` over a *class* does not give `String2&` - it gives `weak<String2>`, a reference that does
+// not keep the object alive, and reading one needs `strong(...)`, `guard`, `??` or `?->`. this section
+// is the original sketch; book/concept/ownership_and_moving.md and book/concept/nullability.md are the
+// current specification of both
+$arcString = String2("Something else"); // a class: reference counted, on the heap. there is no `new`
+
+// a struct is borrowed with `&`, which gives `String&`. a *class* is different - see the note below
 $strRef1 = &$stackString;
 $strRef2 = &$arcString;
 
 // auto references when just beeing read.
-// the compiler implicitly converts this to print(const Ref<String> $string)
+// the compiler implicitly converts this to print(const String& $string)
 function print(String $string) : void {
     echo $string;
 }
@@ -620,7 +625,7 @@ print($stackString); // implicit reference
 print($strRef1); // explicit reference
 
 // heap behavior
-print($arcString); // implicit reference because Shared<String> can be implicitly converted to Ref<String>
+print($arcString); // implicit reference: a class handle borrows as `String2&`
 print($strRef2); // explicit reference
 
 // stack behavior

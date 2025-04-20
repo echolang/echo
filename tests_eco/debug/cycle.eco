@@ -1,0 +1,41 @@
+// **the printer walks the static type, not the object graph.** `Node` is on the path the moment it is
+// entered, so the second occurrence is cut with `<cycle>` - a three-element list still prints one node.
+// following the real graph would need a runtime visited-set and has no bound on its output
+
+class Node
+{
+    int32 $v;
+    Node? $next;
+
+    constructor(int32 $v)
+    {
+        $this->v = $v;
+        $this->next = null;
+    }
+}
+
+$a = Node(1);
+$a->next = Node(2);
+
+dprint($a);
+
+// **mutual** recursion, where neither type repeats immediately - the path set holds every type on the way
+// down, not just the one directly above, so A -> B -> A is cut at the second A
+class Ping { int32 $tp; Pong? $pong; constructor(int32 $t) { $this->tp = $t; $this->pong = null; } }
+class Pong { int32 $tq; Ping? $ping; constructor(int32 $t) { $this->tq = $t; $this->ping = null; } }
+
+$pong = Pong(2);
+$pong->ping = Ping(3);
+
+$ping = Ping(1);
+$ping->pong = $pong;
+
+dprint($ping);
+
+// and a handle that names itself, which the path set cuts before the runtime ever sees the second read
+class Self { int32 $v; Self? $me; constructor(int32 $v) { $this->v = $v; $this->me = null; } }
+
+$s = Self(9);
+$s->me = $s;
+
+dprint($s);

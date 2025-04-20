@@ -1,0 +1,18 @@
+// `**` on integers, which lowers to llvm.pow through the same resolver every #[intrinsic]
+// declaration goes through
+//
+// this had no e2e coverage at all, which is how the site came to ask LLVM for `llvm.pow.f64.f64` -
+// a two-entry overload vector handed to an intrinsic with one overload type, producing a mangled
+// name LLVM never defines. the value happened to survive the JIT, so nothing pointed at it
+//
+// the operator's own semantics are unchanged and deliberately not asserted beyond this: both
+// operands are widened to double and the result truncated back to int32, which is what the
+// implementation has always done
+
+int32 $square = 2 ** 10;
+int32 $cube = 3 ** 3;
+int32 $unit = 5 ** 0;
+
+echo $square;
+echo $cube;
+echo $unit;

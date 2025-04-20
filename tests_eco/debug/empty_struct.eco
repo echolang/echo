@@ -1,0 +1,7 @@
+// a property layout with nothing in it prints on one line rather than as an empty block - there is no
+// body to indent, and `{\n}` reads as though something were missing
+
+struct Nothing {}
+
+$n = Nothing();
+dprint($n);

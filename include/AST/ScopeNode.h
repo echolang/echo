@@ -109,6 +109,18 @@ namespace AST
             child.parent_ptr = this;
         }
 
+        // **registers the name only.** the declaration does not become a statement of this scope, so
+        // nothing emits its initializer - the caller is a statement that owns the declaration itself and
+        // decides when it runs
+        //
+        // `guard` is why this exists: its binding has to be resolvable by every statement after it, but
+        // its initializer must run *once*, inside the guard's own branch. registering through add_vardecl
+        // below put the declaration in the child list as well, so the initializer was emitted twice - once
+        // as an ordinary statement and once by the guard - and the second retain leaked
+        void declare_variable(VarDeclNode &vardecl);
+
+        // registers the name **and** appends the declaration as a statement, which is what an ordinary
+        // `T $x = ...;` wants
         void add_vardecl(VarDeclNode &vardecl);
 
         // appends the declaration to the child list so codegen emits its body. it does *not*

@@ -1,0 +1,18 @@
+--- OUT --->
+[L1] {
+  [L2] $next = {
+    [L3] $next = {
+      [L4] $next = {
+        [L5] $next = {
+          [L6] $next = {
+            [L7] $next = {
+              [L8] $next = {
+                [L9] $next = <max depth>
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

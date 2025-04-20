@@ -1,0 +1,8 @@
+mode: build
+
+--- OUT --->
+[Point] {
+  [float32] $x = 24
+  [float32] $y = 6
+}
+[bool] true

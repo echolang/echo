@@ -1,0 +1,11 @@
+--- OUT --->
+1
+2
+4
+1
+3
+900
+--- RAST --->
+// retain inside the body, release in the teardown - the read happens before the destroy
+CHECK: tempbind<Node>(vardecl<type<Pair>>($__temp) = call make(
+CHECK: retain<Node>(ma<Node>(varref<Pair>(var($__temp))->node)); release(ma<Node>(varref<Pair>(var($__temp))->node))

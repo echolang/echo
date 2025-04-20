@@ -1,0 +1,29 @@
+--- OUT --->
+3
+3.000000
+3.000000
+3
+3
+3.000000
+--- IR --->
+CHECK: define i32 @main()
+
+# no float intrinsic touches the integer abs. scoped here rather than at the end of the section: a
+# CHECK-NOT covers the region between its neighbouring CHECKs, so to say anything about how $abs_i
+# lowers it has to sit above the check that matches it
+CHECK-NOT: llvm.fabs.i32
+CHECK-NOT: llvm.fabs.i64
+
+# the integer argument reaches the *generic* abs, instantiated at int32, rather than either intrinsic
+# overload. there is no llvm.fabs for an integer, so getting this wrong could not even lower - the
+# real risk is the quieter one of routing an int through a double and back
+CHECK: call i32 @_math_absZZMLPiGMLPi(i32
+
+# while both float widths take the concrete intrinsic, each at its own precision
+CHECK: call double @llvm.fabs.f64(double
+CHECK: call float @llvm.fabs.f32(float
+
+# min with six candidates and none of them generic
+CHECK: call i32 @llvm.smin.i32(i32
+CHECK: call i64 @llvm.smin.i64(i64
+CHECK: call double @llvm.minnum.f64(double

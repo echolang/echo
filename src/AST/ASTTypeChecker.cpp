@@ -19,6 +19,7 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/LiteralValueNode.h"
 
@@ -46,19 +47,34 @@ namespace AST
 // answers with the reason rather than a bool, so each site can frame it for the destination it is
 static const char *null_rejection_reason(const ValueType &to)
 {
+    // **one question now: does this destination admit absence at all?** it used to be a list of the kinds
+    // that happened to reject null, which meant every kind not on the list quietly accepted it - and a
+    // class was the big one. `Foo $x = null;` compiled, so a class handle was nullable whether its author
+    // wanted it or not, and nothing could be relied on to hold an object
+    //
+    // a weak reference is admitted without carrying the flag: an empty weak is an ordinary value, and
+    // `weak<T>` has no non-empty spelling to contrast with the way `ptr<T>` has `T&`
+    if (to.is_nullable() || to.is_weak()) {
+        return nullptr;
+    }
+
     // a borrow is the type that promises it is never null, so seeding one with null defeats the only
-    // guarantee it carries (book/concept/pointers_and_refs_v2.md, "Two pointer types")
-    if (to.is_pointer() && !to.is_nullable()) {
+    // guarantee it carries (book/concept/pointers_and_refs_v2.md, "Two pointer types"). it keeps its own
+    // message because it has its own *other* spelling - `ptr<T>`, not `T&?`
+    if (to.is_pointer()) {
         return "declare it as a nullable pointer instead";
     }
 
     // a callable's *environment* slot is nullable - that is how a non-capturing closure is represented -
-    // but its function slot is not, so there is no null callable that could be tested before calling
+    // but its function slot is not. so a `function<...>` still rejects null, and now has somewhere to send
+    // the author who wanted one: `function<...>?` is a tagged pair with a real empty value
     if (to.is_callable()) {
-        return "a callable has no empty value, so give it a function";
+        return "a callable has no empty value - write 'function<...>?' if it may be absent";
     }
 
-    return nullptr;
+    // and everything else, which before this could not be written at all. the message names the spelling
+    // rather than only refusing, because the destination is almost always one `?` away from being right
+    return "add '?' to its type if it may be absent";
 }
 
 static bool demands_exact_conversion(const ValueType &type)
@@ -66,7 +82,9 @@ static bool demands_exact_conversion(const ValueType &type)
     // a callable joins the list for the same reason a pointer is on it: there is no conversion between
     // two signatures. leaving it off would let a cast be silently accepted between two callables that
     // agree on nothing, and the only thing that catches a wrong `fn` slot afterwards is a crash
-    return type.is_pointer() || type.has_complex_type() || type.is_callable();
+    // and a weak, for the third time the same reason: there is no conversion into or out of one, so a cast
+    // that claimed otherwise would be reinterpreting a handle whose object may already be gone
+    return type.is_pointer() || type.has_complex_type() || type.is_callable() || type.is_weak();
 }
 
 // names the storage an assignment target denotes, so a const diagnostic can say what the user
@@ -129,15 +147,6 @@ static const ExprNode *strip_implicit_casts(const ExprNode *expr)
         expr = cast->expr;
     }
     return expr;
-}
-
-// "did the user write null here" - the entry condition every null rule shares, paired one to one
-// with null_rejection_reason. spelled once so an arrival site cannot get the rule right and the
-// question wrong: the sites that skipped the strip judged a cast-wrapped null differently
-static bool is_written_null(const ExprNode *expr)
-{
-    const ExprNode *written = strip_implicit_casts(expr);
-    return written != nullptr && written->get_node_type() == NodeType::n_null;
 }
 
 TypeChecker::TypeChecker(Bundle &bundle) :
@@ -302,23 +311,68 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
         }
     }
 
-    // reaching a member needs an address to reach it from, and a base with no storage has none
-    // reported here rather than left to gen_lvalue's contextless "Expression is not addressable",
-    // which is what `$a->get()->x` used to abort with. binding the intermediate to a local is the
-    // answer, and for a class it is also the answer to *who releases it* - which is why chaining
-    // through a call result stays out until temporaries have owners (todo/A13)
-    auto &base = node.get_base_node();
-    if (base.has() && base.is_expression_node()) {
-        auto *base_expr = base.unsafe_ptr<ExprNode>();
-        if (!is_place_expression(*base_expr) && base_expr->result_type().has_complex_type()) {
-            _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(node.get_member_name()),
-                fmt::format(
-                    "'{}' has no storage to read a member from - bind it to a variable first",
-                    base_expr->result_type().get_type_desciption()));
-        }
+    // **and a base that has no properties at all**, which is a different question from the unknown
+    // member above and was answered nowhere: `$p->x` over a `ptr<int32>` reached codegen and died on
+    // gen_member_lvalue's contextless "Cannot access member 'x' of 'int32'". a borrow-returning call
+    // is one more spelling of the same shape (todo/A13a), so it is worth a location either way
+    //
+    // is_undetermined_type is the reason this is safe to ask here: it is the one spelling of "no
+    // information", so a type parameter or an unresolved call - whose result_type() is void, on top of
+    // the UnknownFunction already reported - passes through rather than earning a second diagnostic.
+    // an interface is excluded because the check above already covers it: it has a complex type and no
+    // properties, so a `->x` on one is already an UnknownMember
+    // **one chain, so a base earns exactly one message.** the three arms below are three different
+    // things that can be wrong with `E->x`, in order of how specific the advice is - and they were an
+    // `if` and a separate `if`/`else if` until a weak base collected two of them at once, which reads as
+    // two problems where there is one
+    //
+    // a weak base first, because "has no members" is true of it but unhelpful: the object it names does
+    // have the member, and what is missing is the upgrade that proves the object is still there
+    if (base_type.is_weak()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.get_member_name()),
+            fmt::format(
+                "'{}' cannot be read through - it does not keep its object alive, so the object may "
+                "already be gone. upgrade it first with 'strong(...)', or reach through it with '?->'",
+                base_type.get_type_desciption()));
+    }
+    // **`->` through something that may not be there.** the member exists; what is not guaranteed is the
+    // value holding it, so the message names the three ways through rather than claiming the member is
+    // wrong. this is the check that makes `Foo?` worth having: without it a nullable would read exactly
+    // like a `Foo` right up until the one execution where it was absent
+    //
+    // **a pointer is excluded**, and that is deliberate rather than an oversight. `ptr<T>` carries this
+    // same flag, but `->` through one is the language's established auto-deref and
+    // book/concept/pointers_and_refs_v2.md documents null-checking the *address* instead. changing that
+    // is a separate decision about pointers, not part of introducing `T?`
+    else if (base_type.is_nullable() && !base_type.is_pointer()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.get_member_name()),
+            fmt::format(
+                "'{}' may not be there, so '->' cannot reach through it - use '?->' to skip when it is "
+                "absent, '??' to supply a replacement, or 'guard' to bind it once and read it plainly",
+                base_type.get_type_desciption()));
+    }
+    else if (!is_undetermined_type(base_type) && !base_type.has_property_layout()
+        && !base_type.is_interface()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.get_member_name()),
+            fmt::format(
+                "'{}' has no members - only a struct or a class has properties to reach with '->'",
+                base_type.get_type_desciption()));
     }
 
+    // **a base with no storage is no longer this pass's question** (todo/A13). it used to be reported
+    // here - "has no storage to read a member from" - because there was no answer to give: a member is
+    // reached from an address, and a value nobody stored has none. both halves have one now, and both
+    // live where the answer is rather than where the shape is visible:
+    //
+    //  - a *borrow*-returning call already **is** the address, so it is simply lowered (A13a, the arm in
+    //    LValueCodegen::gen_place)
+    //  - a *value*-returning call is given storage by AST::OwnershipPass, which is the only pass that can
+    //    both create the temporary and say who destroys it (A13b) - and the three positions that cannot
+    //    be made safe, an address, a borrow and a write, are refused *there*, each naming what would
+    //    have gone wrong. keeping a vaguer copy here reported every one of them twice
     RecursiveVisitor::visitMemberAccess(node);
 }
 
@@ -358,16 +412,78 @@ void TypeChecker::visit_instanceof_expr(InstanceOfExprNode &node)
     RecursiveVisitor::visit_instanceof_expr(node);
 }
 
+void TypeChecker::visit_strong_expr(StrongExprNode &node)
+{
+    const ValueType operand_type = node.operand->result_type();
+
+    // reported here rather than in the parser for the reason every type question in this compiler is: at
+    // parse time the operand may be a bare type parameter, an unsettled call, or an element access whose
+    // contract a later monomorphizer round attaches. by the time this pass runs every type is answered
+    //
+    // is_undetermined_type still passes through, because a call that never resolved has an
+    // UnknownFunction already and does not need a second diagnostic on top of it
+    if (!operand_type.is_weak() && !is_undetermined_type(operand_type)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token),
+            fmt::format(
+                "'strong' needs a weak reference, not '{}' - there is nothing to upgrade, and a value "
+                "that owns its object is already as strong as it gets",
+                operand_type.get_type_desciption()));
+    }
+
+    RecursiveVisitor::visit_strong_expr(node);
+}
+
+// **an address of something that has no address.** by the time this pass runs, every legitimate borrow of
+// a value with no storage has been reseated onto a temporary's varref by AST::OwnershipPass, so an operand
+// that is still neither a place nor pointer-typed means two gates disagreed: AST::argument_fit ranked
+// t_borrow_temporary where the ownership pass declined to mint a slot
+//
+// a *guard rail*, not a user diagnostic - nothing a program can be written to say reaches it. it exists
+// because the alternative failure is the worst kind this compiler has: ExprCodegen::gen_addr_of hands the
+// operand to gen_lvalue, which throws "Expression is not addressable" with no source location at all, far
+// from whichever rule was wrong. one visitor arm converts every future divergence between those two gates
+// into a located error
+//
+// is_undetermined_type passes through for the reason it does everywhere else: an unsettled call already
+// has its own issue and does not need a second one stacked on top
+void TypeChecker::visit_addr_of_expr(AddrOfExprNode &node)
+{
+    // **the same predicate AST::OwnershipPass mints slots from, not a second spelling of it.** a guard
+    // rail that re-derives the rule it polices stops policing it the moment either copy grows an arm,
+    // which is precisely the divergence this arm exists to catch
+    if (borrow_operand_needs_storage(*node.operand)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(location_of_expression(node.operand)),
+            fmt::format(
+                "'{}' has no storage to take the address of, and nothing gave it any. This is a compiler "
+                "bug - AST::argument_fit and AST::OwnershipPass disagree about this operand",
+                node.operand->result_type().get_type_desciption()));
+    }
+
+    RecursiveVisitor::visit_addr_of_expr(node);
+}
+
 // `ref_count<T>(T& $handle)` infers T from anything, so overload resolution admits `ref_count($aStruct)`
 // and nothing below it says no. reported here for the reason check_abort_message's rule is: the only
 // other reader is ExprCodegen, which throws an *internal compiler error* with no source location, and
 // that is not the user's mistake to read
+//
+// `weak_count` has the same signature and the same hole, so it is checked here rather than beside itself:
+// the two read two words of one header and there is one thing wrong you can do to either
 void TypeChecker::check_ref_count_argument(FunctionCallExprNode &node)
 {
-    if (!node.decl->is_builtin()
-        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_ref_count) {
+    if (!node.decl->is_builtin()) {
         return;
     }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (kind != BuiltinKind::t_ref_count && kind != BuiltinKind::t_weak_count) {
+        return;
+    }
+
+    const char *name = kind == BuiltinKind::t_weak_count ? "weak_count" : "ref_count";
 
     if (node.arguments.empty() || node.arguments[0] == nullptr) {
         return;
@@ -388,8 +504,37 @@ void TypeChecker::check_ref_count_argument(FunctionCallExprNode &node)
     if (!handle_type.is_class()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_function_name),
-            fmt::format("'ref_count' needs a class handle, not '{}' - only a class carries a "
-                "reference count", handle_type.get_type_desciption()));
+            fmt::format("'{}' needs a class handle, not '{}' - only a class carries a "
+                "reference count", name, handle_type.get_type_desciption()));
+    }
+}
+
+// `dprint<T>(T& $value)` renders whatever it is handed, so there is exactly one thing wrong you can do to
+// it - and it is reachable. `argument_fit` treats void as t_undetermined, which is *neutral* rather than a
+// mismatch, so `dprint(some_void_call())` resolves with T = void and reaches codegen, where the failure is
+// an internal compiler error with no source location. that is check_ref_count_argument's reason, verbatim
+//
+// nothing else is refused. a still-generic T returns early exactly as its neighbour above does, because
+// the monomorphizer already reports an uninstantiated call and a second diagnostic on top of it is noise;
+// and every other type has a rendering, which is the whole point of the builtin
+void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin() || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_dprint) {
+        return;
+    }
+
+    if (node.arguments.empty() || node.arguments[0] == nullptr) {
+        return;
+    }
+
+    // the parameter is `T&`, so what arrives is the address of the slot - one level out from the value
+    // being printed, exactly as ref_count's argument is
+    const ValueType printed_type = value_type_of(node.arguments[0]->result_type());
+
+    if (printed_type.is_void()) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            "'dprint' has nothing to print - this expression produces no value");
     }
 }
 
@@ -486,6 +631,14 @@ void TypeChecker::check_call_argument(
 
 void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
+    // **outside the generic gate below**, unlike its two neighbours, because the one thing it catches is
+    // precisely a call the monomorphizer could not instantiate: `dprint(some_void_call())` binds T to
+    // void, which is a type there is no slot to allocate, so `decl` is still the template when this pass
+    // runs. inside the gate it would never fire and the failure would stay a location-less codegen throw
+    if (node.decl != nullptr) {
+        check_dprint_argument(node);
+    }
+
     // generic templates are resolved to concrete instances by the monomorphizer; only a
     // resolved, non-generic callee has stable parameter types to check against
     if (node.decl && !node.decl->is_generic()) {
@@ -696,14 +849,23 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         if (lhs_null != rhs_null) {
             const ValueType &other = lhs_null ? rhs : lhs;
             // a class handle is itself the address, so it is compared directly - there is no slot to
-            // peel to and `:$` on it would ask about the variable rather than the object. a struct has
-            // no runtime representation that could be absent, which is why only these two answer
-            if (!other.is_pointer() && !other.is_class()) {
+            // peel to and `:$` on it would ask about the variable rather than the object.
+            //
+            // and **anything nullable**, which is what generalising the flag added here: a `T?` is exactly
+            // the type that may be absent, whatever `T` is, so asking is always meaningful. for a wrapped
+            // one - `int32?`, a nullable struct - it is a tag test rather than an address comparison, and
+            // ExprCodegen::gen_has_value is the one place that tells the two shapes apart
+            //
+            // a weak too: it answers whether the reference was ever taken. **not** whether its object is
+            // still alive, which is `strong($w)` - so the refusal below is worth keeping distinct from
+            // the ones above rather than folded into a single "cannot compare"
+            if (!other.is_pointer() && !other.is_class() && !other.is_nullable() && !other.is_weak()) {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(node.op_node->token_literal),
                     other.is_struct()
-                        ? fmt::format("cannot compare '{}' against null - a struct is always there",
-                            other.get_type_desciption())
+                        ? fmt::format("cannot compare '{}' against null - it is always there, write "
+                            "'{}?' if it may be absent",
+                            other.get_type_desciption(), other.get_type_desciption())
                         : fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
                             other.get_type_desciption()));
             }
@@ -969,7 +1131,14 @@ void TypeChecker::visitVarDecl(VarDeclNode &node)
                 node.name()));
     }
 
-    if (node.init_expr && node.has_type()) {
+    // a guard's binding is deliberately one level less nullable than its initializer - the statement
+    // around it is what makes that sound, by only reaching the declaration on the path where the value
+    // was there. so the ordinary fit rule is skipped rather than relaxed: relaxing it would let *every*
+    // declaration drop a `?`, which is exactly what this whole phase exists to prevent
+    //
+    // what still gets checked is the payload, in Parser::parse_guard: a declared type that does not match
+    // what is inside the nullable is refused there, where the two are both in hand
+    if (node.init_expr && node.has_type() && !node.binds_unwrapped) {
         check_destination_fits(Destination::t_declaration, node.type(), *node.init_expr, node.token_varname);
     }
 

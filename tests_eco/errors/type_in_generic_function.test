@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:12
+'P' cannot be declared inside a generic function's body - it has no access to the enclosing type parameters. Declare it at file scope instead.
+Begin: 'P'
+End: 'P'
+Code excerpt:
+ [10]> {
+ [11]>     struct P { T $x; }
+                 ^
+ [12]>     return 1;
+
+Critical issues found, cannot compile.

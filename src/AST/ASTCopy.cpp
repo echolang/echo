@@ -54,6 +54,18 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         return AST::CopyKind::t_retain;
     }
 
+    // and a weak reference, which needed **no new kind**: `t_retain` says "one more reference to the same
+    // object", and one more weak reference is exactly that. which count moves is read off the ValueType at
+    // the two sites that emit the code (ClassCodegen::gen_retain_value / gen_release_value), so the copy
+    // taxonomy stays four ways of copying rather than five
+    //
+    // that also means the `releases_old` gate in OwnershipPass, which asks `classify_copy(...) ==
+    // t_retain`, admits a weak assignment target with nothing added: `$node->prev = &$other` gives back
+    // the weak reference it was holding, in the order gen_assign already fixes
+    if (type.is_weak()) {
+        return AST::CopyKind::t_retain;
+    }
+
     if (AST::copy_constructor_for(type) != nullptr) {
         return AST::CopyKind::t_constructor;
     }

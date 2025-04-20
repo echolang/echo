@@ -1,0 +1,24 @@
+// `echo` lowers to a variadic `printf`, and a variadic callee has no parameter type to convert
+// against - so the *caller* owes C's default argument promotions. anything narrower than an int has
+// to be widened to one and a `float32` to a double, or `%d` reads four bytes where one was passed
+// and `%f` reads eight where four were. only the AArch64 backend does that on our behalf, so on the
+// machine this was written on the printed output is right either way: the IR section is what makes
+// this case load-bearing, and the OUT section is what makes it readable
+//
+// every value here is echoed *directly*, never through a wider local - that indirection is exactly
+// what hid the defect (see functions/return_integer_widths.eco, which still routes that way on
+// purpose to test the return conversion instead)
+
+int8 $min_i8 = -128;
+int16 $min_i16 = -32768;
+uint8 $max_u8 = 255;
+uint16 $max_u16 = 65535;
+bool $flag = true;
+float32 $quarter = 0.25;
+
+echo $min_i8;
+echo $min_i16;
+echo $max_u8;
+echo $max_u16;
+echo $flag;
+echo $quarter;

@@ -1,18 +1,23 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
+#include "AST/ASTNullability.h"
 #include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
+#include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/VarDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/TemporaryBindExprNode.h"
 #include "AST/VarNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
@@ -42,62 +47,6 @@
 namespace Compiler::LLVM
 {
 
-// how `echo` prints one value: the printf conversion, and the primitive the value has to be
-// widened to before it is handed to a variadic call. both halves sit in one row because C's
-// default argument promotions are part of the conversion rather than a step after it - printf
-// reads exactly what the format says, so `%d` against a raw i8 reads four bytes where one was
-// passed, and `%f` against a raw float reads a double. only the AArch64 backend performs those
-// promotions on our behalf, which is why passing the value raw looked correct on arm64 macOS and
-// printed the untruncated int (300 for an int8 holding 44) and 0.000000 for a float32 on x86-64
-//
-// the promoted type is chosen to agree with the format exactly - unsigned widens to uint32 under
-// `%u` rather than to the int32 C's integer promotion would strictly give - so the two cannot
-// drift apart. a table rather than an if-cascade so that adding a primitive is one row and cannot
-// silently reuse a neighbouring width: `usize`/`isize` print as their concrete 64 bit width, which
-// is what ECO_TARGET_POINTER_SIZE says on every target wired up today
-struct EchoConversion
-{
-    // null for a type echo has no conversion for
-    const char *format;
-    AST::ValueTypePrimitive promoted;
-};
-
-static EchoConversion printf_conversion_for(const AST::ValueType &type)
-{
-    constexpr EchoConversion unsupported{nullptr, AST::ValueTypePrimitive::t_void};
-
-    if (!type.is_primitive()) {
-        return unsupported;
-    }
-
-    switch (type.get_primitive_type()) {
-        case AST::ValueTypePrimitive::t_int8:
-        case AST::ValueTypePrimitive::t_int16:
-        case AST::ValueTypePrimitive::t_int32:
-        case AST::ValueTypePrimitive::t_bool:
-            return {"%d\n", AST::ValueTypePrimitive::t_int32};
-
-        case AST::ValueTypePrimitive::t_int64:
-        case AST::ValueTypePrimitive::t_isize:
-            return {"%lld\n", AST::ValueTypePrimitive::t_int64};
-
-        case AST::ValueTypePrimitive::t_uint8:
-        case AST::ValueTypePrimitive::t_uint16:
-        case AST::ValueTypePrimitive::t_uint32:
-            return {"%u\n", AST::ValueTypePrimitive::t_uint32};
-
-        case AST::ValueTypePrimitive::t_uint64:
-        case AST::ValueTypePrimitive::t_usize:
-            return {"%llu\n", AST::ValueTypePrimitive::t_uint64};
-
-        case AST::ValueTypePrimitive::t_float32:
-        case AST::ValueTypePrimitive::t_float64:
-            return {"%f\n", AST::ValueTypePrimitive::t_float64};
-
-        default:
-            return unsupported;
-    }
-}
 void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
 {
     // visit the expression
@@ -215,6 +164,33 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     auto left = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
+    // **a wrapped `T?` against `null`**, which is a tag test rather than an address comparison - there is
+    // no address. ahead of every arm below because the operand's *kind* is still whatever `T` was: an
+    // `int32?` would otherwise fall into the numeric arm and compare a `{ i1, i32 }` aggregate as a number
+    //
+    // only against a written `null`, never against another optional. `$a == $b` over two `int32?`s is a
+    // question about the values, and answering it here would silently compare presence instead - so it
+    // stays unhandled and the type checker's ordinary rules report it
+    if (lhsret.is_wrapped_optional() || rhsret.is_wrapped_optional()) {
+        // through AST::is_written_null rather than the raw tag: an implicit cast reconciling the null
+        // with the optional's type hides it, and this arm and AST::binary_has_builtin_meaning - which
+        // decided this comparison *has* a built-in lowering at all - have to agree about which operand
+        // was the null
+        const bool lhs_is_null = AST::is_written_null(node.lhs);
+        const bool rhs_is_null = AST::is_written_null(node.rhs);
+
+        if ((lhs_is_null || rhs_is_null) && node.op_node->op->is_identity_comparison()) {
+            const AST::ValueType &optional_type = lhs_is_null ? rhsret : lhsret;
+            llvm::Value *present = _ctx.types->gen_has_value(lhs_is_null ? right : left, optional_type);
+
+            // `$x == null` is *absent*, so the tag is inverted - and `!=` is the tag as it stands
+            _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+                ? _ctx.builder->CreateNot(present, "is_null")
+                : present);
+            return;
+        }
+    }
+
     // two class handles, or a handle against null. the only operators a class answers, and the type
     // checker has already rejected the rest - so this is a plain address comparison over two opaque
     // pointers, ahead of the pointer arm because a class type is not a t_pointer
@@ -317,14 +293,24 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                     // im kinda just copying the behavior of C with clang here
                     // cast all values to double and then call the pow intrinsic
                     // cast the result back to the original type
-                    std::vector<llvm::Type *> arg_type;
-                    arg_type.push_back(llvm::Type::getDoubleTy(*_ctx.llvm_context));
-                    arg_type.push_back(llvm::Type::getDoubleTy(*_ctx.llvm_context));
+                    //
+                    // routed through the one resolver rather than reaching for the intrinsic
+                    // directly. this site used to hand getDeclaration a two-element overload vector
+                    // for `llvm.pow`, which has one overload type - the same bug TypeLowering had,
+                    // and the reason both now ask the same question in one place
+                    llvm::Type *double_type = llvm::Type::getDoubleTy(*_ctx.llvm_context);
+                    llvm::FunctionType *pow_type = llvm::FunctionType::get(double_type, {double_type, double_type}, false);
 
-                    llvm::Function *fun = llvm::Intrinsic::getDeclaration(_ctx.current_module(), llvm::Intrinsic::pow, arg_type);
+                    std::string failure;
+                    llvm::Function *fun = declare_intrinsic(_ctx.current_module(), "llvm.pow", pow_type, failure);
+
+                    if (!fun) {
+                        throw _ctx.error(fmt::format("Cannot lower the '**' operator: {}", failure));
+                    }
+
                     std::vector<llvm::Value *> args;
-                    args.push_back(_ctx.builder->CreateSIToFP(left, llvm::Type::getDoubleTy(*_ctx.llvm_context)));
-                    args.push_back(_ctx.builder->CreateSIToFP(right, llvm::Type::getDoubleTy(*_ctx.llvm_context)));
+                    args.push_back(_ctx.builder->CreateSIToFP(left, double_type));
+                    args.push_back(_ctx.builder->CreateSIToFP(right, double_type));
 
                     llvm::Value *result = _ctx.builder->CreateCall(fun, args);
                     _ctx.value_stack.push(_ctx.builder->CreateFPToSI(result, llvm::Type::getInt32Ty(*_ctx.llvm_context)));
@@ -501,7 +487,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
                 continue;
             }
 
-            const EchoConversion conversion = printf_conversion_for(result_type);
+            const PrintfConversion conversion = printf_conversion_for(result_type);
             if (conversion.format == nullptr) {
                 throw _ctx.error(fmt::format(
                     "Unsupported argument type '{}' for 'echo' {}",
@@ -515,8 +501,10 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             arg_value = _ctx.types->coerce_value(
                 arg_value, result_type, AST::ValueType(conversion.promoted), *_ctx.current_cmp_unit);
 
+            // the newline is appended here rather than carried in the table: the table is shared with
+            // `dprint`, which ends a line once per *value* and not once per leaf it prints
             std::vector<llvm::Value *> ArgsV = {
-                _ctx.builder->CreateGlobalStringPtr(conversion.format),
+                _ctx.builder->CreateGlobalStringPtr(std::string(conversion.format) + "\n"),
                 arg_value
             };
 
@@ -806,25 +794,48 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             return;
 
         case AST::BuiltinKind::t_ref_count:
-            gen_ref_count_builtin(node);
+        case AST::BuiltinKind::t_weak_count:
+            // the kind is handed down for gen_type_query_builtin's reason: the two read two words of one
+            // header and differ in nothing else, so the routing decision is not made twice
+            gen_ref_count_builtin(node, kind);
+            return;
+
+        case AST::BuiltinKind::t_dprint:
+            gen_dprint_builtin(node);
             return;
     }
 }
 
+void ExprCodegen::gen_dprint_builtin(AST::FunctionCallExprNode &node)
+{
+    // the subject type, exactly as gen_type_query_builtin reads it: the monomorphizer bound `T` from the
+    // argument, and it is the *declared* type of what is being printed rather than anything the value
+    // itself could be asked at runtime
+    if (node.decl->instantiation_args.size() != 1) {
+        throw _ctx.error(fmt::format(
+            "'dprint' expects exactly one type argument, got {} {}",
+            node.decl->instantiation_args.size(), _ctx.function_context()));
+    }
+
+    const AST::ValueType subject = node.decl->instantiation_args[0];
+
+    // **no load, unlike gen_ref_count_builtin.** that arm wants the handle *out of* the slot; this one
+    // wants the slot itself, because a struct is walked by GEP. what arrives is already the address:
+    // the parameter is a borrow, so AST::CallResolver wrapped the argument in an AddrOfExprNode
+    node.arguments[0]->accept(*_ctx.visitor);
+    llvm::Value *address = _ctx.pop();
+
+    _ctx.debug_print->gen_dprint(LValue{address, subject});
+
+    // and nothing pushed: dprint returns void, exactly as `die` does, which is what makes it a statement
+    // rather than an expression
+}
+
 void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type)
 {
-    const AST::CoreStringLayout &layout = _ctx.core_string_layout();
-
     // both string types arrive here as a *value*, so the window is reached by extraction rather than a
-    // GEP - there is no address to walk. an owning `string` is one level further out than its window
-    llvm::Value *window = _ctx.core_types().is_string(type)
-        ? _ctx.builder->CreateExtractValue(value, { static_cast<unsigned>(layout.window_index) }, "window")
-        : value;
-
-    llvm::Value *bytes = _ctx.builder->CreateExtractValue(
-        window, { static_cast<unsigned>(layout.bytes_index) }, "bytes");
-    llvm::Value *size = _ctx.builder->CreateExtractValue(
-        window, { static_cast<unsigned>(layout.size_index) }, "size");
+    // GEP - there is no address to walk
+    const auto [bytes, size] = _ctx.gen_string_window(value, type, "");
 
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -848,13 +859,16 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
           llvm::ConstantInt::get(i64, 1) });
 }
 
-void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node)
+void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
 {
+    const bool weak = kind == AST::BuiltinKind::t_weak_count;
+    const char *name = weak ? "weak_count" : "ref_count";
+
     // the shape is TypeChecker::check_ref_count_argument's, not this arm's: a non-class argument is
     // the user's mistake and gets a located diagnostic there rather than an internal compiler error
     // here. what is left is the invariant a settled call already carries
     if (node.arguments.size() != 1 || node.arguments[0] == nullptr) {
-        throw _ctx.error(fmt::format("'ref_count' takes exactly one argument {}", _ctx.function_context()));
+        throw _ctx.error(fmt::format("'{}' takes exactly one argument {}", name, _ctx.function_context()));
     }
 
     const AST::ValueType argument_type = node.arguments[0]->result_type();
@@ -872,8 +886,11 @@ void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node)
 
     // the count itself belongs to the class subsystem, beside retain and release - this arm only routes
     // to it and fits the result to whatever the declaration promised, so the stdlib is free to say
-    // `usize` where the block holds an i64
-    llvm::Value *count = _ctx.classes->gen_strong_count(handle, handle_type);
+    // `usize` where the block holds an i64. which word, by name from ClassBox rather than by a 0 or a 1
+    llvm::Value *count = _ctx.classes->gen_count(
+        handle,
+        handle_type,
+        weak ? ClassBox::weak_index : ClassBox::strong_index);
 
     _ctx.push(_ctx.types->coerce_value(
         count, AST::ValueType(AST::ValueTypePrimitive::t_uint64), node.decl->get_return_type(),
@@ -940,9 +957,41 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
 
 void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
 {
+    // the weak reading reads the *handle out of* the slot rather than taking the slot's address, which is
+    // one load further and the opposite direction from the arm below. the two are not variations on one
+    // lowering: `&$obj` on a class hands back the block the handle names, having taken a weak reference
+    // to it, and the slot the handle happened to be sitting in is not part of the answer
+    if (node.denotes_weak_reference()) {
+        const AST::ValueType class_type = node.operand->result_type();
+
+        LValue place = _ctx.lvalues->gen_lvalue(*node.operand);
+        llvm::Value *handle = _ctx.lvalues->gen_load(place, "obj");
+
+        _ctx.value_stack.push(_ctx.classes->gen_weak_of(handle, class_type));
+        return;
+    }
+
     // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
     // gen_place. so `&$buf` on a `ptr<uint8>` yields the address of $buf itself
     _ctx.value_stack.push(_ctx.lvalues->gen_lvalue(*node.operand).address);
+}
+
+void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)
+{
+    const AST::ValueType operand_type = node.operand->result_type();
+
+    // the shape is TypeChecker's, not this arm's - a non-weak operand is the user's mistake and gets a
+    // located diagnostic there rather than an internal compiler error here
+    if (!operand_type.is_weak()) {
+        throw _ctx.error(fmt::format(
+            "'strong' reached codegen with a '{}' operand {}",
+            operand_type.get_type_desciption(), _ctx.function_context()));
+    }
+
+    node.operand->accept(*_ctx.visitor);
+
+    _ctx.value_stack.push(
+        _ctx.classes->gen_strong_upgrade(_ctx.pop(), operand_type.weak_target()));
 }
 
 void ExprCodegen::gen_null_assert(llvm::Value *address)
@@ -980,9 +1029,219 @@ void ExprCodegen::gen_deref(AST::DerefExprNode &node)
     _ctx.value_stack.push(_ctx.lvalues->gen_load(node, "deref"));
 }
 
+void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
+{
+    // the slot comes from gen_var_decl, the same one a named local gets. a temporary hangs off this node
+    // rather than off a scope, so StmtCodegen::gen_scope's sweep never sees it - here the alloca still
+    // happens where the declaration is *visited*, and this loop running before the body is what puts it
+    // ahead of every read. the same reason TemporaryBindExprNode::clone clones the temporaries first
+    for (AST::VarDeclNode *temp : node.temporaries) {
+        temp->accept(*_ctx.visitor);
+    }
+
+    const size_t depth_before = _ctx.value_stack.size();
+
+    node.body->accept(*_ctx.visitor);
+
+    // the body stopped the program - a `die` reached inside it. the teardown would be instructions
+    // after a terminator, which the verifier rejects, and nothing would run on that path anyway: an
+    // abort is exit(1), it does not unwind. the same question gen_scope asks between two statements
+    if (_ctx.block_is_terminated()) {
+        return;
+    }
+
+    // **a void body pushed nothing**, and one is reachable: `$o->get()->m();` as a statement binds a
+    // temporary for the receiver and the call answers with nothing at all. asked of the stack rather
+    // than of result_type() because gen_function_call is what decides it - a void call deliberately
+    // pushes no value - and the two must not be able to disagree. popping unconditionally read an
+    // empty stack, which is not a diagnostic but a crash
+    llvm::Value *value = _ctx.value_stack.size() > depth_before ? _ctx.pop() : nullptr;
+
+    // the value out of the way *before* the drops rather than after: they are void calls and releases,
+    // so they push nothing, and popping first keeps that a fact rather than a hope. it is also what
+    // makes the ordering the node promises real - the body has read what it wanted out of the
+    // temporary, and only then is the temporary destroyed
+    for (auto &drop : node.teardown) {
+        drop.node()->accept(*_ctx.visitor);
+    }
+
+    assert(_ctx.value_stack.size() == depth_before && "a temporary's drop leaked a value onto the stack");
+
+    if (value != nullptr) {
+        _ctx.value_stack.push(value);
+    }
+}
+
+void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    const AST::ValueType lhs_type = node.lhs->result_type();
+    const AST::ValueType result = node.result_type();
+
+    node.lhs->accept(*_ctx.visitor);
+    llvm::Value *left = _ctx.pop();
+
+    auto *present_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.present", function);
+    auto *absent_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.absent", function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "coalesce.done", function);
+
+    _ctx.builder->CreateCondBr(
+        _ctx.types->gen_has_value(left, lhs_type), present_block, absent_block);
+
+    // the present path unwraps and fits the result type. that second step matters when the two sides
+    // differ - `lookup($k) ?? 0` over an `int32?` and an untyped literal, or a nullable result the right
+    // side made non-nullable
+    _ctx.builder->SetInsertPoint(present_block);
+    llvm::Value *present = _ctx.types->coerce_value(
+        _ctx.types->gen_unwrapped(left, lhs_type),
+        AST::unwrapped_type_of(lhs_type),
+        result,
+        *_ctx.current_cmp_unit);
+    llvm::BasicBlock *present_end = _ctx.builder->GetInsertBlock();
+    _ctx.builder->CreateBr(done_block);
+
+    // **the right side is evaluated here and nowhere else**, which is the reason this is a branch rather
+    // than a select: it may be a call, and calling it on the path where the left was there would be a
+    // side effect the program did not ask for
+    _ctx.builder->SetInsertPoint(absent_block);
+    node.rhs->accept(*_ctx.visitor);
+    llvm::Value *right = _ctx.types->coerce_value(
+        _ctx.pop(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
+    llvm::BasicBlock *absent_end = _ctx.builder->GetInsertBlock();
+    _ctx.builder->CreateBr(done_block);
+
+    // the blocks the phi takes its incoming values from are the ones the builder *ended* in, not the ones
+    // it started in: either arm may have branched internally - a call with its own control flow, a nested
+    // `??` - and a phi naming the wrong predecessor is an llvm verifier failure with no source location
+    _ctx.builder->SetInsertPoint(done_block);
+    llvm::PHINode *phi = _ctx.builder->CreatePHI(
+        _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit), 2, "coalesce");
+    phi->addIncoming(present, present_end);
+    phi->addIncoming(right, absent_end);
+
+    _ctx.value_stack.push(phi);
+}
+
+void ExprCodegen::gen_chain_base(AST::ChainBaseNode &node)
+{
+    if (_ctx.chain_base_slots.empty()) {
+        throw _ctx.error(fmt::format(
+            "a chain base marker was lowered outside a '?->' chain {}", _ctx.function_context()));
+    }
+
+    // the nearest enclosing chain's, which is the top: the marker is built by the parser inside exactly
+    // one chain's continuation, and a nested chain pushes and pops around its own
+    //
+    // a *load*, because this is the value position - reaching the slot itself is gen_lvalue's arm, which
+    // is what a method receiver and a write through the chain go through
+    _ctx.value_stack.push(_ctx.builder->CreateLoad(
+        _ctx.types->get_llvm_type(node.type, *_ctx.current_cmp_unit),
+        _ctx.chain_base_slots.back(),
+        "chain.base"));
+}
+
+void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    const AST::ValueType base_type = node.base->result_type();
+    const AST::ValueType result = node.result_type();
+
+    // **evaluated once, before the branch.** the continuation reaches it through the marker rather than by
+    // re-evaluating, which is what makes `$cache->find($k)?->name` call `find` exactly once
+    node.base->accept(*_ctx.visitor);
+    llvm::Value *base = _ctx.pop();
+
+    auto *reach_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.reach", function);
+    auto *absent_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.absent", function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "chain.done", function);
+
+    _ctx.builder->CreateCondBr(
+        _ctx.types->gen_has_value(base, base_type), reach_block, absent_block);
+
+    _ctx.builder->SetInsertPoint(reach_block);
+
+    // spilled to a slot rather than kept as a value: the continuation may call a method, and a receiver
+    // is an address. two instructions to keep one receiver convention, the same trade the class release
+    // thunk makes when it spills a handle for a deinit
+    llvm::Value *unwrapped = _ctx.types->gen_unwrapped(base, base_type);
+
+    // **the slot is seated in the entry block, the store is not.** an alloca here is an alloca per
+    // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
+    // --debug, where nothing folds it away. a scope's locals are hoisted to scope entry for a weaker
+    // version of this reason: a scope is entered once per iteration, an expression is evaluated once per
+    // evaluation, so only this one can grow without bound
+    llvm::BasicBlock &entry = function->getEntryBlock();
+    llvm::IRBuilder<> entry_builder(&entry, entry.getFirstInsertionPt());
+
+    llvm::Value *slot = entry_builder.CreateAlloca(unwrapped->getType(), nullptr, "chain.slot");
+    _ctx.builder->CreateStore(unwrapped, slot);
+
+    _ctx.chain_base_slots.push_back(slot);
+    node.continuation->accept(*_ctx.visitor);
+
+    const AST::ValueType reached_type = node.continuation->result_type();
+    const bool has_value = !reached_type.is_void();
+
+    llvm::Value *reached = has_value
+        ? _ctx.types->coerce_value(_ctx.pop(), reached_type, result, *_ctx.current_cmp_unit)
+        : nullptr;
+
+    _ctx.chain_base_slots.pop_back();
+
+    llvm::BasicBlock *reach_end = _ctx.builder->GetInsertBlock();
+    _ctx.builder->CreateBr(done_block);
+
+    // the absent arm runs **nothing at all** - that is the whole difference from `??`, which evaluates a
+    // replacement. it only supplies the result type's empty value, and for a void chain not even that
+    _ctx.builder->SetInsertPoint(absent_block);
+
+    // lowered once and used by both the empty value and the phi below
+    llvm::Type *llvm_result = has_value
+        ? _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit)
+        : nullptr;
+
+    llvm::Value *absent =
+        has_value ? _ctx.types->gen_absent(result, *_ctx.current_cmp_unit) : nullptr;
+
+    llvm::BasicBlock *absent_end = _ctx.builder->GetInsertBlock();
+    _ctx.builder->CreateBr(done_block);
+
+    _ctx.builder->SetInsertPoint(done_block);
+
+    // a void chain is a statement and pushes nothing, exactly as a void call does - so gen_scope's
+    // stack-depth assertion stays true rather than being special-cased for this node
+    if (!has_value) {
+        return;
+    }
+
+    llvm::PHINode *phi = _ctx.builder->CreatePHI(llvm_result, 2, "chain");
+    phi->addIncoming(reached, reach_end);
+    phi->addIncoming(absent, absent_end);
+
+    _ctx.value_stack.push(phi);
+}
+
 void ExprCodegen::gen_null(AST::NullNode &node)
 {
-    // every pointer is the same opaque `ptr` under llvm, so one null constant serves them all
+    const AST::ValueType bound = node.result_type();
+
+    // **a wrapped `T?` has no null address to be.** `int32?` is `{ i1 __has, i32 }`, so its empty value is
+    // the tag cleared and the payload left undef - written out here rather than left to coerce_value,
+    // because there is no source value to convert *from*: `null` is the absence itself
+    //
+    // this is the one place the destination has to be known, which is what NullNode::bound_type is for.
+    // an unbound null still answers with the pointer constant below, and that is not a fallback so much as
+    // the shape every *other* nullable actually has
+    if (bound.is_wrapped_optional()) {
+        _ctx.value_stack.push(_ctx.types->gen_absent(bound, *_ctx.current_cmp_unit));
+        return;
+    }
+
+    // every pointer is the same opaque `ptr` under llvm, so one null constant serves them all - and a
+    // class handle and a weak handle are addresses too, which is exactly what has_null_representation()
+    // says about them
     _ctx.value_stack.push(llvm::ConstantPointerNull::get(
         llvm::PointerType::get(*_ctx.llvm_context, 0)));
 }

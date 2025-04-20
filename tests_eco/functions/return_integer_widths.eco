@@ -2,8 +2,9 @@
 // the *source's* signedness and a narrowing return truncates - walked over every integer width,
 // since llvm sees one `i8` for both int8 and uint8 and only the ValueType says which extend.
 //
-// narrow returns are widened into an int32 before `echo`, which has its own variadic bug for
-// types narrower than a word (todo/B15)
+// the narrow integer returns are read back through a wider local before `echo`, which keeps this
+// case about the return conversion alone - echo's own widening of a narrow value is a separate rule,
+// pinned by expressions/echo_narrow_extremes.eco
 
 function make_uint8(int32 $v) : uint8
 {

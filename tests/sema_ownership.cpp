@@ -6,12 +6,14 @@
 #include <AST/ASTDestruction.h>
 #include <AST/ASTMemberLookup.h>
 #include <AST/AssignNode.h>
+#include <AST/MemberAccessNode.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/ExprNode.h>
 #include <AST/IfStatementNode.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/ReturnNode.h>
 #include <AST/ScopeNode.h>
+#include <AST/TemporaryBindExprNode.h>
 #include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
 
@@ -31,7 +33,7 @@ namespace
         "struct Buffer {\n"
         "    usize $tag;\n"
         "    ptr<uint8> $data;\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n";
 
     // the drops in a node list, in order. a drop is an ordinary call whose declaration is a destructor -
@@ -433,7 +435,7 @@ namespace
         "    ptr<uint8> $data;\n"
         "    constructor(usize $t, ptr<uint8> $d) { $this->tag = $t; $this->data:$ = $d; }\n"
         "    constructor(Box& $other) { $this->tag = $other->tag; $this->data:$ = $other->data; }\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n";
 
     // the value a statement puts somewhere, or null when it puts none: the two statements the pass
@@ -815,4 +817,170 @@ TEST_CASE("an owning field initialized twice in one constructor is reported", "[
         "}\n");
 
     REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
+}
+
+// --- a temporary with an owner (todo/A13b) -------------------------------------------------------
+//
+// `$o->get()->tag` reads a member off a value the callee handed back and nobody stored. the pass gives
+// it storage for exactly as long as the expression reading it, and that storage needs an owner - which
+// is why this lives here rather than in the pointer tests: the node exists for the *drop*
+
+namespace
+{
+    // the one binding in a body, or null. nothing else in the pass creates one, so finding it by type
+    // is finding the rewrite
+    TemporaryBindExprNode *binding_in(Module &m)
+    {
+        for (auto *node : m.nodes.of_type<TemporaryBindExprNode>()) {
+            return node;
+        }
+        return nullptr;
+    }
+}
+
+TEST_CASE("a member of a call result is bound to a temporary", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Inner { int32 $tag; }\n"
+        "struct Outer {\n"
+        "    Inner $in;\n"
+        "    function get() : Inner { return $this->in; }\n"
+        "}\n"
+        "function f(Outer& $o) : int32 { return $o->get()->tag; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *bind = binding_in(m);
+
+    REQUIRE(bind != nullptr);
+    REQUIRE(bind->temporaries.size() == 1);
+
+    // the call *is* the initializer - the value moves into the slot rather than being copied into it
+    VarDeclNode *temp = bind->temporaries[0];
+    REQUIRE(temp->init_expr != nullptr);
+    REQUIRE(temp->init_expr->get_node_type() == NodeType::n_expr_call);
+
+    // and the body now reads out of that slot: the base is a place, which is the whole of what codegen
+    // needed - it addresses a varref through the arm a named local uses
+    REQUIRE(bind->body != nullptr);
+    REQUIRE(bind->body->get_node_type() == NodeType::n_member_access);
+
+    auto *access = static_cast<MemberAccessNode *>(bind->body);
+    REQUIRE(place_root_of(access->get_base_node().unsafe_ptr<ExprNode>()) == temp);
+
+    // `Inner` owns nothing, so there is nothing to tear down
+    REQUIRE(bind->teardown.empty());
+}
+
+TEST_CASE("an owning temporary carries its own drop", "[ownership]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "struct Outer {\n"
+        "    Buffer $buf;\n"
+        "    usize $tag;\n"
+        "    function copy_of() : Buffer { return Buffer($this->tag, null); }\n"
+        "}\n"
+        "function f(Outer& $o) : usize { return $o->copy_of()->tag; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *bind = binding_in(m);
+
+    REQUIRE(bind != nullptr);
+    REQUIRE(bind->temporaries.size() == 1);
+
+    // one drop, on the temporary itself, and it rides on the binding rather than on the enclosing
+    // statement - which is what makes a temporary inside a loop condition die once per turn
+    auto drops = drops_in_list(bind->teardown);
+    REQUIRE(drops.size() == 1);
+    REQUIRE(dropped_variable(drops[0]) == bind->temporaries[0]);
+}
+
+TEST_CASE("a class read out of a temporary is retained before the temporary is released", "[ownership]")
+{
+    // the ordering the node exists to make expressible, and neither half has an arm of its own: the
+    // retain is the ordinary "a place is copied" rule, applied by arrive_value while the expression was
+    // still the place it was written as - and only then does the temporary close over it
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Node { int32 $v; }\n"
+        "struct Pair { Node $node; }\n"
+        "struct Box {\n"
+        "    int32 $seed;\n"
+        "    function make() : Pair { return Pair(Node($this->seed)); }\n"
+        "}\n"
+        "function f(Box& $b) : void { $kept = $b->make()->node; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *bind = binding_in(m);
+
+    REQUIRE(bind != nullptr);
+    REQUIRE(bind->body != nullptr);
+    REQUIRE(bind->body->get_node_type() == NodeType::n_expr_retain);
+    REQUIRE_FALSE(bind->teardown.empty());
+}
+
+TEST_CASE("the three positions that cannot hold a temporary refuse one", "[ownership]")
+{
+    const std::string prelude =
+        "struct Buf { ptr<uint8> $data; destructor() { $this->data:$ = null; } }\n"
+        "struct Inner { int32 $tag; }\n"
+        "struct Outer {\n"
+        "    Inner $in;\n"
+        "    Buf $buf;\n"
+        "    function get() : Inner { return $this->in; }\n"
+        "    function owned() : Buf { return Buf(null); }\n"
+        "}\n";
+
+    SECTION("a write would be lost")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            prelude + "function f(Outer& $o) : void { $o->get()->tag = 9; }\n");
+        REQUIRE(has_issue_containing(*bundle, "would be lost"));
+    }
+
+    SECTION("an address kept past the statement would dangle")
+    {
+        // refused by the *destination*, not by the `&`: an address handed to a callee that reads
+        // through it and returns is fine, and is bound around the call instead
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            prelude + "function f(Outer& $o) : void { int32& $r = &$o->get()->tag; }\n");
+        REQUIRE(has_issue_containing(*bundle, "the address of its member 'tag'"));
+    }
+
+    SECTION("but a receiver, which a callee only reads through, is bound around the call")
+    {
+        // `&$o->get()` written by hand is still refused in the parser - a call is not a place whatever
+        // it returns. this is the same address written by the *parser*, for a receiver, and it is safe
+        // for a reason the spelling cannot express: the callee reads through it and returns, inside the
+        // expression that owns the temporary
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            prelude +
+            "struct Peek { int32 $n; function twice() : int32 { return $this->n * 2; } }\n"
+            "struct Holder { Peek $p; function get() : Peek { return $this->p; } }\n"
+            "function f(Holder& $h) : int32 { return $h->get()->twice(); }\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        auto *bind = binding_in(m);
+
+        // the temporary wraps the *call*, so it outlives every argument of it - and the `&` the parser
+        // wrote for the receiver now addresses an alloca
+        REQUIRE(bind != nullptr);
+        REQUIRE(bind->body != nullptr);
+        REQUIRE(bind->body->get_node_type() == NodeType::n_expr_call);
+        REQUIRE(bind->temporaries.size() == 1);
+    }
+
+    SECTION("and so would a pointer read out of it")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            prelude + "function f(Outer& $o) : void { $q = $o->owned()->data; }\n");
+        REQUIRE(has_issue_containing(*bundle, "the pointer in its member 'data'"));
+    }
 }

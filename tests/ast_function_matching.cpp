@@ -72,7 +72,24 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     // the window. the case itself needs a ComplexType carrying a published method, so it is pinned
     // end to end in tests_eco/structs/implicit_conversion; only the ordering can be asked here
     REQUIRE( ArgumentFit::t_conversion < ArgumentFit::t_declared_conversion );
-    REQUIRE( ArgumentFit::t_declared_conversion < ArgumentFit::t_undetermined );
+
+    // and a borrow of a value the compiler had to invent storage for sits below *all* of them - the last
+    // real rank. every rank above describes how an existing value is read or converted; this one adds an
+    // alloca and a lifetime to the program, so it is the fallback that lets a caller hand a value where a
+    // borrow is wanted, never a way to hide a better-matching overload
+    //
+    // pinned from both sides, because a rank in entirely the wrong place still satisfies one of them:
+    // below t_borrow means real storage always wins, and below t_promotion means `w(int64)` beats
+    // `w(int32&)` for `w(42)`. both are asserted end to end in tests_eco/functions/borrow_temporary_rank
+    REQUIRE( ArgumentFit::t_borrow < ArgumentFit::t_borrow_temporary );
+    REQUIRE( ArgumentFit::t_promotion < ArgumentFit::t_borrow_temporary );
+    REQUIRE( ArgumentFit::t_declared_conversion < ArgumentFit::t_borrow_temporary );
+    REQUIRE( ArgumentFit::t_borrow_temporary < ArgumentFit::t_undetermined );
+
+    // **a null expression still declines it**, exactly as it declines t_borrow. that is what keeps
+    // visitTypeCast correct: a cast is not an address-of, so it offers no expression and must not be
+    // told that a value reaches a borrow parameter
+    REQUIRE( AST::argument_fit(t_int32, nullptr, ValueType::make_pointer(t_int32, false)) == ArgumentFit::t_none );
 }
 
 TEST_CASE( "arity filters before anything else", "[fnmatch]" )

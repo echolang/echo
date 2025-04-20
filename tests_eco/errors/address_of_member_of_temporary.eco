@@ -1,0 +1,14 @@
+// the address of a member of a temporary outlives the temporary. binding the value to a local is the
+// answer, and unlike the write next door there is nothing a temporary could be made to do about it:
+// whatever holds the address keeps it after the statement that created the storage has ended (todo/A13b)
+
+struct Inner { int32 $tag; }
+
+struct Outer
+{
+    Inner $in;
+    function get() : Inner { return $this->in; }
+}
+
+$o = Outer(Inner(5));
+int32& $r = &$o->get()->tag;

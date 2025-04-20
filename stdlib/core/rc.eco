@@ -10,8 +10,8 @@
  * How many references name the object `$handle` holds. Zero for a null handle.
  *
  * A compiler builtin rather than a library function, because the count is a word inside the heap
- * block - `{ i64 __strong, ptr __typeinfo, %Foo }` - and no Echo spelling reaches it. Nothing links
- * against this and it has no symbol of its own.
+ * block - `{ i64 __strong, i64 __weak, ptr __typeinfo, %Foo }` - and no Echo spelling reaches it.
+ * Nothing links against this and it has no symbol of its own.
  *
  * The parameter is a **borrow**, not a value. A by-value class parameter is one more reference, so
  * a version taking `T` would answer one too high at every call - which is exactly the question the
@@ -24,3 +24,23 @@
  */
 #[builtin: "ref_count"]
 function ref_count<T>(T& $handle) : usize;
+
+/**
+ * How many handles need the *block* `$handle` names to stay readable. Zero for a null handle.
+ *
+ * The other count in the same header, and it answers a different question. `ref_count` is about the
+ * object: at zero the destructor has run and the object is gone. This one is about the memory: at
+ * zero the block itself is given back. They are not the same moment, and that gap is exactly what a
+ * `weak<T>` lives in - it keeps the block readable so it can ask whether the object is still there,
+ * instead of dangling to find out.
+ *
+ * All the strong references together hold **one** of these, seated with the first and given back by
+ * the release that takes `ref_count` to zero. So a freshly built object reads 1 here, and each
+ * `weak<T>` naming it adds one more.
+ *
+ * Mostly for tests. Nothing observable from Echo distinguishes a balanced pair of counts from a
+ * leaked one, so this is how the corpus pins a reference cycle actually being collected rather
+ * than merely appearing to be - see `tests_eco/classes/weak_cycle_no_leak.eco`.
+ */
+#[builtin: "weak_count"]
+function weak_count<T>(T& $handle) : usize;

@@ -53,8 +53,20 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     //
     // only a concrete primitive is a useful hint though - the literal parsers apply the same rule
     // to themselves, this one keeps the hint from reaching the rest of the expression too
+    //
+    // **except for a destination that admits absence**, which a `null` in this position genuinely needs:
+    // the empty value's *shape* depends on it. an address-like nullable is a null pointer and a wrapped
+    // one is a cleared tag, and a null that never learned which it was reached codegen as the former and
+    // was then wrapped as if it were present - `return null;` from a `Point?` function answered a
+    // `{ i1 true, ptr null }`, which is a value that says it is there and is not
+    //
+    // it was harmless while `null` could only ever go somewhere pointer-shaped. generalising the flag is
+    // what made the destination decide the representation, and this is the site that had to hear about it
     AST::TypeNode *expected_type = payload.context.return_type_ptr;
-    if (expected_type != nullptr && !AST::can_type_a_literal(expected_type->type)) {
+    if (expected_type != nullptr
+        && !AST::can_type_a_literal(expected_type->type)
+        && !expected_type->type.is_nullable()
+        && !expected_type->type.is_weak()) {
         expected_type = nullptr;
     }
 

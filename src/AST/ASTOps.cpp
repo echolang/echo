@@ -71,6 +71,18 @@ AST::OpPrecedence AST::Operator::get_precedence_for_token(const Token::Type &typ
         case Token::Type::t_logical_or:
             return {OpAssociativity::left, 120};
 
+        // `??` - looser than every comparison and than `&&`/`||`, tighter than assignment
+        //
+        // that placement is what makes the two readings people actually write come out right:
+        // `$a ?? $b == $c` groups as `$a ?? ($b == $c)` rather than comparing a fallback, and
+        // `int32 $v = lookup($k) ?? 0;` binds the whole coalesce rather than just the left side
+        //
+        // **right associative**, so `$a ?? $b ?? $c` is `$a ?? ($b ?? $c)` - a chain of fallbacks, each
+        // tried in turn. left associativity would ask for the non-null of `$a ?? $b` and then fall back
+        // to `$c`, which can never fire
+        case Token::Type::t_qmark_qmark:
+            return {OpAssociativity::right, 125};
+
         // assignment
         case Token::Type::t_assign:
             return {OpAssociativity::right, 130};
@@ -105,6 +117,10 @@ AST::OperatorRegistry::OperatorRegistry()
     register_predefined_token_op(Token::Type::t_xor);
     register_predefined_token_op(Token::Type::t_open_paren);
     register_predefined_token_op(Token::Type::t_close_paren);
+    // `??` is spelled by the language and registered like any other predefined symbol, so the shunting
+    // yard finds it at an operator position. what it is *not* is declarable or overloadable: it
+    // short-circuits, and a function of two evaluated operands could not
+    register_predefined_token_op(Token::Type::t_qmark_qmark);
     register_predefined_token_op(Token::Type::t_logical_or);
     register_predefined_token_op(Token::Type::t_logical_and);
     register_predefined_token_op(Token::Type::t_logical_eq);

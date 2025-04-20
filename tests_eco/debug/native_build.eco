@@ -1,0 +1,17 @@
+// dprint through the *native* path rather than the JIT. `mode: build` is the only thing in the corpus
+// exercising make_exec, and printf reaches a linked binary differently than it reaches MCJIT
+
+struct Point
+{
+    float32 $x;
+    float32 $y;
+
+    constructor(float32 $x, float32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+}
+
+dprint(Point(24.0, 6.0));
+dprint(true);

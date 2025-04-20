@@ -1,0 +1,9 @@
+// reading through something that may not be there, without saying what happens when it is not. the
+// message names all three ways through rather than only refusing, because the destination is almost
+// always one of them away from being right
+
+class Node { int32 $tag; }
+
+Node? $maybe = null;
+
+echo $maybe->tag;

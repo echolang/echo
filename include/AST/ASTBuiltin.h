@@ -40,6 +40,33 @@ namespace AST
         // a value: a by-value class parameter is +1, so the answer would be one too high at every call,
         // which is exactly the question the caller is asking
         t_ref_count,
+
+        // and the other count in the same block (ClassBox::weak_index) - how many handles need it to stay
+        // readable. the same shape as t_ref_count in every respect, so the two share their argument check
+        // and their codegen arm and differ only in which word they read
+        //
+        // it exists for a narrower reason than its sibling: a `weak<T>` is only correct if the two counts
+        // move independently, and *nothing observable from Echo distinguishes a balanced pair from a leaked
+        // one*. so the corpus pins both counts directly rather than inferring them from destructor output,
+        // which is what makes the reference cycle in tests_eco/classes an assertion instead of a hope
+        t_weak_count,
+
+        // print a value with its type and, for anything with properties, its whole structure. the same
+        // shape as the two counts above - generic, one borrow argument - but a different *kind* of
+        // builtin from all five: they fold to a constant or read one word, and this one **emits**. it is
+        // also the first whose lowering creates basic blocks, which is why its renderer is a codegen
+        // subsystem of its own rather than an arm on ExprCodegen
+        //
+        // a builtin rather than a library function because everything it prints is a compiler fact with
+        // no Echo spelling: the name of a type, the names and order of its properties, and the layout it
+        // reads them out of. `echo` covers one scalar and refuses a struct outright, which leaves
+        // debugging a value as one `echo` per field with the types remembered by hand
+        //
+        // its parameter is a **borrow** for a sharper version of ref_count's reason: a by-value class
+        // argument is +1, so a printer would report a count it created itself, and a by-value struct
+        // argument is a copy - so a struct that declares a copy constructor would run it, and the printer
+        // would be printing something other than the value it was handed
+        t_dprint,
     };
 
     // resolves a builtin name to its kind, or nullopt when the name is not one. the single place

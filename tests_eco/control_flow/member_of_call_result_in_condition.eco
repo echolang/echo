@@ -1,0 +1,34 @@
+// **the case a node exists for.** a temporary in a loop condition is bound and destroyed inside the
+// block the condition is evaluated in, so it is acquired and released once per turn - four times here,
+// three that enter the body and the one that ends the loop. hoisting it to the top of the statement
+// would have acquired it every turn and released it once (todo/A13b)
+
+struct Counter
+{
+    int32 $n;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+struct Box
+{
+    int32 $limit;
+
+    function state() : Counter
+    {
+        return Counter($this->limit);
+    }
+}
+
+$b = Box(3);
+$i = 0;
+
+while ($i < $b->state()->n) {
+    echo $i;
+    $i = $i + 1;
+}
+
+echo 99;

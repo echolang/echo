@@ -1,0 +1,64 @@
+// a borrow-returning call hands the address back as its value, so reading a member through it needs
+// no storage of its own - there is nothing to own and nothing to release. `&$o->mid()` is still
+// refused: the restriction is on taking the address of a call, not on reading through the one it
+// returned (todo/A13a)
+
+struct Inner { int32 $x; }
+
+struct Middle
+{
+    Inner $in;
+
+    function inner() : Inner&
+    {
+        return &$this->in;
+    }
+
+    function bump(int32 $by) : void
+    {
+        $this->in->x = $this->in->x + $by;
+    }
+}
+
+struct Outer
+{
+    Middle $mid;
+
+    function mid() : Middle&
+    {
+        return &$this->mid;
+    }
+}
+
+struct Holder
+{
+    ptr<Inner> $seat;
+
+    function seat() : ptr<ptr<Inner>>
+    {
+        return &$this->seat;
+    }
+}
+
+$o = Outer(Middle(Inner(5)));
+
+// a member off a borrow-returning call
+echo $o->mid()->in->x;
+
+// two levels: the base of `->x` is a call whose own receiver is a call
+echo $o->mid()->inner()->x;
+
+// written through the call, read back through the place chain - so the write landed in the
+// receiver's storage rather than in a copy
+$o->mid()->in->x = 42;
+echo $o->mid->in->x;
+
+// a method called on a borrow result. the parser spells this `AddrOf(Deref(call))`, which reaches
+// the address through the same seam the member base does
+$o->mid()->bump(3);
+echo $o->mid->in->x;
+
+// two pointer levels: `->` reaches through both, so the member is two loads deep
+$i = Inner(7);
+$h = Holder(&$i);
+echo $h->seat()->x;

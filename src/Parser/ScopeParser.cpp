@@ -3,11 +3,16 @@
 #include "AST/VarDeclNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/AssignNode.h"
+#include "AST/ASTPlaceExpr.h"
+#include "AST/TypeNode.h"
+#include "AST/GuardNode.h"
 
 #include "Parser/VarDeclParser.h"
 #include "Parser/EchoPrintParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/FuncCallParser.h"
+#include "Parser/GuardParser.h"
 #include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
 #include "Parser/WhileStatementParser.h"
@@ -36,13 +41,65 @@ void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &sco
     cursor.skip(); // the semicolon
 }
 
+void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *target)
+{
+    auto &cursor = payload.cursor;
+
+    // a chain that ended in a call is a statement of its own - `first(&$o)->bump(1);` - and needs no
+    // `=`. both kinds, because the chain discovers both: a member call and an indirect one through a
+    // callable property
+    if (AST::is_call_expression(*target)) {
+        finish_call_statement(payload, scope, target);
+        return;
+    }
+
+    // otherwise the chain named storage, and a statement may only be writing to it
+    const TokenReference assign_token = cursor.current();
+
+    if (!cursor.is_type(Token::Type::t_assign)) {
+        payload.collect_unexpected_token(Token::Type::t_assign);
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    // **the same tail Parser::parse_varexpr runs** over a `$var`-rooted target: can this be written to,
+    // and at what type. the only difference between the two statements is what the chain is rooted in -
+    // a call rather than a name - which is not a difference either question acts on
+    AST::ExprNode *value = parse_assigned_value(payload, target, assign_token);
+
+    if (value == nullptr) {
+        return;
+    }
+
+    // no is_initialization arm, and neither shape can want one: a constructor's `$this` is a name, so
+    // a call-rooted target is never its field, and `f()[]` never reaches here because an append needs
+    // storage the index arm of the postfix chain already refused a call
+    scope.children.push_back(AST::make_ref(
+        payload.context.emplace_node<AST::AssignNode>(target, value, assign_token)));
+
+    if (!cursor.is_type(Token::Type::t_semicolon)) {
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
+        cursor.try_skip_to_next_statement();
+        return;
+    }
+
+    cursor.skip(); // the semicolon
+}
+
 AST::ScopeNode & Parser::parse_scope(
-    Parser::Payload &payload, AST::ScopeNode *into, std::optional<TokenReference> block_token)
+    Parser::Payload &payload,
+    std::optional<TokenReference> block_token,
+    AST::VarDeclNode *seed_declaration)
 {
     auto &cursor = payload.cursor;
     auto &context = payload.context;
 
-    auto &scope_node = into ? *into : context.emplace_node<AST::ScopeNode>();
+    auto &scope_node = context.emplace_node<AST::ScopeNode>();
+
+    // before the first statement, so the name is resolvable while the statements that read it are parsed
+    if (seed_declaration) {
+        scope_node.add_vardecl(*seed_declaration);
+    }
 
     context.push_scope(scope_node);
 
@@ -57,7 +114,7 @@ AST::ScopeNode & Parser::parse_scope(
         if (cursor.is_type(Token::Type::t_open_brace)) {
             auto nested_brace = cursor.current();
             cursor.skip();
-            context.scope().add_child_scope(parse_scope(payload, nullptr, nested_brace));
+            context.scope().add_child_scope(parse_scope(payload, nested_brace));
 
             // next token needs to be a closing brace
             if (!cursor.is_type(Token::Type::t_close_brace)) {
@@ -93,6 +150,12 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (cursor.is_type(Token::Type::t_if)) {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
+        }
+        // `guard T $x = <nullable> else { ... }`. ahead of the declaration branch below rather than part
+        // of it: `guard` is a statement whose *shape* contains a declaration, and starts_vardecl scans a
+        // type at the statement head - which `guard` is not
+        else if (cursor.is_type(Token::Type::t_guard)) {
+            scope_node.children.push_back(AST::make_ref(parse_guard(payload, &scope_node)));
         }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
@@ -151,7 +214,18 @@ AST::ScopeNode & Parser::parse_scope(
             }
 
             if (auto *funccall_node = parse_funccall(payload, call_namespace)) {
-                finish_call_statement(payload, scope_node, funccall_node);
+                // **and whatever hangs off it**, which is the same shape the `$var ->` branch above
+                // routes into parse_varexpr: a chain rooted in a call rather than in a name. without
+                // this the statement forms lagged the expression form - `echo first(&$o)->x;` read
+                // fine while `first(&$o)->bump(1);` was `Unexpected '->'`
+                const AST::NodeReference target_ref =
+                    Parser::parse_postfix_chain(payload, AST::make_ref(*funccall_node));
+
+                if (!target_ref.has()) {
+                    continue;
+                }
+
+                finish_place_statement(payload, scope_node, target_ref.unsafe_ptr<AST::ExprNode>());
             }
         }
 

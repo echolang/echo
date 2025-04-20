@@ -1,0 +1,9 @@
+--- OUT --->
+1
+900
+4
+2
+--- RAST --->
+// one release, on the temporary itself - not a destructor call and not a property walk
+CHECK: tempbind<int32>(vardecl<type<Node>>($__temp) = call make(
+CHECK: release(varref<Node>(var($__temp)))

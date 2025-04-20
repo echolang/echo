@@ -6,6 +6,7 @@
 #include <AST/LiteralValueNode.h>
 #include <AST/MemberAccessNode.h>
 #include <AST/NullNode.h>
+#include <AST/TemporaryBindExprNode.h>
 #include <AST/VarDeclNode.h>
 #include <AST/VarNode.h>
 #include <AST/VarRefNode.h>
@@ -98,6 +99,45 @@ TEST_CASE("An address, a literal and a call result are not places", "[AST][point
     REQUIRE_FALSE(is_place_expression(*addr));
     REQUIRE_FALSE(is_place_expression(*literal));
     REQUIRE_FALSE(is_place_expression(*call));
+}
+
+TEST_CASE("can_bind_temporary admits a value with no home, and only that", "[AST][pointer]")
+{
+    // the expression half of todo/A13c: a non-place may answer a borrow parameter, because a slot can be
+    // *minted* for it. so this and is_place_expression partition the arguments a borrow accepts, and the
+    // exclusions below are what keep the partition from swallowing rules that belong elsewhere
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function get() : int { return 1; }\n"
+        "$a = 5;\n"
+        "ptr<int> $p = &$a;\n"
+        "$sum = $a + 1;\n"
+        "echo get();\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *literal = first_of<LiteralIntExprNode>(*bundle);
+    auto *call = first_of<FunctionCallExprNode>(*bundle);
+    auto *binary = first_of<BinaryExprNode>(*bundle);
+    auto *addr = first_of<AddrOfExprNode>(*bundle);
+    auto *var_ref = first_of<VarRefNode>(*bundle);
+
+    REQUIRE(literal != nullptr);
+    REQUIRE(call != nullptr);
+    REQUIRE(binary != nullptr);
+    REQUIRE(addr != nullptr);
+    REQUIRE(var_ref != nullptr);
+
+    // a value the program computed and did not name
+    REQUIRE(can_bind_temporary(*literal));
+    REQUIRE(can_bind_temporary(*call));
+    REQUIRE(can_bind_temporary(*binary));
+
+    // **an address is already a value that means an address.** minting storage for one hands out a
+    // ptr<ptr<T>>, which AST::OwnershipPass refuses anyway - so it is excluded here, where the refusal
+    // costs a rank rather than a diagnostic nobody can act on
+    REQUIRE_FALSE(can_bind_temporary(*addr));
+
+    // and a place needs nothing minted: it reaches t_borrow and never sees the temporary arm at all
+    REQUIRE_FALSE(can_bind_temporary(*var_ref));
 }
 
 TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
@@ -344,4 +384,32 @@ TEST_CASE("indexed_base_type peels borrows but stops at a nullable pointer", "[A
     }
 
     REQUIRE(saw_pointer_index);
+}
+
+TEST_CASE("A bound temporary is not a place either", "[AST][pointer][ownership]")
+{
+    // its value is a copy read out of something about to be destroyed, so `&$o->get()->x` would hand
+    // out an address that dangles at the end of the statement and `$o->get()->x = 5` would write into
+    // bytes nothing will ever read. both are refused in AST::OwnershipPass, which is the only pass that
+    // knew a temporary was wanted - and this predicate staying narrow is what keeps them refused
+    // everywhere else too (todo/A13b)
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Inner { int32 $tag; }\n"
+        "struct Outer {\n"
+        "    Inner $in;\n"
+        "    function get() : Inner { return $this->in; }\n"
+        "}\n"
+        "function f(Outer& $o) : int32 { return $o->get()->tag; }\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *bind = first_of<TemporaryBindExprNode>(*bundle);
+
+    REQUIRE(bind != nullptr);
+    REQUIRE_FALSE(is_place_expression(*bind));
+    REQUIRE_FALSE(is_assignable_target(*bind));
+
+    // and nothing under it names a variable, which is what AST::TypeChecker's "cannot return the
+    // address of a local" reads - the reason a pointer read out of a temporary has to be refused where
+    // the temporary is created rather than left to that check
+    REQUIRE(place_root_of(bind) == nullptr);
 }

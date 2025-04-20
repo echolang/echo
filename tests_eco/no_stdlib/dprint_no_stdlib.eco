@@ -1,0 +1,18 @@
+// **every reader of a `#[core:]` binding must cope with it being unbound**, and dprint has one: it asks
+// whether a value is a `string` before it treats it as the struct it is. with no stdlib there is no
+// binding at all, and the guard is what keeps that a plain struct rather than a crash
+//
+// dprint itself is declared here rather than reached from the stdlib, for the obvious reason
+
+#[builtin: "dprint"]
+function dprint<T>(T& $value) : void;
+
+struct Pair
+{
+    int32 $a;
+    int32 $b;
+}
+
+Pair $p = Pair(1, 2);
+dprint($p);
+dprint(42);

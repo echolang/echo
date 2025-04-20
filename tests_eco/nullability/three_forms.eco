@@ -1,0 +1,96 @@
+// `guard`, `??` and `?->` over every nullable there is - and over a `weak<T>`, which each of them accepts
+// by upgrading it first.
+//
+// **they are nullability features, not weak features.** none of their arms mentions a class: they are
+// keyed on "may this be absent" and nothing else, which is why one implementation serves a nullable
+// primitive, struct, class and weak alike. AST::optional_operand_of is the single place the weak case is
+// decided, so the three cannot drift apart about it
+
+class Inner { int32 $v; function get() : int32 { return $this->v; } }
+class Node { int32 $tag; Inner? $inner; }
+struct Point { int32 $x; }
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) { return null; }
+    return $n / 2;
+}
+
+// -- guard ------------------------------------------------------------------
+// the binding holds the *non-null* type, so every read of it afterwards is plain and unchecked
+
+function guarded(int32 $n) : int32
+{
+    guard int32 $v = halve($n) else { return -1; }
+    return $v + 1;
+}
+
+echo guarded(8);
+echo guarded(-1);
+
+// over a class, and over a weak - the same statement, one implementation
+function tagOf(Node? $maybe) : int32
+{
+    guard Node $n = $maybe else { return -1; }
+    return $n->tag;
+}
+
+function tagOfWeak(weak<Node> $w) : int32
+{
+    guard Node $n = $w else { return -1; }
+    return $n->tag;
+}
+
+$i = Inner(9);
+$node = Node(5, $i);
+
+echo tagOf($node);
+echo tagOf(null);
+
+weak<Node> $w = &$node;
+echo tagOfWeak($w);
+
+// -- ?? ---------------------------------------------------------------------
+// the right side runs **only** when the left is absent
+
+echo halve(8) ?? 99;
+echo halve(-1) ?? 99;
+
+// right associative, so a chain of fallbacks is tried in turn
+echo halve(-1) ?? halve(-2) ?? 42;
+
+// over a struct and over a class
+$p = origin(false) ?? Point(4);
+echo $p->x;
+
+Node? $none = null;
+$fallback = $none ?? Node(3, null);
+echo $fallback->tag;
+
+// -- ?-> --------------------------------------------------------------------
+// reach through when it is there, answer null when it is not - and everything after the `?->` is inside
+// the one short circuit, so an absent base skips the whole rest of the chain
+
+Node? $some = $node;
+
+echo $some?->tag ?? -1;
+echo $none?->tag ?? -1;
+
+// a method call, two links deep
+echo $some?->inner?->get() ?? -2;
+echo $none?->inner?->get() ?? -2;
+
+// a weak base, upgraded first
+echo $w?->tag ?? -3;
+
+// and a nullable struct, which has no address to be null at all
+Point? $herePoint = Point(4);
+Point? $noPoint = null;
+echo $herePoint?->x ?? -4;
+echo $noPoint?->x ?? -4;
+
+function origin(bool $want) : Point?
+{
+    if ($want) { return Point(0); }
+    return null;
+}

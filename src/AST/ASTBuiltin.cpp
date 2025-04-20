@@ -14,6 +14,8 @@ namespace
             { "die", AST::BuiltinKind::t_die },
             { "assert", AST::BuiltinKind::t_assert },
             { "ref_count", AST::BuiltinKind::t_ref_count },
+            { "weak_count", AST::BuiltinKind::t_weak_count },
+            { "dprint", AST::BuiltinKind::t_dprint },
         };
         return table;
     }
@@ -43,11 +45,14 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_assert:
             return 1;
 
-        // nothing to fold: size_of and align_of take no arguments at all, and ref_count's one argument
-        // is a class handle rather than a message
+        // nothing to fold: size_of and align_of take no arguments at all, the two counts' one argument
+        // is a class handle rather than a message, and dprint's is the value being printed - it renders
+        // whatever it is handed, so there is nothing about it that has to be a literal
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_ref_count:
+        case AST::BuiltinKind::t_weak_count:
+        case AST::BuiltinKind::t_dprint:
             return std::nullopt;
     }
 

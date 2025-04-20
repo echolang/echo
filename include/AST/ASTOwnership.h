@@ -21,7 +21,21 @@ namespace AST
     class VarDeclNode;
     class FunctionDeclNode;
     class FunctionCallExprNode;
+    class MemberAccessNode;
     class NodeReference;
+
+    // **the operand edge a pending temporary request means.** the owner holds its operand in one of two
+    // shapes - a plain field for an `&` or a `?->`, a NodeReference for a member access's base so the
+    // tag travels with the pointer - and that is the only thing the three callers differ in. spelled
+    // once here so reading the operand and reseating it cannot disagree about which edge they mean
+    struct PendingEdge
+    {
+        ExprNode **slot = nullptr;
+        NodeReference *base = nullptr;
+
+        ExprNode *get() const;
+        void set(ExprNode *place) const;
+    };
 
     // where a value is arriving. two of the five take a place as an implicit move; at the other
     // three a place would be a copy:
@@ -166,7 +180,56 @@ namespace AST
         // binds a discarded owning value to a synthesized local of the enclosing frame, so the scope
         // destroys it. the frame's ordinary reverse-order drop then covers it with no special case
         VarDeclNode &bind_discarded_temporary(ExprNode *expr);
-        void walk_expression(ExprNode *expr);
+
+        // a synthesized local holding `init`, positioned at `site`. what the two binders above and
+        // below share: one is a statement's worth of storage owned by the frame, the other an
+        // expression's worth owned by a TemporaryBindExprNode, and the declaration is the same
+        // declaration either way
+        VarDeclNode &make_temporary(ExprNode *init, const TokenReference &site);
+
+        // **answers the expression to use in place of `expr`**, which is `expr` itself for everything
+        // except a member access that had to be given storage. every arm reseats the edges it owns, so
+        // a replacement is observable - it returned void while nothing it visited could be replaced
+        ExprNode *walk_expression(ExprNode *expr);
+
+        // a **value** edge: the expression is read here, so a temporary requested anywhere below is
+        // bound *around this edge* and destroyed once it has been read. walk plus flush, and the pair
+        // is what keeps evaluation order honest - wrapping further out would move a temporary's
+        // initializer ahead of everything to its left
+        //
+        // its counterpart is a plain walk_expression, which is what a **place** edge does: a member
+        // base, an index base, `&`, a deref, `:$`. those are still addressing the temporary's storage,
+        // so the request travels outward through them - exactly the set AST::place_root_of walks
+        ExprNode *walk_value_edge(ExprNode *expr);
+
+        // the nodes walked so far that need storage for their operand, innermost first. two owners, and
+        // between them every way a value with no home is reached into: a **member access**, whose base is
+        // the value (`$o->get()->tag`), and an **`&`**, whose operand is - which is how a *receiver* gets
+        // one, since the parser addresses it (`$o->get()->size()`)
+        //
+        // a request rather than a rewrite: nothing is edited until a value edge flushes, so the positions
+        // that refuse one instead leave the tree exactly as it was written
+        std::vector<ExprNode *> _pending_temporaries;
+
+        // **the operand edge a request means, as one answer rather than three.** reading the operand,
+        // reseating it once its temporary exists, and naming it in a diagnostic are the same question,
+        // and asking it at three sites is what let them drift: the naming arm enumerated one owner kind
+        // and blind-cast the rest
+        PendingEdge pending_edge(ExprNode *owner) const;
+
+        // how a diagnostic names what the request was reaching into - `its member 'tag'`, or just `it`
+        std::string describe_pending(ExprNode *owner) const;
+
+        // binds every request above `mark` into a TemporaryBindExprNode wrapping `value`, in binding
+        // order, with the drops in reverse. answers `value` unchanged when there are none, which is
+        // every edge in almost every program
+        ExprNode *bind_pending_temporaries(ExprNode *value, size_t mark);
+
+        // discards every request above `mark`, reporting each: the position wanted the temporary's
+        // *address*, and an address into a value destroyed at the end of the statement is the one thing
+        // binding one cannot make safe. `action` and `outcome` are the two halves the three refusing
+        // positions differ in - an address dangles, a write is simply lost
+        void refuse_pending_temporaries(size_t mark, const char *action, const char *outcome);
 
         // a local moved out of on one branch of an `if` but not the other. the chapter says the
         // variable is unset afterwards, which settles reading it - but not who destroys the value on
@@ -179,7 +242,18 @@ namespace AST
         // parameter it is arriving at, or null when the destination is not one. answers the
         // expression to use in place of `expr` - the operand with the `mv` marker erased, or `expr`
         // unchanged
+        //
+        // an arrival is a value edge, so this is arrive_value wrapped in the same flush
+        // walk_value_edge performs - and the flush is deliberately **last**. that ordering is what
+        // makes a class-typed member read off a temporary retain-then-release with no arm of its own:
+        // arrive_value sees a place and wraps it in a RetainExprNode through the ordinary copy rule,
+        // and only then does the temporary that owns the storage close over it
         ExprNode *resolve_value_arrival(
+            ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination);
+
+        // resolve_value_arrival's own body, without the flush. split out rather than inlined because it
+        // has eight early returns and every one of them has to be flushed
+        ExprNode *arrive_value(
             ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination);
 
         // --- drops ----------------------------------------------------------------------------

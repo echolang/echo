@@ -1,0 +1,43 @@
+// **an upgrade retains, and something has to give that back.** `?->` and `??` accept a `weak<T>` by
+// upgrading it first, and the upgrade takes a strong reference - so the handle they branch on is one
+// reference nobody holds. without a temporary owning it the object is never released, and the leak is
+// invisible: the program is correct, the counts are silently one too high, and nothing ever says so
+//
+// this is the regression test for exactly that. the count either side of each form has to be unchanged,
+// and the destructor has to run
+
+class Res
+{
+    int32 $tag;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function balanced() : void
+{
+    Res $r = Res(1);
+    weak<Res> $w = &$r;
+
+    echo ref_count($r);
+
+    // `?->` upgrades, reads through, and gives the reference back at the end of the statement
+    echo $w?->tag ?? -1;
+    echo ref_count($r);
+
+    // `??` the same, on the path where the left side was there. bound to a name first because
+    // `ref_count` takes a borrow, and a value nothing stored has no address to borrow
+    Res $picked = $w ?? Res(2);
+    echo ref_count($picked);
+
+    // and `guard`, whose binding is a declared local - so it owns the upgrade for its scope, and the
+    // count is legitimately one higher *inside* it
+    guard Res $up = $w else { return; }
+    echo ref_count($r);
+}
+
+balanced();
+
+echo 99;

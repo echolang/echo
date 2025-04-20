@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 7:9
-cannot compare 'P' against null - a struct is always there
+cannot compare 'P' against null - it is always there, write 'P?' if it may be absent
 Begin: '=='
 End: '=='
 Code excerpt:

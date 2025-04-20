@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:1
+'dprint' has nothing to print - this expression produces no value
+Begin: 'dprint'
+End: 'dprint'
+Code excerpt:
+ [9]> 
+ [10]> dprint(nothing());
+      ^
+ [11]> 
+
+Critical issues found, cannot compile.

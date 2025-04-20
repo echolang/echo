@@ -1,0 +1,11 @@
+// **the flip weak references rest on.** a class handle used to accept `null` whether or not its author wanted
+// one, so nothing could be relied on to hold an object. now a bare `Foo` is a promise that there is one,
+// and `Foo?` is how you say there may not be
+//
+// the same rule reaches every type, which is what makes it one rule rather than a class special case
+
+class Node { int32 $tag; }
+
+Node $mustBeThere = null;
+
+int32 $alsoNot = null;

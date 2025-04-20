@@ -1,0 +1,52 @@
+// the rewrite happens on the round the receiver's call settles, and the drop it creates is an ordinary
+// generic call site the *next* round instantiates - which is the whole reason the temporary is bound by
+// AST::OwnershipPass, inside the monomorphizer's fixpoint, rather than by a pass after it. the single
+// 900 is the proof: the temporary retained the class it copied out of `$h` and released it again
+// (todo/A13b)
+
+class Node
+{
+    int32 $v;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+struct Holder<T>
+{
+    T $item;
+    int32 $tag;
+
+    function make() : Holder<T>
+    {
+        return Holder<T>($this->item, 5);
+    }
+}
+
+struct Pair<A>
+{
+    A $first;
+    int32 $tag;
+}
+
+struct Box<T>
+{
+    T $seed;
+
+    function make() : Pair<T>
+    {
+        return Pair<T>($this->seed, 42);
+    }
+}
+
+$b = Box<int32>(7);
+echo $b->make()->tag;
+echo $b->make()->first;
+
+$h = Holder<Node>(Node(1), 2);
+echo 1;
+echo $h->make()->tag;
+echo 2;
+// $h is released here, and 900 follows

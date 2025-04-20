@@ -1,0 +1,28 @@
+// a temporary bound for a borrow argument is destroyed once the call has returned - not before it, which
+// would hand the callee a dead slot, and not at the end of the scope, which would keep it alive past
+// every reader. the output order is the whole assertion
+
+struct Noisy
+{
+    int32 $tag;
+
+    constructor(int32 $t)
+    {
+        $this->tag = $t;
+        echo 1;
+    }
+
+    destructor()
+    {
+        echo 3;
+    }
+}
+
+function look(Noisy& $n) : int32
+{
+    echo 2;
+    return $n->tag;
+}
+
+look(Noisy(5));
+echo 4;

@@ -1,0 +1,17 @@
+// **the rank, pinned from above and below.** a borrow of real storage must always beat a borrow of a
+// value the compiler had to invent, and a free numeric promotion must beat inventing storage at all -
+// so t_borrow_temporary sits last, below even t_declared_conversion
+//
+// both directions in one file on purpose: a test that only pinned one of them would still pass with
+// the rank in entirely the wrong place
+
+function w(int32& $a) : int32 { return 1; }
+function w(int64 $a) : int32 { return 2; }
+
+int32 $place = 5;
+
+// a place: t_borrow beats t_promotion
+echo w($place);
+
+// a literal: t_promotion beats t_borrow_temporary
+echo w(42);

@@ -25,7 +25,7 @@ namespace
         "    ptr<uint8> $data;\n"
         "    constructor(ptr<uint8> $d) { $this->data:$ = $d; }\n"
         "    constructor(Box& $other) { $this->data:$ = $other->data; }\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n";
 
     ComplexType &layout_of(Module &m, const std::string &name)
@@ -93,7 +93,7 @@ TEST_CASE("a const borrow of the own type is a copy constructor too", "[copy_con
         "    ptr<uint8> $data;\n"
         "    constructor(ptr<uint8> $d) { $this->data:$ = $d; }\n"
         "    constructor(const Box& $other) { $this->data:$ = $other->data; }\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
@@ -110,8 +110,8 @@ TEST_CASE("what is not a copy constructor", "[copy_constructor]")
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "struct Box {\n"
             "    ptr<uint8> $data;\n"
-            "    constructor(ptr<Box> $other) { $this->data = null; }\n"
-            "    destructor() { $this->data = null; }\n"
+            "    constructor(ptr<Box> $other) { $this->data:$ = null; }\n"
+            "    destructor() { $this->data:$ = null; }\n"
             "}\n");
 
         auto &m = bundle->modules.find_module("test");
@@ -123,7 +123,7 @@ TEST_CASE("what is not a copy constructor", "[copy_constructor]")
             "struct Box {\n"
             "    ptr<uint8> $data;\n"
             "    constructor(Box& $other, int32 $extra) { $this->data:$ = $other->data; }\n"
-            "    destructor() { $this->data = null; }\n"
+            "    destructor() { $this->data:$ = null; }\n"
             "}\n");
 
         auto &m = bundle->modules.find_module("test");
@@ -155,7 +155,7 @@ TEST_CASE("a generic's instantiation finds its copy constructor through its temp
         "    ptr<T> $slot;\n"
         "    constructor(usize $t) { $this->slot:$ = null; }\n"
         "    constructor(Box<T>& $other) { $this->slot:$ = $other->slot; }\n"
-        "    destructor() { $this->slot = null; }\n"
+        "    destructor() { $this->slot:$ = null; }\n"
         "}\n"
         "function f() : void {\n"
         "    $a = Box<int32>(1);\n"
@@ -189,7 +189,7 @@ TEST_CASE("a type may declare only one copy constructor", "[copy_constructor]")
             "    ptr<uint8> $data;\n"
             "    constructor(Box& $other) { $this->data:$ = $other->data; }\n"
             "    constructor(Box& $another) { $this->data:$ = $another->data; }\n"
-            "    destructor() { $this->data = null; }\n"
+            "    destructor() { $this->data:$ = null; }\n"
             "}\n");
 
         REQUIRE(has_issue_containing(*bundle, "is already declared with these parameter types"));
@@ -203,7 +203,7 @@ TEST_CASE("a type may declare only one copy constructor", "[copy_constructor]")
             "    ptr<uint8> $data;\n"
             "    constructor(Box& $other) { $this->data:$ = $other->data; }\n"
             "    constructor(const Box& $another) { $this->data:$ = $another->data; }\n"
-            "    destructor() { $this->data = null; }\n"
+            "    destructor() { $this->data:$ = null; }\n"
             "}\n");
 
         REQUIRE(has_issue_containing(*bundle, "already has a copy constructor"));
@@ -219,7 +219,7 @@ TEST_CASE("a bare template name is not the borrow of a generic's self type", "[c
         "struct Box<T> {\n"
         "    ptr<T> $slot;\n"
         "    constructor(Box& $other) { $this->slot:$ = $other->slot; }\n"
-        "    destructor() { $this->slot = null; }\n"
+        "    destructor() { $this->slot:$ = null; }\n"
         "}\n");
 
     REQUIRE(has_issue_containing(*bundle, "names the template rather than a type"));

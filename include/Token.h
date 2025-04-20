@@ -45,6 +45,8 @@ public:
         t_op_pow,                   // **
         t_op_custom,                // <custom>
         t_qmark,                    // ?
+        t_qmark_qmark,              // ??
+        t_optional_arrow,           // ?->
         t_exclamation,              // !
         t_open_angle,               // <
         t_close_angle,              // >
@@ -67,6 +69,7 @@ public:
         t_function,                 // function
         t_return,                   // return
         t_if,                       // if
+        t_guard,                    // guard
         t_else,                     // else
         t_while,                    // while
         t_for,                      // for
@@ -75,6 +78,8 @@ public:
         t_namespace,                // namespace
         t_namespace_sep,            // ::
         t_ptr,                      // ptr
+        t_weak,                     // weak
+        t_strong,                   // strong
         t_null,                     // null
         t_struct,                   // struct
         t_class,                    // class

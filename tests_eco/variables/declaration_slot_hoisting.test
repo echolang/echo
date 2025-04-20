@@ -1,0 +1,27 @@
+--- OUT --->
+6
+7
+41
+--- IR --->
+// the one thing a declaration's position still decides: a class constructor's `$this` carries the heap
+// allocation in its *initializer*, so the slot may be seated early but the malloc may not move - and the
+// field write has to follow it rather than store through a handle nothing allocated yet
+CHECK: define ptr @_Counter
+CHECK: %this = alloca ptr
+CHECK-NOT: %value_ptr = getelementptr
+CHECK: call ptr @malloc
+CHECK: store ptr %obj, ptr %this
+CHECK: %value_ptr = getelementptr
+// both locals are seated before either initializer stores, which is the hoist. emitted at the declaration
+// each was written at, `store i32 0, ptr %i` would sit between the two allocas
+CHECK: define i32 @_sum_pairs
+CHECK: %i = alloca i32
+CHECK: %acc = alloca i32
+CHECK: store i32 0, ptr %i
+CHECK: store i32 0, ptr %acc
+// the loop body is a scope of its own and seats its local at *its* entry, inside the loop - so the slot a
+// `Pair` needs zeroed is zeroed once per turn rather than once per call
+CHECK: %p = alloca %Pair
+// a declaration the flow never reaches is seated too. before the hoist it was never visited at all
+CHECK: define i32 @_unreachable_decl
+CHECK: %never = alloca %Pair

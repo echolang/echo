@@ -1,0 +1,41 @@
+// a class-typed borrow is the address of a *slot holding a handle*, so reading a member through one
+// loads the handle out of the returned address and steps into the payload - the same hop a named
+// local's member read makes. the ref_count either side is the assertion that matters: a borrow owns
+// nothing, so nothing along the way may retain or release (todo/A13a)
+
+class Node
+{
+    int32 $v;
+
+    function get() : int32
+    {
+        return $this->v;
+    }
+}
+
+struct Holder
+{
+    Node $n;
+
+    function node() : Node&
+    {
+        return &$this->n;
+    }
+}
+
+$h = Holder(Node(7));
+
+echo ref_count($h->n);
+
+// a property through the class-typed borrow the call returned
+echo $h->node()->v;
+
+// written through it, read back through the place chain
+$h->node()->v = 9;
+echo $h->n->v;
+
+// a method on the class the borrow addresses
+echo $h->node()->get();
+
+// unchanged: no retain and no release leaked
+echo ref_count($h->n);

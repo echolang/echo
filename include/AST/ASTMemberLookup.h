@@ -29,8 +29,9 @@ namespace AST
     // lookup, and it hands back the declaration its three callers actually want. that also lines up
     // with the refusal of a nested type inside a *generic* owner at its declaration site: one
     // `Iterator` shared by `Box<int32>` and `Box<float>` is the right answer only while it cannot
-    // mention `T`, and deciding that per instantiation is what ComplexType::substituted_copy would
-    // have to grow
+    // mention `T`, and deciding that per instantiation is what TypeRegistry::derive_instantiation
+    // would have to grow - it substitutes an instantiation's properties and conformances and knows
+    // nothing about member types
 
     // the method that implicitly converts a `from` into a `to`, or null when the type declares none.
     //

@@ -1,0 +1,31 @@
+// the headline case, and nesting. the whole shape is static, so this is *one* printf per dprint - see
+// debug/buffering
+
+struct Point
+{
+    float32 $x;
+    float32 $y;
+
+    constructor(float32 $x, float32 $y)
+    {
+        $this->x = $x;
+        $this->y = $y;
+    }
+}
+
+struct Line
+{
+    Point $a;
+    Point $b;
+
+    constructor(Point $a, Point $b)
+    {
+        $this->a = $a;
+        $this->b = $b;
+    }
+}
+
+$point = Point(24.0, 6.0);
+dprint($point);
+
+dprint(Line(Point(0.0, 0.0), Point(3.0, 4.0)));

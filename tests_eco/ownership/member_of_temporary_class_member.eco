@@ -1,0 +1,38 @@
+// reading a *class* property out of a struct temporary: the read is one more reference and the
+// temporary's teardown is one less, in that order - so the object outlives the statement and dies with
+// the local that kept it. neither the retain nor the release has an arm of its own: the retain is the
+// ordinary "a place is copied" rule, applied before the temporary closes over it (todo/A13b)
+
+class Node
+{
+    int32 $v;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+struct Pair
+{
+    Node $node;
+}
+
+struct Box
+{
+    int32 $seed;
+
+    function make() : Pair
+    {
+        return Pair(Node($this->seed));
+    }
+}
+
+$b = Box(4);
+echo 1;
+$kept = $b->make()->node;
+echo 2;
+echo $kept->v;
+echo ref_count($kept);
+echo 3;
+// $kept is released here, and 900 follows

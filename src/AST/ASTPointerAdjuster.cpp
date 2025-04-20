@@ -14,6 +14,7 @@
 #include "AST/TypeCastNode.h"
 #include "AST/VarDeclNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/TemporaryBindExprNode.h"
 
 namespace AST
 {
@@ -154,8 +155,15 @@ void PointerAdjuster::bind_null_operand(ExprNode *maybe_null, ExprNode *other)
 
     // a class handle is an address too, and unlike a struct it can be absent - so `$obj == null` binds
     // the null to the class type and the comparison lowers to an icmp over two handles
+    //
+    // a weak handle likewise, and this is the *one* thing a weak may be compared to. it answers whether
+    // the reference was ever taken, not whether the object is still alive - that question is
+    // `strong($w)`, because only reading the count can answer it
+    // one question, the same one every other null site now asks: does the other side admit absence? that
+    // covers a `ptr<T>`, a `weak<T>` and any `T?` - including the wrapped shapes, whose `== null` is a tag
+    // test rather than an address comparison and which therefore need the bound type to know their shape
     ValueType other_type = other->result_type();
-    if (other_type.is_pointer() || other_type.is_class()) {
+    if (other_type.is_nullable() || other_type.is_class() || other_type.is_weak()) {
         null_node->bound_type = other_type;
     }
 }
@@ -362,6 +370,32 @@ void PointerAdjuster::adjust(Node *node)
             // comparison would be against the slot's address rather than the handle in it
             auto *instance_of = static_cast<InstanceOfExprNode *>(node);
             instance_of->operand = as_value(instance_of->operand);
+            break;
+        }
+
+        case NodeType::n_expr_temp_bind:
+        {
+            auto *bind = static_cast<TemporaryBindExprNode *>(node);
+
+            // the temporaries as the declarations they are, through the vardecl arm above: it reads the
+            // initializer *for* the declared type, which is what the call this binds needs
+            for (VarDeclNode *temp : bind->temporaries) {
+                adjust(temp);
+            }
+
+            // the body is a read, and the only one that can be spelled here: the destination this node
+            // sits at applied its own rule to the *wrapper*, which is not a place, so a body left
+            // unadjusted would keep a pointer member's slot where the value was wanted. as_value rather
+            // than as_value_for because a pointer-typed body is refused by AST::OwnershipPass - it would
+            // hand back an address into storage the teardown below destroys
+            bind->body = as_value(bind->body);
+
+            // and the drops, for the assign arm's reason: a drop's receiver is `AddrOf(place)`, which
+            // the call arm routes through adjust_place, so a member-path place with a pointer base would
+            // otherwise silently lose its deref
+            for (auto &drop : bind->teardown) {
+                adjust(drop.node());
+            }
             break;
         }
 

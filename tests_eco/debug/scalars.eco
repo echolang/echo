@@ -1,0 +1,26 @@
+// every numeric leaf, both bools, and the two float rows `dprint` overrides. `%g` at 6 significant digits
+// is FLT_DIG, so a float32 prints as written rather than as echo's `42.690000`; `%.15g` is DBL_DIG, the
+// most digits always exact
+
+float32 $f = 42.5;
+dprint($f);
+
+dprint(42.69);
+
+int32 $i = 0 - 7;
+dprint($i);
+
+int8 $tiny = 0 - 127;
+dprint($tiny);
+
+uint8 $byte = 255;
+dprint($byte);
+
+usize $big = 18446744073709551615;
+dprint($big);
+
+int64 $wide = 0 - 9007199254740993;
+dprint($wide);
+
+dprint(true);
+dprint(false);

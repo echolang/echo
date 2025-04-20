@@ -34,6 +34,7 @@ namespace AST
         void visit_type_decl(TypeDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
+        void visit_strong_expr(StrongExprNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
         void visit_closure_expr(ClosureExprNode &node) override;
@@ -42,6 +43,7 @@ namespace AST
         void visitTypeCast(TypeCastNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
+        void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
 
     private:
@@ -110,6 +112,7 @@ namespace AST
         // the shape by the time it reads it. a no-op for every other call
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
+        void check_dprint_argument(FunctionCallExprNode &node);
 
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value

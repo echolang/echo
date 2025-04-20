@@ -1,0 +1,14 @@
+// **a decision on record, not a feature.** a write through a `T&` bound to a literal lands in storage
+// nobody will read again, and the compiler does not refuse it: it cannot tell a mutating callee from a
+// reading one, and Echo already has the spelling that says which - `const T&`
+//
+// gating the rank on constness instead would refuse every borrow parameter in the stdlib, which are
+// written bare. so the program compiles, the write happens, and it is simply unobservable
+
+function bump(int32& $x) : void
+{
+    $x = $x + 100;
+}
+
+bump(1);
+echo 7;

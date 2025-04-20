@@ -1,0 +1,49 @@
+/**
+ * Printing a value while you are looking for something.
+ *
+ * In the root namespace beside `die`, `assert` and `ref_count`, and for the same reason: "what is
+ * actually in this thing" is a question you ask at three in the morning, and it belongs to no
+ * subsystem you have to opt into first.
+ */
+
+/**
+ * Print `$value` with its type, and - for anything with properties - its whole structure.
+ *
+ * ```echo
+ * dprint(42.69);
+ * // [float32] 42.69
+ *
+ * dprint($point);
+ * // [Point] {
+ * //   [float32] $x = 24
+ * //   [float32] $y = 6
+ * // }
+ * ```
+ *
+ * Where `echo` prints one scalar and refuses a struct outright, this walks in: a struct's properties,
+ * and a class handle's payload behind a null check. Pointers print as addresses and are never
+ * followed - an address may be anything, including nothing.
+ *
+ * A compiler builtin rather than a library function, because every part of that output is a compiler
+ * fact with no Echo spelling: the name of a type, the names and declaration order of its properties,
+ * and the layout it reads them out of. It has no symbol, nothing links against it, and the shape is
+ * expanded where you wrote the call - so a struct of ten scalars is *one* `printf`.
+ *
+ * The parameter is a **borrow**, not a value, and that matters more here than for `ref_count`. A
+ * by-value class argument is one more reference, so the printer would be perturbing exactly what you
+ * called it to look at; a by-value struct argument is a copy, so a struct declaring a copy
+ * constructor would run it and you would be reading the copy. As a borrow it reads in place and
+ * changes nothing - `ref_count($x)` reads the same on both sides of a `dprint($x)`.
+ *
+ * **It walks the static type, not the object graph.** A type that reaches itself is cut with
+ * `<cycle>` the second time it appears on the way down, so a three-element linked list prints one
+ * node and then `<cycle>` - the *type* `Node` is infinitely deep however short the list is.
+ * Nesting deeper than eight levels is cut with `<max depth>`, which catches a chain of distinct
+ * types that the first cut cannot see. Following the real graph would need a runtime visited-set and
+ * has no bound on its output; this has neither problem, at the cost of showing you one node.
+ *
+ * A value erased to an interface prints `<interface>`: the concrete type is a word in the heap
+ * block at runtime, and there is no name stored next to it to print.
+ */
+#[builtin: "dprint"]
+function dprint<T>(T& $value) : void;

@@ -1,0 +1,10 @@
+--- OUT --->
+[Wide] {
+  [int32] $a = 1
+  [int32] $b = 2
+  [int32] $c = 3
+  [int32] $d = 4
+}
+--- IR --->
+CHECK: call i32 (ptr, ...) @printf
+CHECK-NOT: call i32 (ptr, ...) @printf

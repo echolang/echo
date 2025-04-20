@@ -1,0 +1,43 @@
+// **the leak, pinned on purpose.** this is `weak_cycle_no_leak.eco` with the back edge changed from
+// `weak<Node>` to `Node` and nothing else, and it is here so the two can be read side by side: naive
+// reference counting never collects a cycle, and `weak<T>` is the way out rather than a fix that made
+// the problem go away
+//
+// so the absence of destructor output below is the *expected* result. neither object is torn down, both
+// blocks live until the process ends, and nothing warns - which is what
+// book/concept/ownership_and_moving.md now has to keep saying. if a future collector ever changes this,
+// this test failing is the correct way to find out
+
+class Node
+{
+    int32 $tag;
+    Node? $next;
+    Node? $prev;
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function linked() : void
+{
+    Node $a = Node(1, null, null);
+    Node $b = Node(2, null, null);
+
+    $a->next = $b;
+    $b->prev = $a;
+
+    // two owners each, and one of the two is the other object - so neither count can ever reach zero.
+    // in the weak version $a reads 1 here, which is the entire difference
+    echo ref_count($a);
+    echo ref_count($b);
+
+    // the strong references hold one weak reference between them, and nothing else is watching
+    echo weak_count($a);
+}
+
+linked();
+
+// no destructor ran. both objects are still alive, and unreachable
+echo 99;

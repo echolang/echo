@@ -49,6 +49,16 @@ namespace AST
         t_interface,
         t_generic,
         t_pointer,
+        // a non-owning handle on a counted object: `weak<Foo>`. recursive like a pointer, holding the
+        // class it names one level down, and at runtime it is literally the same address - what makes it
+        // its own type is which count it moves and that reading it needs an upgrade
+        //
+        // **a kind rather than a flag on t_class, and that is the whole safety argument.** as a flag,
+        // every one of the many `is_class()` sites - member lookup, `->`, interface widening, argument
+        // fit, the copy taxonomy - would go on answering yes and silently read through a handle whose
+        // object may be gone. as a kind, `is_class()` is false and each of those refuses it until an arm
+        // is added on purpose. it is the same reason `t_pointer` is a kind and not a flag
+        t_weak,
         // a callable value: `function<R(P...)>`. structural like a pointer and for the same reason -
         // it carries nothing but its signature, so two spellings of one signature must be one type
         t_callable,
@@ -199,6 +209,23 @@ namespace AST
             return type;
         }
 
+        // `T?`. nullability is a per-level flag exactly as const is, so these are shaped like the two
+        // above and compose the same way: `make_nullable(make_pointer(t, false))` is `ptr<T>` and is
+        // *the same type* as the `T&?` a program could now write, because it is the same two bits
+        //
+        // **idempotent, unlike make_pointer.** `T??` is `T?` - there is one `null` in the language, so
+        // there is nothing for a second level of absence to mean. that is deliberately the opposite
+        // choice from a pointer, where a second level is a genuinely different type
+        static ValueType make_nullable(ValueType type) {
+            type.type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_nullable);
+            return type;
+        }
+
+        static ValueType make_non_nullable(ValueType type) {
+            type.type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_nullable);
+            return type;
+        }
+
         // `nullable` picks the spelling: true is `ptr<T>`, false the non-nullable borrow `T&`
         // both are one machine address; nullability is the only thing the type system checks.
         // deliberately NOT idempotent - make_pointer(make_pointer(int32)) is ptr<ptr<int32>>
@@ -208,6 +235,20 @@ namespace AST
             if (nullable) {
                 type.type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_nullable);
             }
+            return type;
+        }
+
+        // `weak<Foo>`. the target is held in the same shared_ptr slot a pointee is, for the same reason:
+        // this is a recursive kind, and nothing about it needs interning to compare
+        //
+        // asserts its target is a class or a type parameter - a weak reference over anything else is
+        // meaningless, since nothing else is counted. the *diagnostic* for a written `weak<int32>` is the
+        // parser's, at the type, so by the time this is reached the question is already settled
+        static ValueType make_weak(ValueType class_type) {
+            assert((class_type.is_class() || class_type.is_type_param())
+                && "a weak reference is only meaningful over a counted type");
+            ValueType type(ValueTypeKind::t_weak, ValueTypePrimitive::t_void);
+            type._pointee = std::make_shared<const ValueType>(std::move(class_type));
             return type;
         }
 
@@ -255,11 +296,49 @@ namespace AST
             return kind == ValueTypeKind::t_callable;
         }
 
+        bool is_weak() const {
+            return kind == ValueTypeKind::t_weak;
+        }
+
+        // **is this level one machine address, whose null value is already "absent"?**
+        //
+        // the one question that decides what `T?` costs. a pointer, a class handle and a weak handle all
+        // lower to an opaque `ptr`, so a null one *is* the empty case and `T?` over them is free - no
+        // extra word, no wrapping, the same value flowing through unchanged. everything else - a
+        // primitive, a struct, an interface's two words, a callable's two words - has no spare
+        // representation to donate, so `T?` over it lowers to `{ i1 __has, T }`
+        //
+        // it lives here rather than in TypeLowering because three subsystems have to agree on it: the
+        // lowering that picks the shape, the coercion that wraps and unwraps, and the comparison that
+        // tests one against `null`. two of them answering differently is a wrong load with no diagnostic
+        bool has_null_representation() const {
+            return is_pointer() || is_class() || is_weak();
+        }
+
+        // `T?` over something with no spare null value, so it lowers to a tagged pair rather than to
+        // itself. exactly the negation above, named because it reads better at the sites that branch on it
+        bool is_wrapped_optional() const {
+            return is_nullable() && !has_null_representation();
+        }
+
+        // the class a weak reference names. a separate accessor from pointee() rather than a widening of
+        // it, so that a reader who meant "one level down a pointer" cannot silently be handed a weak's
+        // target - the two are one machine address and nothing downstream would notice
+        const ValueType &weak_target() const {
+            assert(is_weak() && _pointee);
+            return *_pointee;
+        }
+
         const CallableSignature &signature() const;
 
-        // true for `ptr<T>`, false for the borrow `T&`. only meaningful on a pointer
+        // **may this level be absent?** true for `ptr<T>` and for any `T?`, false for the borrow `T&` and
+        // for a bare `T`. one flag on the level it sits on, exactly like const
+        //
+        // it used to assert `is_pointer()`, because a pointer level was the only place nullability could
+        // sit and `ptr<T>` versus `T&` was the whole of it. generalising the flag is what gives the
+        // language `T?` over anything, and it makes `ptr<T>` fall out as the pointer level's spelling of
+        // a question every level can now be asked - see book/concept/nullability.md
         bool is_nullable() const {
-            assert(is_pointer());
             return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_nullable);
         }
 
@@ -439,7 +518,12 @@ namespace AST
 
                 // a pointer is structural: same nullability (already covered by the flag check
                 // above) and the same pointee, all the way down
+                //
+                // a weak shares the arm because it shares the representation - one recursive level in
+                // `_pointee` - and structural equality is right for the same reason: `weak<Foo>` carries
+                // no identity beyond the class it names
                 case ValueTypeKind::t_pointer:
+                case ValueTypeKind::t_weak:
                     return *_pointee == *other._pointee;
 
                 // for struct, class and interface types, compare the complex type pointers
@@ -494,6 +578,10 @@ namespace AST
         // a pointer carries no state beyond its pointee, so structural equality is enough -
         // unlike ComplexType, which is a mutable, property-carrying object that must be shared
         // by identity. shared_ptr keeps ValueType cheap to copy, which everything relies on
+        //
+        // also the t_weak kind's target, which is the same shape of question - one recursive level with
+        // no identity of its own. reached through weak_target() rather than pointee(), so a reader
+        // cannot cross from one kind to the other without saying which it meant
         std::shared_ptr<const ValueType> _pointee = nullptr;
 
         // for the t_callable kind: the signature. shared and structurally compared, for the same
@@ -798,10 +886,10 @@ namespace AST
         // lookup and AST::argument_fit ranks the result last of the real ranks
         //
         // **declarations only, never the target type.** the declaration's return type already *is* the
-        // target, and a second copy of it here would be the only member field on ComplexType carrying
-        // a type - which substituted_copy below does not substitute, so a concrete copy of `Array<T>`
-        // would keep saying `Slice<T>`. holding the declaration means this slot behaves exactly like
-        // _methods under both copy paths and neither of them has to learn about it
+        // target, and a second copy of it here would be a member field on ComplexType carrying a type -
+        // which TypeRegistry::derive_instantiation does not fill, so `Array<int32>` would keep saying
+        // `Slice<T>`. holding the declaration means this slot behaves exactly like _methods, which an
+        // instantiation reaches through the template_or_self redirect rather than owning a copy of
         //
         // a list rather than the single slot the destructor and the copy constructor get: a type may
         // offer a window over itself in more than one shape, and it puts the duplicate check on the
@@ -819,8 +907,9 @@ namespace AST
         // AST::conforms_to answers from, which is what a type-parameter constraint and an `instanceof`
         // over an interface read, and what the runtime conformance table is built from
         //
-        // **types, not declarations** - and so the one member field here that substituted_copy has to
-        // substitute. that is the opposite of _implicit_conversions above, which deliberately stores
+        // **types, not declarations** - and so the one member field here that
+        // TypeRegistry::derive_instantiation has to substitute onto an instantiation, alongside the
+        // properties. that is the opposite of _implicit_conversions above, which deliberately stores
         // declarations so that no ValueType on this class ever needs substituting; the difference is
         // that a conversion's target is already spelled by the declaration's return type while a
         // conformance has no declaration of its own at all. `struct Bag<E> : Iterable<E>` has to become
@@ -836,41 +925,11 @@ namespace AST
             return _conformances;
         }
 
-        // a concrete copy of this type: every property type run through `substitute`, and nothing
-        // left that identifies it as a template or as somebody's instantiation
-        //
-        // copy-then-modify rather than construct-then-refill, so a field added to ComplexType
-        // survives by default and only the deliberate *drops* are named here. the previous shape -
-        // a fresh ComplexType with the carried fields listed one by one - had already silently lost
-        // the namespace once and the methods once, each time far from the cause
-        template <typename Substitute>
-        ComplexType substituted_copy(Substitute substitute) const
-        {
-            ComplexType copy(*this);
-
-            // a copy is concrete: its parameter declarations would otherwise still point their
-            // owner back at the template, and the instantiation identity would name the enclosing
-            // instance's type arguments and mangle under its symbol
-            copy.type_parameters.clear();
-            copy.template_ref = nullptr;
-            copy.instantiation_args.clear();
-
-            // the property *names* are unchanged, so _property_map carries over as it is
-            for (auto &prop : copy._properties) {
-                prop.type = substitute(prop.type);
-            }
-
-            // the *only* other type-carrying field, and so the only other one that has to be
-            // substituted: `struct Bag<E> : Iterable<E>` becomes `Iterable<int32>` on `Bag<int32>`.
-            // without this a constraint asked of the instantiation would compare against a conformance
-            // still mentioning the template's E and answer no - see the note on _conformances for why
-            // this field cannot hold declarations the way _implicit_conversions does
-            for (auto &conformance : copy._conformances) {
-                conformance = substitute(conformance);
-            }
-
-            return copy;
-        }
+        // there is deliberately no way to mint a substituted copy of a layout here.
+        // TypeRegistry::get_or_create_instantiation is the *only* thing that produces a ComplexType for
+        // an instantiation, because struct equality is ComplexType* identity and a second minter is a
+        // second identity for one type. TypeDeclNode::clone used to be that second minter; it now shares
+        // the declaration instead - see todo/A5 in todo/README.md's Resolved section
 
     private:
         std::vector<Property> _properties;
@@ -900,6 +959,9 @@ namespace std
             // mixed rather than xor'd: a bare xor of the pointee hash would make ptr<int32>
             // collide with int32, since the primitive component is identical
             else if (vt.is_pointer()) h ^= (*this)(vt.pointee()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            // the same mix over the class it names. the kind is already in `h`, so `weak<Foo>` and
+            // `ptr<Foo>` do not collide despite hashing one recursive level the same way
+            else if (vt.is_weak()) h ^= (*this)(vt.weak_target()) + 0x9e3779b9 + (h << 6) + (h >> 2);
             // structural, so the hash has to be too - mixed for the reason above, and over the
             // return type as well as the parameters, since `function<int32()>` and
             // `function<void()>` differ only there

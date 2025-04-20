@@ -12,6 +12,22 @@
 namespace Parser
 {
     AST::VarDeclNode *parse_varexpr(Payload &payload, AST::ScopeNode *scope = nullptr);
+
+    // **the value an assignment writes into `target`.** called with the `=` seen but not consumed, and
+    // answers null when either question below refuses - having already left the cursor at the next
+    // statement, so a caller only has to stop
+    //
+    // two askers, and the only thing that differs between them is what the target chain is rooted in: a
+    // `$var` (Parser::parse_varexpr) or a call (Parser::finish_place_statement). the two questions are
+    // the same in both - **can this be written to**, reported here on the `=` rather than left to the
+    // lvalue codegen's locationless "not addressable" throw, and **at what type**, which is the type the
+    // *storage* holds so a pointer target writes through it rather than being re-seated
+    // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+    //
+    // one function because the alternative was two, which is how the day one of them grows a rule the
+    // other wants it ends with only one of them having it
+    AST::ExprNode *parse_assigned_value(
+        Payload &payload, AST::ExprNode *target, const TokenReference &assign_token);
 };
 
 #endif

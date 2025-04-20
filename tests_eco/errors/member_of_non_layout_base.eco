@@ -1,0 +1,22 @@
+// only a struct and a class have properties, so a `->` on anything else has nothing to reach. both
+// spellings used to reach codegen and die on an internal exception with no location - the borrow the
+// call returns is a perfectly good address, it just does not address a type with members
+
+struct Holder
+{
+    int32 $n;
+
+    function slot() : int32&
+    {
+        return &$this->n;
+    }
+}
+
+$h = Holder(3);
+
+// through the borrow a call returned
+echo $h->slot()->x;
+
+// and the same thing through a named borrow, which never had a location either
+int32& $r = &$h->n;
+echo $r->y;

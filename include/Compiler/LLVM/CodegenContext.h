@@ -38,6 +38,7 @@ namespace Compiler::LLVM
     class LValueCodegen;
     class ClassCodegen;
     class AbortCodegen;
+    class DebugPrintCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -73,6 +74,25 @@ namespace Compiler::LLVM
             assert(string_layout.has_value() && "string layout not resolved - compile_bundle must resolve it");
             return string_layout.value();
         }
+
+        // the two words a string is read as: the bytes and how many of them.
+        //
+        // **the other half of what PrintfConversion.h was extracted for.** the same two printers ask -
+        // `echo`, one scalar per statement, and the `dprint` builtin, a whole value's structure - and
+        // getting the *window* out is as much a shared fact as which conversion specifier to use: a
+        // `string` wraps a `view` and is one level further out than it, a `view` is the window itself, and
+        // both are resolved by index off the layout the core binding published, never by position (see
+        // AST::resolve_core_string_layout)
+        //
+        // takes a value rather than an address: both askers already hold one, and a substring shares its
+        // owner's buffer, so there is nothing here to load through
+        struct StringWindow
+        {
+            llvm::Value *bytes;
+            llvm::Value *size;
+        };
+
+        StringWindow gen_string_window(llvm::Value *value, const AST::ValueType &type, const char *prefix);
 
         // the registry an interface **widening** needs, published here by compile_bundle for the reason
         // core_types_ptr above is - so codegen still never holds the whole collector.
@@ -115,6 +135,16 @@ namespace Compiler::LLVM
         std::stack<llvm::Value *> value_stack;
         std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
 
+        // **the slot each `?->` currently being lowered spilled its unwrapped base into**, innermost last.
+        // an AST::ChainBaseNode names the top one - it is the marker standing for that base inside the
+        // chain's continuation, and a chain nested in another's continuation pushes and pops around its own
+        //
+        // here rather than on ExprCodegen because two subsystems read it: the expression arm, for the
+        // marker in value position, and LValueCodegen, for a method receiver or a write through the chain.
+        // the slot *borrows* - nothing is retained into it and nothing dropped out, exactly as a method's
+        // `$this` borrows what it was handed
+        std::vector<llvm::Value *> chain_base_slots;
+
         // the owning LLVMCompiler, so subsystems can recurse into child nodes through the single
         // AST::Visitor that the node accept() dispatch requires.
         AST::Visitor *visitor = nullptr;
@@ -135,6 +165,12 @@ namespace Compiler::LLVM
         // failed `assert`, the null narrowing check - goes through it, so they share one runtime,
         // one message shape and one release-mode gate
         AbortCodegen *abort = nullptr;
+
+        // the debug-print subsystem: the whole of how `dprint` renders a value. reachable from the
+        // expression subsystem, which is where the builtin's call site is - and its own subsystem
+        // because it carries state across a recursion and creates basic blocks, neither of which an
+        // expression arm may do
+        DebugPrintCodegen *debug_print = nullptr;
 
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();

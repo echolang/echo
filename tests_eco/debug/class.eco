@@ -1,0 +1,18 @@
+// a class handle is the one shape whose expansion needs a *runtime* question, so both arms come from one
+// dprint site: null prints as null, and anything else is read in place through the handle
+
+class Handle
+{
+    int32 $x;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+}
+
+$h = Handle(5);
+dprint($h);
+
+Handle? $empty = null;
+dprint($empty);

@@ -17,7 +17,7 @@ echo $d instanceof Dog;
 echo $c instanceof Rock;
 
 // null points at no block at all, so it is an instance of nothing
-Cat $none = null;
+Cat? $none = null;
 echo $none instanceof Cat;
 
 // it is an ordinary bool expression

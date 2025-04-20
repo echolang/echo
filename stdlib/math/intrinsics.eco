@@ -1,0 +1,393 @@
+namespace math;
+
+/**
+ * Math functions that lower to a single LLVM intrinsic.
+ *
+ * every function here is declared twice, once for `float` (32 bit) and once for `float64`. the two
+ * are a plain overload set: the argument type picks the candidate and each lowers to its own
+ * `.f32` / `.f64` mangling, so single-precision math never round-trips through a double
+ *
+ * note that a float literal is double precision unless it ends in `f`, so `math::sqrt(2.0)` is the
+ * float64 overload and `math::sqrt(2.0f)` the float one
+ */
+
+// ----------------------------------------------------------------------------
+// trigonometry
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the sine of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.sin"]
+function sin(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.sin"]
+function sin(float64 $x) : float64;
+
+/**
+ * Returns the cosine of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.cos"]
+function cos(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.cos"]
+function cos(float64 $x) : float64;
+
+/**
+ * Returns the tangent of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.tan"]
+function tan(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.tan"]
+function tan(float64 $x) : float64;
+
+/**
+ * Returns the arc sine of a given value, in radians.
+ */
+#[inline]
+#[intrinsic: "llvm.asin"]
+function asin(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.asin"]
+function asin(float64 $x) : float64;
+
+/**
+ * Returns the arc cosine of a given value, in radians.
+ */
+#[inline]
+#[intrinsic: "llvm.acos"]
+function acos(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.acos"]
+function acos(float64 $x) : float64;
+
+/**
+ * Returns the arc tangent of a given value, in radians.
+ */
+#[inline]
+#[intrinsic: "llvm.atan"]
+function atan(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.atan"]
+function atan(float64 $x) : float64;
+
+/**
+ * Returns the arc tangent of $y / $x, using the signs of both to pick the quadrant.
+ */
+#[inline]
+#[intrinsic: "llvm.atan2"]
+function atan2(float $y, float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.atan2"]
+function atan2(float64 $y, float64 $x) : float64;
+
+/**
+ * Returns the hyperbolic sine of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.sinh"]
+function sinh(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.sinh"]
+function sinh(float64 $x) : float64;
+
+/**
+ * Returns the hyperbolic cosine of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.cosh"]
+function cosh(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.cosh"]
+function cosh(float64 $x) : float64;
+
+/**
+ * Returns the hyperbolic tangent of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.tanh"]
+function tanh(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.tanh"]
+function tanh(float64 $x) : float64;
+
+// ----------------------------------------------------------------------------
+// roots, powers, exponentials and logarithms
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the square root of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.sqrt"]
+function sqrt(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.sqrt"]
+function sqrt(float64 $x) : float64;
+
+/**
+ * Returns $base raised to the power of $exponent.
+ */
+#[inline]
+#[intrinsic: "llvm.pow"]
+function pow(float $base, float $exponent) : float;
+
+#[inline]
+#[intrinsic: "llvm.pow"]
+function pow(float64 $base, float64 $exponent) : float64;
+
+/**
+ * Returns e raised to the power of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.exp"]
+function exp(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.exp"]
+function exp(float64 $x) : float64;
+
+/**
+ * Returns 2 raised to the power of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.exp2"]
+function exp2(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.exp2"]
+function exp2(float64 $x) : float64;
+
+/**
+ * Returns 10 raised to the power of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.exp10"]
+function exp10(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.exp10"]
+function exp10(float64 $x) : float64;
+
+/**
+ * Returns the natural logarithm of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.log"]
+function log(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.log"]
+function log(float64 $x) : float64;
+
+/**
+ * Returns the base 2 logarithm of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.log2"]
+function log2(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.log2"]
+function log2(float64 $x) : float64;
+
+/**
+ * Returns the base 10 logarithm of a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.log10"]
+function log10(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.log10"]
+function log10(float64 $x) : float64;
+
+// ----------------------------------------------------------------------------
+// rounding
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the largest integral value not greater than a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.floor"]
+function floor(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.floor"]
+function floor(float64 $x) : float64;
+
+/**
+ * Returns the smallest integral value not less than a given value.
+ */
+#[inline]
+#[intrinsic: "llvm.ceil"]
+function ceil(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.ceil"]
+function ceil(float64 $x) : float64;
+
+/**
+ * Returns a given value with its fractional part discarded, rounding toward zero.
+ */
+#[inline]
+#[intrinsic: "llvm.trunc"]
+function trunc(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.trunc"]
+function trunc(float64 $x) : float64;
+
+/**
+ * Returns the nearest integral value, rounding halfway cases away from zero.
+ */
+#[inline]
+#[intrinsic: "llvm.round"]
+function round(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.round"]
+function round(float64 $x) : float64;
+
+/**
+ * Returns the nearest integral value, rounding halfway cases to the even neighbour.
+ *
+ * this is banker's rounding, and it differs from round() on exact halves: round(2.5) is 3, while
+ * roundeven(2.5) is 2
+ */
+#[inline]
+#[intrinsic: "llvm.roundeven"]
+function roundeven(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.roundeven"]
+function roundeven(float64 $x) : float64;
+
+/**
+ * Returns the nearest integral value, according to the current rounding mode.
+ */
+#[inline]
+#[intrinsic: "llvm.rint"]
+function rint(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.rint"]
+function rint(float64 $x) : float64;
+
+// ----------------------------------------------------------------------------
+// sign
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the absolute value of a given value.
+ *
+ * these two sit alongside the generic abs<T> in functions.eco, and the overload set sorts it out:
+ * a float argument matches one of these exactly, while an integer one instantiates the template
+ */
+#[inline]
+#[intrinsic: "llvm.fabs"]
+function abs(float $x) : float;
+
+#[inline]
+#[intrinsic: "llvm.fabs"]
+function abs(float64 $x) : float64;
+
+/**
+ * Returns $magnitude with the sign of $sign.
+ */
+#[inline]
+#[intrinsic: "llvm.copysign"]
+function copysign(float $magnitude, float $sign) : float;
+
+#[inline]
+#[intrinsic: "llvm.copysign"]
+function copysign(float64 $magnitude, float64 $sign) : float64;
+
+// ----------------------------------------------------------------------------
+// minimum, maximum and fused multiply-add
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the smaller of two values.
+ *
+ * signed and unsigned integers need different instructions, so the integer overloads are spelled
+ * out rather than generic. a mixed-signedness call has no exact candidate and is reported as such,
+ * which is the honest answer - cast the operands to one type first
+ */
+#[inline]
+#[intrinsic: "llvm.minnum"]
+function min(float $a, float $b) : float;
+
+#[inline]
+#[intrinsic: "llvm.minnum"]
+function min(float64 $a, float64 $b) : float64;
+
+#[inline]
+#[intrinsic: "llvm.smin"]
+function min(int32 $a, int32 $b) : int32;
+
+#[inline]
+#[intrinsic: "llvm.smin"]
+function min(int64 $a, int64 $b) : int64;
+
+#[inline]
+#[intrinsic: "llvm.umin"]
+function min(uint32 $a, uint32 $b) : uint32;
+
+#[inline]
+#[intrinsic: "llvm.umin"]
+function min(uint64 $a, uint64 $b) : uint64;
+
+/**
+ * Returns the larger of two values.
+ */
+#[inline]
+#[intrinsic: "llvm.maxnum"]
+function max(float $a, float $b) : float;
+
+#[inline]
+#[intrinsic: "llvm.maxnum"]
+function max(float64 $a, float64 $b) : float64;
+
+#[inline]
+#[intrinsic: "llvm.smax"]
+function max(int32 $a, int32 $b) : int32;
+
+#[inline]
+#[intrinsic: "llvm.smax"]
+function max(int64 $a, int64 $b) : int64;
+
+#[inline]
+#[intrinsic: "llvm.umax"]
+function max(uint32 $a, uint32 $b) : uint32;
+
+#[inline]
+#[intrinsic: "llvm.umax"]
+function max(uint64 $a, uint64 $b) : uint64;
+
+/**
+ * Returns $a * $b + $c, computed with a single rounding.
+ */
+#[inline]
+#[intrinsic: "llvm.fma"]
+function fma(float $a, float $b, float $c) : float;
+
+#[inline]
+#[intrinsic: "llvm.fma"]
+function fma(float64 $a, float64 $b, float64 $c) : float64;

@@ -3,6 +3,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 
@@ -78,23 +79,13 @@ namespace AST
         return mangled;
     }
 
-    namespace
-    {
-        // `null` has no type of its own, so which operand was written as one is a question about the
-        // *node*. the two operand builders share it rather than each spelling the tag
-        bool written_as_null(const ExprNode *expr)
-        {
-            return expr != nullptr && expr->get_node_type() == NodeType::n_null;
-        }
-    }
-
     OperandFacts parse_time_operand(const ExprNode *expr, const ValueType &result_type)
     {
         if (expr == nullptr) {
             return {};
         }
 
-        return OperandFacts{value_result_type(*expr, result_type), written_as_null(expr)};
+        return OperandFacts{value_result_type(*expr, result_type), is_written_null(expr)};
     }
 
     OperandFacts parse_time_operand(const ExprNode *expr)
@@ -112,7 +103,7 @@ namespace AST
             return {};
         }
 
-        return OperandFacts{expr->result_type(), written_as_null(expr)};
+        return OperandFacts{expr->result_type(), is_written_null(expr)};
     }
 
     bool binary_has_builtin_meaning(
@@ -137,6 +128,22 @@ namespace AST
             && (rhs.type.is_class() || rhs.is_null);
 
         if (class_identity) {
+            return true;
+        }
+
+        // **anything nullable against `null`**, which is the same question one level up: not "are these
+        // two the same object" but "is this one there at all". the language lowers it for every shape - an
+        // address comparison where the type has a null value of its own, a tag test where it does not -
+        // so it has a built-in meaning even over a struct, where `==` otherwise has none
+        //
+        // one side has to be a written `null`. `$a == $b` over two `Point?`s is a question about the
+        // *values*, which is exactly what a declared `==` on Point would be for, so it is left to fall
+        // through to the declaration the way it always did
+        const bool presence_test = op->is_identity_comparison()
+            && ((lhs.is_null && (rhs.type.is_nullable() || rhs.type.is_weak()))
+                || (rhs.is_null && (lhs.type.is_nullable() || lhs.type.is_weak())));
+
+        if (presence_test) {
             return true;
         }
 

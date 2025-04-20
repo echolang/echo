@@ -29,6 +29,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ReturnNode.h"
+#include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/MemberAccessNode.h"
@@ -38,6 +39,7 @@
 #include "AST/AttributeNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ReleaseNode.h"
+#include "AST/TemporaryBindExprNode.h"
 
 namespace AST
 {
@@ -113,6 +115,41 @@ Node *AddrOfExprNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *StrongExprNode::clone(CloneContext &cc) const
+{
+    StrongExprNode *c = cc.shallow(this);
+    c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *NullCoalesceExprNode::clone(CloneContext &cc) const
+{
+    NullCoalesceExprNode *c = cc.shallow(this);
+    c->lhs = cc.child(c->lhs);
+    c->rhs = cc.child(c->rhs);
+    return c;
+}
+
+Node *ChainBaseNode::clone(CloneContext &cc) const
+{
+    ChainBaseNode *c = cc.shallow(this);
+    c->type = cc.substitute(c->type);
+    return c;
+}
+
+Node *OptionalChainExprNode::clone(CloneContext &cc) const
+{
+    OptionalChainExprNode *c = cc.shallow(this);
+    c->base = cc.child(c->base);
+
+    // the marker **before** the continuation, which reaches it through an ordinary child edge: cloning the
+    // other way round would leave the continuation pointing at the template's marker. the same ordering
+    // TemporaryBindExprNode's header spells out, and for the same reason
+    c->chain_base = cc.child(c->chain_base);
+    c->continuation = cc.child(c->continuation);
+    return c;
+}
+
 Node *PointerValueNode::clone(CloneContext &cc) const
 {
     PointerValueNode *c = cc.shallow(this);
@@ -160,6 +197,32 @@ Node *RetainExprNode::clone(CloneContext &cc) const
 {
     RetainExprNode *c = cc.shallow(this);
     c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *TemporaryBindExprNode::clone(CloneContext &cc) const
+{
+    TemporaryBindExprNode *c = cc.shallow(this);
+
+    // the temporaries **first**, exactly as FunctionDeclNode clones its parameters before its body: the
+    // body and the drops reach them through a VarNode, whose declaration edge is a cc.rebind - and
+    // rebind answers the clone only for a declaration the map already holds. cloned in the other order
+    // the body would keep pointing at the *original* temporary, which has no alloca in this function,
+    // and the failure is a "Variable has no allocation in scope" from a body nobody wrote
+    //
+    // load-bearing here for the same reason it is in FunctionDeclNode: a temporary hangs off this node
+    // rather than off a scope, so ScopeNode::clone's declaration pre-pass never sees it
+    for (auto *&temp : c->temporaries) temp = cc.child(temp);
+
+    c->body = cc.child(c->body);
+
+    // always empty in practice, for AssignNode::teardown_old's reason: only a template body is cloned,
+    // and AST::OwnershipPass - the only thing that builds one of these - skips a generic body entirely.
+    // cloned anyway because clone has to be total, and because the shallow copy above would otherwise
+    // leave two nodes owning one drop
+    for (auto &drop : c->teardown) drop = cc.clone_ref(drop);
+
+    // no cc.substitute: this node carries no type of its own, result_type() asks the body
     return c;
 }
 
@@ -291,6 +354,14 @@ Node *IfStatementNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *GuardNode::clone(CloneContext &cc) const
+{
+    GuardNode *c = cc.shallow(this);
+    c->decl = cc.child(c->decl);
+    c->else_scope = cc.child(c->else_scope);
+    return c;
+}
+
 Node *WhileStatementNode::clone(CloneContext &cc) const
 {
     WhileStatementNode *c = cc.shallow(this);
@@ -307,6 +378,20 @@ Node *ScopeNode::clone(CloneContext &cc) const
     ScopeNode *c = cc.make<ScopeNode>(this);
     c->parent_ptr = cc.rebind(parent_ptr);
     c->is_function_boundary = is_function_boundary;
+
+    // the declarations **first**, ahead of the statements that read them. a read reaches its declaration
+    // through cc.rebind, and rebind answers with the *original* for anything the map does not hold yet -
+    // so cloning in child order alone, a declaration that sits after a statement reading it leaves that
+    // read bound to the *template's* declaration. that is storage in a function nobody wrote, and it
+    // fails silently: nothing downstream can tell a legitimate outer-scope reference from this
+    //
+    // this is what makes a declaration's position in the child list mean nothing here. cc.child answers
+    // with the clone it already made, so the loop below reuses these rather than cloning them twice
+    for (const auto &ref : children) {
+        if (ref.has_type<VarDeclNode>()) {
+            cc.child(ref.get_ptr<VarDeclNode>());
+        }
+    }
 
     for (const auto &ref : children) {
         c->children.push_back(cc.clone_ref(ref));
@@ -343,7 +428,11 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
     c->instantiation_args.clear();
     c->template_ref = nullptr;
 
-    // parameters first, so the map is populated before the body rebinds its VarNodes to them
+    // parameters first, so the map is populated before the body rebinds its VarNodes to them. the same
+    // rule ScopeNode::clone follows for a scope's declarations - and this loop is the only thing that can
+    // apply it here, because a parameter is not a *child* of the body scope. it is declared in the
+    // argument scope for name resolution and its storage comes from `args` (see Parser::push_implicit_param),
+    // so nothing walking the body reaches it
     for (auto &arg : c->args) arg = cc.child(arg);
     c->return_type = cc.child(c->return_type);
     c->body = cc.child(c->body);
@@ -352,20 +441,29 @@ Node *FunctionDeclNode::clone(CloneContext &cc) const
 
 Node *TypeDeclNode::clone(CloneContext &cc) const
 {
-    TypeDeclNode *c = cc.shallow(this);
+    // a type declaration is not instantiated: a clone *shares* it. Which ComplexType a generic
+    // application means is TypeRegistry::get_or_create_instantiation's answer and only its - struct
+    // equality is ComplexType* identity, so a second substituted layout minted here (which is what
+    // this used to do) was one type wearing two, unequal to itself across the two paths
+    //
+    // sound because parse_typedecl refuses a type written where a type parameter is visible, the way
+    // parse_funcdecl refuses a nested function - and every body the monomorphizer clones is a generic
+    // one - so a declaration reached from here owes no substitution at all. the assert states that
+    // invariant where it is relied on rather than where it is enforced
+    //
+    // returning `this` rather than asserting keeps clone total, which the monomorphizer requires, and
+    // is still the right answer if some later path reaches a concrete declaration from a cloned body.
+    // the context goes unread for the same reason: nothing is substituted, and nothing is recorded in
+    // cc.map either, since rebind falling back to the original is already the answer sharing wants
+    (void)cc;
 
-    // the embedded complex type with substituted property types and nothing left that identifies it
-    // as a template - ComplexType::substituted_copy owns that rule, so a field added to it survives
-    // here by default. Phase 4 reconciles this with the registry's canonical application ComplexType
-    // for codegen identity; for now the clone owns its own substituted layout -
-    // see todo/A5-reconcile-instantiation-identity.md
-    // no self-pointer to fix up afterwards: value_type() is computed from _complex_type, so the clone
-    // answers with its own layout the moment this assignment lands
-    c->_complex_type = c->_complex_type.substituted_copy(
-        [&cc](const ValueType &type) { return cc.substitute(type); });
+#ifndef NDEBUG
+    for (const auto *prop : _properties) {
+        assert(!prop->has_type() || !contains_type_param(prop->type()));
+    }
+#endif
 
-    for (auto &prop : c->_properties) prop = cc.child(prop);
-    return c;
+    return const_cast<TypeDeclNode *>(this);
 }
 
 // ---------------------------------------------------------------------------

@@ -26,9 +26,15 @@ namespace AST
         // argument which already fits is left alone - lives in argument_fit, because overload
         // resolution has to predict this decision exactly. a candidate accepted there and then not
         // wrapped here would reach codegen passing a value where an address is expected
+        //
+        // **both borrow ranks produce the same node, and that is the point.** the difference between
+        // them - whether the operand already has storage or has to be given some - is a question about
+        // the operand's shape, which AST::OwnershipPass asks of the tree. nothing between here and
+        // codegen should be able to tell the two apart, and AST::PointerAdjuster's argument arm already
+        // routes any AddrOf through adjust_place without asking
         ExprNode *borrow_if_wanted(NodeCollection &nodes, ExprNode *arg, ArgumentFit fit)
         {
-            if (fit != ArgumentFit::t_borrow) {
+            if (fit != ArgumentFit::t_borrow && fit != ArgumentFit::t_borrow_temporary) {
                 return arg;
             }
 

@@ -1,0 +1,11 @@
+mode: build
+
+--- OUT --->
+1
+900
+7
+2
+--- RAST --->
+// the drop rides on the binding, after the body - an ordinary resolved destructor call
+CHECK: tempbind<int32>(vardecl<type<Buffer>>($__temp) = call make(
+CHECK: call destructor(addrof<Buffer&>(varref<Buffer>(var($__temp))))

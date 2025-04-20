@@ -13,7 +13,9 @@
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ExprNode.h"
+#include "AST/GuardNode.h"
 #include "AST/ReleaseNode.h"
+#include "AST/TemporaryBindExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/IfStatementNode.h"
@@ -156,6 +158,39 @@ void RecursiveVisitor::visit_retain_expr(RetainExprNode &node)
     if (node.operand) node.operand->accept(*this);
 }
 
+void RecursiveVisitor::visit_strong_expr(StrongExprNode &node)
+{
+    if (node.operand) node.operand->accept(*this);
+}
+
+void RecursiveVisitor::visit_guard(GuardNode &node)
+{
+    // the declaration first, then the else arm. that order is the order they run in, and it matters to
+    // every pass that carries state down the walk - the ownership pass's moved-from set most of all,
+    // since the else arm may move out of something the initializer read
+    if (node.decl) node.decl->accept(*this);
+    if (node.else_scope) node.else_scope->accept(*this);
+}
+
+void RecursiveVisitor::visit_null_coalesce(NullCoalesceExprNode &node)
+{
+    if (node.lhs) node.lhs->accept(*this);
+    if (node.rhs) node.rhs->accept(*this);
+}
+
+void RecursiveVisitor::visit_optional_chain(OptionalChainExprNode &node)
+{
+    // the base, then the continuation - the order they run in. the continuation is rooted at the chain
+    // base marker, which is a leaf, so the base is not walked twice
+    if (node.base) node.base->accept(*this);
+    if (node.continuation) node.continuation->accept(*this);
+}
+
+void RecursiveVisitor::visit_chain_base(ChainBaseNode &node)
+{
+    // a leaf: it stands for a value the enclosing chain already evaluated, and has no edge to it
+}
+
 void RecursiveVisitor::visit_closure_expr(ClosureExprNode &node)
 {
     // the *environment* is a child of this expression and is walked; the body is not. the declaration
@@ -177,6 +212,23 @@ void RecursiveVisitor::visit_indirect_call_expr(IndirectCallExprNode &node)
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 {
     if (node.operand) node.operand->accept(*this);
+}
+
+// the temporaries first, then the body, then the drops - the order they run in, and the order
+// AST::TypeChecker has to see them in: a drop names a destructor whose call it validates like any
+// other, and a body that reads out of a temporary declared after it would read a declaration this
+// visitor had not reached yet
+void RecursiveVisitor::visit_temporary_bind(TemporaryBindExprNode &node)
+{
+    for (auto *temp : node.temporaries) {
+        if (temp) temp->accept(*this);
+    }
+
+    if (node.body) node.body->accept(*this);
+
+    for (auto &drop : node.teardown) {
+        if (drop.has()) drop.node()->accept(*this);
+    }
 }
 
 void RecursiveVisitor::visit_release(ReleaseNode &node)

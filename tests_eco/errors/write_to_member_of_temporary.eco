@@ -1,0 +1,15 @@
+// writing into a member of a value with no storage of its own: the bytes are destroyed at the end of the
+// statement, so nothing will ever read what was written. reading one works (see
+// tests_eco/structs/member_of_call_result.eco) - a read takes a copy out, a write puts something in
+// (todo/A13b)
+
+struct Inner { int32 $tag; }
+
+struct Outer
+{
+    Inner $in;
+    function get() : Inner { return $this->in; }
+}
+
+$o = Outer(Inner(5));
+$o->get()->tag = 9;

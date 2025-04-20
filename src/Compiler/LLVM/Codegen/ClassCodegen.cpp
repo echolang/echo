@@ -32,14 +32,23 @@ llvm::FunctionCallee ClassCodegen::get_free()
         { _ctx.opaque_ptr_type() });
 }
 
-llvm::Value *ClassCodegen::gen_strong_ptr(llvm::Value *handle, const ClassLayout &layout)
+llvm::Value *ClassCodegen::gen_header_ptr(
+    llvm::Value *handle, llvm::Type *box_type, unsigned index, const llvm::Twine &name)
 {
-    return _ctx.builder->CreateStructGEP(layout.box, handle, ClassBox::strong_index, "strong_ptr");
+    return _ctx.builder->CreateStructGEP(box_type, handle, index, name);
 }
 
-llvm::Value *ClassCodegen::gen_typeinfo_ptr(llvm::Value *handle, llvm::Type *box_type)
+llvm::Type *ClassCodegen::header_box_type(const ClassLayout *layout)
 {
-    return _ctx.builder->CreateStructGEP(box_type, handle, ClassBox::typeinfo_index, "typeinfo_ptr");
+    return layout != nullptr ? static_cast<llvm::Type *>(layout->box) : _ctx.types->class_header_llvm_type();
+}
+
+// what to call the count in the IR, keyed on which one it is rather than on the operation reaching it.
+// so `strong` and `strong.inc` read the same whether a retain, an upgrade or an interface widening
+// produced them - which is what makes an `--- IR --->` check able to name a count at all
+static const char *count_name(unsigned index)
+{
+    return index == ClassBox::weak_index ? "weak" : "strong";
 }
 
 void ClassCodegen::gen_class_alloc(AST::ClassAllocExprNode &node)
@@ -73,21 +82,31 @@ llvm::Value *ClassCodegen::gen_class_box_alloc(const AST::ValueType &class_type)
     // body-local, and the implicit `return $this` moves it out - so the +1 travels to the caller
     // without a retain anywhere
     _ctx.builder->CreateStore(
-        llvm::ConstantInt::get(i64, 1), gen_strong_ptr(handle, layout));
+        llvm::ConstantInt::get(i64, 1),
+        gen_header_ptr(handle, layout.box, ClassBox::strong_index, "strong_ptr"));
+
+    // and one weak reference, held by the strong ones collectively rather than by any handle a program
+    // can name. it is what keeps the block readable for as long as anybody owns the object, and the
+    // release that takes the strong count to zero is what gives it back - so this 1 is the reason a
+    // teardown and a free are two moments instead of one. see Codegen/ClassLayout.h
+    _ctx.builder->CreateStore(
+        llvm::ConstantInt::get(i64, 1),
+        gen_header_ptr(handle, layout.box, ClassBox::weak_index, "weak_ptr"));
 
     _ctx.builder->CreateStore(
         layout.typeinfo,
-        _ctx.builder->CreateStructGEP(layout.box, handle, ClassBox::typeinfo_index, "typeinfo_ptr"));
+        gen_header_ptr(handle, layout.box, ClassBox::typeinfo_index, "typeinfo_ptr"));
 
     return handle;
 }
 
 llvm::Value *ClassCodegen::gen_callable_retain(llvm::Value *callable)
 {
-    // the strong count is the block's first word, so the environment pointer *is* the count's address.
-    // taken directly rather than through a ClassLayout GEP, because the layout is exactly what a
-    // callable does not know
-    gen_strong_inc(_ctx.builder->CreateExtractValue(callable, 1, "retain.env"), nullptr, "env.retain");
+    // a null layout: an environment's block is built by gen_class_box_alloc like any other, so its header
+    // is the shared one, and that is all a count needs. the layout is exactly what a callable does not know
+    gen_count_inc(
+        _ctx.builder->CreateExtractValue(callable, 1, "retain.env"),
+        nullptr, ClassBox::strong_index, "env.retain");
 
     // the value flows through: a retain is a side effect on the environment, not a new callable
     return callable;
@@ -107,9 +126,92 @@ llvm::Function *ClassCodegen::get_or_create_env_release_thunk()
         return existing;
     }
 
-    // no layout and no deinit: the count is the block's first word, and an environment holds no owning
-    // capture, so the block is all there is to give back
+    // no layout and no deinit: the header is the shared one, and an environment holds no owning capture,
+    // so the block is all there is to give back
     return build_release_thunk(name, nullptr, nullptr);
+}
+
+llvm::Function *ClassCodegen::get_or_create_weak_release_thunk()
+{
+    const std::string name = "__eco_weak_release";
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    // through the shared header rather than a layout, and that is not a compromise: nothing about this
+    // decrement is per class, which is why there is one of these and not one per type
+    return build_count_release_thunk(
+        declare_release_thunk(name, "obj"),
+        _ctx.types->class_header_llvm_type(), ClassBox::weak_index, "free",
+        [this](llvm::Value *handle) {
+            // **the only free in the runtime.** the payload is already torn down by the time any path
+            // arrives here - the strong release ran the deinit before dropping its collective weak
+            // reference - so this gives back memory and reads nothing
+            _ctx.builder->CreateCall(get_free(), { handle });
+        });
+}
+
+llvm::Value *ClassCodegen::gen_weak_of(llvm::Value *handle, const AST::ValueType &class_type)
+{
+    const ClassLayout layout =
+        _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
+
+    gen_count_inc(handle, &layout, ClassBox::weak_index, "weak.retain");
+
+    // the same address, differently typed. a weak handle *is* the block pointer - what makes it weak is
+    // which word it moved and that reading it needs an upgrade, not a second representation
+    return handle;
+}
+
+llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AST::ValueType &class_type)
+{
+    const ClassLayout layout =
+        _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
+
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    auto *read_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "upgrade.read", function);
+    auto *live_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "upgrade.live", function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "upgrade.done", function);
+    llvm::BasicBlock *null_block = _ctx.builder->GetInsertBlock();
+
+    _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(weak_handle), done_block, read_block);
+
+    // **the load this whole feature is for.** the block is readable because this weak reference is holding
+    // it, and the strong count in it says whether the payload is still there. a program with no weak count
+    // could not ask - it would have to read the payload to find out, which is the dangle
+    _ctx.builder->SetInsertPoint(read_block);
+    llvm::Value *strong = _ctx.builder->CreateLoad(
+        i64,
+        gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"),
+        "strong");
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpEQ(strong, llvm::ConstantInt::get(i64, 0), "upgrade.dead"),
+        done_block,
+        live_block);
+
+    // one more owner, and it is this one that makes the handed-back handle safe to read through: the
+    // count cannot reach zero while the caller holds it
+    _ctx.builder->SetInsertPoint(live_block);
+    _ctx.builder->CreateStore(
+        _ctx.builder->CreateAdd(strong, llvm::ConstantInt::get(i64, 1), "strong.inc"),
+        gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"));
+    _ctx.builder->CreateBr(done_block);
+
+    _ctx.builder->SetInsertPoint(done_block);
+
+    // two ways to be absent and one to be there, so the result is `T?` - null for a weak that held nothing
+    // and for one whose object is gone, which are the same answer to the only question a caller can ask
+    llvm::PHINode *result = _ctx.builder->CreatePHI(opaque_ptr, 3, "upgraded");
+    llvm::Constant *null_handle = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr));
+    result->addIncoming(null_handle, null_block);
+    result->addIncoming(null_handle, read_block);
+    result->addIncoming(weak_handle, live_block);
+
+    return result;
 }
 
 void ClassCodegen::gen_retain_expr(AST::RetainExprNode &node)
@@ -143,6 +245,14 @@ llvm::Value *ClassCodegen::gen_retain_value(llvm::Value *value, const AST::Value
         return gen_iface_retain(value);
     }
 
+    // **the arm that makes a weak an owner without a single new AST node.** the ownership pass wrote an
+    // ordinary RetainExprNode over a weak-typed place, and this is where "which count" is finally asked -
+    // of the type, at the one site that emits the instruction. so the copy taxonomy, the drop walk and
+    // the assignment order upstream all stayed exactly as they were
+    if (type.is_weak()) {
+        return gen_weak_of(value, type.weak_target());
+    }
+
     return gen_retain(value, type);
 }
 
@@ -158,16 +268,23 @@ void ClassCodegen::gen_release_value(llvm::Value *value, const AST::ValueType &t
         return;
     }
 
+    // the mirror of the retain arm above. one thunk for every class, because giving back a weak reference
+    // runs no deinit and reads no property - see get_or_create_weak_release_thunk
+    if (type.is_weak()) {
+        _ctx.builder->CreateCall(get_or_create_weak_release_thunk(), { value });
+        return;
+    }
+
     gen_release(value, type);
 }
 
 llvm::Value *ClassCodegen::gen_iface_retain(llvm::Value *erased)
 {
     // an erased value is `{ object, vtable }` and only the object is counted. the *count* lives in the
-    // object's own block, exactly where a class handle's does, so this needs no layout: gen_strong_inc
-    // over a null layout reads the count as the block's first word - which is what the box puts there
+    // object's own block, exactly where a class handle's does, so this needs no layout: gen_count_inc
+    // over a null layout reaches it through the header every box shares
     llvm::Value *object = _ctx.builder->CreateExtractValue(erased, { IfaceValue::object_index }, "iface.obj");
-    gen_strong_inc(object, nullptr, "iface");
+    gen_count_inc(object, nullptr, ClassBox::strong_index, "iface");
 
     // handed back unchanged so a retain can sit inline in an expression, as the other two do
     return erased;
@@ -254,7 +371,7 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
     else {
         llvm::Value *typeinfo = _ctx.builder->CreateLoad(
             llvm::PointerType::get(*_ctx.llvm_context, 0),
-            gen_typeinfo_ptr(handle, operand_box),
+            gen_header_ptr(handle, operand_box, ClassBox::typeinfo_index, "typeinfo_ptr"),
             "typeinfo");
 
         // an interface has no layout of its own - it is never allocated and never lowered - so only this
@@ -290,7 +407,9 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
         _ctx.types->get_or_create_interface_identity(interface, *_ctx.current_cmp_unit);
 
     llvm::Value *typeinfo = _ctx.builder->CreateLoad(
-        opaque_ptr, gen_typeinfo_ptr(handle, box_type), "typeinfo");
+        opaque_ptr,
+        gen_header_ptr(handle, box_type, ClassBox::typeinfo_index, "typeinfo_ptr"),
+        "typeinfo");
 
     // the descriptor's two slots: how many interfaces, and where the identities are. asked of the one
     // function that spells its shape, so the writer that mints it and this scan cannot disagree about
@@ -351,13 +470,14 @@ llvm::Value *ClassCodegen::gen_retain(llvm::Value *handle, const AST::ValueType 
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
 
-    gen_strong_inc(handle, &layout, "retain");
+    gen_count_inc(handle, &layout, ClassBox::strong_index, "retain");
 
     // the handle itself, unchanged. a retain is a side effect on the block, not a new value
     return handle;
 }
 
-void ClassCodegen::gen_strong_inc(llvm::Value *block, const ClassLayout *layout, const char *label)
+void ClassCodegen::gen_count_inc(
+    llvm::Value *block, const ClassLayout *layout, unsigned index, const char *label)
 {
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
@@ -375,17 +495,19 @@ void ClassCodegen::gen_strong_inc(llvm::Value *block, const ClassLayout *layout,
     _ctx.builder->SetInsertPoint(bump_block);
 
     // the count's address is only well defined once the block is known non-null, so it is taken here
-    llvm::Value *strong_ptr = layout != nullptr ? gen_strong_ptr(block, *layout) : block;
+    const std::string name = count_name(index);
+    llvm::Value *count_ptr = gen_header_ptr(block, header_box_type(layout), index, name + "_ptr");
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-    llvm::Value *count = _ctx.builder->CreateLoad(i64, strong_ptr, "strong");
+    llvm::Value *count = _ctx.builder->CreateLoad(i64, count_ptr, name);
     _ctx.builder->CreateStore(
-        _ctx.builder->CreateAdd(count, llvm::ConstantInt::get(i64, 1), "strong.inc"), strong_ptr);
+        _ctx.builder->CreateAdd(count, llvm::ConstantInt::get(i64, 1), name + ".inc"), count_ptr);
     _ctx.builder->CreateBr(done_block);
 
     _ctx.builder->SetInsertPoint(done_block);
 }
 
-llvm::Value *ClassCodegen::gen_strong_count(llvm::Value *handle, const AST::ValueType &class_type)
+llvm::Value *ClassCodegen::gen_count(
+    llvm::Value *handle, const AST::ValueType &class_type, unsigned index)
 {
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
@@ -393,11 +515,15 @@ llvm::Value *ClassCodegen::gen_strong_count(llvm::Value *handle, const AST::Valu
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
-    auto *load_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "refcount.load", function);
-    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "refcount.done", function);
+    // derived from the index rather than passed beside it: the caller used to hand in both, which is two
+    // arguments it had to keep consistent and one more place the two counts could be named apart
+    const std::string label = std::string(count_name(index)) + "count";
+
+    auto *load_block = llvm::BasicBlock::Create(*_ctx.llvm_context, label + ".load", function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, label + ".done", function);
     llvm::BasicBlock *null_block = _ctx.builder->GetInsertBlock();
 
-    // null-safe for gen_strong_inc's reason, and the answer matters: **a null handle owns nothing, so
+    // null-safe for gen_count_inc's reason, and the answer matters: **a null handle owns nothing, so
     // the count is 0.** that is what lets a copy-on-write check read as one condition - a `string`
     // holding static literal bytes has a null owner, is therefore not uniquely owned, and clones before
     // mutating, exactly as a shared one does. answering 1 would have it scribble on the binary
@@ -406,12 +532,14 @@ llvm::Value *ClassCodegen::gen_strong_count(llvm::Value *handle, const AST::Valu
     _ctx.builder->SetInsertPoint(load_block);
 
     // the count's address is only well defined once the handle is known non-null, as above
-    llvm::Value *count = _ctx.builder->CreateLoad(i64, gen_strong_ptr(handle, layout), "strong");
+    const std::string name = count_name(index);
+    llvm::Value *count = _ctx.builder->CreateLoad(
+        i64, gen_header_ptr(handle, layout.box, index, name + "_ptr"), name);
     _ctx.builder->CreateBr(done_block);
 
     _ctx.builder->SetInsertPoint(done_block);
 
-    llvm::PHINode *result = _ctx.builder->CreatePHI(i64, 2, "refcount");
+    llvm::PHINode *result = _ctx.builder->CreatePHI(i64, 2, label);
     result->addIncoming(llvm::ConstantInt::get(i64, 0), null_block);
     result->addIncoming(count, load_block);
 
@@ -445,9 +573,62 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
 llvm::Function *ClassCodegen::build_release_thunk(
     const std::string &name, const ClassLayout *layout, const AST::ComplexType *complex)
 {
+    // **declared before the weak thunk is asked for, and resolved before this one's blocks exist.** both
+    // halves of that ordering are load-bearing: this symbol has to be appended to the module first, so a
+    // reader sees the call site above the definition it names, and asking for the weak thunk from inside
+    // the zero arm below would save and restore an insert point into a block that is mid-construction
+    llvm::Function *thunk = declare_release_thunk(name, layout != nullptr ? "obj" : "env");
+    llvm::Function *weak_release = get_or_create_weak_release_thunk();
+
+    // an environment passes no layout, so the word is reached through the header every box shares. it used
+    // to treat the handle *as* the count's address, which was true only while __strong was the first word
+    return build_count_release_thunk(
+        thunk, header_box_type(layout), ClassBox::strong_index, "dead",
+        [this, complex, weak_release](llvm::Value *handle) {
+            // **the object is dead here, the block is not.** the payload's teardown runs, and then the one
+            // weak reference the strong ones collectively held is given back - which frees the block only
+            // if no `weak<T>` is still holding it. so a weak handle outlives the object it names and can
+            // say so, rather than pointing at memory that has been handed back to malloc
+            gen_deinit_call(complex, handle);
+            _ctx.builder->CreateCall(weak_release, { handle });
+        });
+}
+
+// the payload's teardown, when there is any. the deinit takes `Foo&` - a pointer to a *slot* holding a
+// handle, which is the receiver shape every method and destructor uses - so the handle is spilled to a
+// slot to be addressed. two instructions to keep one receiver convention
+void ClassCodegen::gen_deinit_call(const AST::ComplexType *complex, llvm::Value *handle)
+{
+    AST::FunctionDeclNode *deinit = complex != nullptr ? complex->deinit() : nullptr;
+
+    if (deinit == nullptr) {
+        return;
+    }
+
+    auto deinit_id = _ctx.current_cmp_unit->function_table.get_function_id(deinit);
+    if (deinit_id == 0) {
+        _ctx.types->create_llvm_func_decl(deinit, *_ctx.current_cmp_unit);
+        deinit_id = _ctx.current_cmp_unit->function_table.get_function_id(deinit);
+    }
+
+    if (deinit_id == 0) {
+        throw _ctx.error(fmt::format(
+            "Class '{}' has a deinit that is not declared in compilation unit '{}'",
+            complex->name.value_or("<anonymous>"),
+            _ctx.current_cmp_unit->ast_module ? _ctx.current_cmp_unit->ast_module->name : "<unknown>"));
+    }
+
+    llvm::Value *slot = _ctx.builder->CreateAlloca(
+        llvm::PointerType::get(*_ctx.llvm_context, 0), nullptr, "self_slot");
+    _ctx.builder->CreateStore(handle, slot);
+    _ctx.builder->CreateCall(
+        _ctx.current_cmp_unit->function_table.get_llvm_function(deinit_id), { slot });
+}
+
+llvm::Function *ClassCodegen::declare_release_thunk(const std::string &name, const char *handle_name)
+{
     llvm::Type *void_type = llvm::Type::getVoidTy(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
 
     llvm::Function *thunk = llvm::Function::Create(
         llvm::FunctionType::get(void_type, { opaque_ptr }, false),
@@ -457,8 +638,20 @@ llvm::Function *ClassCodegen::build_release_thunk(
         name,
         _ctx.current_module());
 
+    thunk->getArg(0)->setName(handle_name);
+
+    return thunk;
+}
+
+llvm::Function *ClassCodegen::build_count_release_thunk(
+    llvm::Function *thunk,
+    llvm::Type *box_type,
+    unsigned count_index,
+    const char *zero_block_name,
+    llvm::function_ref<void(llvm::Value *handle)> on_zero)
+{
+    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Value *handle = thunk->getArg(0);
-    handle->setName(layout != nullptr ? "obj" : "env");
 
     // built with its own builder position, then restored - this is called from the middle of whatever
     // function asked for a release
@@ -467,7 +660,7 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk);
     llvm::BasicBlock *dec_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "dec", thunk);
-    llvm::BasicBlock *free_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "free", thunk);
+    llvm::BasicBlock *zero_block = llvm::BasicBlock::Create(*_ctx.llvm_context, zero_block_name, thunk);
     llvm::BasicBlock *return_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", thunk);
 
     _ctx.builder->SetInsertPoint(entry);
@@ -475,43 +668,20 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
     _ctx.builder->SetInsertPoint(dec_block);
 
-    // an environment passes no layout: its count is the block's first word, so the handle *is* the
-    // count's address. see gen_callable_release
-    llvm::Value *strong_ptr = layout != nullptr ? gen_strong_ptr(handle, *layout) : handle;
-    llvm::Value *count = _ctx.builder->CreateLoad(i64, strong_ptr, "strong");
-    llvm::Value *next = _ctx.builder->CreateSub(count, llvm::ConstantInt::get(i64, 1), "strong.dec");
-    _ctx.builder->CreateStore(next, strong_ptr);
+    // the labels come off the index, so an arm cannot name one word while the GEP reaches another
+    const std::string count = count_name(count_index);
+
+    llvm::Value *count_ptr = gen_header_ptr(handle, box_type, count_index, count + "_ptr");
+    llvm::Value *current = _ctx.builder->CreateLoad(i64, count_ptr, count);
+    llvm::Value *next = _ctx.builder->CreateSub(current, llvm::ConstantInt::get(i64, 1), count + ".dec");
+    _ctx.builder->CreateStore(next, count_ptr);
     _ctx.builder->CreateCondBr(
-        _ctx.builder->CreateICmpEQ(next, llvm::ConstantInt::get(i64, 0), "is_last"),
-        free_block,
+        _ctx.builder->CreateICmpEQ(next, llvm::ConstantInt::get(i64, 0), "is_last_" + count),
+        zero_block,
         return_block);
 
-    _ctx.builder->SetInsertPoint(free_block);
-
-    // the payload's teardown, when there is any. the deinit takes `Foo&` - a pointer to a *slot*
-    // holding a handle, which is the receiver shape every method and destructor uses - so the handle
-    // is spilled to a slot to be addressed. two instructions to keep one receiver convention
-    if (AST::FunctionDeclNode *deinit = complex != nullptr ? complex->deinit() : nullptr) {
-        auto deinit_id = _ctx.current_cmp_unit->function_table.get_function_id(deinit);
-        if (deinit_id == 0) {
-            _ctx.types->create_llvm_func_decl(deinit, *_ctx.current_cmp_unit);
-            deinit_id = _ctx.current_cmp_unit->function_table.get_function_id(deinit);
-        }
-
-        if (deinit_id == 0) {
-            throw _ctx.error(fmt::format(
-                "Class '{}' has a deinit that is not declared in compilation unit '{}'",
-                complex->name.value_or("<anonymous>"),
-                _ctx.current_cmp_unit->ast_module ? _ctx.current_cmp_unit->ast_module->name : "<unknown>"));
-        }
-
-        llvm::Value *slot = _ctx.builder->CreateAlloca(opaque_ptr, nullptr, "self_slot");
-        _ctx.builder->CreateStore(handle, slot);
-        _ctx.builder->CreateCall(
-            _ctx.current_cmp_unit->function_table.get_llvm_function(deinit_id), { slot });
-    }
-
-    _ctx.builder->CreateCall(get_free(), { handle });
+    _ctx.builder->SetInsertPoint(zero_block);
+    on_zero(handle);
     _ctx.builder->CreateBr(return_block);
 
     _ctx.builder->SetInsertPoint(return_block);
@@ -523,5 +693,4 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
     return thunk;
 }
-
 };

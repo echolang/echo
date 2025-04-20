@@ -1,0 +1,45 @@
+// a declaration's storage is seated at its scope's entry, not where the declaration is reached. that is
+// what stops its position among its siblings from being load-bearing (todo/A12)
+
+struct Pair {
+    int32 $a;
+    int32 $b;
+}
+
+class Counter {
+    int32 $value;
+
+    constructor(int32 $start) {
+        $this->value = $start;
+    }
+}
+
+// a struct local inside a loop body. its slot belongs to the loop scope's entry, which is inside the
+// loop - so the zero-init travels with the alloca and is re-run each turn rather than hoisted out
+function sum_pairs(int32 $n) : int32
+{
+    int32 $i = 0;
+    int32 $acc = 0;
+
+    while ($i < $n) {
+        Pair $p = Pair($i, $i * 2);
+        $acc = $acc + $p->b;
+        $i = $i + 1;
+    }
+
+    return $acc;
+}
+
+// a declaration the flow never reaches. it is seated anyway now, so its type is lowered where before it
+// was never visited at all - it has to lower cleanly
+function unreachable_decl() : int32
+{
+    return 7;
+    Pair $never;
+}
+
+// the one thing position still decides: a class constructor's `$this` carries the heap allocation in its
+// initializer, and an initializer runs where it is written - so the field write below must not precede it
+echo sum_pairs(3);
+echo unreachable_decl();
+echo Counter(41)->value;

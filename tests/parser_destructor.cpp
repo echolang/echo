@@ -29,7 +29,7 @@ namespace
     const char *k_buffer =
         "struct Buffer {\n"
         "    ptr<uint8> $data;\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n";
 }
 
@@ -119,7 +119,7 @@ TEST_CASE("a generic struct shares its type parameters with its destructor", "[d
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Box<T> {\n"
         "    ptr<T> $slot;\n"
-        "    destructor() { $this->slot = null; }\n"
+        "    destructor() { $this->slot:$ = null; }\n"
         "}\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
@@ -143,7 +143,7 @@ TEST_CASE("an instantiation finds its destructor through its template", "[destru
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Box<T> {\n"
         "    ptr<T> $slot;\n"
-        "    destructor() { $this->slot = null; }\n"
+        "    destructor() { $this->slot:$ = null; }\n"
         "}\n"
         "$b = Box<int32>(null);\n");
 
@@ -175,7 +175,7 @@ TEST_CASE("needs_destruction is transitive through properties but stops at a poi
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Buffer {\n"
         "    ptr<uint8> $data;\n"
-        "    destructor() { $this->data = null; }\n"
+        "    destructor() { $this->data:$ = null; }\n"
         "}\n"
         "struct Wrap { Buffer $inner; usize $version; }\n"
         "struct Plain { usize $a; ptr<uint8> $b; }\n");

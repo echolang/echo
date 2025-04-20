@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:10
+Cannot take the address of an expression that has no storage
+Begin: '&'
+End: '&'
+Code excerpt:
+ [10]> 
+ [11]> echo inc(&5);
+               ^
+ [12]> 
+
+Critical issues found, cannot compile.

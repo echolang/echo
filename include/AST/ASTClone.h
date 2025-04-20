@@ -50,9 +50,18 @@ namespace AST
         }
 
         // deep-clone an owned child (dispatches through the virtual clone). Null-safe
+        //
+        // a node the map already holds is answered with *that* clone rather than cloned a second time.
+        // two clones of one node inside one operation is never what a caller wants: for a declaration it
+        // means two allocas and half the reads bound to each, and for any node it means the instance
+        // carries a subtree the template does not. it is also what lets a clone() body clone a scope's
+        // declarations ahead of the statements that read them - see ScopeNode::clone - without the child
+        // loop that follows cloning them all over again
         template <class T>
         T *child(T *old) {
             if (!old) return nullptr;
+            auto it = map.find(old);
+            if (it != map.end()) return static_cast<T *>(it->second);
             return static_cast<T *>(old->clone(*this));
         }
 
@@ -65,11 +74,11 @@ namespace AST
             return it != map.end() ? static_cast<T *>(it->second) : old;
         }
 
-        // deep-clone the node behind an owned NodeReference, preserving its type tag
+        // deep-clone the node behind an owned NodeReference, preserving its type tag. answers with an
+        // existing clone for the same reason `child` does
         NodeReference clone_ref(const NodeReference &ref) {
             if (!ref.has()) return make_void_ref();
-            Node *cloned = ref.node()->clone(*this);
-            return NodeReference(ref.type(), cloned);
+            return NodeReference(ref.type(), child(ref.node()));
         }
 
         // rebind the node behind a cross-reference NodeReference (target not owned here)

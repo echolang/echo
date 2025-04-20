@@ -2,6 +2,7 @@
 
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
+#include "AST/ASTNullability.h"
 #include "AST/ExprNode.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/VarRefNode.h"
@@ -599,6 +600,41 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     auto lhs_type = lhs_expr->result_type();
     auto rhs_type = rhs_expr->result_type();
 
+    // **`??` is not a binary operator**, though it is spelled and parsed as one. it short-circuits, so it
+    // cannot be a function of two already-evaluated operands the way every other infix symbol here is -
+    // the right side must not run when the left is there. it gets its own node and its own lowering
+    //
+    // ahead of the declared-operator gate below because `??` is not declarable: it is spelled by the
+    // language, and letting an overload set claim the symbol would make the short circuit optional
+    if (op_node != nullptr && op_node->op != nullptr
+        && op_node->op->type == Token::Type::t_qmark_qmark) {
+
+        // the weak upgrade, through the one function all three forms share. after this the left side is an
+        // ordinary nullable and everything below knows nothing about weak references
+        AST::ExprNode *left = AST::optional_operand_of(
+            lhs_expr, payload.context.module, op_node->token_literal);
+
+        const AST::ValueType left_type = left->result_type();
+
+        // a left side that can never be absent makes the right side dead code. reported rather than
+        // folded away, for `guard`'s reason: it reads as a claim about the value, and a claim that is
+        // always false is a mistake somewhere. an undetermined type waits for a later round as ever
+        if (AST::is_certainly_present(left_type)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(op_node->token_literal),
+                fmt::format(
+                    "'??' needs a value that may be absent on its left, and '{}' always is one - the "
+                    "right side could never be reached",
+                    left_type.get_type_desciption()));
+            return AST::make_void_ref();
+        }
+
+        auto &node = payload.context.emplace_node<AST::NullCoalesceExprNode>(
+            left, rhs_expr, op_node->token_literal);
+
+        return AST::make_ref(node);
+    }
+
     // **a declared operator, before the built-in arms below.** an operator is a function, so all this
     // does is hand the operands to the same overload resolution every call goes through - which is
     // why nothing downstream of here has an operator case at all
@@ -740,6 +776,11 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_null) ||
            // `ptr<T>(...)` is a cast, so a type keyword can begin an expression
            cursor.is_type(Token::Type::t_ptr) ||
+           // and `weak($obj)` / `strong($w)` for the same reason. without these the shunting-yard loop
+           // never enters, the expression comes back empty, and parse_expr_ref's sanity assert fires -
+           // which is the trap `mv` and the closure literal below already document
+           cursor.is_type(Token::Type::t_weak) ||
+           cursor.is_type(Token::Type::t_strong) ||
            // `mv E` is a prefix operator, so it begins one too. without this the shunting-yard loop
            // never enters and the expression comes back empty
            cursor.is_type(Token::Type::t_mv) ||
@@ -768,18 +809,189 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            starts_declared_operator(payload, cursor, AST::OpFixity::t_prefix);
 }
 
+// `( expr )`, the shape every call-like form here is written in - `weak(...)`, `strong(...)`, a pointer
+// cast. one helper rather than three copies, so the recovery is the same wherever the parens are: a
+// located issue at whichever bracket was missing, and nullptr for the caller to recover from
+AST::ExprNode *parse_parenthesized_operand(Parser::Payload &payload, AST::TypeNode *expected_type = nullptr)
+{
+    auto &cursor = payload.cursor;
+
+    if (!cursor.is_type(Token::Type::t_open_paren)) {
+        payload.collect_unexpected_token(Token::Type::t_open_paren);
+        return nullptr;
+    }
+    cursor.skip();
+
+    auto *operand = Parser::parse_expr(payload, expected_type);
+    if (operand == nullptr) {
+        return nullptr;
+    }
+
+    if (!cursor.is_type(Token::Type::t_close_paren)) {
+        payload.collect_unexpected_token(Token::Type::t_close_paren);
+        return nullptr;
+    }
+    cursor.skip();
+
+    return operand;
+}
+
+AST::ExprNode *Parser::parse_weak_expr(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+    auto weak_token = cursor.current();
+
+    // the explicit form goes through **Parser::parse_type**, the one owner of the type grammar, rather
+    // than re-reading `< type >` here. so `weak<a::b::Foo>` and `weak<Box<int32>>` mean the same in an
+    // expression as in a declaration, including the `>>` split, and the class-only rule is enforced once
+    std::optional<AST::ValueType> written_target;
+    if (cursor.is_type_sequence(0, { Token::Type::t_weak, Token::Type::t_open_angle })) {
+        AST::TypeNode *written = Parser::parse_type(payload);
+        if (written == nullptr) {
+            return nullptr;
+        }
+
+        // parse_type already reported anything that is not a weak - a `weak<int32>` collects its issue at
+        // the type and answers nullopt there, so reaching here with something else is not possible
+        if (!written->type.is_weak()) {
+            return nullptr;
+        }
+
+        written_target = written->type.weak_target();
+    }
+    else {
+        cursor.skip(); // `weak`
+    }
+
+    auto *operand = parse_parenthesized_operand(payload);
+    if (operand == nullptr) {
+        return nullptr;
+    }
+
+    const AST::ValueType operand_type = operand->result_type();
+
+    // a weak reference needs the object's *handle*, which means somewhere to read it from. a temporary
+    // would be released the moment the statement ended, so the weak would be dead before it was named -
+    // refusing here says that, rather than letting the program discover it at runtime
+    if (!AST::is_place_expression(*operand)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(weak_token),
+            "'weak' needs an expression with storage to reference - a value nothing owns is already "
+            "gone by the time a weak reference to it could be read");
+        return nullptr;
+    }
+
+    // an undetermined operand is "ask again later", the standing rule for a type no round has answered.
+    // the node's own result_type() re-asks after substitution, so a `&$t` inside a template needs no
+    // decision here either
+    if (!operand_type.is_class() && !AST::is_undetermined_type(operand_type)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(weak_token),
+            fmt::format(
+                "'weak' needs a class, not '{}' - only a class is reference counted, so only a class "
+                "has a count to opt out of",
+                operand_type.get_type_desciption()));
+        return nullptr;
+    }
+
+    // checked against the operand, never used to change it: the target of a weak reference is whatever
+    // the operand already is. so a mismatch is a claim the program got wrong rather than a conversion
+    if (written_target.has_value() && operand_type.is_class()
+        && !(written_target.value() == operand_type)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(weak_token),
+            fmt::format(
+                "'weak<{}>' does not match its operand's type '{}' - a weak reference names the class "
+                "it was taken of, so the two cannot differ",
+                written_target->get_type_desciption(), operand_type.get_type_desciption()));
+        return nullptr;
+    }
+
+    // **the same node a `&` with a weak destination builds.** `weak($obj)` is not a second operation, it is
+    // the same one saying so itself instead of reading it off a destination - so ownership, lowering and the
+    // dump all follow one path and cannot come apart. it is also the spelling for the case the destination
+    // rule cannot serve: an *inferred* `$w = weak($a)` has no declared type to ask
+    return &payload.context.emplace_node<AST::AddrOfExprNode>(operand, true);
+}
+
+AST::ExprNode *Parser::parse_strong_expr(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+    auto strong_token = cursor.current();
+    cursor.skip(); // `strong`
+
+    auto *operand = parse_parenthesized_operand(payload);
+    if (operand == nullptr) {
+        return nullptr;
+    }
+
+    // no place requirement and no type check here: the operand is read as a *value*, so a weak a call
+    // returned upgrades as readily as one in a variable, and the "is it a weak" question belongs to
+    // AST::TypeChecker - which asks it after the monomorphizer has settled every type
+    return &payload.context.emplace_node<AST::StrongExprNode>(operand, strong_token);
+}
+
 const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, AST::NodeReference base)
 {
     auto &cursor = payload.cursor;
     auto current_ref = base;
 
-    // one loop for every suffix that binds tighter than any operator. `->` and `:$` live here
+    // **the `?->` links opened in this chain, innermost last.** each one swaps the marker in for the base
+    // and records what it has to wrap; the whole lot is unwound after the loop, in reverse
+    //
+    // deferred rather than wrapped on the spot, and that is what makes `$a?->b->c` mean what a reader
+    // expects: everything after the `?->` becomes part of *one* short circuit, so an absent `$a` skips the
+    // `->c` as well. wrapping immediately would have left `->c` applied to a `B?`, which is refused - and
+    // would have forced a `?->` at every link whether or not that link could be absent
+    struct PendingOptionalLink
+    {
+        AST::ExprNode *base;
+        AST::ChainBaseNode *marker;
+        TokenReference token;
+    };
+    std::vector<PendingOptionalLink> optional_links;
+
+    // one loop for every suffix that binds tighter than any operator. `->`, `?->` and `:$` live here
     // rather than in the shunting yard, which has no notion of a postfix operator and pops two
     // operands for everything it sees. `[...]` joins them later
     while (cursor.is_type(Token::Type::t_accessorlr)
+        || cursor.is_type(Token::Type::t_optional_arrow)
         || cursor.is_type(Token::Type::t_ptr_of)
         || cursor.is_type(Token::Type::t_instanceof)
         || cursor.is_type(Token::Type::t_open_bracket)) {
+
+        // `?->` opens a short circuit and then reads a member exactly as `->` does. so it is handled by
+        // *substitution* rather than by a second member-access implementation: the base is replaced with a
+        // marker standing for its unwrapped self, and the `->` arm below carries on unchanged
+        if (cursor.is_type(Token::Type::t_optional_arrow)) {
+            auto optional_token = cursor.current();
+            auto *base = current_ref.unsafe_ptr<AST::ExprNode>();
+
+            // the weak upgrade, through the one function all three forms share
+            base = AST::optional_operand_of(base, payload.context.module, optional_token);
+
+            const AST::ValueType base_type = base->result_type();
+
+            // a base that is always there makes the `?` a lie - the short circuit could never fire, and
+            // the reader is being told to expect an absence that cannot happen. `->` is what they want
+            if (AST::is_certainly_present(base_type)) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(optional_token),
+                    fmt::format(
+                        "'?->' needs a value that may be absent, and '{}' always is one - write '->'",
+                        base_type.get_type_desciption()));
+                return AST::make_void_ref();
+            }
+
+            auto &marker = payload.context.emplace_node<AST::ChainBaseNode>(
+                AST::unwrapped_type_of(base_type), optional_token);
+
+            optional_links.push_back({base, &marker, optional_token});
+
+            // from here the loop reads an ordinary `->` off the marker. the token is *not* consumed:
+            // the arm below consumes it, and both spellings mean the same thing to it
+            current_ref = AST::make_ref(marker);
+        }
 
         // `E instanceof T`. here rather than in the shunting yard for a reason the other suffixes only
         // share by accident: its right operand is a *type*, not an expression, so there is no operand
@@ -806,6 +1018,21 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             cursor.skip();
 
             auto *base = current_ref.unsafe_ptr<AST::ExprNode>();
+
+            // **an element is addressed, so the container has to be storage.** a place is, and so is
+            // `$p:$`, which names an address directly - nothing else. the message is the one the
+            // shunting yard's fallback still gives a literal or an array literal, and it is asked here
+            // as well because a *call* now reaches this loop: `make()[0]` would otherwise be resolved
+            // against the element contract, and fail as an overload that does not exist rather than as
+            // the missing storage it is. giving a call result somewhere to live is todo/A13c, and needs
+            // AST::argument_fit to rank a non-place against the contract's borrow parameter
+            if (!AST::is_place_expression(*base) && base->get_node_type() != AST::NodeType::n_expr_peel) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(bracket_token),
+                    "only a place can be indexed - a variable, a field or an element. Bind this "
+                    "expression to a name first, then index that.");
+                return AST::make_void_ref();
+            }
 
             // **an empty `[]` is legal here**, and means the slot after the last one. it is not read
             // as "an index that failed to parse": AST::OperatorRewriter resolves it against the
@@ -839,6 +1066,9 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // which makes `$out:$:$` identical to `&$out` rather than a special case
             // (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
             if (operand->get_node_type() == AST::NodeType::n_expr_peel) {
+                // no weak reading here, and it needs no destination to decide: `:$` requires a pointer
+                // operand, and a class handle is not one - so `$out:$:$` is always the slot's address,
+                // which is exactly the `&$out` it is documented to be identical to
                 auto &addr = payload.context.emplace_node<AST::AddrOfExprNode>(
                     static_cast<AST::PointerValueNode *>(operand)->operand);
                 current_ref = AST::make_ref(addr);
@@ -943,6 +1173,16 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
         current_ref = AST::make_ref(member_access);
     }
 
+    // **the short circuits close here, innermost first.** everything the loop built after a `?->` is that
+    // link's continuation, so unwinding in reverse puts each chain node around exactly the part of the
+    // expression its base guards - and `$a?->b?->c` nests, stopping at whichever link is absent first
+    for (auto link = optional_links.rbegin(); link != optional_links.rend(); ++link) {
+        auto &chain = payload.context.emplace_node<AST::OptionalChainExprNode>(
+            link->base, current_ref.unsafe_ptr<AST::ExprNode>(), link->marker, link->token);
+
+        current_ref = AST::make_ref(chain);
+    }
+
     return current_ref;
 }
 
@@ -1038,8 +1278,16 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         // null has no type of its own - it takes the one the position expects. an unbound null
         // stays untyped here and is reported by the checker, which has the context to say so
         auto &node = payload.context.emplace_node<AST::NullNode>(cursor.current());
+
+        // **any destination that admits absence**, which is now one question rather than a list of kinds:
+        // a `ptr<T>`, a `weak<T>`, and any `T?` whatever T is. it used to be `is_pointer() || is_class()`,
+        // from when a class was implicitly nullable and nothing else could be - so `int32? $x = null;`
+        // bound nothing and reached codegen as an untyped null
+        //
+        // a *class* is no longer on the list on its own, and that is the flip: `Foo $x = null;` leaves this
+        // unbound and is reported against the destination, naming `Foo?`
         if (expected_type != nullptr
-            && (expected_type->type.is_pointer() || expected_type->type.is_class())) {
+            && (expected_type->type.is_nullable() || expected_type->type.is_weak())) {
             node.bound_type = expected_type->type;
         }
         cursor.skip();
@@ -1215,7 +1463,13 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
                 static_cast<AST::IndexExprNode *>(target)->slot_is_bound = true;
             }
 
-            auto &ptr_expr = payload.context.emplace_node<AST::AddrOfExprNode>(target);
+            // **the destination decides.** a `weak<T>` slot, parameter, field or return type is asking for
+            // a weak reference, and this `&` is how it is spelled; anything else is asking for an address
+            // and gets one, whatever the operand's type happens to be. see AddrOfExprNode's header for why
+            // it cannot be keyed on the operand instead - the stdlib's generic accessors are the reason
+            const bool weak_wanted = expected_type != nullptr && expected_type->type.is_weak();
+
+            auto &ptr_expr = payload.context.emplace_node<AST::AddrOfExprNode>(target, weak_wanted);
             return AST::make_ref(ptr_expr);
         }
 
@@ -1232,6 +1486,29 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         }
 
         return AST::make_ref(*closure);
+    }
+
+    // `weak($obj)` and `weak<Foo>($obj)` - the written spelling of what `&$obj` on a class already means.
+    // both forms build exactly the node the `&` arm builds, so there is one lowering and one ownership
+    // rule for the operation however it was written
+    //
+    // the explicit type argument is accepted and *checked*, not used: the target is whatever the operand
+    // already is, so `weak<Bar>($aFoo)` is a mistake worth naming rather than a coercion. it exists so a
+    // reader can say what they mean at a site where the operand's type is not obvious
+    //
+    // unlike `&`, a non-class operand is an error here rather than falling back to a borrow. `&` has to
+    // stay total - it is the address-of operator for every type - but nobody writes `weak(...)` meaning
+    // "take an address"
+    else if (
+        cursor.is_type_sequence(0, { Token::Type::t_weak, Token::Type::t_open_paren }) ||
+        cursor.is_type_sequence(0, { Token::Type::t_weak, Token::Type::t_open_angle })
+    ) {
+        return AST::make_ref(Parser::parse_weak_expr(payload));
+    }
+
+    // `strong($w)` - the upgrade back, and the only way to read through a weak reference
+    else if (cursor.is_type_sequence(0, { Token::Type::t_strong, Token::Type::t_open_paren })) {
+        return AST::make_ref(Parser::parse_strong_expr(payload));
     }
 
     // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an
@@ -1259,22 +1536,10 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             return AST::make_void_ref();
         }
 
-        if (!cursor.is_type(Token::Type::t_open_paren)) {
-            payload.collect_unexpected_token(Token::Type::t_open_paren);
-            return AST::make_void_ref();
-        }
-        cursor.skip();
-
-        auto *inner = Parser::parse_expr(payload, cast_type);
+        auto *inner = parse_parenthesized_operand(payload, cast_type);
         if (inner == nullptr) {
             return AST::make_void_ref();
         }
-
-        if (!cursor.is_type(Token::Type::t_close_paren)) {
-            payload.collect_unexpected_token(Token::Type::t_close_paren);
-            return AST::make_void_ref();
-        }
-        cursor.skip();
 
         auto &cast = payload.context.emplace_node<AST::TypeCastNode>(cast_type->type, inner, false);
         return Parser::parse_postfix_chain(payload, AST::make_ref(cast));
@@ -1300,7 +1565,15 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
     ) {
         auto fcall = parse_funccall(payload, ast_namespace);
-        return AST::make_ref(fcall);
+
+        if (fcall == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        // **and then the suffixes**, which every other operand producer in this function already does.
+        // without it a `->` after a free call was `Unexpected token '->'` - not a decision about
+        // reading a member off a call result, just the one arm that forgot to continue the chain
+        return Parser::parse_postfix_chain(payload, AST::make_ref(*fcall));
     }
 
     // `&` reached here means it was not followed by a variable name, so there is no storage to
@@ -1543,9 +1816,10 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         // assert at the bottom of this function, which takes the compiler down instead of reporting
         //
         // the array literal production widened the ways to arrive here, because a `[` that no postfix
-        // chain claimed now parses as one operand rather than being an unexpected token: `f()[0]` is
-        // a call followed by `[0]`, since a call result is not a place and the chain does not run on
-        // one (todo/A13a). so this needs to be a diagnostic before it is anything else
+        // chain claimed now parses as one operand rather than being an unexpected token - `5[0]` and
+        // `[1, 2][0]` reach it. a *call* no longer does: the chain runs on one, and its bracket arm
+        // gives the same message from where the decision is (todo/A13c). so this needs to be a
+        // diagnostic before it is anything else
         if (!expr_parts.empty() && expr_parts.back().opnode == nullptr) {
             const bool looks_like_indexing = cursor.is_type(Token::Type::t_open_bracket);
 

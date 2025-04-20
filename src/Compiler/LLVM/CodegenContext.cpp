@@ -8,6 +8,24 @@
 
 namespace Compiler::LLVM
 {
+    CodegenContext::StringWindow CodegenContext::gen_string_window(
+        llvm::Value *value, const AST::ValueType &type, const char *prefix)
+    {
+        const AST::CoreStringLayout &layout = core_string_layout();
+
+        llvm::Value *window = core_types().is_string(type)
+            ? builder->CreateExtractValue(
+                  value, { static_cast<unsigned>(layout.window_index) }, fmt::format("{}window", prefix))
+            : value;
+
+        return StringWindow{
+            builder->CreateExtractValue(
+                window, { static_cast<unsigned>(layout.bytes_index) }, fmt::format("{}bytes", prefix)),
+            builder->CreateExtractValue(
+                window, { static_cast<unsigned>(layout.size_index) }, fmt::format("{}size", prefix)),
+        };
+    }
+
     CmpUnit *CodegenContext::main_cmp_unit()
     {
         auto it = cmp_unit_map.find(ECO_MAIN_MODULE_NAME);

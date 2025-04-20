@@ -40,7 +40,7 @@ echo $circle instanceof Circle;
 echo $circle instanceof Rock;
 
 // null points at no block, so it is an instance of nothing - interface or class
-Circle $none = null;
+Circle? $none = null;
 echo $none instanceof Drawable;
 echo $none instanceof Circle;
 

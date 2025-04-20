@@ -1,0 +1,13 @@
+--- OUT --->
+1024
+27
+1
+--- IR --->
+CHECK: define i32 @main()
+
+# up to the `(` on purpose: `llvm.pow.f64` is a prefix of the broken `llvm.pow.f64.f64`, so a check
+# that stopped at the type would pass either way and assert nothing
+CHECK: call double @llvm.pow.f64(double
+CHECK: call double @llvm.pow.f64(double
+CHECK: call double @llvm.pow.f64(double
+CHECK-NOT: llvm.pow.f64.f64

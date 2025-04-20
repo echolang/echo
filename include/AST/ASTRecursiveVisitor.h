@@ -34,9 +34,15 @@ namespace AST
         void visit_move_expr(MoveExprNode &node) override;
         void visit_class_alloc_expr(ClassAllocExprNode &node) override;
         void visit_retain_expr(RetainExprNode &node) override;
+        void visit_strong_expr(StrongExprNode &node) override;
+        void visit_guard(GuardNode &node) override;
+        void visit_null_coalesce(NullCoalesceExprNode &node) override;
+        void visit_optional_chain(OptionalChainExprNode &node) override;
+        void visit_chain_base(ChainBaseNode &node) override;
         void visit_closure_expr(ClosureExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
+        void visit_temporary_bind(TemporaryBindExprNode &node) override;
         void visit_release(ReleaseNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
         void visit_array_literal_expr(ArrayLiteralExprNode &node) override;

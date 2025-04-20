@@ -1,0 +1,42 @@
+// a member of a temporary handed to a *borrow* parameter. the callee reads through the address during
+// the call and returns, so the temporary does not have to outlive the statement - only the call - and
+// that is where it is destroyed: 500 (the callee) before 900 (the release). the request travels one step
+// further out than an ordinary argument's for exactly that reason (todo/A13b)
+//
+// note there is no retain: the callee borrows the class, it does not take a reference of its own
+
+class Node
+{
+    int32 $v;
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+struct Pair
+{
+    Node $node;
+}
+
+struct Box
+{
+    int32 $seed;
+
+    function make() : Pair
+    {
+        return Pair(Node($this->seed));
+    }
+}
+
+function use(Node& $n) : int32
+{
+    echo 500;
+    return $n->v;
+}
+
+$b = Box(4);
+echo 1;
+echo use($b->make()->node);
+echo 2;

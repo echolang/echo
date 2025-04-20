@@ -1,0 +1,38 @@
+// `abs` is both a generic function in stdlib/math/functions.eco and two intrinsic declarations in
+// stdlib/math/intrinsics.eco, which is the one place adding intrinsics could plausibly have broken
+// something that already worked
+//
+// there is no `llvm.fabs.i32` - fabs is float-only - so if an integer argument ever picked a
+// concrete float overload it would either fail to lower or silently round-trip through a double.
+// it does not: CallResolver scores a template against the parameters it *would* be instantiated
+// with, so abs<T = int32> matches exactly while abs(float64) is only a promotion, and an exact
+// match beats a promotion before "concrete beats template" is ever consulted
+//
+// the tiebreak does decide the float cases, where the template and the concrete overload both match
+// exactly - and there the concrete intrinsic is what we want
+
+int32 $neg_i = 0 - 3;
+float64 $neg_d = 0.0 - 3.0;
+float $neg_f = 0.0f - 3.0f;
+
+// the generic, instantiated at int32
+int32 $abs_i = math::abs($neg_i);
+
+// the concrete intrinsics
+float64 $abs_d = math::abs($neg_d);
+float $abs_f = math::abs($neg_f);
+
+// min is the same question with six candidates instead of three, none of them generic. the int64
+// operands go through locals because an integer literal carries no width suffix
+int64 $three = 3;
+int64 $nine = 9;
+int32 $min_i = math::min(3, 9);
+int64 $min_l = math::min($three, $nine);
+float64 $min_d = math::min(3.0, 9.0);
+
+echo $abs_i;
+echo $abs_d;
+echo $abs_f;
+echo $min_i;
+echo $min_l;
+echo $min_d;

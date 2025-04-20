@@ -1,0 +1,9 @@
+// a guard binds a name that is only meaningful on the path where the value was there. an else arm that
+// ran on and rejoined would leave that name bound to nothing at all, so the arm has to leave - and
+// refusing at the declaration is what makes the binding's promise true by construction
+
+function lookup(int32 $k) : int32? { return null; }
+
+guard int32 $v = lookup(1) else { echo 0; }
+
+echo $v;

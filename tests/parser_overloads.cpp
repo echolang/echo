@@ -197,10 +197,12 @@ TEST_CASE("a struct's own constructor is reachable alongside the field-wise one"
 
 TEST_CASE("a constructor body opens with its $this declaration", "[overloads]")
 {
-    // `$this` has to be the body's *first* child. allocas are emitted in child order, so a `$this`
-    // added after the body was parsed had no storage yet when the statements above it wrote
-    // through it - and a clone rebinds in child order too, so an instantiated generic would bind
-    // its `$this` reads to the template's declaration
+    // `$this` is the body's *first* child, and for a class that is load-bearing rather than tidy:
+    // Parser::seat_this_storage puts the heap allocation in this declaration's initializer, and an
+    // initializer runs where it is written - so a `$this` declared after the field writes would have
+    // them store through a handle nothing allocated yet. codegen and clone no longer care where it
+    // sits (StmtCodegen::gen_scope seats storage at scope entry, ScopeNode::clone pre-maps
+    // declarations); this one reason is the whole of why the parser still seeds it
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"
@@ -230,8 +232,9 @@ TEST_CASE("a constructor body opens with its $this declaration", "[overloads]")
 TEST_CASE("a generic struct's constructor binds $this to its own instance", "[overloads]")
 {
     // the silent half of the same defect: CloneContext::rebind answers with the *original* for
-    // anything not yet cloned, so a `$this` declared after the statements that read it left every
-    // instance pointing back at the template's declaration
+    // anything not yet cloned, so an instance whose `$this` was cloned after the reads of it pointed
+    // back at the template's declaration. ScopeNode::clone now clones a scope's declarations before its
+    // statements, so this holds wherever the declaration sits - asserted directly in clone_test.cpp
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Box<T> {\n"
         "    T $value;\n"
@@ -267,9 +270,7 @@ TEST_CASE("a generic struct's constructor binds $this to its own instance", "[ov
     REQUIRE(template_this->name() == "this");
     REQUIRE(instance_this->name() == "this");
 
-    // the instance owns its own $this. it only can because the declaration is the body's first
-    // child: rebind resolves against what has already been cloned, so a $this cloned last would
-    // leave every read above it pointing back here, at the template's declaration
+    // the instance owns its own $this rather than sharing the template's
     REQUIRE(instance_this != template_this);
     REQUIRE(instance_this->type() == instance->get_return_type());
 }

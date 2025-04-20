@@ -392,15 +392,6 @@ static void parse_constructor(
     auto this_var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
     auto this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
 
-    // the body opens with an implicit `Foo $this;`, exactly as the synthesized field-wise
-    // constructor below does. seeding it here rather than appending it after the body is parsed is
-    // what makes it the first child, and the first child is the only position that works: gen_scope
-    // allocas in child order, so a `$this` declared last has no alloca yet when the statements above
-    // it read it, and CloneContext::rebind resolves to the *original* for anything not yet cloned,
-    // so an instantiated generic ctor would bind its `$this` reads to the template's declaration
-    auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
-    ctor_body.add_vardecl(*this_vardecl);
-
     // the parameters' frame is where this constructor ends: a name resolved past it belongs to
     // another function's storage - see ScopeNode::lookup_variable
     ctor_scope.is_function_boundary = true;
@@ -421,7 +412,14 @@ static void parse_constructor(
         // which clears it: this body has one, the declarations nested in it do not
         AST::ConstructorScope ctor_this_scope(payload.context, this_vardecl);
 
-        ctor_decl->body = &parse_scope(payload, &ctor_body, ctor_brace);
+        // the body opens with an implicit `Foo $this;`, exactly as the synthesized field-wise constructor
+        // below does. handed to parse_scope rather than appended once the body is parsed for one reason:
+        // a statement in the body reads `$this` by name, and a name is resolved as it is parsed
+        //
+        // it also has to precede the statements that write through it, and that one is *not* a lowering
+        // detail the way it used to be - seat_this_storage above put a class's heap allocation in this
+        // declaration's initializer, and an initializer runs where it is written
+        ctor_decl->body = &parse_scope(payload, ctor_brace, this_vardecl);
     }
 
     leave_member_body(payload);
@@ -570,7 +568,7 @@ static void parse_destructor(
         // struct declaration - same reason parse_funcdecl clears it
         AST::FunctionBodyScope body_scope(payload.context, dtor_decl);
 
-        dtor_decl->body = &parse_scope(payload, nullptr, dtor_brace);
+        dtor_decl->body = &parse_scope(payload, dtor_brace);
     }
 
     leave_member_body(payload);
@@ -646,9 +644,14 @@ static void synthesize_field_wise_constructor(
     seat_this_storage(payload, this_vardecl, self_value_type, name_token);
     default_ctor.body->add_vardecl(*this_vardecl);
 
-    // create a var of the declaration
-    auto this_var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
-    auto this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
+    // one read of `$this` per use, never one node shared between them: a node that sits in the tree
+    // twice has two parents, and every pass that rewrites a child in place - AST::OperatorRewriter on a
+    // member-access base, AST::PointerAdjuster on a deref - would rewrite it once per parent. it is also
+    // what lets a clone answer "already cloned" with the one clone: two parents would collapse onto it
+    auto make_this_read = [&]() {
+        auto *var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
+        return payload.context.emplace_nodep<AST::VarRefNode>(var);
+    };
 
     // for each property we create an assignment statement in the constructor body
     for (size_t i = 0; i < struct_node->properties().size(); i++) {
@@ -656,7 +659,7 @@ static void synthesize_field_wise_constructor(
 
         // create $this->prop access
         auto member_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_identifier, prop->token_varname);
-        AST::ExprNode *target = payload.context.emplace_nodep<AST::MemberAccessNode>(AST::make_ref(*this_ref), member_token);
+        AST::ExprNode *target = payload.context.emplace_nodep<AST::MemberAccessNode>(AST::make_ref(*make_this_read()), member_token);
 
         // a pointer property is *bound* here, not written through. a plain assignment to a
         // pointer means "store into the pointee", which for a field that has never been
@@ -687,7 +690,7 @@ static void synthesize_field_wise_constructor(
     }
 
     // return the initialized struct instance
-    auto return_stmt = payload.context.emplace_nodep<AST::ReturnNode>(this_ref);
+    auto return_stmt = payload.context.emplace_nodep<AST::ReturnNode>(make_this_read());
     default_ctor.body->children.push_back(AST::make_ref(return_stmt));
 
     payload.collector.functions.register_function(
@@ -788,6 +791,42 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // here: AST::FunctionBodyScope clears the receiver, which is A30's separate question
     AST::TypeDeclNode *owner_node = payload.context.self_struct_ptr;
 
+    // a `struct` written inside a `{ }` block where a type parameter is visible is refused, the third
+    // case of the rule parse_funcdecl already applies to a nested `function` and parse_closure to a
+    // closure - same predicate, same reason: `T` resolves through the type-param scope stack and would
+    // make this declaration depend on a substitution nothing hands it. A type is the case where that
+    // would be *silent* rather than a link error, because there is nowhere for the substituted layout to
+    // come from: TypeRegistry::get_or_create_instantiation interns one ComplexType per (template, args)
+    // and this declaration is no template, so the monomorphizer's clone used to mint a second layout of
+    // its own - and struct equality is ComplexType* identity, so that was one type wearing two. see
+    // todo/A27, which lifts all three together
+    //
+    // asked here, before MemberTypeScope is opened and before the node is found or created, so the
+    // refusal mutates nothing on the way out. it cannot double-report with the generic *owner* refusal
+    // below: a member type's namespace comes from MemberTypeScope, which is a written namespace and so
+    // never lexical
+    if (payload.context.current_namespace != nullptr
+        && payload.context.current_namespace->is_lexical()
+        && payload.context.has_visible_type_params())
+    {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            fmt::format(
+                "'{}' cannot be declared inside a generic function's body - it has no access to the "
+                "enclosing type parameters. Declare it at file scope instead.",
+                name_token.value()));
+
+        // the attributes staged ahead of this declaration are still owed a drain - an undrained one
+        // attaches itself to whatever declaration comes next, which is the bug the drain below records
+        AST::AttributeList refused_attributes;
+        Parser::drain_attributes(payload, refused_attributes);
+
+        // the open brace is already consumed, and this is brace-depth aware and eats the closing one,
+        // so the cursor lands exactly where the normal close-brace exit leaves it
+        cursor.skip_till_end_of_scope();
+        return nullptr;
+    }
+
     // a nested type's *declarations* - its constructors and methods - belong to a namespace named after
     // the owner, so `A::Inner(1)` resolves and a bare `Inner(1)` does not. opened before the node is
     // namespaced below, and held for the whole body, so everything the walk registers lands there.
@@ -860,7 +899,8 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         struct_node->complex_type().owner_type = &owner_node->complex_type();
 
         // a nested type of a *generic* owner would need one layout per instantiation the moment it
-        // mentions the owner's `T`, and ComplexType::substituted_copy has no way to mint one. the
+        // mentions the owner's `T`, and TypeRegistry::get_or_create_instantiation has no template to
+        // mint one from - the nested declaration is not itself generic. the
         // template_or_self redirect hands every instantiation the template's single nested type, which
         // is the right answer only while that cannot happen - so refuse the whole case rather than
         // ship one that miscompiles as soon as the type is actually useful

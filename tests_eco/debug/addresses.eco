@@ -1,0 +1,52 @@
+// the shapes that render a real address. what each arm asserts:
+//
+//  - a pointer is never **followed**. after PointerAdjuster an address really is an address, and what is
+//    behind it may be unmapped, freed, or the middle of something
+//  - a weak is never **upgraded**. the upgrade moves the strong count, and a printer must not change what
+//    it is observing - and an empty weak prints its null address for free
+//  - an interface prints no address at all, so its line is deterministic like the two above it
+//
+// every address printed here is a **null** one, so OUT stays a byte golden on any machine. the live-
+// address formats are pinned in debug/address_formats, where nothing is executed at all
+
+class Obj
+{
+    int32 $x;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+}
+
+interface Shape { function area() : int32; }
+
+class Circle : Shape
+{
+    int32 $r;
+
+    constructor(int32 $r)
+    {
+        $this->r = $r;
+    }
+
+    function area() : int32
+    {
+        return $this->r;
+    }
+}
+
+struct Ref
+{
+    int32 $tag;
+    ptr<int32> $at;
+}
+
+Ref $r = Ref(7, null);
+dprint($r);
+
+weak<Obj> $w = null;
+dprint($w);
+
+Shape $s = Circle(3);
+dprint($s);

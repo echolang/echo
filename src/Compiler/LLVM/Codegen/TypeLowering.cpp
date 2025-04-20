@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "eco.h"
@@ -22,25 +23,6 @@
 #include <cassert>
 #include <string>
 #include <vector>
-
-static llvm::Intrinsic::IndependentIntrinsics get_intrinsic_for_string(const std::string &name)
-{
-    if (name == "llvm.sin") {
-        return llvm::Intrinsic::sin;
-    } else if (name == "llvm.cos") {
-        return llvm::Intrinsic::cos;
-    } else if (name == "llvm.exp") {
-        return llvm::Intrinsic::exp;
-    } else if (name == "llvm.log") {
-        return llvm::Intrinsic::log;
-    } else if (name == "llvm.sqrt") {
-        return llvm::Intrinsic::sqrt;
-    } else if (name == "llvm.pow") {
-        return llvm::Intrinsic::pow;
-    }
-
-    return llvm::Intrinsic::not_intrinsic;
-}
 
 namespace Compiler::LLVM
 {
@@ -97,14 +79,29 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
         arg_types.push_back(get_llvm_type(arg->type_node()->type, cmp_unit));
     }
 
+    llvm::FunctionType *requested_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
+
     // handle intrinsic functions
+    //
+    // the whole signature goes to the resolver, not just the arguments: which positions of an
+    // intrinsic are overloaded is the resolver's question to answer, and the return type is one of
+    // the positions it reads. AST::resolve_intrinsic is the one owner of both halves
     if (node->intrinsic.has_value()) {
-        llvm::Function *intrinsic_llvm_func = llvm::Intrinsic::getDeclaration(cmp_unit.llvm_module.get(), get_intrinsic_for_string(node->intrinsic.value()), arg_types);
+        std::string failure;
+        llvm::Function *intrinsic_llvm_func = declare_intrinsic(cmp_unit.llvm_module.get(), node->intrinsic.value(), requested_type, failure);
+
+        if (!intrinsic_llvm_func) {
+            // func_name is the mangled symbol, which is not what a user wrote - say the declared
+            // name instead
+            throw _ctx.error(fmt::format(
+                "Function '{}' declares #[intrinsic: \"{}\"], but {}",
+                node->func_name(), node->intrinsic.value(), failure
+            ));
+        }
+
         cmp_unit.function_table.push_function(func_name, node, intrinsic_llvm_func);
         return intrinsic_llvm_func;
     }
-
-    llvm::FunctionType *requested_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
 
     // an extern declaration binds to a symbol that may already exist in this module - declared by
     // another extern in a different file, or by the compiler itself. getOrInsertFunction is what
@@ -245,10 +242,13 @@ void TypeLowering::build_class_box(
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
 
-    // the field order is the contract Codegen/ClassLayout.h states: strong count first so retain and
-    // release need no offset, then the identity pointer, then the payload
-    std::vector<llvm::Type *> box_members(3);
+    // the field order is the contract Codegen/ClassLayout.h states: the two counts, then the identity
+    // pointer, then the payload. written by index rather than pushed, so the contract is the only place
+    // the order is decided - and it must stay in step with class_header_llvm_type() below, which is how
+    // an environment and an erased operand reach the same words with no layout to GEP through
+    std::vector<llvm::Type *> box_members(4);
     box_members[ClassBox::strong_index] = i64;
+    box_members[ClassBox::weak_index] = i64;
     box_members[ClassBox::typeinfo_index] = opaque_ptr;
     box_members[ClassBox::payload_index] = structure.llvm_struct;
 
@@ -391,7 +391,13 @@ Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
     return ClassLayout{ structure.llvm_struct, structure.llvm_box, structure.typeinfo };
 }
 
-void TypeLowering::build_function_maps(const AST::Bundle &bundle)
+// two loops with two different scopes, and the difference is the whole design. the first is
+// *declaration* scoped: a unit emits a body for every function its own module declares, and
+// StmtCodegen::gen_function_decl looks that body's function up by mangled name in the current unit,
+// so the symbol has to exist there before any body is emitted. the second is *reference* scoped: a
+// call to a function another module defines needs a `declare` in this unit and nothing more, so only
+// callees a unit actually names are copied in
+void TypeLowering::build_function_maps()
 {
     for (auto &cmp_unit : _ctx.cmp_units) {
         // first build all functions actually declared in the module
@@ -408,6 +414,14 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
             // an interface requirement is a signature with no implementation - the implementors have
             // the bodies, under their own symbols. declaring one would emit a `declare` nobody defines
             if (fncdecl->is_interface_requirement()) {
+                continue;
+            }
+            // an intrinsic has no body to emit either, so this loop's reason for existing - the symbol
+            // must exist before gen_function_decl looks a body up - does not apply to one. the second,
+            // reference-scoped loop declares the ones a unit actually calls, which is what keeps a
+            // program that touches no math from paying for every row in stdlib/math/intrinsics.eco:
+            // each is an IIT-table signature match against LLVM's whole intrinsic list
+            if (fncdecl->intrinsic.has_value()) {
                 continue;
             }
             create_llvm_func_decl(fncdecl, *cmp_unit);
@@ -450,12 +464,14 @@ void TypeLowering::build_function_maps(const AST::Bundle &bundle)
     }
 }
 
-void TypeLowering::build_struct_maps(const AST::Bundle &bundle)
+// each unit registers the declarations *its own* module holds, because those are the layouts it
+// emits bodies against - nothing is copied between units here. the two shapes this leaves out both
+// arrive on demand instead, in get_llvm_type: a generic instantiation, which has no TypeDeclNode at
+// all, and a struct another module declared but this unit's instantiation of a template mentions.
+// see the comment on that path for why keying the lazy registration on the ComplexType is what makes
+// the two routes agree
+void TypeLowering::build_struct_maps()
 {
-    // for now we do dump implementation which just copies all
-    // struct types between all compilation units, this obviosly
-    // should in the future only happen if a compilation unit actually
-    // references the structure
     for (auto &cmp_unit : _ctx.cmp_units) {
         for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::TypeDeclNode>()) {
             // a generic struct template has type-parameter-typed properties and no concrete
@@ -494,6 +510,68 @@ llvm::StructType *TypeLowering::iface_llvm_type()
     return llvm::StructType::create(*_ctx.llvm_context, { ptr_type, ptr_type }, "eco.iface");
 }
 
+llvm::Value *TypeLowering::gen_has_value(llvm::Value *value, const AST::ValueType &type)
+{
+    // the tag, for a `T?` whose `T` had no null value to donate. `is_wrapped_optional()` is the one
+    // spelling of that question - see ValueType::has_null_representation
+    if (type.is_wrapped_optional()) {
+        return _ctx.builder->CreateExtractValue(value, { OptionalBox::has_index }, "opt.has");
+    }
+
+    // and otherwise the value *is* an address, so being present is being non-null. that covers a
+    // `ptr<T>`, a class handle and a weak handle with one instruction and no unwrapping at all - which is
+    // what makes `Foo?` cost exactly what `Foo` costs
+    return _ctx.builder->CreateIsNotNull(value, "has_value");
+}
+
+llvm::Value *TypeLowering::gen_unwrapped(llvm::Value *value, const AST::ValueType &type)
+{
+    if (type.is_wrapped_optional()) {
+        return _ctx.builder->CreateExtractValue(value, { OptionalBox::value_index }, "opt.val");
+    }
+
+    // an address-like nullable is its own payload: `Foo?` and `Foo` are the same machine value, and the
+    // difference between them was only ever what the type system would let you do with it
+    return value;
+}
+
+llvm::Value *TypeLowering::gen_absent(
+    const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    return llvm::Constant::getNullValue(get_llvm_type(type, cmp_unit));
+}
+
+llvm::StructType *TypeLowering::optional_llvm_type(
+    const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    assert(type.is_wrapped_optional() && "optional_llvm_type over a type whose null value is its own");
+
+    if (auto cached = _optional_types.find(type); cached != _optional_types.end()) {
+        return cached->second;
+    }
+
+    // the mangled name of the *payload*, so `int32?` and `float64?` are two shapes and two names, and so
+    // the same `int32?` reached from two units is one llvm::Type. name-first lookup for the reason
+    // class_header_llvm_type uses one
+    const AST::ValueType payload = AST::ValueType::make_non_nullable(type);
+    const std::string name = "eco.optional." + payload.get_mangled_name();
+
+    if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, name)) {
+        _optional_types[type] = existing;
+        return existing;
+    }
+
+    std::vector<llvm::Type *> members(2);
+    members[OptionalBox::has_index] = llvm::Type::getInt1Ty(*_ctx.llvm_context);
+    members[OptionalBox::value_index] = get_llvm_type(payload, cmp_unit);
+
+    // by slot index rather than in written order, the rule every shape in Codegen/ClassLayout.h follows
+    llvm::StructType *minted = llvm::StructType::create(*_ctx.llvm_context, members, name);
+    _optional_types[type] = minted;
+
+    return minted;
+}
+
 llvm::StructType *TypeLowering::class_header_llvm_type()
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -503,7 +581,14 @@ llvm::StructType *TypeLowering::class_header_llvm_type()
         return existing;
     }
 
-    return llvm::StructType::create(*_ctx.llvm_context, { i64, ptr_type }, "eco.classheader");
+    // the box's header with the payload cut off, by slot index for build_class_box's reason - these two
+    // are the shape's only two writers and a GEP through this one has to land on the same word
+    std::vector<llvm::Type *> members(ClassBox::payload_index);
+    members[ClassBox::strong_index] = i64;
+    members[ClassBox::weak_index] = i64;
+    members[ClassBox::typeinfo_index] = ptr_type;
+
+    return llvm::StructType::create(*_ctx.llvm_context, members, "eco.classheader");
 }
 
 llvm::StructType *TypeLowering::typeinfo_llvm_type()
@@ -613,6 +698,17 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
 {
     llvm::Type *base_type = nullptr;
 
+    // **`T?` first, and only when `T` has no null value of its own.** over a pointer, a class or a weak
+    // the flag changes nothing about the machine type - a null address already means absent - so those
+    // fall through to their own arms below and `Foo?` costs exactly what `Foo` costs. over anything else
+    // there is no spare representation to donate, so the value is tagged
+    //
+    // asked through ValueType::is_wrapped_optional() rather than spelled out here, because coerce_value
+    // and the null comparison branch on the same question and three answers would be three shapes
+    if (type.is_wrapped_optional()) {
+        return optional_llvm_type(type, cmp_unit);
+    }
+
     // every pointer level is the same opaque `ptr` under LLVM's opaque pointer model, so the
     // pointee is never lowered. that also sidesteps lowering a pointer to a struct that has
     // not been declared in this compilation unit yet
@@ -625,6 +721,13 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     // is get_or_create_class_layout's job, asked for by the few places that need it. lowering it here
     // instead would mean every `ptr<Foo>` and every borrow parameter dragged the whole layout in
     if (type.is_class()) {
+        return llvm::PointerType::get(*_ctx.llvm_context, 0);
+    }
+
+    // and a weak handle is the very same address - the block it names, differently typed. the whole of
+    // what makes it weak is which count it moved and that reading it needs an upgrade, both of which are
+    // settled long before lowering, so there is nothing left for the machine type to carry
+    if (type.is_weak()) {
         return llvm::PointerType::get(*_ctx.llvm_context, 0);
     }
 
@@ -784,11 +887,73 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
         return erased;
     }
 
+    // **wrapping into a `T?`, and unwrapping back out.** only ever reached for the tagged shape: over an
+    // address-like `T` the flag is invisible at the machine level, so the identity fast path at the top of
+    // this function already returned, and the arms below pass the value through as they always did
+    //
+    // the *unwrap* direction is not an implicit conversion - is_implicitly_convertible refuses it, and
+    // deliberately - so it arrives here only from a site that has already proven the value is there:
+    // `guard`, `??`, `?->`. this is the store, not the check
+    if (target.is_wrapped_optional() || source.is_wrapped_optional()) {
+        const AST::ValueType source_payload = AST::ValueType::make_non_nullable(source);
+        const AST::ValueType target_payload = AST::ValueType::make_non_nullable(target);
+
+        // **an undetermined source is never wrapped as present.** it means a `null` that was never bound
+        // to its destination, and wrapping one produces `{ i1 true, <garbage> }` - a value that claims to
+        // be there and is not, which is the single worst thing this code could emit. a throw rather than a
+        // guess: every path that legitimately reaches here knows its source type, so this firing is a
+        // compiler bug and wants to say so rather than to be quietly absorbed
+        if (target.is_wrapped_optional() && AST::is_undetermined_type(source)) {
+            throw _ctx.error(fmt::format(
+                "an untyped value reached a '{}' destination - a null here was never bound to its type {}",
+                target.get_type_desciption(), _ctx.function_context()));
+        }
+
+        if (target.is_wrapped_optional() && !source.is_nullable()) {
+            // `T` -> `T?`: present, carrying the value. the payload is coerced first, so widening
+            // `int32 -> int64?` is one conversion and one wrap rather than a shape mismatch
+            llvm::Value *payload = coerce_value(value, source, target_payload, cmp_unit);
+            llvm::Value *wrapped = llvm::UndefValue::get(optional_llvm_type(target, cmp_unit));
+
+            wrapped = _ctx.builder->CreateInsertValue(
+                wrapped,
+                llvm::ConstantInt::getTrue(*_ctx.llvm_context),
+                { OptionalBox::has_index },
+                "opt.has");
+
+            return _ctx.builder->CreateInsertValue(
+                wrapped, payload, { OptionalBox::value_index }, "opt.val");
+        }
+
+        if (source.is_wrapped_optional() && !target.is_nullable()) {
+            // `T?` -> `T`: read the payload out. the tag is not tested here - whoever asked for this
+            // narrowing tested it, and that is the whole reason the narrowing is not implicit
+            llvm::Value *payload = _ctx.builder->CreateExtractValue(
+                value, { OptionalBox::value_index }, "opt.val");
+
+            return coerce_value(payload, source_payload, target, cmp_unit);
+        }
+
+        // both sides nullable and not identical - `int32? -> int64?`. **passed through unconverted**: the
+        // payloads would have to be unwrapped, converted and rewrapped under the tag they arrived with,
+        // and that is not written yet. left as it is rather than guessed at, since every arrival that
+        // reaches codegen with two different wrapped payloads is a shape this file cannot yet lower
+        return value;
+    }
+
     // an address is passed along as the address it is. reinterpreting one as pointing at a
     // different type is free under opaque pointers, and narrowing a nullable pointer to a
     // borrow is an assertion rather than a conversion - the trap for that is emitted by the
     // cast itself, not here
     if (target.is_pointer() || source.is_pointer()) {
+        return value;
+    }
+
+    // a weak handle is an address too, and the two operations that produce one - gen_weak_of and
+    // gen_strong_upgrade - already hand back exactly the value their destination wants. so there is
+    // nothing to convert here, and importantly nothing to convert *silently*: a weak arriving where a
+    // class is wanted was refused by is_implicitly_convertible long before this
+    if (target.is_weak() || source.is_weak()) {
         return value;
     }
 

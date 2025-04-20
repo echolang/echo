@@ -1,0 +1,64 @@
+# nothing here needs the stdlib - there is no string literal - and leaving it out keeps the IR to one
+# module, which is what makes the ordered CHECKs below readable
+stdlib: off
+
+--- OUT --->
+-128
+-32768
+255
+65535
+1
+0.250000
+--- IR --->
+# the printed output above is correct on arm64 whether or not the promotion is emitted, because the
+# AArch64 backend widens a variadic argument for us. so the golden that can actually fail on the
+# machine this was written on is this one: one promotion per echo, agreeing with the format beside it
+
+# the six formats, in the order the echoes appear. `%u` for the unsigned pair rather than `%d` is the
+# half of the table that says a promotion follows the *source's* signedness
+CHECK: c"%d\0A\00"
+CHECK: c"%d\0A\00"
+CHECK: c"%u\0A\00"
+CHECK: c"%u\0A\00"
+CHECK: c"%d\0A\00"
+CHECK: c"%f\0A\00"
+
+CHECK: define i32 @main()
+
+# int8 at its minimum: sign-extended, and the i32 is what `%d` reads. `zext` here would print 128
+CHECK: load i8
+CHECK: sext i8
+CHECK: @printf
+CHECK: , i32
+
+# int16 at its minimum, the same rule one width up
+CHECK: load i16
+CHECK: sext i16
+CHECK: @printf
+CHECK: , i32
+
+# uint8 at its maximum: `zext`, so 255 rather than the -1 the i8 holds
+CHECK: load i8
+CHECK: zext i8
+CHECK: @printf
+CHECK: , i32
+
+# uint16 at its maximum
+CHECK: load i16
+CHECK: zext i16
+CHECK: @printf
+CHECK: , i32
+
+# a bool is an i1, so it is the narrowest thing echo can be handed
+CHECK: zext i1
+CHECK: @printf
+CHECK: , i32
+
+# and a float32 is promoted to a double, because `%f` reads eight bytes. passing the float raw is
+# what printed 0.000000 on x86-64
+CHECK: load float
+CHECK: fpext float
+CHECK: @printf
+CHECK: , double
+
+CHECK: ret i32 0

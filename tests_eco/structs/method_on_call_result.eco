@@ -1,0 +1,49 @@
+// **a method on a value-returning call.** a method takes the address of the value it is called on, and a
+// value nobody stored has none - so one is given to it: the temporary is built immediately before the
+// call and destroyed immediately after it, which is why 500 (the method's own echo) lands before 900
+// (the destructor) rather than after. the receiver is argument zero and evaluated first, so binding it
+// just outside the call is exactly where it was written (todo/A13b)
+
+struct Buffer
+{
+    int32 $tag;
+    ptr<uint8> $data;
+
+    function doubled() : int32
+    {
+        echo 500;
+        return $this->tag * 2;
+    }
+
+    function silent() : void
+    {
+        echo 600;
+    }
+
+    destructor()
+    {
+        echo 900;
+        mem::free($this->data);
+    }
+}
+
+struct Box
+{
+    int32 $seed;
+
+    function make() : Buffer
+    {
+        return Buffer($this->seed, mem::alloc<uint8>(8));
+    }
+}
+
+$b = Box(7);
+echo 1;
+echo $b->make()->doubled();
+echo 2;
+
+// and a **void** method, which is the statement form: the temporary exists only for the receiver, and
+// the call answers with nothing at all. that is worth its own case - a body that pushes no value read
+// an empty value stack, which is a crash rather than a diagnostic
+$b->make()->silent();
+echo 3;

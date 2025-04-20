@@ -1,0 +1,21 @@
+// the same refusal inside a *method* of a generic type, which is the case the gating makes non-obvious:
+// AST::FunctionBodyScope clears the receiver, so `self_struct_ptr` is null here and the nested-type-in-a-
+// generic-owner refusal cannot see this at all. what does see it is the type-parameter scope stack, which
+// still carries the owner's `T` - the same predicate a nested `function` is refused by
+//
+// so the two refusals partition the cases rather than overlapping: this one fires only in a lexical
+// namespace, and a member type's namespace is a written one
+
+struct Box<T>
+{
+    T $value;
+
+    function unwrap() : int32
+    {
+        struct P { int32 $x; }
+        return 1;
+    }
+}
+
+Box<int32> $b = Box<int32>(1);
+echo $b->unwrap();

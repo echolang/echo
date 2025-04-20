@@ -40,7 +40,7 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
     auto if_brace = payload.cursor.current();
     payload.cursor.skip(); // skip the opening brace
 
-    ifstatement.if_scope = &parse_scope(payload, nullptr, if_brace);
+    ifstatement.if_scope = &parse_scope(payload, if_brace);
 
     // expect a closing brace
     if (!payload.cursor.is_type(Token::Type::t_close_brace)) {
@@ -76,7 +76,7 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
         // parse the else scope
         // if there is another if statement aka "else if" it should automatically be parsed as a new if statement
         // instead of an else block building the tree
-        ifstatement.else_scope = &parse_scope(payload, nullptr, else_brace);
+        ifstatement.else_scope = &parse_scope(payload, else_brace);
 
         // expect a closing brace
         if (is_end_else) {

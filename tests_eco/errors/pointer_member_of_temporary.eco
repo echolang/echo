@@ -1,0 +1,26 @@
+// a pointer read out of a temporary is an address into it, and the destructor below is what makes that
+// concrete: the buffer is freed at the end of the statement, so `$q` would point at freed memory. it is
+// also the one dangling shape the "cannot return the address of a local" check cannot see, because the
+// binding is not a place and nothing under it names a variable (todo/A13b)
+
+struct Buffer
+{
+    int32 $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+struct Box
+{
+    function make() : Buffer
+    {
+        return Buffer(1, mem::alloc<uint8>(8));
+    }
+}
+
+$b = Box();
+$q = $b->make()->data;

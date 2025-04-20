@@ -33,7 +33,7 @@ AST::WhileStatementNode *Parser::parse_whilestatement(Parser::Payload &payload)
     auto loop_brace = payload.cursor.current();
     payload.cursor.skip(); // skip the opening brace
 
-    whilestmt.loop_scope = &parse_scope(payload, nullptr, loop_brace);
+    whilestmt.loop_scope = &parse_scope(payload, loop_brace);
 
     // expect a closing brace
     if (!payload.cursor.is_type(Token::Type::t_close_brace)) {

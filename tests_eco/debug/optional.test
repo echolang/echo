@@ -1,0 +1,9 @@
+--- OUT --->
+[int32?] 12
+[int32?] null
+[Row] {
+  [int32?] $count = null
+}
+[Row] {
+  [int32?] $count = 3
+}

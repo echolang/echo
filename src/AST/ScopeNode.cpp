@@ -29,10 +29,15 @@ const std::string AST::ScopeNode::node_description_inner()
     return result;
 }
 
+void AST::ScopeNode::declare_variable(VarDeclNode &vardecl)
+{
+    _declared_variables[vardecl.token_varname.value()] = &vardecl;
+}
+
 void AST::ScopeNode::add_vardecl(VarDeclNode &vardecl)
 {
     children.push_back(AST::make_ref(vardecl));
-    _declared_variables[vardecl.token_varname.value()] = &vardecl;
+    declare_variable(vardecl);
 }
 
 void AST::ScopeNode::add_funcdecl(AST::FunctionDeclNode &funcdecl)

@@ -6,7 +6,7 @@ class Handle { int32 $x; }
 
 // a null handle owns nothing, so the count is 0. that is what lets a copy-on-write check read as one
 // condition: static bytes with no owner are not uniquely owned either, so they clone before mutating
-Handle $none = null;
+Handle? $none = null;
 echo ref_count($none);
 
 $a = Handle(1);

@@ -1,0 +1,11 @@
+--- OUT --->
+1
+500
+900
+4
+2
+--- RAST --->
+// the borrow is taken out of the temporary, and the release runs after the call returns
+CHECK: call use(addrof<Node&>(ma<Node>(varref<Pair>(var($__temp))->node)))
+CHECK: release(ma<Node>(varref<Pair>(var($__temp))->node))
+CHECK-NOT: retain

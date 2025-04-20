@@ -86,6 +86,38 @@ static AST::ExprNode *build_incdec_value(Parser::Payload &payload, AST::ExprNode
     return &payload.context.emplace_node<AST::BinaryExprNode>(&op_node, operand, step);
 }
 
+AST::ExprNode *Parser::parse_assigned_value(
+    Parser::Payload &payload, AST::ExprNode *target, const TokenReference &assign_token)
+{
+    auto &cursor = payload.cursor;
+
+    // reported here, on the `=`, rather than left to the type checker or codegen. an address has no
+    // storage behind it, so `$p:$:$ = &$q` reached the lvalue codegen's "not addressable" throw with
+    // no location at all
+    if (!AST::is_assignable_target(*target)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(assign_token),
+            "cannot assign to this expression - it has no storage to write into");
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
+    cursor.skip(); // the '='
+
+    // the value is expected at the type the *storage* holds. for a pointer target that is the pointee,
+    // because assigning to a pointer writes through it - `$p = 20` never changes where $p points
+    auto &expected = payload.context.emplace_node<AST::TypeNode>(AST::value_result_type(*target));
+
+    AST::ExprNode *value = parse_expr(payload, &expected);
+
+    if (value == nullptr) {
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
+    return value;
+}
+
 AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode *scope)
 {
     auto &cursor = payload.cursor;
@@ -216,28 +248,13 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
                 return nullptr;
             }
 
-            // reported here, on the `=`, rather than left to the type checker or codegen. an
-            // address has no storage behind it, so `$p:$:$ = &$q` reached the lvalue codegen's
-            // "not addressable" throw with no location at all
-            if (!AST::is_assignable_target(*target)) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(assign_token),
-                    "cannot assign to this expression - it has no storage to write into");
-                cursor.try_skip_to_next_statement();
+            // a declaration is the other case and binds instead, which is why the init_expr path
+            // below keeps the full declared type rather than the storage's
+            expr = parse_assigned_value(payload, target, assign_token);
+
+            if (expr == nullptr) {
                 return nullptr;
             }
-
-            cursor.skip();
-
-            // the value is expected at the type the *storage* holds. for a pointer target that is
-            // the pointee, because assigning to a pointer writes through it - `$p = 20` never
-            // changes where $p points (book/concept/pointers_and_refs_v2.md, "Binding, writing,
-            // and re-seating"). a declaration is the other case and binds instead, which is why
-            // the init_expr path below keeps the full declared type
-            auto &expected = payload.context.emplace_node<AST::TypeNode>(
-                AST::value_result_type(*target));
-
-            expr = parse_expr(payload, &expected);
         }
 
         auto assign = &payload.context.emplace_node<AST::AssignNode>(target, expr, assign_token);

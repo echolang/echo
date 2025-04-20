@@ -1,0 +1,7 @@
+--- OUT --->
+5
+--- RAST --->
+// one binding, wrapping the whole chain - not one per `->`
+CHECK: tempbind<int32>(vardecl<type<Middle>>($__temp) = call mid(
+CHECK: ma<int32>(ma<Inner>(varref<Middle>(var($__temp))->in)->tag)
+CHECK-NOT: tempbind<Middle>

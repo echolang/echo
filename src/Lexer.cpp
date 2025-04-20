@@ -202,6 +202,10 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_div);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_op_mod);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_op_pow);
+    // `?->` and `??` before the bare `?`. a StringToken's priority is its length, so the trie picks the
+    // longest match at a shared prefix - the same rule that keeps `:$` from lexing as a bare `:`
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_optional_arrow);
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_qmark_qmark);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_qmark);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_exclamation);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_open_angle);
@@ -226,6 +230,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_return);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_if);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_else);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_guard);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_while);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_for);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_break);
@@ -236,6 +241,13 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace_sep);
 
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_ptr);
+
+    // keywords for `ptr`'s reason: `weak` names a type constructor, so it has to be recognised in type
+    // position where no identifier can be, and `strong` is its inverse operation. FNC_KEYWORD rather
+    // than FNC_STRING, which matches a *prefix* and would break every identifier starting with them
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_weak);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_strong);
+
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_null);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_struct);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_class);

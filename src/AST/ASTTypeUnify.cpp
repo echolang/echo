@@ -38,6 +38,18 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         return unify_type(param.pointee(), arg.pointee(), out, false);
     }
 
+    // and weak against weak, the same way: `cache<T>(weak<T> $w)` called with a `weak<Node>` binds
+    // T=Node. `allow_decay` off below it for the pointer arm's reason
+    //
+    // note there is deliberately no arm decaying a `weak<Foo>` argument to `Foo` for a bare `T`
+    // parameter, the way the top of this function decays a pointer. a pointer is *transparent* - reading
+    // one yields its pointee, so inference following that read is inference agreeing with codegen. a
+    // weak is not: reading it is refused, and binding T=Foo would name an instance whose body cannot be
+    // handed what the call site actually has
+    if (param.is_weak() && arg.is_weak()) {
+        return unify_type(param.weak_target(), arg.weak_target(), out, false);
+    }
+
     // a bare type parameter binds directly to the argument type
     if (param.is_type_param()) {
         out.bind(param.get_type_param(), arg);

@@ -1,0 +1,49 @@
+// `T?` over every shape there is, because the representation differs and the *program* must not.
+//
+// a pointer, a class handle and a weak handle already have a null value of their own, so `T?` over one
+// costs nothing at all - the same machine word, and only the type system knows the difference. everything
+// else is tagged, `{ i1 __has, T }`. which of the two a type gets is ValueType::has_null_representation,
+// and the whole point of asking it in one place is that nothing below this line can tell
+
+class Node { int32 $tag; }
+struct Point { int32 $x; int32 $y; }
+
+// the tagged shape: a primitive has no spare value to mean "absent" with
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) { return null; }
+    return $n / 2;
+}
+
+// and a struct, for the same reason - every bit pattern of a Point is a Point
+function origin(bool $want) : Point?
+{
+    if ($want) { return Point(0, 0); }
+    return null;
+}
+
+// the free shape: a class handle that holds nothing *is* the absent case
+function find(bool $want) : Node?
+{
+    if ($want) { return Node(7); }
+    return null;
+}
+
+echo halve(8) == null;
+echo halve(-1) == null;
+echo origin(true) == null;
+echo origin(false) == null;
+echo find(true) == null;
+echo find(false) == null;
+
+// a value widens into a nullable without saying anything - it discards a guarantee, which is always safe
+int32? $widened = 41;
+echo $widened == null;
+
+// and `null` reaches any of them
+int32? $none = null;
+Point? $noPoint = null;
+Node? $noNode = null;
+echo $none == null;
+echo $noPoint == null;
+echo $noNode == null;

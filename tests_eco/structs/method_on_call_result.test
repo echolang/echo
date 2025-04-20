@@ -1,0 +1,16 @@
+--- OUT --->
+1
+500
+900
+14
+2
+600
+900
+3
+--- RAST --->
+// the receiver is addressed out of the temporary, and the drop follows the call
+CHECK: tempbind<int32>(vardecl<type<Buffer>>($__temp) = call make(
+CHECK: call doubled(addrof<Buffer&>(varref<Buffer>(var($__temp))))
+CHECK: call destructor(addrof<Buffer&>(varref<Buffer>(var($__temp))))
+// and the void form is a statement of its own, with the same shape
+CHECK: tempbind<void>(vardecl<type<Buffer>>($__temp) = call make(

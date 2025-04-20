@@ -13,6 +13,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 
 namespace AST
 {
@@ -35,8 +36,12 @@ namespace Compiler::LLVM
         TypeLowering(CodegenContext &ctx) : _ctx(ctx) {};
 
         void create_cmp_units(const AST::Bundle &bundle);
-        void build_function_maps(const AST::Bundle &bundle);
-        void build_struct_maps(const AST::Bundle &bundle);
+
+        // both walk `_ctx.cmp_units`, which create_cmp_units has already built out of the bundle -
+        // so neither takes the bundle again, and neither is a whole-program pass despite running
+        // once for the program
+        void build_function_maps();
+        void build_struct_maps();
 
         llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
@@ -79,6 +84,44 @@ namespace Compiler::LLVM
         // method's `$this` is `Circle&`, the address of a slot holding a handle, and the address of
         // field 0 is exactly that. see Codegen/IfaceValue.h for the slot names
         llvm::StructType *iface_llvm_type();
+
+        // **is this nullable value present?** an i1, and the one primitive `== null`, `??`, `?->` and
+        // `guard` all branch on - so the two shapes a `T?` can have are told apart in exactly one place
+        //
+        //  - address-like (`ptr<T>`, a class handle, a weak handle): a null pointer comparison
+        //  - wrapped (`{ i1 __has, T }`): the tag
+        //
+        // here rather than in ExprCodegen because three subsystems need it - the expression arm for
+        // `== null` and `??`, the statement arm for `guard` - and this is the file that already owns what
+        // shape a ValueType has, right beside coerce_value and the wrapper it mints below
+        llvm::Value *gen_has_value(llvm::Value *value, const AST::ValueType &type);
+
+        // the payload of a nullable that is known present - the counterpart of gen_has_value, and only
+        // ever emitted on a path that one has guarded. an address-like nullable *is* its payload, so this
+        // is the identity there; a wrapped one gives up its value field
+        llvm::Value *gen_unwrapped(llvm::Value *value, const AST::ValueType &type);
+
+        // **the empty value of a nullable** - the third of the set, and here for the reason the two above
+        // are: `null` itself and a `?->` that short-circuited both have to produce one, and they produced
+        // two different values before this (an all-zero wrapper against a wrapper with an undef payload).
+        // both are correct, because nothing reads a payload gen_has_value said was not there - which is
+        // exactly why the difference could sit there unnoticed
+        //
+        // `Constant::getNullValue` covers both shapes at once: a null pointer for an address-like nullable,
+        // and an all-zero `{ i1 __has, T }` for a wrapped one, the two agreeing because
+        // OptionalBox::has_index is field 0 and false is zero
+        llvm::Value *gen_absent(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // the shape a `T?` takes when `T` has no spare null value of its own: `{ i1 __has, T }`. asked only
+        // for a type AST::ValueType::is_wrapped_optional() answers true for - a nullable primitive, struct,
+        // interface or callable. over a pointer, a class handle or a weak handle there is no wrapper at
+        // all and `T?` lowers to `T`, because a null address already *is* the empty case
+        //
+        // named `eco.optional.<mangled>` and looked up by name first, exactly as class_header_llvm_type is,
+        // so every unit that mentions `int32?` agrees on one llvm::Type. the mangled name is what keeps
+        // `int32?` and `float64?` apart - a literal StructType would work too, but the name is what makes
+        // the IR readable when a wrapped optional turns up in a dump
+        llvm::StructType *optional_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
         // the **header** every class block starts with, `{ i64 strong, ptr typeinfo }`, with no payload.
         // for a handle whose concrete class is not statically known - the object inside an erased value -
@@ -160,6 +203,13 @@ namespace Compiler::LLVM
             const std::string &name,
             const std::function<llvm::Constant *()> &build,
             const Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // the wrapped optionals this compiler has already lowered. the named-type lookup in
+        // optional_llvm_type is the interning, and this is only what keeps it from re-mangling the
+        // payload's name to perform it: get_llvm_type routes every `T?` through there, so it is asked
+        // once per alloca, per load, per coerce_value and per parameter of every signature that
+        // mentions one. safe as a member because there is exactly one llvm::LLVMContext for the program
+        std::unordered_map<AST::ValueType, llvm::StructType *> _optional_types;
 
         CodegenContext &_ctx;
     };

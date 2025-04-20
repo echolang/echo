@@ -1,0 +1,29 @@
+// a generic body whose statements declare locals in a *nested* scope, so the instance is cloned through
+// ScopeNode::clone twice - once for the body, once for the loop scope. each scope clones its own
+// declarations ahead of the statements that read them, which is what binds `$b` to the instance's
+// declaration rather than to the template's (todo/A12)
+
+struct Box<T> {
+    T $value;
+
+    constructor(T $v) {
+        $this->value = $v;
+    }
+}
+
+function fold<T>(T $seed, int32 $n) : int32
+{
+    int32 $i = 0;
+    int32 $acc = 0;
+
+    while ($i < $n) {
+        Box<T> $b = Box<T>($seed);
+        $acc = $acc + $b->value;
+        $i = $i + 1;
+    }
+
+    return $acc;
+}
+
+echo fold<int32>(5, 3);
+echo Box<int32>(9)->value;
