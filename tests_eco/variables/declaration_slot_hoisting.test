@@ -1,5 +1,6 @@
 --- OUT --->
 6
+0
 7
 41
 --- IR --->
@@ -12,16 +13,29 @@ CHECK-NOT: %value_ptr = getelementptr
 CHECK: call ptr @malloc
 CHECK: store ptr %obj, ptr %this
 CHECK: %value_ptr = getelementptr
-// both locals are seated before either initializer stores, which is the hoist. emitted at the declaration
-// each was written at, `store i32 0, ptr %i` would sit between the two allocas
+// every slot in the function sits in `entry`, ahead of the first store - including the loop body's `%p`,
+// which is the whole point. an alloca is an instruction, so one emitted inside the loop would run once per
+// turn and grow the stack, and mem2reg would not promote it because it is not in the entry block
 CHECK: define i32 @_sum_pairs
 CHECK: %i = alloca i32
 CHECK: %acc = alloca i32
+CHECK: %p = alloca %Pair
 CHECK: store i32 0, ptr %i
 CHECK: store i32 0, ptr %acc
-// the loop body is a scope of its own and seats its local at *its* entry, inside the loop - so the slot a
-// `Pair` needs zeroed is zeroed once per turn rather than once per call
+// and the loop body allocates nothing at all
+CHECK: body:
+CHECK-NOT: alloca
+CHECK: br label %loop
+// **the split.** the same local with no initializer: one slot up in `entry`, but the zeroing store down in
+// the block the back edge re-enters. hoisted with the alloca it would run once, and the second turn would
+// read back whatever the first left in those bytes - the `0` in the output above is that assertion
+CHECK: define i32 @_reset_each_turn
 CHECK: %p = alloca %Pair
+CHECK: br label %loop
+CHECK: body:
+CHECK: store %Pair zeroinitializer, ptr %p
+CHECK-NOT: alloca
+CHECK: br label %loop
 // a declaration the flow never reaches is seated too. before the hoist it was never visited at all
 CHECK: define i32 @_unreachable_decl
 CHECK: %never = alloca %Pair

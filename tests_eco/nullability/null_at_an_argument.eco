@@ -1,0 +1,77 @@
+// **a bare `null` written as a call argument**, which is the one position that cannot get its type from
+// the parser: a direct call's parameter types sit on a declaration nobody has chosen yet, so
+// Parser::parse_call_arguments passes no expected type and the null is parsed untyped. AST::CallResolver
+// binds it once the callee is known, which is the first point holding both the argument and the parameter
+//
+// every shape, because the shape is the whole reason it matters. an address-like nullable's empty value is
+// a null pointer and a wrapped one's is a cleared tag, and an unbound null reached codegen as the former
+// and was then wrapped as though it were present - a `{ i1 true, undef }`, a value that says it is there
+// and is not
+
+class Node { int32 $tag; }
+struct Point { int32 $x; int32 $y; }
+
+// the tagged shapes
+function tag_of(int32? $v) : int32
+{
+    guard int32 $n = $v else { return -1; }
+    return $n;
+}
+
+function x_of(Point? $p) : int32
+{
+    guard Point $q = $p else { return -2; }
+    return $q->x;
+}
+
+// and the free one
+function node_tag(Node? $n) : int32
+{
+    guard Node $m = $n else { return -3; }
+    return $m->tag;
+}
+
+echo tag_of(null);
+echo x_of(null);
+echo node_tag(null);
+
+// the same value, arrived at through a variable rather than written at the argument. it has to answer
+// identically - the binding gives the written null exactly the type the declared local already had
+int32? $none = null;
+Point? $noPoint = null;
+Node? $noNode = null;
+echo tag_of($none);
+echo x_of($noPoint);
+echo node_tag($noNode);
+
+// present, so the absent path is not the only one exercised. a *class* handle only, because widening a
+// value into a wrapped `T?` at an argument position is a separate open hole: CallResolver::coerce_arguments
+// asks is_implicitly_convertible to decide whether a cast node is owed, and that answers "legal" rather
+// than "same representation" - so `x_of(Point(5, 6))` passes a bare `%Point` to a `{ i1, %Point }`
+// parameter and fails IR verification. unrelated to the null, which has no value to widen
+echo node_tag(Node(9));
+
+// a *member* call takes the same route: the receiver is argument 0 and the written null is argument 1,
+// and neither the parser nor PointerAdjuster binds it
+struct Store
+{
+    int32 $seed;
+
+    function reading(int32? $v) : int32
+    {
+        guard int32 $n = $v else { return $this->seed; }
+        return $n;
+    }
+}
+
+Store $s = Store(4);
+echo $s->reading(null);
+
+// a constructor is a call like any other, and its parameter is where this was first seen to crash
+struct Row
+{
+    int32? $count;
+    constructor(int32? $count) { $this->count = $count; }
+}
+
+echo Row(null)->count == null;

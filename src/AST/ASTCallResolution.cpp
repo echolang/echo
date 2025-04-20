@@ -5,6 +5,7 @@
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTNullability.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/TypeNode.h"
@@ -76,6 +77,35 @@ namespace AST
             conversion_call.settlement = CallSettlement::t_settled;
 
             return &conversion_call;
+        }
+
+        // **a written `null` argument takes the parameter's type**, which is the one thing about an
+        // argument that has to be decided here rather than in the parser.
+        //
+        // every other position that admits a null hands the destination down to parse_expr and the null
+        // arm binds it there. a *direct* call cannot: its parameter types are on a declaration nobody has
+        // chosen yet, so Parser::parse_call_arguments passes no expected type at all and the null is
+        // parsed untyped. an indirect call reads them off the callee's signature and does bind, which is
+        // why `$fn(null)` worked and `f(null)` did not
+        //
+        // this is the first point in the pipeline holding both the argument node and a resolved parameter,
+        // so it is where the binding belongs. two things went wrong without it, and one call fixes both:
+        // an unbound null reached codegen with no type, where a wrapped `T?` destination has no null
+        // address to be and TypeLowering::coerce_value refused it - and, before that, it stayed
+        // permanently undetermined, so arguments_are_determined below could never let the call settle
+        //
+        // a parameter that does *not* admit a null is left alone on purpose. AST::bind_null_to declines
+        // it, the call stays pending, and AST::TypeChecker reports it against the destination through
+        // AST::null_rejection_reason - which is the diagnostic that names `Foo?`
+        void bind_null_arguments(FunctionCallExprNode &call)
+        {
+            for (size_t i = 0; i < call.arguments.size() && i < call.decl->args.size(); i++) {
+                if (call.arguments[i] == nullptr) {
+                    continue;
+                }
+
+                bind_null_to(call.arguments[i], call.decl->args[i]->type());
+            }
         }
 
         // true when every argument's type is known, so a decision made about them is final rather
@@ -317,6 +347,13 @@ namespace AST
         if (call.decl->is_generic()) {
             return Result::t_pending;
         }
+
+        // after the generic gate, so a `T?` parameter is never what a null learns its shape from - the
+        // round that rewires `decl` to the instance is the first one with a concrete type to bind. and
+        // before the determinedness test below, which is the half of this that un-wedges the fixpoint:
+        // bound, the null has a type and the call settles here rather than in the monomorphizer's
+        // out-of-rounds sweep
+        bind_null_arguments(call);
 
         // **the fix.** coercing against a type that says nothing cannot tell "no conversion needed"
         // from "no information": the borrow rule declines to wrap, and the cast below it fires for

@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
@@ -348,8 +349,10 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
             // dropped, and codegen evaluates the expression before running these - see ReturnNode::unwind
             auto *ret = child.get_ptr<ReturnNode>();
 
-            // rebuilt each round rather than appended to: the pass is idempotent by re-deriving, and the
-            // fixpoint walks a body more than once
+            // rebuilt rather than appended to, so this arm derives the unwind rather than accumulating
+            // one. _processed_functions and _processed_roots mean a body is in fact walked at most once
+            // ever, so nothing today reaches this twice - but that is a guarantee two visited-sets make
+            // and not one this loop can see, and the scope-exit append below has no equivalent
             ret->unwind.clear();
 
             for (auto frame = _frames.rbegin(); frame != _frames.rend(); ++frame) {
@@ -360,17 +363,28 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
         rebuilt.push_back(kept);
     }
 
-    // the scope's own locals, destroyed in reverse declaration order. skipped when the scope's last
-    // statement was a return, which already emitted them - anything after a return is unreachable
-    // (gen_scope stops there), so a second set would be dead code rather than a double free
-    const bool ends_with_return =
-        !scope.children.empty() && scope.children.back().has_type<ReturnNode>();
-
-    if (!ends_with_return) {
-        collect_frame_drops(_frames.back(), rebuilt);
-    }
-
+    // spliced *before* the question below rather than after. the question reads the scope's statements,
+    // and walk_statement is allowed to replace one - a discarded owning temporary comes back as the
+    // declaration that now owns it - so asking it of the pre-walk list would answer about a tree that no
+    // longer exists
     scope.children = std::move(rebuilt);
+
+    // the scope's own locals, destroyed in reverse declaration order, at the point after its last
+    // statement. skipped when control never reaches that point: whatever left already owes every frame's
+    // drops and collected them onto its own ReturnNode::unwind, so a second set here is dead tree
+    //
+    // dead, and not free - it is type-checked, and a drop of a `Box<int32>` local *creates a generic call
+    // site* the monomorphizer then instantiates. it also shows up in `-ar`, which is precisely where a
+    // duplicated drop is supposed to be diagnosed rather than printed
+    //
+    // asked of AST::scope_always_exits rather than re-derived here, which is the fix: this used to test
+    // the *last child* for `ReturnNode` and nothing else, so a `die` tail, an `if` whose arms both return,
+    // and any statement written after a `return` each appended a full duplicate. none of them ever reached
+    // codegen - gen_scope stops at the first terminated block - so the tree was wrong and the binary was
+    // not, which is the kind of divergence `-ar` exists to make visible
+    if (!scope_always_exits(scope)) {
+        collect_frame_drops(_frames.back(), scope.children);
+    }
 
     if (own_frame) {
         _frames.pop_back();

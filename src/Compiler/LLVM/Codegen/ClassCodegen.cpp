@@ -618,8 +618,10 @@ void ClassCodegen::gen_deinit_call(const AST::ComplexType *complex, llvm::Value 
             _ctx.current_cmp_unit->ast_module ? _ctx.current_cmp_unit->ast_module->name : "<unknown>"));
     }
 
-    llvm::Value *slot = _ctx.builder->CreateAlloca(
-        llvm::PointerType::get(*_ctx.llvm_context, 0), nullptr, "self_slot");
+    // a deinit takes its receiver by address, so the handle is spilled to one. through
+    // CodegenContext::entry_alloca like every other slot: this arm is emitted inside a release thunk's
+    // conditional block, and an alloca is only ever a *static* allocation when it sits in the entry block
+    llvm::Value *slot = _ctx.entry_alloca(_ctx.opaque_ptr_type(), "self_slot");
     _ctx.builder->CreateStore(handle, slot);
     _ctx.builder->CreateCall(
         _ctx.current_cmp_unit->function_table.get_llvm_function(deinit_id), { slot });

@@ -210,6 +210,39 @@ namespace Compiler::LLVM
             return block != nullptr && block->getTerminator() != nullptr;
         }
 
+        // **every stack slot in the language comes from here.**
+        //
+        // an `alloca` is an instruction, not a declaration, so it re-runs every time control reaches it -
+        // and the builder stands wherever the emitter that asked happens to be. a local declared in a loop
+        // body was therefore allocated once per iteration, growing the stack until the function returned,
+        // with no `llvm.stackrestore` anywhere to give it back. `-O` did not take it back either: mem2reg
+        // and SROA only promote allocas they find in the entry block, so the loop local nobody could
+        // promote was also the one most worth promoting
+        //
+        // the entry block runs exactly once per call, which is the lifetime a slot actually wants. it is
+        // also where LLVM's own frontends put theirs, and what the whole "static alloca" contract is
+        //
+        // **only the slot travels.** an initializing or zeroing store is a statement and stays where it
+        // was written - see StmtCodegen::ensure_var_slot, whose zero-init has to re-run once per turn of a
+        // loop for a `Foo $x;` to be re-cleared. hoisting the two together is the mistake this splits
+        llvm::AllocaInst *entry_alloca(llvm::Type *type, const llvm::Twine &name) {
+            llvm::BasicBlock &entry = builder->GetInsertBlock()->getParent()->getEntryBlock();
+
+            // **after the slots already there, not in front of them.** getFirstInsertionPt alone would put
+            // each new one at the top, so a function's parameters came out in reverse and every IR golden
+            // had to be rewritten for no reason. past the run instead keeps the allocas contiguous and in
+            // the order they were asked for, which is what the emitters here have always produced -
+            // getFirstNonPHIOrDbgOrAlloca is exactly that point, and it skips *static* allocas only, which
+            // is all of them because this is the one place they are minted and it never passes an array size
+            //
+            // its own builder rather than a save/restore of the shared one: this is called from the middle
+            // of emitting something else, and an early return between the two would leave the shared
+            // insert point stranded in the entry block
+            llvm::IRBuilder<> at_entry(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
+
+            return at_entry.CreateAlloca(type, nullptr, name);
+        }
+
         void push(llvm::Value *value) {
             value_stack.push(value);
         }

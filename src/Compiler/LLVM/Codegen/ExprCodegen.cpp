@@ -1167,15 +1167,11 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
     // thunk makes when it spills a handle for a deinit
     llvm::Value *unwrapped = _ctx.types->gen_unwrapped(base, base_type);
 
-    // **the slot is seated in the entry block, the store is not.** an alloca here is an alloca per
+    // **the slot is seated in the entry block, the store is not.** an alloca here would be an alloca per
     // *evaluation*, so a `?->` in a loop body would grow the stack once per turn - and `run` defaults to
-    // --debug, where nothing folds it away. a scope's locals are hoisted to scope entry for a weaker
-    // version of this reason: a scope is entered once per iteration, an expression is evaluated once per
-    // evaluation, so only this one can grow without bound
-    llvm::BasicBlock &entry = function->getEntryBlock();
-    llvm::IRBuilder<> entry_builder(&entry, entry.getFirstInsertionPt());
-
-    llvm::Value *slot = entry_builder.CreateAlloca(unwrapped->getType(), nullptr, "chain.slot");
+    // --debug, where nothing folds it away. CodegenContext::entry_alloca is the one owner of that rule,
+    // shared with every local and every parameter, so no slot in the language is seated any other way
+    llvm::Value *slot = _ctx.entry_alloca(unwrapped->getType(), "chain.slot");
     _ctx.builder->CreateStore(unwrapped, slot);
 
     _ctx.chain_base_slots.push_back(slot);

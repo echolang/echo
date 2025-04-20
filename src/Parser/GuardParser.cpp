@@ -4,6 +4,7 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/TypeParser.h"
 
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTNullability.h"
 #include "AST/GuardNode.h"
 #include "AST/ScopeNode.h"

@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
@@ -144,26 +145,35 @@ void PointerAdjuster::bind_null_operand(ExprNode *maybe_null, ExprNode *other)
         return;
     }
 
-    if (maybe_null->get_node_type() != NodeType::n_null) {
-        return;
-    }
-
-    auto *null_node = static_cast<NullNode *>(maybe_null);
-    if (null_node->is_bound()) {
-        return;
-    }
-
-    // a class handle is an address too, and unlike a struct it can be absent - so `$obj == null` binds
-    // the null to the class type and the comparison lowers to an icmp over two handles
+    // **the cheap half of the question first.** only a written null has anything to bind, and asking
+    // AST::written_null_of is a tag compare - where `other->result_type()` below walks the other operand's
+    // whole subtree, which for a nested binary or a member chain is not free. this is called for both
+    // operands of every binary node in the program, and almost none of them is a null
     //
-    // a weak handle likewise, and this is the *one* thing a weak may be compared to. it answers whether
-    // the reference was ever taken, not whether the object is still alive - that question is
-    // `strong($w)`, because only reading the count can answer it
-    // one question, the same one every other null site now asks: does the other side admit absence? that
-    // covers a `ptr<T>`, a `weak<T>` and any `T?` - including the wrapped shapes, whose `== null` is a tag
-    // test rather than an address comparison and which therefore need the bound type to know their shape
-    ValueType other_type = other->result_type();
-    if (other_type.is_nullable() || other_type.is_class() || other_type.is_weak()) {
+    // one walk, and it owns "is this a null at all" - the raw `n_null` tag is not the question, because an
+    // implicit cast the parser or the monomorphizer wrapped around it hides that tag
+    NullNode *null_node = written_null_of(maybe_null);
+
+    if (null_node == nullptr || null_node->is_bound()) {
+        return;
+    }
+
+    // the shared rule: does the other side admit absence? that covers a `ptr<T>`, a `weak<T>` and any `T?`
+    // - including the wrapped shapes, whose `== null` is a tag test rather than an address comparison and
+    // which therefore need the bound type to know their shape
+    //
+    // a weak is the *one* thing this admits that the other askers would refuse outright. `$w == null`
+    // answers whether the reference was ever taken, not whether the object is still alive - that question
+    // is `strong($w)`, because only reading the count can answer it
+    //
+    // **and a comparison-only widening on top of it**: a non-nullable class handle. it is an address, so
+    // `$obj == null` lowers to an icmp over two handles and has always been accepted - even though the
+    // answer is now statically known, because a `Foo` that is not a `Foo?` is never absent. narrowing that
+    // to a diagnostic is a semantic decision of its own and is deliberately not made here; it is spelled at
+    // this call site rather than inside destination_admits_null so the other askers cannot inherit it
+    const ValueType other_type = other->result_type();
+
+    if (destination_admits_null(other_type) || other_type.is_class()) {
         null_node->bound_type = other_type;
     }
 }

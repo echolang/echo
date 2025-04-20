@@ -1,0 +1,68 @@
+// **a scope owes its locals a teardown at the point past its closing brace - and only if control can get
+// there.** whatever left first already collected every frame's drops onto its own `return`, so a second
+// set is a duplicate.
+//
+// none of these ever reached the binary: StmtCodegen::gen_scope stops at the first terminated block, so
+// the duplicate was emitted into the tree and then silently discarded. that is exactly the divergence
+// `-ar` exists to make visible - and it is not free either, since a duplicated drop is type-checked and a
+// drop of a generic local *creates a call site* the monomorphizer then instantiates
+//
+// the question is AST::scope_always_exits, which the ownership pass used to re-derive as "is the last
+// child a ReturnNode". each shape below is one it got wrong
+
+class Handle
+{
+    int32 $v;
+    constructor(int32 $v) { $this->v = $v; }
+}
+
+// **a statement after the return.** the return leaves, so the declaration behind it is unreachable - but
+// it was the last child, so the old check said the scope falls through and appended the whole set again
+function dead_tail() : int32
+{
+    Handle $h = Handle(1);
+    return 10;
+    int32 $unreachable = 0;
+}
+
+// **both arms of an `if`.** one arm returning says nothing about the other, so this is the only branching
+// shape that counts - and codegen agrees, gen_if_statement leaves no merge block when every arm terminated
+function both_arms(bool $c) : int32
+{
+    Handle $h = Handle(2);
+    if ($c) { return 20; } else { return 21; }
+}
+
+// **a `die` tail**, which never comes back either. the old check only ever looked for a `ReturnNode`
+function dies(bool $c) : int32
+{
+    Handle $h = Handle(3);
+    if ($c) { return 30; }
+    die("unreachable in this program");
+}
+
+// the control: an `if` with no else *does* fall through, so the scope-exit drop is owed and must still be
+// there. a fix that answered "always exits" too eagerly would leak here
+function falls_through(bool $c) : int32
+{
+    Handle $h = Handle(4);
+    if ($c) { return 40; }
+    Handle $second = Handle(5);
+    return 41;
+}
+
+// and the shape that actually reaches the scope-exit append: a body with no `return` anywhere in it, so
+// the point past the closing brace is the only place the drop can go
+function no_return_at_all() : void
+{
+    Handle $h = Handle(6);
+    echo $h->v;
+}
+
+echo dead_tail();
+echo both_arms(true);
+echo both_arms(false);
+echo dies(true);
+echo falls_through(true);
+echo falls_through(false);
+no_return_at_all();

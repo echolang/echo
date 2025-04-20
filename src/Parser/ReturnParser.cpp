@@ -2,6 +2,7 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTNullability.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -65,8 +66,7 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     AST::TypeNode *expected_type = payload.context.return_type_ptr;
     if (expected_type != nullptr
         && !AST::can_type_a_literal(expected_type->type)
-        && !expected_type->type.is_nullable()
-        && !expected_type->type.is_weak()) {
+        && !AST::destination_admits_null(expected_type->type)) {
         expected_type = nullptr;
     }
 

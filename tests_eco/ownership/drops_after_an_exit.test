@@ -1,0 +1,38 @@
+--- OUT --->
+10
+20
+21
+30
+40
+41
+6
+--- RAST --->
+// the drop rides out on the return's unwind, and the dead declaration behind it gets no second copy.
+// CHECK-NOT is scoped between the two surrounding CHECKs, so it is asserting about the tail of this
+// function specifically rather than about the file
+CHECK: function dead_tail
+CHECK: return(literal<int32>(10))
+CHECK: unwind release(varref<Handle>(var($h)))
+CHECK-NOT: release(varref<Handle>(var($h)))
+// both arms of the `if` leave, so nothing is owed after it
+CHECK: function both_arms
+CHECK: return(literal<int32>(20))
+CHECK: unwind release(varref<Handle>(var($h)))
+CHECK: return(literal<int32>(21))
+CHECK: unwind release(varref<Handle>(var($h)))
+CHECK-NOT: release(varref<Handle>(var($h)))
+// a `die` does not come back either, and it is not a ReturnNode - which is what the old check looked for
+CHECK: function dies
+CHECK: unwind release(varref<Handle>(var($h)))
+CHECK: call die(
+CHECK-NOT: release(varref<Handle>(var($h)))
+// the control: an `if` with no else falls through, so both locals are still dropped - on the trailing
+// return's unwind, innermost first
+CHECK: function falls_through
+CHECK: unwind release(varref<Handle>(var($second)))
+CHECK: unwind release(varref<Handle>(var($h)))
+// and the one shape that reaches the scope-exit append at all: no return anywhere, so the drop is a
+// statement of its own rather than an unwind entry
+CHECK: function no_return_at_all
+CHECK: call echo(ma<int32>(varref<Handle>(var($h))->v))
+CHECK: release(varref<Handle>(var($h)))

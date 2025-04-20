@@ -10,7 +10,7 @@ namespace AST
 {
     class ExprNode;
     class Module;
-    class ScopeNode;
+    class NullNode;
 
     // **the three forms that read a value out of something that may not have one** - `guard`, `??` and
     // `?->` - and the one question all three ask first.
@@ -68,21 +68,45 @@ namespace AST
     // thing to the checker and another to the two gates that decide what the comparison even means
     bool is_written_null(const ExprNode *expr);
 
-    // **does control always leave this scope?** true when its last statement is a `return` or a `die`.
+    // the same walk, handing back the node instead of a verdict - so a site that has to *write* to the
+    // null does not re-derive which expressions are ones. `bind_null_to` is the usual way to write one;
+    // this is for the caller that binds against something other than a plain destination type, which
+    // today is only AST::PointerAdjuster's comparison widening
+    NullNode *written_null_of(ExprNode *expr);
+
+    // **does a written `null` belong at this destination?** the companion to is_written_null above: that
+    // one is the question about the node, this one is the question about the type it is arriving at.
     //
-    // `guard`'s else block is the one thing that asks, and it has to: a guard binds a name that is only
-    // meaningful on the path where the value was there, so an else arm that ran on and rejoined would
-    // leave that name bound to nothing. refusing at the declaration is what makes the binding's promise
-    // true by construction rather than by the author remembering
+    // one question, and it used to be spelled by hand at every asker with the spellings already drifted:
+    // the expression parser said `is_nullable() || is_weak()`, the return parser said the same inverted
+    // and folded into its literal hint gate, and PointerAdjuster said `is_nullable() || is_class() ||
+    // is_weak()`. a fourth asker - AST::CallResolver, for an argument - is what made the drift worth
+    // removing rather than describing. most of them now reach it through `bind_null_to`; the direct
+    // callers are the return parser's hint gate and AST::null_rejection_reason, which need the answer
+    // without a node to bind
     //
-    // deliberately shallow - the *last* statement, not a walk of every path. an `if` whose two arms both
-    // return is not recognised, and that is a limitation worth having on purpose: the alternative is a
-    // reachability analysis, and this language has no `break` or `continue` yet for one to be complete
-    // over. it answers the shapes an else arm is actually written in
+    // a `ptr<T>` needs no arm: nullability is a per-level flag on any kind, so a pointer that admits null
+    // *is* `is_nullable()` on its pointer level
+    bool destination_admits_null(const ValueType &type);
+
+    // **gives a written `null` the type of the place it is going.** `null` has no type of its own, and the
+    // destination decides more than its name: an address-like nullable is a null pointer, a wrapped `T?` is
+    // a cleared tag, and a null that never learned which it was reaches codegen as the former and is then
+    // wrapped as though it were present.
     //
-    // lives here because `guard` is its only caller. if a second one appears - an exhaustive-match arm, a
-    // never-returning call in statement position - it wants its own header and a row in CLAUDE.md
-    bool scope_always_exits(const ScopeNode &scope);
+    // a no-op on anything that is not a written null, on a null that is already bound, and on a destination
+    // that does not admit one - so an asker may call it without first knowing which of those it has. an
+    // unbound null left behind is deliberate: AST::null_rejection_reason is what reports it, against the
+    // destination, and doing that here would report the same mistake twice
+    //
+    // it reaches *through* an implicit cast for the same reason is_written_null does, so the two agree on
+    // what counts as a null: whenever is_written_null(expr) holds and the destination admits one, this
+    // binds it. returns true when the null now carries a type
+    bool bind_null_to(ExprNode *expr, const ValueType &destination);
+
+    // `guard`'s "the else arm must leave" rule used to live here, back when `guard` was its only caller.
+    // it is AST::scope_always_exits ([AST/ASTControlFlow.h]) now - control flow is not a nullability
+    // question, and it has a second asker
 };
 
 #endif

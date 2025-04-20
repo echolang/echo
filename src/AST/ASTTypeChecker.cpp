@@ -54,7 +54,12 @@ static const char *null_rejection_reason(const ValueType &to)
     //
     // a weak reference is admitted without carrying the flag: an empty weak is an ordinary value, and
     // `weak<T>` has no non-empty spelling to contrast with the way `ptr<T>` has `T&`
-    if (to.is_nullable() || to.is_weak()) {
+    //
+    // asked of AST::destination_admits_null, which is the same call the four binding sites make. this is
+    // the reject half of that rule and they are the accept half - spelled apart they drift, and a drift
+    // here is either a null AST::CallResolver bound being reported as an error or one it refused reaching
+    // codegen with no diagnostic at all
+    if (destination_admits_null(to)) {
         return nullptr;
     }
 

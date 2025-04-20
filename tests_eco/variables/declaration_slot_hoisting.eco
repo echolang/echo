@@ -1,5 +1,15 @@
-// a declaration's storage is seated at its scope's entry, not where the declaration is reached. that is
-// what stops its position among its siblings from being load-bearing (todo/A12)
+// **a declaration is two things, and they are seated at two different heights.**
+//
+// the *slot* goes to the function's entry block, which runs exactly once per call. an alloca is an
+// instruction, so one emitted inside a loop body would run every iteration and grow the stack until the
+// function returned - and mem2reg only promotes what it finds in the entry block, so `-O` would not take
+// it back either. CodegenContext::entry_alloca is the one owner of that
+//
+// the *zero-init* stays at its scope's entry, which for a loop body is a block the back edge re-enters -
+// so a `Pair $p;` written in a loop is re-cleared each turn rather than once per call
+//
+// between them, a declaration's position among its siblings stops being load-bearing: a statement above it
+// reads a slot that is already there (todo/A12)
 
 struct Pair {
     int32 $a;
@@ -14,8 +24,8 @@ class Counter {
     }
 }
 
-// a struct local inside a loop body. its slot belongs to the loop scope's entry, which is inside the
-// loop - so the zero-init travels with the alloca and is re-run each turn rather than hoisted out
+// a struct local inside a loop body: one slot for the whole call, up in the entry block, written afresh
+// by the initializer each turn
 function sum_pairs(int32 $n) : int32
 {
     int32 $i = 0;
@@ -30,6 +40,24 @@ function sum_pairs(int32 $n) : int32
     return $acc;
 }
 
+// and the same local with *no* initializer, which is what pins the split. one alloca in the entry block,
+// but the zeroing store inside the loop body - written only once, the second turn would read back whatever
+// the first left behind
+function reset_each_turn(int32 $n) : int32
+{
+    int32 $i = 0;
+    int32 $total = 0;
+
+    while ($i < $n) {
+        Pair $p;
+        $total = $total + $p->a;
+        $p->a = 100;
+        $i = $i + 1;
+    }
+
+    return $total;
+}
+
 // a declaration the flow never reaches. it is seated anyway now, so its type is lowered where before it
 // was never visited at all - it has to lower cleanly
 function unreachable_decl() : int32
@@ -41,5 +69,6 @@ function unreachable_decl() : int32
 // the one thing position still decides: a class constructor's `$this` carries the heap allocation in its
 // initializer, and an initializer runs where it is written - so the field write below must not precede it
 echo sum_pairs(3);
+echo reset_each_turn(3);
 echo unreachable_decl();
 echo Counter(41)->value;

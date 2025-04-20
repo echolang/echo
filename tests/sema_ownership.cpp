@@ -984,3 +984,79 @@ TEST_CASE("the three positions that cannot hold a temporary refuse one", "[owner
         REQUIRE(has_issue_containing(*bundle, "the pointer in its member 'data'"));
     }
 }
+
+TEST_CASE("a scope control cannot fall out of is owed no drops after its last statement", "[ownership]")
+{
+    // the scope-exit drops and a `return`'s unwind are two spellings of the same set, so exactly one of
+    // them is owed. the pass used to decide by testing its scope's last child for a `ReturnNode`, which is
+    // not the question - the question is whether the point past the closing brace is reachable at all, and
+    // AST::scope_always_exits is the one thing that answers it
+    //
+    // none of the duplicates below ever reached the binary: StmtCodegen::gen_scope stops at the first
+    // terminated block. they were real nodes in the tree all the same - type-checked, printed by `-ar`
+    // where a duplicated drop is meant to be diagnosed, and for a generic local a fresh call site the
+    // monomorphizer had to instantiate
+
+    SECTION("a statement written after the return does not bring the set back")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            std::string(k_buffer) +
+            "function f() : int32 {\n"
+            "    Buffer $b;\n"
+            "    return 1;\n"
+            "    int32 $dead = 0;\n"
+            "}\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        auto &body = body_of(m, "f");
+
+        REQUIRE(drops_on_return(body).size() == 1);
+        REQUIRE(drops_in(body).empty());
+    }
+
+    SECTION("an `if` whose arms both return leaves nothing to drop after it")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            std::string(k_buffer) +
+            "function f(bool $c) : int32 {\n"
+            "    Buffer $b;\n"
+            "    if ($c) { return 1; } else { return 2; }\n"
+            "}\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        auto &body = body_of(m, "f");
+
+        // one on each arm's return, unwinding the enclosing frame the way any early exit does
+        auto &branch = body.children.back().get<IfStatementNode>();
+        REQUIRE(drops_on_return(*branch.if_scope).size() == 1);
+        REQUIRE(drops_on_return(*branch.else_scope).size() == 1);
+
+        // and none appended behind the `if`, where codegen has no block left to put them in
+        REQUIRE(drops_in(body).empty());
+    }
+
+    SECTION("but an `if` with no else does fall through, and the drop is still owed")
+    {
+        // the mirror of the case above, and the one a too-eager answer would leak. one arm returning says
+        // nothing at all about the other
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            std::string(k_buffer) +
+            "function f(bool $c) : void {\n"
+            "    Buffer $b;\n"
+            "    if ($c) { echo 1; }\n"
+            "}\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+        auto &m = bundle->modules.find_module("test");
+        auto &body = body_of(m, "f");
+
+        auto drops = drops_in(body);
+        REQUIRE(drops.size() == 1);
+        REQUIRE(dropped_variable(drops[0])->name() == "b");
+    }
+}

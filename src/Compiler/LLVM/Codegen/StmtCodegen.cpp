@@ -44,12 +44,17 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
         return;
     }
 
-    // every declaration this scope makes gets its storage here, before the first statement runs. the slot
-    // therefore exists for the whole scope, which is what stops a declaration's *position* among its
-    // siblings from being load-bearing: a statement above it reads a slot that is already there
+    // every declaration this scope makes is seated here, before the first statement runs - so its slot
+    // exists for the whole scope, which is what stops a declaration's *position* among its siblings from
+    // being load-bearing: a statement above it reads a slot that is already there
     //
-    // direct children only. a declaration nested in an `if` arm or a loop body belongs to that scope's
-    // entry, and hoisting it here would carry its zero-init out of the block it has to be re-run in
+    // the alloca itself does not land here. CodegenContext::entry_alloca puts it in the function's entry
+    // block, so a loop body does not allocate one per iteration; what this sweep places is the *zero-init*,
+    // and scope entry is the right height for it because it is the block a loop re-enters - a `Foo $x;`
+    // inside one is re-cleared each turn
+    //
+    // direct children only, for that same reason. a declaration nested in an `if` arm or a loop body
+    // belongs to that scope's sweep, and clearing it from here would clear it once instead of per turn
     for (auto &child : node.children) {
         if (child.has_type<AST::VarDeclNode>()) {
             ensure_var_slot(*child.get_ptr<AST::VarDeclNode>());
@@ -116,8 +121,10 @@ llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
 
     llvm::Type *type = _ctx.types->get_llvm_type(node.type_node()->type, *_ctx.current_cmp_unit);
 
-    // alloc the variable on the stack
-    llvm::AllocaInst *alloca = _ctx.builder->CreateAlloca(type, nullptr, node.name());
+    // the slot itself goes to the function's entry block and the zero-init below stays here, which is the
+    // one split that makes both right - see CodegenContext::entry_alloca. emitted where the builder stood,
+    // a declaration in a loop body allocated a fresh slot every iteration
+    llvm::AllocaInst *alloca = _ctx.entry_alloca(type, node.name());
 
     // store the variable in the map
     _ctx.var_map[&node] = alloca;
@@ -133,10 +140,10 @@ llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
     // uninitialized `Foo $x;` would decrement a count at whatever address was on the stack. null is
     // a legitimate value of the type, and releasing null is a no-op
     //
-    // it belongs *with* the alloca and travels no further. left behind at the declaration's position it
-    // would zero a value the statements above already built; hoisted past scope entry - to the function's
-    // entry block, which is where an alloca in a loop body would rather be - a `Foo $x;` inside a loop
-    // would stop being re-zeroed each turn. scope entry is the one height that is right for both
+    // **it stays here, where the alloca above no longer is** - see the split at the top of this function.
+    // and not at the *declaration's* position either, where it would zero a value the statements above
+    // already built. scope entry is the one height that is right for it
+    //
     // **a guard's binding counts as having no initializer here**, and for exactly the reason this
     // zero-init exists. it is only written on the path where the value was there, but the scope-exit
     // release reads the slot on *both* - the else arm's unwind releases it too, because the frame's local
@@ -242,9 +249,13 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     _ctx.builder->SetInsertPoint(entry);
 
     // create the arguments
+    // the parameter slots. through entry_alloca like every other slot even though the builder is already
+    // standing in the entry block - one owner for "where does a stack slot come from" is worth more than
+    // the line it saves here, and it is what keeps this loop from being the counter-example somebody
+    // copies into a loop body later
     for (auto &arg : func->args()) {
         arg.setName(node.args[arg.getArgNo()]->name());
-        llvm::AllocaInst *alloca = _ctx.builder->CreateAlloca(arg.getType(), nullptr, arg.getName());
+        llvm::AllocaInst *alloca = _ctx.entry_alloca(arg.getType(), arg.getName());
         _ctx.builder->CreateStore(&arg, alloca);
         _ctx.var_map[node.args[arg.getArgNo()]] = alloca;
     }

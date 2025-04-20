@@ -140,8 +140,8 @@ namespace AST
         // *values*, which is exactly what a declared `==` on Point would be for, so it is left to fall
         // through to the declaration the way it always did
         const bool presence_test = op->is_identity_comparison()
-            && ((lhs.is_null && (rhs.type.is_nullable() || rhs.type.is_weak()))
-                || (rhs.is_null && (lhs.type.is_nullable() || lhs.type.is_weak())));
+            && ((lhs.is_null && destination_admits_null(rhs.type))
+                || (rhs.is_null && destination_admits_null(lhs.type)));
 
         if (presence_test) {
             return true;

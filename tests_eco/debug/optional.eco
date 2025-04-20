@@ -18,10 +18,7 @@ struct Row
     }
 }
 
-// through a variable rather than a bare `null` argument: binding an untyped null at an argument
-// position is an unrelated open hole that crashes codegen
-int32? $absent = null;
-dprint(Row($absent));
+dprint(Row(null));
 
 int32? $present = 3;
 dprint(Row($present));

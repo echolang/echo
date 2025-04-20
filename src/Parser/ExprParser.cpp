@@ -1279,16 +1279,19 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         // stays untyped here and is reported by the checker, which has the context to say so
         auto &node = payload.context.emplace_node<AST::NullNode>(cursor.current());
 
-        // **any destination that admits absence**, which is now one question rather than a list of kinds:
+        // **any destination that admits absence**, which is one question rather than a list of kinds:
         // a `ptr<T>`, a `weak<T>`, and any `T?` whatever T is. it used to be `is_pointer() || is_class()`,
         // from when a class was implicitly nullable and nothing else could be - so `int32? $x = null;`
         // bound nothing and reached codegen as an untyped null
         //
         // a *class* is no longer on the list on its own, and that is the flip: `Foo $x = null;` leaves this
         // unbound and is reported against the destination, naming `Foo?`
-        if (expected_type != nullptr
-            && (expected_type->type.is_nullable() || expected_type->type.is_weak())) {
-            node.bound_type = expected_type->type;
+        //
+        // asked of AST::bind_null_to, which is the same call AST::CallResolver makes for an argument this
+        // position cannot reach: a direct call's parameter types sit on a declaration nobody has chosen
+        // yet, so `expected_type` is null there and the binding happens once the callee is known
+        if (expected_type != nullptr) {
+            AST::bind_null_to(&node, expected_type->type);
         }
         cursor.skip();
         return AST::make_ref(node);

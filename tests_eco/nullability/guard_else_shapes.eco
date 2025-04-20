@@ -1,0 +1,58 @@
+// **the shapes a guard's else arm may be written in.** the rule is one question -
+// AST::scope_always_exits - and the arm has to answer yes to it, because a guard binds a name that is only
+// meaningful on the path where the value was there.
+//
+// it used to test the arm's *last statement* for a `return` and nothing else, which refused two arms that
+// plainly do leave. AST::OwnershipPass asks the same question of every scope, and widening it for one
+// widened it for the other - the same predicate, so the two cannot answer differently
+
+function lookup(int32 $k) : int32?
+{
+    if ($k > 0) { return $k * 2; }
+    return null;
+}
+
+// a plain `return`, which always worked
+function simple(int32 $k) : int32
+{
+    guard int32 $v = lookup($k) else { return -1; }
+    return $v;
+}
+
+// **an `if` whose arms both leave.** neither arm alone says anything, and together they say everything
+function branching(int32 $k, bool $flag) : int32
+{
+    guard int32 $v = lookup($k) else {
+        if ($flag) { return -2; } else { return -3; }
+    }
+
+    return $v;
+}
+
+// **a `die`**, which does not come back either
+function fatal(int32 $k) : int32
+{
+    guard int32 $v = lookup($k) else { die("no value"); }
+    return $v;
+}
+
+// and a `return` with a dead statement written behind it - the arm still leaves, and the statement after
+// the thing that left is unreachable rather than a way back out
+function trailing(int32 $k) : int32
+{
+    guard int32 $v = lookup($k) else {
+        return -4;
+        echo 0;
+    }
+
+    return $v;
+}
+
+echo simple(3);
+echo simple(-1);
+echo branching(4, true);
+echo branching(-1, true);
+echo branching(-1, false);
+echo fatal(5);
+echo trailing(6);
+echo trailing(-1);
