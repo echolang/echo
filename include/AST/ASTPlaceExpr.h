@@ -207,10 +207,18 @@ namespace AST
     // initializer was a call that could not be settled yet. they used to spell it out separately, and
     // the sweep's spelling dropped both halves - so `const $x = f();` silently lost its `const`, and
     // lost it only for the initializers the fixpoint had to finish
+    //
+    // the overload below is the second half on its own, for the **third** moment: an array literal's
+    // `result_type()` is unknown by construction, so a declaration initialized by one is typed from
+    // its *elements* by AST::array_literal_type_for, and only the `const` half applies there
+    inline ValueType infer_declaration_type(const ValueType &inferred, bool is_const)
+    {
+        return is_const ? ValueType::make_const(inferred) : inferred;
+    }
+
     inline ValueType infer_declaration_type(const ExprNode &init_expr, bool is_const)
     {
-        const ValueType inferred = value_result_type(init_expr);
-        return is_const ? ValueType::make_const(inferred) : inferred;
+        return infer_declaration_type(value_result_type(init_expr), is_const);
     }
 };
 

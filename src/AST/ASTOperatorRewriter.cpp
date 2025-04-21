@@ -1,10 +1,13 @@
 #include "AST/ASTOperatorRewriter.h"
 
+#include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
+#include "AST/ASTNullability.h"
+#include "AST/GuardNode.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
@@ -51,12 +54,23 @@ bool OperatorRewriter::run_round()
             _current_file = &file;
 
             if (file.root != nullptr) {
-                rewrite(file.root);
+                file.root->accept(*this);
             }
         }
     }
 
     return _changed;
+}
+
+void OperatorRewriter::finalize()
+{
+    // one more round, rather than a sweep over `nodes.of_type<ArrayLiteralExprNode>()`: a round
+    // inherits visitFunctionDecl's generic-body skip, so a literal inside a template nothing
+    // instantiated is not blamed for a destination that was never going to be substituted - and it
+    // sees only literals a scope still holds, where a sweep would see detached ones forever
+    _finalizing = true;
+    run_round();
+    _finalizing = false;
 }
 
 FunctionCallExprNode &OperatorRewriter::build_call(
@@ -272,9 +286,8 @@ OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node 
     if (statement->get_node_type() == NodeType::n_vardecl) {
         auto *decl = static_cast<VarDeclNode *>(statement);
 
-        if (decl->init_expr != nullptr
-            && decl->init_expr->get_node_type() == NodeType::n_expr_array_literal) {
-            return {decl, static_cast<ArrayLiteralExprNode *>(decl->init_expr), &decl->init_expr};
+        if (auto *literal = array_literal_of(decl->init_expr)) {
+            return {decl, literal, &decl->init_expr, true};
         }
 
         return {};
@@ -286,13 +299,11 @@ OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node 
     // element, which is A13b's temporary problem wearing different clothes
     if (statement->get_node_type() == NodeType::n_assign) {
         auto *assign = static_cast<AssignNode *>(statement);
+        auto *literal = array_literal_of(assign->value_expr);
 
-        if (assign->value_expr == nullptr
-            || assign->value_expr->get_node_type() != NodeType::n_expr_array_literal) {
+        if (literal == nullptr) {
             return {};
         }
-
-        auto *literal = static_cast<ArrayLiteralExprNode *>(assign->value_expr);
 
         if (assign->target == nullptr || assign->target->get_node_type() != NodeType::n_varref) {
             return {nullptr, literal, nullptr};
@@ -302,6 +313,70 @@ OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node 
     }
 
     return {};
+}
+
+bool OperatorRewriter::settle_destination_type(
+    const LiteralDestination &destination, ValueType &settled)
+{
+    ArrayLiteralExprNode &literal = *destination.literal;
+
+    ValueType destination_type =
+        destination.decl->has_type() ? destination.decl->type() : ValueType::make_unknown();
+
+    // **the declaration said nothing about what holds these, so the elements are asked.**
+    // AST::array_literal_type_for owns that question and answers three ways, so `[f(), g()]` is asked
+    // again next round rather than refused on the first - `$a = [1, 2, 3]` is an `Array<int32>`
+    // because its elements say so, which is what book/concept/arrays.md specifies
+    if (destination.declares && is_undetermined_type(destination_type)) {
+        const ArrayLiteralLookup look =
+            array_literal_type_for(literal, _collector.core_types, _collector.type_registry);
+
+        if (look.result == ArrayLiteralLookup::Result::t_refused) {
+            literal.expansion_decided = true;
+
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(destination.decl->token_varname), look.refusal);
+
+            return false;
+        }
+
+        if (look.result == ArrayLiteralLookup::Result::t_ok) {
+            // the `const` the declaration was written with, put back on top - the same half
+            // AST::infer_declaration_type applies at the two other moments, and the half its own
+            // comment records getting dropped once already
+            destination_type = infer_declaration_type(look.type, destination_type.is_const());
+
+            destination.decl->set_type_node(
+                &_current_module->nodes.emplace_back<TypeNode>(destination_type));
+
+            _changed = true;
+        }
+    }
+
+    // not decided yet: the declaration may be typed from a call this fixpoint has not settled, or an
+    // element above may be. **out of rounds is out of answers** - see finalize()
+    if (is_undetermined_type(destination_type)) {
+        // the message is only for the case where nothing else explained it, which
+        // has_critical_issues() is already the compiler's answer to - deciding it either way is what
+        // keeps a literal from reaching codegen unexpanded
+        if (_finalizing) {
+            literal.expansion_decided = true;
+
+            if (!_collector.has_critical_issues()) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(literal.token_bracket),
+                    fmt::format(
+                        "nothing ever said what '{}' holds - an array literal takes its type from "
+                        "where it is going, and this destination never became concrete.",
+                        destination.decl->token_varname.value()));
+            }
+        }
+
+        return false;
+    }
+
+    settled = destination_type;
+    return true;
 }
 
 void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
@@ -319,11 +394,9 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
         return;
     }
 
-    const ValueType destination_type =
-        destination.decl->has_type() ? destination.decl->type() : ValueType::make_unknown();
+    ValueType destination_type;
 
-    // not decided yet: the declaration may be typed from a call this fixpoint has not settled
-    if (is_undetermined_type(destination_type)) {
+    if (!settle_destination_type(destination, destination_type)) {
         return;
     }
 
@@ -394,7 +467,7 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
     _changed = true;
 }
 
-ExprNode *OperatorRewriter::rewrite_expr(ExprNode *expr)
+ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
 {
     if (expr == nullptr) {
         return nullptr;
@@ -403,12 +476,12 @@ ExprNode *OperatorRewriter::rewrite_expr(ExprNode *expr)
     // an array literal reaching here is one no statement claimed - the vardecl and assign arms hand
     // theirs to expand_array_literal above and do not descend into them. so this position cannot
     // hold one, whatever it is
-    if (expr->get_node_type() == NodeType::n_expr_array_literal) {
-        report_unplaced_literal(*static_cast<ArrayLiteralExprNode *>(expr));
+    if (auto *literal = array_literal_of(expr)) {
+        report_unplaced_literal(*literal);
         return expr;
     }
 
-    rewrite(expr);
+    expr->accept(*this);
 
     return resolve_builtin_operator(expr);
 }
@@ -459,271 +532,117 @@ ExprNode *OperatorRewriter::resolve_builtin_operator(ExprNode *expr)
     return expr;
 }
 
-void OperatorRewriter::rewrite(Node *node)
+// ---- the arms that are not the base's default -------------------------------------------------
+
+void OperatorRewriter::visitScope(ScopeNode &node)
 {
-    if (node == nullptr) {
+    // the base already walks children by index, but the literal expansion has to run *before* the
+    // child is rewritten - so the constructor and the appends it produces are walked by this same
+    // pass rather than waiting a round. that ordering is this pass's, so the loop is too
+    for (size_t i = 0; i < node.children.size(); i++) {
+        expand_array_literal(node, i);
+        statement_edge(node.children[i].node());
+    }
+}
+
+void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
+{
+    // a template's body is only meaningful once cloned into a concrete instance, and its operand
+    // types are the very things that are not known there. PointerAdjuster's rule
+    if (node.is_generic()) {
         return;
     }
 
-    switch (node->get_node_type()) {
-        case NodeType::n_scope:
-        {
-            // indexed rather than ranged, because expand_array_literal splices siblings in - and
-            // *before* the child is rewritten, so the constructor and the appends it produces are
-            // walked by this same pass rather than waiting a round
-            auto *scope = static_cast<ScopeNode *>(node);
+    RecursiveVisitor::visitFunctionDecl(node);
+}
 
-            for (size_t i = 0; i < scope->children.size(); i++) {
-                expand_array_literal(*scope, i);
-                rewrite(scope->children[i].node());
-            }
-            break;
-        }
-
-        case NodeType::n_func_decl:
-        {
-            // a template's body is only meaningful once cloned into a concrete instance, and its
-            // operand types are the very things that are not known there. PointerAdjuster's rule
-            auto *fn = static_cast<FunctionDeclNode *>(node);
-            if (!fn->is_generic()) {
-                rewrite(fn->body);
-            }
-            break;
-        }
-
-        case NodeType::n_vardecl:
-        {
-            // an array literal initializer belongs to the enclosing scope, which has already had its
-            // turn at it above - descending here would report it as an expression in a position that
-            // cannot hold one
-            auto *decl = static_cast<VarDeclNode *>(node);
-
-            if (decl->init_expr != nullptr
-                && decl->init_expr->get_node_type() == NodeType::n_expr_array_literal) {
-                break;
-            }
-
-            decl->init_expr = rewrite_expr(decl->init_expr);
-            break;
-        }
-
-        case NodeType::n_assign:
-        {
-            auto *assign = static_cast<AssignNode *>(node);
-            assign->target = rewrite_expr(assign->target);
-
-            // as for a declaration above: the scope owns an array literal on the right-hand side
-            if (assign->value_expr == nullptr
-                || assign->value_expr->get_node_type() != NodeType::n_expr_array_literal) {
-                assign->value_expr = rewrite_expr(assign->value_expr);
-            }
-
-            rewrite(assign->teardown_old);
-            break;
-        }
-
-        case NodeType::n_expr_binary:
-        {
-            auto *bin = static_cast<BinaryExprNode *>(node);
-            bin->lhs = rewrite_expr(bin->lhs);
-            bin->rhs = rewrite_expr(bin->rhs);
-            widen_binary_operands(*bin);
-            break;
-        }
-
-        case NodeType::n_expr_unary:
-        {
-            auto *un = static_cast<UnaryExprNode *>(node);
-            un->expr = rewrite_expr(un->expr);
-            break;
-        }
-
-        case NodeType::n_expr_call:
-        {
-            auto *call = static_cast<FunctionCallExprNode *>(node);
-            for (auto *&arg : call->arguments) {
-                arg = rewrite_expr(arg);
-            }
-            break;
-        }
-
-        case NodeType::n_expr_indirect_call:
-        {
-            auto *call = static_cast<IndirectCallExprNode *>(node);
-            call->callee = rewrite_expr(call->callee);
-            for (auto *&arg : call->arguments) {
-                arg = rewrite_expr(arg);
-            }
-            break;
-        }
-
-        case NodeType::n_expr_closure:
-        {
-            auto *closure = static_cast<ClosureExprNode *>(node);
-            for (auto *&captured : closure->captured_values) {
-                captured = rewrite_expr(captured);
-            }
-            break;
-        }
-
-        case NodeType::n_expr_addrof:
-        {
-            auto *addr = static_cast<AddrOfExprNode *>(node);
-            addr->operand = rewrite_expr(addr->operand);
-            break;
-        }
-
-        case NodeType::n_expr_deref:
-        {
-            auto *deref = static_cast<DerefExprNode *>(node);
-            deref->operand = rewrite_expr(deref->operand);
-            break;
-        }
-
-        case NodeType::n_expr_index:
-        {
-            auto *index_expr = static_cast<IndexExprNode *>(node);
-
-            // the operands first: `$a[$b[0]]` has to decide the inner bracket before the outer one
-            // can read a type off it
-            index_expr->base = rewrite_expr(index_expr->base);
-            for (auto *&index : index_expr->indices) {
-                index = rewrite_expr(index);
-            }
-
-            rewrite(index_expr->element_call);
-
-            resolve_index(*index_expr);
-            break;
-        }
-
-        case NodeType::n_expr_peel:
-        {
-            auto *peel = static_cast<PointerValueNode *>(node);
-            peel->operand = rewrite_expr(peel->operand);
-            break;
-        }
-
-        case NodeType::n_member_access:
-        {
-            // **reseated**, unlike PointerAdjuster's arm: rule 3 replaces a node rather than editing
-            // it, so a base that is a binary expression over a declared operator becomes a different
-            // node entirely and the reference has to follow it
-            auto *access = static_cast<MemberAccessNode *>(node);
-            NodeReference &base = access->get_base_node();
-
-            if (base.has() && base.is_expression_node()) {
-                auto *rewritten = rewrite_expr(base.unsafe_ptr<ExprNode>());
-                base = NodeReference(rewritten->get_node_type(), rewritten);
-            }
-
-            break;
-        }
-
-        case NodeType::n_expr_instanceof:
-        {
-            auto *instance_of = static_cast<InstanceOfExprNode *>(node);
-            instance_of->operand = rewrite_expr(instance_of->operand);
-            break;
-        }
-
-        case NodeType::n_expr_temp_bind:
-        {
-            // an operator or a bracket can sit anywhere inside a bound subtree, so all three edges get
-            // their round - a temporary is bound around a member chain, and `$o->mid()->tag + 1` puts a
-            // declared `+` directly above one
-            auto *bind = static_cast<TemporaryBindExprNode *>(node);
-
-            for (VarDeclNode *temp : bind->temporaries) {
-                rewrite(temp);
-            }
-
-            bind->body = rewrite_expr(bind->body);
-
-            for (auto &drop : bind->teardown) {
-                rewrite(drop.node());
-            }
-            break;
-        }
-
-        case NodeType::n_expr_retain:
-        {
-            auto *retain = static_cast<RetainExprNode *>(node);
-            retain->operand = rewrite_expr(retain->operand);
-            break;
-        }
-
-        case NodeType::n_type_cast:
-        {
-            auto *cast = static_cast<TypeCastNode *>(node);
-            cast->expr = rewrite_expr(cast->expr);
-            break;
-        }
-
-        case NodeType::n_func_return:
-        {
-            auto *ret = static_cast<ReturnNode *>(node);
-            ret->expr = rewrite_expr(ret->expr);
-
-            // the drops a return owes, which ride on the node rather than sitting ahead of it
-            for (auto &drop : ret->unwind) {
-                rewrite(drop.node());
-            }
-            break;
-        }
-
-        case NodeType::n_foreach:
-        {
-            // **mandatory, and the failure is a deadlock rather than a wrong answer.** this switch ends
-            // in a `default:` that treats an unknown tag as a leaf, so without this arm
-            // `foreach ($grid[0] as $row)`'s bracket never becomes an `operator []` call, the source
-            // type never resolves, AST::ForeachLowering waits forever and the program compiles to
-            // nothing with no diagnostic at all
-            auto *loop = static_cast<ForeachNode *>(node);
-            loop->source = rewrite_expr(loop->source);
-            rewrite(loop->body);
-            break;
-        }
-
-        case NodeType::n_loop_control:
-        {
-            // the same list on the other early exit. **mandatory**: this switch ends in a `default:`
-            // that treats an unknown tag as a leaf, so leaving it out is silent - an operator or a
-            // bracket inside a drop would never be rewritten, and a BinaryExprNode surviving to
-            // gen_binary_expr emits a scaled GEP rather than the call the author declared
-            //
-            // AST::PointerAdjuster deliberately has no matching arm, and neither does it walk a return's
-            // unwind: AST::needs_destruction says a pointer is not an owner, so a drop's place never
-            // reaches through one and there is no deref to insert. do not add one "for symmetry"
-            auto *exit_node = static_cast<LoopControlNode *>(node);
-
-            for (auto &drop : exit_node->unwind) {
-                rewrite(drop.node());
-            }
-            break;
-        }
-
-        case NodeType::n_if_statement:
-        {
-            auto *stmt = static_cast<IfStatementNode *>(node);
-            stmt->condition = rewrite_expr(stmt->condition);
-            rewrite(stmt->if_scope);
-            rewrite(stmt->else_scope);
-            break;
-        }
-
-        case NodeType::n_while_statement:
-        {
-            auto *stmt = static_cast<WhileStatementNode *>(node);
-            stmt->condition = rewrite_expr(stmt->condition);
-            rewrite(stmt->loop_scope);
-            break;
-        }
-
-        default:
-            // leaves: literals, operators, var references, types, releases. nothing to rewrite
-            break;
+void OperatorRewriter::visitVarDecl(VarDeclNode &node)
+{
+    // an array literal initializer belongs to the enclosing scope, which has already had its turn at
+    // it above - descending here would report it as an expression in a position that cannot hold one
+    if (array_literal_of(node.init_expr) != nullptr) {
+        return;
     }
+
+    RecursiveVisitor::visitVarDecl(node);
+}
+
+void OperatorRewriter::visit_assign(AssignNode &node)
+{
+    value_edge(node.target);
+
+    // as for a declaration above: the scope owns an array literal on the right-hand side
+    if (array_literal_of(node.value_expr) == nullptr) {
+        value_edge(node.value_expr);
+    }
+
+    statement_edge(node.teardown_old);
+}
+
+void OperatorRewriter::visitBinaryExpr(BinaryExprNode &node)
+{
+    RecursiveVisitor::visitBinaryExpr(node);
+    widen_binary_operands(node);
+}
+
+ExprNode *OperatorRewriter::upgrade_optional_operand(ExprNode *operand, const TokenReference &at)
+{
+    ExprNode *upgraded = optional_operand_of(operand, *_current_module, at);
+
+    if (upgraded != operand) {
+        _changed = true;
+    }
+
+    return upgraded;
+}
+
+void OperatorRewriter::visit_guard(GuardNode &node)
+{
+    RecursiveVisitor::visit_guard(node);
+
+    // the tested value is the declaration's own initializer - a guard has no separate condition edge
+    if (node.decl != nullptr) {
+        node.decl->init_expr = upgrade_optional_operand(node.decl->init_expr, node.token);
+    }
+}
+
+void OperatorRewriter::visit_null_coalesce(NullCoalesceExprNode &node)
+{
+    RecursiveVisitor::visit_null_coalesce(node);
+
+    node.lhs = upgrade_optional_operand(node.lhs, node.token);
+}
+
+void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
+{
+    RecursiveVisitor::visit_optional_chain(node);
+
+    ExprNode *base = upgrade_optional_operand(node.base, node.token);
+
+    if (base == node.base) {
+        return;
+    }
+
+    node.base = base;
+
+    // **and the marker's stored type, which nothing else can repair.** a ChainBaseNode holds the
+    // base's non-null type rather than an edge to the base, and clone only *substitutes* it - so a
+    // marker minted for a bare `T` becomes `weak<Node>` where it should have become `Node`. re-derived
+    // here, at the one moment the base is known to have changed shape (todo/A35 is why it cannot be
+    // re-derived from the marker's own side)
+    if (node.chain_base != nullptr) {
+        node.chain_base->type = unwrapped_type_of(node.base->result_type());
+    }
+}
+
+void OperatorRewriter::visit_index_expr(IndexExprNode &node)
+{
+    // **the operands before the bracket itself**: `$a[$b[0]]` has to decide the inner one before the
+    // outer can read a type off it, which is what descending first gets. the base's own order is not
+    // a second rule to keep in step with - `element_call` and the operands are never both present
+    RecursiveVisitor::visit_index_expr(node);
+
+    resolve_index(node);
 }
 
 };

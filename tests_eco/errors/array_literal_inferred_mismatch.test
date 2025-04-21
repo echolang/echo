@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:10
+Invalid type conversion: cannot assign 'string' to 'int32'
+Begin: '['
+End: '['
+Code excerpt:
+ [2]> // expansion writes - so a mixed literal is the ordinary assignment mismatch, at the element
+ [3]> $mixed = [1, 2, "three"];
+               ^
+ [4]> 
+
+Critical issues found, cannot compile.

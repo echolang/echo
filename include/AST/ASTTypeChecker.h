@@ -6,6 +6,7 @@
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTNullability.h"
 
 namespace AST
 {
@@ -35,6 +36,15 @@ namespace AST
         void visitMemberAccess(MemberAccessNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
         void visit_strong_expr(StrongExprNode &node) override;
+
+        // the three nullability forms, re-asked here for the reason every type question in this
+        // compiler is asked here: inside a template the operand is a bare `T`, which
+        // AST::is_certainly_present deliberately answers "later" for, and the parser is the only place
+        // that ever asked. see todo/B27
+        void visit_guard(GuardNode &node) override;
+        void visit_null_coalesce(NullCoalesceExprNode &node) override;
+        void visit_optional_chain(OptionalChainExprNode &node) override;
+
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
         void visit_closure_expr(ClosureExprNode &node) override;
@@ -113,6 +123,12 @@ namespace AST
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);
+
+        // the shared half of the three arms above: refuse an operand that can never be absent, worded
+        // by AST::certainly_present_refusal. the three differ only in which expression they hand it
+        // and where they point, so the rule is written once
+        void check_optional_operand(
+            OptionalForm form, const ExprNode *operand, const TokenReference &at);
 
         // rejects an assignment that reaches const storage. split out of visit_assign because it
         // asks a different question than the conversion check next to it: not "does the value

@@ -23,18 +23,11 @@ namespace
         return AST::IterationLookup {};
     }
 
-    // the ComplexType a bound core interface declares, or null when nothing declared that kind
-    const AST::ComplexType *core_template(const AST::CoreTypes &core, AST::CoreTypeKind kind)
-    {
-        AST::TypeDeclNode *decl = core.declaration(kind);
-        return decl == nullptr ? nullptr : &decl->complex_type();
-    }
-
     // `Keyed<K>` on the cursor, if it declares one. absent is not an error here - only a `=>` asking
     // for it makes it one, and that refusal belongs at the `=>`
     std::optional<AST::ValueType> key_type_of(const AST::ValueType &iterator, const AST::CoreTypes &core)
     {
-        const AST::ComplexType *keyed = core_template(core, AST::CoreTypeKind::t_keyed);
+        const AST::ComplexType *keyed = core.declared_template(AST::CoreTypeKind::t_keyed);
 
         if (keyed == nullptr || !iterator.has_complex_type()) {
             return std::nullopt;
@@ -63,8 +56,8 @@ AST::IterationLookup AST::iteration_plan_for(
     // **the unbound case comes first.** `--no-stdlib` is a legitimate program, and this is also what
     // keeps stdlib/core/iterator.eco itself compilable - it is parsed by the very compiler that would
     // otherwise assert on the interfaces not existing yet
-    const AST::ComplexType *iterator_tmpl = core_template(core, AST::CoreTypeKind::t_iterator);
-    const AST::ComplexType *iterable_tmpl = core_template(core, AST::CoreTypeKind::t_iterable);
+    const AST::ComplexType *iterator_tmpl = core.declared_template(AST::CoreTypeKind::t_iterator);
+    const AST::ComplexType *iterable_tmpl = core.declared_template(AST::CoreTypeKind::t_iterable);
 
     if (iterator_tmpl == nullptr || iterable_tmpl == nullptr) {
         return refuse(

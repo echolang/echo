@@ -6,6 +6,8 @@
 #include "AST/ASTValueType.h"
 #include "Token.h"
 
+#include <string>
+
 namespace AST
 {
     class ExprNode;
@@ -29,6 +31,26 @@ namespace AST
     // wording, which is why this is the predicate and not the diagnostic. an undetermined type and a bare
     // type parameter answer false: they are "ask again later", and judging them here is a round too early
     bool is_certainly_present(const ValueType &type);
+
+    // which of the three was written. the mistakes are not the same mistake - "a guard that can never
+    // fail", "a `??` whose left side is always there" and "a `?->` that could never short circuit" are
+    // three different things to tell an author - so the wording is per form even though the rule is not
+    enum class OptionalForm
+    {
+        t_guard,
+        t_null_coalesce,
+        t_optional_chain,
+    };
+
+    // **the diagnostic is_certainly_present earns, worded for the form it was written in.** empty when
+    // there is nothing to refuse, so an asker may call it without asking the predicate first.
+    //
+    // there are *two* moments, not one, and that is why this exists rather than three string literals
+    // at three sites. the parser asks, where the diagnostic is best located and where most programs are
+    // decided; and AST::TypeChecker asks again after the monomorphizer, because inside a template the
+    // operand is a bare `T` and the predicate correctly answers "later" - see todo/B27. two askers per
+    // form is exactly how three wordings become six and then drift
+    std::string certainly_present_refusal(OptionalForm form, const ValueType &operand_type);
 
     // the expression the three forms should actually branch on, given the one that was written.
     //

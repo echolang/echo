@@ -1,0 +1,14 @@
+// **the elements decide the type.** a declaration with no type of its own takes the *first* element's
+// as its element type, so nothing here has to name Array at all
+$names = ["Alice", "Bob", "Charlie"];
+
+foreach ($names as $name) {
+    echo $name;
+}
+
+$numbers = [1, 2, 3, 4, 5];
+echo $numbers->count();
+echo $numbers[4];
+
+$ratios = [0.5, 1.5];
+echo $ratios[1];

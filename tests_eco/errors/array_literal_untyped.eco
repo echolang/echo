@@ -1,3 +1,0 @@
-// an array literal takes its type from where it is going, so a declaration with nothing else to go
-// on has nothing to infer from - the missing half is the *element* type
-$a = [1, 2, 3];

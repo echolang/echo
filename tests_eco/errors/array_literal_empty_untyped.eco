@@ -1,0 +1,3 @@
+// the elements decide an array literal's type, so `$a = [1, 2, 3]` needs nothing else - but an
+// empty one has no elements to decide with, and takes its type from where it is going instead
+$a = [];

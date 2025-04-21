@@ -1,0 +1,9 @@
+--- OUT --->
+5
+-1
+--- RAST --->
+CHECK: Module: [main]
+CHECK: function unwrap
+// the deref sits inside the guard's own initializer. before AST::RecursiveVisitor owned the descent
+// the whole declaration was unreachable from either rewriter, and the argument stayed an address
+CHECK: guard vardecl<type<int32>>($v) = call halve(cast<int32>(deref<int32>(varref<int32&>(var($n)))))

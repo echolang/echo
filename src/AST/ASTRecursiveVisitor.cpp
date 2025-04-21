@@ -1,5 +1,10 @@
 // default child recursion for the RecursiveVisitor walker. the edges walked here mirror the owned
 // children in src/AST/ASTClone.cpp; cross-reference edges (decl pointers) are intentionally skipped.
+//
+// **every descent below goes through one of the edge helpers**, never through a bare `accept()`. that
+// is what makes the walk rewritable by a subclass without the subclass owning a second copy of this
+// list - and the helper it goes through is also the statement of whether the position wants a place or
+// a read, which is a fact about the node and belongs here rather than in whichever pass first needed it
 
 #include "AST/ASTRecursiveVisitor.h"
 
@@ -34,73 +39,153 @@ namespace AST
 
 RecursiveVisitor::~RecursiveVisitor() {}
 
+// ---- the edge seams -------------------------------------------------------------------------
+
+ExprNode *RecursiveVisitor::rewrite_value_edge(ExprNode *expr)
+{
+    if (expr != nullptr) {
+        expr->accept(*this);
+    }
+
+    return expr;
+}
+
+ExprNode *RecursiveVisitor::rewrite_place_edge(ExprNode *expr)
+{
+    // a read-only walk cannot tell the two apart, and neither can a rewriter that does not care -
+    // routing through the value form means such a pass overrides one method and gets both
+    return rewrite_value_edge(expr);
+}
+
+void RecursiveVisitor::value_edge(ExprNode *&edge)
+{
+    edge = rewrite_value_edge(edge);
+}
+
+void RecursiveVisitor::place_edge(ExprNode *&edge)
+{
+    edge = rewrite_place_edge(edge);
+}
+
+void RecursiveVisitor::value_edges(std::vector<ExprNode *> &edges)
+{
+    for (auto *&edge : edges) {
+        value_edge(edge);
+    }
+}
+
+void RecursiveVisitor::value_edge(NodeReference &edge)
+{
+    rewrite_ref_edge(edge, false);
+}
+
+void RecursiveVisitor::place_edge(NodeReference &edge)
+{
+    rewrite_ref_edge(edge, true);
+}
+
+void RecursiveVisitor::rewrite_ref_edge(NodeReference &edge, bool as_place)
+{
+    if (!edge.has()) {
+        return;
+    }
+
+    // a reference position may legitimately hold something that is not an expression - a scope's
+    // children are the obvious case, and a `->` base can be one too. asked once, here, so a caller
+    // cannot get it right in one place and wrong in the next
+    if (!edge.is_expression_node()) {
+        statement_edge(edge.node());
+        return;
+    }
+
+    auto *expr = edge.unsafe_ptr<ExprNode>();
+    ExprNode *replacement = as_place ? rewrite_place_edge(expr) : rewrite_value_edge(expr);
+
+    if (replacement != expr) {
+        edge = replacement != nullptr
+            ? NodeReference(static_cast<Node *>(replacement)->get_node_type(), replacement)
+            : make_void_ref();
+    }
+}
+
+void RecursiveVisitor::statement_edge(Node *node)
+{
+    if (node != nullptr) {
+        node->accept(*this);
+    }
+}
+
+void RecursiveVisitor::statement_edges(NodeReferenceList &edges)
+{
+    for (auto &ref : edges) {
+        statement_edge(ref.node());
+    }
+}
+
+// ---- the edges themselves -------------------------------------------------------------------
+
 void RecursiveVisitor::visitScope(ScopeNode &node)
 {
-    for (auto &ref : node.children) {
-        if (ref.has()) {
-            ref.node()->accept(*this);
-        }
+    // **indexed, and the edge is re-read after the descent.** a subclass may splice statements in
+    // around the one being walked (AST::OperatorRewriter's array-literal expansion does) or reseat it
+    // (AST::ForeachLowering's lowering does), and a range-for over `children` would be walking a
+    // vector whose storage had just moved
+    for (size_t i = 0; i < node.children.size(); i++) {
+        statement_edge(node.children[i].node());
     }
 }
 
 void RecursiveVisitor::visitFunctionDecl(FunctionDeclNode &node)
 {
     for (auto *arg : node.args) {
-        if (arg) arg->accept(*this);
+        statement_edge(arg);
     }
-    if (node.body) {
-        node.body->accept(*this);
-    }
+
+    statement_edge(node.body);
 }
 
 void RecursiveVisitor::visit_type_decl(TypeDeclNode &node)
 {
     for (auto *prop : node.properties()) {
-        if (prop) prop->accept(*this);
+        statement_edge(prop);
     }
 }
 
 void RecursiveVisitor::visitVarDecl(VarDeclNode &node)
 {
-    if (node.init_expr) {
-        node.init_expr->accept(*this);
-    }
+    value_edge(node.init_expr);
 }
 
 void RecursiveVisitor::visit_assign(AssignNode &node)
 {
-    if (node.target) node.target->accept(*this);
-    if (node.value_expr) node.value_expr->accept(*this);
+    value_edge(node.target);
+    value_edge(node.value_expr);
 
     // the old value's teardown is part of the statement, so it is part of the walk: this is what lets
     // AST::TypeChecker validate the destructor calls AST::OwnershipPass inserted here, exactly as it
     // validates the ones sitting in a scope's children
-    if (node.teardown_old) node.teardown_old->accept(*this);
+    statement_edge(node.teardown_old);
 }
 
 void RecursiveVisitor::visitReturn(ReturnNode &node)
 {
-    if (node.expr) {
-        node.expr->accept(*this);
-    }
+    value_edge(node.expr);
 
     // the drops this return owes, which live on the node rather than ahead of it
-    for (auto &drop : node.unwind) {
-        if (drop.has()) drop.node()->accept(*this);
-    }
+    statement_edges(node.unwind);
 }
 
 void RecursiveVisitor::visitIfStatement(IfStatementNode &node)
 {
-    if (node.condition) node.condition->accept(*this);
-    if (node.if_scope) node.if_scope->accept(*this);
-    if (node.else_scope) node.else_scope->accept(*this);
+    value_edge(node.condition);
+    statement_edge(node.if_scope);
+    statement_edge(node.else_scope);
 }
 
 void RecursiveVisitor::visitWhileStatement(WhileStatementNode &node)
 {
-    if (node.condition) node.condition->accept(*this);
-    if (node.loop_scope) node.loop_scope->accept(*this);
+    value_edge(node.condition);
+    statement_edge(node.loop_scope);
 }
 
 void RecursiveVisitor::visit_loop_control(LoopControlNode &node)
@@ -108,9 +193,7 @@ void RecursiveVisitor::visit_loop_control(LoopControlNode &node)
     // the drops this exit owes, which live on the node exactly as a return's do. without this descent
     // AST::TypeChecker never validates them - and "every drop is an ordinary call node in the tree" is
     // the whole reason they are nodes rather than a codegen side effect
-    for (auto &drop : node.unwind) {
-        if (drop.has()) drop.node()->accept(*this);
-    }
+    statement_edges(node.unwind);
 }
 
 void RecursiveVisitor::visit_foreach(ForeachNode &node)
@@ -119,57 +202,55 @@ void RecursiveVisitor::visit_foreach(ForeachNode &node)
     // clone builds them in. the bindings are `body->children[0..1]` as well, so the body walk reaches
     // them a second time; harmless for every reader of this visitor, and the explicit edges are what
     // let AST::is_never_written find them without knowing that
-    if (node.source) node.source->accept(*this);
-    if (node.key) node.key->accept(*this);
-    if (node.element) node.element->accept(*this);
-    if (node.body) node.body->accept(*this);
+    value_edge(node.source);
+    statement_edge(node.key);
+    statement_edge(node.element);
+    statement_edge(node.body);
 }
 
 void RecursiveVisitor::visitTypeCast(TypeCastNode &node)
 {
-    if (node.expr) {
-        node.expr->accept(*this);
-    }
+    value_edge(node.expr);
 }
 
 void RecursiveVisitor::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
-    for (auto *arg : node.arguments) {
-        if (arg) arg->accept(*this);
-    }
+    value_edges(node.arguments);
 }
 
 void RecursiveVisitor::visitBinaryExpr(BinaryExprNode &node)
 {
-    if (node.lhs) node.lhs->accept(*this);
-    if (node.rhs) node.rhs->accept(*this);
+    value_edge(node.lhs);
+    value_edge(node.rhs);
 }
 
 void RecursiveVisitor::visitUnaryExpr(UnaryExprNode &node)
 {
-    if (node.expr) {
-        node.expr->accept(*this);
-    }
+    value_edge(node.expr);
 }
 
 void RecursiveVisitor::visit_addr_of_expr(AddrOfExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    // "no transparency peeling": the operand of `&` is the place whose address is being taken
+    place_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_deref_expr(DerefExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    // the operand names the pointer being read through - this node *is* the read, so the operand
+    // below it is not one
+    place_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_pointer_value(PointerValueNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    // `:$` exists precisely to say "the place, not the value at it"
+    place_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_move_expr(MoveExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    value_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)
@@ -179,12 +260,12 @@ void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)
 
 void RecursiveVisitor::visit_retain_expr(RetainExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    value_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_strong_expr(StrongExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    value_edge(node.operand);
 }
 
 void RecursiveVisitor::visit_guard(GuardNode &node)
@@ -192,22 +273,26 @@ void RecursiveVisitor::visit_guard(GuardNode &node)
     // the declaration first, then the else arm. that order is the order they run in, and it matters to
     // every pass that carries state down the walk - the ownership pass's moved-from set most of all,
     // since the else arm may move out of something the initializer read
-    if (node.decl) node.decl->accept(*this);
-    if (node.else_scope) node.else_scope->accept(*this);
+    //
+    // **the declaration is reachable only from here.** it is not a child of the enclosing scope, only
+    // its *name* is registered there - so a pass that walks statements and has no arm for this node
+    // never sees the initializer at all. that was two silent bugs before this walk was shared
+    statement_edge(node.decl);
+    statement_edge(node.else_scope);
 }
 
 void RecursiveVisitor::visit_null_coalesce(NullCoalesceExprNode &node)
 {
-    if (node.lhs) node.lhs->accept(*this);
-    if (node.rhs) node.rhs->accept(*this);
+    value_edge(node.lhs);
+    value_edge(node.rhs);
 }
 
 void RecursiveVisitor::visit_optional_chain(OptionalChainExprNode &node)
 {
     // the base, then the continuation - the order they run in. the continuation is rooted at the chain
     // base marker, which is a leaf, so the base is not walked twice
-    if (node.base) node.base->accept(*this);
-    if (node.continuation) node.continuation->accept(*this);
+    value_edge(node.base);
+    value_edge(node.continuation);
 }
 
 void RecursiveVisitor::visit_chain_base(ChainBaseNode &node)
@@ -220,22 +305,18 @@ void RecursiveVisitor::visit_closure_expr(ClosureExprNode &node)
     // the *environment* is a child of this expression and is walked; the body is not. the declaration
     // hangs off the file root, so every pass that walks declarations reaches it there exactly once -
     // descending into it here would process it twice
-    for (auto *value : node.captured_values) {
-        if (value) value->accept(*this);
-    }
+    value_edges(node.captured_values);
 }
 
 void RecursiveVisitor::visit_indirect_call_expr(IndirectCallExprNode &node)
 {
-    if (node.callee) node.callee->accept(*this);
-    for (auto *arg : node.arguments) {
-        if (arg) arg->accept(*this);
-    }
+    value_edge(node.callee);
+    value_edges(node.arguments);
 }
 
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 {
-    if (node.operand) node.operand->accept(*this);
+    value_edge(node.operand);
 }
 
 // the temporaries first, then the body, then the drops - the order they run in, and the order
@@ -245,35 +326,33 @@ void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 void RecursiveVisitor::visit_temporary_bind(TemporaryBindExprNode &node)
 {
     for (auto *temp : node.temporaries) {
-        if (temp) temp->accept(*this);
+        statement_edge(temp);
     }
 
-    if (node.body) node.body->accept(*this);
-
-    for (auto &drop : node.teardown) {
-        if (drop.has()) drop.node()->accept(*this);
-    }
+    value_edge(node.body);
+    statement_edges(node.teardown);
 }
 
 void RecursiveVisitor::visit_release(ReleaseNode &node)
 {
-    if (node.target) node.target->accept(*this);
+    // the target is the place whose slot is released, read by codegen itself - a release never wants
+    // the value in it. AST::PointerAdjuster relies on this being a place edge rather than a read
+    place_edge(node.target);
 }
 
 void RecursiveVisitor::visit_index_expr(IndexExprNode &node)
 {
-    if (node.element_call) node.element_call->accept(*this);
-    if (node.base) node.base->accept(*this);
-    for (auto *index : node.indices) {
-        if (index) index->accept(*this);
-    }
+    statement_edge(node.element_call);
+
+    // the base is wanted as the address it holds - `$p:$[1]` offsets from $p's address, it does not
+    // read through it first
+    place_edge(node.base);
+    value_edges(node.indices);
 }
 
 void RecursiveVisitor::visit_array_literal_expr(ArrayLiteralExprNode &node)
 {
-    for (auto *element : node.elements) {
-        if (element) element->accept(*this);
-    }
+    value_edges(node.elements);
 }
 
 void RecursiveVisitor::visitVarRef(VarRefNode &node)
@@ -285,10 +364,8 @@ void RecursiveVisitor::visitVarRef(VarRefNode &node)
 
 void RecursiveVisitor::visitMemberAccess(MemberAccessNode &node)
 {
-    auto &base = node.get_base_node();
-    if (base.has()) {
-        base.node()->accept(*this);
-    }
+    // the base is wanted as a place; `->` reaching through a pointer is gen_place's job
+    place_edge(node.get_base_node());
 }
 
 // leaves and cross-reference-only nodes: nothing to descend into

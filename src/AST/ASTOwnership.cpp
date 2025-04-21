@@ -1,5 +1,6 @@
 #include "AST/ASTOwnership.h"
 
+#include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTControlFlow.h"
@@ -263,6 +264,18 @@ bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
                 // one still mentioning a parameter is waiting on a substitution. either way there is
                 // no answer to "does this own something" yet
                 if (!decl->has_type() || contains_type_param(decl->type())) {
+                    return false;
+                }
+
+                // **an unexpanded array literal is never concrete**, which the type alone does not
+                // say: a declaration typed from its elements holds an *unknown* until
+                // AST::OperatorRewriter expands it, and unknown is not contains_type_param. this pass
+                // walks a body exactly once ever, so a body walked before the expansion gives the
+                // array it declares no drop at all - the first of the two arms a transient node owes,
+                // the same one AST::ForeachNode has below
+                auto *literal = array_literal_of(decl->init_expr);
+
+                if (literal != nullptr && !literal->expansion_decided) {
                     return false;
                 }
                 break;

@@ -1,0 +1,57 @@
+// **the other half of the same hole: the `weak<T>` upgrade.** all three forms accept a weak by
+// upgrading it to a strong handle first, and that decision is AST::optional_operand_of's - inserted by
+// the parser, where inside a template there is a bare `T` and nothing to upgrade. so a `T` that
+// substituted to a `weak<Res>` branched on a handle nobody retained.
+//
+// AST::OperatorRewriter asks the same function again on the round that substitution reveals the weak,
+// which is exactly where its other three rules already live. **the counts are the assertion**: each
+// form has to leave `$r`'s count exactly where it found it, and every echoed number below is the same
+// number the non-generic spelling produces - `tests_eco/classes/weak_upgrade_is_balanced.eco` is that
+// spelling, and this is it wearing a type parameter
+
+class Res
+{
+    int32 $tag;
+    destructor() { echo $this->tag; }
+}
+
+function through_guard<T>(T $w) : int32
+{
+    guard Res $r = $w else { return -1; }
+    return ref_count($r);
+}
+
+function through_coalesce<T>(T $w, Res $fb) : int32
+{
+    Res $picked = $w ?? $fb;
+    return ref_count($picked);
+}
+
+// the chain is the one that needs a second thing repaired: its ChainBaseNode stores the base's
+// non-null type rather than an edge to it, and cloning only substitutes that stored type - so a marker
+// minted for `T` becomes `weak<Res>` where it has to become `Res`
+function through_chain<T>(T $w) : int32
+{
+    return $w?->tag ?? -1;
+}
+
+function balanced() : void
+{
+    Res $r = Res(1);
+    weak<Res> $w = &$r;
+
+    echo ref_count($r);
+
+    echo through_guard($w);
+    echo ref_count($r);
+
+    echo through_chain($w);
+    echo ref_count($r);
+
+    echo through_coalesce($w, Res(2));
+    echo ref_count($r);
+}
+
+balanced();
+
+echo 99;

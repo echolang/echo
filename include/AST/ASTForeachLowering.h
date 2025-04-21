@@ -65,6 +65,15 @@ namespace AST
         // answers whether anything changed, so the fixpoint can report progress
         bool run_round();
 
+        // **the fixpoint's exit obligation**: one last round in which "the source is not settled yet"
+        // is a refusal. being out of rounds is the proof that nothing was ever going to settle it,
+        // which is Monomorphizer::finalize_calls' reasoning and its moment.
+        //
+        // without it, `pending` had no exit at all: a source that never becomes typed - `$a = [];`,
+        // then a loop over `$a` - left the node in the tree, and PointerAdjuster's throw for a
+        // survivor aborted the process on top of a perfectly good diagnostic nobody had printed yet
+        void finalize();
+
     private:
         CodeRef code_ref_for(const TokenReference &token);
 
@@ -105,6 +114,10 @@ namespace AST
         File *_current_file = nullptr;
 
         bool _changed = false;
+
+        // is this the finalizing round? see finalize() above. a flag rather than a parameter because
+        // it has to reach lower() through the visitor's descent, which takes none
+        bool _finalizing = false;
     };
 };
 

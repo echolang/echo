@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:1
+an empty array literal has nothing to go on - it takes its type from where it is going. Write the type, e.g. 'Array<int32> $a = [];'.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [2]> // empty one has no elements to decide with, and takes its type from where it is going instead
+ [3]> $a = [];
+      ^
+ [4]> 
+
+Critical issues found, cannot compile.

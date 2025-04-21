@@ -37,7 +37,7 @@ void PointerAdjuster::run()
         for (auto &file : module_ptr->files()) {
             _current_file = &file;
             if (file.root) {
-                adjust(file.root);
+                file.root->accept(*this);
             }
         }
     }
@@ -65,6 +65,16 @@ ExprNode *PointerAdjuster::strip_peel(ExprNode *expr)
     return operand;
 }
 
+ExprNode *PointerAdjuster::rewrite_value_edge(ExprNode *expr)
+{
+    return as_value(expr);
+}
+
+ExprNode *PointerAdjuster::rewrite_place_edge(ExprNode *expr)
+{
+    return adjust_place(expr);
+}
+
 ExprNode *PointerAdjuster::as_value(ExprNode *expr)
 {
     if (expr == nullptr) {
@@ -74,11 +84,11 @@ ExprNode *PointerAdjuster::as_value(ExprNode *expr)
     // a peeled expression is already the value it means - the pointer itself - so it keeps its
     // place and gets no deref. this is the entire implementation of `:$`
     if (expr->get_node_type() == NodeType::n_expr_peel) {
-        adjust(expr);
+        expr->accept(*this);
         return strip_peel(expr);
     }
 
-    adjust(expr);
+    expr->accept(*this);
 
     // only a place holding a pointer needs the deref. an AddrOfExprNode is a pointer too, but
     // it is already the value it means - `&$x` yields an address, it does not read through one
@@ -135,7 +145,7 @@ ExprNode *PointerAdjuster::adjust_place(ExprNode *expr)
         return nullptr;
     }
 
-    adjust(expr);
+    expr->accept(*this);
     return strip_peel(expr);
 }
 
@@ -178,309 +188,147 @@ void PointerAdjuster::bind_null_operand(ExprNode *maybe_null, ExprNode *other)
     }
 }
 
-void PointerAdjuster::adjust(Node *node)
+// ---- the arms that are not the base's default -------------------------------------------------
+//
+// everything absent from this list is the base's descent plus as_value(), which is the overwhelmingly
+// common answer and the safe one. that is the whole trade: a forgotten arm here reads a value where a
+// place was wanted and AST::TypeChecker sees the mismatch, where a forgotten arm in the old switch
+// meant an unvisited subtree and codegen reading the wrong number of levels with nothing to say
+
+void PointerAdjuster::visitFunctionDecl(FunctionDeclNode &node)
 {
-    if (node == nullptr) {
+    // a template's body is only meaningful once cloned into a concrete instance
+    if (node.is_generic()) {
         return;
     }
 
-    switch (node->get_node_type()) {
-        case NodeType::n_scope:
-        {
-            auto *scope = static_cast<ScopeNode *>(node);
-            for (auto &child : scope->children) {
-                adjust(child.node());
-            }
-            break;
+    FunctionDeclNode *prev = _current_function;
+    _current_function = &node;
+    RecursiveVisitor::visitFunctionDecl(node);
+    _current_function = prev;
+}
+
+void PointerAdjuster::visitVarDecl(VarDeclNode &node)
+{
+    // a declaration *binds*: `ptr<int32> $p = &$a;` stores the address, so the initializer keeps its
+    // pointer when the declared type is a pointer too
+    node.init_expr = as_value_for(
+        node.init_expr, node.has_type() ? node.type() : ValueType::make_unknown());
+}
+
+void PointerAdjuster::visit_assign(AssignNode &node)
+{
+    // the target goes through as_value like any other read: a plain pointer target gains the deref
+    // that write-through means, while `$p:$` keeps the slot it names - that is the whole difference
+    // between writing through a pointer and re-seating it
+    node.target = as_value(node.target);
+
+    // the value is then read to fit whatever storage the target turned out to name. for
+    // `ptr<ptr<int>> $out`, `$out = $target` writes the caller's *pointer*, so the value keeps its
+    // address instead of being read through.
+    //
+    // **order-dependent**: the destination is read off the target *after* the target was rewritten,
+    // which is one of the three reasons a shared walker cannot precompute a destination
+    node.value_expr = as_value_for(
+        node.value_expr,
+        node.target != nullptr ? node.target->result_type() : ValueType::make_unknown());
+
+    // and the old value's teardown, which is a scope of ordinary destructor calls hanging off this
+    // statement rather than sitting in the enclosing one's children. not cosmetic: a drop's receiver
+    // is `AddrOf(place)`, whose operand is a place edge, so a member-path place with a pointer base
+    // would otherwise silently lose its deref
+    statement_edge(node.teardown_old);
+}
+
+void PointerAdjuster::visitFunctionCallExpr(FunctionCallExprNode &node)
+{
+    adjust_call_arguments(node.arguments, [&node](size_t i) {
+        if (node.decl != nullptr && i < node.decl->args.size() && node.decl->args[i]->has_type()) {
+            return node.decl->args[i]->type();
         }
 
-        case NodeType::n_func_decl:
-        {
-            auto *fn = static_cast<FunctionDeclNode *>(node);
-            // a template's body is only meaningful once cloned into a concrete instance
-            if (!fn->is_generic()) {
-                FunctionDeclNode *prev = _current_function;
-                _current_function = fn;
-                adjust(fn->body);
-                _current_function = prev;
-            }
-            break;
-        }
+        return ValueType::make_unknown();
+    });
+}
 
-        case NodeType::n_vardecl:
-        {
-            auto *decl = static_cast<VarDeclNode *>(node);
-            // a declaration *binds*: `ptr<int32> $p = &$a;` stores the address, so the
-            // initializer keeps its pointer when the declared type is a pointer too
-            decl->init_expr = as_value_for(
-                decl->init_expr, decl->has_type() ? decl->type() : ValueType::make_unknown());
-            break;
-        }
+void PointerAdjuster::visit_indirect_call_expr(IndirectCallExprNode &node)
+{
+    // the callee is wanted as a *value*: `$p()` over a `ptr<function<...>>` has to read through to the
+    // callable before its fn slot can be extracted. the parameter types come off the signature rather
+    // than off a declaration, which is the whole difference from a direct call
+    const ValueType callee_type = node.callee_type();
+    node.callee = as_value_for(node.callee, callee_type);
 
-        case NodeType::n_assign:
-        {
-            auto *assign = static_cast<AssignNode *>(node);
-            // the target goes through as_value like any other read: a plain pointer target
-            // gains the deref that write-through means, while `$p:$` keeps the slot it names
-            // that is the whole difference between writing through a pointer and re-seating it
-            assign->target = as_value(assign->target);
-
-            // the value is then read to fit whatever storage the target turned out to name
-            // for `ptr<ptr<int>> $out`, `$out = $target` writes the caller's *pointer*, so the
-            // value keeps its address instead of being read through
-            assign->value_expr = as_value_for(
-                assign->value_expr,
-                assign->target != nullptr ? assign->target->result_type() : ValueType::make_unknown());
-
-            // and the old value's teardown, which is a scope of ordinary destructor calls hanging off
-            // this statement rather than sitting in the enclosing one's children. not cosmetic: a
-            // drop's receiver is `AddrOf(place)`, which the call arm below routes through adjust_place,
-            // so a member-path place with a pointer base would otherwise silently lose its deref
-            adjust(assign->teardown_old);
-            break;
-        }
-
-        case NodeType::n_expr_binary:
-        {
-            auto *bin = static_cast<BinaryExprNode *>(node);
-            bin->lhs = as_value(bin->lhs);
-            bin->rhs = as_value(bin->rhs);
-
-            // null has no type of its own, so in a comparison it takes the other operand's.
-            // done here rather than in the parser because the other side's pointer-ness is
-            // only settled once the derefs above are in place
-            bind_null_operand(bin->lhs, bin->rhs);
-            bind_null_operand(bin->rhs, bin->lhs);
-            break;
-        }
-
-        case NodeType::n_expr_unary:
-        {
-            auto *un = static_cast<UnaryExprNode *>(node);
-            un->expr = as_value(un->expr);
-            break;
-        }
-
-        case NodeType::n_expr_call:
-        {
-            auto *call = static_cast<FunctionCallExprNode *>(node);
-
-            adjust_call_arguments(call->arguments, [call](size_t i) {
-                if (call->decl != nullptr && i < call->decl->args.size() && call->decl->args[i]->has_type()) {
-                    return call->decl->args[i]->type();
-                }
-
-                return ValueType::make_unknown();
-            });
-
-            break;
-        }
-
-        case NodeType::n_expr_indirect_call:
-        {
-            auto *call = static_cast<IndirectCallExprNode *>(node);
-
-            // the callee is wanted as a *value*: `$p()` over a `ptr<function<...>>` has to read through
-            // to the callable before its fn slot can be extracted. the parameter types come off the
-            // signature rather than off a declaration, which is the whole difference from a direct call
-            const ValueType callee_type = call->callee_type();
-            call->callee = as_value_for(call->callee, callee_type);
-
-            if (!callee_type.is_callable()) {
-                break;
-            }
-
-            const auto &signature = callee_type.signature();
-
-            adjust_call_arguments(call->arguments, [&signature](size_t i) {
-                return i < signature.parameter_types.size()
-                    ? signature.parameter_types[i]
-                    : ValueType::make_unknown();
-            });
-
-            break;
-        }
-
-        case NodeType::n_expr_closure:
-        {
-            auto *closure = static_cast<ClosureExprNode *>(node);
-
-            // each captured place is read in the enclosing frame, as a value of the property it fills
-            for (size_t i = 0; i < closure->captured_values.size(); i++) {
-                const ValueType wanted = closure->environment_type != nullptr
-                    ? closure->environment_type->get_property_type(i)
-                    : ValueType::make_unknown();
-
-                closure->captured_values[i] = as_value_for(closure->captured_values[i], wanted);
-            }
-
-            break;
-        }
-
-        case NodeType::n_expr_addrof:
-        {
-            // "no transparency peeling": the operand of `&` is wanted as a place
-            auto *addr = static_cast<AddrOfExprNode *>(node);
-            addr->operand = adjust_place(addr->operand);
-            break;
-        }
-
-        case NodeType::n_expr_deref:
-        {
-            auto *deref = static_cast<DerefExprNode *>(node);
-            deref->operand = adjust_place(deref->operand);
-            break;
-        }
-
-        case NodeType::n_expr_index:
-        {
-            auto *index_expr = static_cast<IndexExprNode *>(node);
-
-            // a container's element access is a call by now, and the operands moved into it - so
-            // there is nothing here to adjust that adjusting the call does not already reach, and
-            // adjusting them here too would wrap each one twice
-            if (index_expr->element_call != nullptr) {
-                adjust(index_expr->element_call);
-                break;
-            }
-
-            // the base is wanted as the address it holds, so it keeps its pointer and gets no
-            // deref - `$p:$[1]` offsets from $p's address, it does not read through it first
-            index_expr->base = adjust_place(index_expr->base);
-            for (auto *&index : index_expr->indices) {
-                index = as_value(index);
-            }
-            break;
-        }
-
-        case NodeType::n_expr_peel:
-        {
-            auto *peel = static_cast<PointerValueNode *>(node);
-            peel->operand = adjust_place(peel->operand);
-            break;
-        }
-
-        case NodeType::n_member_access:
-        {
-            // the base is wanted as a place; `->` reaching through a pointer is gen_place's job.
-            //
-            // adjusted in place, not reassigned: no shape reachable under a `->` needs replacing.
-            // a peel base is rejected in the parser (`$p:$->x`), and the index arm above rewrites
-            // its own base edge. anything that does need a replacement has to reseat the reference
-            // here - adjust() alone cannot be observed
-            auto *access = static_cast<MemberAccessNode *>(node);
-            adjust(access->get_base_node().node());
-            break;
-        }
-
-        case NodeType::n_expr_instanceof:
-        {
-            // the operand is read as a value: the question is about the object a handle names, and
-            // `$this instanceof Foo` inside a method holds a `Foo&`, so without the deref the
-            // comparison would be against the slot's address rather than the handle in it
-            auto *instance_of = static_cast<InstanceOfExprNode *>(node);
-            instance_of->operand = as_value(instance_of->operand);
-            break;
-        }
-
-        case NodeType::n_expr_temp_bind:
-        {
-            auto *bind = static_cast<TemporaryBindExprNode *>(node);
-
-            // the temporaries as the declarations they are, through the vardecl arm above: it reads the
-            // initializer *for* the declared type, which is what the call this binds needs
-            for (VarDeclNode *temp : bind->temporaries) {
-                adjust(temp);
-            }
-
-            // the body is a read, and the only one that can be spelled here: the destination this node
-            // sits at applied its own rule to the *wrapper*, which is not a place, so a body left
-            // unadjusted would keep a pointer member's slot where the value was wanted. as_value rather
-            // than as_value_for because a pointer-typed body is refused by AST::OwnershipPass - it would
-            // hand back an address into storage the teardown below destroys
-            bind->body = as_value(bind->body);
-
-            // and the drops, for the assign arm's reason: a drop's receiver is `AddrOf(place)`, which
-            // the call arm routes through adjust_place, so a member-path place with a pointer base would
-            // otherwise silently lose its deref
-            for (auto &drop : bind->teardown) {
-                adjust(drop.node());
-            }
-            break;
-        }
-
-        case NodeType::n_expr_retain:
-        {
-            // likewise a read: the retain touches the count in the block the *handle* names. the
-            // ownership pass wrapped a place here, and this is where that place stops being one
-            auto *retain = static_cast<RetainExprNode *>(node);
-            retain->operand = as_value(retain->operand);
-            break;
-        }
-
-        case NodeType::n_release:
-        {
-            // deliberately not adjusted. codegen reads the target's slot itself, because between the
-            // declaration and the release an assignment may have re-seated the variable - so the
-            // release wants the place, not a read of it. a borrow is never a release target anyway:
-            // needs_destruction is false for a pointer
-            break;
-        }
-
-        // a leaf: an allocation has no operand, only the class type it was synthesized for
-        case NodeType::n_expr_class_alloc:
-            break;
-
-        case NodeType::n_type_cast:
-        {
-            auto *cast = static_cast<TypeCastNode *>(node);
-            cast->expr = as_value(cast->expr);
-            break;
-        }
-
-        case NodeType::n_func_return:
-        {
-            // a return fits its value to the declared return type, exactly as a declaration
-            // and an assignment do. a `T&` return hands back the address, so reading through
-            // it here would return the pointee where the signature promised the pointer -
-            // which llvm's verifier rejects outright ("return type does not match operand")
-            auto *ret = static_cast<ReturnNode *>(node);
-            ret->expr = as_value_for(
-                ret->expr,
-                _current_function != nullptr ? _current_function->get_return_type() : ValueType::make_unknown());
-            break;
-        }
-
-        case NodeType::n_if_statement:
-        {
-            auto *stmt = static_cast<IfStatementNode *>(node);
-            stmt->condition = as_value(stmt->condition);
-            adjust(stmt->if_scope);
-            adjust(stmt->else_scope);
-            break;
-        }
-
-        case NodeType::n_while_statement:
-        {
-            auto *stmt = static_cast<WhileStatementNode *>(node);
-            stmt->condition = as_value(stmt->condition);
-            adjust(stmt->loop_scope);
-            break;
-        }
-
-        case NodeType::n_foreach:
-            // a transient node AST::ForeachLowering was supposed to have erased - by lowering it, or by
-            // discarding it after a refusal. one reaching here would have every deref inside its body
-            // silently skipped by the `default:` arm below, and codegen would read the wrong number of
-            // levels with no diagnostic. AST::PointerValueNode's contract
-            throw std::runtime_error(
-                "a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered into "
-                "an iterator and a while, or discarded after a refusal");
-
-        default:
-            // leaves: literals, operators, var references, types. nothing to rewrite
-            break;
+    if (!callee_type.is_callable()) {
+        return;
     }
+
+    const auto &signature = callee_type.signature();
+
+    adjust_call_arguments(node.arguments, [&signature](size_t i) {
+        return i < signature.parameter_types.size()
+            ? signature.parameter_types[i]
+            : ValueType::make_unknown();
+    });
+}
+
+void PointerAdjuster::visit_closure_expr(ClosureExprNode &node)
+{
+    // each captured place is read in the enclosing frame, as a value of the property it fills
+    for (size_t i = 0; i < node.captured_values.size(); i++) {
+        const ValueType wanted = node.environment_type != nullptr
+            ? node.environment_type->get_property_type(i)
+            : ValueType::make_unknown();
+
+        node.captured_values[i] = as_value_for(node.captured_values[i], wanted);
+    }
+}
+
+void PointerAdjuster::visitReturn(ReturnNode &node)
+{
+    // a return fits its value to the declared return type, exactly as a declaration and an assignment
+    // do. a `T&` return hands back the address, so reading through it here would return the pointee
+    // where the signature promised the pointer - which llvm's verifier rejects outright ("return type
+    // does not match operand")
+    node.expr = as_value_for(
+        node.expr,
+        _current_function != nullptr ? _current_function->get_return_type() : ValueType::make_unknown());
+
+    // the drops this return owes. they were skipped while this pass drove its own traversal, on the
+    // argument that AST::needs_destruction says a pointer is never an owner so a drop's place cannot
+    // reach through one. the assign arm above already contradicted that argument for exactly the same
+    // shape of node, so the walk is uniform now and the two agree
+    statement_edges(node.unwind);
+}
+
+void PointerAdjuster::visitBinaryExpr(BinaryExprNode &node)
+{
+    RecursiveVisitor::visitBinaryExpr(node);
+
+    // null has no type of its own, so in a comparison it takes the other operand's. done here rather
+    // than in the parser because the other side's pointer-ness is only settled once the derefs above
+    // are in place
+    bind_null_operand(node.lhs, node.rhs);
+    bind_null_operand(node.rhs, node.lhs);
+}
+
+void PointerAdjuster::visit_release(ReleaseNode &node)
+{
+    // deliberately not adjusted at all. codegen reads the target's slot itself, because between the
+    // declaration and the release an assignment may have re-seated the variable - so the release wants
+    // the place, not a read of it, and not a subtree walk that could strip a peel out from under it. a
+    // borrow is never a release target anyway: needs_destruction is false for a pointer
+}
+
+void PointerAdjuster::visit_foreach(ForeachNode &node)
+{
+    // a transient node AST::ForeachLowering was supposed to have erased - by lowering it, or by
+    // discarding it after a refusal. one reaching here used to have every deref inside its body
+    // silently skipped, and codegen would read the wrong number of levels with no diagnostic.
+    // AST::PointerValueNode's contract
+    throw std::runtime_error(
+        "a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered into "
+        "an iterator and a while, or discarded after a refusal");
 }
 
 };

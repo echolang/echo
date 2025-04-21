@@ -52,6 +52,16 @@ bool ForeachLowering::run_round()
     return _changed;
 }
 
+void ForeachLowering::finalize()
+{
+    // one more round, rather than a sweep: a round inherits visitFunctionDecl's generic-body skip and
+    // walks scope children, which is the tree walk this pass is required to use - NodeCollection owns
+    // a detached node forever, so an of_type sweep would blame loops that were lowered away
+    _finalizing = true;
+    run_round();
+    _finalizing = false;
+}
+
 void ForeachLowering::visitScope(ScopeNode &node)
 {
     for (size_t i = 0; i < node.children.size(); i++) {
@@ -132,6 +142,21 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         loop->source->result_type(), _collector.core_types, _collector.type_registry);
 
     if (look.result == IterationLookup::Result::t_pending) {
+        // **out of rounds is out of answers** - see finalize(). the discard is the half that matters:
+        // a survivor is the InternalCompilerException PointerAdjuster throws, ahead of the gate that
+        // would have printed whatever *did* explain the source. the message is only for the case
+        // where nothing else did, which has_critical_issues() is already the compiler's answer to
+        if (_finalizing) {
+            if (_collector.has_critical_issues()) {
+                discard(scope, index, *loop);
+            }
+            else {
+                refuse(scope, index, *loop, loop->token_foreach, fmt::format(
+                    "'{}' never got a type, so there is nothing to iterate.",
+                    loop->source->result_type().get_type_desciption()));
+            }
+        }
+
         return;  // ask again next round
     }
 

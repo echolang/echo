@@ -31,6 +31,16 @@ namespace AST
         // `string::view` - a borrowed window over UTF-8 bytes, owning nothing
         t_string_view,
 
+        // `struct Array<T>` - the owning, growable sequence. bound so the compiler can **say**
+        // `Array<E>` for an array literal that has no destination to take a type from, and for nothing
+        // else: it knows no method, no property and no shape of it, which is what keeps this a name
+        // binding rather than a second resolve_core_string_layout
+        //
+        // `Slice<T>` deliberately gets none. nothing in the grammar spells a slice literal, so no
+        // slice type is ever *minted* by the compiler, and `foreach` finds one through its `Iterable`
+        // conformance rather than by name
+        t_array,
+
         // `interface Iterator<V>` - the loop protocol: `advance()` then `current()`. what `foreach`
         // lowers onto, and the one thing it requires
         t_iterator,
@@ -65,6 +75,14 @@ namespace AST
         // the bound type, or an **unknown** ValueType when nothing declared this kind. answering
         // unknown rather than asserting is the whole contract: see the class comment
         ValueType type(CoreTypeKind kind) const;
+
+        // the ComplexType the kind's declaration carries, or null when nothing declared it.
+        //
+        // **how every generic core kind is read.** `type()` above answers a generic declaration with
+        // the bare, un-substituted template - `Iterator` and not `Iterator<int32>` - which is not a
+        // type a caller may hold. what a caller wants is either the template to compare a conformance
+        // against, or the thing to apply arguments to, and both of those are this
+        ComplexType *declared_template(CoreTypeKind kind) const;
 
         ValueType string_type() const {
             return type(CoreTypeKind::t_string);

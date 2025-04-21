@@ -1,0 +1,23 @@
+// **the guard's initializer itself**, with nothing exotic in the else arm. the same hole, one level
+// up: the initializer is `decl->init_expr` on a declaration reachable only through the GuardNode, so
+// AST::PointerAdjuster never visited it and the borrow was passed where the pointee was wanted
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) { return null; }
+    return $n / 2;
+}
+
+function unwrap(int32& $n) : int32
+{
+    // `$n` is a borrow and `halve` takes a value, so the argument owes exactly one deref - inside a
+    // guard's initializer, which is the only thing that makes it interesting
+    guard int32 $v = halve($n) else { return -1; }
+    return $v;
+}
+
+int32 $a = 10;
+int32 $b = -4;
+
+echo unwrap(&$a);
+echo unwrap(&$b);

@@ -513,6 +513,17 @@ namespace AST
             progressed |= _ownership.run_round();
         }
 
+        // **the fixpoint converged, so every transient node it owns has to be gone.** the two
+        // rewriters leave a node in place while its types are still arriving, and nothing else ever
+        // turns a permanent "not yet" into a diagnostic - PointerAdjuster throws for a survivor, and
+        // it runs *before* run_semantic_passes gates on has_critical_issues(), so the abort landed on
+        // top of whatever real error had explained it.
+        //
+        // in the round order, and for the round order's reason: a literal refused here leaves its
+        // declaration untyped, and a loop over that declaration is what the next line refuses
+        _operators.finalize();
+        _foreach.finalize();
+
         finalize_calls();
     }
 

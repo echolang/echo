@@ -1,0 +1,20 @@
+expect: ok
+
+--- OUT --->
+Alice
+Bob
+Charlie
+5
+5
+1.500000
+--- RAST --->
+CHECK: Module: [main]
+// the inference itself, which OUT cannot show: three declarations, three element types, none of
+// them written down. and one destructor each - a body holding an unexpanded literal is not
+// concrete, so the ownership pass waited for the expansion rather than walking past it
+CHECK: vardecl<type<Array<string>>>($names) = call Array(): Array<string>
+CHECK: vardecl<type<Array<int32>>>($numbers) = call Array(): Array<int32>
+CHECK: vardecl<type<Array<float64>>>($ratios) = call Array(): Array<float64>
+CHECK: call destructor(addrof<Array<float64>&>
+CHECK: call destructor(addrof<Array<int32>&>
+CHECK: call destructor(addrof<Array<string>&>

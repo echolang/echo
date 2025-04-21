@@ -1,0 +1,9 @@
+--- OUT --->
+7
+-1
+--- RAST --->
+CHECK: Module: [main]
+CHECK: function pick
+// the bracket became the declared operator's call - AST::OperatorRewriter's half - and the guard
+// branches on what it returns rather than on an unresolved index node
+CHECK: guard vardecl<type<int32>>($v) = index<int32?>(call operator [](varref<Slots&>(var($s)), varref<usize>(var($i))): int32?&)

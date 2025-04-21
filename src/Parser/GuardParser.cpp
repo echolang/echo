@@ -62,17 +62,16 @@ AST::GuardNode *Parser::parse_guard(Parser::Payload &payload, AST::ScopeNode *sc
 
     const AST::ValueType init_type = init->result_type();
 
-    // **a guard that cannot fail is a bug, not a no-op.** it reads as a claim that the value might be
-    // absent, and if it never is then either the type is wrong or the guard is - either way the author
-    // wants to know. an undetermined type passes through: the monomorphizer reports whatever never
-    // resolved, and judging it here would be a round too early
-    if (AST::is_certainly_present(init_type)) {
+    // **a guard that cannot fail is a bug, not a no-op.** an undetermined type passes through: the
+    // monomorphizer reports whatever never resolved, and judging it here would be a round too early.
+    // for the same reason a bare `T` passes too, and AST::TypeChecker is what asks again once it has
+    // been substituted - the wording is shared with that second asker rather than written twice
+    const std::string refusal =
+        AST::certainly_present_refusal(AST::OptionalForm::t_guard, init_type);
+
+    if (!refusal.empty()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(guard_token),
-            fmt::format(
-                "'guard' needs a value that may be absent, and '{}' always is one - write '{}?' if it "
-                "may not be, or drop the guard",
-                init_type.get_type_desciption(), init_type.get_type_desciption()));
+            payload.context.code_ref(guard_token), refusal);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }

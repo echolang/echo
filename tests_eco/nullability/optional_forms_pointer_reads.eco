@@ -1,0 +1,54 @@
+// **the three siblings the same hole had.** `guard` was the one that was reported, but neither
+// rewriter had an arm for `??`, `?->` or `strong` either - all three reach codegen, so a bracket or a
+// pointer read anywhere inside one was silently left alone.
+//
+// nothing here is about nullability as such. each form just holds a subtree, and the claim is only
+// that the subtree is walked
+
+class Node
+{
+    int32 $value;
+
+    function scale(int32 $by) : int32 { return $this->value * $by; }
+}
+
+struct Holder { weak<Node> $ref; }
+
+operator (Holder& $h)[usize $i] : weak<Node>&
+{
+    return &$h->ref;
+}
+
+function twice(int32 $n) : int32 { return $n * 2; }
+
+// **`??`**: a pointer read in the right operand, which only runs when the left side was absent
+function fallback(int32? $m, int32& $fb) : int32
+{
+    return $m ?? twice($fb);
+}
+
+// **`?->`**: the continuation runs only on the present path, and the argument it passes is a borrow
+function chain(Node? $n, int32& $by) : int32
+{
+    return $n?->scale($by) ?? 0;
+}
+
+$live = Node(21);
+weak<Node> $w = &$live;
+$h = Holder($w);
+
+int32 $five = 5;
+int32 $two = 2;
+
+int32? $three = 3;
+int32? $absent = null;
+
+echo fallback($three, &$five);
+echo fallback($absent, &$five);
+
+echo chain($live, &$two);
+echo chain(null, &$two);
+
+// **`strong`**: its operand is a bracket, so the upgrade is over what the declared operator returned
+guard Node $up = strong($h[0]) else { die("the object is gone"); }
+echo $up->value;

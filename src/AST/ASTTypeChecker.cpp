@@ -14,6 +14,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/MemberAccessNode.h"
+#include "AST/GuardNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
@@ -470,6 +471,55 @@ void TypeChecker::visit_strong_expr(StrongExprNode &node)
     }
 
     RecursiveVisitor::visit_strong_expr(node);
+}
+
+// **the three nullability forms, asked a second time.** both halves of what makes them sound were
+// decided in the parser and nowhere else, and inside a template the operand is a bare `T` that
+// AST::is_certainly_present correctly answers "later" for - so a form over a `T` that substituted to a
+// non-nullable was never checked at all, and a guard that could never fail compiled silently (B27).
+//
+// the parser keeps its check: it fires for non-generic code, where the diagnostic is best located and
+// where waiting for this pass would be a worse message. what is shared is the *wording*, through
+// AST::certainly_present_refusal - two askers per form is exactly how three strings become six
+void TypeChecker::check_optional_operand(
+    OptionalForm form, const ExprNode *operand, const TokenReference &at)
+{
+    if (operand == nullptr) {
+        return;
+    }
+
+    // is_undetermined_type passes through inside the refusal itself, for the reason it does everywhere
+    // else in this file: a call that never resolved already has its own issue
+    const std::string refusal = certainly_present_refusal(form, operand->result_type());
+
+    if (!refusal.empty()) {
+        _collector.collect_issue<Issue::GenericError>(code_ref_for(at), refusal);
+    }
+}
+
+void TypeChecker::visit_guard(GuardNode &node)
+{
+    // the initializer is the tested value, and it is the declaration's own - a guard has no separate
+    // condition edge
+    if (node.decl != nullptr) {
+        check_optional_operand(OptionalForm::t_guard, node.decl->init_expr, node.token);
+    }
+
+    RecursiveVisitor::visit_guard(node);
+}
+
+void TypeChecker::visit_null_coalesce(NullCoalesceExprNode &node)
+{
+    check_optional_operand(OptionalForm::t_null_coalesce, node.lhs, node.token);
+
+    RecursiveVisitor::visit_null_coalesce(node);
+}
+
+void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
+{
+    check_optional_operand(OptionalForm::t_optional_chain, node.base, node.token);
+
+    RecursiveVisitor::visit_optional_chain(node);
 }
 
 // **an address of something that has no address.** by the time this pass runs, every legitimate borrow of

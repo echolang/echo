@@ -616,16 +616,14 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
 
         const AST::ValueType left_type = left->result_type();
 
-        // a left side that can never be absent makes the right side dead code. reported rather than
-        // folded away, for `guard`'s reason: it reads as a claim about the value, and a claim that is
-        // always false is a mistake somewhere. an undetermined type waits for a later round as ever
-        if (AST::is_certainly_present(left_type)) {
+        // a left side that can never be absent makes the right side dead code. an undetermined type
+        // waits for a later round as ever, and AST::TypeChecker is the one that asks again
+        const std::string refusal =
+            AST::certainly_present_refusal(AST::OptionalForm::t_null_coalesce, left_type);
+
+        if (!refusal.empty()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
-                payload.context.code_ref(op_node->token_literal),
-                fmt::format(
-                    "'??' needs a value that may be absent on its left, and '{}' always is one - the "
-                    "right side could never be reached",
-                    left_type.get_type_desciption()));
+                payload.context.code_ref(op_node->token_literal), refusal);
             return AST::make_void_ref();
         }
 
@@ -953,12 +951,12 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
             // a base that is always there makes the `?` a lie - the short circuit could never fire, and
             // the reader is being told to expect an absence that cannot happen. `->` is what they want
-            if (AST::is_certainly_present(base_type)) {
+            const std::string refusal =
+                AST::certainly_present_refusal(AST::OptionalForm::t_optional_chain, base_type);
+
+            if (!refusal.empty()) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(optional_token),
-                    fmt::format(
-                        "'?->' needs a value that may be absent, and '{}' always is one - write '->'",
-                        base_type.get_type_desciption()));
+                    payload.context.code_ref(optional_token), refusal);
                 return AST::make_void_ref();
             }
 

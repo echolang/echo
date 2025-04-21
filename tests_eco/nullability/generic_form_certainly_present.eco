@@ -1,0 +1,16 @@
+// **the refusal a template used to escape.** the three nullability forms decide their soundness
+// precondition with AST::is_certainly_present, and inside a template the operand is a bare `T` - which
+// that predicate deliberately answers "ask again later" for, because judging it at parse time is a
+// round too early. nothing re-asked, so a `guard` over a `T` that substituted to `int32` compiled and
+// ran, with an else arm that was dead code and a diagnostic the language promises never firing.
+//
+// AST::TypeChecker is the second asker now, against the same wording - the parser keeps its check for
+// the non-generic spelling, where the message is better located
+
+function firstOr<T>(T $maybe, T $fallback) : T
+{
+    guard T $v = $maybe else { return $fallback; }
+    return $v;
+}
+
+echo firstOr(5, 9);

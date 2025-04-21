@@ -5,6 +5,8 @@
 #include "AST/NullNode.h"
 #include "AST/TypeCastNode.h"
 
+#include <fmt/format.h>
+
 namespace
 {
     // looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
@@ -66,6 +68,42 @@ bool AST::bind_null_to(AST::ExprNode *expr, const AST::ValueType &destination)
 bool AST::is_certainly_present(const AST::ValueType &type)
 {
     return !type.is_nullable() && !is_undetermined_type(type);
+}
+
+std::string AST::certainly_present_refusal(
+    AST::OptionalForm form, const AST::ValueType &operand_type)
+{
+    if (!is_certainly_present(operand_type)) {
+        return {};
+    }
+
+    const std::string spelled = operand_type.get_type_desciption();
+
+    switch (form) {
+        case OptionalForm::t_guard:
+            // a guard that cannot fail reads as a claim that the value might be absent. if it never is
+            // then either the type is wrong or the guard is, and either way the author wants to know
+            return fmt::format(
+                "'guard' needs a value that may be absent, and '{}' always is one - write '{}?' if it "
+                "may not be, or drop the guard",
+                spelled, spelled);
+
+        case OptionalForm::t_null_coalesce:
+            // the right side is dead code. reported rather than folded away, for guard's reason
+            return fmt::format(
+                "'??' needs a value that may be absent on its left, and '{}' always is one - the "
+                "right side could never be reached",
+                spelled);
+
+        case OptionalForm::t_optional_chain:
+            // the `?` is a lie: the short circuit could never fire, and the reader is being told to
+            // expect an absence that cannot happen
+            return fmt::format(
+                "'?->' needs a value that may be absent, and '{}' always is one - write '->'",
+                spelled);
+    }
+
+    return {};
 }
 
 AST::ExprNode *AST::optional_operand_of(

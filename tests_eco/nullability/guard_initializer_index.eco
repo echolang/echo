@@ -1,0 +1,27 @@
+// **the one line that trips both rewriters through the same edge.** a bracket in a guard's
+// initializer owes two things and each was owed by a different pass: AST::OperatorRewriter has to
+// turn it into the declared `operator []` call, and AST::PointerAdjuster has to read through the
+// borrow that call hands back. neither had an arm for a guard, so a bracket here resolved against
+// nothing and the guard branched on whatever the unresolved node reported
+
+struct Slots { int32? $a; int32? $b; }
+
+// an index operator returns a borrow of the element - `$s[$i]` is a place, so what it names has to
+// have an address. that is what puts a pointer read in the guard's initializer
+operator (Slots& $s)[usize $i] : int32?&
+{
+    if ($i == 0) { return &$s->a; }
+    return &$s->b;
+}
+
+function pick(Slots& $s, usize $i) : int32
+{
+    guard int32 $v = $s[$i] else { return -1; }
+    return $v;
+}
+
+$s = Slots(null, null);
+$s->a = 7;
+
+echo pick(&$s, 0);
+echo pick(&$s, 1);

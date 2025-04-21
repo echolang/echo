@@ -23,7 +23,13 @@
  * parameter and deliberately none yet: mem::alloc is allocator-free and Echo has no function
  * pointers, so a per-container allocator would be an invented ABI. The intended future shape is a
  * monomorphized Array<T, A> plus mem::alloc_with, which is purely additive.
+ *
+ * `#[core: "array"]` is what lets the compiler *say* `Array<E>`, and it needs to say it in exactly
+ * one situation: `$a = [1, 2, 3];`, an array literal with no declared type to take one from. It
+ * knows no method, no property and no shape of this type - everything below is looked up the way
+ * your own code is.
  */
+#[core: "array"]
 struct Array<T> : Iterable<T>
 {
     ptr<T> $data;

@@ -1,0 +1,3 @@
+// the *first* element decides the type, and every other element is fitted to it by the append the
+// expansion writes - so a mixed literal is the ordinary assignment mismatch, at the element
+$mixed = [1, 2, "three"];

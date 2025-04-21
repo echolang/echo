@@ -14,6 +14,7 @@ namespace
         static const std::unordered_map<std::string, AST::CoreTypeKind> table = {
             { "string", AST::CoreTypeKind::t_string },
             { "string_view", AST::CoreTypeKind::t_string_view },
+            { "array", AST::CoreTypeKind::t_array },
             { "iterator", AST::CoreTypeKind::t_iterator },
             { "iterable", AST::CoreTypeKind::t_iterable },
             { "keyed", AST::CoreTypeKind::t_keyed },
@@ -47,6 +48,13 @@ AST::ValueType AST::CoreTypes::type(AST::CoreTypeKind kind) const
     AST::TypeDeclNode *decl = declaration(kind);
 
     return decl == nullptr ? AST::ValueType::make_unknown() : decl->value_type();
+}
+
+AST::ComplexType *AST::CoreTypes::declared_template(AST::CoreTypeKind kind) const
+{
+    AST::TypeDeclNode *decl = declaration(kind);
+
+    return decl == nullptr ? nullptr : &decl->complex_type();
 }
 
 std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::CoreTypes &types, std::string &out_error)

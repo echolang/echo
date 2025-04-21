@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:1
+an array literal with no declared type needs 'Array', and nothing in this program declares '#[core: "array"]'. it lives in the standard library, which this compilation left out - write the type, e.g. 'Array<int32> $a = [...];'.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [2]> // `#[core: "array"]` lives in the standard library this compilation left out
+ [3]> $a = [1, 2];
+      ^
+ [4]> 
+
+Critical issues found, cannot compile.

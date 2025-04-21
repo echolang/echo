@@ -1,0 +1,35 @@
+// **a `foreach` inside a guard's else arm**, which is the shape that made the hole visible.
+//
+// a guard's binding is not a child of the enclosing scope - only its *name* is registered there, and
+// the declaration itself hangs off the GuardNode. so a pass that walks statements through a switch on
+// NodeType and has no arm for `n_guard` never sees the arm's contents at all. both rewriters were
+// missing that arm: the loop lowered correctly and then every deref inside it was skipped, and `echo`
+// was handed an address to print
+
+function lookup(int32 $k) : int32?
+{
+    if ($k > 0) { return $k * 2; }
+    return null;
+}
+
+function report(int32 $k) : int32
+{
+    guard int32 $v = lookup($k) else {
+        Array<int32> $codes;
+        $codes->push(7);
+        $codes->push(8);
+
+        // the lowered body reads `$code` out of the cursor as a `const int32&`, so the read owes a
+        // deref. without one it is an address, and `echo` refuses to print one
+        foreach ($codes as $code) {
+            echo $code;
+        }
+
+        return -1;
+    }
+
+    return $v;
+}
+
+echo report(3);
+echo report(-1);

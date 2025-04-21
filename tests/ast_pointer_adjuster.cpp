@@ -305,3 +305,27 @@ TEST_CASE("A rewritten index is adjusted as the call it became", "[sema][pointer
     REQUIRE_FALSE(contains(d, "addrof<Bag&&>"));
     REQUIRE_FALSE(contains(d, "deref<Bag>(addrof<Bag&>"));
 }
+
+TEST_CASE("A guard's initializer is adjusted, and so is its else arm", "[sema][pointer][nullability]")
+{
+    // **a guard's binding is reachable only through the GuardNode.** the parser registers its *name*
+    // in the enclosing scope but pushes only the guard itself as a statement, so a pass that walks a
+    // scope's children never reaches `decl->init_expr` unless it has an arm for the node.
+    //
+    // this pass drove its own traversal through a switch ending in a `default:` that treated an
+    // unknown tag as a leaf, and had no such arm - so nothing under a guard was adjusted at all, in
+    // either half. AST::RecursiveVisitor owns the descent now and is total by construction
+    auto d = desc(
+        "function halve(int32 $n) : int32? { if ($n < 0) { return null; } return $n / 2; }\n"
+        "function unwrap(int32& $n, int32& $fb) : int32\n"
+        "{\n"
+        "    guard int32 $v = halve($n) else { return $fb; }\n"
+        "    return $v;\n"
+        "}\n");
+
+    // the initializer, which is the tested value and the half the report was about
+    REQUIRE(contains(d, "guard vardecl<type<int32>>($v) = call halve(cast<int32>(deref<int32>(varref<int32&>(var($n))))"));
+
+    // and the else arm, which is an ordinary scope hanging off the same node
+    REQUIRE(contains(d, "return(deref<int32>(varref<int32&>(var($fb))))"));
+}

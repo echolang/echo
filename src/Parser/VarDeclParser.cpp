@@ -321,22 +321,6 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     auto expr = parse_expr(payload, vardecl->optional_type_node());
     vardecl->init_expr = expr;
 
-    // **an array literal has no type of its own**, so a declaration with nothing else to go on has
-    // nothing to infer from. reported here rather than left to the inference below, which would say
-    // "cannot infer" about an initializer that is right there - the missing half is the *element*
-    // type, and only the declaration can supply it
-    if (!vardecl->has_type() && vardecl->init_expr != nullptr
-        && vardecl->init_expr->get_node_type() == AST::NodeType::n_expr_array_literal) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(nametoken),
-            fmt::format(
-                "nothing says what '{}' holds - an array literal takes its type from where it is "
-                "going. Write the type, e.g. 'Array<int32> {} = [...];'.",
-                nametoken.value(), nametoken.value()));
-        cursor.try_skip_to_next_statement();
-        return nullptr;
-    }
-
     if (!vardecl->has_type()) {
         // if there is no explicit type we need to be able to infer it
         if (vardecl->init_expr == nullptr) {
@@ -346,7 +330,11 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         }
         else {
             // AST::infer_declaration_type owns the rule - see it for both halves and for the
-            // second asker, the monomorphizer's re-derivation sweep
+            // other two askers, the monomorphizer's re-derivation sweep and the array literal.
+            //
+            // an array literal answers *unknown* here and is meant to: the elements say what goes in
+            // and never what holds them, so the type arrives in the fixpoint, from
+            // AST::array_literal_type_for - the same state `$x = f();` on an unsettled call is in
             vardecl->set_type_node(&payload.context.emplace_node<AST::TypeNode>(
                 AST::infer_declaration_type(*vardecl->init_expr, is_const)));
         }

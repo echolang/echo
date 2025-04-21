@@ -1,0 +1,31 @@
+--- OUT --->
+1
+2
+1
+1
+1
+2
+2
+1
+1
+99
+--- RAST --->
+CHECK: Module: [main]
+// the *templates* dump first, and they are the before picture: a bare `T` with no upgrade in sight,
+// which is correct - there is nothing to upgrade until something substitutes it
+CHECK: function through_guard
+CHECK: guard vardecl<type<Res>>($r) = varref<T>(var($w))
+CHECK: function through_chain
+CHECK: chainbase<T>
+// then the instances, where the round that revealed the weak inserted the same node the parser would
+// have. the upgraded handle is a value with no storage, so the ownership pass binds it to a temporary
+// and releases it after - which is what keeps the count balanced
+CHECK: function through_guard
+CHECK: guard vardecl<type<Res>>($r) = strong<Res?>(varref<weak<Res>>(var($w)))
+CHECK: function through_chain
+CHECK: vardecl<type<Res?>>($__temp) = strong<Res?>(varref<weak<Res>>(var($w)))
+// and the marker's stored type is the *unwrapped* one. cloning alone substitutes `T` into it and
+// leaves `weak<Res>`, which is a handle nobody retained wearing the name of one that was
+CHECK: ma<int32>(chainbase<Res>->tag)
+CHECK: function through_coalesce
+CHECK: coalesce<Res>(strong<Res?>(varref<weak<Res>>(var($w)))

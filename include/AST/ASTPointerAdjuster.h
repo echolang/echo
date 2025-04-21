@@ -5,6 +5,7 @@
 
 #include "AST/ASTNode.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTRecursiveVisitor.h"
 
 namespace AST
 {
@@ -25,18 +26,44 @@ namespace AST
     // this pass wraps every pointer read in a value position with a DerefExprNode, so after it
     // runs `result_type()` means what it says and nobody has to compensate
     //
-    // it is a *rewriter*, not a walker: it replaces the parent's edge to a child. that is why
-    // it drives the traversal itself through adjust() rather than subclassing the read-only
-    // RecursiveVisitor's descent
+    // it is a *rewriter*: it replaces the parent's edge to a child rather than only reading it. that
+    // used to mean driving its own traversal, and the traversal was a switch over NodeType ending in a
+    // `default:` that treated an unknown tag as a leaf - so a `guard`, a `??`, a `?->` and a `strong`
+    // had their whole subtrees silently skipped. AST::RecursiveVisitor owns the descent now, and
+    // rewrite_value_edge / rewrite_place_edge are the two seams that make a walker a rewriter
+    //
+    // **what stayed here is the destination type**, and only that: the six positions below where a
+    // value is read *toward* something. the destination comes from a sibling field, a cross-reference
+    // or this pass's own function stack, none of which a generic walker could answer - so hoisting it
+    // would be a second answer to "how far is a value read", which is this file's whole question
     //
     // runs after monomorphization - a type parameter's pointer-ness is not known until it is
     // substituted - and before the type checker, which can then compare types structurally
-    class PointerAdjuster
+    class PointerAdjuster : public RecursiveVisitor
     {
     public:
         PointerAdjuster(Bundle &bundle);
 
         void run();
+
+        // the six positions that read a value *toward a type*. everything else is the base's descent
+        // plus as_value(), which is what rewrite_value_edge below hands it
+        void visitVarDecl(VarDeclNode &node) override;
+        void visit_assign(AssignNode &node) override;
+        void visitFunctionCallExpr(FunctionCallExprNode &node) override;
+        void visit_indirect_call_expr(IndirectCallExprNode &node) override;
+        void visit_closure_expr(ClosureExprNode &node) override;
+        void visitReturn(ReturnNode &node) override;
+
+        // and the four that are not about a destination at all
+        void visitFunctionDecl(FunctionDeclNode &node) override;
+        void visitBinaryExpr(BinaryExprNode &node) override;
+        void visit_release(ReleaseNode &node) override;
+        void visit_foreach(ForeachNode &node) override;
+
+    protected:
+        ExprNode *rewrite_value_edge(ExprNode *expr) override;
+        ExprNode *rewrite_place_edge(ExprNode *expr) override;
 
     private:
         Bundle &_bundle;
@@ -51,16 +78,15 @@ namespace AST
         // has to fit. null at file scope, where a return has no declared type to answer to
         FunctionDeclNode *_current_function = nullptr;
 
-        // walks the node, rewriting each of its expression edges through as_value()
-        void adjust(Node *node);
-
-        // the value-position form of an expression: a pointer read gains one deref, everything
-        // else is returned unchanged. null-safe
+        // the value-position form of an expression: descend into it, then a pointer read gains one
+        // deref and everything else is returned unchanged. null-safe. **this is rewrite_value_edge** -
+        // named separately because the three destination-aware arms call it by this name, and because
+        // "as a value" is the vocabulary the rest of the file and the spec are written in
         ExprNode *as_value(ExprNode *expr);
 
-        // adjust the expression subtree *without* making its root a value - used for the
-        // operand of an address-of, and for a member access base, both of which want the place
-        // returns the possibly-replaced expression
+        // the same descent *without* making the root a value - the operand of an address-of, a member
+        // access base, an index base. **this is rewrite_place_edge**, and the base decides which
+        // positions are ones. returns the possibly-replaced expression
         ExprNode *adjust_place(ExprNode *expr);
 
         // as_value, except that a pointer-shaped destination keeps the address rather than

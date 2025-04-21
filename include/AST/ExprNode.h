@@ -929,7 +929,18 @@ namespace AST
 
         // has AST::OperatorRewriter finished with this node? the same three-state problem
         // IndexExprNode::resolution_decided solves, and the same answer: without it a destination
-        // that never becomes concrete is reported once per round
+        // that never becomes concrete is reported once per round.
+        //
+        // **the two arms this owes are not AST::ForeachNode's two.** the first is the same:
+        // OwnershipPass::body_is_concrete answers false while an unexpanded literal is in a body, so
+        // the pass that walks a body exactly once does not walk it before the appends exist. the
+        // second is *not* a throw in AST::PointerAdjuster - a foreach is a statement, so a refused one
+        // is replaced by an empty scope, while a literal is an expression and report_unplaced_literal
+        // refuses one from edges (`f([1, 2])`) with nothing to put in its place. codegen's arm is the
+        // backstop instead, and it runs after the has_critical_issues() gate rather than before it
+        //
+        // copied by clone through cc.shallow, which is correct only while AST::OperatorRewriter skips
+        // generic bodies - a template's literal is therefore always still false when it is cloned
         bool expansion_decided = false;
 
         ArrayLiteralExprNode(std::vector<ExprNode *> elements, TokenReference token_bracket) :

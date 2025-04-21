@@ -1,0 +1,16 @@
+--- OUT --->
+3
+10
+42
+0
+21
+--- RAST --->
+CHECK: Module: [main]
+// `??` - the deref is inside the right operand, which nothing walked into before
+CHECK: function fallback
+CHECK: coalesce<int32>(varref<int32?>(var($m)), call twice(cast<int32>(deref<int32>(varref<int32&>(var($fb))))): int32)
+// `?->` - and inside the continuation, which is the half that only runs on the present path
+CHECK: function chain
+CHECK: optchain<int32?>(varref<Node?>(var($n)), call scale(addrof<Node&>(chainbase<Node>), cast<int32>(deref<int32>(varref<int32&>(var($by))))): int32)
+// `strong` - the bracket under it became the declared operator's call, which is the rewriter's half
+CHECK: strong<Node?>(index<weak<Node>>(call operator [](addrof<Holder&>(varref<Holder>(var($h))), cast<usize>(literal<int32>(0))): weak<Node>&))

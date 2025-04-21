@@ -1,0 +1,15 @@
+--- OUT --->
+6
+7
+8
+-1
+--- RAST --->
+CHECK: Module: [main]
+// the loop is gone - AST::ForeachLowering reaches a guard's else arm through AST::RecursiveVisitor
+CHECK: function report
+CHECK: guard vardecl<type<int32>>($v)
+CHECK: while (call advance
+// and the read of the cursor's element carries its deref, which is what the two rewriters owed the
+// arm and did not pay while each drove a traversal of its own
+CHECK: call echo(deref<const int32>(varref<const int32&>(var($code))))
+CHECK-NOT: foreach

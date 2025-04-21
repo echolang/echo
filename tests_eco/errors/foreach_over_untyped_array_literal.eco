@@ -1,0 +1,7 @@
+// `$a` never gets a type, so the loop's source never settles. the fixpoint has to say so and remove
+// the loop - a surviving foreach is an abort inside AST::PointerAdjuster, on top of this diagnostic
+$a = [];
+
+foreach ($a as $e) {
+    echo $e;
+}
