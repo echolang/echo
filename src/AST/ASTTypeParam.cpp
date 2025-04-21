@@ -5,7 +5,7 @@
 
 #include <cassert>
 
-bool AST::TypeParamDecl::allows(const ValueType &type) const
+bool AST::constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type)
 {
     if (constraint.empty()) {
         return true;
@@ -38,6 +38,11 @@ bool AST::TypeParamDecl::allows(const ValueType &type) const
     return false;
 }
 
+bool AST::TypeParamDecl::allows(const ValueType &type) const
+{
+    return AST::constraint_admits(constraint, type);
+}
+
 void AST::TypeParamDecl::set_owner(ComplexType *owner)
 {
     assert(_owner_func == nullptr);
@@ -52,6 +57,11 @@ void AST::TypeParamDecl::set_owner(const FunctionDeclNode *owner)
 
 AST::TypeParamOwnerKind AST::TypeParamDecl::owner_kind() const
 {
+    // ahead of the t_type arm: an associated type's owner *is* a ComplexType, so the flag is the only
+    // thing that tells the two apart
+    if (is_associated) {
+        return TypeParamOwnerKind::t_associated;
+    }
     if (_owner_type) {
         return TypeParamOwnerKind::t_type;
     }

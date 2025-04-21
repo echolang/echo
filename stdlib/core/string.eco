@@ -218,15 +218,13 @@ struct string
             bool $same = true;
             usize $i = 0;
 
-            // there is no `break` yet, so the early exit is spelled by moving the cursor to the end
             while ($i < $this->size) {
                 if ($this->bytes:$[$i] != $other->bytes:$[$i]) {
                     $same = false;
-                    $i = $this->size;
+                    break;
                 }
-                else {
-                    $i = $i + 1;
-                }
+
+                $i = $i + 1;
             }
 
             return $same;

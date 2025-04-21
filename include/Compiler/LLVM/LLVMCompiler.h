@@ -69,6 +69,8 @@ public:
     void visitReturn(AST::ReturnNode &node);
     void visitIfStatement(AST::IfStatementNode &node);
     void visitWhileStatement(AST::WhileStatementNode &node);
+    void visit_loop_control(AST::LoopControlNode &node);
+    void visit_foreach(AST::ForeachNode &node);
     void visit_assign(AST::AssignNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);

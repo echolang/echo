@@ -87,6 +87,16 @@ namespace AST
         // said by the tree so no later pass has to infer "we are inside a constructor"
         VarDeclNode *ctor_this_ptr = nullptr;
 
+        // how many loops a `break` or a `continue` written here could leave, innermost outward. zero means
+        // there is none, which is the whole of what Parser::parse_loop_control has to check.
+        //
+        // **a counter and not a stack of loop nodes.** the *target* of an exit is resolved twice further
+        // down - by AST::OwnershipPass's frame stack and by CodegenContext::loop_targets - and a third
+        // answer recorded here is the one that goes stale when the monomorphizer clones a loop body. a
+        // depth is the only part of the question the parser is the right one to answer, and it is also
+        // exactly the bound a labelled `break N` would validate against
+        unsigned loop_depth = 0;
+
         inline ScopeNode &scope() const {
             assert(scope_ptr);
             return *scope_ptr;
@@ -142,9 +152,20 @@ namespace AST
                 [](const std::vector<TypeParamDecl *> &frame) { return !frame.empty(); });
         }
 
+        // the interface whose associated types are in scope, null outside one.
+        //
+        // **a pointer to the owner rather than a type-parameter frame**, because the list *grows* as
+        // the body is read: `type Iter : Iterator<V>` has to be resolvable by the requirement written
+        // under it, and push_type_param_scope copies the vector, so a frame is a snapshot that cannot
+        // learn about a declaration made after it was pushed
+        const ComplexType *associated_owner = nullptr;
+
         // resolves a name against the type parameters in scope, innermost first, so an inner
         // parameter shadows an outer one of the same name. null when the name is not a type
         // parameter here. defined out of line because it reads TypeParamDecl::name
+        //
+        // the enclosing interface's associated types are consulted *after* the frames, so a type
+        // parameter of the same name shadows one - the same innermost-wins rule, one level further out
         const TypeParamDecl *find_type_param(const std::string &name) const;
 
         template <typename T, typename... Args>
@@ -204,6 +225,29 @@ namespace AST
 
         ~TypeParamScope() {
             context.pop_type_param_scope();
+        }
+    };
+
+    // scopes an interface's associated types to its body. saves and restores rather than clearing, for
+    // SelfScope's reason: an interface cannot be nested in another, but a *struct* declared inside one
+    // would otherwise see its `Iter`
+    struct AssociatedTypeScope
+    {
+        Context &context;
+        const ComplexType *previous;
+
+        AssociatedTypeScope(Context &context, const ComplexType *owner) :
+            context(context),
+            previous(context.associated_owner)
+        {
+            context.associated_owner = owner;
+        }
+
+        AssociatedTypeScope(const AssociatedTypeScope &) = delete;
+        AssociatedTypeScope &operator=(const AssociatedTypeScope &) = delete;
+
+        ~AssociatedTypeScope() {
+            context.associated_owner = previous;
         }
     };
 
@@ -397,6 +441,34 @@ namespace AST
         }
     };
 
+    // how many loops the code being parsed sits inside. a loop body enters `previous + 1`;
+    // FunctionBodyScope enters 0.
+    //
+    // it takes a depth rather than incrementing so that one guard serves both askers - and the second one
+    // is the load-bearing one: a closure or a nested `function` written inside a loop body does *not*
+    // inherit the loop, for the reason every other field in FunctionBodyScope is cleared. without it
+    // `while ($c) { $f = function() { break; }; }` parses, and codegen emits a branch to a basic block in
+    // a different llvm::Function - which the verifier reports nowhere near the source
+    struct LoopScope
+    {
+        Context &context;
+        unsigned previous;
+
+        LoopScope(Context &context, unsigned depth) :
+            context(context),
+            previous(context.loop_depth)
+        {
+            context.loop_depth = depth;
+        }
+
+        LoopScope(const LoopScope &) = delete;
+        LoopScope &operator=(const LoopScope &) = delete;
+
+        ~LoopScope() {
+            context.loop_depth = previous;
+        }
+    };
+
     // every frame a function-like body opens, in one guard: it is no longer inside a struct declaration,
     // no longer inside a constructor, no longer inside a closure unless it *is* one, and it names the
     // lexical namespaces its blocks mint
@@ -414,6 +486,7 @@ namespace AST
         ConstructorScope no_ctor_this;
         ClosureScope enclosing_closure;
         CurrentFunctionScope current_function;
+        LoopScope no_enclosing_loop;
 
         // the closure defaults to none, because a closure literal's own body is the only one written
         // inside one: a plain `function` nested in a closure body captures nothing, it is a declaration
@@ -421,7 +494,8 @@ namespace AST
             no_self(context, nullptr, nullptr),
             no_ctor_this(context, nullptr),
             enclosing_closure(context, closure),
-            current_function(context, function)
+            current_function(context, function),
+            no_enclosing_loop(context, 0)
         {
         }
 

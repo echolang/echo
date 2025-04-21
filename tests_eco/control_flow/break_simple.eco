@@ -1,0 +1,10 @@
+// break leaves the innermost loop
+int $i = 0;
+while ($i < 10) {
+    if ($i == 3) {
+        break;
+    }
+    echo $i;
+    $i = $i + 1;
+}
+echo "after";

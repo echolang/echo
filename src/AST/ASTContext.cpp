@@ -57,6 +57,14 @@ const AST::TypeParamDecl *AST::Context::find_type_param(const std::string &name)
         }
     }
 
+    // an interface's own associated types, outermost of all: they belong to the whole body, and a
+    // requirement's type-parameter frame - which is empty for an ordinary requirement - sits inside them
+    if (associated_owner != nullptr) {
+        if (TypeParamDecl *assoc = associated_owner->find_associated_type(name)) {
+            return assoc;
+        }
+    }
+
     return nullptr;
 }
 

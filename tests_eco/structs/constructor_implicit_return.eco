@@ -1,0 +1,96 @@
+// **a constructor gets an implicit `return $this` - unless control already left its body.**
+//
+// the parser used to decide that by scanning the body's direct children for a `ReturnNode`, which is
+// a second answer to a question AST::scope_always_exits owns. it got the same two shapes wrong the
+// ownership pass once did (see tests_eco/ownership/drops_after_an_exit.eco, the other half of this
+// fix): a `die` tail, and an `if` whose arms all leave.
+//
+// the appended return never reached the binary - StmtCodegen::gen_scope stops at the first terminated
+// block - but it was still a statement AST::OwnershipPass and AST::TypeChecker had to make sense of.
+// `Clamped` below did not merely carry dead tree before the fix: both arms hand `$this` back, so the
+// return written behind them read a value that was moved out of on every path, and the constructor was
+// refused outright with "'$this' has been moved out of"
+
+class Handle
+{
+    int32 $v;
+    constructor(int32 $v) { $this->v = $v; }
+}
+
+// **a `die` at the top level of the body.** the constructor never hands anything back, so there is
+// nowhere for a `return $this` to go - and the drop of the `$this` it would have returned even less
+struct Refused
+{
+    Handle $h;
+
+    constructor(int32 $v)
+    {
+        $this->h = Handle($v);
+        die("Refused is never built");
+    }
+}
+
+// **both arms of an `if`, each returning.** one arm says nothing about the other, so this is the only
+// branching shape that counts - two returns in this body, and no third behind them
+struct Clamped
+{
+    Handle $h;
+
+    constructor(int32 $v)
+    {
+        // built once, before the branch: two writes to one owning field are two initializations, and
+        // that is a different diagnostic than the one this file is about
+        $this->h = Handle($v);
+
+        if ($v < 0) {
+            echo 1;
+            return $this;
+        } else {
+            echo 2;
+            return $this;
+        }
+    }
+}
+
+// the control: an `if` with no else *does* fall through, so the implicit return is still owed - even
+// though a `return` is written in the body. a fix that answered "always exits" too eagerly would leave
+// this constructor handing back undef. its field is an `int32` rather than a `Handle` so the early
+// return stays about control flow and not about a value moved out of on one branch (todo/C7)
+struct Floored
+{
+    int32 $v;
+
+    constructor(int32 $v)
+    {
+        $this->v = $v;
+        if ($v < 0) {
+            return $this;
+        }
+        $this->v = $v + 100;
+    }
+}
+
+// and the ordinary shape, which is what the implicit return exists for: no `return` written anywhere
+struct Plain
+{
+    Handle $h;
+
+    constructor(int32 $v)
+    {
+        $this->h = Handle($v);
+    }
+}
+
+// Refused is deliberately never built - it is here to be *compiled*, and what it does with its `$this`
+// is a question only the RAST answers
+Clamped $c = Clamped(-5);
+echo $c->h->v;
+
+Clamped $d = Clamped(11);
+echo $d->h->v;
+
+Floored $f = Floored(3);
+echo $f->v;
+
+Plain $p = Plain(9);
+echo $p->h->v;

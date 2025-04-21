@@ -1,0 +1,35 @@
+// a break unwinds the frames it leaves, innermost first, and stops at the loop body's -
+// the locals outside the loop are still live on the other side of the branch
+struct Noisy
+{
+    int32 $id;
+
+    constructor(int32 $id) {
+        $this->id = $id;
+    }
+
+    destructor() {
+        echo "drop";
+        echo $this->id;
+    }
+}
+
+function main() : void
+{
+    Noisy $outer = Noisy(100);
+
+    int32 $i = 0;
+    while ($i < 5) {
+        Noisy $inner = Noisy($i);
+        $i = $i + 1;
+
+        if ($i == 2) {
+            Noisy $nested = Noisy(50);
+            break;
+        }
+    }
+
+    echo "after";
+}
+
+main();

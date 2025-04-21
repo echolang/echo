@@ -1,0 +1,17 @@
+// a guard's else arm may leave by breaking - the binding is unreachable either way
+function pick(int32 $i) : int32?
+{
+    if ($i < 3) {
+        return $i;
+    }
+
+    return null;
+}
+
+int32 $i = 0;
+while ($i < 10) {
+    guard int32 $v = pick($i) else { break; }
+    echo $v;
+    $i = $i + 1;
+}
+echo "stopped";

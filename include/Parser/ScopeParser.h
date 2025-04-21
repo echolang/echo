@@ -16,16 +16,17 @@ namespace Parser
     // the identity of the block's lexical namespace, which is what makes a declaration written in here
     // belong to this block rather than to the enclosing namespace. only the file root has none
     //
-    // `seed_declaration` is a declaration the scope is to open with - a constructor's `$this`, which the
-    // body can read but nobody wrote. it is registered before the first statement is parsed, and that is
-    // the whole of what it is for: a name has to be resolvable while the statements that read it are
-    // being parsed (Parser::parse_varexpr asks ScopeNode::lookup_variable), and a caller cannot register
-    // it after the fact. where it lands in the child list means nothing - StmtCodegen::gen_scope seats
-    // every declaration's storage at scope entry and ScopeNode::clone clones them before the statements
+    // `seed_declarations` are declarations the scope is to open with, in the order they are to be seen -
+    // a constructor's `$this`, or a `foreach`'s `$k` and `$el`: names the body can read but nobody wrote
+    // in it. they are registered before the first statement is parsed, and that is the whole of what
+    // they are for: a name has to be resolvable while the statements that read it are being parsed
+    // (Parser::parse_varexpr asks ScopeNode::lookup_variable), and a caller cannot register one after
+    // the fact. where they land in the child list means nothing - StmtCodegen::gen_scope seats every
+    // declaration's storage at scope entry and ScopeNode::clone clones them before the statements
     AST::ScopeNode &parse_scope(
         Payload &payload,
         std::optional<TokenReference> block_token = std::nullopt,
-        AST::VarDeclNode *seed_declaration = nullptr);
+        std::vector<AST::VarDeclNode *> seed_declarations = {});
 
     // the tail of a call used as a statement: appends it to `scope` and consumes the semicolon that
     // has to follow. shared by the free-call branch of parse_scope and the `$obj->m();` branch of

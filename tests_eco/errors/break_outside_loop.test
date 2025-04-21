@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 7:1
+'break' is only meaningful inside a loop - there is no loop here to leave. a closure or a nested function does not inherit the loop it was written in
+Begin: 'break'
+End: 'break'
+Code excerpt:
+ [6]> 
+ [7]> break;
+      ^
+ [8]> 
+
+Critical issues found, cannot compile.

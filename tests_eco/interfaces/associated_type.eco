@@ -1,0 +1,56 @@
+// an associated type is one the *implementor* chooses and the interface only constrains. it is never
+// written at the implementor: the compiler infers `Iter` by unifying the requirement's signature
+// against the member that answers it, then re-checks every requirement through that binding
+interface Stepper<V>
+{
+    function advance() : bool;
+    function current() : V;
+}
+
+interface Walkable<V>
+{
+    type Iter : Stepper<V>;
+    function iterate() : Iter;
+}
+
+struct Cursor : Stepper<int32>
+{
+    int32 $at;
+
+    function advance() : bool {
+        $this->at = $this->at + 1;
+        if ($this->at > 3) {
+            return false;
+        }
+        return true;
+    }
+
+    function current() : int32 {
+        return $this->at;
+    }
+}
+
+struct Bag : Walkable<int32>
+{
+    // `Iter` is inferred to be `Cursor` from this return type alone
+    function iterate() : Cursor {
+        return Cursor(0);
+    }
+}
+
+// the constraint path: monomorphized, direct calls, and it needs no way to *name* the associated type -
+// `$it` is typed from the settled call by the monomorphizer's ordinary re-derivation sweep
+function total<C: Walkable<int32>>(C& $c) : int32
+{
+    $it = $c->iterate();
+    int32 $sum = 0;
+
+    while ($it->advance()) {
+        $sum = $sum + $it->current();
+    }
+
+    return $sum;
+}
+
+$b = Bag();
+echo total($b);

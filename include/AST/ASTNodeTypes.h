@@ -55,6 +55,8 @@ namespace AST
         n_guard,
         n_while_statement,
         n_for_statement,
+        n_loop_control,
+        n_foreach,
         n_namespace_decl,
         n_namespace,
         n_attribute,

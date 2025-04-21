@@ -1,0 +1,30 @@
+// `Keyed<K>` is an orthogonal capability. a cursor that does not declare it has no keys, and the
+// refusal lands on the `=>` that asked for one
+
+struct plain_cursor : Iterator<int32>
+{
+    int32 $at;
+
+    function advance() : bool {
+        $this->at = $this->at + 1;
+        if ($this->at > 2) { return false; }
+        return true;
+    }
+
+    function current() : int32& {
+        return &$this->at;
+    }
+}
+
+struct Plain : Iterable<int32>
+{
+    function iterate() : plain_cursor {
+        return plain_cursor(0);
+    }
+}
+
+$p = Plain();
+
+foreach ($p as $k => $v) {
+    echo $k;
+}

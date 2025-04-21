@@ -1,0 +1,9 @@
+// the advance sits in the condition-side counter, so continue must not skip it
+int $i = 0;
+while ($i < 6) {
+    $i = $i + 1;
+    if ($i == 3) {
+        continue;
+    }
+    echo $i;
+}

@@ -1,0 +1,28 @@
+// a template's body is skipped by AST::ForeachLowering - the element type is exactly what is not known
+// there - so each instance lowers independently, off its own concrete source type
+//
+// the source is also a *borrow parameter*, which is already an address, so the loop must not take
+// another one: addressing it twice unifies against nothing and the call is then silently never
+// instantiated at all
+function show<T>(Array<T>& $a) : usize
+{
+    usize $n = 0;
+
+    foreach ($a as $i => $x) {
+        echo $i;
+        echo $x;
+        $n = $n + 1;
+    }
+
+    return $n;
+}
+
+$ints = Array<int32>();
+$ints[] = 1;
+$ints[] = 2;
+
+$floats = Array<float64>();
+$floats[] = 1.5;
+
+echo show($ints);
+echo show($floats);

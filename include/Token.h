@@ -29,6 +29,7 @@ public:
         t_logical_geq,              // >=
         t_accessorlr,               // ->
         t_assign,                   // =
+        t_double_arrow,             // =>
         t_and,                      // &
         t_ref,                      // & (reference)
         t_or,                       // |
@@ -73,6 +74,7 @@ public:
         t_else,                     // else
         t_while,                    // while
         t_for,                      // for
+        t_foreach,                  // foreach
         t_break,                    // break
         t_continue,                 // continue
         t_namespace,                // namespace

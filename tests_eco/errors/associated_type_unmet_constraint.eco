@@ -1,0 +1,30 @@
+// the inferred binding is checked against the associated type's own constraint, *substituted through
+// the conformance* - so the message names `Stepper<int32>` and not the `Stepper<V>` the interface
+// author wrote. reported ahead of the ordinary unmet-requirement check, which would otherwise render
+// `iterate() : Iter` and name a type the implementor's author never saw
+
+interface Stepper<V>
+{
+    function advance() : bool;
+    function current() : V;
+}
+
+interface Walkable<V>
+{
+    type Iter : Stepper<V>;
+    function iterate() : Iter;
+}
+
+struct NotACursor
+{
+    int32 $x;
+}
+
+struct Bag : Walkable<int32>
+{
+    function iterate() : NotACursor {
+        return NotACursor(0);
+    }
+}
+
+echo 1;

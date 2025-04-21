@@ -1,0 +1,11 @@
+// the source may be a temporary: `->slice()` hands back a value with no storage, and the loop's own
+// iterator declaration is what gives it a slot for as long as the loop runs
+$a = Array<int32>();
+$a[] = 1;
+$a[] = 2;
+$a[] = 3;
+$a[] = 4;
+
+foreach ($a->slice(1, 2) as $x) {
+    echo $x;
+}

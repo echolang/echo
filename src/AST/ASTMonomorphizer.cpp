@@ -33,7 +33,8 @@ namespace AST
     }
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
-        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle), _operators(bundle)
+        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle), _operators(bundle),
+          _foreach(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -484,6 +485,17 @@ namespace AST
             // because a declaration inferred from `$a[0]` has no type at all until the element call
             // is attached - and behind the instantiation above, because it needs that round's types
             progressed |= _operators.run_round();
+
+        // **after the rewriter, before the re-derivation.** after, because `foreach ($grid[0] as $row)`
+        // has no source type until the bracket has become an `operator []` call - the very reason the
+        // rewriter is itself ahead of the sweep. before, because `$__it` is declared with no type node
+        // and that sweep is what types it, so lowering here saves a whole round.
+        //
+        // and before the ownership pass below, which walks a body **exactly once, ever**: the round a
+        // loop lowers in has to be the round its body becomes eligible. OwnershipPass::body_is_concrete
+        // answers false while an unlowered foreach is in the body, which is what makes that safe rather
+        // than merely fast
+        progressed |= _foreach.run_round();
 
             progressed |= rederive_stale_variable_types();
             progressed |= rederive_stale_capture_types();

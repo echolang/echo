@@ -1,0 +1,36 @@
+--- OUT --->
+1
+-5
+2
+11
+103
+9
+--- RAST --->
+// **a `die` at the top level of the body.** the body ends at the die, and nothing is written behind it -
+// the region runs to the field-wise constructor the parser synthesizes next, which is the closest thing
+// below that a stray `return $this` could hide in front of
+CHECK: function Refused -> type<Refused>
+CHECK: call die(
+CHECK-NOT: return(varref<Refused>(var($this)))
+CHECK-NOT: unwind
+// and the synthesized one, which does return - so the CHECK-NOT above is scoped and not vacuous
+CHECK: function Refused -> type<Refused>
+CHECK: return(varref<Refused>(var($this)))
+// **both arms of an `if`, each returning.** two returns in this body, and no third behind the branch
+CHECK: function Clamped -> type<Clamped>
+CHECK: call echo(literal<int32>(1)): void
+CHECK: return(varref<Clamped>(var($this)))
+CHECK: call echo(literal<int32>(2)): void
+CHECK: return(varref<Clamped>(var($this)))
+CHECK-NOT: return(varref<Clamped>(var($this)))
+CHECK: function Clamped -> type<Clamped>
+// the control: an `if` with no else falls through even though it holds a `return`, so the implicit
+// return is still owed - after the statement written past the branch
+CHECK: function Floored -> type<Floored>
+CHECK: return(varref<Floored>(var($this)))
+CHECK: ma<int32>(varref<Floored>(var($this))->v) = binexp
+CHECK: return(varref<Floored>(var($this)))
+// and the ordinary shape the implicit return exists for
+CHECK: function Plain -> type<Plain>
+CHECK: ma<Handle>(varref<Plain>(var($this))->h) = call Handle(
+CHECK: return(varref<Plain>(var($this)))

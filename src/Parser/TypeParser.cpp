@@ -475,6 +475,125 @@ static AST::ValueType parse_generic_application(Parser::Payload &payload, AST::T
     return AST::ValueType::make_complex(inst);
 }
 
+// **the constraint grammar**, `: atom (| atom)*`, as one function.
+//
+// two callers: a type parameter's constraint in parse_type_param_list, and an interface's associated
+// type in parse_typedecl. one grammar, so the `>>` split, the deferred resolution in the type-name
+// pass and the bare-generic refusal cannot drift between the two spellings
+//
+// hands back false when it reported and gave up, so the caller can abandon whatever list it was
+// building. does nothing and answers true when the cursor is not on a ':'
+bool Parser::parse_constraint_atoms(Parser::Payload &payload, ParsedTypeParam &param)
+{
+    auto &cursor = payload.cursor;
+
+    if (!cursor.is_type(Token::Type::t_colon)) {
+        return true;
+    }
+
+    cursor.skip(); // skip ':'
+
+    // the type-name pass reads this list for the one thing it owns - a generic type's arity
+    // and its parameter names - and a constraint atom may name a type no pass has registered
+    // yet, so resolving one here would report an unknown type for a well formed program. the
+    // atoms are still walked, to leave the cursor after the list, and the declaration pass
+    // fills the constraint in: declare_params refreshes it on every pass precisely so this
+    // can be deferred
+    const bool resolve_atoms = payload.pass != Pass::t_type_names;
+
+    while (true) {
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+            cursor.try_skip_to_next_statement();
+            return false;
+        }
+
+        auto atom_token = cursor.current();
+        auto atom_name = atom_token.value();
+
+        // an atom may be a generic *application* - `C: Iterable<int32>` - and not only a bare
+        // name. an interface is what made that worth having: `Iterable` alone resolves to the
+        // template, which is not a type any value ever has, so a constraint naming one could
+        // never be satisfied by anything
+        const bool is_application = cursor.peek_is_type(1, Token::Type::t_open_angle);
+
+        if (!resolve_atoms) {
+            // walked with skip_type_shape, the one owner of "how far does a written type
+            // extend" - a second scanner counting angle brackets is a second answer to where
+            // `Iterable<Box<int32>>` ends, and the cursor's `>>` split is exactly what the
+            // resolving arm below reaches through parse_type. this pass validates nothing, so a
+            // shape it cannot walk is left for the declaration pass to report
+            skip_type_shape(cursor);
+        }
+        else if (is_application) {
+            // parse_type owns every spelling of a type - the arity check against the template,
+            // the interning, and the `>>` split its closing brackets need - so an applied atom
+            // is read by it rather than by a second scanner here. it leaves the cursor after
+            // the list, which is why this arm does not skip
+            AST::TypeNode *applied = Parser::parse_type(payload);
+
+            if (applied == nullptr) {
+                // parse_type has reported
+                cursor.try_skip_to_next_statement();
+                return false;
+            }
+
+            param.constraint.push_back(applied->type);
+            if (!param.constraint_spelling.empty()) {
+                param.constraint_spelling += "|";
+            }
+            param.constraint_spelling += applied->type.get_type_desciption();
+        }
+        else {
+            auto atom_types = resolve_constraint_atom(payload, atom_name);
+            if (!atom_types) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(atom_token),
+                    fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
+                );
+                cursor.try_skip_to_next_statement();
+                return false;
+            }
+
+            // a *generic* type named bare is refused rather than pushed: it resolves to the
+            // template, which no value's type ever equals and no conformance ever names, so the
+            // constraint would reject every argument with the atom looking perfectly correct.
+            // `Iterable<int32>` is the spelling the arm above now accepts
+            if (atom_types->size() == 1 && atom_types->front().has_complex_type()
+                && atom_types->front().get_complex_type()->is_generic()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(atom_token),
+                    fmt::format(
+                        "'{}' is generic, so it needs its type arguments in the constraint of "
+                        "type parameter '{}' - write '{}<...>'.",
+                        atom_name, param.name(), atom_name)
+                );
+                cursor.try_skip_to_next_statement();
+                return false;
+            }
+
+            for (const auto &type : *atom_types) {
+                param.constraint.push_back(type);
+            }
+            if (!param.constraint_spelling.empty()) {
+                param.constraint_spelling += "|";
+            }
+            param.constraint_spelling += atom_name;
+
+            cursor.skip();
+        }
+
+        // more atoms are separated by '|'
+        if (cursor.is_type(Token::Type::t_or)) {
+            cursor.skip();
+            continue;
+        }
+        break;
+    }
+
+    return true;
+}
+
 std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -517,106 +636,8 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
         cursor.skip();
 
         // optional constraint: `: atom (| atom)*`
-        if (cursor.is_type(Token::Type::t_colon)) {
-            cursor.skip(); // skip ':'
-
-            // the type-name pass reads this list for the one thing it owns - a generic type's arity
-            // and its parameter names - and a constraint atom may name a type no pass has registered
-            // yet, so resolving one here would report an unknown type for a well formed program. the
-            // atoms are still walked, to leave the cursor after the list, and the declaration pass
-            // fills the constraint in: declare_params refreshes it on every pass precisely so this
-            // can be deferred
-            const bool resolve_atoms = payload.pass != Pass::t_type_names;
-
-            while (true) {
-                if (!cursor.is_type(Token::Type::t_identifier)) {
-                    payload.collect_unexpected_token(Token::Type::t_identifier);
-                    cursor.try_skip_to_next_statement();
-                    return type_parameters;
-                }
-
-                auto atom_token = cursor.current();
-                auto atom_name = atom_token.value();
-
-                // an atom may be a generic *application* - `C: Iterable<int32>` - and not only a bare
-                // name. an interface is what made that worth having: `Iterable` alone resolves to the
-                // template, which is not a type any value ever has, so a constraint naming one could
-                // never be satisfied by anything
-                const bool is_application = cursor.peek_is_type(1, Token::Type::t_open_angle);
-
-                if (!resolve_atoms) {
-                    // walked with skip_type_shape, the one owner of "how far does a written type
-                    // extend" - a second scanner counting angle brackets is a second answer to where
-                    // `Iterable<Box<int32>>` ends, and the cursor's `>>` split is exactly what the
-                    // resolving arm below reaches through parse_type. this pass validates nothing, so a
-                    // shape it cannot walk is left for the declaration pass to report
-                    skip_type_shape(cursor);
-                }
-                else if (is_application) {
-                    // parse_type owns every spelling of a type - the arity check against the template,
-                    // the interning, and the `>>` split its closing brackets need - so an applied atom
-                    // is read by it rather than by a second scanner here. it leaves the cursor after
-                    // the list, which is why this arm does not skip
-                    AST::TypeNode *applied = Parser::parse_type(payload);
-
-                    if (applied == nullptr) {
-                        // parse_type has reported
-                        cursor.try_skip_to_next_statement();
-                        return type_parameters;
-                    }
-
-                    param.constraint.push_back(applied->type);
-                    if (!param.constraint_spelling.empty()) {
-                        param.constraint_spelling += "|";
-                    }
-                    param.constraint_spelling += applied->type.get_type_desciption();
-                }
-                else {
-                    auto atom_types = resolve_constraint_atom(payload, atom_name);
-                    if (!atom_types) {
-                        payload.collector.collect_issue<AST::Issue::GenericError>(
-                            payload.context.code_ref(atom_token),
-                            fmt::format("Unknown type or alias '{}' in constraint of type parameter '{}'", atom_name, param.name())
-                        );
-                        cursor.try_skip_to_next_statement();
-                        return type_parameters;
-                    }
-
-                    // a *generic* type named bare is refused rather than pushed: it resolves to the
-                    // template, which no value's type ever equals and no conformance ever names, so the
-                    // constraint would reject every argument with the atom looking perfectly correct.
-                    // `Iterable<int32>` is the spelling the arm above now accepts
-                    if (atom_types->size() == 1 && atom_types->front().has_complex_type()
-                        && atom_types->front().get_complex_type()->is_generic()) {
-                        payload.collector.collect_issue<AST::Issue::GenericError>(
-                            payload.context.code_ref(atom_token),
-                            fmt::format(
-                                "'{}' is generic, so it needs its type arguments in the constraint of "
-                                "type parameter '{}' - write '{}<...>'.",
-                                atom_name, param.name(), atom_name)
-                        );
-                        cursor.try_skip_to_next_statement();
-                        return type_parameters;
-                    }
-
-                    for (const auto &type : *atom_types) {
-                        param.constraint.push_back(type);
-                    }
-                    if (!param.constraint_spelling.empty()) {
-                        param.constraint_spelling += "|";
-                    }
-                    param.constraint_spelling += atom_name;
-
-                    cursor.skip();
-                }
-
-                // more atoms are separated by '|'
-                if (cursor.is_type(Token::Type::t_or)) {
-                    cursor.skip();
-                    continue;
-                }
-                break;
-            }
+        if (!parse_constraint_atoms(payload, param)) {
+            return type_parameters;
         }
 
         type_parameters.push_back(std::move(param));

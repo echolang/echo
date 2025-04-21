@@ -262,6 +262,39 @@ void TypeChecker::check_conformances(TypeDeclNode &node)
     const AST::ComplexType &ct = node.complex_type();
 
     for (const ValueType &interface : ct.conformances()) {
+        // **the binding is reported first, and that ordering matters.** a failed solve leaves the
+        // associated type unsubstituted, so first_unmet_requirement's wanted_signature would render
+        // `iterate() : Iter` - naming a type the implementor's author never wrote and cannot act on,
+        // which is exactly what that signature was made substituted to avoid
+        const AST::ConformanceBinding binding =
+            AST::conformance_bindings(&ct, interface, _collector.type_registry);
+
+        if (binding.failure != AST::ConformanceBinding::Failure::t_none) {
+            std::string detail;
+
+            if (binding.failure == AST::ConformanceBinding::Failure::t_ambiguous) {
+                detail = fmt::format(
+                    "two of its members disagree about what '{}' is - one says '{}', another '{}'",
+                    binding.associated->name,
+                    binding.first.get_type_desciption(),
+                    binding.second.get_type_desciption());
+            }
+            else {
+                detail = fmt::format(
+                    "'{}' would be '{}', which does not satisfy '{}'",
+                    binding.associated->name,
+                    binding.first.get_type_desciption(),
+                    binding.constraint_spelling);
+            }
+
+            _collector.collect_issue<Issue::UnmetInterfaceRequirement>(
+                code_ref_for(node.declaration_site_token()),
+                fmt::format("'{}' says it conforms to '{}', but {}.",
+                    node.type_name(), interface.get_type_desciption(), detail));
+
+            continue;
+        }
+
         auto unmet = AST::first_unmet_requirement(
             &ct, interface, _collector.type_registry, &_collector.functions);
 

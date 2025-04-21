@@ -22,7 +22,21 @@ namespace AST
         t_none,
         t_type,
         t_function,
+
+        // an interface's associated type - `type Iter : Iterator<V>`. its owner is a ComplexType like
+        // t_type's, so this one is read off TypeParamDecl::is_associated rather than off which owner
+        // pointer is set
+        t_associated,
     };
+
+    // **the constraint rule**, stated over a constraint list rather than over a declaration.
+    //
+    // extracted from TypeParamDecl::allows, which is now its one-line caller, so that an *associated*
+    // type can be checked against its constraint substituted through the conformance: `type Iter :
+    // Iterator<V>` means nothing until `V` is bound, and `allows` reads `this->constraint` verbatim
+    //
+    // still the sole owner of "is this type argument allowed" - two callers, one rule
+    bool constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type);
 
     // one generic type parameter as written at its declaration site - the `T` in `struct Box<T>`
     // or `function twice<T>(...)`. a ValueType of kind t_generic refers to one of these, so the
@@ -55,6 +69,14 @@ namespace AST
         // the original constraint source (e.g. "numeric|bool"), kept for diagnostics so an
         // error can name what the user actually wrote
         std::string constraint_spelling;
+
+        // **is this an interface's associated type** rather than one of its type parameters?
+        //
+        // stored rather than derived ("my owner's type_parameters does not contain me") because the
+        // derivation is a linear scan on a hot path, and because a second way to ask is a second way to
+        // get a different answer. stamped by ComplexType::add_associated_type, the single minter, exactly
+        // as add_type_parameter stamps ordinal and owner - so the two cannot disagree
+        bool is_associated = false;
 
         TypeParamDecl(std::string name, size_t ordinal, std::optional<TokenReference> name_token) :
             name(std::move(name)),

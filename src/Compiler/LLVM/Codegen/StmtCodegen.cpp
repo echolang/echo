@@ -19,6 +19,7 @@
 #include "AST/ReturnNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
+#include "AST/LoopControlNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
@@ -465,13 +466,49 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     // a body whose every path returns already terminated its block, and a second terminator there
     // fails the verifier
     _ctx.builder->SetInsertPoint(body_block);
-    node.loop_scope->accept(*_ctx.visitor);
+    {
+        // **the body only**, and the continue target is the *condition* block: for a `while` the
+        // condition is the step, so `continue` and the natural back edge below are the same edge. that is
+        // also why no step block is needed for the `foreach` this lowers from - its advance lives in the
+        // condition by design
+        LoopTargetScope loop(_ctx, merge_block, loop_block);
+
+        node.loop_scope->accept(*_ctx.visitor);
+    }
     if (!_ctx.block_is_terminated()) {
         _ctx.builder->CreateBr(loop_block);
     }
 
     // merge block
     _ctx.builder->SetInsertPoint(merge_block);
+}
+
+void StmtCodegen::gen_loop_control(AST::LoopControlNode &node)
+{
+    if (_ctx.loop_targets.empty()) {
+        // Parser::parse_loop_control refuses one outside a loop and builds no node for it, so this is a
+        // compiler bug rather than a program error - and the alternative is a branch to a null block,
+        // which llvm reports nowhere near here
+        throw _ctx.error(fmt::format("a '{}' reached codegen with no enclosing loop {}",
+            node.keyword(), _ctx.function_context()));
+    }
+
+    const CodegenContext::LoopTarget &target = _ctx.loop_targets.back();
+
+    // **the drops first, then the branch.** the same ordering gen_return uses before CreateRet, and for
+    // the same reason: a terminator ends the block, so anything emitted after it is either dropped on the
+    // floor or a second terminator the verifier rejects
+    //
+    // these are void calls and releases, so none of them pushes onto the value stack - which is what lets
+    // gen_scope's per-statement depth assertion hold across an exit
+    for (auto &drop : node.unwind) {
+        if (drop.has()) {
+            drop.node()->accept(*_ctx.visitor);
+        }
+    }
+
+    _ctx.builder->CreateBr(
+        node.kind == AST::LoopControlKind::t_break ? target.break_block : target.continue_block);
 }
 
 void StmtCodegen::gen_assign(AST::AssignNode &node)

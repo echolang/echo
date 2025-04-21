@@ -40,6 +40,8 @@ namespace AST
     class ReturnNode;
     class IfStatementNode;
     class WhileStatementNode;
+    class LoopControlNode;
+    class ForeachNode;
     class AssignNode;
     class NamespaceDeclNode;
     class NamespaceNode;
@@ -90,6 +92,8 @@ namespace AST
         virtual void visitReturn(ReturnNode &node) = 0;
         virtual void visitIfStatement(IfStatementNode &node) = 0;
         virtual void visitWhileStatement(WhileStatementNode &node) = 0;
+        virtual void visit_loop_control(LoopControlNode &node) = 0;
+        virtual void visit_foreach(ForeachNode &node) = 0;
         virtual void visit_assign(AssignNode &node) = 0;
         virtual void visitNamespaceDecl(NamespaceDeclNode &node) = 0;
         virtual void visitNamespace(NamespaceNode &node) = 0;

@@ -21,6 +21,8 @@
 #include "AST/VarRefNode.h"
 #include "AST/TypeNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/LoopControlNode.h"
+#include "AST/ForeachNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
@@ -91,6 +93,54 @@ FunctionCallExprNode &OperatorRewriter::build_operator_call(
     _changed = true;
 
     return call;
+}
+
+void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
+{
+    // **the post-parse moment of the parser's binary reconciliation** - the rule itself is
+    // AST::common_numeric_type's, shared with Parser::parse_binary_expr, and only the insertion is here.
+    //
+    // the parser can only reconcile operands whose type it knows *then*. a declaration typed by a later
+    // pass misses it entirely - `foreach ($a as $i => $x) { if ($i == 0) ... }` is the shape that made
+    // this reachable, since `$i` has no type until AST::ForeachLowering reads the key contract off the
+    // cursor, by which point the literal has long since defaulted to int32.
+    //
+    // the failure mode was codegen asserting on `Both operands to ICmp instruction are not of the same
+    // type`, which names neither the loop nor the comparison. this pass is the right owner of the second
+    // moment: its header states it exists for "operand syntax whose meaning depends on a type this
+    // fixpoint is still deciding", and a binary expression whose operands only now have types is that
+    if (bin.lhs == nullptr || bin.rhs == nullptr) {
+        return;
+    }
+
+    // asked before the operand types, because it is the cheap half and it is false for all but a
+    // handful of nodes: already reconciled - by the parser, or by an earlier round of this.
+    //
+    // a void answer is what "not reconciled" looks like from the outside; anything else is either not
+    // ready yet or not this function's business, since a pointer, a class and a nullable all have their
+    // own arms in BinaryExprNode::result_type() and never reach a void answer through width alone
+    if (!bin.result_type().is_void()) {
+        return;
+    }
+
+    const ValueType left = value_type_of(bin.lhs->result_type());
+    const ValueType right = value_type_of(bin.rhs->result_type());
+
+    const auto common = common_numeric_type(left, right);
+
+    if (!common.has_value()) {
+        return;
+    }
+
+    // exactly one side differs: the common type is always one of the two
+    if (left.get_primitive_type() != common->get_primitive_type()) {
+        bin.lhs = &_current_module->nodes.emplace_back<TypeCastNode>(*common, bin.lhs, true);
+    }
+    else {
+        bin.rhs = &_current_module->nodes.emplace_back<TypeCastNode>(*common, bin.rhs, true);
+    }
+
+    _changed = true;
 }
 
 void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
@@ -477,6 +527,7 @@ void OperatorRewriter::rewrite(Node *node)
             auto *bin = static_cast<BinaryExprNode *>(node);
             bin->lhs = rewrite_expr(bin->lhs);
             bin->rhs = rewrite_expr(bin->rhs);
+            widen_binary_operands(*bin);
             break;
         }
 
@@ -616,6 +667,37 @@ void OperatorRewriter::rewrite(Node *node)
 
             // the drops a return owes, which ride on the node rather than sitting ahead of it
             for (auto &drop : ret->unwind) {
+                rewrite(drop.node());
+            }
+            break;
+        }
+
+        case NodeType::n_foreach:
+        {
+            // **mandatory, and the failure is a deadlock rather than a wrong answer.** this switch ends
+            // in a `default:` that treats an unknown tag as a leaf, so without this arm
+            // `foreach ($grid[0] as $row)`'s bracket never becomes an `operator []` call, the source
+            // type never resolves, AST::ForeachLowering waits forever and the program compiles to
+            // nothing with no diagnostic at all
+            auto *loop = static_cast<ForeachNode *>(node);
+            loop->source = rewrite_expr(loop->source);
+            rewrite(loop->body);
+            break;
+        }
+
+        case NodeType::n_loop_control:
+        {
+            // the same list on the other early exit. **mandatory**: this switch ends in a `default:`
+            // that treats an unknown tag as a leaf, so leaving it out is silent - an operator or a
+            // bracket inside a drop would never be rewritten, and a BinaryExprNode surviving to
+            // gen_binary_expr emits a scaled GEP rather than the call the author declared
+            //
+            // AST::PointerAdjuster deliberately has no matching arm, and neither does it walk a return's
+            // unwind: AST::needs_destruction says a pointer is not an owner, so a drop's place never
+            // reaches through one and there is no deref to insert. do not add one "for symmetry"
+            auto *exit_node = static_cast<LoopControlNode *>(node);
+
+            for (auto &drop : exit_node->unwind) {
                 rewrite(drop.node());
             }
             break;

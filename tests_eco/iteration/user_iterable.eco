@@ -1,0 +1,52 @@
+// **there is no `Array` special case anywhere in the loop.** this type conforms exactly the way the
+// standard library's does, and iterates exactly as well
+struct countdown_cursor : Iterator<int32>, Keyed<usize>
+{
+    int32 $value;
+    usize $step;
+
+    constructor(int32 $from)
+    {
+        $this->value = $from + 1;
+        $this->step = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->value <= 1) {
+            return false;
+        }
+
+        $this->value = $this->value - 1;
+        $this->step = $this->step + 1;
+        return true;
+    }
+
+    function current() : int32&
+    {
+        return &$this->value;
+    }
+
+    function key() : usize
+    {
+        return $this->step - 1;
+    }
+}
+
+struct Countdown : Iterable<int32>
+{
+    int32 $from;
+
+    // `Iter` is inferred to be `countdown_cursor` from this return type
+    function iterate() : countdown_cursor
+    {
+        return countdown_cursor($this->from);
+    }
+}
+
+$c = Countdown(4);
+
+foreach ($c as $i => $v) {
+    echo $i;
+    echo $v;
+}

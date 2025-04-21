@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:1
+'Bag' cannot be iterated - it declares neither 'Iterator' nor 'Iterable'. Declare one, e.g. 'struct Bag : Iterable<...>'.
+Begin: 'foreach'
+End: 'foreach'
+Code excerpt:
+ [9]> 
+ [10]> foreach ($b as $e) {
+      ^
+ [11]>     echo $e;
+
+Critical issues found, cannot compile.

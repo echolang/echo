@@ -175,4 +175,27 @@ namespace AST
 
         return false;
     }
+
+    std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs)
+    {
+        const bool lhs_numeric = lhs.is_integer_type() || lhs.is_floating_type();
+        const bool rhs_numeric = rhs.is_integer_type() || rhs.is_floating_type();
+
+        // both predicates already gate on is_primitive(), so get_primitive_type() below is answerable
+        if (!lhs_numeric || !rhs_numeric || lhs.get_primitive_type() == rhs.get_primitive_type()) {
+            return std::nullopt;
+        }
+
+        if (lhs.is_integer_type() && rhs.is_floating_type()) {
+            return rhs;
+        }
+
+        if (lhs.is_floating_type() && rhs.is_integer_type()) {
+            return lhs;
+        }
+
+        return get_primitive_size(lhs.get_primitive_type()) > get_primitive_size(rhs.get_primitive_type())
+            ? lhs
+            : rhs;
+    }
 };

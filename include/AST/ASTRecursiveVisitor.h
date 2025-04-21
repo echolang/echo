@@ -54,6 +54,8 @@ namespace AST
         void visitReturn(ReturnNode &node) override;
         void visitIfStatement(IfStatementNode &node) override;
         void visitWhileStatement(WhileStatementNode &node) override;
+        void visit_loop_control(LoopControlNode &node) override;
+        void visit_foreach(ForeachNode &node) override;
         void visit_assign(AssignNode &node) override;
         void visitNamespaceDecl(NamespaceDeclNode &node) override;
         void visitNamespace(NamespaceNode &node) override;

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 23:8
+'Bag' says it conforms to 'Walkable<int32>', but 'Iter' would be 'NotACursor', which does not satisfy 'Stepper<int32>'.
+Begin: 'Bag'
+End: 'Bag'
+Code excerpt:
+ [22]> 
+ [23]> struct Bag : Walkable<int32>
+             ^
+ [24]> {
+
+Critical issues found, cannot compile.

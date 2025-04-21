@@ -20,6 +20,8 @@
 #include "AST/ReturnNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/LoopControlNode.h"
+#include "AST/ForeachNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
@@ -99,6 +101,28 @@ void RecursiveVisitor::visitWhileStatement(WhileStatementNode &node)
 {
     if (node.condition) node.condition->accept(*this);
     if (node.loop_scope) node.loop_scope->accept(*this);
+}
+
+void RecursiveVisitor::visit_loop_control(LoopControlNode &node)
+{
+    // the drops this exit owes, which live on the node exactly as a return's do. without this descent
+    // AST::TypeChecker never validates them - and "every drop is an ordinary call node in the tree" is
+    // the whole reason they are nodes rather than a codegen side effect
+    for (auto &drop : node.unwind) {
+        if (drop.has()) drop.node()->accept(*this);
+    }
+}
+
+void RecursiveVisitor::visit_foreach(ForeachNode &node)
+{
+    // the source, then the two bindings, then the body - the order they run in, and the order the
+    // clone builds them in. the bindings are `body->children[0..1]` as well, so the body walk reaches
+    // them a second time; harmless for every reader of this visitor, and the explicit edges are what
+    // let AST::is_never_written find them without knowing that
+    if (node.source) node.source->accept(*this);
+    if (node.key) node.key->accept(*this);
+    if (node.element) node.element->accept(*this);
+    if (node.body) node.body->accept(*this);
 }
 
 void RecursiveVisitor::visitTypeCast(TypeCastNode &node)

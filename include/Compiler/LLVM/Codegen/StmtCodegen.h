@@ -17,6 +17,7 @@ namespace AST
     class IfStatementNode;
     class GuardNode;
     class WhileStatementNode;
+    class LoopControlNode;
     class AssignNode;
 };
 
@@ -51,6 +52,10 @@ namespace Compiler::LLVM
         // `$x` a plain non-null local from here on rather than something every later read has to re-check
         void gen_guard(AST::GuardNode &node);
         void gen_while_statement(AST::WhileStatementNode &node);
+
+        // `break` / `continue`: the exit's own drops, then a branch to whichever of the innermost
+        // CodegenContext::LoopTarget's two blocks the kind names
+        void gen_loop_control(AST::LoopControlNode &node);
         void gen_assign(AST::AssignNode &node);
 
     private:

@@ -1,0 +1,125 @@
+/**
+ * The iteration protocol.
+ *
+ * `foreach` knows these three interfaces and nothing else - there is no arm anywhere in the compiler
+ * that knows what an `Array<T>` is. A type of your own conforms exactly the way `Array<T>` below does,
+ * and loops exactly as well. See book/concept/iteration.md.
+ *
+ * The compiler binds them by name with `#[core: ...]` rather than by their spelling, so the names, the
+ * namespace and the documentation all live here. A program compiled with `--no-stdlib` has none of
+ * them, and `foreach` then says so in a located diagnostic rather than crashing.
+ *
+ * **File order does not matter.** `slice_iterator<T>` below names `Slice<T>` from slice.eco, and
+ * array.eco names `slice_iterator<T>` from here - the three parse passes publish every type name over
+ * every file before any signature is read, so there is no ordering to get right and nothing to gain
+ * by rearranging these files.
+ */
+
+/**
+ * A cursor. It knows how to step, and it knows what it is looking at.
+ *
+ * `advance()` is called first and its answer gates the loop, so `current()` is only ever reached after
+ * a `true`. That is the whole contract - and it is what lets `current()` skip a bounds check that
+ * `advance()` already performed.
+ */
+#[core: "iterator"]
+interface Iterator<V>
+{
+    /**
+     * Step to the next element. False when there are none left.
+     */
+    function advance() : bool;
+
+    /**
+     * The element the cursor is looking at. Only valid after `advance()` answered true.
+     */
+    function current() : V&;
+}
+
+/**
+ * Anything that can hand you a fresh cursor.
+ *
+ * `Iter` is an associated type: the implementor chooses it and this interface only constrains it. You
+ * never write it - the compiler reads it off your `iterate()`.
+ */
+#[core: "iterable"]
+interface Iterable<V>
+{
+    type Iter : Iterator<V>;
+
+    /**
+     * A cursor positioned before the first element.
+     */
+    function iterate() : Iter;
+}
+
+/**
+ * The orthogonal capability that makes `foreach ($a as $k => $v)` spellable.
+ *
+ * Deliberately apart from `Iterator<V>` rather than a second interface repeating `advance` and
+ * `current`: that is what lets the capability set grow. A future `Reversible` or `RandomAccess<V>` is
+ * another interface beside this one, and a cursor declares the ones it can honour.
+ */
+#[core: "keyed"]
+interface Keyed<K>
+{
+    /**
+     * Where the current element sits. Only valid after `advance()` answered true.
+     */
+    function key() : K;
+}
+
+/**
+ * The cursor `Array<T>` and `Slice<T>` both iterate through.
+ *
+ * Owning nothing, so - like `Slice<T>` itself - it declares no destructor and no copy constructor: a
+ * shallow copy is the correct copy.
+ *
+ * **It holds the window by value, and that is load-bearing rather than incidental.** The length is
+ * then an ordinary local the optimiser can prove loop-invariant, which gives the loop a computable
+ * trip count and with it unrolling and vectorisation. A cursor holding an `Array<T>&` and asking it
+ * `->count()` each turn would force a reload through a pointer nothing can prove unaliased, and the
+ * loop would be measurably worse for no gain. See book/concept/iteration.md, "What it costs".
+ *
+ * The usual borrow rule applies, unchanged: growing the array ends this window, exactly as it ends
+ * every other borrow into it.
+ */
+struct slice_iterator<T> : Iterator<T>, Keyed<usize>
+{
+    Slice<T> $window;
+
+    // the index one *past* the element `current()` names, so the cursor starts before the first one
+    // without needing a signed type or a "have we started" flag
+    usize $pos;
+
+    constructor(Slice<T> $window)
+    {
+        $this->window = $window;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->window->count()) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+        return true;
+    }
+
+    /**
+     * Indexed **unchecked**, on purpose: `advance()` already established that this element is there,
+     * and that is the entire content of "valid after a true advance". Routing this through `->at()`
+     * would re-test the bound every step in a debug build, checking something the protocol guarantees.
+     */
+    function current() : T&
+    {
+        return &$this->window->data:$[$this->pos - 1];
+    }
+
+    function key() : usize
+    {
+        return $this->pos - 1;
+    }
+}

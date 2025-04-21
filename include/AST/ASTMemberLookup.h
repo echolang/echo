@@ -5,12 +5,17 @@
 
 #include "AST/ASTValueType.h"
 
+#include "Token.h"
+
 #include <string>
 #include <vector>
 
 namespace AST
 {
+    class ExprNode;
+    class FunctionCallExprNode;
     class FunctionDeclNode;
+    class Module;
 
     // the candidate member functions a name denotes on `ct`, as an overload set - the member
     // counterpart of FunctionRegistry::overloads, and the only place that answers "which
@@ -96,6 +101,26 @@ namespace AST
     // the two can never both be set: AST::copy_is_synthesizable (ASTCopy.h) declines a type this very
     // lookup already answers for, and it is the only gate OwnershipPass synthesizes behind
     FunctionDeclNode *find_copy_constructor(const ComplexType *ct);
+
+    // **a member call a pass synthesizes, with its callee already chosen.** a member call is a
+    // FunctionCallExprNode with the receiver prepended - there is no other machinery - so all this owns
+    // is the one rule that is easy to get wrong at either of the sites that build one.
+    //
+    // **the receiver is addressed, unless it already is an address.** the parameter is the borrow
+    // `Foo&`, so a value ranked against it would be no fit at all - but a place that is *already* a
+    // pointer must be handed over bare. a synthesized class deinit's `$this` is one, and so is a borrow
+    // parameter a `foreach` iterates. addressing one of those twice hands the callee a `ptr<ptr<Foo>>`,
+    // which unifies against nothing: the call is then **never instantiated at all, silently**, and only
+    // the type checker notices, far away. one function, because a rule whose failure mode is silence
+    // must not have two copies of itself to keep in step.
+    //
+    // the call is published as **resolved but uncoerced**: there is no name to look up and no overload
+    // set to search, and for an instantiation `callee` is the *template's* declaration - the
+    // monomorphizer's next round binds the owner's parameters from the receiver and rewires the call to
+    // the instance. fitting the receiver to the borrow parameter stays AST::CallResolver's, in a later
+    // round, which is why both callers run inside that fixpoint
+    FunctionCallExprNode &make_resolved_member_call(
+        Module &module, FunctionDeclNode *callee, const TokenReference &at, ExprNode *place);
 };
 
 #endif

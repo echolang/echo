@@ -1,0 +1,7 @@
+// `break` is only meaningful inside a loop. reported by the parser, which is the pass that knows
+// lexical nesting - and it knows it before the constructor parser reads the tree to decide whether a
+// body needs an implicit `return $this`
+
+echo 1;
+
+break;

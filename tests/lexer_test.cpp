@@ -520,3 +520,28 @@ TEST_CASE( "Keywords are whole words", "[lexer]" )
     REQUIRE( symbols[1].type() == Token::Type::t_namespace_sep );
     REQUIRE( symbols[2].type() == Token::Type::t_identifier );
 }
+
+TEST_CASE( "foreach and the double arrow", "[lexer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "foreach for forward foreachable $k => $v $a >= $b $x = $y");
+
+    // `foreach` and `for` share a trie node, and a KeywordToken's priority is its length - so the
+    // longer one is tried first and `for` still lexes on its own. `forward` and `foreachable` stay
+    // identifiers because the keyword form checks for a word boundary, which a plain StringToken - a
+    // prefix match - would not
+    REQUIRE( tokens[0].type() == Token::Type::t_foreach );
+    REQUIRE( tokens[1].type() == Token::Type::t_for );
+    REQUIRE( tokens[2].type() == Token::Type::t_identifier );
+    REQUIRE( tokens[3].type() == Token::Type::t_identifier );
+
+    // `=>` is one token, and it disturbs neither spelling that shares a character with it
+    REQUIRE( tokens[4].type() == Token::Type::t_varname );
+    REQUIRE( tokens[5].type() == Token::Type::t_double_arrow );
+    REQUIRE( tokens[6].type() == Token::Type::t_varname );
+
+    REQUIRE( tokens[8].type() == Token::Type::t_logical_geq );
+    REQUIRE( tokens[11].type() == Token::Type::t_assign );
+}

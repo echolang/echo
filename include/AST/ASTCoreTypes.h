@@ -30,6 +30,17 @@ namespace AST
 
         // `string::view` - a borrowed window over UTF-8 bytes, owning nothing
         t_string_view,
+
+        // `interface Iterator<V>` - the loop protocol: `advance()` then `current()`. what `foreach`
+        // lowers onto, and the one thing it requires
+        t_iterator,
+
+        // `interface Iterable<V>` - anything that hands back a fresh `Iterator<V>` from `iterate()`
+        t_iterable,
+
+        // `interface Keyed<K>` - the orthogonal capability that makes `$k => $v` spellable. an iterator
+        // that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
+        t_keyed,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that

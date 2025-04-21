@@ -1,0 +1,16 @@
+// the default binding. `$x` is the element's value - writing it leaves the array alone
+$a = Array<int32>();
+$a[] = 1;
+$a[] = 2;
+$a[] = 3;
+
+foreach ($a as $x) {
+    $x = $x * 100;
+    echo $x;
+}
+
+echo "--";
+
+foreach ($a as $y) {
+    echo $y;
+}

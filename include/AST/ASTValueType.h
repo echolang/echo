@@ -925,6 +925,31 @@ namespace AST
             return _conformances;
         }
 
+        // the associated types this *interface* declares - the `type Iter : Iterator<V>` in an interface
+        // body. a type the implementor chooses and the interface only constrains.
+        //
+        // **a list of its own, deliberately not appended to `type_parameters`.** that list is the type's
+        // *arity*: get_or_create_instantiation asserts on it, parse_generic_application checks a written
+        // application against it, and TypeSubstitution::positional is positional over exactly it. an entry
+        // there would change the identity of every `Iterable<...>` a program can write
+        //
+        // **declarations, never types** - so TypeRegistry::derive_instantiation has nothing to substitute
+        // here, which is the same choice _implicit_conversions makes and the opposite of _conformances.
+        // what an implementor *binds* one to is not stored anywhere at all: it is knowable only after the
+        // implementor's methods exist, which is strictly later than get_or_create_instantiation's
+        // staleness test can notice (todo/A7), so AST::conformance_bindings derives it on every ask
+        void add_associated_type(TypeParamDecl *decl);
+
+        const std::vector<TypeParamDecl *> &associated_types() const {
+            return _associated_types;
+        }
+
+        // by name, for the parser: pass 2 and pass 3 both walk the body, and the declaration has to be
+        // *reused* rather than minted twice. equality on a type parameter is TypeParamDecl* identity, so
+        // two decls make pass 2's `Iter` compare unequal to pass 3's and every conformance reports unmet
+        // with a message naming two identical-looking types
+        TypeParamDecl *find_associated_type(const std::string &name) const;
+
         // there is deliberately no way to mint a substituted copy of a layout here.
         // TypeRegistry::get_or_create_instantiation is the *only* thing that produces a ComplexType for
         // an instantiation, because struct equality is ComplexType* identity and a second minter is a
@@ -941,6 +966,7 @@ namespace AST
         FunctionDeclNode *_deinit = nullptr;
         std::vector<FunctionDeclNode *> _implicit_conversions;
         std::vector<ValueType> _conformances;
+        std::vector<TypeParamDecl *> _associated_types;
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };

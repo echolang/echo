@@ -1,0 +1,38 @@
+// a by-value binding over elements that own something is a real copy per iteration, and it is dropped
+// per iteration too - the loop body is an ordinary scope and the copy an ordinary local. nothing about
+// either is foreach-specific
+struct Owner
+{
+    int32 $id;
+
+    constructor(int32 $id) {
+        $this->id = $id;
+    }
+
+    constructor(Owner& $other) {
+        echo "copy";
+        $this->id = $other->id;
+    }
+
+    destructor() {
+        echo "drop";
+        echo $this->id;
+    }
+}
+
+function main() : void
+{
+    $a = Array<Owner>();
+    $a[] = Owner(1);
+    $a[] = Owner(2);
+
+    // written, so the copy is real rather than elided
+    foreach ($a as $o) {
+        $o->id = $o->id + 10;
+        echo $o->id;
+    }
+
+    echo "end";
+}
+
+main();

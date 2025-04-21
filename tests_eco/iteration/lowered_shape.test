@@ -1,0 +1,10 @@
+--- OUT --->
+1
+--- AST --->
+CHECK: foreach (varref<Array<T>>(var($a)) as $x)
+
+--- RAST --->
+CHECK: vardecl<type<slice_iterator<int32>>>($__it) = call iterate
+CHECK: while (call advance
+CHECK: vardecl<type<const int32&>>($x) = call current
+CHECK-NOT: foreach

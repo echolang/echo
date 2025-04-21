@@ -145,6 +145,23 @@ namespace Compiler::LLVM
         // `$this` borrows what it was handed
         std::vector<llvm::Value *> chain_base_slots;
 
+        // **where a `break` and a `continue` go**, innermost last.
+        //
+        // two blocks per loop rather than the loop's AST node, because the two are different edges - and
+        // because that is the only thing a C-style `for` would need: its step block goes in
+        // `continue_block` and nothing else here changes. for a `while` the continue target is the
+        // condition block, since the condition *is* the step
+        //
+        // here rather than on StmtCodegen for chain_base_slots' reason: the loop pushes it and the exit
+        // reads it, and one owner is what keeps the two from disagreeing about which loop is innermost
+        struct LoopTarget
+        {
+            llvm::BasicBlock *break_block = nullptr;
+            llvm::BasicBlock *continue_block = nullptr;
+        };
+
+        std::vector<LoopTarget> loop_targets;
+
         // the owning LLVMCompiler, so subsystems can recurse into child nodes through the single
         // AST::Visitor that the node accept() dispatch requires.
         AST::Visitor *visitor = nullptr;
@@ -203,8 +220,7 @@ namespace Compiler::LLVM
         // decline to branch, and compile_bundle's main epilogue declines to return
         //
         // named because a second terminator in one block fails the verifier, so every emitter that
-        // can follow a `return` or a `die` owes this check - and the next early exit (`break`) will
-        // owe it too
+        // can follow a `return`, a `die` or a `break` owes this check
         bool block_is_terminated() const {
             llvm::BasicBlock *block = builder->GetInsertBlock();
             return block != nullptr && block->getTerminator() != nullptr;
@@ -271,6 +287,28 @@ namespace Compiler::LLVM
         std::string current_file_name() const;
 
         Compiler::InternalCompilerException error(std::string message);
+    };
+
+    // pushes a loop's two exit targets for the duration of its **body**, the codegen mirror of
+    // AST::LoopScope. it must never wrap a loop's condition: a `break` written in one belongs to an
+    // enclosing loop, and a stack pushed too early sends it to the wrong merge block - valid IR, wrong
+    // program, and nothing downstream can tell
+    struct LoopTargetScope
+    {
+        CodegenContext &ctx;
+
+        LoopTargetScope(CodegenContext &ctx, llvm::BasicBlock *break_block, llvm::BasicBlock *continue_block)
+            : ctx(ctx)
+        {
+            ctx.loop_targets.push_back(CodegenContext::LoopTarget{break_block, continue_block});
+        }
+
+        LoopTargetScope(const LoopTargetScope &) = delete;
+        LoopTargetScope &operator=(const LoopTargetScope &) = delete;
+
+        ~LoopTargetScope() {
+            ctx.loop_targets.pop_back();
+        }
     };
 };
 

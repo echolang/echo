@@ -4,6 +4,7 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/ASTTypeUnify.h"
 #include "AST/FunctionDeclNode.h"
 
 #include <algorithm>
@@ -48,6 +49,113 @@ const std::vector<AST::FunctionDeclNode *> &AST::interface_requirements(const AS
     return owner->methods();
 }
 
+const std::vector<AST::TypeParamDecl *> &AST::interface_associated_types(const AST::ComplexType *interface)
+{
+    static const std::vector<AST::TypeParamDecl *> none;
+
+    if (interface == nullptr || !interface->is_interface_kind()) {
+        return none;
+    }
+
+    // the same redirect interface_requirements takes, and for the same reason: `Iterable<int32>` is an
+    // interned ComplexType that declares nothing of its own
+    return interface->template_or_self()->associated_types();
+}
+
+std::vector<AST::ValueType> AST::conformances_matching_template(
+    const AST::ComplexType *ct, const AST::ComplexType *interface_template)
+{
+    std::vector<AST::ValueType> found;
+
+    if (ct == nullptr || interface_template == nullptr) {
+        return found;
+    }
+
+    for (const AST::ValueType &declared : ct->conformances()) {
+        const AST::ComplexType *applied = declared.get_complex_type();
+
+        if (applied != nullptr && applied->template_or_self() == interface_template->template_or_self()) {
+            found.push_back(declared);
+        }
+    }
+
+    return found;
+}
+
+std::optional<AST::ValueType> AST::conformance_matching_template(
+    const AST::ComplexType *ct, const AST::ComplexType *interface_template)
+{
+    if (ct == nullptr || interface_template == nullptr) {
+        return std::nullopt;
+    }
+
+    // its own scan rather than the vector form's `.front()`: this is asked per `foreach` per fixpoint
+    // round, and "is there exactly one" needs no list built to answer - the second match ends it
+    std::optional<AST::ValueType> found;
+
+    for (const AST::ValueType &declared : ct->conformances()) {
+        const AST::ComplexType *applied = declared.get_complex_type();
+
+        if (applied == nullptr
+            || applied->template_or_self() != interface_template->template_or_self()) {
+            continue;
+        }
+
+        // two answers is not one answer. a caller that wants to word "which of these did you mean" asks
+        // the vector form; this one only says it cannot tell
+        if (found.has_value()) {
+            return std::nullopt;
+        }
+
+        found = declared;
+    }
+
+    return found;
+}
+
+std::optional<AST::TemplateConformance> AST::template_conformance_for(
+    AST::ComplexType *ct, const AST::ValueType &applied)
+{
+    if (ct == nullptr) {
+        return std::nullopt;
+    }
+
+    AST::TemplateConformance result;
+    result.owner = ct;
+    result.conformance = applied;
+
+    if (!ct->is_instantiated()) {
+        return result;
+    }
+
+    AST::ComplexType *tmpl = ct->template_ref;
+
+    if (tmpl == nullptr || tmpl->type_parameters.size() != ct->instantiation_args.size()) {
+        return std::nullopt;
+    }
+
+    const std::vector<AST::ValueType> &declared = ct->conformances();
+    const auto found = std::find(declared.begin(), declared.end(), applied);
+
+    if (found == declared.end()) {
+        return std::nullopt;
+    }
+
+    // index-parallel by construction - see the header
+    const size_t slot = static_cast<size_t>(found - declared.begin());
+
+    if (slot >= tmpl->conformances().size()) {
+        return std::nullopt;
+    }
+
+    result.owner = tmpl;
+    result.conformance = tmpl->conformances()[slot];
+    result.to_instance =
+        AST::TypeSubstitution::positional(tmpl->type_parameters, ct->instantiation_args);
+
+    return result;
+}
+
 std::optional<size_t> AST::interface_method_slot(
     const AST::ComplexType *interface, const AST::FunctionDeclNode *requirement)
 {
@@ -64,12 +172,13 @@ std::optional<size_t> AST::interface_method_slot(
 
 namespace
 {
-    // the substitution that turns a requirement's signature into the one an implementor has to answer:
     // the interface's own type parameters bound to the arguments the conformance spelled out.
     // `Iterable<int32>` binds `T` to `int32`, so `next() : ptr<T>` is asked for as `ptr<int32>`
     //
-    // empty for a non-generic interface, which is what leaves its requirements compared as written
-    AST::TypeSubstitution conformance_substitution(const AST::ValueType &interface)
+    // empty for a non-generic interface, which is what leaves its requirements compared as written.
+    // this is only *half* of what a conformance binds - AST::conformance_bindings adds the associated
+    // types on top of it, and is what every caller outside this helper asks
+    AST::TypeSubstitution interface_parameter_substitution(const AST::ValueType &interface)
     {
         const AST::ComplexType *applied = interface.get_complex_type();
         const AST::ComplexType *tmpl = applied->template_or_self();
@@ -197,7 +306,155 @@ namespace
 
         return nullptr;
     }
+
+    // does this signature still mention an associated type nothing has bound yet?
+    bool mentions_unbound(const WantedSignature &wanted, const AST::TypeSubstitution &subst,
+        const std::vector<AST::TypeParamDecl *> &associated)
+    {
+        for (const AST::TypeParamDecl *assoc : associated) {
+            if (subst.covers(assoc)) {
+                continue;
+            }
+
+            if (AST::contains_type_param(wanted.return_type, assoc)) {
+                return true;
+            }
+
+            for (const AST::ValueType &param : wanted.parameters) {
+                if (AST::contains_type_param(param, assoc)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 };
+
+AST::ConformanceBinding AST::conformance_bindings(
+    const AST::ComplexType *ct, const AST::ValueType &interface, AST::TypeRegistry &types)
+{
+    AST::ConformanceBinding result;
+
+    if (!interface.is_interface()) {
+        return result;
+    }
+
+    result.substitution = interface_parameter_substitution(interface);
+
+    const std::vector<AST::TypeParamDecl *> &associated =
+        AST::interface_associated_types(interface.get_complex_type());
+
+    // the overwhelmingly common case, and the one every interface written before this feature is in:
+    // nothing to solve, so nothing is walked
+    if (ct == nullptr || associated.empty()) {
+        return result;
+    }
+
+    // @TODO the explicit `type Iter = X;` form - see the chapter's holes - would seed the trial here
+    // rather than replace it: the requirements below are still re-checked against the seed, so a wrong
+    // explicit binding stays an ordinary unmet-requirement diagnostic rather than a second failure mode
+    for (const AST::FunctionDeclNode *requirement :
+         AST::interface_requirements(interface.get_complex_type())) {
+        if (requirement == nullptr || requirement->is_operator()) {
+            continue;
+        }
+
+        const WantedSignature wanted = wanted_signature(requirement, result.substitution, types);
+
+        // only a requirement that still mentions an unbound associated type can teach us anything; every
+        // other one is a pure check, and checking is first_unmet_requirement's job rather than this one's
+        if (!mentions_unbound(wanted, result.substitution, associated)) {
+            continue;
+        }
+
+        for (const AST::FunctionDeclNode *candidate :
+             AST::find_member_functions(ct, requirement->func_name())) {
+            if (candidate->args.size() != wanted.arg_count
+                || candidate->own_type_param_count() != requirement->own_type_param_count()) {
+                continue;
+            }
+
+            AST::TypeSubstitution trial;
+
+            // **allow_decay = false is load-bearing.** the default carries the two *call boundary*
+            // rules - pointer decay and auto-borrow - and a conformance is not a call boundary: with
+            // decay on, `iterate() : Iter` would happily bind `Iter` through a pointer level the
+            // implementor does not actually return
+            bool unified = AST::unify_type(
+                wanted.return_type, candidate->get_return_type(), trial, /*allow_decay=*/false);
+
+            for (size_t i = 0; unified && i < wanted.parameters.size(); i++) {
+                unified = AST::unify_type(
+                    wanted.parameters[i], candidate->parameter_type(i + 1), trial, /*allow_decay=*/false);
+            }
+
+            if (!unified) {
+                continue;
+            }
+
+            // **keep only the associated bindings.** unify_type binds *any* bare type parameter it
+            // meets, the interface's own `V` included, and TypeSubstitution::bind silently replaces on
+            // rebind - so a candidate that merely has the right shape could quietly weaken the contract
+            // it is supposed to answer. discarding everything else is what leaves ValueType::operator==
+            // as the thing that decides, with unification only ever proposing
+            for (const AST::TypeParamDecl *assoc : associated) {
+                if (!trial.covers(assoc)) {
+                    continue;
+                }
+
+                const AST::ValueType proposed = *trial.lookup(assoc);
+
+                if (const AST::ValueType *already = result.substitution.lookup(assoc)) {
+                    // **two members proposed different types for one name.** solve order decides which
+                    // came first; saying so is better than silently taking it
+                    if (!(*already == proposed)) {
+                        result.failure = AST::ConformanceBinding::Failure::t_ambiguous;
+                        result.associated = assoc;
+                        result.first = *already;
+                        result.second = proposed;
+                        return result;
+                    }
+
+                    continue;
+                }
+
+                // the associated type's own constraint, **substituted through this conformance**:
+                // `type Iter : Iterator<V>` means nothing until `V` is bound, which is exactly why
+                // AST::constraint_admits exists apart from TypeParamDecl::allows
+                std::vector<AST::ValueType> constraint;
+                constraint.reserve(assoc->constraint.size());
+                for (const AST::ValueType &atom : assoc->constraint) {
+                    constraint.push_back(wanted_type(atom, result.substitution, types));
+                }
+
+                if (!AST::constraint_admits(constraint, proposed)) {
+                    result.failure = AST::ConformanceBinding::Failure::t_constraint;
+                    result.associated = assoc;
+                    result.first = proposed;
+
+                    for (const AST::ValueType &atom : constraint) {
+                        if (!result.constraint_spelling.empty()) {
+                            result.constraint_spelling += "|";
+                        }
+                        result.constraint_spelling += atom.get_type_desciption();
+                    }
+
+                    return result;
+                }
+
+                result.substitution.bind(assoc, proposed);
+            }
+
+            // the first candidate that unifies decides. a smarter constraint-propagating solver would
+            // accept a few more programs; this one is order-dependent and says so, and the escape hatch
+            // is that the requirements are all re-checked exactly afterwards
+            break;
+        }
+    }
+
+    return result;
+}
 
 std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
     const AST::ComplexType *ct,
@@ -209,7 +466,10 @@ std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
         return std::nullopt;
     }
 
-    const AST::TypeSubstitution subst = conformance_substitution(interface);
+    // the *full* binding - the interface's own parameters and its associated types - so that a
+    // requirement's signature reads the same here as it does in interface_implementations. this header
+    // promises the two cannot disagree about whether a conformance is met, and this is that promise
+    const AST::TypeSubstitution subst = AST::conformance_bindings(ct, interface, types).substitution;
 
     for (const AST::FunctionDeclNode *requirement : AST::interface_requirements(interface.get_complex_type())) {
         if (requirement == nullptr) {
@@ -293,6 +553,27 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
             from.get_type_desciption(), interface.get_type_desciption());
     }
 
+    // **an associated type has no binding at an erased use site.** a vtable *can* be built - every
+    // requirement still has an answering member - but `iterate() : Iter` has no static result type once
+    // the value has forgotten which implementor it holds. that is an existential, and there is no opaque
+    // type to give it. (the generic-instantiation refusal above is a frequent *consequence* of this, but
+    // it is a fact about `from`; this one is a fact about the interface, which is why it is separate)
+    const std::vector<AST::TypeParamDecl *> &associated =
+        AST::interface_associated_types(interface.get_complex_type());
+
+    if (!associated.empty()) {
+        const AST::TypeParamDecl *assoc = associated.front();
+
+        return fmt::format(
+            "'{}' declares the associated type '{}', so it cannot be stored as a value - an erased value "
+            "has forgotten which implementor it holds, and a requirement returning '{}' has no type "
+            "without one. Use it as a constraint, or erase the '{}' itself.",
+            interface.get_type_desciption(),
+            assoc->name,
+            assoc->name,
+            assoc->constraint_spelling);
+    }
+
     // **an operator requirement has no vtable slot.** an operator is a free declaration in the root
     // namespace with no receiver, so there is nothing for a dispatch to key on. such an interface is still
     // perfectly usable as a constraint and on the right of `instanceof` - it just is not a type
@@ -318,7 +599,7 @@ std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
         return {};
     }
 
-    const AST::TypeSubstitution subst = conformance_substitution(interface);
+    const AST::TypeSubstitution subst = AST::conformance_bindings(ct, interface, types).substitution;
     const std::vector<AST::FunctionDeclNode *> &requirements =
         AST::interface_requirements(interface.get_complex_type());
 

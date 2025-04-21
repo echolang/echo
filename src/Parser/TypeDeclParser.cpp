@@ -2,6 +2,7 @@
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
@@ -19,7 +20,6 @@
 #include "Parser/SymbolParser.h"
 #include "Parser/TypeParser.h"
 
-#include <algorithm>
 #include <fmt/core.h>
 
 // the node a previous pass already registered for this declaration site, with its arguments dropped,
@@ -38,6 +38,143 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
     }
 
     return decl;
+}
+
+// `type Iter : Iterator<V>;` in an interface body - an associated type: one the *implementor* chooses
+// and the interface only constrains.
+//
+// four refusals, each declining to publish, so ComplexType::associated_types() only ever holds entries
+// AST::conformance_bindings can actually solve. the cursor is consumed to the `;` on every path, so the
+// rest of the body is still read
+static void parse_associated_type(
+    Parser::Payload &payload,
+    AST::TypeDeclNode &struct_node,
+    bool is_interface_body,
+    bool collect_members)
+{
+    auto &cursor = payload.cursor;
+
+    const auto keyword = cursor.current();
+    cursor.skip(); // `type`
+
+    const auto name_token = cursor.current();
+    cursor.skip();
+
+    // consumes to the end of the declaration, whatever happened above it
+    auto finish = [&]() {
+        cursor.skip_until({ Token::Type::t_semicolon });
+        if (cursor.is_type(Token::Type::t_semicolon)) {
+            cursor.skip();
+        }
+    };
+
+    // one lambda rather than the gate and the `finish()` re-typed at every arm, which is what keeps the
+    // four consistent - parse_typedecl below makes the same move for the same reason.
+    //
+    // **the pass gate is inside it**, and it is not optional: registration reconciles on the declaration
+    // site rather than re-appending, so every one of these runs three times and only the body pass has a
+    // complete enough picture to be believed
+    auto refuse = [&](const TokenReference &at, std::string message) {
+        if (collect_members) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(at), std::move(message));
+        }
+
+        finish();
+    };
+
+    // **only an interface declares one.** a struct *binds* an associated type its conformance declared;
+    // it does not introduce one, and there would be nothing to constrain the binding against
+    if (!is_interface_body) {
+        refuse(keyword, fmt::format(
+            "only an 'interface' declares an associated type, and '{}' is not one. an implementor "
+            "binds one by declaring the member that answers the requirement mentioning it.",
+            struct_node.type_name()));
+        return;
+    }
+
+    AST::ComplexType &owner = struct_node.complex_type();
+
+    // **declared before the requirements.** a position rule rather than a use-before-declare detection:
+    // caught afterwards it would surface as parse_type's "unknown type 'Iter'", which points at the
+    // wrong line and names the wrong problem
+    //
+    // **asked only in the pass that can answer it** - not merely reported there, which is what makes it
+    // the one arm whose condition carries the gate rather than leaving it to `refuse`: registration
+    // reconciles on the declaration site rather than re-appending, so in the body pass the method list
+    // is already full and the question itself would misfire on every well-formed interface
+    if (collect_members && !owner.methods().empty()) {
+        refuse(keyword, fmt::format(
+            "'{}' has to be declared before '{}''s requirements - a requirement's signature may "
+            "mention it, so it has to be a name by the time one is read.",
+            name_token.value(), struct_node.type_name()));
+        return;
+    }
+
+    // a collision with one of the interface's own type parameters. name resolution takes the first
+    // match, so the later one would simply be unreachable - the same reason the type-parameter list
+    // refuses a repeat within itself
+    for (const auto *param : owner.type_parameters) {
+        if (param->name == name_token.value()) {
+            refuse(name_token, fmt::format(
+                "'{}' is already a type parameter of '{}', so the associated type of that name could "
+                "never be named.",
+                name_token.value(), struct_node.type_name()));
+            return;
+        }
+    }
+
+    // **reused across passes, never minted twice.** equality on a type parameter is TypeParamDecl*
+    // identity, so a second declaration would make pass 2's `Iter` compare unequal to pass 3's and every
+    // conformance would report unmet against two identical-looking types. declare_params does the same
+    // for the same reason
+    AST::TypeParamDecl *decl = owner.find_associated_type(name_token.value());
+
+    if (decl != nullptr && collect_members) {
+        refuse(name_token, fmt::format("'{}' is already an associated type of '{}'.",
+            name_token.value(), struct_node.type_name()));
+        return;
+    }
+
+    Parser::ParsedTypeParam parsed{ name_token, {}, "" };
+
+    if (!Parser::parse_constraint_atoms(payload, parsed)) {
+        // parse_constraint_atoms has reported
+        finish();
+        return;
+    }
+
+    // **unconstrained is refused.** a type parameter's argument is chosen by a caller who knows the
+    // concrete type; an associated type is read by a generic body that knows only the constraint, so an
+    // unconstrained one promises nothing at all and constraint_admits would accept anything. this is the
+    // reversible direction - loosening later is source-compatible, tightening is not
+    if (parsed.constraint.empty()) {
+        refuse(name_token, fmt::format(
+            "the associated type '{}' needs a constraint - write 'type {} : SomeInterface;'. a body "
+            "reading it knows only what the constraint promises, so an unconstrained one would promise "
+            "nothing.",
+            name_token.value(), name_token.value()));
+        return;
+    }
+
+    if (decl == nullptr) {
+        // the ordinal is passed as 0 and meant to be: ComplexType::add_associated_type is its sole
+        // minter, and it continues past the type parameters *and* the associated types already there -
+        // a second expression here would only be a worse guess at the same number
+        decl = payload.collector.type_params.declare(name_token.value(), 0, name_token);
+        owner.add_associated_type(decl);
+    }
+
+    // refreshed on every pass, exactly as declare_params refreshes a type parameter's: the type-name
+    // pass walks the atoms without resolving them, so the constraint is only real from pass 2 on
+    decl->constraint = std::move(parsed.constraint);
+    decl->constraint_spelling = std::move(parsed.constraint_spelling);
+
+    if (!cursor.is_type(Token::Type::t_semicolon)) {
+        payload.collect_unexpected_token(Token::Type::t_semicolon);
+    }
+
+    finish();
 }
 
 // reads `: Drawable, Iterable<E>` and publishes what it resolves onto the type, modelled on
@@ -419,18 +556,29 @@ static void parse_constructor(
         // it also has to precede the statements that write through it, and that one is *not* a lowering
         // detail the way it used to be - seat_this_storage above put a class's heap allocation in this
         // declaration's initializer, and an initializer runs where it is written
-        ctor_decl->body = &parse_scope(payload, ctor_brace, this_vardecl);
+        ctor_decl->body = &parse_scope(payload, ctor_brace, { this_vardecl });
     }
 
     leave_member_body(payload);
 
-    // append implicit "return $this" if the user did not return
-    const bool has_return = std::any_of(
-        ctor_decl->body->children.begin(),
-        ctor_decl->body->children.end(),
-        [](const AST::NodeReference &child) { return child.has_type<AST::ReturnNode>(); });
-
-    if (!has_return) {
+    // append an implicit `return $this` - unless control already leaves the body on every path.
+    //
+    // AST::scope_always_exits, and not "is one of the children a ReturnNode": a body ending in `die`, or
+    // in an `if` whose arms all leave, is already done, and a return appended behind it is written at a
+    // point nothing reaches. it never reaches the binary either - StmtCodegen::gen_scope stops at the
+    // first terminated block - but AST::OwnershipPass sees a ReturnNode and hangs a full unwind drop set
+    // on it, dead drops that are still type-checked and that mint a generic call site for a generic local
+    //
+    // this is the same re-derivation the ownership pass carried before ASTControlFlow.h existed, and the
+    // same two shapes it got wrong. asking the owner is strictly narrowing: every body the old check
+    // called "returns" is one this answers true for
+    //
+    // **scope_always_leaves_function, not scope_always_exits.** a `break` leaves its scope without leaving
+    // the constructor, so it must not suppress the implicit return - a body that only breaks still owes
+    // `$this`, and without one gen_function_decl synthesizes `ret undef`. the parser refuses a `break` with
+    // no enclosing loop and builds no node for it, so the two predicates cannot disagree here today; this
+    // is the boundary being named while it is still free to name
+    if (!AST::scope_always_leaves_function(*ctor_decl->body)) {
         auto ret_stmt = payload.context.emplace_nodep<AST::ReturnNode>(this_ref);
         ctor_decl->body->children.push_back(AST::make_ref(ret_stmt));
     }
@@ -986,6 +1134,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // later pass could find and believe in
     const bool is_interface_body = struct_node->complex_type().is_interface_kind();
 
+    // the interface's associated types resolve throughout its body. opened for every body kind, with a
+    // null owner outside an interface, so `find_type_param` has one rule rather than a conditional
+    AST::AssociatedTypeScope associated_scope(
+        payload.context, is_interface_body ? &struct_node->complex_type() : nullptr);
+
     // reports a member shape an interface cannot hold, and consumes it so the rest of the body is still
     // read. one lambda rather than the wording repeated at four arms, which is what keeps the four
     // consistent - and the shape is named rather than the token quoted, since `constructor` and a
@@ -1034,6 +1187,20 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             }
 
             parse_typedecl(payload);
+        }
+        // `type Iter : Iterator<V>;` - an interface's associated type.
+        //
+        // recognised contextually rather than through a `t_type` keyword token, which would break every
+        // `struct type`, `function type()` and plain identifier spelled that way for no gain. the
+        // `peek(1)` guard is load-bearing and not decorative: a struct named `type` can legally declare
+        // a property `type $x;`, and only the `$` tells the two apart. `constructor` sets the precedent
+        //
+        // ahead of starts_vardecl for the nested-type arm's reason: an unambiguous contextual keyword
+        // should not race the type-grammar scanner
+        else if (cursor.is_type(Token::Type::t_identifier)
+            && cursor.current().value() == "type"
+            && cursor.peek_is_type(1, Token::Type::t_identifier)) {
+            parse_associated_type(payload, *struct_node, is_interface_body, collect_members);
         }
         else if (starts_vardecl(payload)) {
             auto var = parse_varexpr(payload, &structscope);

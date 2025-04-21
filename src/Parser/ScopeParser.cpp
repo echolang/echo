@@ -16,6 +16,8 @@
 #include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
 #include "Parser/WhileStatementParser.h"
+#include "Parser/LoopControlParser.h"
+#include "Parser/ForeachParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/TypeDeclParser.h"
@@ -89,16 +91,19 @@ void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &sc
 AST::ScopeNode & Parser::parse_scope(
     Parser::Payload &payload,
     std::optional<TokenReference> block_token,
-    AST::VarDeclNode *seed_declaration)
+    std::vector<AST::VarDeclNode *> seed_declarations)
 {
     auto &cursor = payload.cursor;
     auto &context = payload.context;
 
     auto &scope_node = context.emplace_node<AST::ScopeNode>();
 
-    // before the first statement, so the name is resolvable while the statements that read it are parsed
-    if (seed_declaration) {
-        scope_node.add_vardecl(*seed_declaration);
+    // before the first statement, so the names are resolvable while the statements that read them are
+    // parsed. in the order given, which is the order they are declared in
+    for (AST::VarDeclNode *seed : seed_declarations) {
+        if (seed != nullptr) {
+            scope_node.add_vardecl(*seed);
+        }
     }
 
     context.push_scope(scope_node);
@@ -159,6 +164,21 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
+        }
+        // `foreach ($a as $el) { ... }`. beside `while` for readability; a dedicated keyword token
+        // cannot collide with starts_vardecl, so the position is not load-bearing
+        else if (cursor.is_type(Token::Type::t_foreach)) {
+            if (auto *loop = parse_foreach(payload)) {
+                scope_node.children.push_back(AST::make_ref(loop));
+            }
+        }
+        // `break;` / `continue;`. their own token types, so starts_vardecl - which scans the type grammar
+        // from an identifier or a type keyword - cannot claim them, and position here is readability only.
+        // parse_loop_control hands back null for one written outside a loop, having already reported it
+        else if (cursor.is_type(Token::Type::t_break) || cursor.is_type(Token::Type::t_continue)) {
+            if (auto *exit_node = parse_loop_control(payload)) {
+                scope_node.children.push_back(AST::make_ref(exit_node));
+            }
         }
         // print statement aka "echo $something"
         else if (cursor.is_type(Token::Type::t_echo)) {

@@ -33,7 +33,15 @@ AST::WhileStatementNode *Parser::parse_whilestatement(Parser::Payload &payload)
     auto loop_brace = payload.cursor.current();
     payload.cursor.skip(); // skip the opening brace
 
-    whilestmt.loop_scope = &parse_scope(payload, loop_brace);
+    {
+        // **the body only.** the condition above is parsed outside this guard on purpose: a `break`
+        // written in a loop's condition belongs to an enclosing loop, not to this one. it wraps the whole
+        // parse_scope call so an `if` arm, a `guard`'s else arm and a nested block inside the body all
+        // inherit the depth
+        AST::LoopScope loop(payload.context, payload.context.loop_depth + 1);
+
+        whilestmt.loop_scope = &parse_scope(payload, loop_brace);
+    }
 
     // expect a closing brace
     if (!payload.cursor.is_type(Token::Type::t_close_brace)) {

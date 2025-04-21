@@ -661,37 +661,16 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
         return AST::make_ref(*call);
     }
 
-    // if one of the nodes is has a integer return type and the other a floating one
-    // we either convert the literal to a float or cast the referenced expression to a float
-    if (lhs_type.is_integer_type() && rhs_type.is_floating_type()) {
-        // convert the lhs to a float
-        lhs = try_implicit_cast(payload, lhs, rhs_type);
-    } else if (lhs_type.is_floating_type() && rhs_type.is_integer_type()) {
-        // convert the rhs to a float
-        rhs = try_implicit_cast(payload, rhs, lhs_type);
-    }
-    // two floating types? we cast to the larger one
-    else if (
-        lhs_type.is_floating_type() && rhs_type.is_floating_type() && 
-        (lhs_type.get_primitive_type() != rhs_type.get_primitive_type())
-    ){
-        if (get_primitive_size(lhs_type.get_primitive_type()) > get_primitive_size(rhs_type.get_primitive_type())) {
-            rhs = try_implicit_cast(payload, rhs, lhs_type);
+    // **the numeric reconciliation, asked of AST::common_numeric_type** - which AST::OperatorRewriter
+    // asks again for the operands only a later pass gives a type to. the rule is shared; the insertion
+    // is not, and this is the moment that can do better than a cast: try_implicit_cast retypes a literal
+    // outright where the rewriter has nothing left but a TypeCastNode to wrap the operand in
+    if (const auto common = AST::common_numeric_type(lhs_type, rhs_type)) {
+        // exactly one side differs: the common type is always one of the two
+        if (lhs_type.get_primitive_type() != common->get_primitive_type()) {
+            lhs = try_implicit_cast(payload, lhs, *common);
         } else {
-            lhs = try_implicit_cast(payload, lhs, rhs_type);
-        }
-    }
-    // two integer types? we cast to the larger one
-    // basically the same as above, i could merge it, but in the back of my mind
-    // i think there will be some special rules
-    else if (
-        lhs_type.is_integer_type() && rhs_type.is_integer_type() && 
-        (lhs_type.get_primitive_type() != rhs_type.get_primitive_type())
-    ) {
-        if (get_primitive_size(lhs_type.get_primitive_type()) > get_primitive_size(rhs_type.get_primitive_type())) {
-            rhs = try_implicit_cast(payload, rhs, lhs_type);
-        } else {
-            lhs = try_implicit_cast(payload, lhs, rhs_type);
+            rhs = try_implicit_cast(payload, rhs, *common);
         }
     }
 

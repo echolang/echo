@@ -1,0 +1,7 @@
+// `foreach` knows two interfaces and nothing else. a primitive declares neither
+
+int32 $n = 3;
+
+foreach ($n as $x) {
+    echo $x;
+}

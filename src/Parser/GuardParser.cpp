@@ -149,8 +149,8 @@ AST::GuardNode *Parser::parse_guard(Parser::Payload &payload, AST::ScopeNode *sc
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(else_brace),
             fmt::format(
-                "the 'else' of a guard has to leave - end it with 'return' or 'die'. otherwise "
-                "'{}' would be read after the value it names turned out not to be there",
+                "the 'else' of a guard has to leave - end it with 'return', 'break', 'continue' or "
+                "'die'. otherwise '{}' would be read after the value it names turned out not to be there",
                 name_token.value()));
     }
 

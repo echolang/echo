@@ -1,5 +1,7 @@
 #include "AST/ASTMemberLookup.h"
 
+#include "AST/ASTModule.h"
+#include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 
@@ -110,4 +112,22 @@ AST::FunctionDeclNode *AST::find_copy_constructor(const AST::ComplexType *ct)
     }
 
     return ct->is_instantiated() ? ct->template_ref->copy_constructor() : nullptr;
+}
+
+AST::FunctionCallExprNode &AST::make_resolved_member_call(
+    AST::Module &module, AST::FunctionDeclNode *callee, const TokenReference &at, AST::ExprNode *place)
+{
+    AST::ExprNode *receiver = place;
+
+    if (!place->result_type().is_pointer()) {
+        receiver = &module.nodes.emplace_back<AST::AddrOfExprNode>(place);
+    }
+
+    auto &call = module.nodes.emplace_back<AST::FunctionCallExprNode>(
+        at, std::vector<AST::ExprNode *>{ receiver });
+
+    call.decl = callee;
+    call.settlement = AST::CallSettlement::t_uncoerced;
+
+    return call;
 }

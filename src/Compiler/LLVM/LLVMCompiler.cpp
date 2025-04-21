@@ -1,6 +1,8 @@
 #include "Compiler/LLVM/LLVMCompiler.h"
 
 #include "AST/FunctionDeclNode.h"
+#include "AST/LoopControlNode.h"
+#include "AST/ForeachNode.h"
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -183,6 +185,17 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node) { _stmt.gen_fu
 void LLVMCompiler::visitReturn(AST::ReturnNode &node) { _stmt.gen_return(node); }
 void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node) { _stmt.gen_if_statement(node); }
 void LLVMCompiler::visitWhileStatement(AST::WhileStatementNode &node) { _stmt.gen_while_statement(node); }
+void LLVMCompiler::visit_loop_control(AST::LoopControlNode &node) { _stmt.gen_loop_control(node); }
+
+// a `foreach` is lowered away inside the monomorphizer's fixpoint, into the iterator declaration and the
+// `while` a hand-written loop would have been. one reaching here means AST::ForeachLowering neither
+// lowered nor discarded it, which is AST::PointerValueNode's contract: a marker a pass was supposed to
+// erase is a compiler bug, and answering with something plausible would hide it
+void LLVMCompiler::visit_foreach(AST::ForeachNode &node)
+{
+    throw _ctx.error("a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered "
+        "into an iterator and a while " + _ctx.function_context());
+}
 void LLVMCompiler::visit_assign(AST::AssignNode &node) { _stmt.gen_assign(node); }
 
 void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node) { _expr.gen_type_cast(node); }

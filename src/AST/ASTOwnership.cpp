@@ -23,6 +23,7 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/LoopControlNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
@@ -168,10 +169,20 @@ void OwnershipPass::resolve_root(ScopeNode &root)
         return;
     }
 
+    // **the same gate resolve_function has, and for the same reason.** a file root is a body too -
+    // codegen synthesizes `main` out of it - and it is walked exactly once, so a "no" derived before
+    // the fixpoint settled is never revisited. this used to be ungated because nothing at file scope
+    // could be un-answerable on the first round; an unlowered `foreach` is, and a root walked past one
+    // leaves every local the loop declares with no drop at all
+    if (!body_is_concrete(root)) {
+        return;
+    }
+
     _processed_roots.insert(&root);
 
     _current_function = nullptr;
     _frames.clear();
+    _loop_frames.clear();
     _moved.clear();
     _maybe_moved.clear();
     _initialized_storage.clear();
@@ -205,6 +216,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
 
     _current_function = &decl;
     _frames.clear();
+    _loop_frames.clear();
     _moved.clear();
     _maybe_moved.clear();
     _initialized_storage.clear();
@@ -294,6 +306,17 @@ bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
                 break;
             }
 
+            case NodeType::n_foreach:
+                // **an unlowered foreach is never concrete.** it declares `$el` and `$k` with no type,
+                // and the iterator declaration it will mint does not exist yet - so a body holding one
+                // has nothing this pass can answer. and the wrong answer here is permanent:
+                // _processed_functions means a body is walked exactly once, so an early "yes" leaves
+                // `$el`, `$__it` and every local the loop body declares with no drop at all
+                //
+                // AST::ForeachLowering runs earlier in the same round; once it has, this node is gone
+                // and the wrapper scope it left behind is answered by the n_scope arm below
+                return false;
+
             case NodeType::n_scope:
                 if (!body_is_concrete(*static_cast<ScopeNode *>(node))) {
                     return false;
@@ -340,24 +363,24 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
 
         if (child.has_type<ReturnNode>()) {
             // a return leaves every enclosing scope at once, so it owes the drops of all of them,
-            // innermost frame first. this and the end of a scope are the *only* two insertion
-            // points in the language today - `break` and `continue` are lexed but have no parser
-            // arm, so `return` is the only early exit. that window closes the day `break` lands,
-            // and this loop is what will have to grow an edge-per-exit
+            // innermost frame first. one of the three insertion points in the language: this, the
+            // `break`/`continue` arm below, and the end of a scope
             //
             // collected onto the return, not ahead of it: the returned expression may read what is being
             // dropped, and codegen evaluates the expression before running these - see ReturnNode::unwind
-            auto *ret = child.get_ptr<ReturnNode>();
+            // the floor is 0: a return leaves the function, so no frame outlives it
+            collect_unwind(0, child.get_ptr<ReturnNode>()->unwind);
+        }
+        else if (child.has_type<LoopControlNode>()) {
+            // **the same edge, with a floor.** a `break` leaves every frame from here down to the loop
+            // body's, inclusive - and no further. the frames outside the loop are still live on the
+            // other side of the branch, which is the whole of what makes this shorter than a return's
+            //
+            // Parser::parse_loop_control refuses one outside a loop and builds no node for it, so an
+            // empty stack here is a compiler bug rather than a program error
+            assert(!_loop_frames.empty() && "a loop exit reached the ownership pass with no enclosing loop");
 
-            // rebuilt rather than appended to, so this arm derives the unwind rather than accumulating
-            // one. _processed_functions and _processed_roots mean a body is in fact walked at most once
-            // ever, so nothing today reaches this twice - but that is a guarantee two visited-sets make
-            // and not one this loop can see, and the scope-exit append below has no equivalent
-            ret->unwind.clear();
-
-            for (auto frame = _frames.rbegin(); frame != _frames.rend(); ++frame) {
-                collect_frame_drops(*frame, ret->unwind);
-            }
+            collect_unwind(_loop_frames.back(), child.get_ptr<LoopControlNode>()->unwind);
         }
 
         rebuilt.push_back(kept);
@@ -582,6 +605,12 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             break;
         }
 
+        // a `break` carries no expression, so there is nothing to walk. its unwind list is filled by
+        // walk_scope, which is where _frames is - named here rather than left to `default:`, because that
+        // arm calls walk_value_edge on a node that is not an expression
+        case NodeType::n_loop_control:
+            break;
+
         case NodeType::n_guard:
         {
             auto *stmt = static_cast<GuardNode *>(node);
@@ -682,8 +711,17 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
                 auto before = _moved;
 
+                // the frame walk_scope is about to push for the body, recorded here rather than inside
+                // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
+                // only tells it whether the frame it needs is already there
+                _loop_frames.push_back(_frames.size());
                 walk_scope(*stmt->loop_scope);
+                _loop_frames.pop_back();
 
+                // note _moved is deliberately *not* saved and restored around the body, and a break's
+                // moves must not be either: a break goes to the code after the loop, so what it moved is
+                // gone there. that is the opposite of the `guard` arm's treatment, whose else block
+                // cannot fall through at all
                 for (const auto *decl : _moved) {
                     if (before.count(decl) > 0 || outer.count(decl) == 0) {
                         continue;
@@ -1500,6 +1538,15 @@ ExprNode *OwnershipPass::arrive_value(
     return expr;
 }
 
+void OwnershipPass::collect_unwind(size_t floor_frame, std::vector<NodeReference> &out)
+{
+    out.clear();
+
+    for (size_t i = _frames.size(); i-- > floor_frame; ) {
+        collect_frame_drops(_frames[i], out);
+    }
+}
+
 void OwnershipPass::collect_frame_drops(const Frame &frame, std::vector<NodeReference> &out)
 {
     // reverse declaration order: the last thing built is the first thing torn down, so a local
@@ -1589,33 +1636,11 @@ void OwnershipPass::emit_drop(
 FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
     FunctionDeclNode *callee, const TokenReference &at, ExprNode *place)
 {
-    // the receiver is addressed here, exactly as the parser addresses a method's: the parameter is the
-    // borrow `Foo&`, and a value ranked against it would be no fit at all
-    //
-    // unless the place already *is* that address. that happens in exactly one situation - the `$this`
-    // of a synthesized class deinit, which is declared `Foo&` because a by-value class parameter would
-    // own a reference and be released at the end of the very function doing the releasing. addressing
-    // it again would hand the callee a ptr<ptr<Foo>>
-    ExprNode *receiver = place;
-
-    const ValueType place_type = place->result_type();
-    if (!place_type.is_pointer()) {
-        receiver = &_current_module->nodes.emplace_back<AddrOfExprNode>(place);
-    }
-
-    auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
-        at, std::vector<ExprNode *>{receiver});
-
-    // resolved already: there is no name to look up and no overload set to search. for an
-    // instantiation this is the *template's* declaration, and the monomorphizer's next round
-    // binds the owner's parameters from the receiver and rewires this call to the instance -
-    // which is the whole reason the pass runs inside that fixpoint
-    //
-    // so this pass is the one other producer of a call that already knows its declaration, and it
-    // publishes the state that describes it: choosing is done, fitting the receiver to the callee's
-    // borrow parameter is still AST::CallResolver's, in a later round
-    call.decl = callee;
-    call.settlement = CallSettlement::t_uncoerced;
+    // the node, the receiver's addressing and the settlement are all AST::make_resolved_member_call's -
+    // this pass is one of its two callers and adds only the round's progress flag. the place that is
+    // already an address here is the `$this` of a synthesized class deinit, declared `Foo&` because a
+    // by-value class parameter would own a reference and be released by the very function releasing it
+    auto &call = make_resolved_member_call(*_current_module, callee, at, place);
 
     _changed = true;
 

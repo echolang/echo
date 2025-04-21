@@ -16,7 +16,7 @@
  *
  * Counts and indices are `usize` throughout, matching `mem::`.
  */
-struct Slice<T>
+struct Slice<T> : Iterable<T>
 {
     ptr<T> $data;
     usize $len;
@@ -66,6 +66,15 @@ struct Slice<T>
     function at(usize $index) : T&
     {
         return &$this[$index];
+    }
+
+    /**
+     * A cursor over this window. `Iter` is inferred to be `slice_iterator<T>` from this return type -
+     * a conformance never spells its associated types, it only constrains them.
+     */
+    function iterate() : slice_iterator<T>
+    {
+        return slice_iterator<T>($this);
     }
 
     /**

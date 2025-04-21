@@ -125,6 +125,18 @@ namespace AST
 
         std::vector<Frame> _frames;
 
+        // the index into _frames of each enclosing loop body's frame, innermost last.
+        //
+        // this is the *bound* on a break's unwind, and the whole difference between it and a return's: a
+        // `break` unwinds from the innermost frame down to **and including** _loop_frames.back() and no
+        // further, because the frames outside the loop are still live on the other side of the branch.
+        //
+        // a vector and not a single index, so a labelled `break N` is _loop_frames[size() - N] the day it
+        // is spelled, with the unwind loop unchanged. cleared in resolve_function *and* resolve_root: a
+        // stale index from a previous body either reads out of range or clips an unwind to the wrong
+        // depth, and _processed_functions means the wrong answer is never revisited
+        std::vector<size_t> _loop_frames;
+
         // declarations whose value has been moved out. a moved local is neither readable nor
         // dropped - "its destructor travelled with the value"
         std::unordered_set<const VarDeclNode *> _moved;
@@ -261,6 +273,17 @@ namespace AST
         // appends the drop statements for `frame`'s live locals, innermost value first: reverse
         // declaration order, as the chapter specifies
         void collect_frame_drops(const Frame &frame, std::vector<NodeReference> &out);
+
+        // **what a statement that leaves owes**: the drops of every frame from the innermost down to
+        // `floor_frame`, inclusive. a `return` passes 0 - it leaves the function, so no frame outlives
+        // it - and a `break` passes _loop_frames.back(). the *bound* is the whole difference between
+        // the two, which is why it is a parameter and not a second walk.
+        //
+        // `out` is **rebuilt**, not appended to, so an unwind is derived rather than accumulated.
+        // _processed_functions and _processed_roots mean a body is in fact walked at most once ever, so
+        // nothing today arrives twice - but that is a guarantee two visited-sets make and not one this
+        // can see, and the scope-exit append in walk_scope has no equivalent
+        void collect_unwind(size_t floor_frame, std::vector<NodeReference> &out);
 
         // destroying a value of `type` at `root`->`path`: its own destructor if it has one, then
         // each property that needs destroying, in reverse declaration order. no implicit destructor

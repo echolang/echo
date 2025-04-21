@@ -1,0 +1,12 @@
+// a struct that declares neither is refused by name, with the spelling that would fix it
+
+struct Bag
+{
+    int32 $x;
+}
+
+$b = Bag(1);
+
+foreach ($b as $e) {
+    echo $e;
+}

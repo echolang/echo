@@ -59,6 +59,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_qmark: return "qmark (?)";
         case Token::Type::t_qmark_qmark: return "null coalesce (??)";
         case Token::Type::t_optional_arrow: return "optional accessor (?->)";
+        case Token::Type::t_double_arrow: return "double arrow (=>)";
         case Token::Type::t_exclamation: return "exclamation (!)";
         case Token::Type::t_open_angle: return "open_angle (<)";
         case Token::Type::t_close_angle: return "close_angle (>)";
@@ -86,6 +87,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
+        case Token::Type::t_foreach: return "foreach";
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";
@@ -142,6 +144,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_qmark: return "?";
         case Token::Type::t_qmark_qmark: return "??";
         case Token::Type::t_optional_arrow: return "?->";
+        case Token::Type::t_double_arrow: return "=>";
         case Token::Type::t_exclamation: return "!";
         case Token::Type::t_open_angle: return "<";
         case Token::Type::t_close_angle: return ">";
@@ -161,6 +164,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_else: return "else";
         case Token::Type::t_while: return "while";
         case Token::Type::t_for: return "for";
+        case Token::Type::t_foreach: return "foreach";
         case Token::Type::t_break: return "break";
         case Token::Type::t_continue: return "continue";
         case Token::Type::t_namespace: return "namespace";

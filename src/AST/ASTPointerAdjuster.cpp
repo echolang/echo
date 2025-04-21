@@ -468,6 +468,15 @@ void PointerAdjuster::adjust(Node *node)
             break;
         }
 
+        case NodeType::n_foreach:
+            // a transient node AST::ForeachLowering was supposed to have erased - by lowering it, or by
+            // discarding it after a refusal. one reaching here would have every deref inside its body
+            // silently skipped by the `default:` arm below, and codegen would read the wrong number of
+            // levels with no diagnostic. AST::PointerValueNode's contract
+            throw std::runtime_error(
+                "a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered into "
+                "an iterator and a while, or discarded after a refusal");
+
         default:
             // leaves: literals, operators, var references, types. nothing to rewrite
             break;

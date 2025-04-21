@@ -1,0 +1,13 @@
+// every reader of a `#[core:]` binding has to cope with it being unbound: `--no-stdlib` is a
+// legitimate program, and it is also what keeps stdlib/core/iterator.eco itself compilable
+
+struct Bag
+{
+    int32 $x;
+}
+
+$b = Bag(1);
+
+foreach ($b as $e) {
+    echo $e;
+}

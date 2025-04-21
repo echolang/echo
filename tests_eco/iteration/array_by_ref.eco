@@ -1,0 +1,13 @@
+// `&$x` borrows the element, so a write reaches the array
+$a = Array<int32>();
+$a[] = 1;
+$a[] = 2;
+$a[] = 3;
+
+foreach ($a as &$x) {
+    $x = $x * 2;
+}
+
+foreach ($a as $y) {
+    echo $y;
+}

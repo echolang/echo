@@ -6,6 +6,7 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTValueType.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,22 @@ namespace AST
     // ExprCodegen::gen_unary_expr lowers negation over a number, and nothing else. unary `+` never
     // reaches here at all - the parser folds it away, since it carries no semantics
     bool unary_has_builtin_meaning(const Operator *op, const OperandFacts &operand);
+
+    // **the type two mismatched numeric operands reconcile to.** an integer meeting a float becomes the
+    // float, whatever the widths; otherwise the wider wins. nullopt when there is nothing to reconcile -
+    // one of them is not a number, or they already agree - which is every operand pair but a few.
+    //
+    // one owner, for build_operator_call_node's reason: there are two *moments* that ask, and only one
+    // rule. Parser::parse_binary_expr asks with the operand types it knows at parse time and inserts the
+    // cast through try_implicit_cast, which may retype a literal outright instead. AST::OperatorRewriter
+    // asks again for the operands a later pass typed - `foreach ($a as $i => $x) { if ($i == 0) ... }`,
+    // where `$i` has no type until the loop lowers and the literal has long since defaulted to int32 -
+    // and has only a TypeCastNode to wrap the losing side in.
+    //
+    // the insertion is each caller's, the decision is not: two answers here means one program means two
+    // things depending on which pass got to type an operand first, and the way that surfaces is codegen
+    // asserting on "Both operands to ICmp instruction are not of the same type"
+    std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs);
 };
 
 #endif

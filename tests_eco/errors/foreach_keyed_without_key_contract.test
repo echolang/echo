@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 28:19
+'Plain' iterates, but its cursor declares no key contract - so there is no '$k' to bind. Declare 'Keyed<...>' on it, or drop the '=>'.
+Begin: '=>'
+End: '=>'
+Code excerpt:
+ [27]> 
+ [28]> foreach ($p as $k => $v) {
+                        ^
+ [29]>     echo $k;
+
+Critical issues found, cannot compile.

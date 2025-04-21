@@ -6,6 +6,7 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTOperatorRewriter.h"
+#include "AST/ASTForeachLowering.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTValueType.h"
 
@@ -57,6 +58,11 @@ namespace AST
         // and an operator over a bare type parameter. driven from inside here for the ownership
         // pass's exact reason, and see its header for the ordering the round depends on
         OperatorRewriter _operators;
+
+        // `foreach`, rewritten into the iterator declaration and the `while` it stands for. driven from
+        // inside here because the element type is only knowable after resolution, and it must run before
+        // the ownership pass reaches the body - see its header for the ordering the round depends on
+        ForeachLowering _foreach;
 
         // every function declaration mapped to the module that owns it, so instances are
         // cloned into the template's module (keeping copied token references valid)

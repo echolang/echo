@@ -519,6 +519,35 @@ void AST::ComplexType::add_type_parameter(TypeParamDecl *param)
     type_parameters.push_back(param);
 }
 
+void AST::ComplexType::add_associated_type(TypeParamDecl *decl)
+{
+    assert(decl);
+    assert(find_associated_type(decl->name) == nullptr
+        && "an associated type is declared twice - the parser must reuse it across passes");
+
+    decl->is_associated = true;
+    decl->set_owner(this);
+
+    // the ordinal continues past the type parameters rather than restarting. hygiene rather than
+    // necessity - a requirement is never emitted, so it is never mangled - but get_mangled_name renders
+    // a t_generic as `T<ordinal>`, and a collision would make `interface I<V> { type V2 : ...; }`'s two
+    // declarations print alike in a `--print-*` dump
+    decl->ordinal = type_parameters.size() + _associated_types.size();
+
+    _associated_types.push_back(decl);
+}
+
+AST::TypeParamDecl *AST::ComplexType::find_associated_type(const std::string &name) const
+{
+    for (TypeParamDecl *decl : _associated_types) {
+        if (decl->name == name) {
+            return decl;
+        }
+    }
+
+    return nullptr;
+}
+
 bool AST::ComplexType::declares_type_param(const ValueType &type) const
 {
     assert(type.is_type_param());

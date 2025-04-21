@@ -46,10 +46,10 @@ namespace AST
     // it is a *rewriter*, not a walker, for AST::PointerAdjuster's reason: it replaces the parent's
     // edge to a child, so it drives its own traversal rather than subclassing RecursiveVisitor.
     //
-    // **one walk, three rules**, weighed rather than assumed (todo/A32 asks for exactly this trade):
+    // **one walk, four rules**, weighed rather than assumed (todo/A32 asks for exactly this trade):
     // a second complete expression-edge switch parallel to PointerAdjuster::adjust is a place where a
-    // forgotten arm is a silent miss, and three switches would be three of them. the rules do not
-    // differ by edge *position* the way the adjuster's policies do, so one switch serves all three.
+    // forgotten arm is a silent miss, and four switches would be four of them. the rules do not
+    // differ by edge *position* the way the adjuster's policies do, so one switch serves all four.
     //
     // runs **inside the monomorphizer's fixpoint**, per round, the way AST::OwnershipPass does and
     // for the same reason: it needs the concrete types the round produced, and the call it builds may
@@ -78,6 +78,11 @@ namespace AST
 
         // the rewriting form of one edge: the expression itself, or its replacement
         ExprNode *rewrite_expr(ExprNode *expr);
+
+        // rule 4 - two mismatched numeric operands are reconciled, for a declaration whose type only a
+        // later pass could give it. the *rule* is AST::common_numeric_type's, shared with the parser;
+        // this is the second moment it has to be applied at, and only the cast is built here
+        void widen_binary_operands(BinaryExprNode &bin);
 
         // rule 1 - a bracket over a container becomes its `operator []`. a base whose type is still
         // undetermined is left alone and asked again next round; everything else is decided once and

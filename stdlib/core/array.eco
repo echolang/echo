@@ -24,7 +24,7 @@
  * pointers, so a per-container allocator would be an invented ABI. The intended future shape is a
  * monomorphized Array<T, A> plus mem::alloc_with, which is purely additive.
  */
-struct Array<T>
+struct Array<T> : Iterable<T>
 {
     ptr<T> $data;
     usize $len;
@@ -234,6 +234,17 @@ struct Array<T>
         assert($count <= $this->len - $from, "slice length out of range");
 
         return Slice<T>($this->data:$ + $from, $count);
+    }
+
+    /**
+     * A cursor over the elements.
+     *
+     * Written *through* `->slice()` so the window rules have one implementation and this cannot drift
+     * from what `$a->slice()` hands out.
+     */
+    function iterate() : slice_iterator<T>
+    {
+        return slice_iterator<T>($this->slice());
     }
 
     /**

@@ -14,6 +14,9 @@ namespace
         static const std::unordered_map<std::string, AST::CoreTypeKind> table = {
             { "string", AST::CoreTypeKind::t_string },
             { "string_view", AST::CoreTypeKind::t_string_view },
+            { "iterator", AST::CoreTypeKind::t_iterator },
+            { "iterable", AST::CoreTypeKind::t_iterable },
+            { "keyed", AST::CoreTypeKind::t_keyed },
         };
 
         return table;

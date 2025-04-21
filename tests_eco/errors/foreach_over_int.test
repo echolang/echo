@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:1
+'int32' cannot be iterated - it declares neither 'Iterator' nor 'Iterable'.
+Begin: 'foreach'
+End: 'foreach'
+Code excerpt:
+ [4]> 
+ [5]> foreach ($n as $x) {
+      ^
+ [6]>     echo $x;
+
+Critical issues found, cannot compile.

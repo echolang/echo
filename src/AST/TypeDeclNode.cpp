@@ -2,6 +2,7 @@
 
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/ASTTypeParam.h"
 
 #include "Debugging.h"
 
@@ -28,8 +29,28 @@ const std::string AST::TypeDeclNode::namespaced_type_name() const
 
 const std::string AST::TypeDeclNode::node_description()
 {
-    // the keyword the declaration was written with, so --print-ast says which storage class this is
-    std::string result = std::string(is_class() ? "class " : "struct ") + namespaced_type_name() + "\n{\n";
+    // the keyword the declaration was written with, so --print-ast says which of the three kinds this
+    // is. an interface used to print as `struct`, which made the one dump that could have shown the
+    // difference say there was none
+    const char *keyword = "struct ";
+    if (is_class()) {
+        keyword = "class ";
+    }
+    else if (complex_type().is_interface_kind()) {
+        keyword = "interface ";
+    }
+
+    std::string result = std::string(keyword) + namespaced_type_name() + "\n{\n";
+
+    // ahead of the members, which is the order they are declared in and the order the parser enforces:
+    // a requirement's signature may mention one, so it has to be a name before one is read
+    if (!complex_type().associated_types().empty()) {
+        result += "associated types:\n";
+        for (const auto *assoc : complex_type().associated_types()) {
+            result += DD::tabbify(assoc->describe() + " : " + assoc->constraint_spelling, 2) + "\n";
+        }
+    }
+
     result += "properties:\n";
     for (auto prop : _properties) {
         result += DD::tabbify(prop->node_description(), 2) + "\n";

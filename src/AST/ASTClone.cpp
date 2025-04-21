@@ -32,6 +32,8 @@
 #include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/LoopControlNode.h"
+#include "AST/ForeachNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
@@ -367,6 +369,28 @@ Node *WhileStatementNode::clone(CloneContext &cc) const
     WhileStatementNode *c = cc.shallow(this);
     c->condition = cc.child(c->condition);
     c->loop_scope = cc.child(c->loop_scope);
+    return c;
+}
+
+Node *LoopControlNode::clone(CloneContext &cc) const
+{
+    LoopControlNode *c = cc.shallow(this);
+    for (auto &drop : c->unwind) drop = cc.clone_ref(drop);
+    return c;
+}
+
+Node *ForeachNode::clone(CloneContext &cc) const
+{
+    ForeachNode *c = cc.shallow(this);
+    c->source = cc.child(c->source);
+
+    // **the two bindings before the body**, for ScopeNode::clone's own reason: a read inside the body
+    // reaches its declaration through cc.rebind, and rebind answers with the *original* for anything the
+    // map does not hold yet. cc.child memoizes, so cloning the body next reuses these rather than
+    // minting a second pair the body's reads would not be bound to
+    c->key = cc.child(c->key);
+    c->element = cc.child(c->element);
+    c->body = cc.child(c->body);
     return c;
 }
 

@@ -1,0 +1,20 @@
+// `$i` has no type until the loop lowers, so the literal in `$i == 0` defaulted to int32 while the key
+// is a usize - and the parser's binary reconciliation had already run. AST::OperatorRewriter's
+// widen_binary_operands is the post-parse half of that rule; without it this asserts in codegen with
+// a message naming neither the loop nor the comparison
+$a = Array<int32>();
+$a[] = 1;
+$a[] = 2;
+$a[] = 3;
+
+int32 $sum = 0;
+
+foreach ($a as $i => $x) {
+    if ($i == 0) {
+        continue;
+    }
+
+    $sum = $sum + $x;
+}
+
+echo $sum;

@@ -1,0 +1,10 @@
+// a closure does not inherit the loop it was written in - its body is a different llvm::Function, and a
+// branch across that boundary is not a thing. AST::FunctionBodyScope clears the loop depth for exactly
+// this reason, the same way it clears `$this` and the enclosing closure
+
+int32 $i = 0;
+
+while ($i < 3) {
+    $f = function() : void { continue; };
+    $i = $i + 1;
+}

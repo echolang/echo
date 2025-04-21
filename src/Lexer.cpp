@@ -188,6 +188,10 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_neq);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_leq);
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_logical_geq);
+    // `=>` before the bare `=`. a StringToken's priority is its length and the trie descends to the
+    // deepest match, the same rule that keeps `?->` from lexing as `??` - and `=` immediately followed
+    // by `>` is unspellable in Echo otherwise, so this cannot reinterpret an existing program
+    ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_double_arrow);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_assign);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_and);
     ECHO_LEX_FNC_CHAR(lx_functions, Token::Type::t_or);
@@ -232,6 +236,11 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_else);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_guard);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_while);
+    // `foreach` before `for`, though the order here does not decide it: insert_function_into_tree
+    // truncates at three characters so both land in the "for" node, and sort_functiontree orders by
+    // priority descending - a KeywordToken's priority is its length, so `foreach` is tried first and
+    // `for(` still falls through to `for`
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_foreach);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_for);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_break);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_continue);

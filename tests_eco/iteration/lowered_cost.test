@@ -1,0 +1,21 @@
+flags: -O
+
+--- OUT --->
+3
+--- IR --->
+// the window's length and data pointer are loaded **once, in the entry block** - the cursor holds its
+// bound by value, so nothing in the loop can have written them and LICM may hoist both. that is what
+// gives the loop a computable trip count, and with it unrolling and vectorisation
+CHECK: define i32 @_totalZZMRBMLC5ArrayIMLPiE
+CHECK: entry:
+CHECK: load i64
+CHECK: load ptr
+
+// and the body holds no calls at all: `iterate`, `advance` and `current` are inlined away, the cursor
+// struct is SROA'd to a single register, and the bounds assert is gone with the release build. what is
+// left is the indexed load and the loop's own compare - the same loop a hand-written cursor produces
+CHECK: body:
+CHECK-NOT: call
+CHECK: getelementptr i32
+CHECK-NOT: call
+CHECK: br i1

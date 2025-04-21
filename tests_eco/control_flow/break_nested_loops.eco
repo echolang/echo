@@ -1,0 +1,15 @@
+// an inner break leaves the inner loop only
+int $outer = 0;
+while ($outer < 3) {
+    int $inner = 0;
+    while ($inner < 10) {
+        if ($inner == 2) {
+            break;
+        }
+        echo $inner;
+        $inner = $inner + 1;
+    }
+    echo "-";
+    $outer = $outer + 1;
+}
+echo "end";

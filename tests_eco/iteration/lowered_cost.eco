@@ -1,0 +1,20 @@
+// **the cost claim, pinned.** after inlining, a struct cursor costs exactly what the cursor-and-`while`
+// it replaced did - see book/concept/iteration.md, "What it costs". this is the only test that would
+// catch `slice_iterator<T>` being "tidied" into holding an `Array<T>&` instead of a `Slice<T>` by
+// value, which would stop the optimiser hoisting the bound and cost the loop its trip count
+function total(Array<int32>& $a) : int32
+{
+    int32 $sum = 0;
+
+    foreach ($a as $x) {
+        $sum = $sum + $x;
+    }
+
+    return $sum;
+}
+
+$a = Array<int32>();
+$a[] = 1;
+$a[] = 2;
+
+echo total($a);
