@@ -5,8 +5,10 @@ expect: fail
 Issue at 7:3
 No overload of 'operator []' accepts these arguments. Candidates are:
   operator []<T>(Array<T>&, usize)
+  operator []<T>(const Array<T>&, usize)
   operator []<T>(Array<T>&)
   operator []<T>(Slice<T>&, usize)
+  operator []<T>(const Slice<T>&, usize)
 Begin: 'operator []'
 End: 'operator []'
 Code excerpt:

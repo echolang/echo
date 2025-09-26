@@ -134,6 +134,13 @@ namespace AST
         // asks a different question than the conversion check next to it: not "does the value
         // fit" but "may this storage be written at all"
         void check_const_target(AssignNode &node);
+
+        // rejects a call whose receiver is const and whose callee is not, worded by
+        // AST::const_receiver_refusal. **true when it reported**, so the argument loop drops argument 0
+        // rather than adding a second, vaguer message about the same value - the contract
+        // check_interface_erasure already has, and for the same reason: the reader needs the method's
+        // name and the `const function` spelling, not the name of a conversion
+        bool check_receiver_const(FunctionCallExprNode &node);
     };
 };
 

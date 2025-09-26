@@ -140,6 +140,67 @@ namespace AST
         // concrete yet is left for a later round, exactly as an index is
         void expand_array_literal(ScopeNode &scope, size_t index);
 
+        // **rule 2 where the author named no storage** - `f([1, 2, 3])`. the compiler names it: a
+        // synthesized declaration is hoisted *ahead* of the statement and the literal's edge becomes
+        // that declaration's name, so what reaches the parameter is an ordinary place taking an
+        // ordinary `t_borrow`. none of AST::OwnershipPass's temporary machinery is involved, which is
+        // the point - a literal is `t_addressless` precisely because it fills storage rather than
+        // occupying some
+        //
+        // answers the replacement for the edge, or null when the literal is not ready - it has no
+        // AST::bind_array_literal_to type yet, so the round that settles the call has not happened.
+        // the caller leaves the literal in place, and finalize() is what turns a permanent "not yet"
+        // into the diagnostic
+        ExprNode *hoist_array_literal(ArrayLiteralExprNode &literal);
+
+        // the constructor of `type` written into `slot`, plus one `$into[] = element` per element.
+        // shared by the two rules above because it is the whole of what an expansion *is*; what
+        // differs between them is only where the storage came from and where the appends go
+        //
+        // answers false when the destination cannot be built from a literal, having reported it
+        bool build_literal_expansion(
+            ArrayLiteralExprNode &literal,
+            VarDeclNode &into,
+            const ValueType &type,
+            ExprNode **slot,
+            std::vector<NodeReference> &appends);
+
+        // the declarations and appends hoist_array_literal produced while walking the current
+        // statement, innermost first. buffered rather than spliced on the spot because the walk is
+        // *inside* statement_edge and the scope's child list is what would be mutated under it
+        //
+        // saved and restored around a nested scope's own loop, so a literal in an inner block is
+        // wrapped there rather than escaping to the outer one
+        std::vector<NodeReference> _hoisted;
+
+        // how many literals this module has hoisted, so their names are distinct - a statement may
+        // hold two (`f([1, 2], [3, 4])`), and a `RAST` golden has to be able to tell them apart
+        size_t _hoist_count = 0;
+
+        // **how deep inside a form that does not evaluate its right side we are.** `?->` and `??` are
+        // the only two, and a hoist inside either would move the construction above the branch that
+        // decides whether it runs. a counter rather than a flag because the two nest
+        size_t _hoist_barrier = 0;
+
+        // raises the barrier for one subtree. an RAII guard rather than a set-and-clear, because the
+        // arms it sits in return early
+        struct HoistBarrier
+        {
+            explicit HoistBarrier(OperatorRewriter &pass) : _pass(pass) { _pass._hoist_barrier++; }
+            ~HoistBarrier() { _pass._hoist_barrier--; }
+
+            HoistBarrier(const HoistBarrier &) = delete;
+            HoistBarrier &operator=(const HoistBarrier &) = delete;
+
+        private:
+            OperatorRewriter &_pass;
+        };
+
+        // moves `scope.children[index]` into a scope of its own, preceded by whatever _hoisted holds.
+        // that scope *is* the lifetime: the declarations are its locals, so the statement's end is
+        // where AST::OwnershipPass destroys them
+        void wrap_statement_with_hoists(ScopeNode &scope, size_t index);
+
         // the two statement shapes an array literal may sit in, resolved to the one thing the
         // expansion needs: the declaration whose storage is being filled, and the literal filling it.
         // `decl` null means this statement is not one of them

@@ -75,6 +75,12 @@ namespace AST
         // of one struct shares a single TypeNode, the way the constructor shares its return type
         TypeNode *self_type_ptr = nullptr;
 
+        // and the same thing for a `const function`: `const Foo&`. two nodes rather than one node
+        // and a flag because a method's const-ness *is* its receiver's type and nothing else - see
+        // AST::receiver_is_const - so the only thing a const method needs is a different args[0],
+        // and minting it once per struct body keeps the sharing the mutable one already has
+        TypeNode *self_const_type_ptr = nullptr;
+
         // the `$this` local of the *constructor* whose body is being parsed, null everywhere else -
         // including inside a method, whose `$this` is a borrow parameter naming storage that already
         // exists
@@ -100,6 +106,13 @@ namespace AST
         inline ScopeNode &scope() const {
             assert(scope_ptr);
             return *scope_ptr;
+        }
+
+        // which of the two receiver nodes a method binds `$this` to. one accessor rather than the
+        // pick spelled at each site, so a caller cannot reach for the mutable node while believing
+        // it asked for a const method - and so the null-outside-a-struct-body case is one answer
+        inline TypeNode *receiver_type(bool is_const) const {
+            return is_const ? self_const_type_ptr : self_type_ptr;
         }
 
         // the nearest namespace the user could have written. types live there rather than in a block's
@@ -283,14 +296,20 @@ namespace AST
         Context &context;
         TypeDeclNode *previous_struct;
         TypeNode *previous_type;
+        TypeNode *previous_const_type;
 
-        SelfScope(Context &context, TypeDeclNode *self_struct, TypeNode *self_type) :
+        // both receiver spellings at once: a body that has one has the other, and a frame that set
+        // only the mutable node would let `const function` inside it bind `$this` to null
+        SelfScope(Context &context, TypeDeclNode *self_struct, TypeNode *self_type,
+            TypeNode *self_const_type = nullptr) :
             context(context),
             previous_struct(context.self_struct_ptr),
-            previous_type(context.self_type_ptr)
+            previous_type(context.self_type_ptr),
+            previous_const_type(context.self_const_type_ptr)
         {
             context.self_struct_ptr = self_struct;
             context.self_type_ptr = self_type;
+            context.self_const_type_ptr = self_const_type;
         }
 
         SelfScope(const SelfScope &) = delete;
@@ -299,6 +318,7 @@ namespace AST
         ~SelfScope() {
             context.self_struct_ptr = previous_struct;
             context.self_type_ptr = previous_type;
+            context.self_const_type_ptr = previous_const_type;
         }
     };
 

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <AST/ASTBundle.h>
+#include <AST/ASTConstness.h>
 #include <AST/ASTMemberLookup.h>
 #include <AST/ExprNode.h>
 #include <AST/FunctionDeclNode.h>
@@ -405,4 +406,121 @@ TEST_CASE("a member call diagnostic counts the arguments the caller wrote", "[me
         "$p->set(null);\n");
 
     REQUIRE(has_issue_containing(*bundle, "argument 1 of 'set'"));
+}
+
+TEST_CASE("a const method's receiver is a const borrow of the struct", "[methods][const]")
+{
+    // a method's const-ness *is* args[0]'s type - there is no
+    // flag on the declaration - so this assertion is the feature, and everything downstream (the
+    // mangler, argument_fit, member access) reads it off here
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Point {\n"
+        "    int32 $x;\n"
+        "    const function get() : int32 { return $this->x; }\n"
+        "    function shift(int32 $by) : void { $this->x = $this->x + $by; }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    auto readers = decls_named(m, "get");
+    REQUIRE(readers.size() == 1);
+
+    const auto self_type = readers[0]->args[0]->type();
+    REQUIRE(self_type.is_pointer());
+    REQUIRE_FALSE(self_type.is_nullable());
+    REQUIRE(self_type.pointee().is_const());
+    REQUIRE(AST::receiver_is_const(*readers[0]));
+
+    // the const is on the *pointee*, so `const Foo&` and not `const (Foo&)` - the shape a written
+    // `const Point&` parameter produces, which is what makes the two one type
+    REQUIRE_FALSE(self_type.is_const());
+    REQUIRE(self_type.pointee() == ValueType::make_const(type_named(m, "Point")->value_type()));
+
+    // and the mutable receiver is untouched, so the two share nothing but the struct
+    auto writers = decls_named(m, "shift");
+    REQUIRE(writers.size() == 1);
+    REQUIRE_FALSE(AST::receiver_is_const(*writers[0]));
+    REQUIRE_FALSE(writers[0]->args[0]->type().pointee().is_const());
+}
+
+TEST_CASE("a method may be overloaded on its receiver's const-ness", "[methods][const]")
+{
+    // two signatures, not a DuplicateFunctionSignature: `$this` is args[0], so the mangler already
+    // tells them apart, and the matcher picks by the receiver - t_borrow for the one whose const-ness
+    // matches, t_borrow_const for the one that adds it
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag {\n"
+        "    int32 $x;\n"
+        "    function at() : int32& { return &$this->x; }\n"
+        "    const function at() : const int32& { return &$this->x; }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto members = find_member_functions(&type_named(m, "Bag")->complex_type(), "at");
+    REQUIRE(members.size() == 2);
+
+    REQUIRE(members[0]->decorated_func_name() != members[1]->decorated_func_name());
+
+    // exactly one of them is the reader, whichever order the lookup hands them back in
+    REQUIRE((AST::receiver_is_const(*members[0]) != AST::receiver_is_const(*members[1])));
+
+    // and the signature a diagnostic renders tells them apart, which is what keeps a "no overload"
+    // message from listing the same line twice
+    REQUIRE(members[0]->signature_description() != members[1]->signature_description());
+}
+
+TEST_CASE("only a method may be declared const", "[methods][const]")
+{
+    // `const` qualifies a receiver, and a free function has none. reported and dropped rather than
+    // refused, so the declaration still registers and the call below is not a second, unrelated
+    // "unknown function"
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "const function reads(int32 $n) : int32 { return $n; }\n"
+        "echo reads(1);\n");
+
+    REQUIRE(has_issue_containing(*bundle, "is not a method, so it cannot be declared const"));
+
+    auto decls = decls_named(bundle->modules.find_module("test"), "reads");
+    REQUIRE(decls.size() == 1);
+    REQUIRE_FALSE(AST::receiver_is_const(*decls[0]));
+}
+
+TEST_CASE("a generic struct's const method keeps the qualifier through substitution", "[methods][const]")
+{
+    // const-ness is decided once, on the template's receiver, so two instances agree about which
+    // methods only read - `find_member_functions`' template_ref redirect would stop meaning anything
+    // if `Holder<int32>::peek` and `Holder<float64>::peek` had different signatures
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Holder<T> {\n"
+        "    T $item;\n"
+        "    constructor(T $v) { $this->item = $v; }\n"
+        "    const function peek() : T { return $this->item; }\n"
+        "}\n"
+        "const $a = Holder<int32>(1);\n"
+        "const $b = Holder<float64>(2.5);\n"
+        "echo $a->peek();\n"
+        "echo $b->peek();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto calls = calls_to(m, "peek");
+    REQUIRE(calls.size() == 2);
+
+    for (auto *call : calls) {
+        REQUIRE(call->decl != nullptr);
+
+        // the instance, not the template - and still a reader
+        REQUIRE_FALSE(call->decl->is_generic());
+        REQUIRE(AST::receiver_is_const(*call->decl));
+        REQUIRE(call->decl->args[0]->type().pointee().is_const());
+    }
+
+    // and the two instances really are distinct, so this says something about substitution rather
+    // than about one declaration seen twice
+    REQUIRE(calls[0]->decl != calls[1]->decl);
 }

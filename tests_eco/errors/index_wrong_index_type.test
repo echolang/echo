@@ -2,14 +2,16 @@ expect: fail
 
 --- OUT --->
 ---- Issue ----
-Issue at 5:8
-Invalid type conversion: cannot implicitly convert 'string' to 'usize'
+Issue at 10:8
+No overload of 'operator []' accepts these arguments. Candidates are:
+  operator []<T>(Array<T>&, usize)
+  operator []<T>(const Array<T>&, usize)
 Begin: 'operator []'
 End: 'operator []'
 Code excerpt:
- [4]> 
- [5]> echo $a["nope"];
+ [9]> 
+ [10]> echo $a["nope"];
              ^
- [6]> 
+ [11]> 
 
 Critical issues found, cannot compile.

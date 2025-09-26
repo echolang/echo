@@ -20,10 +20,13 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     if (op_node != nullptr && (raw_left.is_pointer() || raw_right.is_pointer())) {
         const auto op = op_node->op->type;
 
-        // offsetting an address stays an address, scaled by the pointee's size
+        // offsetting an address stays an address, scaled by the pointee's size. **mutable**, for the
+        // reason spelled out below: the const on the operand's own level said its slot could not be
+        // re-seated, and this answer is a fresh value with no slot to re-seat. the pointee's const
+        // rides along untouched, which is the half that is actually a promise about storage
         if ((op == Token::Type::t_op_add || op == Token::Type::t_op_sub)
             && raw_left.is_pointer() && !raw_right.is_pointer()) {
-            return raw_left;
+            return AST::ValueType::make_mutable(raw_left);
         }
 
         // the distance between two addresses, in elements
@@ -55,8 +58,15 @@ AST::ValueType AST::BinaryExprNode::result_type() const
 
     // operands are read in value position, so a pointer contributes its pointee: `$ref + 1`
     // adds to the int the reference points at, not to the address
-    auto left = value_type_of(raw_left);
-    auto right = value_type_of(raw_right);
+    //
+    // **and mutable.** `const` is a promise about *storage*, and this expression produces a fresh
+    // value that has none - `$a + 1` is no more const than `1` is. reading the operands raw made the
+    // equality below distinguish `usize` from `const usize`, so every arithmetic reached through a
+    // const receiver answered void: untyped for the type checker, and an unhandled operand kind by
+    // the time codegen saw it. the collapse and this strip are the two halves of "read this operand
+    // as a value"
+    auto left = ValueType::make_mutable(value_type_of(raw_left));
+    auto right = ValueType::make_mutable(value_type_of(raw_right));
 
     // if both left and right have the same type then the result type is the same
     if (left == right) {

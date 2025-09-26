@@ -198,11 +198,12 @@ TEST_CASE("a struct's own constructor is reachable alongside the field-wise one"
 TEST_CASE("a constructor body opens with its $this declaration", "[overloads]")
 {
     // `$this` is the body's *first* child, and for a class that is load-bearing rather than tidy:
-    // Parser::seat_this_storage puts the heap allocation in this declaration's initializer, and an
+    // AST::declare_constructor_this puts the heap allocation in this declaration's initializer, and an
     // initializer runs where it is written - so a `$this` declared after the field writes would have
     // them store through a handle nothing allocated yet. codegen and clone no longer care where it
     // sits (StmtCodegen::gen_scope seats storage at scope entry, ScopeNode::clone pre-maps
-    // declarations); this one reason is the whole of why the parser still seeds it
+    // declarations); this one reason is the whole of why the parser still seeds it, and it is the same
+    // reason for all three producers now - see tests/ast_constructor.cpp for the rule itself
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"

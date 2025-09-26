@@ -1,5 +1,7 @@
 #include "AST/MemberAccessNode.h"
 
+#include "AST/ASTConstness.h"
+
 AST::MemberAccessNode::MemberAccessNode(NodeReference base, TokenReference member_name)
     : _base_node(base), _member_name(member_name)
 {
@@ -36,9 +38,24 @@ AST::ValueType AST::MemberAccessNode::result_type() const
     auto *complex = base_type.get_complex_type();
 
     // an unknown member has no type of its own; the type checker reports it by name
-    if (complex == nullptr || !complex->has_property(_member_name.value())) {
+    //
+    // find_property rather than a has/get pair: this walks a `->` chain recursively, so one lookup
+    // per link instead of two is the difference the single-lookup accessor exists for
+    const ComplexType::Property *prop =
+        complex == nullptr ? nullptr : complex->find_property(_member_name.value());
+
+    if (prop == nullptr) {
         return ValueType::void_type();
     }
 
-    return complex->get_property_type(_member_name.value());
+    // **const is a property of the path, not of the declaration.** a property reached through a
+    // `const Foo&` is const however it was declared, which is what makes a `const` receiver mean
+    // something rather than decorate one: `$this->prop = 5` inside a const method then fails at
+    // TypeChecker::check_const_target with no rule of its own, the target being an ordinary place
+    // whose result_type() says const.
+    //
+    // asked of AST::member_type_through, and asked *here* because base_target_type() above is the
+    // single owner of "what does this base address" (B16). the type checker used to keep a second
+    // copy of that question and this is exactly the rule that would have gone into both
+    return member_type_through(base_type, prop->type);
 }

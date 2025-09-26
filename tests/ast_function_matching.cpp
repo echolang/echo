@@ -92,6 +92,35 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     REQUIRE( AST::argument_fit(t_int32, nullptr, ValueType::make_pointer(t_int32, false)) == ArgumentFit::t_none );
 }
 
+TEST_CASE( "a borrow parameter is answered by a conversion to what it borrows", "[fnmatch]" )
+{
+    // AST::implicit_conversion_target is the peel that makes the declared conversion and the borrow of
+    // its result compose on one argument. without it the arm could never fire for a borrow parameter at
+    // all: find_implicit_conversion compares return types exactly, and `string::view` never equals
+    // `string::view&` - so `f('hello')` reported an ordinary mismatch. the conversion itself needs a
+    // ComplexType carrying a published method, so it is pinned end to end in
+    // tests_eco/strings/view_conversion_literal; only the rule about the parameter can be asked here
+
+    // a by-value parameter is its own target - the conversion has to return exactly it
+    REQUIRE( AST::implicit_conversion_target(t_int32) == t_int32 );
+
+    // a borrow is answered one level in: the conversion produces a value, and borrowing that value is
+    // the separate, later rank
+    const ValueType borrow = ValueType::make_pointer(t_int32, false);
+    REQUIRE( AST::implicit_conversion_target(borrow) == t_int32 );
+
+    // `const` is dropped, so `const T&` is answered by the declaration a bare `T&` is. the resulting
+    // `T&` reaches the parameter without a cast, is_implicitly_convertible already accepting it
+    const ValueType const_borrow = ValueType::make_pointer(ValueType::make_const(t_int32), false);
+    REQUIRE( AST::implicit_conversion_target(const_borrow) == t_int32 );
+
+    // **a nullable pointer is not a borrow**, so it is its own target and no peel happens - the same
+    // exclusion parameter_auto_borrows makes, and shared with it rather than spelled again. taking an
+    // address is a decision the caller should be able to see in the source
+    const ValueType nullable = ValueType::make_pointer(t_int32, true);
+    REQUIRE( AST::implicit_conversion_target(nullable) == nullable );
+}
+
 TEST_CASE( "arity filters before anything else", "[fnmatch]" )
 {
     const std::vector<FunctionCandidate> candidates = {

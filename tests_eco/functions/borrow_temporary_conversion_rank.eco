@@ -1,0 +1,36 @@
+// **the rank, now that a literal can reach a declared conversion at all.** an overload taking the owning
+// type has to keep beating one taking the window: a `#[implicit]` conversion is the fallback that lets a
+// caller take the cheap view without writing anything, never a way to hide a better-matching overload
+//
+// both overloads are present on purpose. with one candidate, matching rule 2 wins without consulting
+// types at all, so a rank in entirely the wrong place would still pass
+
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    #[implicit]
+    function view() : string::view { return $this->window; }
+}
+
+function which(string::view& $v) : void { echo 1; }
+function which(string $s) : void { echo 2; }
+
+// a literal is a `string`, so the by-value overload is an exact fit and wins outright - the conversion
+// plus the borrow of its result is two ranks worse
+which('hello');
+
+// and the same for a place, which is how the rule read before a literal could reach it
+$owned = 'john';
+which($owned);
+
+// with only the view overload in scope, the conversion is what makes the call resolve at all
+function only(string::view& $v) : void { echo 3; }
+only('hello');

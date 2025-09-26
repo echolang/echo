@@ -1,5 +1,6 @@
 #include "AST/ASTConformance.h"
 
+#include "AST/ASTConstness.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
@@ -226,12 +227,19 @@ namespace
         // requirement with no arguments at all cannot read as one with a receiver
         size_t arg_count = 0;
 
+        // the one thing about argument 0 that *is* compared. the receiver's type differs by
+        // construction - the interface borrows itself, the implementor borrows itself - but its
+        // const-ness is the requirement's promise to the caller, not an artefact of who declared it:
+        // a `const` requirement says a holder of the interface may call this on a const value, and a
+        // vtable slot filled by a method that may write would launder exactly that promise away
+        bool receiver_is_const = false;
+
         // the requirement rendered as the implementor has to write it. signature_description() shows
         // what was *declared*, which for a generic interface still names its own `T` - a parameter the
         // author of the implementor never wrote and cannot act on
         std::string description() const
         {
-            std::string buffer = requirement->func_name() + "(";
+            std::string buffer = std::string(receiver_is_const ? "const " : "") + requirement->func_name() + "(";
 
             for (size_t i = 0; i < parameters.size(); i++) {
                 buffer += (i > 0 ? ", " : "");
@@ -250,6 +258,7 @@ namespace
         WantedSignature wanted;
         wanted.requirement = requirement;
         wanted.arg_count = requirement->args.size();
+        wanted.receiver_is_const = AST::receiver_is_const(*requirement);
         wanted.return_type = wanted_type(requirement->get_return_type(), subst, registry);
 
         wanted.parameters.reserve(requirement->args.size() > 0 ? requirement->args.size() - 1 : 0);
@@ -276,6 +285,14 @@ namespace
         // can compare: U is bound at the call, not by the conformance. refused at the declaration would
         // be better, and until then this simply never matches
         if (candidate->own_type_param_count() != wanted.requirement->own_type_param_count()) {
+            return false;
+        }
+
+        // exact, like every comparison here, and in both directions: a `const` requirement is not
+        // answered by a method that may write, and a plain one is not answered by a const method
+        // either - the vtable holds one declaration, and a caller through the interface has to be
+        // able to read which promise it got off the requirement alone
+        if (AST::receiver_is_const(*candidate) != wanted.receiver_is_const) {
             return false;
         }
 

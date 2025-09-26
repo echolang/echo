@@ -23,7 +23,7 @@ CHECK: chainbase<T>
 CHECK: function through_guard
 CHECK: guard vardecl<type<Res>>($r) = strong<Res?>(varref<weak<Res>>(var($w)))
 CHECK: function through_chain
-CHECK: vardecl<type<Res?>>($__temp) = strong<Res?>(varref<weak<Res>>(var($w)))
+CHECK: vardecl<type<Res?>>($__temp1) = strong<Res?>(varref<weak<Res>>(var($w)))
 // and the marker's stored type is the *unwrapped* one. cloning alone substitutes `T` into it and
 // leaves `weak<Res>`, which is a handle nobody retained wearing the name of one that was
 CHECK: ma<int32>(chainbase<Res>->tag)

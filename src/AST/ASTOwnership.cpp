@@ -3,11 +3,13 @@
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstructor.h"
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -34,6 +36,118 @@ namespace AST
 
 namespace
 {
+    // **may the ownership pass answer this body yet?** it walks a body exactly once, ever, so every
+    // "no" it records is permanent - and a body it walks too early is one whose drops were decided
+    // against a tree that had not finished arriving.
+    //
+    // four things can still be arriving, and they are four *arms* rather than four conditions in a
+    // hand-written statement switch, which is what this used to be. that switch descended into
+    // statements only, so an expression could hold a transient node and answer "concrete" - which is
+    // how `make()[0]` came to have its container's `&` written a round after ownership had already
+    // walked past it. AST::RecursiveVisitor makes the walk total: a node kind with no visit_* does not
+    // compile, and none of the four can be reached and missed
+    class BodyAnswerable : public RecursiveVisitor
+    {
+    public:
+        bool answerable = true;
+
+        // **the flag is monotone, so the walk stops the moment it is false.** this runs once per
+        // un-answered body *and* per file root on every fixpoint round, and a body that waits k rounds
+        // would otherwise pay k complete traversals to re-derive the same no.
+        //
+        // both descent seams are pruned - the statement loop here and the expression edge below - so
+        // neither a later statement nor a sibling subtree is walked once the answer is settled. nothing
+        // is rewritten, so unlike the base's loop this one may hold its bound
+        void visitScope(ScopeNode &node) override
+        {
+            for (size_t i = 0; answerable && i < node.children.size(); i++) {
+                statement_edge(node.children[i].node());
+            }
+        }
+
+        ExprNode *rewrite_value_edge(ExprNode *expr) override
+        {
+            return answerable ? RecursiveVisitor::rewrite_value_edge(expr) : expr;
+        }
+
+        // an untyped declaration is one the monomorphizer has not re-derived yet, and a typed one
+        // still mentioning a parameter is waiting on a substitution. either way there is no answer to
+        // "does this own something" yet
+        void visitVarDecl(VarDeclNode &node) override
+        {
+            if (!node.has_type() || contains_type_param(node.type())) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visitVarDecl(node);
+        }
+
+        // **an unexpanded array literal is never answerable**, which the declaration's type alone does
+        // not say: one typed from its elements holds an *unknown* until AST::OperatorRewriter expands
+        // it, and unknown is not contains_type_param. asked of the literal itself rather than of the
+        // declaration holding one, so a literal in any other position counts too
+        void visit_array_literal_expr(ArrayLiteralExprNode &node) override
+        {
+            if (!node.expansion_decided) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visit_array_literal_expr(node);
+        }
+
+        // an unresolved bracket has no element call yet, so there is nothing here for the arm below to
+        // find - and resolving it is what *creates* the borrow of the container
+        void visit_index_expr(IndexExprNode &node) override
+        {
+            if (!node.resolution_decided) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visit_index_expr(node);
+        }
+
+        // **a call that has not settled has not been fitted to its parameters**, and fitting is what
+        // writes the `&` around a borrow argument. so a body walked while one is outstanding gives that
+        // argument's temporary no slot, and AST::TypeChecker's guard rail reports it as a compiler bug -
+        // which is exactly what it did. the round order already claims this invariant in the
+        // monomorphizer ("last of the four, so every call in a body it walks has already been fitted");
+        // this is where the claim is checked
+        //
+        // a *failed* call is terminal and counts as answerable: it has its own diagnostic, and waiting
+        // for a program that cannot compile only costs it its drops
+        void visitFunctionCallExpr(FunctionCallExprNode &node) override
+        {
+            if (!call_is_terminal(node.settlement)) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visitFunctionCallExpr(node);
+        }
+
+        // **an unlowered foreach is never answerable.** it declares `$el` and `$k` with no type, and
+        // the iterator declaration it will mint does not exist yet. AST::ForeachLowering runs earlier
+        // in the same round; once it has, this node is gone and the scope it left behind is ordinary
+        void visit_foreach(ForeachNode &node) override
+        {
+            answerable = false;
+
+            RecursiveVisitor::visit_foreach(node);
+        }
+
+        // a nested declaration is resolved as its own body, from the file root's children. whether
+        // *it* is ready says nothing about whether this one is
+        void visitFunctionDecl(FunctionDeclNode &) override
+        {
+        }
+
+        // **and neither does a type declaration**, which is not flow at all. its properties are
+        // ordinary VarDeclNodes, so descending into `struct Box<T> { T $value; }` finds one typed `T`
+        // and answers "never" for every body the struct is declared beside - a file root included
+        void visit_type_decl(TypeDeclNode &) override
+        {
+        }
+    };
+
     // how a diagnostic names the place a value was arriving at
     const char *describe(ValueDestination destination)
     {
@@ -187,6 +301,7 @@ void OwnershipPass::resolve_root(ScopeNode &root)
     _moved.clear();
     _maybe_moved.clear();
     _initialized_storage.clear();
+    _temporary_count = 0;
 
     walk_scope(root);
 }
@@ -221,6 +336,7 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     _moved.clear();
     _maybe_moved.clear();
     _initialized_storage.clear();
+    _temporary_count = 0;
 
     // a by-value parameter of an owning type owns what it was handed - "$items is ours; it is
     // destroyed at the end of this body". seeded into the *body's* frame rather than a frame of its
@@ -248,105 +364,10 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
 
 bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
 {
-    for (auto &child : scope.children) {
-        Node *node = child.node();
+    BodyAnswerable answerable;
+    scope.accept(answerable);
 
-        if (node == nullptr) {
-            continue;
-        }
-
-        switch (node->get_node_type()) {
-            case NodeType::n_vardecl:
-            {
-                auto *decl = static_cast<VarDeclNode *>(node);
-
-                // an untyped declaration is one the monomorphizer has not re-derived yet, and a typed
-                // one still mentioning a parameter is waiting on a substitution. either way there is
-                // no answer to "does this own something" yet
-                if (!decl->has_type() || contains_type_param(decl->type())) {
-                    return false;
-                }
-
-                // **an unexpanded array literal is never concrete**, which the type alone does not
-                // say: a declaration typed from its elements holds an *unknown* until
-                // AST::OperatorRewriter expands it, and unknown is not contains_type_param. this pass
-                // walks a body exactly once ever, so a body walked before the expansion gives the
-                // array it declares no drop at all - the first of the two arms a transient node owes,
-                // the same one AST::ForeachNode has below
-                auto *literal = array_literal_of(decl->init_expr);
-
-                if (literal != nullptr && !literal->expansion_decided) {
-                    return false;
-                }
-                break;
-            }
-
-            case NodeType::n_guard:
-            {
-                auto *stmt = static_cast<GuardNode *>(node);
-
-                // the binding is a declaration like any other, and the same two things make it not yet
-                // answerable: no type re-derived, or one still mentioning a parameter
-                if (stmt->decl != nullptr
-                    && (!stmt->decl->has_type() || contains_type_param(stmt->decl->type()))) {
-                    return false;
-                }
-
-                if (stmt->else_scope != nullptr && !body_is_concrete(*stmt->else_scope)) {
-                    return false;
-                }
-                break;
-            }
-
-            case NodeType::n_if_statement:
-            {
-                auto *stmt = static_cast<IfStatementNode *>(node);
-                if (stmt->if_scope != nullptr && !body_is_concrete(*stmt->if_scope)) {
-                    return false;
-                }
-                if (stmt->else_scope != nullptr && !body_is_concrete(*stmt->else_scope)) {
-                    return false;
-                }
-                break;
-            }
-
-            case NodeType::n_while_statement:
-            {
-                auto *stmt = static_cast<WhileStatementNode *>(node);
-                if (stmt->loop_scope != nullptr && !body_is_concrete(*stmt->loop_scope)) {
-                    return false;
-                }
-                break;
-            }
-
-            case NodeType::n_foreach:
-                // **an unlowered foreach is never concrete.** it declares `$el` and `$k` with no type,
-                // and the iterator declaration it will mint does not exist yet - so a body holding one
-                // has nothing this pass can answer. and the wrong answer here is permanent:
-                // _processed_functions means a body is walked exactly once, so an early "yes" leaves
-                // `$el`, `$__it` and every local the loop body declares with no drop at all
-                //
-                // AST::ForeachLowering runs earlier in the same round; once it has, this node is gone
-                // and the wrapper scope it left behind is answered by the n_scope arm below
-                return false;
-
-            case NodeType::n_scope:
-                if (!body_is_concrete(*static_cast<ScopeNode *>(node))) {
-                    return false;
-                }
-                break;
-
-            case NodeType::n_func_decl:
-                // its own body, resolved as its own declaration. whether *it* is ready says nothing
-                // about whether this one is
-                break;
-
-            default:
-                break;
-        }
-    }
-
-    return true;
+    return answerable.answerable;
 }
 
 void OwnershipPass::walk_scope(ScopeNode &scope)
@@ -456,22 +477,23 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
         {
             auto *assign = static_cast<AssignNode *>(node);
 
+            // **the target refuses.** writing into a member or an element of a value with no storage of
+            // its own: the bytes are destroyed at the end of this statement, so nothing will ever read
+            // what was written. refused rather than bound, which is also what keeps AssignNode::target a
+            // place - the wrapper would not be one
+            MaterializationScope target_scope(*this,
+                "writing to", "would be lost, because the value is destroyed at the end of this statement");
+
             // a whole-variable target is *written*, not read, so a moved-from variable being re-seated
             // is not a use-after-move. the arm below already says so - it clears the moved state and
             // notes "the variable is live again from here on" - but the walk got there first and
             // reported the write as a read. any other target shape (`$a->f`, `$a[$i]`) genuinely does
             // read `$a` to find the storage, so it is walked as usual
-            const size_t target_mark = _pending_temporaries.size();
-
             if (whole_variable_moved(assign->target) == nullptr) {
                 assign->target = walk_expression(assign->target);
             }
 
-            // writing into a member of a value with no storage of its own: the bytes are destroyed at
-            // the end of this statement, so nothing will ever read what was written. refused rather
-            // than bound, which is also what keeps AssignNode::target a place - the wrapper is not one
-            refuse_pending_temporaries(target_mark,
-                "writing to", "would be lost, because the value is destroyed at the end of this statement");
+            target_scope.close(assign->target);
 
             const ValueType target_type =
                 assign->target != nullptr ? value_result_type(*assign->target) : ValueType::make_unknown();
@@ -796,7 +818,13 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
 VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference &site)
 {
-    const TokenReference name_token = virtual_token("$__temp", Token::Type::t_varname, site);
+    // **numbered, because one bind can hold several.** two temporaries in one statement are two
+    // declarations either way - a place refers to the VarDeclNode and never to its spelling - but a
+    // dump in which both read `$__temp` cannot be asserted about, and a `RAST` golden is how every
+    // rule in this pass is pinned. per body rather than global, so a case's golden does not move
+    // when an unrelated function above it grows a temporary
+    const TokenReference name_token =
+        virtual_token(fmt::format("$__temp{}", ++_temporary_count), Token::Type::t_varname, site);
 
     auto &type_node = _current_module->nodes.emplace_back<TypeNode>(init->result_type());
     auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(name_token, &type_node);
@@ -863,6 +891,48 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
     // reaching here means one was added without an edge, which would otherwise blind-cast
     assert(false && "a pending temporary was requested by a node with no operand edge");
     return {};
+}
+
+OwnershipPass::MaterializationScope::MaterializationScope(OwnershipPass &pass) :
+    _pass(pass), _mark(pass._pending_temporaries.size())
+{
+}
+
+OwnershipPass::MaterializationScope::MaterializationScope(
+    OwnershipPass &pass, const char *action, const char *outcome) :
+    _pass(pass), _mark(pass._pending_temporaries.size()), _action(action), _outcome(outcome)
+{
+    assert(action != nullptr && outcome != nullptr && "a refusal has to say why");
+}
+
+ExprNode *OwnershipPass::MaterializationScope::close(ExprNode *value)
+{
+    assert(!_closed && "a materialization scope closed twice");
+    _closed = true;
+
+    // **a refusal answers the value unchanged.** it reports and leaves the tree exactly as it was
+    // written, which is what lets the reader see the program they wrote rather than the rewrite the
+    // compiler was part way through
+    if (_action != nullptr) {
+        _pass.refuse_pending_temporaries(_mark, _action, _outcome);
+        return value;
+    }
+
+    return _pass.bind_pending_temporaries(value, _mark);
+}
+
+OwnershipPass::MaterializationScope::~MaterializationScope()
+{
+    // **a scope that was never closed left its requests on the queue**, where the next position to
+    // close would adopt them - binding a temporary for an operand it knows nothing about, or refusing
+    // one with somebody else's wording. neither shows up as a crash, so it is asserted rather than
+    // discovered
+    assert(_closed && "a materialization scope was opened and never closed");
+}
+
+void OwnershipPass::request_storage_for(ExprNode *owner)
+{
+    _pending_temporaries.push_back(owner);
 }
 
 std::string OwnershipPass::describe_pending(ExprNode *owner) const
@@ -1000,8 +1070,8 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
 
 ExprNode *OwnershipPass::walk_value_edge(ExprNode *expr)
 {
-    const size_t mark = _pending_temporaries.size();
-    return bind_pending_temporaries(walk_expression(expr), mark);
+    MaterializationScope scope(*this);
+    return scope.close(walk_expression(expr));
 }
 
 ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
@@ -1046,15 +1116,19 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         {
             auto *call = static_cast<FunctionCallExprNode *>(expr);
 
-            // **a borrow argument's temporary dies here, not at its own edge.** the callee reads through
-            // the address *during* the call, so the argument edge left its request pending (see
-            // resolve_value_arrival) and the call is the innermost thing that outlives every one of them
+            // **a call forwards, and opens no scope.** it used to bind here, on the grounds that the
+            // callee reads through a borrowed address *during* the call and returns - which is true, and
+            // is not the whole question. it is false the moment the value the call hands back is *made
+            // of* one of those temporaries: `operator [](Array<T>&) : T&` returns an address into the
+            // very storage the bind would have destroyed, and an `#[implicit]` conversion returns a
+            // window into its receiver. both are ordinary library declarations, so no enumeration of
+            // shapes could be trusted to catch the next one
             //
-            // it is also the tightest correct place: the temporary is built immediately before the call
-            // and destroyed immediately after it. for a receiver - argument zero, evaluated first - that
-            // is exactly where the author wrote it
-            const size_t mark = _pending_temporaries.size();
-
+            // so the tighter lifetime went, and nothing replaced it: resolve_value_arrival already binds
+            // at every destination that *reads* a value, which is where tightness was sound. only a
+            // **borrow** argument travels past here, and that is exactly the set that needed to. so
+            // `echo sum(Point(3, 4))` still binds around `sum(...)` - echo's own argument reads a value -
+            // while `f(&make())` binds at the statement, where nothing can still be pointing into it
             for (size_t i = 0; i < call->arguments.size(); i++) {
                 const VarDeclNode *param = nullptr;
                 ValueType wanted = ValueType::make_unknown();
@@ -1069,7 +1143,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 call->arguments[i] = resolve_value_arrival(call->arguments[i], wanted, param, ValueDestination::t_argument);
             }
 
-            return bind_pending_temporaries(expr, mark);
+            break;
         }
 
         case NodeType::n_expr_binary:
@@ -1110,7 +1184,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // about to read through - and where that is not true, the destination refuses it (see
             // resolve_value_arrival)
             if (borrow_operand_needs_storage(*addr->operand)) {
-                _pending_temporaries.push_back(expr);
+                request_storage_for(expr);
             }
 
             break;
@@ -1197,7 +1271,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // *continuation* produced, so nothing downstream carries the base's reference. that is what
             // makes a temporary the right answer here and the wrong one there
             if (!is_place_expression(*chain->base) && needs_destruction(chain->base->result_type())) {
-                _pending_temporaries.push_back(expr);
+                request_storage_for(expr);
             }
 
             // the continuation is rooted at the marker, which stands for the base rather than holding it -
@@ -1249,7 +1323,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 // two positions that *refuse* a temporary instead of binding one then leave the tree
                 // exactly as it was written
                 if (member_base_needs_storage(*walked)) {
-                    _pending_temporaries.push_back(access);
+                    request_storage_for(access);
                 }
             }
 
@@ -1267,43 +1341,47 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
 ExprNode *OwnershipPass::resolve_value_arrival(
     ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination)
 {
-    // an arrival is a value edge like any other, and the flush is **last** on purpose: arrive_value
-    // decides copy-or-move while the expression is still the place it was written as, so a class-typed
-    // member read off a temporary is wrapped in a retain by the ordinary copy rule - and only then does
-    // the temporary that owns the storage close over the retain. retain-then-release, with no arm here
-    // that knows a temporary exists
-    const size_t mark = _pending_temporaries.size();
-    ExprNode *arrived = arrive_value(expr, wanted, param, destination);
-
     // **a borrow destination does not read the value, it keeps the address** - so this edge is the
-    // wrong place to destroy the temporary, and which of two things that means depends on how long the
-    // destination keeps it:
+    // wrong place to destroy the temporary, and which of the three answers that means depends on how
+    // long the destination keeps it:
     //
-    //  - an **argument** hands the address to a callee that reads through it and returns. the request
-    //    travels one step further out, to the call, which outlives every argument of it - so
-    //    `use($b->make()->node)` works, and so does the receiver `$o->get()->size()`
+    //  - an **argument** hands the address to a callee that reads through it and returns, so the
+    //    request travels one step further out. this position *forwards*, which is spelled by opening
+    //    no scope at all - and it is why `use($b->make()->node)` works, and the receiver
+    //    `$o->get()->size()` with it
     //  - a **declaration, an assignment, a return or an initialization** keeps it past the statement
     //    entirely, and no lifetime a temporary can have would be long enough. refused
+    //  - anything else *reads* the value, so this edge outlives every request below it. bound
     //
     // asked of `wanted` rather than of the parameter, so all four destinations answer through one rule
     // - and so it holds whether or not AST::CallResolver has addressed the argument yet, which is a
     // different pass in the same fixpoint and may not have run
-    if (wanted.is_pointer()) {
-        if (destination != ValueDestination::t_argument) {
-            // one rule, worded as the source spells it: the author's own `&`, or a borrow the
-            // destination asked for and AST::CallResolver would have inserted
-            const bool addressed =
-                arrived != nullptr && arrived->get_node_type() == NodeType::n_expr_addrof;
-
-            refuse_pending_temporaries(mark,
-                addressed ? "the address of" : "a borrow of",
-                "would point into a value destroyed at the end of this statement");
-        }
-
-        return arrived;
+    if (wanted.is_pointer() && destination == ValueDestination::t_argument) {
+        return arrive_value(expr, wanted, param, destination);
     }
 
-    return bind_pending_temporaries(arrived, mark);
+    if (wanted.is_pointer()) {
+        // one rule, worded as the **source** spells it: the author's own `&`, or a borrow the
+        // destination asked for and AST::CallResolver would have inserted. asked of `expr` rather than
+        // of what arrive_value hands back, which is what the wording means and is also the only order
+        // a scope allows - a refusal states its reason when it opens. the two answer alike on every
+        // path that can reach here: the wrappings arrive_value adds are a retain, which takes a place,
+        // and an interface cast, which needs a non-pointer destination
+        const bool addressed = expr != nullptr && expr->get_node_type() == NodeType::n_expr_addrof;
+
+        MaterializationScope scope(*this,
+            addressed ? "the address of" : "a borrow of",
+            "would point into a value destroyed at the end of this statement");
+
+        return scope.close(arrive_value(expr, wanted, param, destination));
+    }
+
+    // the close is **last** on purpose: arrive_value decides copy-or-move while the expression is
+    // still the place it was written as, so a class-typed member read off a temporary is wrapped in a
+    // retain by the ordinary copy rule - and only then does the temporary that owns the storage close
+    // over the retain. retain-then-release, with no arm here that knows a temporary exists
+    MaterializationScope scope(*this);
+    return scope.close(arrive_value(expr, wanted, param, destination));
 }
 
 ExprNode *OwnershipPass::arrive_value(
@@ -1419,9 +1497,9 @@ ExprNode *OwnershipPass::arrive_value(
     }
 
     // a borrow parameter is not a destination at all: nothing changes hands, so a place is exactly
-    // what belongs there. the wanted type being a pointer already answers this, since
-    // needs_destruction is false for one - but a coercion may not have run yet, so the receiver of
-    // a member call arrives here as a bare place against a struct parameter type
+    // what belongs there. the wanted type being a pointer already answers this, since classify_copy
+    // answers t_bytes for one - but a coercion may not have run yet, so the receiver of a member call
+    // arrives here as a bare place against a struct parameter type
     if (param != nullptr && param->has_type() && param->type().is_pointer()) {
         return expr;
     }
@@ -1461,62 +1539,90 @@ ExprNode *OwnershipPass::arrive_value(
         return expr;
     }
 
-    // **a class is copied by retaining it.** this is the one place the two storage classes part ways,
-    // and it is the whole of the difference: a struct that owns something cannot be duplicated, because
-    // there is no way to say what duplicating the thing it owns would mean - but a class value owns a
-    // *count*, and one more reference to the same object is exactly what a copy of it is
-    //
-    // so where a struct gets the diagnostics below, a class gets a retain, and the destination it
-    // arrives at owes the matching release: a local at its scope's end, a by-value parameter at the end
-    // of the callee's body, a field when it is overwritten or its owner is torn down. an explicit `mv`
-    // still works and is still cheaper - it hands the existing reference over instead of adding one -
-    // it is just no longer the only option
-    //
-    // note this is reached for a *place* only. a class-typed call result is already one reference
-    // nobody else holds, and the early return above lets it through untouched
-    if (copy_kind == CopyKind::t_retain) {
-        return &_current_module->nodes.emplace_back<RetainExprNode>(expr);
+    // **the copy, dispatched on the one classification made above.** a switch and not a ladder of
+    // `if`s, and with no `default:`: a fifth way to copy a value cannot be added to AST::CopyKind
+    // without answering it here, which is the whole point of there being one enum. what used to sit
+    // here re-asked the copy-constructor lookup to find out whether the type had an answer at all, so
+    // the refusal was an arm nothing named - and a disagreement between the two would have been a
+    // silently byte-copied owner
+    FunctionDeclNode *copy_ctor = nullptr;
+
+    switch (copy_kind) {
+        // answered above, ahead of the borrow escape and the move analysis, because a value with
+        // nothing to arrange is not this pass's business at all. named here to keep the switch total
+        case CopyKind::t_bytes:
+            return expr;
+
+        // **a class is copied by retaining it.** this is the one place the two storage classes part
+        // ways, and it is the whole of the difference: a struct that owns something cannot be
+        // duplicated, because there is no way to say what duplicating the thing it owns would mean -
+        // but a class value owns a *count*, and one more reference to the same object is exactly what a
+        // copy of it is
+        //
+        // so where a struct gets the diagnostic below, a class gets a retain, and the destination it
+        // arrives at owes the matching release: a local at its scope's end, a by-value parameter at the
+        // end of the callee's body, a field when it is overwritten or its owner is torn down. an
+        // explicit `mv` still works and is still cheaper - it hands the existing reference over instead
+        // of adding one - it is just no longer the only option
+        //
+        // note this is reached for a *place* only. a class-typed call result is already one reference
+        // nobody else holds, and the early return above lets it through untouched
+        case CopyKind::t_retain:
+            return &_current_module->nodes.emplace_back<RetainExprNode>(expr);
+
+        // **and the compiler writes that constructor itself when the answer is not a guess**: a struct
+        // whose properties each have a copy of their own is copied by copying each of them. built here
+        // rather than checked for as a second kind of copy, so what follows cannot tell a synthesized
+        // copy constructor from a written one - the whole difference is who wrote the body, which is why
+        // this arm and the one below meet at the same emission past the switch
+        case CopyKind::t_synthesizable:
+            copy_ctor = ensure_copy_constructor(wanted, location_of_expression(expr));
+            break;
+
+        // **a struct says what its copy is by declaring a constructor that takes a borrow of itself.**
+        // the type holding the raw pointer is the only one that knows what duplicating it means, and
+        // this is it saying so - which is the hole book/concept/ownership_and_moving.md's "Not yet
+        // specified" lists first, and the one the others hang off
+        //
+        // recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are
+        // the same declaration and there is one way to copy a value rather than two to keep in step.
+        // and nothing downstream needs to know: the result is a call, so it is not a place, and the
+        // callee's implicit `return $this` makes it an owner nobody else holds through the t_return
+        // move above
+        //
+        // the position of this whole switch among its neighbours is load-bearing: after the implicit
+        // moves, because a returned local and an initialization *move*, which is cheaper and always
+        // correct - and because a constructor's own `return $this` would otherwise call the copy
+        // constructor from inside the copy constructor
+        case CopyKind::t_constructor:
+            copy_ctor = copy_constructor_for(wanted);
+            break;
+
+        // nobody has said what a copy of this would mean. an arm of its own now, rather than whatever was
+        // left over once a copy-constructor lookup on the way past came back null
+        case CopyKind::t_none:
+            reject_uncopyable(expr, wanted, source, destination);
+            return expr;
     }
 
-    // **a struct says what its copy is by declaring a constructor that takes a borrow of itself.**
-    // the type holding the raw pointer is the only one that knows what duplicating it means, and this
-    // is it saying so - which is the hole book/concept/ownership_and_moving.md's "Not yet specified"
-    // lists first, and the one the others hang off
-    //
-    // recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are the
-    // same declaration and there is one way to copy a value rather than two to keep in step. and
-    // nothing downstream needs to know: the result is a call, so it is not a place, and the callee's
-    // implicit `return $this` makes it an owner nobody else holds through the t_return move above.
-    //
-    // the position among its neighbours is all load-bearing. after the class retain, because a class's
-    // copy is one more reference and that stays true even when the class also declares a `Foo&`
-    // constructor - which builds a *new* object, a different operation. after the implicit moves,
-    // because a returned local and an initialization *move*, which is cheaper and always correct - and
-    // because a constructor's own `return $this` would otherwise call the copy constructor from inside
-    // the copy constructor. and ahead of both rejections below, because with a copy constructor a
-    // *field* source is legal and no longer belongs in the first of them
-    //
-    // **and the compiler writes that constructor itself when the answer is not a guess**: a struct
-    // whose owning properties are all classes is copied by retaining each of them. built here rather
-    // than checked for as a second kind of copy, so what follows cannot tell a synthesized copy
-    // constructor from a written one - the whole difference is who wrote the body
-    //
-    // t_none skips this: there is nothing to synthesize, and asking anyway re-walked the type's
-    // properties at every copy site of every round for the one case that never has an answer
-    if (copy_kind == CopyKind::t_synthesizable) {
-        ensure_copy_constructor(wanted, location_of_expression(expr));
-    }
+    // the classifier named a constructor for both arms that reach here - t_constructor because it read
+    // the slot, t_synthesizable because ensure_copy_constructor has just filled it - so a null is a
+    // compiler bug rather than a program error. reporting the author-facing refusal instead would blame
+    // them for it, which is exactly the divergence this switch exists to make impossible
+    assert(copy_ctor != nullptr && "a copy the classifier named has no constructor to call");
 
-    if (FunctionDeclNode *copy_ctor = copy_constructor_for(wanted)) {
-        // the type's own name, positioned at the copy rather than at the declaration: this is the call
-        // the author could have written by hand, and a diagnostic about it has to point at where the
-        // copy happens
-        const TokenReference &at =
-            virtual_token(copy_ctor->func_name(), Token::Type::t_identifier, location_of_expression(expr));
+    // the type's own name, positioned at the copy rather than at the declaration: this is the call
+    // the author could have written by hand, and a diagnostic about it has to point at where the
+    // copy happens
+    const TokenReference &at =
+        virtual_token(copy_ctor->func_name(), Token::Type::t_identifier, location_of_expression(expr));
 
-        return &emit_resolved_member_call(copy_ctor, at, expr);
-    }
+    return &emit_resolved_member_call(copy_ctor, at, expr);
+}
 
+void OwnershipPass::reject_uncopyable(
+    ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination)
+{
     // a *part* of a value arriving somewhere by copy, which no wording about `mv` would help with:
     // `mv $doc->body` is rejected too, so there is nothing to suggest. reported at the assignment's
     // own token when the source names no variable at all
@@ -1532,7 +1638,7 @@ ExprNode *OwnershipPass::arrive_value(
                 wanted.get_type_desciption(),
                 wanted.get_type_desciption()));
 
-        return expr;
+        return;
     }
 
     _collector.collect_issue<Issue::GenericError>(
@@ -1547,8 +1653,6 @@ ExprNode *OwnershipPass::arrive_value(
             wanted.get_type_desciption(),
             wanted.get_type_desciption(),
             wanted.get_type_desciption()));
-
-    return expr;
 }
 
 void OwnershipPass::collect_unwind(size_t floor_frame, std::vector<NodeReference> &out)
@@ -1660,6 +1764,22 @@ FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
     return call;
 }
 
+AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
+{
+    const ValueType type = place->result_type();
+
+    // an address is the deinit's `$this`, already the borrow its parameter wants - and a mutable
+    // place is what every other drop hands over. neither is this rule's business
+    if (type.is_pointer() || !type.is_const()) {
+        return place;
+    }
+
+    auto &address = _current_module->nodes.emplace_back<AddrOfExprNode>(place);
+
+    return &_current_module->nodes.emplace_back<TypeCastNode>(
+        ValueType::make_pointer(ValueType::make_mutable(type), false), &address, false);
+}
+
 void OwnershipPass::emit_destructor_call(
     VarDeclNode *root,
     const std::vector<std::string> &path,
@@ -1675,7 +1795,8 @@ void OwnershipPass::emit_destructor_call(
     const TokenReference &receiver_token =
         virtual_token("destructor", Token::Type::t_destructor, root->token_varname);
 
-    out.push_back(make_ref(emit_resolved_member_call(dtor, receiver_token, make_place(root, path))));
+    out.push_back(make_ref(emit_resolved_member_call(
+        dtor, receiver_token, receiver_for_teardown(make_place(root, path)))));
 }
 
 void OwnershipPass::emit_property_drops(
@@ -1793,16 +1914,18 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
     publish_synthesized_decl(decl);
 }
 
-void OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenReference &site)
+FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenReference &site)
 {
     // the single gate, and it is both halves of the question: whether there is a body to write at all,
-    // and - since it declines a type AST::find_copy_constructor already answers for - the idempotency
-    // that builds this once per type, at the first copy that needs it
+    // and the idempotency that builds this once per type, at the first copy that needs it - a published
+    // copy constructor classifies as t_constructor, so the second ask declines and the caller reads the
+    // slot the first one filled
     //
-    // everything it declines still reaches the two rejections below the caller: a type that owns
-    // something the compiler has no rule for is a located error, not a silently wrong copy
+    // the caller's switch reaches this from the t_synthesizable arm only, so nothing it would decline
+    // arrives - it is a precondition restated, kept because a body built around an assumption held in
+    // another file is how the ladder below came to be walked twice
     if (!copy_is_synthesizable(type)) {
-        return;
+        return copy_constructor_for(type);
     }
 
     ComplexType *ct = type.get_complex_type();
@@ -1844,14 +1967,16 @@ void OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenRe
     // ever being read as a copy of a type whose copy is still being decided
     ct->set_copy_constructor(&decl);
 
-    // `Foo $this;` - a body-local of value type, exactly as a written constructor's is. first, because
-    // the body reads best that way rather than because it has to be: StmtCodegen::gen_scope seats every
-    // declaration's storage at scope entry and ScopeNode::clone clones a scope's declarations before its
-    // statements, so position decides nothing here. a written constructor's `$this` is still seeded
-    // first for a reason this one does not have - see Parser::seat_this_storage, which puts a class's
-    // heap allocation in the initializer, and this synthesized declaration has none
-    auto &this_decl = _current_module->nodes.emplace_back<VarDeclNode>(
-        virtual_token("$this", Token::Type::t_varname, site), &self_type);
+    // `Foo $this;` - a body-local of value type, built by the same owner a written constructor's is
+    // (AST::declare_constructor_this), and appended before the field writes below for the reason that
+    // owner states: a class carries its heap allocation in this declaration's initializer, and an
+    // initializer runs where it was written
+    //
+    // that a class cannot reach here today - classify_copy answers the retain a step earlier, so no
+    // reference kind is ever synthesizable - is deliberately *not* what this relies on. that guard lives
+    // in another file, and a body built around an assumption held somewhere else is exactly how this
+    // line came to write through a handle that was never allocated
+    auto &this_decl = declare_constructor_this(*_current_module, self_type, site);
     body.add_vardecl(this_decl);
 
     for (size_t i = 0; i < ct->property_count(); i++) {
@@ -1883,10 +2008,11 @@ void OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenRe
         body.children.push_back(make_ref(assign));
     }
 
-    auto &this_result = _current_module->nodes.emplace_back<ReturnNode>(make_place(&this_decl, {}));
-    body.children.push_back(make_ref(this_result));
+    close_constructor_body(*_current_module, decl, this_decl);
 
     publish_synthesized_decl(decl);
+
+    return &decl;
 }
 
 ExprNode *OwnershipPass::make_place(VarDeclNode *root, const std::vector<std::string> &path)

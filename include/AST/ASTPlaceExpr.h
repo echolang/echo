@@ -12,21 +12,41 @@ namespace AST
 {
     class VarDeclNode;
 
-    // true when the expression denotes storage: it has an address, so `&E`, `E:$` and assigning
-    // to E are all meaningful
+    // **what storage does this expression have?** the one taxonomy behind every question the compiler
+    // asks about an expression's address, where there used to be two switches and a type predicate that
+    // had to agree and were written three different ways
     //
-    // shared deliberately. four places have to agree on this question - the parser rejecting
-    // `&($a + $b)`, the adjustment pass deciding value versus place position, the type checker
-    // locating a diagnostic, and the lvalue codegen's dispatch. when each kept its own switch
-    // they drifted, which is how member reads and member writes ended up disagreeing (todo/A3)
-    inline bool is_place_expression(const ExprNode &expr)
+    // total by construction: the switch below names only the two answers that are *not* the common case,
+    // so a node kind added later lands in `t_materializable` - the useful default - instead of silently
+    // answering "no" the way an allow-list makes it (todo/A36, and the same trap CLAUDE.md lists for
+    // `NodeReference::is_expression_node()`)
+    enum class StorageClass
     {
-        switch (expr.get_node_type()) {
+        // it has an address already, so `&E`, `E:$` and assigning to E are all meaningful
+        t_place,
+
+        // no address, but one can be minted: the value is bound to a temporary and *that* is addressed.
+        // which is what a method receiver needs, a method taking the address of the value it is called
+        // on (todo/A13b), and what lets a literal answer a borrow parameter (todo/A13c)
+        t_materializable,
+
+        // no address, and it must not be given one. each of these is load-bearing, and each for its
+        // own reason - see the switch
+        t_addressless,
+    };
+
+    // **asked of the tag, because the tag is the whole of the rule.** the node-taking overload below is
+    // what every caller uses; this one exists because the classification can then be stated and tested
+    // for kinds no small program produces - a closure environment's allocation, a retain the ownership
+    // pass inserts - without having to build one of each
+    inline StorageClass storage_of(NodeType kind)
+    {
+        switch (kind) {
             case NodeType::n_varref:
             case NodeType::n_member_access:
             case NodeType::n_expr_deref:
             case NodeType::n_expr_index:
-                return true;
+                return StorageClass::t_place;
 
             // **a `?->` chain's unwrapped base is a place**, and it has to be: everything after the `?->`
             // is an ordinary member chain, and a method call in there needs a receiver with an address.
@@ -36,53 +56,56 @@ namespace AST
             // it owns nothing, exactly like `$this`: the slot borrows the value the chain already holds,
             // so nothing here is retained and nothing is dropped
             case NodeType::n_expr_chain_base:
-                return true;
+                return StorageClass::t_place;
 
+            // an array literal fills storage, so it has to *name* it - AST::OperatorRewriter expands it
+            // into a declaration and one append per element, which needs a place to append into rather
+            // than a slot to copy a value in to
+            case NodeType::n_expr_array_literal:
+            // NullNode::bound_type is set by the destination, so there is nothing here to size a slot
+            // from until somebody else has spoken
+            case NodeType::n_null:
+            // already values that *mean* an address; giving one storage hands out a ptr<ptr<T>>
+            case NodeType::n_expr_addrof:
+            case NodeType::n_expr_peel:
+            // a transient marker saying a *place* is being handed over. the storage question is about
+            // its operand, and a `mv` that survives to codegen is a compiler defect either way
+            case NodeType::n_expr_move:
+            // already carries its own request outward through the pending queue
+            case NodeType::n_expr_temp_bind:
+                return StorageClass::t_addressless;
+
+            // a call, an indirect call, every literal, an arithmetic result, a cast, `strong($w)`,
+            // `??`, `?->`, a closure, an `instanceof` - all the same thing, a value the program
+            // computed and did not name
             default:
-                return false;
+                return StorageClass::t_materializable;
         }
     }
 
-    // **can this expression be given storage?** a value nobody stored has no address, but it can be
-    // bound to a temporary and then addressed - which is exactly what a method receiver needs, since a
-    // method takes the address of the value it is called on (todo/A13b), and what lets a literal
-    // answer a borrow parameter (`inc(41)` against `inc(int32& $x)`, todo/A13c)
+    inline StorageClass storage_of(const ExprNode &expr)
+    {
+        return storage_of(expr.get_node_type());
+    }
+
+    // true when the expression denotes storage: it has an address
     //
-    // a call is the shape that matters most: it is where a value with no home usually comes from. but
-    // every one of these is the same thing - a value the program computed and did not name - so the
-    // list is deliberately about *shape*, not about where the value came from
-    //
-    // **an allow-list, not "everything that is not a place"**, and each exclusion is load-bearing:
-    //
-    //  - `n_expr_array_literal` has its own rule ("an array literal fills storage, so it has to name
-    //    it"), and leaving it out is what keeps that diagnostic by construction rather than by luck;
-    //  - `n_null` carries no type of its own - NullNode::bound_type is set by the destination, so
-    //    there is nothing here to size a slot from;
-    //  - `n_expr_addrof` and `n_expr_peel` are already values that *mean* an address; giving one
-    //    storage hands out a ptr<ptr<T>>, which AST::OwnershipPass refuses anyway;
-    //  - `n_expr_temp_bind` already carries its request outward through the pending queue.
-    //
-    // asked in the parser, which is where a receiver is decided and no type is known yet, and in
-    // AST::argument_fit, which has the expression but not yet a decision. AST::OwnershipPass asks the
-    // type question that goes with it and is what actually binds the temporary
+    // shared deliberately. four places have to agree on this question - the parser rejecting
+    // `&($a + $b)`, the adjustment pass deciding value versus place position, the type checker
+    // locating a diagnostic, and the lvalue codegen's dispatch. when each kept its own switch
+    // they drifted, which is how member reads and member writes ended up disagreeing (todo/A3)
+    inline bool is_place_expression(const ExprNode &expr)
+    {
+        return storage_of(expr) == StorageClass::t_place;
+    }
+
+    // **may this expression be *given* storage?** asked in the parser, which is where a receiver is
+    // decided and no type is known yet, and in AST::argument_fit, which has the expression but not yet
+    // a decision. AST::OwnershipPass asks the type question that goes with it
+    // (borrow_operand_needs_storage below) and is what actually binds the temporary
     inline bool can_bind_temporary(const ExprNode &expr)
     {
-        switch (expr.get_node_type()) {
-            case NodeType::n_expr_call:
-            case NodeType::n_expr_indirect_call:
-            case NodeType::n_literal:
-            case NodeType::n_literal_float:
-            case NodeType::n_literal_int:
-            case NodeType::n_literal_bool:
-            case NodeType::n_literal_string:
-            case NodeType::n_expr_binary:
-            case NodeType::n_expr_unary:
-            case NodeType::n_type_cast:
-                return true;
-
-            default:
-                return false;
-        }
+        return storage_of(expr) == StorageClass::t_materializable;
     }
 
     // **is there anything here to mint storage for at all?** the half the two requesting arms - a member
@@ -95,6 +118,15 @@ namespace AST
     // it would re-walk a whole `->` chain per link, once per fixpoint round, and throw the answer away
     //
     // a **pointer** operand needs nothing: a borrow-returning call already is the address (todo/A13a)
+    //
+    // **it asks the place half of storage_of and deliberately not the addressless half**, which is the
+    // one place the two questions come apart. can_bind_temporary answers "may the compiler *ask* for a
+    // slot for this shape", which an array literal and a bare `null` must refuse. this answers "does an
+    // operand somebody has already decided to address have anything to size a slot from" - and
+    // `n_expr_temp_bind` is exactly the case where those differ: nothing may request one be materialised
+    // as an argument, because it carries its own request, yet an `&` over one a nested bind produced
+    // does need a slot. the type test below is what excludes the rest: a null and an array literal both
+    // answer unknown here
     //
     // answers *with the type it had to derive* rather than with a bool, so the two narrower questions
     // below share the one derivation. MemberAccessNode::result_type() recurses the whole `->` chain, so a

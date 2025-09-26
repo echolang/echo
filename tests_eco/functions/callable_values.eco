@@ -25,7 +25,7 @@ const function<int32()> $frozen = function() : int32 { return 42; };
 echo $frozen();
 
 // a borrow parameter - one machine word either way, so nothing special happens. taken of a mutable
-// local, since a borrow of a `const` one is `const T&` and does not convert (todo/A25)
+// local, since a borrow of a `const` one is `const T&` and does not convert
 function<int32()> $plain = function() : int32 { return 42; };
 
 function apply_ref(function<int32()>& $f) : int32

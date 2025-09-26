@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:7
+Const violation: cannot assign to 'x' - it is declared const
+Begin: '='
+End: '='
+Code excerpt:
+ [10]> const Inner& $r = &$o->in;
+ [11]> $r->x = 5;
+            ^
+ [12]> 
+
+---- Issue ----
+Issue at 15:12
+Const violation: cannot assign to 'x' - it is declared const
+Begin: '='
+End: '='
+Code excerpt:
+ [14]> const Outer& $co = &$o;
+ [15]> $co->in->x = 7;
+                 ^
+ [16]> 
+
+Critical issues found, cannot compile.

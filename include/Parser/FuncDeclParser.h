@@ -164,8 +164,26 @@ namespace Parser
         AST::TypeNode *type_node,
         const TokenReference &at);
 
-    // the implicit `$this` receiver, typed `self_type` - the non-nullable borrow `Foo&` (or `Foo<T>&`)
-    // every member of the struct shares
+    // **the modifiers written ahead of `function`.** one bundle read by one scan, so the next member
+    // modifier - A17's `public`/`private` - is a field added here rather than a second parameter
+    // threaded through parse_funcdecl and everything it hands the declaration to
+    struct MemberModifiers
+    {
+        // where the `const` was written, so a refusal points at the modifier rather than at the name.
+        // present *is* the modifier - a separate bool beside it would be a second carrier of one fact,
+        // and the site that words the refusal reads the token through a `.value()` the bool does not
+        // guard
+        std::optional<TokenReference> const_token;
+
+        // `const function get() : int32` - the method only reads, so its `$this` is `const Foo&`.
+        // it goes no further than picking that TypeNode: from there the receiver's *type* is the
+        // whole of the feature (AST::receiver_is_const), and nothing downstream carries a flag
+        bool is_const() const { return const_token.has_value(); }
+    };
+
+    // the implicit `$this` receiver, typed `self_type` - the non-nullable borrow `Foo&` (or `Foo<T>&`),
+    // or `const Foo&` for a method declared `const`. which one is Context::receiver_type's answer, and
+    // this takes the node rather than the flag so there is exactly one place that picks
     //
     // shared by the method and destructor arms so the two receivers cannot drift - they are the same
     // thing, and a destructor that borrowed differently would mutate a copy and free nothing

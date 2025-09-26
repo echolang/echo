@@ -1,7 +1,9 @@
 #include "AST/ASTCallResolution.h"
 
 #include "AST/ASTArgumentFit.h"
+#include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
@@ -35,7 +37,10 @@ namespace AST
         // routes any AddrOf through adjust_place without asking
         ExprNode *borrow_if_wanted(NodeCollection &nodes, ExprNode *arg, ArgumentFit fit)
         {
-            if (fit != ArgumentFit::t_borrow && fit != ArgumentFit::t_borrow_temporary) {
+            // all four borrow ranks, asked of AST::fit_is_borrow rather than enumerated here: the const
+            // it gains is already on the operand's type, and which ranks are borrows is the fit
+            // ordering's own question
+            if (!fit_is_borrow(fit)) {
                 return arg;
             }
 
@@ -57,7 +62,11 @@ namespace AST
                 return arg;
             }
 
-            FunctionDeclNode *conversion = find_implicit_conversion(arg->result_type(), expected);
+            // the same expression argument_fit ranked with, so this is retrieval. a borrow parameter is
+            // answered by a conversion to its pointee, and the borrow of the conversion's result is the
+            // separate rank the re-ask below picks up
+            FunctionDeclNode *conversion =
+                find_implicit_conversion(arg->result_type(), implicit_conversion_target(expected));
 
             // the rank identifies the case, so this is retrieval and not a second decision - the two
             // used to share t_conversion with the primitive casts one step below, and a null answer
@@ -97,15 +106,36 @@ namespace AST
         // a parameter that does *not* admit a null is left alone on purpose. AST::bind_null_to declines
         // it, the call stays pending, and AST::TypeChecker reports it against the destination through
         // AST::null_rejection_reason - which is the diagnostic that names `Foo?`
-        void bind_null_arguments(FunctionCallExprNode &call)
+        //
+        // **an array literal is the second thing an argument position has to type**, and for the same
+        // reason spelled the same way: it has no type of its own, its destination is on a declaration
+        // nobody had chosen at parse time, and this is the first point holding both. one loop, two
+        // rules - each still its own function, so neither grew an arm about the other
+        //
+        // answers whether an argument is an array literal still waiting to be *expanded*. that is not
+        // the same as being typed: AST::OperatorRewriter turns the literal into a declaration plus one
+        // append per element and puts the declaration's name here, and coercing against the literal
+        // would fit the wrong node - it is `t_addressless`, so a borrow parameter would get a cast
+        // where an address belongs. so the call waits a round, exactly as an undetermined argument does
+        bool bind_destination_typed_arguments(FunctionCallExprNode &call)
         {
+            bool waiting_on_a_literal = false;
+
             for (size_t i = 0; i < call.arguments.size() && i < call.decl->args.size(); i++) {
                 if (call.arguments[i] == nullptr) {
                     continue;
                 }
 
-                bind_null_to(call.arguments[i], call.decl->args[i]->type());
+                const ValueType expected = call.decl->args[i]->type();
+
+                bind_null_to(call.arguments[i], expected);
+
+                if (bind_array_literal_to(call.arguments[i], expected)) {
+                    waiting_on_a_literal = true;
+                }
             }
+
+            return !waiting_on_a_literal;
         }
 
         // true when every argument's type is known, so a decision made about them is final rather
@@ -299,9 +329,25 @@ namespace AST
             // uniform AddrOfExprNode instead of sniffing the argument's kind
             call.arguments[i] = borrow_if_wanted(nodes, converted, fit);
 
+            // once, for the two questions below: a receiver is an AddrOf over a `->` chain, and
+            // MemberAccessNode::result_type walks the whole chain to answer
+            const ValueType coerced = call.arguments[i]->result_type();
+
+            // **a receiver refused for its const-ness gets no cast.** `ptr<const Foo>` and `ptr<Foo>`
+            // are the same value, so there is nothing here for codegen to lower - the cast's only
+            // effect would be visitTypeCast reporting "cannot implicitly convert", drowning the
+            // located refusal AST::TypeChecker::check_receiver_const words about the same call.
+            //
+            // asked of the one owner rather than re-derived from the two types, which cannot tell
+            // this apart from any other pointee mismatch - and of its predicate half, so the wording
+            // is built by the pass that reports it rather than here, per call, to be thrown away
+            if (i == 0 && const_receiver_refused(*call.decl, coerced)) {
+                continue;
+            }
+
             // is_implicitly_convertible rather than ==, so a borrow passed where a nullable pointer
             // is expected does not acquire a cast codegen has no lowering for
-            if (!is_implicitly_convertible(call.arguments[i]->result_type(), expected)) {
+            if (!is_implicitly_convertible(coerced, expected)) {
                 call.arguments[i] = &nodes.emplace_back<TypeCastNode>(expected, call.arguments[i], true);
             }
         }
@@ -353,7 +399,13 @@ namespace AST
         // before the determinedness test below, which is the half of this that un-wedges the fixpoint:
         // bound, the null has a type and the call settles here rather than in the monomorphizer's
         // out-of-rounds sweep
-        bind_null_arguments(call);
+        //
+        // an array literal argument is typed here too, and unlike a null it also makes the call wait:
+        // what finally reaches the parameter is the declaration AST::OperatorRewriter hoists, not the
+        // literal itself, and that rewrite happens at the top of the next round
+        if (!bind_destination_typed_arguments(call)) {
+            return Result::t_pending;
+        }
 
         // **the fix.** coercing against a type that says nothing cannot tell "no conversion needed"
         // from "no information": the borrow rule declines to wrap, and the cast below it fires for

@@ -24,7 +24,7 @@ struct Slice<T> : Iterable<T>
     /**
      * How many elements the window covers.
      */
-    function count() : usize
+    const function count() : usize
     {
         return $this->len;
     }
@@ -34,7 +34,7 @@ struct Slice<T> : Iterable<T>
      *
      * A branch and two `return`s rather than `return $this->len == 0;` - `string.eco` explains why.
      */
-    function is_empty() : bool
+    const function is_empty() : bool
     {
         if ($this->len > 0) {
             return false;
@@ -49,7 +49,7 @@ struct Slice<T> : Iterable<T>
      * Checked with `assert`, so `echoc build` drops the check - the bargain C's `assert` makes.
      * `$s[$index]` is the same element without the copy.
      */
-    function get(usize $index) : T
+    const function get(usize $index) : T
     {
         return $this[$index];
     }
@@ -64,6 +64,17 @@ struct Slice<T> : Iterable<T>
      * implementation and `$s->at($i)` cannot drift from `$s[$i]`.
      */
     function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * The same borrow, read-only, for when the window itself is `const`.
+     *
+     * One overload set told apart by the receiver, exactly as `Array<T>::at` is: a mutable window
+     * matches the borrow above exactly, a `const` one reaches only this.
+     */
+    const function at(usize $index) : const T&
     {
         return &$this[$index];
     }
@@ -101,6 +112,20 @@ struct Slice<T> : Iterable<T>
  * arguments", with no rule anywhere saying which types may append.
  */
 operator<T> (Slice<T>& $s)[usize $index] : T&
+{
+    assert($index < $s->len, "slice index out of range");
+
+    return &$s->data:$[$index];
+}
+
+/**
+ * The same contract over a `const` window, handing back a borrow that only reads.
+ *
+ * Mirrors `Array<T>`'s const element operator rather than reasoning separately about what `const`
+ * means for a type that borrows its storage: the two are used interchangeably at call sites, so a
+ * `const` one of either yields `const T&`.
+ */
+operator<T> (const Slice<T>& $s)[usize $index] : const T&
 {
     assert($index < $s->len, "slice index out of range");
 

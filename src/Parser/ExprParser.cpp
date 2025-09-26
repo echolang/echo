@@ -996,14 +996,20 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
             auto *base = current_ref.unsafe_ptr<AST::ExprNode>();
 
-            // **an element is addressed, so the container has to be storage.** a place is, and so is
-            // `$p:$`, which names an address directly - nothing else. the message is the one the
-            // shunting yard's fallback still gives a literal or an array literal, and it is asked here
-            // as well because a *call* now reaches this loop: `make()[0]` would otherwise be resolved
-            // against the element contract, and fail as an overload that does not exist rather than as
-            // the missing storage it is. giving a call result somewhere to live is todo/A13c, and needs
-            // AST::argument_fit to rank a non-place against the contract's borrow parameter
-            if (!AST::is_place_expression(*base) && base->get_node_type() != AST::NodeType::n_expr_peel) {
+            // **an element is addressed, so the container has to have storage or be able to be given
+            // some.** a place has it; `$p:$` names an address directly; and anything materializable can
+            // be bound to a temporary and indexed out of that, which is what makes `make()[0]` read the
+            // way it looks (todo/A13c). the container is operand 0 of the element call, so it is an
+            // ordinary borrow argument from there on and AST::argument_fit ranks it t_borrow_temporary
+            //
+            // what is left is genuinely addressless - a bare `null`, an array literal - and the message
+            // is the one the shunting yard's fallback still gives `5[0]` and `[1, 2][0]`, which no
+            // postfix chain claims. nearly the method-receiver gate in FuncCallParser, and for the same
+            // reason - a receiver *is* a borrow argument in position 0 - **but for `:$`**, which is
+            // addressless there and admitted here. a `->` base is read by parse_postfix_chain, which
+            // never hands one over, so the two gates have not had to answer it in the same terms yet
+            if (AST::storage_of(*base) == AST::StorageClass::t_addressless
+                && base->get_node_type() != AST::NodeType::n_expr_peel) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(bracket_token),
                     "only a place can be indexed - a variable, a field or an element. Bind this "
@@ -1797,9 +1803,10 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         //
         // the array literal production widened the ways to arrive here, because a `[` that no postfix
         // chain claimed now parses as one operand rather than being an unexpected token - `5[0]` and
-        // `[1, 2][0]` reach it. a *call* no longer does: the chain runs on one, and its bracket arm
-        // gives the same message from where the decision is (todo/A13c). so this needs to be a
-        // diagnostic before it is anything else
+        // `[1, 2][0]` reach it, and they are the whole of what is left. a *call* runs the chain, whose
+        // bracket arm now indexes it: a call result can be given storage (todo/A13c), and only a
+        // genuinely addressless base is still refused there. so this needs to be a diagnostic before it
+        // is anything else
         if (!expr_parts.empty() && expr_parts.back().opnode == nullptr) {
             const bool looks_like_indexing = cursor.is_type(Token::Type::t_open_bracket);
 

@@ -1,0 +1,22 @@
+--- OUT --->
+7
+9
+107
+7
+99
+--- RAST --->
+# **the implicit copy is a RetainExprNode, not a call.** the declaration is right there on the type and
+# resolution never reaches for it: classify_copy answers t_retain for a class before the copy hook, so a
+# class-typed `$b = $a` is one more reference whatever the type declares
+CHECK: function implicit_is_a_retain
+CHECK: vardecl<type<Counter>>($b) = retain<Counter>(varref<Counter>(var($a)))
+
+# and the release that pairs with it - a retain and a copy owe different teardowns, so the two arms
+# cannot be told apart by the drop alone
+CHECK: release(varref<Counter>(var($b)))
+
+# **spelled out, the same declaration is an ordinary resolved call**, with the receiver addressed to the
+# `Counter&` the constructor takes. so the declaration is reachable and useful - it simply means "build a
+# new object", which is not what an implicit copy of a class means
+CHECK: function explicit_is_a_construction
+CHECK: vardecl<type<Counter>>($c) = call Counter(addrof<Counter&>(varref<Counter>(var($a)))): Counter

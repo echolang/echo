@@ -1,0 +1,21 @@
+--- OUT --->
+11
+104
+111
+5
+119
+100
+1
+--- RAST --->
+# the ordering *is* the assertion: the clone is bound, the view is taken of it, `show` reads through the
+# view, and only then is the clone's buffer released. a call that bound its arguments' temporaries put
+# that release between the second and third of those
+CHECK: vardecl<type<string>>($__temp1) = call clone(
+CHECK: vardecl<type<string::view>>($__temp2) = call view(addrof<string&>(varref<string>(var($__temp1))))
+CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp2))))
+CHECK: release(ma<StringBuf>(varref<string>(var($__temp1))->owner))
+
+# and the same for a substring, which holds a second reference to the same buffer
+CHECK: vardecl<type<string>>($__temp3) = call sub(
+CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp4))))
+CHECK: release(ma<StringBuf>(varref<string>(var($__temp3))->owner))

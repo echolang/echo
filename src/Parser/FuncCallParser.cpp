@@ -362,7 +362,11 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     // wherever an ordinary borrow parameter would - but unreachable in practice from here: a `->` base is
     // read by parse_postfix_chain, which does not accept a parenthesised group, and a primitive declares
     // no methods to call. so what actually reaches this refusal is unchanged
-    if (!AST::is_place_expression(*self_arg) && !AST::can_bind_temporary(*self_arg)) {
+    //
+    // spelled as the one taxonomy rather than as two of its three predicates negated: place,
+    // materializable and addressless are exhaustive, so "neither of the first two" *is* the third,
+    // and saying so keeps this readable against AST::storage_of when a class is added
+    if (AST::storage_of(*self_arg) == AST::StorageClass::t_addressless) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(member_token),
             fmt::format(

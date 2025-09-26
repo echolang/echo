@@ -1,0 +1,48 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:22
+Const violation: cannot assign to 'value' - it is declared const
+Begin: '='
+End: '='
+Code excerpt:
+ [10]>     const function writes_a_field() : void {
+ [11]>         $this->value = 5;
+                           ^
+ [12]>     }
+
+---- Issue ----
+Issue at 15:22
+Const violation: cannot assign to 'x' - it is declared const
+Begin: '='
+End: '='
+Code excerpt:
+ [14]>     const function writes_through_a_path() : void {
+ [15]>         $this->in->x = 5;
+                           ^
+ [16]>     }
+
+---- Issue ----
+Issue at 19:9
+Invalid type conversion: cannot implicitly convert 'const int32' to 'int32&'
+Begin: 'bump'
+End: 'bump'
+Code excerpt:
+ [18]>     const function lends_a_field_mutably() : void {
+ [19]>         bump($this->value);
+              ^
+ [20]>     }
+
+---- Issue ----
+Issue at 23:16
+Const violation: cannot call 'Box::set(int32)' on a const 'Box' - the method is not declared const, so it may write. Mark it `const function set(...)` if it only reads.
+Begin: 'set'
+End: 'set'
+Code excerpt:
+ [22]>     const function calls_a_writer() : void {
+ [23]>         $this->set(1);
+                     ^
+ [24]>     }
+
+Critical issues found, cannot compile.

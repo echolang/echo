@@ -1,6 +1,5 @@
 #include "AST/ASTCopy.h"
 
-#include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
 
 AST::FunctionDeclNode *AST::copy_constructor_for(const AST::ValueType &type)
@@ -12,115 +11,86 @@ AST::FunctionDeclNode *AST::copy_constructor_for(const AST::ValueType &type)
     return AST::find_copy_constructor(type.get_complex_type());
 }
 
-bool AST::copy_needs_constructor(const AST::ValueType &type)
+namespace
 {
-    // the declared answer first, and deliberately not gated on ownership: a type that says how it is
-    // copied is copied that way, so the explicit `Foo($a)` and the implicit `$b = $a` cannot diverge
-    if (AST::copy_constructor_for(type) != nullptr) {
-        return true;
-    }
+    // **the one walk**: a struct is copied by copying each of its properties, so its answer is the fold
+    // of theirs. the copying counterpart of ASTDestruction.cpp's body_needs_destruction, and the same
+    // shape - the walk lives here, the classifier below owns the guards that decide whether to reach it
+    //
+    // asked through the same classifier the ownership pass switches on, so "has somebody said how this
+    // is copied" cannot come apart from "what does copying it do"
+    AST::CopyKind fold_property_copies(const AST::ComplexType *ct)
+    {
+        bool anything_to_arrange = false;
 
-    // and the one the compiler asks on its own behalf: an owning value has no byte copy, whether or
-    // not its author has said what a real one would be
-    return AST::needs_destruction(type);
-}
+        for (size_t i = 0; i < ct->property_count(); i++) {
+            switch (AST::classify_copy(ct->get_property_type(i))) {
+                // one property with no rule is enough: it would be copied as bytes alongside the ones
+                // that do have one, leaving two owners of one resource
+                case AST::CopyKind::t_none:
+                    return AST::CopyKind::t_none;
+
+                // a property that copies as bytes says nothing about the struct holding it - a struct
+                // of nothing but these is a byte copy itself, which is what the flag below tracks
+                case AST::CopyKind::t_bytes:
+                    break;
+
+                // a retain, a declared constructor or a synthesizable property: each is a copy the
+                // synthesized body's field-wise assignment reaches on the next round, through the very
+                // arm that put it there
+                case AST::CopyKind::t_retain:
+                case AST::CopyKind::t_constructor:
+                case AST::CopyKind::t_synthesizable:
+                    anything_to_arrange = true;
+                    break;
+            }
+        }
+
+        return anything_to_arrange ? AST::CopyKind::t_synthesizable : AST::CopyKind::t_bytes;
+    }
+};
 
 AST::CopyKind AST::classify_copy(const AST::ValueType &type)
 {
-    // the byte copy first, through the shared gate rather than through its two halves: a type that
-    // owns nothing *and* has said nothing about copying is copied the way it always was
-    if (!AST::copy_needs_constructor(type)) {
-        return AST::CopyKind::t_bytes;
-    }
-
-    // ahead of the declared constructor - see the header for why that order is not free
-    if (type.is_class()) {
-        return AST::CopyKind::t_retain;
-    }
-
-    // a callable is copied the way a class is: the copy shares the captured environment, so it is one
-    // more reference to it. a callable can declare nothing, so there is no constructor arm to order
-    // against - but it has to precede the two below, which both go looking for properties it has none of
-    if (type.is_callable()) {
-        return AST::CopyKind::t_retain;
-    }
-
-    // an interface value is a class handle wearing an erased type, so it is copied the way a class is
-    // and for the same reason a callable is: what is inside is a different question, and the type cannot
-    // answer it. beside these two rather than below, because an interface declares no copy constructor
-    // (refused at its declaration) and has no properties for either arm below to walk - asking them
-    // would answer t_none, which reads to the author as "this type cannot be copied at all"
-    if (type.is_interface()) {
-        return AST::CopyKind::t_retain;
-    }
-
-    // and a weak reference, which needed **no new kind**: `t_retain` says "one more reference to the same
-    // object", and one more weak reference is exactly that. which count moves is read off the ValueType at
-    // the two sites that emit the code (ClassCodegen::gen_retain_value / gen_release_value), so the copy
-    // taxonomy stays four ways of copying rather than five
+    // the reference kinds, and they are one arm because they are one answer: a copy is one more
+    // reference, and what is behind it is a different question the type cannot answer
     //
-    // that also means the `releases_old` gate in OwnershipPass, which asks `classify_copy(...) ==
-    // t_retain`, admits a weak assignment target with nothing added: `$node->prev = &$other` gives back
-    // the weak reference it was holding, in the order gen_assign already fixes
-    if (type.is_weak()) {
+    // ahead of the declared constructor below - see the header for why that order is not free. a
+    // callable shares its captured environment, an interface value is a class handle wearing an erased
+    // type, and a weak reference needed **no new kind** of its own: which count moves is read off the
+    // ValueType at the two sites that emit the code (ClassCodegen::gen_retain_value /
+    // gen_release_value), so the taxonomy stays four ways of copying rather than five
+    //
+    // that also means the `releases_old` gate in OwnershipPass, which asks for t_retain, admits a weak
+    // assignment target with nothing added: `$node->prev = &$other` gives back the weak reference it
+    // was holding, in the order gen_assign already fixes
+    if (type.is_class() || type.is_callable() || type.is_interface() || type.is_weak()) {
         return AST::CopyKind::t_retain;
     }
 
+    // the declared answer, deliberately not gated on ownership: a type that says how it is copied is
+    // copied that way, so the explicit `Foo($a)` and the implicit `$b = $a` cannot diverge. and ahead
+    // of the destructor arm below, so a type declaring both is copied the way it says
     if (AST::copy_constructor_for(type) != nullptr) {
         return AST::CopyKind::t_constructor;
     }
 
-    // the recursion into properties lives here
-    if (AST::copy_is_synthesizable(type)) {
-        return AST::CopyKind::t_synthesizable;
-    }
-
-    return AST::CopyKind::t_none;
-}
-
-namespace
-{
-    // "every property has a copy somebody has said how to make". the copying counterpart of
-    // ASTDestruction.cpp's body_needs_destruction, and the same shape: the walk lives here, the
-    // public entry below owns the guards
-    bool properties_are_copyable(const AST::ComplexType *ct)
-    {
-        for (size_t i = 0; i < ct->property_count(); i++) {
-            // one uncopyable property is enough: it would be copied as bytes alongside the ones that
-            // do have a rule, leaving two owners of one resource
-            //
-            // asked through the same classifier the ownership pass dispatches on, so "has somebody
-            // said how this is copied" cannot come apart from "what does copying it do"
-            if (AST::classify_copy(ct->get_property_type(i)) == AST::CopyKind::t_none) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-};
-
-bool AST::copy_is_synthesizable(const AST::ValueType &type)
-{
-    // a class is copied by retaining it, which resolve_value_arrival answers before it gets here, and
-    // everything else has no layout to ask about - so this is has_complex_type() minus the classes
+    // nothing else has a layout to ask about, so nothing else can own anything the compiler can see: a
+    // primitive owns its own bytes, a pointer and a borrow own nothing at all, and a type parameter the
+    // fixpoint has not settled yet must read as "nothing to arrange" rather than as a refusal - it is a
+    // not-yet, and the instantiation is classified on its own
     if (!type.is_struct()) {
-        return false;
+        return AST::CopyKind::t_bytes;
     }
 
     const AST::ComplexType *ct = type.get_complex_type();
 
-    // a written copy constructor is the answer, and is never replaced by a synthesized one
-    if (AST::find_copy_constructor(ct) != nullptr) {
-        return false;
-    }
-
-    // a destructor is the author saying this value's teardown is theirs. what a second value
-    // running that same body would mean is exactly the question they have not answered - and the
-    // one place it is knowable is the type itself, which is why the compiler does not guess
+    // a destructor is the author saying this value's teardown is theirs. what a second value running
+    // that same body would mean is exactly the question they have not answered - and the one place it is
+    // knowable is the type itself, which is why the compiler does not guess
     if (AST::find_destructor(ct) != nullptr) {
-        return false;
+        return AST::CopyKind::t_none;
     }
 
-    return properties_are_copyable(ct);
+    return fold_property_copies(ct);
 }

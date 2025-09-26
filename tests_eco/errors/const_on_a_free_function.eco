@@ -1,0 +1,10 @@
+// `const` qualifies a *receiver*, so there is nothing for it to say about a free function - its
+// parameters carry their own const, where the caller can see it. reported and dropped rather than
+// refused outright, so the declaration is still registered and the call below is not a second,
+// unrelated "unknown function"
+const function reads(int32 $n) : int32
+{
+    return $n;
+}
+
+echo reads(1);

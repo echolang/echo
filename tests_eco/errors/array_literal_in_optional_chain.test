@@ -2,14 +2,14 @@ expect: fail
 
 --- OUT --->
 ---- Issue ----
-Issue at 5:11
+Issue at 21:16
 an array literal fills storage, so it has to name it - write it as a declaration's initializer or as an assignment to a variable.
 Begin: '['
 End: '['
 Code excerpt:
- [4]> 
- [5]> echo take([1, 2]);
-                ^
- [6]> 
+ [20]> 
+ [21]> echo $h?->take([1, 2]) ?? 7;
+                     ^
+ [22]> 
 
 Critical issues found, cannot compile.

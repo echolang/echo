@@ -1,0 +1,35 @@
+// `const function` says a method only reads, which makes its receiver `const Foo&` and nothing else -
+// a method's const-ness *is* its args[0], so argument_fit, the mangler and overload resolution each
+// answer it with no rule of their own
+struct Box {
+    int32 $value;
+
+    constructor(int32 $v) { $this->value = $v; }
+
+    const function get() : int32 { return $this->value; }
+
+    function set(int32 $v) : void { $this->value = $v; }
+}
+
+// the case the ticket opened with: before this, `const` on a struct local was a way to make the
+// value unusable rather than a way to protect it
+const $frozen = Box(41);
+echo $frozen->get();
+
+// a mutable receiver reaches a const method too - `Box&` widens to `const Box&`, never the reverse
+$open = Box(1);
+echo $open->get();
+$open->set(7);
+echo $open->get();
+
+// the same on a class, which is a struct on the heap and so needs no arm of its own
+class Cell {
+    int32 $n;
+
+    constructor(int32 $v) { $this->n = $v; }
+
+    const function read() : int32 { return $this->n; }
+}
+
+const $cell = Cell(5);
+echo $cell->read();

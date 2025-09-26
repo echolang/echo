@@ -108,6 +108,63 @@ namespace AST
         bool run_round();
 
     private:
+        // **what an enclosing position does with the storage requests raised beneath it**, opened
+        // where the decision is made and closed over the expression the decision is about.
+        //
+        // there are three answers and only two of them are a scope, which is the point:
+        //
+        //  - **bind.** the position *reads a value*, so it outlives every request below it. closing
+        //    mints the slots, reseats the operands and hangs the drops on the result
+        //  - **refuse.** no lifetime a temporary can have is long enough, so binding one would be
+        //    silently wrong rather than merely tight. closing reports and leaves the tree exactly as
+        //    it was written, which is what lets the reader see the program they wrote
+        //  - **forward** - *no scope at all.* the position keeps an **address** rather than reading a
+        //    value, so it does not outlive the storage and the request travels one step further out.
+        //    every place edge is one, and so is a call: when the value a call hands back is made of a
+        //    temporary it borrowed, the call is not where the lifetime ends
+        //
+        // spelling "forward" as the absence of a scope is deliberate. it is the overwhelmingly common
+        // case - every `&`, `->`, `[…]`, `:$` and `?->` in the program - so a walker arm says nothing
+        // and gets the right answer, and a position that *does* decide has to say which decision it
+        // is making. the two constructors are the two decisions: neither can be written without its
+        // reason, a refusal without wording or a bind without an expression to hang the drops on
+        //
+        // a **frame** lifetime is deliberately not one of these. binding a value to the enclosing
+        // frame is a rewrite of the *statement* rather than of an expression edge - the statement
+        // becomes the declaration - so bind_discarded_temporary owns it, sharing make_temporary and
+        // nothing else. one mint, two shapes
+        class MaterializationScope
+        {
+        public:
+            // the binding form. `pass` outlives it by construction: every scope is a local of a
+            // method on the pass
+            explicit MaterializationScope(OwnershipPass &pass);
+
+            // the refusing form. `action` and `outcome` are the two halves the refusing positions
+            // differ in - an address dangles, a write is simply lost - and they are constructor
+            // arguments rather than a later call so a refusal cannot exist without saying why
+            MaterializationScope(OwnershipPass &pass, const char *action, const char *outcome);
+
+            ~MaterializationScope();
+
+            MaterializationScope(const MaterializationScope &) = delete;
+            MaterializationScope &operator=(const MaterializationScope &) = delete;
+
+            // applies the decision and answers the expression the caller should use in place of
+            // `value` - the same node when nothing was requested, which is every edge in almost every
+            // program. a refusing scope answers `value` unchanged, always: it reports rather than
+            // rewrites. safe to call with null, which is what a refusing position that has no
+            // expression to hand back passes
+            ExprNode *close(ExprNode *value);
+
+        private:
+            OwnershipPass &_pass;
+            size_t _mark;
+            const char *_action = nullptr;
+            const char *_outcome = nullptr;
+            bool _closed = false;
+        };
+
         // the destructible locals of one lexical scope, in declaration order. a `return` unwinds
         // every frame from the innermost out, which is why this is a stack and not a single list
         struct Frame
@@ -154,6 +211,10 @@ namespace AST
         // bodies already resolved, so the fixpoint can call this every round
         std::unordered_set<const FunctionDeclNode *> _processed_functions;
         std::unordered_set<const ScopeNode *> _processed_roots;
+
+        // how many temporaries this body has minted, so their names are distinct. reset per body by
+        // both entry points - see make_temporary for why they are numbered at all
+        size_t _temporary_count = 0;
 
         bool _changed = false;
 
@@ -219,9 +280,20 @@ namespace AST
         // the value (`$o->get()->tag`), and an **`&`**, whose operand is - which is how a *receiver* gets
         // one, since the parser addresses it (`$o->get()->size()`)
         //
-        // a request rather than a rewrite: nothing is edited until a value edge flushes, so the positions
-        // that refuse one instead leave the tree exactly as it was written
+        // a request rather than a rewrite: nothing is edited until a MaterializationScope closes, so the
+        // positions that refuse one instead leave the tree exactly as it was written
+        //
+        // one queue for the whole walk, and the scopes index into it by mark - which is what makes
+        // forwarding free: a position that opens no scope simply does not take anything off it
         std::vector<ExprNode *> _pending_temporaries;
+
+        // **the one place a request is raised**, so the queue has a single writer and the three arms that
+        // can reach into a value with no home - `$o->get()->tag`, `$o->get()->size()`, `f(41)` - all put
+        // theirs on it the same way. *whether* to raise one stays with the arm, which is the only thing
+        // that knows: a member base additionally needs somewhere to reach into, and a discarded chain
+        // base needs destroying rather than addressing. a `wants` parameter here read as though this
+        // owned that question too, and it never has
+        void request_storage_for(ExprNode *owner);
 
         // **the operand edge a request means, as one answer rather than three.** reading the operand,
         // reseating it once its temporary exists, and naming it in a diagnostic are the same question,
@@ -232,6 +304,10 @@ namespace AST
         // how a diagnostic names what the request was reaching into - `its member 'tag'`, or just `it`
         std::string describe_pending(ExprNode *owner) const;
 
+        // MaterializationScope's two closings, and the only two ways a request ever leaves the queue.
+        // private to the pass and reached only through the scope, so a position cannot bind or refuse
+        // without having declared which it does
+
         // binds every request above `mark` into a TemporaryBindExprNode wrapping `value`, in binding
         // order, with the drops in reverse. answers `value` unchanged when there are none, which is
         // every edge in almost every program
@@ -239,8 +315,7 @@ namespace AST
 
         // discards every request above `mark`, reporting each: the position wanted the temporary's
         // *address*, and an address into a value destroyed at the end of the statement is the one thing
-        // binding one cannot make safe. `action` and `outcome` are the two halves the three refusing
-        // positions differ in - an address dangles, a write is simply lost
+        // binding one cannot make safe
         void refuse_pending_temporaries(size_t mark, const char *action, const char *outcome);
 
         // a local moved out of on one branch of an `if` but not the other. the chapter says the
@@ -321,6 +396,21 @@ namespace AST
         FunctionCallExprNode &emit_resolved_member_call(
             FunctionDeclNode *callee, const TokenReference &at, ExprNode *place);
 
+        // **a teardown reaches a const value.** `const` is a promise about what the *program* writes,
+        // and a drop is not one of its writes: the storage is going away, and nothing that happens to
+        // it afterwards is observable. refusing here would make `const` unusable for every type that
+        // owns anything - a const local of one could not be declared at all - which is protecting
+        // nothing.
+        //
+        // spelled as the **explicit** cast a user would have to write for the same narrowing, so
+        // nothing is weakened by it: AST::TypeChecker validates implicit casts only, and every arrival
+        // at a mutable borrow the *program* wrote still answers to AST::const_receiver_refusal.
+        //
+        // the address is taken here rather than left to emit_resolved_member_call, which would then
+        // have a `ptr<const Foo>` and nothing to cast it from. a place that is already an address, or
+        // one that is not const, is handed back untouched so that rule keeps its single owner
+        ExprNode *receiver_for_teardown(ExprNode *place);
+
         // the destructor call for one value, when its type declares one. the receiver is the address of
         // the place - except when the place already *is* that address, which is the deinit's `$this`
         void emit_destructor_call(
@@ -395,13 +485,27 @@ namespace AST
         // and `Box<Handle>` can while `Box<Buffer>` cannot. AST::copy_is_synthesizable (ASTCopy.h) is
         // the rule, and it declines a type that already has a written one
         //
+        // **answers the declaration**, which is what the caller goes on to call. that is one asking of
+        // the copy-constructor lookup rather than "publish it, then read the slot back" - the arm that
+        // gets here has already classified the type, and re-deriving what it just decided is what A24
+        // took out of this ladder
+        //
         // deliberately **not** registered in AST::FunctionRegistry, unlike the parser's field-wise
         // constructor. that registry is read only while parsing, and a call site is resolved as it is
         // parsed - so a declaration created inside this fixpoint arrives after every written call was
         // already resolved or already reported. it would make `Pair($p)` no more callable than it is
         // now, and would put a per-instantiation declaration into a name-keyed overload set the
         // parser owns. `$q = $p` is the spelling
-        void ensure_copy_constructor(const ValueType &type, const TokenReference &site);
+        FunctionDeclNode *ensure_copy_constructor(const ValueType &type, const TokenReference &site);
+
+        // **there is no copy of this value, and this is what the author is told.** two wordings, and
+        // which one applies is not a property of the type: a source that names no variable has no `mv`
+        // to suggest, because `mv $doc->body` is rejected too
+        //
+        // split out of arrive_value's CopyKind switch so the t_none arm reads as one arm beside the
+        // others rather than as fifteen lines of formatting
+        void reject_uncopyable(
+            ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination);
 
         // declarations synthesized this round - class deinits and copy constructors - appended to the
         // file root after the walk rather than during it, since resolve_function is iterating those

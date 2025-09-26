@@ -140,6 +140,91 @@ TEST_CASE("can_bind_temporary admits a value with no home, and only that", "[AST
     REQUIRE_FALSE(can_bind_temporary(*var_ref));
 }
 
+TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
+{
+    // **the arm that keeps the taxonomy total.** storage_of names only the two answers that are not the
+    // common case and lets everything else default to t_materializable, which is what makes a node kind
+    // added later behave usefully instead of silently answering "no" - the allow-list this replaced had
+    // already lost four value-producing kinds that way (todo/A36)
+    //
+    // so this asserts the classification over *every* NodeType an expression can be, and the list is
+    // NodeReference::is_expression_node()'s. a kind added to that one and not considered here fails the
+    // final check below rather than quietly picking up a default nobody looked at
+    const std::vector<std::pair<NodeType, StorageClass>> expected = {
+        // places: they have an address, so `&E`, `E:$` and assigning to E are all meaningful
+        { NodeType::n_varref, StorageClass::t_place },
+        { NodeType::n_member_access, StorageClass::t_place },
+        { NodeType::n_expr_deref, StorageClass::t_place },
+        { NodeType::n_expr_index, StorageClass::t_place },
+        { NodeType::n_expr_chain_base, StorageClass::t_place },
+
+        // addressless, each for its own reason - see the switch
+        { NodeType::n_expr_array_literal, StorageClass::t_addressless },
+        { NodeType::n_null, StorageClass::t_addressless },
+        { NodeType::n_expr_addrof, StorageClass::t_addressless },
+        { NodeType::n_expr_peel, StorageClass::t_addressless },
+        { NodeType::n_expr_move, StorageClass::t_addressless },
+        { NodeType::n_expr_temp_bind, StorageClass::t_addressless },
+
+        // and everything else is a value the program computed and did not name. the last five are the
+        // ones the allow-list had lost: `f($a ?? $b)` against a `T&` parameter could not resolve, with
+        // no diagnostic pointing at the reason
+        { NodeType::n_expr_call, StorageClass::t_materializable },
+        { NodeType::n_expr_indirect_call, StorageClass::t_materializable },
+        { NodeType::n_literal, StorageClass::t_materializable },
+        { NodeType::n_literal_float, StorageClass::t_materializable },
+        { NodeType::n_literal_int, StorageClass::t_materializable },
+        { NodeType::n_literal_bool, StorageClass::t_materializable },
+        { NodeType::n_literal_string, StorageClass::t_materializable },
+        { NodeType::n_expr_binary, StorageClass::t_materializable },
+        { NodeType::n_expr_unary, StorageClass::t_materializable },
+        { NodeType::n_type_cast, StorageClass::t_materializable },
+        { NodeType::n_expr_void, StorageClass::t_materializable },
+        { NodeType::n_expr_class_alloc, StorageClass::t_materializable },
+        { NodeType::n_expr_retain, StorageClass::t_materializable },
+        { NodeType::n_expr_closure, StorageClass::t_materializable },
+        { NodeType::n_expr_instanceof, StorageClass::t_materializable },
+        { NodeType::n_expr_strong, StorageClass::t_materializable },
+        { NodeType::n_expr_null_coalesce, StorageClass::t_materializable },
+        { NodeType::n_expr_optional_chain, StorageClass::t_materializable },
+    };
+
+    // asked of the tag rather than of a node, which is the whole of what storage_of reads - so the
+    // classification can be stated for kinds no two-line program produces (a closure environment's
+    // allocation, a retain the ownership pass inserts) without building one of each
+    for (const auto &[tag, storage] : expected) {
+        INFO("NodeType " << static_cast<int>(tag));
+        REQUIRE(storage_of(tag) == storage);
+    }
+
+    // the kinds that are not expressions at all, and therefore have no storage class to state. spelled
+    // out rather than derived, so that the sweep below is a genuine partition of NodeType
+    const std::vector<NodeType> not_expressions = {
+        NodeType::n_void, NodeType::n_scope, NodeType::n_operator, NodeType::n_vardecl,
+        NodeType::n_var, NodeType::n_assign, NodeType::n_type, NodeType::n_release,
+        NodeType::n_func_decl, NodeType::n_func_return, NodeType::n_if_statement, NodeType::n_guard,
+        NodeType::n_while_statement, NodeType::n_for_statement, NodeType::n_loop_control,
+        NodeType::n_foreach, NodeType::n_namespace_decl, NodeType::n_namespace,
+        NodeType::n_attribute, NodeType::n_type_decl,
+    };
+
+    // **the partition is what makes this total.** every NodeType is either an expression with a stated
+    // storage class or a statement kind with none - so a kind added to the enum and to neither list
+    // fails here rather than quietly taking the t_materializable default nobody looked at
+    for (int tag = 0; tag <= static_cast<int>(NodeType::n_member_access); tag++) {
+        const auto kind = static_cast<NodeType>(tag);
+
+        const bool stated = std::any_of(expected.begin(), expected.end(),
+            [kind](const auto &entry) { return entry.first == kind; });
+        const bool statement =
+            std::find(not_expressions.begin(), not_expressions.end(), kind) != not_expressions.end();
+
+        INFO("NodeType " << tag << " is in neither list - state its storage class, or that it is not "
+             "an expression");
+        REQUIRE(stated != statement);
+    }
+}
+
 TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
 {
     // is_assignable_target is deliberately one wider than is_place_expression: `$p:$ = &$b`

@@ -1,0 +1,55 @@
+// a field that says how it is copied is copied that way, even when the struct holding it says nothing
+// and owns nothing. `Point` declares a copy constructor and no destructor, so it owns no resource -
+// but it is still not a byte copy, and a struct made of them is not one either
+//
+// the copy of `Pair` is synthesized: nobody wrote it, and there is nothing to guess, because each of
+// its properties already has an answer. its field-wise body then reaches `Point`'s constructor through
+// the ordinary arrival rule, the same way structs/copy_constructor_nested.eco's `Plain` does with a
+// body its author wrote by hand
+//
+// the neighbouring case is structs/copy_constructor_no_destructor.eco, where such a type is copied
+// directly rather than as somebody's field
+
+struct Point
+{
+    int32 $x;
+
+    constructor(int32 $x)
+    {
+        $this->x = $x;
+    }
+
+    constructor(Point& $other)
+    {
+        echo 700;
+        $this->x = $other->x;
+    }
+}
+
+struct Pair
+{
+    Point $a;
+    Point $b;
+}
+
+// two copies, one per property, in declaration order
+$p = Pair(Point(1), Point(2));
+$q = $p;
+
+echo $q->a->x;
+echo $q->b->x;
+
+// and transitively: `Wrap` owns nothing either, and its synthesized copy reaches `Pair`'s synthesized
+// one, which reaches `Point`'s written one
+struct Wrap
+{
+    Pair $inner;
+    int32 $n;
+}
+
+$w = Wrap(Pair(Point(3), Point(4)), 50);
+$v = $w;
+
+echo $v->inner->a->x;
+echo $v->n;
+echo 99;

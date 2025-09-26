@@ -1,5 +1,6 @@
 #include "AST/FunctionDeclNode.h"
 
+#include "AST/ASTConstness.h"
 #include "AST/ASTMangler.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
@@ -11,7 +12,8 @@ bool AST::FunctionDeclNode::is_interface_requirement() const
 
 const std::string AST::FunctionDeclNode::node_description()
 {
-    std::string buffer = "function " + namespaced_func_name() + " -> " + get_return_type_description() + "\n";
+    std::string buffer = std::string(AST::receiver_is_const(*this) ? "const " : "")
+        + "function " + namespaced_func_name() + " -> " + get_return_type_description() + "\n";
 
     if (args.size() > 0) {
         for (auto arg : args) {
@@ -33,6 +35,14 @@ const std::string AST::FunctionDeclNode::signature_description() const
     // string reaches NoMatchingOverload, AmbiguousCall, DuplicateFunctionSignature and the debug
     // dumps, so a leaked `$this` would be visible in every one of them
     std::string buffer;
+
+    // **not cosmetic.** a method may be overloaded on its receiver's const-ness - `at()` beside
+    // `const at()` - and those two differ in nothing else this string renders, since the receiver
+    // itself is deliberately absent from it. without the prefix, NoMatchingOverload and
+    // AmbiguousCall would list the same line twice and name nothing the author could act on
+    if (AST::receiver_is_const(*this)) {
+        buffer += "const ";
+    }
 
     if (owner_type != nullptr) {
         buffer += owner_type->namespaced_name() + ECO_NAMESPACE_SEPARATOR;

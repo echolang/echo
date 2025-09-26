@@ -1,0 +1,39 @@
+// a **literal** reaching a view parameter through the `#[implicit]` conversion, which needs two things
+// that used to be missing (todo/A13c):
+//
+//  - the conversion's receiver is `$this`, so it needs an address, and a literal has no storage. it gets
+//    a temporary, the same one any other non-place borrow argument gets
+//  - the parameter is a *borrow*, so the conversion has to be looked up against what it borrows.
+//    `find_implicit_conversion` compares return types exactly, and `string::view` never equals
+//    `string::view&` - so `AST::implicit_conversion_target` asks one level in
+//
+// the two compose on one argument: convert first, then borrow the conversion's result. that is two
+// temporaries in one bind, which is what `TemporaryBindExprNode::temporaries` is a vector for
+
+class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+
+#[core: "string"]
+struct string
+{
+    #[core: "string_view"]
+    struct view { ptr<const uint8> $bytes; usize $size; }
+
+    string::view $window;
+    StringBuf $owner;
+
+    #[implicit]
+    function view() : string::view { return $this->window; }
+}
+
+// by borrow, which is the spelling the stdlib uses everywhere
+function show(string::view& $v) : void { echo $v->size; }
+
+// and by value, the shape that worked for a place and not for a literal
+function showv(string::view $v) : void { echo $v->size; }
+
+show('hello');
+showv('hi');
+
+// a place still needs only the one temporary - there is nothing to give the receiver, it has storage
+$owned = 'john';
+show($owned);

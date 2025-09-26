@@ -174,8 +174,8 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
 
     // the initializer stays at the declaration's position and is *not* hoisted with the slot: it is a
     // statement, and statements run in the order they were written. for a class constructor's `$this`
-    // that is load-bearing rather than tidy - Parser::seat_this_storage puts the heap allocation in this
-    // initializer, so the declaration still has to precede every field write that stores through it
+    // that is load-bearing rather than tidy - AST::declare_constructor_this puts the heap allocation in
+    // this initializer, so the declaration still has to precede every field write that stores through it
     if (node.init_expr) {
         node.init_expr->accept(*_ctx.visitor);
 

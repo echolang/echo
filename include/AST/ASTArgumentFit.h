@@ -27,6 +27,16 @@ namespace AST
         // implicitly. see AST::CallResolver::coerce_arguments, which performs exactly this case
         t_borrow,
 
+        // the same borrow, into a parameter that promises only to read: a mutable place handed to a
+        // `const T&`. **the borrow-level mirror of t_widening**, and ranked below t_borrow for that
+        // rank's own reason - the argument gains a promise it did not have, so an overload that
+        // wanted no promise fits better.
+        //
+        // without this rank the two are one, and `f(Foo&)` beside `f(const Foo&)` is ambiguous for
+        // every mutable argument - which is exactly the pair a read-only `operator []` forms with the
+        // writable one, so const overloading is unusable without it
+        t_borrow_const,
+
         // the mirror of it: the argument is a place holding a non-nullable borrow and the parameter
         // wants the value, so the read goes one level through. PointerAdjuster::as_value_for already
         // emits that deref - this rank is only the *scoring* of it, which was missing
@@ -95,6 +105,11 @@ namespace AST
         // against the stdlib, whose borrow parameters are written bare
         t_borrow_temporary,
 
+        // and the read-only form of that one, t_borrow_const's mirror at the bottom of the ranking.
+        // both borrow arms owe the distinction or const overloading works for a place and is
+        // ambiguous for a temporary - `$a[0]` resolving where `f()[0]` does not
+        t_borrow_temporary_const,
+
         // the argument's type says nothing yet: a string literal, an unbound `null`, a member of
         // an incomplete struct, a mixed-operand binary expression, or anything still mentioning a
         // type parameter. neutral - it neither qualifies nor disqualifies a candidate
@@ -146,6 +161,88 @@ namespace AST
         return param.is_pointer() && !param.is_nullable();
     }
 
+    // **may a borrow of `from` satisfy `to`?** the const half of the two borrow arms, which compare
+    // the pointee with make_mutable on both sides and so would otherwise hand a mutable borrow of a
+    // const place to a parameter that may write through it.
+    //
+    // the same asymmetry is_implicitly_convertible already applies to a pointee (`int32&` reaches
+    // `const int32&`, never the reverse) - stated here rather than reused from there because that one
+    // compares two pointers and this compares a *value* against the pointee of one. taking an address
+    // must not launder a promise the address-of was inserted for.
+    //
+    // the arms it does not gate: t_widening delegates to is_implicitly_convertible, which already has
+    // the rule, and t_read_through is a read - copying a const value out of one is exactly what a
+    // const borrow is for
+    inline bool borrow_preserves_const(const ValueType &from, const ValueType &to)
+    {
+        return to.pointee().is_const() || !from.is_const();
+    }
+
+    // **the whole type half of a borrow arm**, const rule included: the pointee is compared with
+    // make_mutable on both sides, so the const promise has to be checked separately, and the two are
+    // one question rather than two lines an arm can be written with only half of.
+    //
+    // one helper for the same reason borrow_rank is one - the arms are documented as verbatim mirrors,
+    // and a condition spelled twice is one that drifts. this is what leaves each arm differing only in
+    // its *expression* test, which is the one thing that genuinely does differ between them
+    inline bool borrow_type_matches(const ValueType &from, const ValueType &to)
+    {
+        return borrow_preserves_const(from, to)
+            && ValueType::make_mutable(from) == ValueType::make_mutable(to.pointee());
+    }
+
+    // which of a borrow arm's two ranks this argument earns: `matched` when the argument's const-ness
+    // is already the parameter's, `promised` when the parameter adds const the argument did not have.
+    //
+    // one helper over both arms rather than the test spelled twice, because they are documented as
+    // verbatim mirrors and this is exactly the kind of rule that drifts between two copies - one of
+    // them ranking and the other not is how `$a[0]` and `f()[0]` come to resolve differently
+    inline ArgumentFit borrow_rank(
+        const ValueType &from, const ValueType &to, ArgumentFit matched, ArgumentFit promised)
+    {
+        return from.is_const() == to.pointee().is_const() ? matched : promised;
+    }
+
+    // **did this fit score a wrapping in an address?** all four borrow ranks answer yes, because the
+    // const pair differs from the plain one only in how it *scores* - the node AST::CallResolver
+    // produces is the same address either way.
+    //
+    // named here, where the ranks are defined, rather than enumerated at the call site: each borrow
+    // arm gains a `_const` twin by construction, so a fifth rank added to the enum and not to a
+    // hand-written `if` is an argument that silently stops being addressed
+    inline bool fit_is_borrow(ArgumentFit fit)
+    {
+        switch (fit) {
+            case ArgumentFit::t_borrow:
+            case ArgumentFit::t_borrow_const:
+            case ArgumentFit::t_borrow_temporary:
+            case ArgumentFit::t_borrow_temporary_const:
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    // **what a `#[implicit]` conversion has to return to answer this parameter.** a borrow parameter is
+    // answered by a conversion to its *pointee*: the conversion produces a value, and the borrow of that
+    // value is a separate and later rank, which is exactly why t_borrow_temporary sits below
+    // t_declared_conversion. so the question is asked one level in
+    //
+    // `const` is dropped for the borrow arms' reason - `const string::view&` is answered by the same
+    // declaration a bare one is, and is_implicitly_convertible accepts the resulting `string::view&`
+    // without a cast
+    //
+    // its own rule with two readers rather than a peel spelled at each: AST::argument_fit decides *that*
+    // a conversion applies and AST::CallResolver retrieves *which*, and a disagreement between the two
+    // trips the `assert` in convert_if_wanted. AST::find_implicit_conversion itself is deliberately left
+    // exact - its comparison is what keeps a chain of conversions unsearchable - so the peel belongs
+    // here, where the thing being described is a parameter position
+    inline ValueType implicit_conversion_target(const ValueType &param)
+    {
+        return parameter_auto_borrows(param) ? ValueType::make_mutable(param.pointee()) : param;
+    }
+
     // **the** rule for "does this argument answer this parameter" - the only implementation, with
     // three readers that each take a different amount of it:
     //
@@ -188,8 +285,13 @@ namespace AST
             // a *place* only, and deliberately not the t_borrow_temporary arm at the bottom: a weak
             // exists to outlive the handle it watches, so binding one to storage that dies with the
             // statement is a shape nobody can have meant
+            // the pointee comparison is the borrow arms', asked through the same helper so this does
+            // not become a third spelling of "which pointee does a borrow accept" - const rule
+            // included, which costs this arm nothing it wanted: a `const weak<Foo>` place handed to a
+            // `weak<Foo>&` is the laundering borrow_preserves_const exists to refuse, and refusing it
+            // here is the arm agreeing with its two mirrors rather than an exception to them
             if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)
-                && ValueType::make_mutable(from) == ValueType::make_mutable(to.pointee())) {
+                && borrow_type_matches(from, to)) {
                 return ArgumentFit::t_borrow;
             }
 
@@ -206,11 +308,9 @@ namespace AST
 
         // a borrow parameter takes the address of any place - which parameters those are is
         // parameter_auto_borrows, shared with the inference that has to predict this
-        if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)) {
-            const ValueType pointee = ValueType::make_mutable(to.pointee());
-            if (ValueType::make_mutable(from) == pointee) {
-                return ArgumentFit::t_borrow;
-            }
+        if (parameter_auto_borrows(to) && expr != nullptr && is_place_expression(*expr)
+            && borrow_type_matches(from, to)) {
+            return borrow_rank(from, to, ArgumentFit::t_borrow, ArgumentFit::t_borrow_const);
         }
 
         // reading one level *through* a borrow to fill a value parameter, which is what
@@ -259,20 +359,26 @@ namespace AST
         // CallResolver can tell this case apart from the primitive conversions above by the rank
         // alone rather than by asking the lookup a second time.
         //
-        // a **place**, for the borrow arm's reason one rule up: the conversion is a call whose receiver is
-        // `$this`, so it needs an address. a temporary for a non-place argument *exists* now
-        // (AST::TemporaryBindExprNode, todo/A13b) and both a method receiver and the borrow arm below
-        // already get one - what is still missing is that this arm asks for it too, which is the
-        // remaining half of todo/A13c. until that lands `f('literal')` against a view parameter reports
-        // an ordinary mismatch rather than being lowered wrong
-        if (expr != nullptr && is_place_expression(*expr) && find_implicit_conversion(from, to) != nullptr) {
+        // **asked of implicit_conversion_target rather than of `to`**, so a borrow parameter is answered
+        // by a conversion to what it borrows. without that peel this arm could never fire for one at all,
+        // the return type `string::view` never equalling the parameter type `string::view&` - so the
+        // compose t_borrow_temporary's comment describes was unreachable rather than merely ungated
+        //
+        // **any operand, place or not.** the conversion is a call whose receiver is `$this`, so it needs
+        // an address - and a non-place argument gets one the same way every other borrow argument does,
+        // from the temporary AST::OwnershipPass mints for the `&` CallResolver writes around it. so
+        // `f('hello')` composes: the literal is bound, the conversion reads it, and the borrow of *that*
+        // takes the rank below (todo/A13c)
+        if (expr != nullptr
+            && find_implicit_conversion(from, implicit_conversion_target(to)) != nullptr) {
             return ArgumentFit::t_declared_conversion;
         }
 
         // and the same borrow parameter filled by a value that has no storage at all, which the
-        // compiler answers by materialising a slot for it. the type test is the borrow arm's *verbatim*
-        // - only the expression test differs, is_place_expression there and can_bind_temporary here -
-        // so the two cannot come to different answers about which pointee a borrow accepts
+        // compiler answers by materialising a slot for it. the type test is the borrow arm's, through
+        // borrow_type_matches rather than spelled again, so the two cannot come to different answers
+        // about which pointee a borrow accepts - only the expression test differs, is_place_expression
+        // there and can_bind_temporary here, and AST::storage_of makes those two mutually exclusive
         //
         // **last**, so that no arm above changes behaviour: a place reaches t_borrow twelve lines up and
         // returns there, never seeing this one. that is the whole of why this is an additive change
@@ -282,11 +388,9 @@ namespace AST
         // pointer read out of a temporary is an address into it"), and the AddrOf CallResolver already
         // wrote would then reach gen_lvalue with nothing to address
         if (parameter_auto_borrows(to) && expr != nullptr && !from.is_pointer()
-            && !is_place_expression(*expr) && can_bind_temporary(*expr)) {
-            const ValueType pointee = ValueType::make_mutable(to.pointee());
-            if (ValueType::make_mutable(from) == pointee) {
-                return ArgumentFit::t_borrow_temporary;
-            }
+            && can_bind_temporary(*expr) && borrow_type_matches(from, to)) {
+            return borrow_rank(
+                from, to, ArgumentFit::t_borrow_temporary, ArgumentFit::t_borrow_temporary_const);
         }
 
         return ArgumentFit::t_none;

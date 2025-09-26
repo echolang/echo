@@ -405,7 +405,8 @@ namespace AST
     //
     // there is no syntax for this and there is not meant to be: `Foo(...)` builds either storage class,
     // and which one it is, is the declaration's business rather than the call site's. so the node is
-    // synthesized by the type declaration parser, in exactly the place a struct constructor leaves
+    // synthesized by AST::declare_constructor_this - the one minter of a constructor's `$this`, for the
+    // parser's two and the ownership pass's alike - in exactly the place a struct constructor leaves
     // `$this` uninitialized, and everything else about a constructor - the property writes, the
     // implicit `return $this` - is the struct path unchanged.
     //
@@ -915,9 +916,10 @@ namespace AST
     // which is what a `Map<K, V>` literal will reuse rather than re-derive.
     //
     // it is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
-    // the appends, and only the enclosing scope has both. legal as a declaration's initializer or as
-    // an assignment's right-hand side, and a located error anywhere else - `f([1, 2, 3])` included,
-    // because an argument has no temporary to expand into yet (todo/A13c)
+    // the appends, and only the enclosing scope has both. where the author named that storage - a
+    // declaration's initializer, an assignment to a variable - the expansion fills it. everywhere else
+    // the compiler names it, hoisting a synthesized declaration ahead of the statement and wrapping
+    // the pair in a scope so it dies with the statement rather than with the frame (todo/A13c)
     class ArrayLiteralExprNode : public ExprNode
     {
     public:
@@ -926,6 +928,18 @@ namespace AST
         std::vector<ExprNode *> elements;
 
         TokenReference token_bracket;
+
+        // **the type a destination gave this literal**, which is how `f([1, 2, 3])` knows what to
+        // build. exactly NullNode::bound_type's shape and for exactly its reason: the elements say
+        // what goes in and never what holds them, and at an argument position the only thing that can
+        // say is the parameter - which lives on a declaration nobody has chosen while the literal is
+        // being parsed. AST::CallResolver is the one place holding both, so it is the one place that
+        // sets this, through AST::bind_array_literal_to
+        //
+        // a declaration and an assignment do not use it: they hand their own destination to
+        // AST::OperatorRewriter directly, and a *declaration* with no written type is answered from
+        // the elements by AST::array_literal_type_for. three ways to be typed, one expansion
+        std::optional<ValueType> bound_type;
 
         // has AST::OperatorRewriter finished with this node? the same three-state problem
         // IndexExprNode::resolution_decided solves, and the same answer: without it a destination

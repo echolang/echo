@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:1
+'Array<int32>' has no storage of its own, so writing to it would be lost, because the value is destroyed at the end of this statement. Bind it to a variable first.
+Begin: 'make'
+End: 'make'
+Code excerpt:
+ [10]> 
+ [11]> make()[0] = 5;
+      ^
+ [12]> 
+
+Critical issues found, cannot compile.

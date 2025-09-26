@@ -1,0 +1,15 @@
+// **const is a property of the path to storage, not of its declared type.** a member reached through
+// a `const` borrow is const however the property was declared. answering the raw property type here
+// instead lets the write through a borrow that had promised not to - and it is the same hole that
+// makes a `const` receiver decorative, so this pins both halves of one rule
+struct Inner { int32 $x; constructor(int32 $v) { $this->x = $v; } }
+struct Outer { Inner $in; constructor() { $this->in = Inner(1); } }
+
+$o = Outer();
+
+const Inner& $r = &$o->in;
+$r->x = 5;
+
+// and one level further out, through a const borrow of the whole thing
+const Outer& $co = &$o;
+$co->in->x = 7;

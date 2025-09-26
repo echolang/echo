@@ -224,3 +224,47 @@ TEST_CASE("a bare template name is not the borrow of a generic's self type", "[c
 
     REQUIRE(has_issue_containing(*bundle, "names the template rather than a type"));
 }
+
+TEST_CASE("a class's copy constructor is published but is never the implicit copy", "[copy_constructor]")
+{
+    // the two questions come apart on a class, and both answers are deliberate. `publish_copy_constructor`
+    // is not gated on the storage class, so the declaration *is* recognised and reachable - `Foo($a)`
+    // calls it, and it builds a new object. but classify_copy answers t_retain for a class ahead of the
+    // constructor arm, so an implicit `$b = $a` is one more reference to the object already there
+    //
+    // pinned in both directions because with only one of them the asymmetry reads as an oversight either
+    // way: published-and-never-used looks like a missing dispatch, retained-with-a-constructor-declared
+    // looks like a missing diagnostic. it is neither - the two spellings mean two operations
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Counter {\n"
+        "    int32 $value;\n"
+        "    constructor(Counter& $other) { $this->value = $other->value; }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *decl = type_named(m, "Counter");
+    REQUIRE(decl != nullptr);
+    REQUIRE(decl->is_class());
+
+    // recognised and published, exactly as a struct's is
+    auto *copy_ctor = find_copy_constructor(&decl->complex_type());
+    REQUIRE(copy_ctor != nullptr);
+    REQUIRE(copy_ctor->is_constructor());
+    REQUIRE(copy_ctor->args.size() == 1);
+    REQUIRE(copy_constructor_for(decl->value_type()) == copy_ctor);
+
+    // and true for the reason it is asked, which is what makes the next assertion worth making: this
+    // type does say how it is copied, and the answer is still a retain
+    REQUIRE(copy_needs_constructor(decl->value_type()));
+
+    // the arm that decides, and the class one wins - see AST::classify_copy, whose declaration order is
+    // the order it decides in
+    REQUIRE(classify_copy(decl->value_type()) == CopyKind::t_retain);
+    REQUIRE(classify_copy(decl->value_type()) != CopyKind::t_constructor);
+
+    // and the compiler never writes one for a class either, whatever its properties: that arm is a
+    // struct's alone
+    REQUIRE_FALSE(copy_is_synthesizable(decl->value_type()));
+}

@@ -271,6 +271,14 @@ Node *ArrayLiteralExprNode::clone(CloneContext &cc) const
         element = cc.child(element);
     }
 
+    // a type, so it is substituted like every other. unset in practice today - a call inside an
+    // un-instantiated template body never settles, so nothing has typed the literal by the time the
+    // body is cloned - but the shallow copy carries it, and a `bound_type` still naming `T` would
+    // have the instance building the template's collection
+    if (c->bound_type.has_value()) {
+        c->bound_type = cc.substitute(*c->bound_type);
+    }
+
     return c;
 }
 

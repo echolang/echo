@@ -1,7 +1,7 @@
 // a generic body whose statements declare locals in a *nested* scope, so the instance is cloned through
 // ScopeNode::clone twice - once for the body, once for the loop scope. each scope clones its own
 // declarations ahead of the statements that read them, which is what binds `$b` to the instance's
-// declaration rather than to the template's (todo/A12)
+// declaration rather than to the template's
 
 struct Box<T> {
     T $value;

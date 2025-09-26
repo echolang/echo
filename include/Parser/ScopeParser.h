@@ -21,8 +21,11 @@ namespace Parser
     // in it. they are registered before the first statement is parsed, and that is the whole of what
     // they are for: a name has to be resolvable while the statements that read it are being parsed
     // (Parser::parse_varexpr asks ScopeNode::lookup_variable), and a caller cannot register one after
-    // the fact. where they land in the child list means nothing - StmtCodegen::gen_scope seats every
-    // declaration's storage at scope entry and ScopeNode::clone clones them before the statements
+    // the fact. their *storage* does not care where they land - StmtCodegen::gen_scope seats every
+    // declaration's slot at scope entry and ScopeNode::clone clones them before the statements - but a
+    // seed carrying an **initializer** does, that being a statement and running where it was written.
+    // seeds open the scope for both reasons at once, which is why neither caller has to choose
+    // (AST::declare_constructor_this states the second one for a class constructor's `$this`)
     AST::ScopeNode &parse_scope(
         Payload &payload,
         std::optional<TokenReference> block_token = std::nullopt,

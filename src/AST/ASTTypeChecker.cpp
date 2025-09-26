@@ -19,6 +19,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTConformance.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
@@ -535,12 +536,22 @@ void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
 //
 // is_undetermined_type passes through for the reason it does everywhere else: an unsettled call already
 // has its own issue and does not need a second one stacked on top
+//
+// **and so does a program that has already failed.** AST::OwnershipPass *refuses* some requests rather
+// than binding them - a write through a temporary's element is the shape that reaches here - and a
+// refusal deliberately leaves the tree exactly as it was written, so the unbacked `&` survives to this
+// arm. the two gates did not disagree there; one of them declined, out loud, with a located reason the
+// author can act on. stacking "this is a compiler bug" on top of it would bury the real message, and
+// run_semantic_passes fails the compile on the first one either way
+//
+// the cost is that the rail is blind in a program that is already broken, which is the one program where
+// it was never the interesting diagnostic
 void TypeChecker::visit_addr_of_expr(AddrOfExprNode &node)
 {
     // **the same predicate AST::OwnershipPass mints slots from, not a second spelling of it.** a guard
     // rail that re-derives the rule it polices stops policing it the moment either copy grows an arm,
     // which is precisely the divergence this arm exists to catch
-    if (borrow_operand_needs_storage(*node.operand)) {
+    if (borrow_operand_needs_storage(*node.operand) && !_collector.has_critical_issues()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of_expression(node.operand)),
             fmt::format(
@@ -671,6 +682,34 @@ void TypeChecker::check_abort_message(FunctionCallExprNode &node)
     }
 }
 
+// a `const` value may only be handed to a method that promised to read it. the promise is the
+// receiver's own type - `const Foo&` at args[0] - so the *fit* already refuses this, and what is
+// left is which of the two diagnostics the reader gets: the conversion's, which names a pointee they
+// never wrote, or this one, which names the method and the modifier that would fix it
+//
+// AST::CallResolver declines to wrap such a receiver in a cast for exactly this reason, so nothing
+// else has already spoken by the time this runs
+bool TypeChecker::check_receiver_const(FunctionCallExprNode &node)
+{
+    // the node's own halves only - what makes a *declaration* refusable is const_receiver_refusal's,
+    // and re-derived here it would be a third site that knows what a method is
+    if (node.decl == nullptr || node.arguments.empty() || node.arguments[0] == nullptr) {
+        return false;
+    }
+
+    const std::string refusal =
+        const_receiver_refusal(*node.decl, node.arguments[0]->result_type());
+
+    if (refusal.empty()) {
+        return false;
+    }
+
+    _collector.collect_issue<Issue::ConstViolation>(
+        code_ref_for(node.token_function_name), refusal);
+
+    return true;
+}
+
 void TypeChecker::check_call_argument(
     ExprNode *argument,
     const ValueType &param_type,
@@ -732,12 +771,21 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     if (node.decl && !node.decl->is_generic()) {
         const auto &params = node.decl->args;
 
+        // the receiver's const-ness first, and taking argument 0 out of the loop when it reported -
+        // the generic "expects type 'Box&' but got 'const Box&'" is true and says nothing about the
+        // one edit that fixes it
+        const bool receiver_reported = check_receiver_const(node);
+
         // every argument is checked, the receiver included - `$p->m()` on a null pointer is exactly
         // the case the borrow guard below exists for - but the *number* a diagnostic reports is the
         // one the reader can count to, which is what user_arg_number answers
         if (node.arguments.size() == params.size()) {
             for (size_t i = 0; i < params.size(); i++) {
                 if (!node.arguments[i] || !params[i]->has_type()) {
+                    continue;
+                }
+
+                if (i == 0 && receiver_reported) {
                     continue;
                 }
 

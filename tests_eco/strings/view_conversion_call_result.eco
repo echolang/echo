@@ -1,0 +1,26 @@
+// **the case a call binding its own arguments' temporaries got wrong.** `clone()` returns an owning
+// `string` with a real buffer behind it, and the `#[implicit]` conversion hands back a `string::view`
+// pointing *into* that buffer. so the temporary holding the clone has to outlive the call the view is
+// handed to - and while a call bound the temporaries its arguments raised, it did not: the clone was
+// released, its StringBuf freed, and `show` read the bytes afterwards
+//
+// nothing about the shape says so from the outside. `clone` and `view` are ordinary library
+// declarations, which is why AST::OwnershipPass has no rule naming either one: a call binds nothing,
+// and the enclosing statement - the first thing that genuinely outlives the address - does
+
+function show(string::view& $v) : void
+{
+    echo $v->size;
+    echo $v->byte_at(0);
+    echo $v->byte_at(4);
+}
+
+$owned = 'hello world';
+
+// the clone is a temporary; the view borrows into it; the read happens before it is destroyed
+show($owned->clone());
+
+// and again through a substring, which owns a second reference to the same buffer
+show($owned->sub(6, 5));
+
+echo 1;

@@ -1,0 +1,34 @@
+// a `const` method's receiver is `const Foo&`, and `const` survives a `->` - so every write a body
+// could make through `$this` is refused by the ordinary const rules, with no analysis of the body
+// and no check of its own
+struct Box {
+    int32 $value;
+    Inner $in;
+
+    constructor(int32 $v) { $this->value = $v; $this->in = Inner(0); }
+
+    const function writes_a_field() : void {
+        $this->value = 5;
+    }
+
+    const function writes_through_a_path() : void {
+        $this->in->x = 5;
+    }
+
+    const function lends_a_field_mutably() : void {
+        bump($this->value);
+    }
+
+    const function calls_a_writer() : void {
+        $this->set(1);
+    }
+
+    function set(int32 $v) : void { $this->value = $v; }
+}
+
+struct Inner {
+    int32 $x;
+    constructor(int32 $v) { $this->x = $v; }
+}
+
+function bump(int32& $n) : void { $n = $n + 1; }

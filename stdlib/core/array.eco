@@ -60,8 +60,12 @@ struct Array<T> : Iterable<T>
      *
      * Spelled `Array<T>&`, not `Array&`. Inside a generic struct the bare name is the *template*,
      * which is not a type; only the applied form matches.
+     *
+     * And `const`, because a copy reads its source and nothing more. That is what lets `$b = $a` and
+     * `$a->clone()` work when `$a` is `const` - without it the copy is the one operation a const
+     * array cannot take part in, including the one its own `clone()` is written through.
      */
-    constructor(Array<T>& $other)
+    constructor(const Array<T>& $other)
     {
         $this->data:$ = null;
         $this->len = 0;
@@ -99,7 +103,7 @@ struct Array<T> : Iterable<T>
     /**
      * How many elements are in it.
      */
-    function count() : usize
+    const function count() : usize
     {
         return $this->len;
     }
@@ -107,7 +111,7 @@ struct Array<T> : Iterable<T>
     /**
      * How many it has room for before it has to grow.
      */
-    function capacity() : usize
+    const function capacity() : usize
     {
         return $this->cap;
     }
@@ -115,7 +119,7 @@ struct Array<T> : Iterable<T>
     /**
      * True when it holds no elements. Says nothing about capacity.
      */
-    function is_empty() : bool
+    const function is_empty() : bool
     {
         if ($this->len > 0) {
             return false;
@@ -194,7 +198,7 @@ struct Array<T> : Iterable<T>
      *
      * `$a[$index]` is the same element without the copy, and is what to reach for.
      */
-    function get(usize $index) : T
+    const function get(usize $index) : T
     {
         return $this[$index];
     }
@@ -207,6 +211,19 @@ struct Array<T> : Iterable<T>
      * apart, and `$a->at($i)` cannot come to mean something `$a[$i]` does not.
      */
     function at(usize $index) : T&
+    {
+        return &$this[$index];
+    }
+
+    /**
+     * The same borrow, read-only, for when the array itself is `const`.
+     *
+     * The two are one overload set told apart by the receiver: `$a->at($i)` on a mutable array picks
+     * the borrow above because its receiver matches exactly, and on a `const` one only this reaches.
+     * Written through the const element operator for the reason the mutable form is written through
+     * the mutable one.
+     */
+    const function at(usize $index) : const T&
     {
         return &$this[$index];
     }
@@ -256,7 +273,7 @@ struct Array<T> : Iterable<T>
     /**
      * An explicit deep copy - the same thing `$b = $a` does, said out loud at the call site.
      */
-    function clone() : Array<T>
+    const function clone() : Array<T>
     {
         return Array<T>($this);
     }
@@ -270,6 +287,23 @@ struct Array<T> : Iterable<T>
  * nothing - the same bargain `->at()` and `string::view::byte_at` make.
  */
 operator<T> (Array<T>& $a)[usize $index] : T&
+{
+    assert($index < $a->len, "array index out of range");
+
+    return &$a->data:$[$index];
+}
+
+/**
+ * The same contract over a `const` array: it reads, it chains with `->`, and it does not write.
+ *
+ * Not a method, so there is no receiver here to declare `const` - the operand says it, which is why
+ * this is an ordinary overload rather than anything new. A mutable array still picks the form above,
+ * its operand matching exactly where this one would only widen; a `const` array reaches only this.
+ *
+ * `const T&` is what makes it read-only all the way through: `$c[$i] = v` is then a write through a
+ * const pointee, which the compiler refuses by naming exactly that.
+ */
+operator<T> (const Array<T>& $a)[usize $index] : const T&
 {
     assert($index < $a->len, "array index out of range");
 

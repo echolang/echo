@@ -1,6 +1,7 @@
 #include "AST/ASTArrayLiteral.h"
 
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTTypeParam.h"
@@ -31,6 +32,29 @@ AST::ArrayLiteralExprNode *AST::array_literal_of(AST::ExprNode *expr)
     }
 
     return static_cast<ArrayLiteralExprNode *>(expr);
+}
+
+bool AST::bind_array_literal_to(AST::ExprNode *expr, const AST::ValueType &destination)
+{
+    AST::ArrayLiteralExprNode *literal = array_literal_of(expr);
+
+    if (literal == nullptr) {
+        return false;
+    }
+
+    const AST::ValueType wanted = AST::implicit_conversion_target(destination);
+
+    if (is_undetermined_type(wanted)) {
+        return false;
+    }
+
+    // idempotent, so the round that binds it and every round after read the same answer. the expansion
+    // is decided against this type, and a second opinion arriving later would decide it twice
+    if (!literal->bound_type.has_value()) {
+        literal->bound_type = wanted;
+    }
+
+    return true;
 }
 
 AST::ArrayLiteralLookup AST::array_literal_type_for(

@@ -1,0 +1,20 @@
+// **the lifetime, which is the part that is easy to get wrong.** the hoisted declaration is a local of
+// a scope wrapping the *statement*, not of the enclosing frame - so a literal argument inside a loop is
+// built and destroyed once per iteration. as a frame local it would have held one live collection per
+// iteration until the whole block ended, which is a leak in everything but name
+//
+// the assertion is structural, in the RAST: `Array<T>`'s destructor frees the buffer without running its
+// elements' destructors (notes/stdlib.md records that hole), so there is nothing to print - what there is
+// to check is *where* the drop sits, which is inside the loop body ahead of the next statement
+
+function first(Array<int32>& $a) : int32 { return $a[0]; }
+
+int32 $i = 0;
+int32 $seen = 0;
+
+while ($i < 3) {
+    $seen = $seen + first([$i, 0]);
+    $i = $i + 1;
+}
+
+echo $seen;

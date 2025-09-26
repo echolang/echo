@@ -143,7 +143,13 @@ bool Parser::parse_parameter_list(
 
 bool Parser::starts_funcdecl(Parser::Cursor &cursor)
 {
-    return cursor.is_type_sequence(0, { Token::Type::t_function, Token::Type::t_identifier });
+    // the member modifier prefix, currently one keyword long. it is *optional* here rather than a
+    // second predicate so a struct body has one arm for "this is a method" however it was written -
+    // and so `const` at the head of a property declaration, which reaches the same loop, is told
+    // apart by the `function` behind it rather than by an ordering the two arms have to agree on
+    const size_t offset = cursor.is_type(Token::Type::t_const) ? 1 : 0;
+
+    return cursor.is_type_sequence(offset, { Token::Type::t_function, Token::Type::t_identifier });
 }
 
 bool Parser::starts_closure_literal(Parser::Cursor &cursor)
@@ -543,6 +549,17 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // know which pass it is forwarding
     const bool symbol_only = payload.pass == Pass::t_declarations;
 
+    // the member modifier prefix. read here, before the `function` keyword, because that is where
+    // starts_funcdecl already looks and where A17's `public`/`private` will sit - one scan producing
+    // one bundle, so adding the next modifier is a field rather than a second parameter threaded
+    // through everything below
+    MemberModifiers modifiers;
+
+    if (cursor.is_type(Token::Type::t_const)) {
+        modifiers.const_token.emplace(cursor.current());
+        cursor.skip();
+    }
+
     if (!cursor.is_type(Token::Type::t_function)) {
         payload.collect_unexpected_token(Token::Type::t_function);
         cursor.try_skip_to_next_statement();
@@ -633,8 +650,24 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // a `function` written inside a struct body is a method: the enclosing struct arrived on the
     // context, and it is the only thing that distinguishes this from a free function
     AST::TypeDeclNode *owner_struct = payload.context.self_struct_ptr;
-    AST::TypeNode *self_type = payload.context.self_type_ptr;
+    AST::TypeNode *self_type = payload.context.receiver_type(modifiers.is_const());
     const bool is_method = owner_struct != nullptr && self_type != nullptr;
+
+    // `const` qualifies a *receiver*, so there is nothing for it to say about a free function or an
+    // extern one - their parameters carry their own const, where the caller can see it. reported and
+    // then ignored rather than refused outright, so the declaration still registers and every call
+    // to it gets an ordinary diagnostic instead of "unknown function"
+    //
+    // no reset is needed to ignore it: outside a struct body there is no const receiver
+    // node to have bound, which is what `is_method` being false above already says
+    if (modifiers.is_const() && !is_method) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(modifiers.const_token.value()),
+            fmt::format(
+                "'{}' is not a method, so it cannot be declared const - only a receiver is what "
+                "`const` would qualify. Write `const` on the parameters that are read-only instead.",
+                nametoken.value()));
+    }
 
     // a method of a generic struct carries the owner's parameters ahead of its own, so that one
     // TypeSubstitution binds both: the owner's T from the receiver argument, its own U from the rest

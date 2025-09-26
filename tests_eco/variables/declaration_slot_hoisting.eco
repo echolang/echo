@@ -9,7 +9,7 @@
 // so a `Pair $p;` written in a loop is re-cleared each turn rather than once per call
 //
 // between them, a declaration's position among its siblings stops being load-bearing: a statement above it
-// reads a slot that is already there (todo/A12)
+// reads a slot that is already there
 
 struct Pair {
     int32 $a;

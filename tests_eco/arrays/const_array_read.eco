@@ -1,0 +1,25 @@
+// a `const` array is usable: it indexes, it answers its read-only methods, and it is destroyed at
+// the end of the scope like any other. none of that works without `const` methods: the element
+// contract and the destructor would both want a mutable borrow, which makes `const` on a container a
+// way to make it unusable rather than a way to protect it
+Array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+// the read-only element contract, `operator (const Array<T>&)[usize] : const T&`
+echo $frozen[0];
+
+// and the methods that declared themselves readers
+echo $frozen->count();
+echo $frozen->get(2);
+echo $frozen->is_empty();
+
+// the mutable array still picks the writable contract, its operand matching exactly where the
+// read-only one would only widen - which is what the t_borrow / t_borrow_const ranks decide
+$source[0] = 9;
+echo $source[0];
+
+// a copy reads its source, so it is available to a const one too
+$copy = $frozen->clone();
+$copy[1] = 7;
+echo $copy[1];
+echo $frozen[1];

@@ -1,0 +1,21 @@
+// **the one argument position a literal still cannot take.** everywhere else the compiler hoists a
+// declaration ahead of the statement and puts its name in the literal's place - but a hoist runs
+// unconditionally, and everything under a `?->` runs only when the base was there. so the elements
+// would be evaluated on the null path too, which is an effect the author never wrote
+//
+// `?->` and `??` are the only two forms in the language that do not evaluate their right side, so this
+// is a two-arm rule rather than a control-flow analysis. bind the literal to a name and the refusal
+// goes away, which is what the message says
+
+class Holder
+{
+    int32 $n;
+
+    constructor(int32 $n) { $this->n = $n; }
+
+    function take(Array<int32>& $a) : int32 { return $a[0]; }
+}
+
+Holder? $h = null;
+
+echo $h?->take([1, 2]) ?? 7;

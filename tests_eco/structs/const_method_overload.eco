@@ -1,0 +1,21 @@
+// a method may be overloaded on its receiver's const-ness: `$this` is args[0], so the two mangle
+// apart by construction and the matcher ranks them like any other pair. the receiver decides -
+// t_borrow for the one whose const-ness already matches, t_borrow_const for the one that adds it
+struct Pair {
+    int32 $a;
+
+    constructor(int32 $v) { $this->a = $v; }
+
+    function which() : int32 { return 1; }
+
+    const function which() : int32 { return 2; }
+}
+
+$mutable = Pair(0);
+const $frozen = Pair(0);
+
+// exact receiver wins
+echo $mutable->which();
+
+// only the const one is reachable
+echo $frozen->which();

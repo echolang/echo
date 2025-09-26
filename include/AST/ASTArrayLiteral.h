@@ -60,6 +60,23 @@ namespace AST
 
     ArrayLiteralLookup array_literal_type_for(
         const ArrayLiteralExprNode &literal, const CoreTypes &core, TypeRegistry &types);
+
+    // **the third way a literal is typed: a destination said so.** answers whether `expr` is an array
+    // literal this call typed, and records the type on it if so - the shape AST::bind_null_to has, for
+    // the same reason it has it. an argument's destination lives on a declaration nobody has chosen
+    // while the expression is being parsed, so AST::CallResolver is the only thing that can say, and
+    // it says it here rather than reaching into the node
+    //
+    // `destination` is the parameter as written, and a **borrow** parameter is answered by the
+    // collection it borrows - AST::implicit_conversion_target's peel, for the same reason: the literal
+    // builds a value, and the borrow of that value is somebody else's step. what actually reaches the
+    // parameter is a place, because AST::OperatorRewriter hoists the built collection into a
+    // declaration and puts its name here
+    //
+    // refuses an undetermined destination rather than recording one: a literal typed `unknown` is
+    // indistinguishable from one nothing has typed, and the expansion would then be decided against a
+    // type the next round was going to replace
+    bool bind_array_literal_to(ExprNode *expr, const ValueType &destination);
 };
 
 #endif

@@ -274,7 +274,7 @@ TEST_CASE("A declaration cloned after a reference to it still rebinds", "[clone]
     // scope's declarations before its statements, which is what makes the order below decide nothing
     //
     // the shape is built by reordering rather than written: the parser cannot produce a read above a
-    // declaration, and that is exactly why nothing caught this (todo/A12)
+    // declaration, and that is exactly why nothing caught this
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function late(int32 $n) : int32 {\n"
         "    int32 $z = $n + 1;\n"

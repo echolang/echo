@@ -1,0 +1,22 @@
+// a `const` requirement is part of the contract: it promises a holder of the interface may call it
+// on a value it only borrows to read, so the vtable slot has to be filled by a method that made the
+// same promise. the receiver's type differs by construction between the two - the interface borrows
+// itself, the implementor borrows itself - so its const-ness is the one thing about args[0] that
+// conformance compares
+interface Readable {
+    const function read() : int32;
+}
+
+struct Fixed : Readable {
+    int32 $v;
+
+    constructor(int32 $x) { $this->v = $x; }
+
+    const function read() : int32 { return $this->v; }
+}
+
+$f = Fixed(12);
+echo $f->read();
+
+const $frozen = Fixed(34);
+echo $frozen->read();

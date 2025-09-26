@@ -1,0 +1,13 @@
+// a `const` array reads and does not write, which is the whole of what `const` means on one. the
+// read is pinned by arrays/const_array_read; these are the two shapes that still refuse, and they
+// refuse for different reasons - one is the storage, the other is the method
+Array<int32> $source = [1, 2];
+const $frozen = $source;
+
+// the element contract a const array reaches hands back `const T&`, so the storage this names is
+// const - refused as a const violation rather than as a failed conversion to `Array<int32>&`
+$frozen[0] = 5;
+
+// and a method that did not declare itself a reader is refused by name, with the modifier that
+// would fix it
+$frozen->push(3);

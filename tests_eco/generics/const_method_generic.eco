@@ -1,0 +1,24 @@
+// const-ness is decided once, on the template's receiver, and rides through substitution - so two
+// instances of one generic struct agree about which of its methods only read. a re-derivation sweep
+// that dropped the qualifier would let the generic case silently allow what the non-generic one
+// rejects, so this pins both instances rather than one
+struct Holder<T> {
+    T $item;
+
+    constructor(T $v) { $this->item = $v; }
+
+    const function peek() : T { return $this->item; }
+
+    function replace(T $v) : void { $this->item = $v; }
+}
+
+const $ints = Holder<int32>(3);
+const $floats = Holder<float64>(2.5);
+
+echo $ints->peek();
+echo $floats->peek();
+
+$open = Holder<int32>(1);
+echo $open->peek();
+$open->replace(8);
+echo $open->peek();

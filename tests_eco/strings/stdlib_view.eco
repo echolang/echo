@@ -21,10 +21,11 @@ string::view $tail = $v->sub(6, 5);
 echo $tail;
 echo $tail->size;
 
-// bound to a name first: a method takes the address of its receiver, and the temporary a call
-// returns has no storage to take one of (todo/A13)
+// a method takes the address of its receiver, and a call result has none - so the compiler binds one,
+// which is why this reads the way it looks whether or not the substring is given a name first
 $piece = $owned->sub(6, 5);
 echo $tail->equals($piece->view());
+echo $tail->equals($owned->sub(6, 5)->view());
 
 // an overload taking the owning type still wins outright: a declared conversion ranks below every
 // built-in one

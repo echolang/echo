@@ -1,0 +1,10 @@
+# the string type is declared in the program, so the stdlib's own must be out of the way
+stdlib: off
+
+# native, so this work is exercised through make_exec too and not only the JIT
+mode: build
+
+--- OUT --->
+2
+2
+3

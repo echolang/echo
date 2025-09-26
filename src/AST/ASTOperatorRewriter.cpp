@@ -53,6 +53,12 @@ bool OperatorRewriter::run_round()
         for (auto &file : module_ptr->files()) {
             _current_file = &file;
 
+            // per file, so a case's hoist names do not move when an unrelated file above it grows a
+            // literal - the locality OwnershipPass::_temporary_count has per body. a round that hoists
+            // nothing new leaves the numbering exactly where the round that did put it, because a
+            // decided literal is never hoisted twice
+            _hoist_count = 0;
+
             if (file.root != nullptr) {
                 file.root->accept(*this);
             }
@@ -402,11 +408,30 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
 
     literal.expansion_decided = true;
 
+    std::vector<NodeReference> appends;
+
+    if (!build_literal_expansion(
+            literal, *destination.decl, destination_type, destination.slot, appends)) {
+        return;
+    }
+
+    scope.children.insert(scope.children.begin() + index + 1, appends.begin(), appends.end());
+
+    _changed = true;
+}
+
+bool OperatorRewriter::build_literal_expansion(
+    ArrayLiteralExprNode &literal,
+    VarDeclNode &into,
+    const ValueType &type,
+    ExprNode **slot,
+    std::vector<NodeReference> &appends)
+{
     // has_property_layout, not has_complex_type: the expansion below asks the destination for a
     // zero-argument constructor and appends into the places it makes, and an interface declares
     // neither. so an array literal assigned to an interface-typed destination is the "cannot be built
     // from a literal" diagnostic below rather than a lookup that finds nothing
-    ComplexType *ct = destination_type.has_property_layout() ? destination_type.get_complex_type() : nullptr;
+    ComplexType *ct = type.has_property_layout() ? type.get_complex_type() : nullptr;
 
     if (ct == nullptr) {
         _collector.collect_issue<Issue::GenericError>(
@@ -414,8 +439,8 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
             fmt::format(
                 "'{}' cannot be built from an array literal - a literal fills a collection, through "
                 "its constructor and its append operator.",
-                destination_type.get_type_desciption()));
-        return;
+                type.get_type_desciption()));
+        return false;
     }
 
     // **the constructor of the destination type, named rather than looked up.** an instantiation
@@ -435,36 +460,79 @@ void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
 
     ctor.explicit_type_args = std::move(type_args);
 
-    *destination.slot = &ctor;
+    *slot = &ctor;
 
-    // one `$dest[] = element` per element, spliced in after the statement being expanded. each gets
-    // its **own** place naming the destination - one subtree per append, because PointerAdjuster
-    // rewrites edges in place and a shared one would be adjusted once per use
-    std::vector<NodeReference> appends;
+    // one `$dest[] = element` per element. each gets its **own** place naming the destination - one
+    // subtree per append, because PointerAdjuster rewrites edges in place and a shared one would be
+    // adjusted once per use
     appends.reserve(literal.elements.size());
 
     for (auto *element : literal.elements) {
-        auto &var = _current_module->nodes.emplace_back<VarNode>(destination.decl);
+        auto &var = _current_module->nodes.emplace_back<VarNode>(&into);
         auto &var_ref = _current_module->nodes.emplace_back<VarRefNode>(&var);
 
-        auto &slot = _current_module->nodes.emplace_back<IndexExprNode>(
+        auto &slot_expr = _current_module->nodes.emplace_back<IndexExprNode>(
             &var_ref, std::vector<ExprNode *>{}, literal.token_bracket);
 
         // the two facts the parser records for a hand-written `$a[] = v`, recorded here for the same
         // reasons: the slot is bound rather than read, and the write into it initializes storage
         // that holds nothing, so no teardown is owed
-        slot.slot_is_bound = true;
+        slot_expr.slot_is_bound = true;
 
         auto &assign = _current_module->nodes.emplace_back<AssignNode>(
-            &slot, element, literal.token_bracket);
+            &slot_expr, element, literal.token_bracket);
         assign.is_initialization = true;
 
         appends.push_back(make_ref(assign));
     }
 
-    scope.children.insert(scope.children.begin() + index + 1, appends.begin(), appends.end());
+    return true;
+}
+
+ExprNode *OperatorRewriter::hoist_array_literal(ArrayLiteralExprNode &literal)
+{
+    // under a `?->` or a `??`, where hoisting would move the construction above the branch that
+    // decides whether it happens at all. refused outright rather than waited on - no later round makes
+    // it safe - so report_unplaced_literal is the answer, and its message is already the right one:
+    // the literal has to name its storage, which here means the author writing the declaration
+    if (_hoist_barrier > 0) {
+        report_unplaced_literal(literal);
+        return nullptr;
+    }
+
+    // no destination has spoken yet. AST::CallResolver types an argument's literal when it settles the
+    // call, which is a later step of this same round - so this is the ordinary "ask again next round",
+    // and finalize() is what makes being out of rounds a refusal
+    if (!literal.bound_type.has_value()) {
+        return nullptr;
+    }
+
+    literal.expansion_decided = true;
+
+    // minted after parsing, so no lexical namespace and no block token - nothing reads
+    // ScopeNode::lookup_variable past the parser. the name is numbered for the reason a temporary's
+    // is: a statement may hold two, and a dump in which both read `$__lit` cannot be asserted about
+    auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(
+        _current_module->make_virtual_token(
+            fmt::format("$__lit{}", ++_hoist_count), Token::Type::t_varname, literal.token_bracket),
+        &_current_module->nodes.emplace_back<TypeNode>(*literal.bound_type));
+
+    std::vector<NodeReference> appends;
+
+    if (!build_literal_expansion(literal, decl, *literal.bound_type, &decl.init_expr, appends)) {
+        return nullptr;
+    }
+
+    // the declaration first, then its appends: the statement being walked comes after all of them,
+    // and visitScope wraps the lot in a scope of its own
+    _hoisted.push_back(make_ref(decl));
+    _hoisted.insert(_hoisted.end(), appends.begin(), appends.end());
 
     _changed = true;
+
+    auto &var = _current_module->nodes.emplace_back<VarNode>(&decl);
+
+    return &_current_module->nodes.emplace_back<VarRefNode>(&var);
 }
 
 ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
@@ -473,11 +541,26 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
         return nullptr;
     }
 
-    // an array literal reaching here is one no statement claimed - the vardecl and assign arms hand
-    // theirs to expand_array_literal above and do not descend into them. so this position cannot
-    // hold one, whatever it is
+    // an array literal reaching here is one no *statement* claimed - the vardecl and assign arms hand
+    // theirs to expand_array_literal above and do not descend into them. so this is a literal in an
+    // expression position: an argument, which a destination can type, or a position nothing will ever
+    // type, which report_unplaced_literal is still for
+    //
+    // the hoist answers null while it is waiting, and the literal is then left exactly as written -
+    // the three-state shape expansion_decided exists for. only finalize() turns waiting into a refusal
     if (auto *literal = array_literal_of(expr)) {
-        report_unplaced_literal(*literal);
+        if (literal->expansion_decided) {
+            return expr;
+        }
+
+        if (ExprNode *hoisted = hoist_array_literal(*literal)) {
+            return hoisted;
+        }
+
+        if (_finalizing) {
+            report_unplaced_literal(*literal);
+        }
+
         return expr;
     }
 
@@ -541,8 +624,43 @@ void OperatorRewriter::visitScope(ScopeNode &node)
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
     for (size_t i = 0; i < node.children.size(); i++) {
         expand_array_literal(node, i);
+
+        // **saved and restored around the descent**, because a nested block runs this very loop: a
+        // literal hoisted inside it belongs to *its* statement, and an inner scope finishing would
+        // otherwise hand its leftovers to whatever statement this level was in the middle of
+        std::vector<NodeReference> outer;
+        outer.swap(_hoisted);
+
         statement_edge(node.children[i].node());
+
+        if (!_hoisted.empty()) {
+            wrap_statement_with_hoists(node, i);
+        }
+
+        _hoisted.swap(outer);
     }
+}
+
+void OperatorRewriter::wrap_statement_with_hoists(ScopeNode &scope, size_t index)
+{
+    // **a scope of its own, rather than the declarations spliced into this one.** the difference is
+    // the lifetime: a local of the enclosing frame is dropped when *that* frame ends, so
+    // `f([1, 2, 3])` in a loop body would hold one live collection per iteration until the whole
+    // block ended. wrapped, the frame is the statement's, and AST::OwnershipPass's ordinary
+    // reverse-order scope drop destroys it where the statement finishes - no new mechanism, and a
+    // `return` or a `break` inside the statement unwinds through it like any other frame
+    //
+    // the same shape AST::ForeachLowering's wrapper has, for the same reason, down to carrying no
+    // block token and no lexical namespace
+    auto &wrapper = _current_module->nodes.emplace_back<ScopeNode>();
+    wrapper.parent_ptr = &scope;
+
+    wrapper.children = std::move(_hoisted);
+    wrapper.children.push_back(scope.children[index]);
+
+    _hoisted.clear();
+
+    scope.children[index] = make_ref(wrapper);
 }
 
 void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)
@@ -608,6 +726,10 @@ void OperatorRewriter::visit_guard(GuardNode &node)
 
 void OperatorRewriter::visit_null_coalesce(NullCoalesceExprNode &node)
 {
+    // the other half of the rule above: `$a ?? [1, 2]` evaluates its right side only when the left was
+    // null, and a hoist would build the collection either way
+    const HoistBarrier barrier(*this);
+
     RecursiveVisitor::visit_null_coalesce(node);
 
     node.lhs = upgrade_optional_operand(node.lhs, node.token);
@@ -615,6 +737,13 @@ void OperatorRewriter::visit_null_coalesce(NullCoalesceExprNode &node)
 
 void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
 {
+    // **the one position a hoist must not reach.** everything under a `?->` runs only when the base
+    // was there, and a hoisted declaration runs unconditionally, ahead of the statement - so
+    // `$o?->take([f()])` would call `f()` on the null path too. `?->` and `??` are the only two forms
+    // in the language that do not evaluate their right side, which is what makes this a two-arm rule
+    // rather than a control-flow analysis
+    const HoistBarrier barrier(*this);
+
     RecursiveVisitor::visit_optional_chain(node);
 
     ExprNode *base = upgrade_optional_operand(node.base, node.token);

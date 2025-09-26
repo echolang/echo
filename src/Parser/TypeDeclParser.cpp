@@ -2,7 +2,7 @@
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
-#include "AST/ASTControlFlow.h"
+#include "AST/ASTConstructor.h"
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
@@ -321,26 +321,6 @@ static void leave_member_body(Parser::Payload &payload)
     payload.context.pop_scope();
 }
 
-// gives a constructor's `$this` its storage. a struct's is a plain stack slot that gen_var_decl
-// zero-fills; a class's is a fresh heap block with its strong count already at 1.
-//
-// that one initializer is the entire difference between constructing the two storage classes -
-// everything after it, the property writes and the implicit `return $this`, is shared code. shared by
-// both the user-written and the synthesized constructor so the two cannot diverge
-static void seat_this_storage(
-    Parser::Payload &payload,
-    AST::VarDeclNode *this_vardecl,
-    const AST::ValueType &self_value_type,
-    const TokenReference &name_token)
-{
-    if (!self_value_type.is_class()) {
-        return;
-    }
-
-    this_vardecl->init_expr =
-        payload.context.emplace_nodep<AST::ClassAllocExprNode>(self_value_type, name_token);
-}
-
 // the attributes written ahead of a constructor or a destructor: drained onto the declaration they
 // were written for, then handed to the one owner of every marker that has something to say about a
 // member. neither used to drain, so an attribute sat on the scope's stack until whatever declaration
@@ -523,11 +503,8 @@ static void parse_constructor(
 
     // predeclare "$this" so member access works in the body. a body-local of *value* type, unlike a
     // method's `$this`, which is a borrow parameter - a constructor hands back a new instance
-    auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
-    auto this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, ctor_decl->return_type);
-    seat_this_storage(payload, this_vardecl, self_value_type, name_token);
-    auto this_var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
-    auto this_ref = payload.context.emplace_nodep<AST::VarRefNode>(this_var);
+    auto &this_vardecl = AST::declare_constructor_this(
+        payload.context.module, *ctor_decl->return_type, name_token);
 
     // the parameters' frame is where this constructor ends: a name resolved past it belongs to
     // another function's storage - see ScopeNode::lookup_variable
@@ -547,41 +524,21 @@ static void parse_constructor(
         // and `$this` is fresh storage for as long as this body lasts, so a write to one of its
         // fields is that field's first write - see Context::ctor_this_ptr. *after* the frame above,
         // which clears it: this body has one, the declarations nested in it do not
-        AST::ConstructorScope ctor_this_scope(payload.context, this_vardecl);
+        AST::ConstructorScope ctor_this_scope(payload.context, &this_vardecl);
 
         // the body opens with an implicit `Foo $this;`, exactly as the synthesized field-wise constructor
-        // below does. handed to parse_scope rather than appended once the body is parsed for one reason:
-        // a statement in the body reads `$this` by name, and a name is resolved as it is parsed
-        //
-        // it also has to precede the statements that write through it, and that one is *not* a lowering
-        // detail the way it used to be - seat_this_storage above put a class's heap allocation in this
-        // declaration's initializer, and an initializer runs where it is written
-        ctor_decl->body = &parse_scope(payload, ctor_brace, { this_vardecl });
+        // below does. handed to parse_scope rather than appended once the body is parsed for one reason
+        // this site owns and one it does not: a statement in the body reads `$this` by name and a name is
+        // resolved as it is parsed - and it also has to precede the statements that write through it,
+        // which is AST::declare_constructor_this's rule rather than this parser's
+        ctor_decl->body = &parse_scope(payload, ctor_brace, { &this_vardecl });
     }
 
     leave_member_body(payload);
 
-    // append an implicit `return $this` - unless control already leaves the body on every path.
-    //
-    // AST::scope_always_exits, and not "is one of the children a ReturnNode": a body ending in `die`, or
-    // in an `if` whose arms all leave, is already done, and a return appended behind it is written at a
-    // point nothing reaches. it never reaches the binary either - StmtCodegen::gen_scope stops at the
-    // first terminated block - but AST::OwnershipPass sees a ReturnNode and hangs a full unwind drop set
-    // on it, dead drops that are still type-checked and that mint a generic call site for a generic local
-    //
-    // this is the same re-derivation the ownership pass carried before ASTControlFlow.h existed, and the
-    // same two shapes it got wrong. asking the owner is strictly narrowing: every body the old check
-    // called "returns" is one this answers true for
-    //
-    // **scope_always_leaves_function, not scope_always_exits.** a `break` leaves its scope without leaving
-    // the constructor, so it must not suppress the implicit return - a body that only breaks still owes
-    // `$this`, and without one gen_function_decl synthesizes `ret undef`. the parser refuses a `break` with
-    // no enclosing loop and builds no node for it, so the two predicates cannot disagree here today; this
-    // is the boundary being named while it is still free to name
-    if (!AST::scope_always_leaves_function(*ctor_decl->body)) {
-        auto ret_stmt = payload.context.emplace_nodep<AST::ReturnNode>(this_ref);
-        ctor_decl->body->children.push_back(AST::make_ref(ret_stmt));
-    }
+    // and the implicit `return $this` that ends it, on the same terms as the two synthesized
+    // constructors - see AST::close_constructor_body, which owns when one is owed
+    AST::close_constructor_body(payload.context.module, *ctor_decl, this_vardecl);
 
     payload.context.declaration_scope().add_funcdecl(*ctor_decl);
 }
@@ -786,18 +743,18 @@ static void synthesize_field_wise_constructor(
     auto &ctor_body = payload.context.emplace_node<AST::ScopeNode>();
     default_ctor.body = &ctor_body;
 
-    // allocate "$this"
-    auto this_token = payload.context.make_virtual_token("$this", Token::Type::t_varname, name_token);
-    auto this_vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(this_token, &type_node);
-    seat_this_storage(payload, this_vardecl, self_value_type, name_token);
-    default_ctor.body->add_vardecl(*this_vardecl);
+    // allocate "$this" - ahead of every statement below, which is this body's half of
+    // AST::declare_constructor_this's rule: a class's field writes store *through* the handle its
+    // initializer makes
+    auto &this_vardecl = AST::declare_constructor_this(payload.context.module, type_node, name_token);
+    default_ctor.body->add_vardecl(this_vardecl);
 
     // one read of `$this` per use, never one node shared between them: a node that sits in the tree
     // twice has two parents, and every pass that rewrites a child in place - AST::OperatorRewriter on a
     // member-access base, AST::PointerAdjuster on a deref - would rewrite it once per parent. it is also
     // what lets a clone answer "already cloned" with the one clone: two parents would collapse onto it
     auto make_this_read = [&]() {
-        auto *var = payload.context.emplace_nodep<AST::VarNode>(this_vardecl);
+        auto *var = payload.context.emplace_nodep<AST::VarNode>(&this_vardecl);
         return payload.context.emplace_nodep<AST::VarRefNode>(var);
     };
 
@@ -837,9 +794,10 @@ static void synthesize_field_wise_constructor(
         default_ctor.body->children.push_back(AST::make_ref(member_mut));
     }
 
-    // return the initialized struct instance
-    auto return_stmt = payload.context.emplace_nodep<AST::ReturnNode>(make_this_read());
-    default_ctor.body->children.push_back(AST::make_ref(return_stmt));
+    // return the initialized struct instance, through the same owner the written constructor above ends
+    // by. nothing here can leave early, so the guard inside it always answers "one is owed" - it is
+    // called anyway, because "when does a constructor owe a return" is not a question this site holds
+    AST::close_constructor_body(payload.context.module, default_ctor, this_vardecl);
 
     payload.collector.functions.register_function(
         payload.collector, payload.context.code_ref(name_token), &default_ctor);
@@ -1110,11 +1068,19 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     auto &self_type_node = payload.context.emplace_node<AST::TypeNode>(
         AST::ValueType::make_pointer(self_value_type, false));
 
+    // and the one a `const function` shares: `const Foo&`, the const on the *pointee*, which is
+    // what makes a method that only reads reachable from a const value. built here beside the
+    // mutable one so both are minted once per body and every method of the struct shares whichever
+    // it asked for - and `const` on the pointee rather than on the borrow is the same shape
+    // parse_value_type produces for a written `const Foo&`, so the two spellings are one type
+    auto &self_const_type_node = payload.context.emplace_node<AST::TypeNode>(
+        AST::ValueType::make_pointer(AST::ValueType::make_const(self_value_type), false));
+
     // makes a `function` in this body parse as a method: parse_funcdecl reads the struct off the
     // context to bind `$this`, prefix the owner's type parameters and register on the type. it opens
     // a null frame of its own around each body, so nothing nested inherits the receiver. both passes
     // reach a method, so both need it
-    AST::SelfScope self_scope(payload.context, struct_node, &self_type_node);
+    AST::SelfScope self_scope(payload.context, struct_node, &self_type_node, &self_const_type_node);
 
     // add the struct to the current scope, which is the list --print-ast walks. the body pass only:
     // the declaration pass has no file root, and a name is already resolvable without this because
@@ -1202,21 +1168,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             && cursor.peek_is_type(1, Token::Type::t_identifier)) {
             parse_associated_type(payload, *struct_node, is_interface_body, collect_members);
         }
-        else if (starts_vardecl(payload)) {
-            auto var = parse_varexpr(payload, &structscope);
-
-            // a requirement is behaviour, not storage. a required *property* would fix the layout of
-            // every implementor and mean nothing without a stored offset, so it is refused - which also
-            // keeps ComplexType::has_property_layout() true of exactly the two kinds that have one
-            if (is_interface_body) {
-                refuse_interface_member(
-                    var != nullptr ? var->token_varname : cursor.current(), "a property");
-            }
-            // append the var as a property of the struct
-            else if (var && collect_members) {
-                struct_node->add_property(var);
-            }
-        }
+        // **ahead of starts_vardecl**, for the two arms above's reason and one sharper than theirs:
+        // a method may be written `const function get()`, and starts_vardecl reads that leading
+        // `const` as the head of a property declaration. `function` is a keyword token, so nothing
+        // that starts a vardecl can ever reach this arm - the order costs nothing and is what keeps
+        // the modifier from racing the type-grammar scanner
         else if (starts_funcdecl(cursor)) {
             // a method. the declaration lands in the *enclosing* scope's children rather than in the
             // struct - the struct body never pushes a scope, so `payload.context.scope()` is still
@@ -1239,6 +1195,21 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                         "'{}' is a requirement of the interface '{}', so it cannot have a body - end it "
                         "with ';' and let each implementor write one.",
                         member->signature_description(), struct_node->type_name()));
+            }
+        }
+        else if (starts_vardecl(payload)) {
+            auto var = parse_varexpr(payload, &structscope);
+
+            // a requirement is behaviour, not storage. a required *property* would fix the layout of
+            // every implementor and mean nothing without a stored offset, so it is refused - which also
+            // keeps ComplexType::has_property_layout() true of exactly the two kinds that have one
+            if (is_interface_body) {
+                refuse_interface_member(
+                    var != nullptr ? var->token_varname : cursor.current(), "a property");
+            }
+            // append the var as a property of the struct
+            else if (var && collect_members) {
+                struct_node->add_property(var);
             }
         }
         else if (starts_operatordecl(cursor)) {

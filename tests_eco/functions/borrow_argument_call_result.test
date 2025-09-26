@@ -1,5 +1,5 @@
 --- OUT --->
 7
 --- RAST --->
-CHECK: tempbind<int32>(vardecl<type<Point>>($__temp) = call Point(
-CHECK: call sum(addrof<Point&>(varref<Point>(var($__temp))))
+CHECK: tempbind<int32>(vardecl<type<Point>>($__temp1) = call Point(
+CHECK: call sum(addrof<Point&>(varref<Point>(var($__temp1))))

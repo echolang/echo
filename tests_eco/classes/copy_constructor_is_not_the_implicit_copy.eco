@@ -1,0 +1,54 @@
+// **a class may declare `Foo& $other` and it is still not what `$b = $a` means.** the constructor is
+// recognised, published on the type and callable - `Foo($a)` builds a new object with it - but a class's
+// implicit copy is one more reference to the same object, decided before the copy hook is ever reached
+//
+// the asymmetry is deliberate: a `Foo&` constructor builds a *new* object, which is a different operation
+// from acquiring the one that is already there. this pins both halves, because with only one of them the
+// design reads as an oversight either way
+
+class Counter
+{
+    int32 $value;
+
+    // the copy constructor shape, on a class. +100 so the body announces itself: any value below that
+    // carries it is one this constructor built
+    constructor(Counter& $other)
+    {
+        $this->value = $other->value + 100;
+    }
+}
+
+// the implicit copy is a retain. the body above does not run, and the two names are one object - so a
+// write through either is visible through the other
+function implicit_is_a_retain() : void
+{
+    Counter $a = Counter(7);
+    Counter $b = $a;
+
+    // 7, not 107: nothing constructed anything here
+    echo $b->value;
+
+    $b->value = 9;
+
+    // and 9 through `$a`, because there is only one object
+    echo $a->value;
+}
+
+// spelled out, the very same declaration runs - and builds something separate
+function explicit_is_a_construction() : void
+{
+    Counter $a = Counter(7);
+    Counter $c = Counter($a);
+
+    // 107: the constructor body ran
+    echo $c->value;
+
+    $c->value = 9;
+
+    // and `$a` is untouched, because `$c` names an object of its own
+    echo $a->value;
+}
+
+implicit_is_a_retain();
+explicit_is_a_construction();
+echo 99;

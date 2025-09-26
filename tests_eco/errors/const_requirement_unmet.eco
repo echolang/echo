@@ -1,0 +1,13 @@
+// a plain method does not answer a `const` requirement. the near-miss names the requirement the way
+// the implementor has to write it - `const` included - which is the whole of what it has to change
+interface Readable {
+    const function read() : int32;
+}
+
+struct Mutating : Readable {
+    int32 $v;
+
+    constructor(int32 $x) { $this->v = $x; }
+
+    function read() : int32 { return $this->v; }
+}
