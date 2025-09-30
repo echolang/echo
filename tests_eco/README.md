@@ -48,12 +48,29 @@ test that quietly asserts less than its author wrote.
 | Key | Values | Meaning |
 |---|---|---|
 | `flags` | anything | extra `echoc` flags, spliced in as typed |
+| `modules` | space-separated paths | module manifests to build alongside the case, each passed as `-m`. Paths are relative to `tests_eco/` |
 | `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `math::` become undeclared names |
 | `expect` | `ok` (default) / `fail` | the exit status the case must produce |
 | `mode` | `run` (default) / `build` | JIT the module, or link a native binary and execute it |
 
 `#` comment lines and blank lines are ignored in the header. All settings must sit above the first
 delimiter; a `key: value` line *inside* a section is content.
+
+### Module fixtures
+
+A `modules:` entry names a directory holding a `module.eco` manifest — see
+[modules/](modules/), where `lib_geom` depends on `lib_core` and only the former has to be named.
+
+Every case is run with its **own** `--cache-dir` under the build tree. Without that the default store
+applies — `.echo` beside each manifest — so the corpus would write artifacts into `tests_eco/` and into
+`stdlib/`, and two cases sharing a manifest would share a cache. A case that passes only because an earlier
+one populated something is not a case, which is also why it is per case rather than per suite: Catch2 is
+free to shuffle them.
+
+**A `.eco` file at or below a directory holding a `module.eco` is not a test case.** It is a source
+of that module, claimed by the manifest, so the usual rule that an unpaired `.eco` is an error does
+not apply to it. That exception is derived rather than listed: the manifest the runner reads is the
+same file `echoc` reads, so a source cannot be claimed by one and orphaned by the other.
 
 ### Sections
 

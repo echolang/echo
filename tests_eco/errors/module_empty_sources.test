@@ -1,0 +1,7 @@
+modules: modules/empty_sources
+expect: fail
+
+--- OUT --->
+Module Manifest Error
+---------------------
+module.eco: the sources pattern 'nope/*.eco' matched no files.

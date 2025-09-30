@@ -218,6 +218,26 @@ namespace AST
         TokenReference make_virtual_token(const std::string &value, Token::Type type, const TokenReference &ref) {
             return module.make_virtual_token(value, type, ref);
         }
+
+        /**
+         * The suffix that tells two compiler-minted names of the same kind apart: where in the source
+         * the thing being named was written, as `<file>L<line>C<column>`.
+         *
+         * Two names need one - a block's lexical namespace and a closure - and both used to take a
+         * monotonic counter instead. A counter is only unique within one *bundle*, and both of these
+         * names reach the mangler, so the emitted symbol of a block-local function depended on how many
+         * blocks and closures had been parsed before it anywhere in the program. The same declaration in
+         * the same library got a different symbol depending on who else was in the build, which makes a
+         * compiled artifact unreusable and is what this replaces.
+         *
+         * Derived from the position rather than numbered because that is the property actually wanted:
+         * unique without coordination, and unchanged by an edit somewhere else. The file tag is
+         * mandatory - a module tokenizes all of its files into one collection, so line and column alone
+         * repeat across files. Two files whose *stem* also matches at the same line and column would
+         * still collide, which is loud rather than silent: create_llvm_func_decl refuses two
+         * declarations mangling to one name.
+         */
+        std::string site_discriminator(const TokenReference &at) const;
     };
 
     // scopes a type-parameter frame to a parser function, so every early return unwinds it.

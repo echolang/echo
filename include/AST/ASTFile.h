@@ -80,6 +80,10 @@ namespace AST
         // will read the file from disk and update the content
         void read_from_disk();
 
+        // the same read, reporting *why* it failed. Prefer this wherever the path came from anywhere but a
+        // command line the user just typed - see the note on the definition
+        bool read_from_disk(std::string &out_error);
+
         std::string debug_description() const;
         
         std::string get_content_of_line(uint32_t line) const;

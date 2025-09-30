@@ -1,0 +1,7 @@
+// cross-module inlining, which the module system must not cost anything.
+//
+// Both callees live in modcore and both are called once from here. Under `-O` neither call may survive: the
+// optimizer has to be able to see through a module boundary, or splitting a program into modules would be a
+// performance decision rather than an organisational one.
+echo modcore::tripled(14);
+echo modcore::doubled(21);

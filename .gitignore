@@ -10,3 +10,7 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 .cmake
+
+# compiled module artifacts. The default store is `.echo` beside each manifest, so a library's cache lives
+# with the code it belongs to - deleting a checkout deletes its cache, and no two projects share one
+.echo/

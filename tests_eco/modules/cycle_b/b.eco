@@ -1,0 +1,2 @@
+namespace cycleb;
+function b() : int32 { return 2; }

@@ -1,0 +1,3 @@
+// the program is irrelevant: the manifests named by this case depend on each other, so the build fails
+// before a source file is read at all
+echo 1;

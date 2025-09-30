@@ -20,6 +20,7 @@
 #include "AST/ReleaseNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
+#include "AST/TypeDeclNode.h"
 #include "AST/TypeNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/VarDeclNode.h"
@@ -230,9 +231,122 @@ TokenReference OwnershipPass::virtual_token(const std::string &value, Token::Typ
     return _current_module->make_virtual_token(value, type, at);
 }
 
+// the module a class layout is declared in, for every declared type in the bundle. An instantiation has
+// no declaration node of its own, so it answers with its template's module - which is where the
+// monomorphizer already homes a function instance, and for the same reason: the tokens a clone copies
+// belong to that module's collection
+void OwnershipPass::build_type_module_map()
+{
+    _type_module.clear();
+
+    for (auto &module_ptr : _bundle.modules) {
+        for (auto *type_decl : module_ptr->nodes.of_type<TypeDeclNode>()) {
+            _type_module[&type_decl->complex_type()] = TypeHome{ module_ptr.get(), type_decl };
+        }
+    }
+}
+
+void OwnershipPass::synthesize_pending_class_deinits()
+{
+    build_type_module_map();
+
+    // declared classes first, then the interned instantiations. Two enumerations because a ComplexType
+    // reaches the bundle by two routes and only one of them has a declaration node: `class Foo` is
+    // embedded on its TypeDeclNode, `Box<int32>` is minted by TypeRegistry::get_or_create_instantiation
+    // the map is unordered, so sweeping it directly would synthesize in hash order - and the order
+    // declarations are appended in decides the order bodies are emitted in, which is visible in every IR
+    // dump. Sorted on the mangled token, which is the one name a ComplexType has that is stable across
+    // runs by construction - carried alongside rather than asked for inside the comparator, because
+    // mangled_token() builds a fresh recursively-allocated string per call and this sweep runs every round
+    std::vector<std::pair<std::string, ComplexType *>> candidates;
+
+    for (const auto &[ct, home] : _type_module) {
+        ComplexType *candidate = const_cast<ComplexType *>(ct);
+        candidates.emplace_back(candidate->mangled_token(), candidate);
+    }
+
+    for (ComplexType *inst : _collector.type_registry.instantiations()) {
+        candidates.emplace_back(inst->mangled_token(), inst);
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    for (const auto &[mangled, ct] : candidates) {
+        if (!ct->is_class_kind() || ct->deinit() != nullptr) {
+            continue;
+        }
+
+        // a template has no layout to tear down: its property types still mention its parameters, so
+        // needs_destruction cannot answer for them. Its instantiations are swept instead, and they are in
+        // the second list above
+        if (ct->is_generic() && !ct->is_instantiated()) {
+            continue;
+        }
+
+        // **an instantiation whose properties are not filled in yet is not answerable, and answering
+        // anyway is permanent.** An application of a generic can be interned during the declaration pass,
+        // before the template's own body has been walked, and is refilled later (todo/A7). Sweeping one
+        // in that window would build a deinit that drops nothing and `set_deinit` would make that the
+        // final answer - so wait for the round in which the layout agrees with its template
+        if (ct->is_instantiated() && ct->property_count() != ct->template_or_self()->property_count()) {
+            continue;
+        }
+
+        if (!class_needs_deinit(ct)) {
+            continue;
+        }
+
+        // the declaring module for a declared class, the template's for an instantiation. Absent for an
+        // anonymous compiler-minted type, whose deinit is asked for on demand by the walk that owns it
+        auto home = _type_module.find(ct->template_or_self());
+        if (home == _type_module.end()) {
+            continue;
+        }
+
+        if (home->second.module == nullptr || home->second.decl == nullptr
+            || !home->second.decl->name_token.has_value()) {
+            continue;
+        }
+
+        File *home_file = home->second.module->files().first();
+
+        // a module with no file, or one whose root the body pass never built. Nothing can be published
+        // into it, and the demand-driven asks remain as the fallback
+        if (home_file == nullptr || home_file->root == nullptr) {
+            continue;
+        }
+
+        Module *previous_module = _current_module;
+        File *previous_file = _current_file;
+
+        _current_module = home->second.module;
+        _current_file = home_file;
+
+        // the class's own name is the site, which is what this sweep buys over the demand-driven asks
+        // beside it: a diagnostic from inside the body points at the class rather than at whichever
+        // release happened to be walked first
+        ensure_class_deinit(ValueType::make_complex(ct), home->second.decl->name_token.value());
+
+        // published into the home module's file root here rather than through the loop below, whose
+        // _pending_declarations belongs to the file walk and is cleared per file
+        for (FunctionDeclNode *decl : _pending_declarations) {
+            home_file->root->add_funcdecl(*decl);
+        }
+        _pending_declarations.clear();
+
+        _current_module = previous_module;
+        _current_file = previous_file;
+    }
+}
+
 bool OwnershipPass::run_round()
 {
     _changed = false;
+
+    // before the file walks, so a deinit created this round is an ordinary root child by the time the
+    // loop below reaches it and gets its own body resolved on the next round like any other
+    synthesize_pending_class_deinits();
 
     for (auto &module_ptr : _bundle.modules) {
         _current_module = module_ptr.get();
@@ -1829,6 +1943,10 @@ FunctionDeclNode &OwnershipPass::begin_synthesized_decl(const std::string &name,
     // `inherited_type_param_count` of 0, left as declared
     auto &decl = _current_module->nodes.emplace_back<FunctionDeclNode>(
         virtual_token(name, Token::Type::t_identifier, site));
+
+    // nobody wrote it, so no module owns its symbol - see AST::function_emission_kind. Set here rather
+    // than at each of the two callers, because "this pass built it" is exactly what this function means
+    decl.is_implicitly_generated = true;
 
     decl.body = &_current_module->nodes.emplace_back<ScopeNode>();
 

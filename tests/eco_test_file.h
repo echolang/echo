@@ -65,6 +65,13 @@ namespace EchoTests
     {
         // settings, all defaulted - a plain golden test writes no header at all
         std::string flags;
+
+        // the module manifests this case builds, as paths relative to the corpus root. Relative and
+        // resolved by compiler_flags below rather than written absolutely, because the tests binary's
+        // working directory is not fixed - and a manifest is the one input whose *own* relative paths
+        // (its sources, its dependencies) then resolve against the manifest, not against either
+        std::vector<std::string> modules;
+
         bool stdlib = true;
         Expectation expect = Expectation::t_ok;
         RunMode mode = RunMode::t_run;
@@ -82,7 +89,7 @@ namespace EchoTests
         // here rather than in the runner for the reason `dump_flag` is here: what a setting *means*
         // is the format's, and a setting whose meaning is spelled in the runner is a setting the
         // README's table can silently disagree with
-        std::string compiler_flags() const;
+        std::string compiler_flags(const std::filesystem::path &corpus_root) const;
     };
 
     // strips a single trailing newline, the one difference the OUT golden forgives. applied to the

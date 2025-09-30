@@ -1,0 +1,20 @@
+/*
+ * The standard library, as an ordinary module manifest.
+ *
+ * There is nothing privileged about this file. `echoc` adds it to every build unless `--no-stdlib` says
+ * otherwise, and from there the stdlib is one module among however many the invocation names - which is
+ * what makes it the honest test of the module system: if a library cannot be expressed this way, neither
+ * can this one.
+ *
+ * One pattern per directory rather than a single `**` sweep. Two directories must never be picked up and
+ * naming them by inclusion is what keeps them out for a reason rather than by a skip list: `build/` holds
+ * the generated embedded header rather than source, and `sketches/` is for Echo that describes a type the
+ * language cannot express yet - the directory name is what says it does not compile. Adding a file to an
+ * existing directory needs no edit here; adding a directory does, which is the right way round.
+ */
+
+#[module: "stdlib"]
+
+#[sources: "core/*.eco"]
+#[sources: "math/*.eco"]
+#[sources: "mem/*.eco"]

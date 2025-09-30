@@ -28,4 +28,12 @@
 // target is one edit rather than an api break across the whole stdlib
 #define ECO_TARGET_POINTER_SIZE 8
 
+// the module cache's format version. **Bump this by hand whenever codegen changes what it emits.**
+//
+// The cache key folds in the LLVM version, the target triple and the build mode, so those are covered
+// automatically - this constant covers the one input nothing can detect: a change to this compiler's own
+// lowering. Forgetting it means a stale object silently linked into a new build, which is the single failure
+// mode in the cache with no diagnostic
+#define ECO_MODULE_CACHE_VERSION "1"
+
 #endif // ECO_H

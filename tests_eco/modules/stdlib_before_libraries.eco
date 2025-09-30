@@ -1,0 +1,2 @@
+// a library module naming a standard library type. See lib_stdlib_user/module.eco for what this pins.
+echo stdlibuser::measure();

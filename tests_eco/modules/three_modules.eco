@@ -1,0 +1,18 @@
+// three modules and the program: modcore, modgeom (which depends on it), and this file as `main`.
+//
+// only modgeom is named on the command line - modcore arrives because modgeom's manifest depends on it,
+// which is what says the graph is resolved rather than just listed.
+//
+// the same generic is instantiated from two different modules over two different types, so `Box<int32>`
+// is requested by modgeom and `Box<Point>` by this program. Both are cloned into modcore, where the
+// template lives, and both are emitted into whichever unit actually references them.
+
+modgeom::Point $p = modgeom::Point(3, 4);
+
+echo $p->sum();
+echo modgeom::boxed_x($p);
+
+modcore::Box<modgeom::Point> $boxed = modcore::Box<modgeom::Point>($p);
+echo $boxed->get()->sum();
+
+echo modcore::doubled(21);

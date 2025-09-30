@@ -173,6 +173,37 @@ namespace AST
             return template_ref != nullptr;
         }
 
+        // nobody wrote this declaration: the compiler built it from a type's shape. Three producers -
+        // the field-wise constructor synthesized by the declaration pass, and the class deinit and copy
+        // constructor synthesized by AST::OwnershipPass.
+        //
+        // it is the *other* half of what AST::function_emission_kind calls generated, beside
+        // `is_instantiated()`. Both mean the same thing where it matters: the definition is a pure
+        // function of inputs every build shares, so two units may legitimately both need the symbol and
+        // it cannot carry external linkage. Two flags rather than one because they are produced in
+        // different phases and answer different questions elsewhere - an instance also has a template to
+        // point back at, and this has none
+        bool is_implicitly_generated = false;
+
+        // `#[inline]`: emit this body into every unit that calls it, rather than once in the unit that
+        // declares it. The request is "copy me to the call site's compilation unit", and that is exactly
+        // AST::FunctionEmission::t_odr_shared - the same treatment a generic instantiation gets.
+        //
+        // **it is what keeps cross-module inlining possible without a whole-program merge.** The optimizer
+        // can only inline a body it can see; today every unit is linked into one module before the O3
+        // pipeline runs, so it sees everything. A build that emits per-module objects instead - which is
+        // what an object cache is - hands the optimizer one unit at a time, and then a callee in another
+        // module is just a `declare`. Marking it copies the body across, so the inliner has something to
+        // work with either way.
+        //
+        // the ODR obligation that comes with t_odr_shared applies: two copies of this body must be
+        // identical, so nothing about it may depend on which unit it was emitted into.
+        //
+        // deliberately *not* a promise the optimizer has to keep. It is a placement instruction, not
+        // `always_inline` - naming it after the outcome rather than the mechanism is what lets the
+        // attribute stay honest when the inliner declines.
+        bool is_inline = false;
+
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;

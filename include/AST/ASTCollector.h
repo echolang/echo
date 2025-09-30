@@ -48,11 +48,6 @@ namespace AST
         // outlive the module that declared it: a literal in *any* file resolves against it
         CoreTypes core_types = CoreTypes();
 
-        // names the next closure literal. a closure has no name of its own and is in no overload set, but
-        // it still needs a *symbol*, and two closures written in one block would otherwise mangle alike.
-        // bundle-wide and deterministic: files are walked in a fixed order, and a literal is parsed once
-        size_t next_closure_id = 0;
-        
         // create a registry for the native scalar cast types
         
         Collector();

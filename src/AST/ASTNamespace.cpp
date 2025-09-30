@@ -114,7 +114,8 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &
 }
 
 AST::Namespace &AST::NamespaceManager::retrieve_lexical(
-    AST::Namespace &parent, const AST::DeclarationSite &site, const std::string &display_name)
+    AST::Namespace &parent, const AST::DeclarationSite &site, const std::string &display_name,
+    const std::string &discriminator)
 {
     if (const auto existing = parent._lexical_children.find(site); existing != parent._lexical_children.end()) {
         return *existing->second;
@@ -135,10 +136,10 @@ AST::Namespace &AST::NamespaceManager::retrieve_lexical(
         }
     }
 
-    // `outer$3` mangles, `outer` displays. the discriminator is what keeps two blocks of one function
-    // apart in a symbol name, and leaving it out of the display name is what keeps it out of every
-    // diagnostic - a user never wrote this namespace and should never have to read its number
-    auto lexical = std::make_unique<Namespace>(display_name + "$" + std::to_string(_lexical_counter++));
+    // `outer$mainL4C5` mangles, `outer` displays. the discriminator is what keeps two blocks of one
+    // function apart in a symbol name, and leaving it out of the display name is what keeps it out of
+    // every diagnostic - a user never wrote this namespace and should never have to read its position
+    auto lexical = std::make_unique<Namespace>(display_name + "$" + discriminator);
     lexical->_display_name = ancestor_already_displays ? "" : display_name;
     lexical->_is_lexical = true;
     lexical->_parent = &parent;

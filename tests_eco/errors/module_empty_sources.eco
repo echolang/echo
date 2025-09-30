@@ -1,0 +1,2 @@
+// the manifest named by this case has a sources pattern that matches nothing
+echo 1;

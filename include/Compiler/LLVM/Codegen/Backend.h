@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace llvm
 {
@@ -15,8 +18,10 @@ namespace Compiler::LLVM
 {
     struct CodegenContext;
 
+    struct CmpUnit;
+
     // the output stage of the compiler: runs the optimization pipeline, prints the module IR,
-    // JIT-executes the main module, and emits a native executable (via clang)
+    // JIT-executes the main module, and emits a native executable
     class Backend
     {
     public:
@@ -41,7 +46,22 @@ namespace Compiler::LLVM
         // failure paths. it reports by return value rather than only by printing, because a caller
         // that cannot tell exits 0 having produced no binary - which is a build that looks
         // successful to a shell, a Makefile and the e2e suite alike
+        //
+        // the whole-program spelling: one unit, one object, one link. Kept for the paths that merged
+        // everything into main first - `-O` and `--print-ir` - where per-module objects do not exist
         bool make_exec(std::string executable_name);
+
+        // one unit to one object file. **Sound only because an ODR-shared definition is emitted into
+        // every unit that references it**: without that a unit's object would be missing the bodies its
+        // callers expect somebody else to have provided
+        bool emit_object(CmpUnit &cmp_unit, const std::filesystem::path &object_path);
+
+        // links objects into an executable. Prefers the system linker and falls back to the `clang`
+        // driver, which is a ~33ms difference on every build: almost all of `clang -o exe exe.o` is
+        // driver startup, and this stage is otherwise a constant floor no amount of caching removes.
+        // The fallback is what keeps a platform whose flags we cannot spell buildable rather than broken
+        bool link_executable(
+            const std::string &executable_name, const std::vector<std::filesystem::path> &objects);
 
     private:
         CodegenContext &_ctx;

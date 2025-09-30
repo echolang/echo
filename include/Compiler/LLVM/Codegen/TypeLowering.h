@@ -12,6 +12,7 @@
 #include <llvm/IR/Type.h>
 
 #include <functional>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -35,7 +36,19 @@ namespace Compiler::LLVM
     public:
         TypeLowering(CodegenContext &ctx) : _ctx(ctx) {};
 
-        void create_cmp_units(const AST::Bundle &bundle);
+        // one unit per module, **except the ones named in `cached_modules`**.
+        //
+        // A module whose compiled object comes from the cache gets no unit at all, which is the whole of the
+        // gate: every later step - build_struct_maps, both loops of build_function_maps, the body walk, the
+        // drain - iterates `_ctx.cmp_units`, so it is skipped by construction rather than by a flag each of
+        // them has to remember to ask about. References to its symbols still resolve, because a caller
+        // declares what it needs into its *own* unit.
+        //
+        // `function_file_map` is deliberately still built over every module in the bundle, cached or not: an
+        // ODR-shared body from a cached module's template can be emitted into a fresh unit, and it has to
+        // carry the source position it was written at
+        void create_cmp_units(
+            const AST::Bundle &bundle, const std::set<std::string> &cached_modules = {});
 
         // both walk `_ctx.cmp_units`, which create_cmp_units has already built out of the bundle -
         // so neither takes the bundle again, and neither is a whole-program pass despite running

@@ -1,0 +1,10 @@
+/*
+ * A leaf library: no dependencies of its own beyond the standard library, which every build has.
+ * Exists to be the *first* module in the topological order, so anything depending on it proves the
+ * ordering is real rather than accidental.
+ */
+
+#[module: "modcore"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

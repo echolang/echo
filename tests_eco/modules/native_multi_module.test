@@ -1,0 +1,7 @@
+modules: modules/lib_geom
+mode: build
+
+--- OUT --->
+30
+20
+60

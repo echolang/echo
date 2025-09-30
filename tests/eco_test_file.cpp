@@ -124,12 +124,18 @@ const char *expectation_name(Expectation expect)
     return expect == Expectation::t_ok ? "succeed" : "fail";
 }
 
-std::string EcoTestFile::compiler_flags() const
+std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root) const
 {
     std::string result;
 
     if (!stdlib) {
         result += "--no-stdlib ";
+    }
+
+    // one `-m` per manifest, resolved against the corpus root so the case reads as a path relative to
+    // the test file rather than to whatever directory the tests binary was launched from
+    for (const std::string &manifest : modules) {
+        result += "-m \"" + (corpus_root / manifest).string() + "\" ";
     }
 
     if (!flags.empty()) {
@@ -189,7 +195,7 @@ namespace
     // enumerate the same list - the same reason dump_section_name is the only spelling of a section
     // name. a key added to the dispatch and forgotten here would leave the error telling an author
     // that a valid key is invalid
-    constexpr std::string_view k_setting_keys[] = { "flags", "stdlib", "expect", "mode" };
+    constexpr std::string_view k_setting_keys[] = { "flags", "modules", "stdlib", "expect", "mode" };
 
     // a setting's value, checked against its enumeration and written straight into the field it
     // settles. one helper because all three enumerated settings report their mistake the same way,
@@ -260,6 +266,17 @@ namespace
 
         if (key == "flags") {
             out_file.flags = value;
+            return true;
+        }
+
+        // whitespace separated, because the header forbids a repeated key and a list is what this setting
+        // means. A path holding a space is not supported and does not need to be: these are corpus fixtures
+        if (key == "modules") {
+            std::istringstream stream(value);
+            std::string entry;
+            while (stream >> entry) {
+                out_file.modules.push_back(entry);
+            }
             return true;
         }
 

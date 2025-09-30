@@ -3,6 +3,35 @@
 #include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
 
+#include <fmt/core.h>
+
+// everything outside `[A-Za-z0-9_]` becomes an underscore. A file stem may hold a dash, a dot or worse,
+// and these end up inside an emitted symbol name - LLVM would quote them, but a symbol a developer has to
+// read in a linker error or a profile is worth keeping plain
+static std::string sanitize_symbol_fragment(const std::string &raw)
+{
+    std::string out;
+    out.reserve(raw.size());
+
+    for (const char c : raw) {
+        const bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        out.push_back(safe ? c : '_');
+    }
+
+    return out;
+}
+
+std::string AST::Context::site_discriminator(const TokenReference &at) const
+{
+    // a module always has files by the time anything is minted, but a test harness can build a Context
+    // over one that does not - and an empty tag is still unique per line and column within one file,
+    // which is all a single-file module needs
+    const std::string file_tag =
+        file.file != nullptr ? sanitize_symbol_fragment(file.file->get_path().stem().string()) : "";
+
+    return fmt::format("{}L{}C{}", file_tag, at.line(), at.char_offset());
+}
+
 AST::LexicalScope::LexicalScope(
     AST::Context &context,
     AST::NamespaceManager &namespaces,
@@ -20,7 +49,8 @@ AST::LexicalScope::LexicalScope(
         context.current_function_ptr != nullptr ? context.current_function_ptr->func_name() : "";
 
     context.current_namespace = &namespaces.retrieve_lexical(
-        *context.current_namespace, make_declaration_site(block_token.value()), display_name);
+        *context.current_namespace, make_declaration_site(block_token.value()), display_name,
+        context.site_discriminator(block_token.value()));
 }
 
 AST::MemberTypeScope::MemberTypeScope(

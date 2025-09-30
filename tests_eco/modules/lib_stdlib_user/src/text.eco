@@ -1,0 +1,8 @@
+namespace stdlibuser;
+
+// `string` is declared by the standard library, so this only parses if stdlib was parsed first
+function measure() : usize
+{
+    $s = 'hello';
+    return $s->size();
+}

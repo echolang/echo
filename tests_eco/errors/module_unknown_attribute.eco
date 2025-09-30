@@ -1,0 +1,2 @@
+// the manifest named by this case misspells `sources` as `source`
+echo 1;

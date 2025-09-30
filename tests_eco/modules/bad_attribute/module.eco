@@ -1,0 +1,4 @@
+// `source` is not a manifest attribute - `sources` is. A misspelling must be an error rather than a
+// module with no files
+#[module: "badattr"]
+#[source: "*.eco"]

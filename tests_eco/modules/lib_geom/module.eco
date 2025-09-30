@@ -1,0 +1,13 @@
+/*
+ * Depends on modcore, and says so here rather than on the command line - which is the point of `depends`:
+ * a consumer names this manifest and gets both modules, in the order that works.
+ *
+ * The dependency is written as a directory; `module.eco` inside it is what gets read.
+ */
+
+#[module: "modgeom"]
+#[version: "0.2.0"]
+
+#[depends: "../lib_core"]
+
+#[sources: "src/*.eco"]

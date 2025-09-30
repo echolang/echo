@@ -129,7 +129,12 @@ namespace AST
         //
         // `display_name` is the enclosing function's name, which is what a diagnostic renders; the
         // namespace's own name gets a discriminator so two blocks of one function still mangle apart
-        Namespace &retrieve_lexical(Namespace &parent, const DeclarationSite &site, const std::string &display_name);
+        // `discriminator` is what keeps two blocks of one function apart in a mangled symbol, and it is
+        // supplied rather than generated here because only the caller knows the *position* it is derived
+        // from - see AST::Context::site_discriminator, which is the one producer
+        Namespace &retrieve_lexical(
+            Namespace &parent, const DeclarationSite &site, const std::string &display_name,
+            const std::string &discriminator);
 
         // returns the namespace for the given name, or nullptr if it doesn't exist
         const Namespace *get(const std::string &name) const;
@@ -157,12 +162,6 @@ namespace AST
 
     private:
         Namespace _root;
-
-        // makes every lexical namespace's `_name` unique in one step, without depending on how many
-        // blocks a given parent happens to have seen. a plain counter is enough: the passes reuse an
-        // existing lexical namespace rather than minting a second one, so each is numbered once, and
-        // creation order is a fixed file order walked linearly - the same every run
-        size_t _lexical_counter = 0;
     };
 };
 

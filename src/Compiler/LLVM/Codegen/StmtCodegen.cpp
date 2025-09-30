@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
 #include "AST/ScopeNode.h"
 #include "AST/ASTMangler.h"
@@ -196,42 +197,22 @@ void StmtCodegen::gen_var_decl(AST::VarDeclNode &node)
 
 void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
 {
-    // skip compilation of generic function templates
-    if (node.is_generic()) {
+    // nothing to emit unless this compiler owns the body, which AST::function_emission_kind is the one
+    // owner of. A template has no concrete signature; a builtin is answered at each call site and an
+    // interface requirement dispatches through a vtable, so neither has a symbol at all; an extern and an
+    // intrinsic have one somebody else supplies
+    const AST::FunctionEmission emission = AST::function_emission_kind(&node);
+
+    if (!AST::emission_has_body(emission)) {
         return;
     }
 
-    // sanity checks
-
-    // 1. must have a body
+    // and a kind that claims a body and then has none is a compiler bug rather than a source error: the
+    // symbol was declared on the strength of the same answer, so returning quietly here would link
+    // against something nobody defines. That is exactly what the bare `if (!is_generic()) return;` this
+    // replaces used to swallow - a member whose body error recovery skipped past reached codegen, got a
+    // `declare`, and produced an undefined symbol with nothing pointing at the declaration
     if (!node.body) {
-        // if its an intrinsic function we can skip this
-        if (node.intrinsic) {
-            return;
-        }
-
-        // a builtin has no symbol at all - it is answered in gen_builtin_call at each call site, so
-        // there is nothing to emit here. spelled out rather than left to the !is_generic() fallback
-        // below, which only happened to cover the generic builtins that existed first
-        if (node.is_builtin()) {
-            return;
-        }
-
-        // an interface requirement has no body by construction - the implementors do, under their own
-        // symbols. spelled out beside the builtin above rather than left to the fallback, so the reason
-        // is visible where the two other readers of the same predicate are
-        if (node.is_interface_requirement()) {
-            return;
-        }
-
-        // skip instantiated generic functions that don't have bodies yet
-        // this is a temporary measure while we implement proper body cloning
-        // (is_generic() is exactly !type_parameters.empty(), so one check covers it)
-        if (!node.is_generic()) {
-            return;
-        }
-
-        assert(false);
         throw _ctx.error(fmt::format(
             "Function '{}' has no body associated with it.",
             node.func_name()
@@ -242,9 +223,44 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     AST::FunctionDeclNode *prev_function = _ctx.current_function;
     _ctx.current_function = &node;
 
+    // and the file *this declaration* was written in, rather than whichever one the walk happens to be
+    // standing in. The body can bake the file name into a constant - an `assert` message carries
+    // `<file>:<line>` - so leaving it ambient makes the emitted bytes depend on the walk, which is not
+    // allowed for a definition two units may both emit. See CodegenContext::function_file_map
+    AST::File *prev_file = _ctx.current_file;
+    _ctx.current_file = _ctx.file_of(&node);
+
     // dump all function names in map
     auto funcid = _ctx.current_cmp_unit->function_table.get_function_id_by_name(AST::mangle_function_name(&node));
     auto func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
+
+    // the symbol has to have been declared into this unit before a body can be attached to it. Reported
+    // rather than dereferenced: a null here used to crash inside BasicBlock::Create with nothing naming
+    // the declaration, and the two ways to get one are both compiler bugs - build_function_maps skipped a
+    // declaration it should have claimed, or a body is being emitted into a unit that never referenced it
+    if (func == nullptr) {
+        throw _ctx.error(fmt::format(
+            "'{}' has no symbol in module '{}', so its body cannot be emitted there.",
+            node.func_name(), _ctx.current_cmp_unit->ast_module->name));
+    }
+
+    // already emitted into this unit. An ODR-shared body is reachable twice - once from the drain's queue
+    // and once from whatever named it - and BasicBlock::Create below is unconditional, so a second pass
+    // would give one llvm::Function two entry blocks
+    if (!func->empty()) {
+        _ctx.current_function = prev_function;
+        _ctx.current_file = prev_file;
+        return;
+    }
+
+    // a generated definition claims its symbol weakly, because more than one unit may legitimately hold
+    // the same one - see AST::FunctionEmission::t_odr_shared. The flip happens here rather than at
+    // Function::Create because LLVM's verifier rejects a *bodyless* linkonce_odr function: a unit that
+    // only references the symbol must declare it externally, and only the unit that supplies the body
+    // may weaken it
+    if (emission == AST::FunctionEmission::t_odr_shared) {
+        func->setLinkage(llvm::Function::LinkOnceODRLinkage);
+    }
 
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", func);
     _ctx.builder->SetInsertPoint(entry);
@@ -280,6 +296,7 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     }
 
     _ctx.current_function = prev_function;
+    _ctx.current_file = prev_file;
 }
 
 void StmtCodegen::gen_return(AST::ReturnNode &node)

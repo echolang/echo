@@ -469,6 +469,42 @@ namespace AST
         // somewhere to point other than line 0
         void ensure_class_deinit(const ValueType &class_type, const TokenReference &site);
 
+        // every class in the bundle whose payload needs tearing down gets its deinit, whether or not this
+        // program happens to release one.
+        //
+        // synthesizing on demand alone is not sound across separate compilations, and the failure is
+        // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body branches
+        // on whether the class has a deinit - so a build that never released a `StringBuf` produced a
+        // thunk that decrements and frees, a build that did produced one that also tears the payload down,
+        // and both claim the same ODR symbol. The linker keeps whichever it saw first and the program
+        // leaks, with nothing anywhere to point at.
+        //
+        // so existence has to be a function of the *type* rather than of what the build did with it -
+        // which class_needs_deinit already is. This makes the synthesis agree with it.
+        //
+        // deliberately **not** done for copy constructors, which are generated the same way and share the
+        // same linkage: nothing else observes whether one exists. A copy constructor's body is field-wise
+        // assignment derived from the properties, so two units that both need one write the same bytes,
+        // and a unit that does not need one simply does not ask. The deinit is special only because the
+        // release thunk reads the slot
+        void synthesize_pending_class_deinits();
+
+        // where a class layout was declared: the module, so a swept deinit lands somewhere deterministic
+        // rather than in whichever file's walk happened to reach the type first, and the declaration node,
+        // which is the only thing holding the name token to position it at - a ComplexType carries its
+        // name as a string and has no token of its own
+        struct TypeHome
+        {
+            Module *module = nullptr;
+            TypeDeclNode *decl = nullptr;
+        };
+
+        // rebuilt per round, like Monomorphizer::_decl_module and for the same reason: declarations are
+        // still being appended while the fixpoint runs
+        std::unordered_map<const ComplexType *, TypeHome> _type_module;
+
+        void build_type_module_map();
+
         // --- copies ----------------------------------------------------------------------------
 
         // the copy constructor for a struct whose owning properties are all classes, transitively:

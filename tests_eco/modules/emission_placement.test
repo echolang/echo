@@ -1,0 +1,21 @@
+modules: modules/lib_core
+
+--- OUT --->
+42
+42
+7
+--- IR --->
+# the three placements the module system is built on, read off one dump.
+#
+# `tripled` is `#[inline]` and `Box<int32>::get` is a generic instantiation, so both are ODR-shared: the
+# body is emitted into every unit that references it, under linkonce_odr, exactly as C++ treats an
+# implicitly-instantiated template. `doubled` is neither, so it stays a single external definition owned by
+# the unit of the module that declares it.
+#
+# this is the invariant an object cache rests on. A module's emitted code has to be a function of its own
+# source, and it stops being one the moment a consumer can cause a definition to appear in the *library's*
+# unit - which is what happened before instances were placed this way.
+CHECK: define linkonce_odr i32 @_modcore_tripledZZMLPi
+CHECK: define linkonce_odr %"Box<int32>" @_modcore_BoxZZMLPiGMLPi
+CHECK: define linkonce_odr i32 @_modcore_MN7modcore3BoxE_get
+CHECK: define i32 @_modcore_doubledZZMLPi

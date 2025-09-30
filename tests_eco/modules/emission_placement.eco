@@ -1,0 +1,11 @@
+// what the module system promises about *where* a definition ends up, asserted on the IR.
+//
+// three shapes, all declared in modcore and all called from here:
+//   - `doubled`      an ordinary function: defined once, in its own module's unit, external linkage
+//   - `tripled`      `#[inline]`: copied into this unit, linkonce_odr
+//   - `Box<int32>`   a generic instance: copied into this unit, linkonce_odr
+echo modcore::doubled(21);
+echo modcore::tripled(14);
+
+modcore::Box<int32> $b = modcore::Box<int32>(7);
+echo $b->get();

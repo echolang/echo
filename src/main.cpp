@@ -3,7 +3,6 @@
 #include <sstream>
 
 #include <argparse.h>
-#include <glob.hpp>
 
 #include "eco.h"
 #include "Lexer.h"
@@ -14,14 +13,22 @@
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTTypeChecker.h"
+#include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/CompilerException.h"
+#include "Compiler/ModuleCache.h"
+#include "Compiler/PhaseTimings.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
 
 #if ECO_USE_EMBEDDED_STDLIB
 #include "stdlib_embedded.h"
 #endif
 
+#include <unistd.h>
+
+#include <algorithm>
+#include <map>
+#include <set>
 #include <chrono>
 
 #define SH_COLOR_RST  "\x1B[0m"
@@ -61,9 +68,10 @@ std::vector<std::filesystem::path> get_file_list_from_args(
     for (const auto &path_string : path_strings) {
         std::filesystem::path path{path_string};
 
-        // check for wildcards
+        // check for wildcards. through the same expander a manifest's `#[sources:]` uses, so a pattern
+        // does not mean one thing on the command line and another in a manifest
         if (path_string.find('*') != std::string::npos) {
-            auto paths = glob::glob(path_string);
+            auto paths = Parser::expand_source_pattern(path);
 
             for (const auto &p : paths) {
                 if (std::filesystem::exists(p) && std::filesystem::is_regular_file(p)) {
@@ -88,9 +96,22 @@ std::vector<std::filesystem::path> get_file_list_from_args(
     return files;
 }
 
+// colour only when somebody is watching. A redirected stream is being read by a program - a golden test,
+// a log, a pipe into `grep` - and an escape sequence in it is noise that has to be filtered back out
+static bool stdout_is_a_terminal()
+{
+    static const bool answer = isatty(fileno(stdout)) != 0;
+    return answer;
+}
+
 void print_critical_error(std::string title, std::string message)
 {
-    std::cout << SH_COLOR_BOLD(SH_COLOR_FRED( << title <<) ) << std::endl;
+    if (stdout_is_a_terminal()) {
+        std::cout << SH_COLOR_BOLD(SH_COLOR_FRED( << title <<) ) << std::endl;
+    }
+    else {
+        std::cout << title << std::endl;
+    }
 
     for (size_t i = 0; i < title.size(); i++) {
         std::cout << "-";
@@ -117,44 +138,9 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
     return 0;
 }
 
-// every .eco file the standard library is made of, sorted so the ordering is reproducible
-//
-// globbed rather than listed, so adding a stdlib file does not need a C++ edit - the previous
-// hardcoded list had already fallen behind what is on disk
-//
-// two directories are skipped. `build/` holds the generated embedded header rather than source.
-// `sketches/` is for Echo that describes a type the language cannot express yet, kept in source
-// form because the directory name is what says it does not compile - it is empty today, `string`
-// having graduated into `core/string.eco`, and the skip stays for the next one
-static std::vector<std::filesystem::path> stdlib_source_files()
-{
-    std::vector<std::filesystem::path> files;
-
-    const std::filesystem::path root{STDLIB_SOURCE_DIR};
-    if (!std::filesystem::exists(root)) {
-        return files;
-    }
-
-    for (const auto &entry : std::filesystem::recursive_directory_iterator(root)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".eco") {
-            continue;
-        }
-
-        const std::string path_string = entry.path().string();
-        if (path_string.find("/build/") != std::string::npos
-            || path_string.find("/sketches/") != std::string::npos) {
-            continue;
-        }
-
-        files.push_back(entry.path());
-    }
-
-    std::sort(files.begin(), files.end());
-
-    return files;
-}
-
-// adds the standard library module to the bundle and parses it, unless `--no-stdlib` says not to.
+// the standard library, when it is embedded in the binary rather than read from disk. This is the one
+// module that cannot come from a manifest, because there is no file list to read - the sources *are* the
+// bytes the generated header carries
 //
 // leaving the standard library out is leaving one module out, nothing more - nothing downstream
 // looks a module up by that name, codegen only ever asks for ECO_MAIN_MODULE_NAME, and the core
@@ -162,58 +148,143 @@ static std::vector<std::filesystem::path> stdlib_source_files()
 // program gives up is `die`, `assert` and the `mem::`/`math::` namespaces, which is the point: a
 // test reading the emitted IR or an AST dump does not want several hundred lines of library
 // standing between its first assertion and the code it is about
-static void parse_stdlib_module(
-    argparse::ArgumentParser &cli, AST::Bundle &bundle, Parser::ModuleParser &parser)
+#if ECO_USE_EMBEDDED_STDLIB
+static void parse_embedded_stdlib_module(AST::Bundle &bundle, Parser::ModuleParser &parser)
 {
-    if (cli.get<bool>("--no-stdlib")) {
-        return;
-    }
-
     AST::module_handle_t stdlib_handle = bundle.modules.add_module("stdlib");
     auto &stdlib = bundle.modules.get_module(stdlib_handle);
 
-#if ECO_USE_EMBEDDED_STDLIB
     EmbeddedModule::load_stdlib_module(bundle, stdlib);
     parser.parse_module(stdlib, bundle.collector);
-#else
-    auto stdlib_input = Parser::ModuleParser::InputPayload {
-        .files = {},
-        .module = stdlib,
-        .collector = bundle.collector
-    };
+}
+#endif
 
-    for (const auto &stdlib_file : stdlib_source_files()) {
-        stdlib_input.files.push_back(Parser::ModuleParser::InputFile(stdlib_file));
+// the manifest of the project the compiler was invoked *in*, when the command line names nothing at all.
+//
+// this is what makes `echoc run` work the way every other project tool does: a directory holding a
+// module.eco is a project, and pointing at it is redundant. Only consulted when neither `-m` nor a source
+// file was given, so it can never override something the user asked for
+static std::optional<std::filesystem::path> discover_project_manifest()
+{
+    std::error_code ec;
+    const std::filesystem::path candidate = std::filesystem::current_path(ec) / "module.eco";
+
+    if (ec || !std::filesystem::is_regular_file(candidate, ec)) {
+        return std::nullopt;
     }
 
-    if (handle_parse(parser, stdlib_input)) {
-        throw std::runtime_error("Failed to parse the echo standard library.");
+    return candidate;
+}
+
+// the manifests this invocation builds, in the order the modules have to be parsed: every `-m` the user
+// gave, plus the standard library's own, which is an ordinary manifest module like any other
+//
+// resolving the whole graph here rather than per flag is what makes a dependency implicit: naming a
+// library that depends on another pulls the other in, once, in the right order
+static bool resolve_manifests(
+    argparse::ArgumentParser &cli,
+    std::vector<Parser::ModuleManifest> &out,
+    std::vector<std::filesystem::path> &out_roots)
+{
+    std::vector<std::filesystem::path> roots;
+
+#if !ECO_USE_EMBEDDED_STDLIB
+    if (!cli.get<bool>("--no-stdlib")) {
+        roots.push_back(std::filesystem::path(STDLIB_SOURCE_DIR) / "module.eco");
     }
 #endif
 
-    // regenerating the embeddable header is a build step, not a compile step. it used to run on
-    // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
-    if (cli.is_used("--emit-stdlib-header")) {
-        AST::write_embedded_module(stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
+    // the standard library is not one of *the user's* roots - it is added to every build - so it is
+    // deliberately not in out_roots. Whoever asks "what did this invocation point at" must not be told
+    // "the standard library"
+    const size_t implicit_roots = roots.size();
+
+    for (const auto &named : cli.get<std::vector<std::string>>("--module")) {
+        roots.push_back(std::filesystem::path(named));
     }
+
+    if (roots.size() == implicit_roots && cli.get<std::vector<std::string>>("source").empty()) {
+        if (const std::optional<std::filesystem::path> discovered = discover_project_manifest()) {
+            roots.push_back(discovered.value());
+        }
+    }
+
+    out_roots.assign(roots.begin() + implicit_roots, roots.end());
+
+    if (roots.empty()) {
+        return true;
+    }
+
+    std::string error;
+    if (!Parser::resolve_module_graph(roots, out, error)) {
+        print_critical_error("Module Manifest Error", error);
+        return false;
+    }
+
+    return true;
+}
+
+// one AST::Module per manifest, parsed completely before the next one starts - which is what the
+// topological order above exists for
+static int parse_manifest_modules(
+    const std::vector<Parser::ModuleManifest> &manifests,
+    AST::Bundle &bundle,
+    Parser::ModuleParser &parser)
+{
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        AST::module_handle_t handle = bundle.modules.add_module(manifest.name);
+        auto &module = bundle.modules.get_module(handle);
+
+        auto input = Parser::ModuleParser::InputPayload {
+            .files = {},
+            .module = module,
+            .collector = bundle.collector
+        };
+
+        for (const auto &source : manifest.sources) {
+            input.files.push_back(Parser::ModuleParser::InputFile(source));
+        }
+
+        if (handle_parse(parser, input)) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 // builds the bundle both `run` and `build` compile: the stdlib module, then the main module with
 // the user's sources. one function rather than two copies, because the copies had already drifted
 // - `build` never created a stdlib module at all, so any program calling `mem::` or `math::`
 // compiled under `run` and failed under `build`
-static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Parser::ModuleParser &parser)
+static int build_bundle(
+    argparse::ArgumentParser &cli,
+    AST::Bundle &bundle,
+    Parser::ModuleParser &parser,
+    std::vector<Parser::ModuleManifest> &out_manifests,
+    std::string &out_entry_module)
 {
-    parse_stdlib_module(cli, bundle, parser);
+#if ECO_USE_EMBEDDED_STDLIB
+    if (!cli.get<bool>("--no-stdlib")) {
+        parse_embedded_stdlib_module(bundle, parser);
+    }
+#endif
 
-    AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
-    auto &module = bundle.modules.get_module(module_handle);
+    // the manifest modules first, in dependency order, and the loose sources after them - so a program on
+    // the command line can name anything a manifest declared, and no manifest can name it back. That is
+    // the same one-way rule that holds between two manifests, for the same reason
+    std::vector<Parser::ModuleManifest> &manifests = out_manifests;
+    std::vector<std::filesystem::path> roots;
+    {
+        Compiler::ScopedPhase phase("resolve manifests");
+        if (!resolve_manifests(cli, manifests, roots)) {
+            return 1;
+        }
+    }
 
-    auto input = Parser::ModuleParser::InputPayload {
-        .files = {},
-        .module = module,
-        .collector = bundle.collector
-    };
+    if (parse_manifest_modules(manifests, bundle, parser) != 0) {
+        return 1;
+    }
 
     size_t missing_files = 0;
     auto source_files = get_file_list_from_args(cli, "source", missing_files);
@@ -225,18 +296,87 @@ static int build_bundle(argparse::ArgumentParser &cli, AST::Bundle &bundle, Pars
         return 1;
     }
 
-    // ...and "you named nothing" is the other mistake, which is the only one this message is about
+    // an entry point has to come from somewhere, and there are two natural spellings because there are two
+    // natural shapes of program: a script is a file, an application is a project.
+    //
+    // loose sources on the command line become the `main` module. Otherwise the program is *the manifest
+    // this invocation pointed at* - the one `-m`, or the module.eco in the working directory - whatever it
+    // happens to call itself. A build that points at several roots and gives no sources has no answer to
+    // "which of these is the program", and guessing would pick one silently
+    out_entry_module = ECO_MAIN_MODULE_NAME;
+
     if (source_files.empty()) {
-        std::cerr << "No source files provided." << std::endl;
-        return 1;
+        if (roots.size() != 1) {
+            if (roots.empty()) {
+                std::cerr << "No source files provided, and no 'module.eco' in the working directory."
+                          << std::endl;
+            }
+            else {
+                std::cerr << "Several manifests were given and no source files, so it is ambiguous which "
+                             "module is the program. Name its sources on the command line, or build one "
+                             "manifest at a time." << std::endl;
+            }
+            return 1;
+        }
+
+        // the root's own name, resolved through the loaded set rather than from the path - the manifest
+        // decides what its module is called
+        const std::filesystem::path &root = roots.front();
+        auto found = std::find_if(manifests.begin(), manifests.end(),
+            [&root](const Parser::ModuleManifest &manifest) {
+                std::error_code ec;
+                return std::filesystem::equivalent(manifest.path, root, ec);
+            });
+
+        if (found == manifests.end()) {
+            std::cerr << "Internal: the root manifest '" << root.string()
+                      << "' is not among the resolved modules." << std::endl;
+            return 1;
+        }
+
+        out_entry_module = found->name;
     }
 
-    for (const auto &source_file : source_files) {
-        input.files.push_back(Parser::ModuleParser::InputFile(source_file));
+    if (!source_files.empty()) {
+        const bool manifest_is_the_program = std::any_of(
+            manifests.begin(), manifests.end(),
+            [](const Parser::ModuleManifest &manifest) { return manifest.name == ECO_MAIN_MODULE_NAME; });
+
+        if (manifest_is_the_program) {
+            std::cerr << "A manifest already declares the '" << ECO_MAIN_MODULE_NAME
+                      << "' module, so the source files on the command line have nowhere to go."
+                      << std::endl;
+            return 1;
+        }
+
+        AST::module_handle_t module_handle = bundle.modules.add_module(ECO_MAIN_MODULE_NAME);
+        auto &module = bundle.modules.get_module(module_handle);
+
+        auto input = Parser::ModuleParser::InputPayload {
+            .files = {},
+            .module = module,
+            .collector = bundle.collector
+        };
+
+        for (const auto &source_file : source_files) {
+            input.files.push_back(Parser::ModuleParser::InputFile(source_file));
+        }
+
+        if (handle_parse(parser, input)) {
+            return 1;
+        }
     }
 
-    if (handle_parse(parser, input)) {
-        return 1;
+    // regenerating the embeddable header is a build step, not a compile step. it used to run on
+    // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
+    if (cli.is_used("--emit-stdlib-header")) {
+        if (AST::Module *stdlib = bundle.modules.find_module_ptr("stdlib")) {
+            AST::write_embedded_module(*stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
+        }
+        else {
+            std::cerr << "--emit-stdlib-header needs the standard library in the build." << std::endl;
+            return 1;
+        }
     }
 
     if (cli.get<bool>("--print-symbol-table")) {
@@ -330,6 +470,223 @@ static Compiler::CompilerOptions resolve_options(
     return { fallback };
 }
 
+
+// what a build reuses and what it has to produce.
+//
+// Only manifest modules are cacheable, and the entry module never is: its unit is where the C `main` is
+// created, so serving it from a store would leave codegen with no entry point to attach one to. It is also the
+// module being edited, so it would miss every time anyway.
+struct ModuleArtifact
+{
+    // where the freshly compiled object must be written
+    std::filesystem::path object;
+
+    // the sidecar to write once that object exists, so the next miss can name what changed
+    std::filesystem::path record;
+};
+
+struct ModulePlan
+{
+    // no compilation unit is created for these, and their stored object is linked instead
+    std::set<std::string> cached;
+
+    // the objects already on disk, in module order
+    std::vector<std::filesystem::path> reused;
+
+    // what each freshly compiled module is to leave behind, by module name. A module absent from this map is
+    // not cacheable, and its object goes to a scratch path beside the executable.
+    //
+    // one map rather than one per artifact: the two paths are decided together and are always both present or
+    // both absent, so two containers would only offer a way for them to disagree
+    std::map<std::string, ModuleArtifact> emit_to;
+};
+
+// decides, per manifest module, whether its object can be reused. Reads the store; writes nothing
+static ModulePlan plan_module_artifacts(
+    argparse::ArgumentParser &cli,
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::map<std::string, Compiler::ModuleCacheKey> &keys,
+    const std::string &entry_module)
+{
+    ModulePlan plan;
+
+    const std::filesystem::path cache_dir_override(cli.get<std::string>("--cache-dir"));
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        if (manifest.name == entry_module) {
+            continue;
+        }
+
+        auto found = keys.find(manifest.name);
+        if (found == keys.end()) {
+            continue;
+        }
+
+        const std::filesystem::path object =
+            Compiler::module_object_path(manifest, found->second, cache_dir_override);
+
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(object, ec)) {
+            plan.cached.insert(manifest.name);
+            plan.reused.push_back(object);
+            continue;
+        }
+
+        // **an unwritable store is not an error.** A read-only library directory, a toolchain installed
+        // system-wide, a full disk: the module is compiled to a scratch object beside the executable and simply
+        // not kept. Failing the build over a missed optimization would make a cache a liability
+        if (!Compiler::cache_dir_is_writable(object.parent_path())) {
+            continue;
+        }
+
+        plan.emit_to[manifest.name] = ModuleArtifact{
+            object, Compiler::module_inputs_path(manifest, cache_dir_override) };
+    }
+
+    return plan;
+}
+
+// **the whole-program path.** An optimized or dumped build folds every unit into one module first, because both
+// the O3 pipeline and the IR dump can only look at one - and that is exactly what a per-module object cache
+// cannot have. So the two are mutually exclusive by construction rather than by a warning: `-O` and `-p` get
+// whole-program optimization and no cache, everything else gets the cache.
+static bool wants_whole_program_module(argparse::ArgumentParser &cli)
+{
+    return cli.get<bool>("--optimize") || cli.get<bool>("--print-ir");
+}
+
+// the cache key of every manifest module. Computed whenever anything downstream reads one - the plan, or
+// `--explain-cache` - and skipped entirely otherwise, because a key costs a read of every source in the
+// build and a whole-program build reuses nothing
+static bool compute_cache_keys(
+    argparse::ArgumentParser &cli,
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const Compiler::CompilerOptions &options,
+    std::map<std::string, Compiler::ModuleCacheKey> &out_keys)
+{
+    Compiler::ScopedPhase phase("cache keys");
+
+    std::string error;
+    if (!Compiler::compute_module_keys(manifests, options, cli.get<bool>("--optimize"), out_keys, error)) {
+        print_critical_error("Module Cache Error", error);
+        return false;
+    }
+
+    return true;
+}
+
+// what the build decided, per module: reused, or compiled and why.
+//
+// **it reports the plan rather than re-deriving it from the filesystem.** Asking again would be a second
+// answer to a question the plan already owns, and the two could disagree - which is exactly the bug this
+// diagnostic exists to help find
+static void report_cache_plan(
+    argparse::ArgumentParser &cli,
+    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::map<std::string, Compiler::ModuleCacheKey> &keys,
+    const ModulePlan &plan,
+    const std::string &entry_module_name,
+    bool bypassed)
+{
+    if (!cli.get<bool>("--explain-cache")) {
+        return;
+    }
+
+    std::cout << "[cache]" << std::endl;
+
+    if (bypassed) {
+        std::cout << "  bypassed: an optimized or dumped build is whole-program, so no module object is "
+                     "reusable" << std::endl;
+    }
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        auto found = keys.find(manifest.name);
+        if (found == keys.end()) {
+            continue;
+        }
+
+        const Compiler::ModuleCacheKey &key = found->second;
+
+        std::cout << "  " << manifest.name << "  " << key.hex << "  ";
+
+        if (plan.cached.count(manifest.name) > 0) {
+            std::cout << "hit" << std::endl;
+            continue;
+        }
+
+        std::cout << "miss";
+
+        // three different reasons a module is not being reused, and they have to read differently: it is the
+        // program, its store cannot be written, or one of its inputs changed. Only the last is about the source
+        auto artifact = plan.emit_to.find(manifest.name);
+        if (artifact == plan.emit_to.end()) {
+            if (bypassed) {
+                std::cout << std::endl;
+            }
+            else if (manifest.name == entry_module_name) {
+                std::cout << "  (the program itself is never cached)" << std::endl;
+            }
+            else {
+                std::cout << "  (its cache directory is not writable)" << std::endl;
+            }
+            continue;
+        }
+
+        const std::string why = Compiler::explain_miss(artifact->second.record, key);
+        if (!why.empty()) {
+            std::cout << "  (" << why << ")";
+        }
+
+        std::cout << std::endl;
+    }
+}
+
+
+// emits every module that was not reused, then links the reused objects together with them.
+//
+// the module's object goes straight into the cache rather than being emitted elsewhere and copied: an object in
+// the store is by definition one this compiler just produced for that exact key, and a copy step is one more
+// thing that can half-succeed.
+static bool emit_and_link_modules(
+    LLVMCompiler &compiler, const std::string &output, const ModulePlan &plan)
+{
+    std::vector<std::filesystem::path> objects = plan.reused;
+
+    // a module with nowhere to be stored - the entry module, or anything not from a manifest - gets a scratch
+    // object beside the executable, the same place the whole-program path has always put one
+    const auto object_for = [&](const std::string &module_name) -> std::filesystem::path {
+        auto found = plan.emit_to.find(module_name);
+        if (found != plan.emit_to.end()) {
+            return found->second.object;
+        }
+
+        return std::filesystem::path(output + "." + module_name + ".o");
+    };
+
+    if (!compiler.emit_objects(object_for, objects)) {
+        return false;
+    }
+
+    return compiler.link_executable(output, objects);
+}
+
+// the inputs each freshly emitted module was built from, so the next miss can name what changed.
+//
+// best effort: a store that cannot be written is a cache that will miss next time, which is slow rather than
+// wrong. Refusing the build over it would make an unwritable directory fatal to compiling
+static void store_module_records(
+    const ModulePlan &plan, const std::map<std::string, Compiler::ModuleCacheKey> &keys)
+{
+    for (const auto &[module_name, artifact] : plan.emit_to) {
+        auto found = keys.find(module_name);
+        if (found == keys.end()) {
+            continue;
+        }
+
+        Compiler::write_inputs_record(artifact.record, found->second);
+    }
+}
+
 // prints a codegen exception and answers the process status a subcommand returns for it.
 //
 // one function for the same reason resolve_options is one: both subcommands answer this the same way
@@ -348,29 +705,93 @@ static int report_compiler_exception(const Compiler::ASTCompilerException &e)
     return 1;
 }
 
+// everything both subcommands do before codegen, and the answers they carry into it.
+//
+// one function for the same reason build_bundle and run_semantic_passes are one each: a phase added to one
+// entry point and forgotten in the other is a silent behaviour difference, and the two tails below are all
+// that legitimately differ - `run` merges and JITs, `build` emits objects and links.
+struct FrontEnd
+{
+    std::vector<Parser::ModuleManifest> manifests;
+    std::string entry_module;
+    Compiler::CompilerOptions options;
+
+    // empty unless something downstream reads one - see needs_cache_keys
+    std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
+};
+
+// keying a module reads every one of its sources, so it is not free. Only two things ever look at a key: the
+// plan, which a whole-program build does not have, and `--explain-cache`
+static bool needs_cache_keys(argparse::ArgumentParser &cli, bool whole_program)
+{
+    return !whole_program || cli.get<bool>("--explain-cache");
+}
+
+static bool run_front_end(
+    argparse::ArgumentParser &cli,
+    AST::Bundle &bundle,
+    Parser::ModuleParser &parser,
+    Compiler::BuildMode fallback,
+    bool whole_program,
+    FrontEnd &out)
+{
+    {
+        Compiler::ScopedPhase phase("parse");
+        if (build_bundle(cli, bundle, parser, out.manifests, out.entry_module) != 0) {
+            return false;
+        }
+    }
+
+    {
+        Compiler::ScopedPhase phase("semantic passes");
+        if (run_semantic_passes(cli, bundle) != 0) {
+            return false;
+        }
+    }
+
+    out.options = resolve_options(cli, fallback);
+
+    if (needs_cache_keys(cli, whole_program)
+        && !compute_cache_keys(cli, out.manifests, out.options, out.cache_keys)) {
+        return false;
+    }
+
+    return true;
+}
+
 int main_run(argparse::ArgumentParser &cli)
 {
     auto bundle = AST::Bundle();
     auto parser = Parser::ModuleParser();
 
-    if (build_bundle(cli, bundle, parser) != 0) {
+    // `run` reuses nothing: the JIT is handed one module, so every unit is merged and there are no per-module
+    // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
+    // module beside main's, which is a question about duplicate weak symbols rather than about caching
+    FrontEnd front;
+    if (!run_front_end(cli, bundle, parser, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
         return 1;
     }
 
-    if (run_semantic_passes(cli, bundle) != 0) {
-        return 1;
-    }
+    const Compiler::CompilerOptions options = front.options;
+    const std::string &entry_module = front.entry_module;
 
-    // compile the module
-    LLVMCompiler compiler(resolve_options(cli, Compiler::BuildMode::t_debug));
+    report_cache_plan(cli, front.manifests, front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
+
+    LLVMCompiler compiler(options);
+    compiler.set_entry_module(entry_module);
 
     try {
+        Compiler::ScopedPhase phase("codegen");
         compiler.compile_bundle(bundle);
+
+        // the JIT can only be handed one module, so `run` always merges
+        compiler.link_into_main();
     } catch (Compiler::ASTCompilerException &e) {
         return report_compiler_exception(e);
     }
 
     if (cli.get<bool>("--optimize")) {
+        Compiler::ScopedPhase phase("optimize");
         compiler.optimize();
     }
 
@@ -378,7 +799,12 @@ int main_run(argparse::ArgumentParser &cli)
         compiler.printIR(false);
     }
 
-    compiler.run_code();
+    {
+        Compiler::ScopedPhase phase("jit");
+        compiler.run_code();
+    }
+
+    std::cout << Compiler::PhaseTimings::instance().report();
 
     return 0;
 }
@@ -388,19 +814,41 @@ int main_build(argparse::ArgumentParser &cli)
     auto bundle = AST::Bundle();
     auto parser = Parser::ModuleParser();
 
-    if (build_bundle(cli, bundle, parser) != 0) {
+    // **before anything is compiled.** This used to sit after codegen and after the optimizer, so a
+    // forgotten `-o` threw away the whole compile to say one sentence - and the output path is now an
+    // input to the decision of what to emit at all, not just where to put it
+    if (!cli.present("-o")) {
+        std::cerr << "No output file specified." << std::endl;
         return 1;
     }
 
-    if (run_semantic_passes(cli, bundle) != 0) {
+    const bool whole_program = wants_whole_program_module(cli);
+
+    FrontEnd front;
+    if (!run_front_end(cli, bundle, parser, Compiler::BuildMode::t_release, whole_program, front)) {
         return 1;
     }
 
-    // compile the module
-    LLVMCompiler compiler(resolve_options(cli, Compiler::BuildMode::t_release));
+    const Compiler::CompilerOptions options = front.options;
+    const std::string &entry_module = front.entry_module;
+
+    // an optimized or dumped build reuses nothing and stores nothing - see wants_whole_program_module
+    const ModulePlan plan = whole_program
+        ? ModulePlan{}
+        : plan_module_artifacts(cli, front.manifests, front.cache_keys, entry_module);
+
+    report_cache_plan(cli, front.manifests, front.cache_keys, plan, entry_module, whole_program);
+
+    LLVMCompiler compiler(options);
+    compiler.set_entry_module(entry_module);
 
     try {
-        compiler.compile_bundle(bundle);
+        Compiler::ScopedPhase phase("codegen");
+        compiler.compile_bundle(bundle, plan.cached);
+
+        if (whole_program) {
+            compiler.link_into_main();
+        }
     } catch (Compiler::ASTCompilerException &e) {
         return report_compiler_exception(e);
     }
@@ -409,6 +857,7 @@ int main_build(argparse::ArgumentParser &cli)
     // switch `build` accepted and silently ignored - and left no way at all to see what codegen
     // emitted for a release build, since `-p` only ever showed the optimizer's output
     if (cli.get<bool>("--optimize")) {
+        Compiler::ScopedPhase phase("optimize");
         compiler.optimize();
     }
 
@@ -416,15 +865,30 @@ int main_build(argparse::ArgumentParser &cli)
         compiler.printIR(false);
     }
 
-    // ensure the output file is set
-    if (!cli.present("-o")) {
-        std::cerr << "No output file specified." << std::endl;
-        return 1;
+    const std::string output = cli.get<std::string>("-o");
+
+    {
+        Compiler::ScopedPhase phase("emit + link");
+
+        if (whole_program) {
+            // one merged module, one object, one link - the path that has to keep existing because `-O`
+            // depends on it
+            if (!compiler.make_exec(output)) {
+                return 1;
+            }
+        }
+        else if (!emit_and_link_modules(compiler, output, plan)) {
+            return 1;
+        }
     }
 
-    if (!compiler.make_exec(cli.get<std::string>("-o"))) {
-        return 1;
+    // only now, and only for what was actually emitted: a record written before the object exists would
+    // describe a build that may still have failed
+    if (!whole_program) {
+        store_module_records(plan, front.cache_keys);
     }
+
+    std::cout << Compiler::PhaseTimings::instance().report();
 
     return 0;
 }
@@ -483,6 +947,33 @@ int main(int argc, char *argv[])
             .default_value(false)
             .implicit_value(true);
 
+        command.get().add_argument("--cache-dir")
+            .help("Where compiled module artifacts are stored. Defaults to '.echo' beside each manifest.")
+            .default_value(std::string(""));
+
+        // the two measurement dumps. They sit with `-a`/`-ar`/`-p`/`-syt`/`-pi` rather than off to one side
+        // because they answer the same kind of question those do - what did the compiler actually do - and a
+        // number nobody can ask for is a number nobody looks at. Both print a `[section]` header, the shape
+        // --print-symbol-table already uses, so the output is greppable and stays stable enough to assert on
+        command.get().add_argument("-ec", "--explain-cache")
+            .help("Print each module's cache key, whether its artifact is present, and what changed.")
+            .default_value(false)
+            .implicit_value(true);
+
+        command.get().add_argument("-t", "--timings")
+            .help("Print where the compile spent its time, by phase.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // repeatable, and the graph is resolved as a whole - so naming a library that depends on another
+        // pulls the other in too, once, ahead of it. A dependency does not have to be spelled here
+        command.get().add_argument("-m", "--module")
+            .help("Build a module from its manifest. May be given more than once; a manifest may be an "
+                  "'module.eco' file or a directory holding one.")
+            .default_value(std::vector<std::string>{})
+            .append()
+            .metavar("MANIFEST");
+
         // the build mode decides which checks the program carries: `assert` and the null check the
         // `ptr<T>` -> `T&` narrowing emits are both debug-only. deliberately orthogonal to -O,
         // which says how hard to optimize what is emitted, not what to emit
@@ -533,6 +1024,16 @@ int main(int argc, char *argv[])
         std::cerr << err.what() << std::endl;
         std::cerr << cli;
         return 1;
+    }
+
+    // enabled here rather than inside each entry point, so the very first phase a subcommand enters is
+    // already being timed
+    if (cli.is_subcommand_used(run_command) || cli.is_subcommand_used(build_command)) {
+        auto &command = cli.is_subcommand_used(run_command) ? run_command : build_command;
+
+        if (command.get<bool>("--timings")) {
+            Compiler::PhaseTimings::instance().enable();
+        }
     }
 
     if (cli.is_subcommand_used(run_command)) {

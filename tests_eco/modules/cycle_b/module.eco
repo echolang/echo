@@ -1,0 +1,4 @@
+// the other half of the cycle
+#[module: "cycleb"]
+#[depends: "../cycle_a"]
+#[sources: "*.eco"]

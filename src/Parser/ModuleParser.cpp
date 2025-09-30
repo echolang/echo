@@ -1,5 +1,7 @@
 #include "Parser/ModuleParser.h"
 
+#include "Compiler/PhaseTimings.h"
+
 #include "eco.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
@@ -78,6 +80,8 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
 {
     // build all parser payloads
     std::vector<std::tuple<AST::File *, AST::TokenizedFile>> file_payloads;
+    {
+    Compiler::ScopedPhase phase("lex");
     for (auto &file : module.files()) {
 #if ECO_DONT_CATCH_EXCEPTIONS 
         auto tfile = make_tokenized_file(module, file);
@@ -92,6 +96,7 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         }
 #endif
     }
+    }
 
     // three passes over the same tokens, each one only naming what the next one needs
     //
@@ -103,16 +108,22 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
 
     // types first: just the names, so that a property or a parameter can be typed by a struct
     // declared further down or in another file
+    {
+    Compiler::ScopedPhase phase("pass 1: type names");
     for (auto &[file, tfile] : file_payloads) {
         auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_type_names);
         parse_type_names(parser_payload);
     }
+    }
 
     // then the declaration surface - function, method and constructor signatures, and struct
     // properties - so that a call can resolve against a declaration written anywhere
+    {
+    Compiler::ScopedPhase phase("pass 2: declarations");
     for (auto &[file, tfile] : file_payloads) {
         auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_declarations);
         parse_symbols(parser_payload);
+    }
     }
 
     // dump symbols
@@ -121,21 +132,29 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
     }
 
     // and finally the bodies
+    {
+    Compiler::ScopedPhase phase("pass 3: bodies");
     for (auto &[file, tfile] : file_payloads) {
         auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_bodies);
         file->root = &parse_scope(parser_payload);
+    }
     }
 }
 
 void Parser::ModuleParser::parse_input(const InputPayload &payload) const
 {
-    for (const auto &input_file : payload.files) {
-        if (input_file.content.has_value()) {
-            parse_file_from_mem(input_file.path, input_file.content.value(), payload.module, payload.collector);
-        } else {
-            parse_file_from_disk(input_file.path, payload.module, payload.collector);
+    {
+        Compiler::ScopedPhase read_phase("read sources");
+
+        for (const auto &input_file : payload.files) {
+            if (input_file.content.has_value()) {
+                parse_file_from_mem(input_file.path, input_file.content.value(), payload.module, payload.collector);
+            } else {
+                parse_file_from_disk(input_file.path, payload.module, payload.collector);
+            }
         }
     }
+
     
     parse_module(payload.module, payload.collector);
 }

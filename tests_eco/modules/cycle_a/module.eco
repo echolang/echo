@@ -1,0 +1,4 @@
+// half of a deliberate cycle - see tests_eco/errors/module_cycle.test
+#[module: "cyclea"]
+#[depends: "../cycle_b"]
+#[sources: "*.eco"]

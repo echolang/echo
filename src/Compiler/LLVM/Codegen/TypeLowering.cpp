@@ -8,6 +8,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTConformance.h"
+#include "AST/ASTFunctionEmission.h"
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -26,9 +27,15 @@
 
 namespace Compiler::LLVM
 {
-void TypeLowering::create_cmp_units(const AST::Bundle &bundle)
+void TypeLowering::create_cmp_units(
+    const AST::Bundle &bundle, const std::set<std::string> &cached_modules)
 {
     for (auto &module : bundle.modules) {
+        // served from the cache: no unit, so nothing below ever declares or defines anything for it
+        if (cached_modules.count(module->name) > 0) {
+            continue;
+        }
+
         // check if the module is already in the map which is not allowed
         if (_ctx.cmp_unit_map.find(module->name) != _ctx.cmp_unit_map.end()) {
             throw Compiler::InternalCompilerException(fmt::format(
@@ -50,6 +57,25 @@ void TypeLowering::create_cmp_units(const AST::Bundle &bundle)
         cmp_unit->llvm_module->setTargetTriple(_ctx.target_triple);
 
         _ctx.cmp_unit_map[module->name] = cmp_unit.get();
+    }
+
+    // where every declaration was written, recorded once now that the file roots are final - every pass
+    // that appends one has run. See CodegenContext::function_file_map for why a body needs this rather
+    // than the ambient current_file
+    _ctx.function_file_map.clear();
+
+    for (auto &module : bundle.modules) {
+        for (auto &file : module->files()) {
+            if (file.root == nullptr) {
+                continue;
+            }
+
+            for (auto &child : file.root->children) {
+                if (child.has_type<AST::FunctionDeclNode>()) {
+                    _ctx.function_file_map[child.get_ptr<AST::FunctionDeclNode>()] = &file;
+                }
+            }
+        }
     }
 
     // ensure none of the modules are null
@@ -152,10 +178,23 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
         }
     }
 
+    // **external here even for an ODR-shared definition**, and weakened later, in
+    // StmtCodegen::gen_function_decl. LLVM's verifier rejects a bodyless linkonce_odr function, and this
+    // is also the path a unit takes to *reference* one it does not define - so the linkage a symbol ends
+    // up with is decided by whether a body was emitted into this unit, not by what it is
     llvm::Function *llvm_func = llvm::Function::Create(requested_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
 
     // store in the function map
     cmp_unit.function_table.push_function(func_name, node, llvm_func);
+
+    // and if nobody owns this definition, this unit now owes a body for it - see
+    // CmpUnit::pending_definitions. Queued here rather than at the four call sites that reach this
+    // function lazily, because this is the one place all of them pass through, so transitivity is free:
+    // draining one body runs the same path again for whatever that body names
+    if (AST::function_emission_kind(node) == AST::FunctionEmission::t_odr_shared
+        && cmp_unit.definition_queued.insert(node).second) {
+        cmp_unit.pending_definitions.push_back(node);
+    }
 
     return llvm_func;
 }
@@ -402,28 +441,29 @@ void TypeLowering::build_function_maps()
     for (auto &cmp_unit : _ctx.cmp_units) {
         // first build all functions actually declared in the module
         for (auto fncdecl : cmp_unit->ast_module->nodes.of_type<AST::FunctionDeclNode>()) {
-            // skip generic function templates during function map building
-            if (fncdecl->is_generic()) {
+            // exactly the declarations this unit will emit a body for: the symbol has to exist before
+            // gen_function_decl looks one up by mangled name. Everything left out is left out because
+            // there is no body of ours to define - a builtin, an interface requirement or a template has
+            // no symbol at all, and an extern or an intrinsic has one somebody else supplies. Each of
+            // those is still declared by the reference-scoped loop below wherever it is actually named,
+            // which is what keeps a program that touches no math from paying for every row of
+            // stdlib/math/intrinsics.eco: resolving one is a signature match against LLVM's whole
+            // intrinsic table
+            const AST::FunctionEmission kind = AST::function_emission_kind(fncdecl);
+
+            if (!AST::emission_has_body(kind)) {
                 continue;
             }
-            // a builtin is answered at the call site and has no symbol, so declaring one would
-            // emit a `declare` nobody defines and the call would fail to resolve at link time
-            if (fncdecl->is_builtin()) {
+
+            // an ODR-shared definition is deliberately *not* claimed here. It has no owning module, so
+            // "the unit whose arena holds the declaration node" is the wrong home: an instantiation is
+            // cloned into the *template's* module, which for `mem::alloc<Padded>` means the stdlib unit
+            // would define a body over a struct only the application declares. It is emitted into every
+            // unit that references it instead, by the drain
+            if (kind == AST::FunctionEmission::t_odr_shared) {
                 continue;
             }
-            // an interface requirement is a signature with no implementation - the implementors have
-            // the bodies, under their own symbols. declaring one would emit a `declare` nobody defines
-            if (fncdecl->is_interface_requirement()) {
-                continue;
-            }
-            // an intrinsic has no body to emit either, so this loop's reason for existing - the symbol
-            // must exist before gen_function_decl looks a body up - does not apply to one. the second,
-            // reference-scoped loop declares the ones a unit actually calls, which is what keeps a
-            // program that touches no math from paying for every row in stdlib/math/intrinsics.eco:
-            // each is an IIT-table signature match against LLVM's whole intrinsic list
-            if (fncdecl->intrinsic.has_value()) {
-                continue;
-            }
+
             create_llvm_func_decl(fncdecl, *cmp_unit);
         }
     }
@@ -437,23 +477,12 @@ void TypeLowering::build_function_maps()
             // if there is no matching llvm function for the call inside of the module
             // we copy the declaration from another module
             auto decl = fnccall->decl;
-            if (!decl) {
-                continue;
-            }
 
-            // skip generic function templates
-            if (decl->is_generic()) {
-                continue;
-            }
-
-            // as above: a builtin call folds to a constant, there is nothing to link
-            if (decl->is_builtin()) {
-                continue;
-            }
-
-            // a call whose declaration is an interface requirement is dispatched through the receiver's
-            // vtable rather than to a symbol, so there is nothing to link here either
-            if (decl->is_interface_requirement()) {
+            // a call this unit names needs this unit to name the symbol, and nothing more. The one shape
+            // that gets no declaration is the one that has no symbol: a builtin call folds to a constant,
+            // an interface requirement dispatches through the receiver's vtable, and a template has no
+            // concrete signature - none of the three is a name the linker will ever be asked for
+            if (!AST::emission_needs_declaration(AST::function_emission_kind(decl))) {
                 continue;
             }
 

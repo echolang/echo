@@ -718,6 +718,11 @@ static void synthesize_field_wise_constructor(
     // synthesized constructor needs no token minted for it either
     auto &default_ctor = payload.context.emplace_node<AST::FunctionDeclNode>(name_token);
     default_ctor.member_kind = AST::MemberKind::t_constructor;
+
+    // built from the struct's properties rather than written, so no module owns its symbol and every
+    // build that sees this struct produces the same definition - see AST::function_emission_kind
+    default_ctor.is_implicitly_generated = true;
+
     struct_node->set_field_wise_constructor(&default_ctor);
 
     default_ctor.ast_namespace = payload.context.declaring_namespace();

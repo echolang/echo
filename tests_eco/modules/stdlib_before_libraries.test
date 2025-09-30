@@ -1,0 +1,10 @@
+modules: modules/lib_stdlib_user
+
+--- OUT --->
+5
+--- AST --->
+# the order is the assertion. `CHECK:` advances a cursor, so these three lines can only match in this
+# sequence - which is exactly "stdlib was parsed before the library, and the library before the program".
+CHECK: Module: [stdlib]
+CHECK: Module: [stdlibuser]
+CHECK: Module: [main]

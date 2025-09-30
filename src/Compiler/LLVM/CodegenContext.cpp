@@ -28,7 +28,7 @@ namespace Compiler::LLVM
 
     CmpUnit *CodegenContext::main_cmp_unit()
     {
-        auto it = cmp_unit_map.find(ECO_MAIN_MODULE_NAME);
+        auto it = cmp_unit_map.find(entry_module_name);
         if (it == cmp_unit_map.end()) {
             return nullptr;
         }

@@ -625,30 +625,34 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
     }
 }
 
+// the callee symbol *in the current unit*, declared on demand if this unit has not named it yet.
+//
+// it used to fall back to searching the other units' tables, which is wrong in a way nothing catches:
+// an llvm::Function belongs to exactly one llvm::Module, and compile_bundle moves every non-main
+// module into main and then resets it. a call planted against a foreign unit's Function therefore
+// references an object that is about to be destroyed, and LLVM's verifier does not check the module
+// membership of a referenced global - so the whole thing is silent. the path was unreachable only
+// because build_function_maps' reference-scoped loop happens to declare every callee of every call
+// node a module owns, which stops being true as soon as a definition is emitted into a unit other
+// than the one that owns its declaration.
+//
+// declaring into the current unit is what that loop already does, so this is the same answer reached
+// on demand rather than up front, and a `declare` is all a cross-module callee ever needs.
 llvm::Function *ExprCodegen::find_llvm_function(const AST::FunctionDeclNode *decl)
 {
-    auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(decl);
-    llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid);
+    // a null decl is an unresolved call, which the caller reports by name - there is nothing to
+    // declare, and minting a symbol for it would turn a resolution failure into a link failure
+    if (decl == nullptr) {
+        return nullptr;
+    }
 
-    if (func) {
+    auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(decl);
+
+    if (llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid)) {
         return func;
     }
 
-    // look for the function in the other modules
-    for (auto &cmp_unit : _ctx.cmp_units) {
-        if (cmp_unit.get() == _ctx.current_cmp_unit) {
-            continue;
-        }
-
-        funcid = cmp_unit->function_table.get_function_id(decl);
-        func = cmp_unit->function_table.get_llvm_function(funcid);
-
-        if (func) {
-            return func;
-        }
-    }
-
-    return nullptr;
+    return _ctx.types->create_llvm_func_decl(decl, *_ctx.current_cmp_unit);
 }
 
 void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)

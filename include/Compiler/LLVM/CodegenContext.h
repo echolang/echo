@@ -128,6 +128,26 @@ namespace Compiler::LLVM
         CmpUnit *current_cmp_unit = nullptr;
         AST::File *current_file = nullptr;
 
+        // the file each function declaration was written in, so a body's own source position does not
+        // depend on which walk reached it.
+        //
+        // it exists because a body's *content* can read `current_file`: AbortCodegen::location_of folds
+        // `<file>:<line>` into the private string an `assert` or a `die` aborts with. A body emitted from
+        // its own file root got the right answer by luck of the walk, and the moment a definition is
+        // emitted into a unit other than the one owning its declaration - which is what a generic
+        // instantiation shared by two units needs - the same linkonce_odr symbol would carry two different
+        // messages and the linker would keep an arbitrary one.
+        //
+        // a lookup miss is legitimate and falls back to the ambient file: a declaration reached other than
+        // through a file root has no better answer available, and the fallback is exactly today's
+        // behaviour
+        std::unordered_map<const AST::FunctionDeclNode *, AST::File *> function_file_map;
+
+        AST::File *file_of(const AST::FunctionDeclNode *decl) const {
+            auto found = function_file_map.find(decl);
+            return found != function_file_map.end() ? found->second : current_file;
+        }
+
         // the function declaration currently being generated, set/restored around each function
         // body so codegen errors can name their enclosing function. null at global scope
         AST::FunctionDeclNode *current_function = nullptr;
@@ -268,6 +288,15 @@ namespace Compiler::LLVM
             value_stack.pop();
             return value;
         }
+
+        // the module whose file-scope statements become the C `main`. Defaults to ECO_MAIN_MODULE_NAME,
+        // which is what loose sources on the command line are collected into.
+        //
+        // it is a *name* rather than the constant because a project is not a pile of files: `echoc run` in a
+        // directory holding a module.eco compiles that manifest, and a manifest calls its module whatever
+        // the project is called. Requiring `#[module: "main"]` to make a project runnable would be naming
+        // the compiler's internals in every user's manifest
+        std::string entry_module_name = ECO_MAIN_MODULE_NAME;
 
         // the main compilation unit, or nullptr if the bundle has no main module yet
         CmpUnit *main_cmp_unit();

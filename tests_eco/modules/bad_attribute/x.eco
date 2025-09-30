@@ -1,0 +1,2 @@
+namespace badattr;
+function x() : int32 { return 3; }

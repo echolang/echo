@@ -1,0 +1,9 @@
+// the same three-module graph, linked as a native binary rather than JITed. `mode: build` is the only
+// thing that exercises make_exec, so it is the only thing that proves a multi-module program actually
+// links: a symbol defined in the wrong unit, or in none, is invisible under the JIT's single merged
+// module and an undefined symbol at the link step here.
+modgeom::Point $p = modgeom::Point(10, 20);
+
+echo $p->sum();
+echo modgeom::boxed_x($p);
+echo modcore::doubled($p->sum());

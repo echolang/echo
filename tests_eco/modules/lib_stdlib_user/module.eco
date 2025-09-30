@@ -1,0 +1,12 @@
+/*
+ * A library that uses a standard library type. Its whole job is to pin the parse order: the standard library
+ * is added as the first root of every build, so every other module must be ordered after it.
+ *
+ * That used to depend on where this directory sat on disk. The graph was emitted in canonical-path order, so a
+ * project whose path sorted above `stdlib/` was parsed *before* the standard library and could not name
+ * `string` at all - the same source compiling or failing based on its own location.
+ */
+
+#[module: "stdlibuser"]
+
+#[sources: "src/*.eco"]

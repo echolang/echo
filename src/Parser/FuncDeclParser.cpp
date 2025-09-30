@@ -280,10 +280,15 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     auto function_token = cursor.current();
     cursor.skip();
 
-    // a name nobody can spell, discriminated so two closures never share a symbol. the block's lexical
-    // namespace already separates blocks; the counter separates two literals inside one block
+    // a name nobody can spell, discriminated so two closures never share a symbol - including two written
+    // inside one block, which the enclosing lexical namespace cannot tell apart.
+    //
+    // the *position* rather than a counter, and this one carries a second reason beyond reproducibility:
+    // the environment type is minted as `<this name>.env` in declaring_namespace(), which skips lexical
+    // namespaces - so the env type's identity, its typeinfo global and its release thunk all rest on this
+    // string alone being unique
     auto name_token = payload.context.make_virtual_token(
-        fmt::format("closure${}", payload.collector.next_closure_id++),
+        fmt::format("closure${}", payload.context.site_discriminator(function_token)),
         Token::Type::t_identifier,
         function_token);
 
@@ -381,6 +386,12 @@ void Parser::publish_declaration_markers(
     const TokenReference &nametoken)
 {
     publish_implicit_conversion(payload, funcdecl, owner_struct, nametoken);
+
+    // no validation here on purpose, unlike `#[implicit]`. The attribute is meaningless rather than wrong
+    // on a declaration with no body of ours - an extern, an intrinsic, a builtin - and the stdlib stacks it
+    // on every intrinsic in math/intrinsics.eco already. AST::function_emission_kind answers those before it
+    // ever looks at this flag, so the combination costs nothing and refusing it would break that file
+    funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
 }
 
 // publishes a method marked `#[implicit]` as one of its owner's implicit conversions, and reports
