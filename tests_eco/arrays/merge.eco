@@ -1,0 +1,25 @@
+// `arr::merge` is an ordinary generic function over an ordinary type - there is no rule in the compiler
+// about merging, and nothing about `arr` that makes it different from a namespace you declare yourself
+array<int32> $a = [1, 2, 3];
+array<int32> $b = [4, 5];
+
+array<int32> $merged = arr::merge($a, $b);
+
+echo $merged->count();
+
+foreach ($merged as $value) {
+    echo $value;
+}
+
+// the inputs are `const` borrows, so neither of them was consumed or changed
+echo $a->count();
+echo $b->count();
+
+// one allocation for the whole result, because merge reserves the total up front rather than
+// growing into it
+echo $merged->capacity();
+
+// merging with an empty array is the identity, and the empty one needs no special case in merge
+array<int32> $none = [];
+echo arr::merge($a, $none)->count();
+echo arr::merge($none, $a)->count();

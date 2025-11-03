@@ -21,21 +21,21 @@ function balanced() : void
     Res $r = Res(1);
     weak<Res> $w = &$r;
 
-    echo ref_count($r);
+    echo mem::ref_count($r);
 
     // `?->` upgrades, reads through, and gives the reference back at the end of the statement
     echo $w?->tag ?? -1;
-    echo ref_count($r);
+    echo mem::ref_count($r);
 
     // `??` the same, on the path where the left side was there. bound to a name first because
-    // `ref_count` takes a borrow, and a value nothing stored has no address to borrow
+    // `mem::ref_count` takes a borrow, and a value nothing stored has no address to borrow
     Res $picked = $w ?? Res(2);
-    echo ref_count($picked);
+    echo mem::ref_count($picked);
 
     // and `guard`, whose binding is a declared local - so it owns the upgrade for its scope, and the
     // count is legitimately one higher *inside* it
     guard Res $up = $w else { return; }
-    echo ref_count($r);
+    echo mem::ref_count($r);
 }
 
 balanced();

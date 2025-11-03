@@ -17,7 +17,7 @@ CHECK-NOT: llvm.fabs.i64
 # the integer argument reaches the *generic* abs, instantiated at int32, rather than either intrinsic
 # overload. there is no llvm.fabs for an integer, so getting this wrong could not even lower - the
 # real risk is the quieter one of routing an int through a double and back
-CHECK: call i32 @_math_absZZMLPiGMLPi(i32
+CHECK: call i32 @_std_math_absZZMLPiGMLPi(i32
 
 # while both float widths take the concrete intrinsic, each at its own precision
 CHECK: call double @llvm.fabs.f64(double

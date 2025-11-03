@@ -1,7 +1,7 @@
 // a by-value binding nothing writes is bound `const V&` instead - indistinguishable for any program
 // that keeps the "do not mutate the collection while iterating" contract, and the only place the
 // difference is visible at all is the resolved AST
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 
 // never written -> elided to a borrow

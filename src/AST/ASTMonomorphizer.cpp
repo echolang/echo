@@ -379,7 +379,7 @@ namespace AST
             // **a receiver that still mentions a type parameter is a template's, not a program's.**
             // this call sits in an un-instantiated body, and the clones the fixpoint made are what
             // carry the concrete receiver - so `$c->count()` inside `f<T>(T& $c)` is answered by
-            // `f<Array<int32>>`'s copy and reporting the template's would blame the one body that
+            // `f<array<int32>>`'s copy and reporting the template's would blame the one body that
             // was never going to be emitted
             //
             // the same silence determine_type_args keeps for t_undecided_parameter, and the same

@@ -1233,7 +1233,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             // **a call forwards, and opens no scope.** it used to bind here, on the grounds that the
             // callee reads through a borrowed address *during* the call and returns - which is true, and
             // is not the whole question. it is false the moment the value the call hands back is *made
-            // of* one of those temporaries: `operator [](Array<T>&) : T&` returns an address into the
+            // of* one of those temporaries: `operator [](array<T>&) : T&` returns an address into the
             // very storage the bind would have destroyed, and an `#[implicit]` conversion returns a
             // window into its receiver. both are ordinary library declarations, so no enumeration of
             // shapes could be trusted to catch the next one

@@ -474,7 +474,7 @@ namespace AST
         //
         // synthesizing on demand alone is not sound across separate compilations, and the failure is
         // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body branches
-        // on whether the class has a deinit - so a build that never released a `StringBuf` produced a
+        // on whether the class has a deinit - so a build that never released a `str::buf` produced a
         // thunk that decrements and frees, a build that did produced one that also tears the payload down,
         // and both claim the same ODR symbol. The linker keeps whichever it saw first and the program
         // leaks, with nothing anywhere to point at.

@@ -5,7 +5,7 @@
 
 struct Point { int32 $x; int32 $y; }
 
-Array<Point> $a = [];
+array<Point> $a = [];
 
 // the slot is a borrow of the new element, so each field is written straight into the buffer
 $a->push_slot()->x = 1;

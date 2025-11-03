@@ -1,6 +1,6 @@
-// **the bracket owes the standard library nothing.** `Array<T>` is a library type that declares an
+// **the bracket owes the standard library nothing.** `array<T>` is a library type that declares an
 // element contract like any other, and here is a container that does the same with the stdlib gone
-// entirely - no `Array`, no `assert`, no `mem::`
+// entirely - no `array`, no `assert`, no `mem::`
 struct Ring
 {
     ptr<int32> $slots;

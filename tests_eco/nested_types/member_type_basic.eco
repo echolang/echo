@@ -2,7 +2,7 @@
 // see errors/nested_type_bare_name.eco
 struct MovieCollection
 {
-    struct Iterator
+    struct cursor
     {
         usize $index;
 
@@ -11,9 +11,9 @@ struct MovieCollection
 
     usize $count;
 
-    function make_iterator() : MovieCollection::Iterator
+    function make_iterator() : MovieCollection::cursor
     {
-        return MovieCollection::Iterator(0);
+        return MovieCollection::cursor(0);
     }
 }
 
@@ -25,5 +25,5 @@ $it->advance();
 echo $it->index;
 
 // spelled directly, as a declaration type and as a constructor
-MovieCollection::Iterator $direct = MovieCollection::Iterator(42);
+MovieCollection::cursor $direct = MovieCollection::cursor(42);
 echo $direct->index;

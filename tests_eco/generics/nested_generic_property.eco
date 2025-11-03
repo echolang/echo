@@ -1,5 +1,5 @@
 // a generic application as a *property* type - the composition case, which is what lets one
-// generic struct hold another (`struct Document { Array<uint8> $body; }`)
+// generic struct hold another (`struct Document { array<uint8> $body; }`)
 struct Q<T> { T $x; }
 
 // a concrete application in a non-generic struct

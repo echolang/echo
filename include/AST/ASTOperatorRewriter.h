@@ -54,7 +54,7 @@ namespace AST
     //
     // runs **inside the monomorphizer's fixpoint**, per round, the way AST::OwnershipPass does and
     // for the same reason: it needs the concrete types the round produced, and the call it builds may
-    // itself be generic - `operator []` over `Array<int32>` is an instantiation, which only the
+    // itself be generic - `operator []` over `array<int32>` is an instantiation, which only the
     // fixpoint can still create. it is ordered ahead of the re-derivation steps because a declaration
     // inferred from `$a[0]` has no type at all until the element call is attached
     class OperatorRewriter : public RecursiveVisitor
@@ -213,7 +213,7 @@ namespace AST
             // is this statement the declaration itself? **only a declaration may be typed *from* its
             // elements** - an assignment writes storage somebody else already named, and taking a
             // type off the right-hand side there would let `$a = ["x"];` silently retype an
-            // `Array<int32>` rather than being the mismatch it is
+            // `array<int32>` rather than being the mismatch it is
             bool declares = false;
         };
 

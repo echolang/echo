@@ -38,7 +38,7 @@ echo $self;
 $noop = 'kept';
 $noop->append('');
 echo $noop;
-echo ref_count($noop->owner);
+echo mem::ref_count($noop->owner);
 
 // clear keeps the allocation
 $s->clear();

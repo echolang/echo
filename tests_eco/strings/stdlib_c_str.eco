@@ -11,7 +11,7 @@ $lit = 'hello';
 echo $lit->is_terminated();
 echo c_strlen($lit->c_str());
 
-// an owned buffer: terminated by StringBuf, which is what makes `$bytes[$used]` an invariant
+// an owned buffer: terminated by str::buf, which is what makes `$bytes[$used]` an invariant
 $owned = $lit->clone();
 $owned->append(' world');
 echo $owned->is_terminated();

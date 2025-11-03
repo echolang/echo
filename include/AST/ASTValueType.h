@@ -887,8 +887,8 @@ namespace AST
         //
         // **declarations only, never the target type.** the declaration's return type already *is* the
         // target, and a second copy of it here would be a member field on ComplexType carrying a type -
-        // which TypeRegistry::derive_instantiation does not fill, so `Array<int32>` would keep saying
-        // `Slice<T>`. holding the declaration means this slot behaves exactly like _methods, which an
+        // which TypeRegistry::derive_instantiation does not fill, so `array<int32>` would keep saying
+        // `slice<T>`. holding the declaration means this slot behaves exactly like _methods, which an
         // instantiation reaches through the template_or_self redirect rather than owning a copy of
         //
         // a list rather than the single slot the destructor and the copy constructor get: a type may
@@ -903,8 +903,8 @@ namespace AST
             return _implicit_conversions;
         }
 
-        // the interfaces this type declared it conforms to - the `: Drawable, Iterable<E>` clause. what
-        // AST::conforms_to answers from, which is what a type-parameter constraint and an `instanceof`
+        // the interfaces this type declared it conforms to - the `: Drawable, contract::iterable<E>` clause.
+        // what AST::conforms_to answers from, which is what a type-parameter constraint and an `instanceof`
         // over an interface read, and what the runtime conformance table is built from
         //
         // **types, not declarations** - and so the one member field here that
@@ -912,8 +912,9 @@ namespace AST
         // properties. that is the opposite of _implicit_conversions above, which deliberately stores
         // declarations so that no ValueType on this class ever needs substituting; the difference is
         // that a conversion's target is already spelled by the declaration's return type while a
-        // conformance has no declaration of its own at all. `struct Bag<E> : Iterable<E>` has to become
-        // `Iterable<int32>` on `Bag<int32>`, or a constraint would be checked against a template
+        // conformance has no declaration of its own at all. `struct Bag<E> : contract::iterable<E>` has to
+        // become `contract::iterable<int32>` on `Bag<int32>`, or a constraint would be checked against a
+        // template
         //
         // only valid, deduplicated entries are ever pushed - parse_typedecl refuses a non-interface and
         // a repeat at the declaration - so no reader re-filters
@@ -925,13 +926,13 @@ namespace AST
             return _conformances;
         }
 
-        // the associated types this *interface* declares - the `type Iter : Iterator<V>` in an interface
-        // body. a type the implementor chooses and the interface only constrains.
+        // the associated types this *interface* declares - the `type Iter : contract::iterator<V>` in an
+        // interface body. a type the implementor chooses and the interface only constrains.
         //
         // **a list of its own, deliberately not appended to `type_parameters`.** that list is the type's
         // *arity*: get_or_create_instantiation asserts on it, parse_generic_application checks a written
         // application against it, and TypeSubstitution::positional is positional over exactly it. an entry
-        // there would change the identity of every `Iterable<...>` a program can write
+        // there would change the identity of every `contract::iterable<...>` a program can write
         //
         // **declarations, never types** - so TypeRegistry::derive_instantiation has nothing to substitute
         // here, which is the same choice _implicit_conversions makes and the opposite of _conformances.
@@ -1131,7 +1132,7 @@ namespace AST
         // the declaration pass, *before* the template's own body has been walked, so an instance may
         // have to be refilled later (todo/A7)
         //
-        // re-entrant: substituting `struct Bag<E> : Iterable<Bag<E>>` asks this registry for
+        // re-entrant: substituting `struct Bag<E> : contract::iterable<Bag<E>>` asks this registry for
         // `Bag<int32>`, which is already in the cache but mid-derivation, and the staleness test would
         // then send it straight back in here. `_deriving` is what makes the inner call a no-op and lets
         // the outer one finish the job

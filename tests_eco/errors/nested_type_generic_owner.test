@@ -3,12 +3,12 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 3:24
-'Iterator' is declared inside the generic type 'Box', which is not supported yet - declare it alongside its owner instead.
-Begin: 'Iterator'
-End: 'Iterator'
+'cursor' is declared inside the generic type 'Box', which is not supported yet - declare it alongside its owner instead.
+Begin: 'cursor'
+End: 'cursor'
 Code excerpt:
  [2]> // answer only while it cannot mention the owner's T, and nothing enforces that
- [3]> struct Box<T> { struct Iterator { usize $i; } T $v; }
+ [3]> struct Box<T> { struct cursor { usize $i; } T $v; }
                              ^
  [4]> 
 

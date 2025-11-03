@@ -1,0 +1,38 @@
+// **a constraint atom may be namespace qualified.** the interfaces the language itself declares live in
+// `contract`, so a constrained type parameter naming one has to be spelled `contract::iterable<int32>` -
+// there is no `use` and no way to shorten it from the root namespace
+//
+// the `<` that tells an *application* from a bare name sits after the prefix, which is the whole of what
+// makes this different from `T: iterable<int32>`: a scanner peeking one token ahead sees `::` and reads
+// the atom as the bare name `contract`, which is a namespace and not a type at all
+function sum_all<T: contract::iterable<int32>>(T& $source) : int32
+{
+    int32 $total = 0;
+
+    foreach ($source as $value) {
+        $total = $total + $value;
+    }
+
+    return $total;
+}
+
+array<int32> $numbers = [4, 8, 15];
+echo sum_all($numbers);
+
+// the same constraint is satisfied by any other conformance, which is the point of constraining on the
+// contract rather than on `array<T>`
+echo sum_all($numbers->sub(1, 2));
+
+// a *conformance* list takes a qualified name by the same grammar, and always could: it is read by
+// Parser::parse_type, which is exactly where a qualified constraint atom now goes too
+struct counter : contract::keyed<usize>
+{
+    usize $at;
+
+    function key() : usize
+    {
+        return $this->at;
+    }
+}
+
+echo counter(7)->key();

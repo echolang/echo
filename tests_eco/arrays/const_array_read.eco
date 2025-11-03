@@ -2,10 +2,10 @@
 // the end of the scope like any other. none of that works without `const` methods: the element
 // contract and the destructor would both want a mutable borrow, which makes `const` on a container a
 // way to make it unusable rather than a way to protect it
-Array<int32> $source = [1, 2, 3];
+array<int32> $source = [1, 2, 3];
 const $frozen = $source;
 
-// the read-only element contract, `operator (const Array<T>&)[usize] : const T&`
+// the read-only element contract, `operator (const array<T>&)[usize] : const T&`
 echo $frozen[0];
 
 // and the methods that declared themselves readers

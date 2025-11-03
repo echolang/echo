@@ -4,7 +4,7 @@
 // the source is also a *borrow parameter*, which is already an address, so the loop must not take
 // another one: addressing it twice unifies against nothing and the call is then silently never
 // instantiated at all
-function show<T>(Array<T>& $a) : usize
+function show<T>(array<T>& $a) : usize
 {
     usize $n = 0;
 
@@ -17,11 +17,11 @@ function show<T>(Array<T>& $a) : usize
     return $n;
 }
 
-$ints = Array<int32>();
+$ints = array<int32>();
 $ints[] = 1;
 $ints[] = 2;
 
-$floats = Array<float64>();
+$floats = array<float64>();
 $floats[] = 1.5;
 
 echo show($ints);

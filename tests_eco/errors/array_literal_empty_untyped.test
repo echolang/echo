@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 3:1
-an empty array literal has nothing to go on - it takes its type from where it is going. Write the type, e.g. 'Array<int32> $a = [];'.
+an empty array literal has nothing to go on - it takes its type from where it is going. Write the type, e.g. 'array<int32> $a = [];'.
 Begin: '$a'
 End: '$a'
 Code excerpt:

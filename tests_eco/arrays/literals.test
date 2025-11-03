@@ -11,5 +11,5 @@ expect: ok
 --- RAST --->
 // the expansion, in the tree: a constructor call and one append assignment per element. no node
 // kind survives that codegen would have to know about
-CHECK: call Array()
+CHECK: call array()
 CHECK: index<int32>(call operator []

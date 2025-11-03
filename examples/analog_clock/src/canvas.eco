@@ -1,0 +1,135 @@
+/*
+ * The character grid the clock is drawn into, and the one interesting decision in this example.
+ *
+ * The dial is drawn with Unicode glyphs, which are two and three bytes each in UTF-8 - so a cell
+ * cannot be a byte of output. **A cell holds a glyph id, and ids become bytes only when the frame is
+ * serialised.** One rule keeps that from turning into a table nobody can read:
+ *
+ *     an id below 32 is one of this example's own glyphs; an id of 32 or above is that ASCII byte.
+ *
+ * So `48 + $digit` is still a digit and `32` is still a space, and the grid stays a flat
+ * `array<uint8>` - which matters, because `array<array<T>>` copies its elements bytewise and would be
+ * silently wrong.
+ */
+
+namespace clock;
+
+// the glyphs, as functions - Echo has no global variable, and a top-level statement in a module that
+// is not the entry module never runs
+function glyph_empty() : uint8 { return 0; }
+function glyph_ring() : uint8 { return 1; }
+function glyph_hour_mark() : uint8 { return 2; }
+function glyph_quarter_mark() : uint8 { return 3; }
+function glyph_hour_hand() : uint8 { return 4; }
+function glyph_minute_hand() : uint8 { return 5; }
+function glyph_second_hand() : uint8 { return 6; }
+function glyph_pin() : uint8 { return 7; }
+
+function append_glyph(string& $out, uint8 $id) : void
+{
+    if ($id == 0) { $out->append(' '); return; }
+    if ($id == 1) { $out->append('·'); return; }
+    if ($id == 2) { $out->append('●'); return; }
+    if ($id == 3) { $out->append('◆'); return; }
+    if ($id == 4) { $out->append('█'); return; }
+    if ($id == 5) { $out->append('▒'); return; }
+    if ($id == 6) { $out->append('•'); return; }
+    if ($id == 7) { $out->append('┼'); return; }
+
+    // anything else is its own ASCII byte
+    $out->push_byte($id);
+}
+
+// **Borrowed everywhere, never copied.** A `Canvas` owns its `array`, and a struct is copied field by
+// field - so handing one around by value would duplicate the buffer's pointer and free it twice. It is
+// built once, as a local, and every function that draws takes a `Canvas&`.
+struct Canvas
+{
+    usize $width;
+    usize $height;
+    array<uint8> $cells;
+
+    constructor(usize $width, usize $height)
+    {
+        $this->width = $width;
+        $this->height = $height;
+
+        // there is no fill constructor and no fixed-size array, so the cells are pushed one at a time
+        // into a buffer reserved up front
+        $this->cells = array<uint8>();
+        $this->cells->reserve($width * $height);
+
+        usize $i = 0;
+        while ($i < $width * $height) {
+            $this->cells[] = 0;
+            $i++;
+        }
+    }
+
+    function fill(uint8 $id) : void
+    {
+        usize $i = 0;
+        while ($i < $this->cells->count()) {
+            $this->cells[$i] = $id;
+            $i++;
+        }
+    }
+
+    // out of range is a no-op rather than an error - a hand at the edge of the dial rounds outside it,
+    // and clipping here keeps every caller free of bounds checks.
+    //
+    // the tests are nested because `&&` does not short-circuit yet: one condition per `if`.
+    function set(int32 $x, int32 $y, uint8 $id) : void
+    {
+        if ($x < 0) { return; }
+        if ($y < 0) { return; }
+        if ($x >= $this->width) { return; }
+        if ($y >= $this->height) { return; }
+
+        $this->cells[$y * $this->width + $x] = $id;
+    }
+
+    // the geometry is all in floats, so this is where it lands on a cell. assigning a `float64` to an
+    // `int32` truncates towards zero, hence the `round` - the only float to int cast the language has
+    // is the implicit one at a typed destination
+    function plot(float64 $x, float64 $y, uint8 $id) : void
+    {
+        int32 $cx = std::math::round($x);
+        int32 $cy = std::math::round($y);
+
+        $this->set($cx, $cy, $id);
+    }
+
+    function write_text(int32 $x, int32 $y, string& $text) : void
+    {
+        usize $i = 0;
+        while ($i < $text->size()) {
+            int32 $col = $x + $i;
+            $this->set($col, $y, $text->byte_at($i));
+            $i++;
+        }
+    }
+
+    // the whole picture as one string, cursor-home first. `echo` prints one expression and always adds
+    // a newline, so a frame has to arrive in a single statement - printing cell by cell would flicker
+    // and cost a write syscall per glyph.
+    function to_frame() : string
+    {
+        string $out = "\x1b[H";
+        $out->reserve($this->cells->count() * 3 + $this->height);
+
+        usize $y = 0;
+        while ($y < $this->height) {
+            usize $x = 0;
+            while ($x < $this->width) {
+                append_glyph(&$out, $this->cells[$y * $this->width + $x]);
+                $x++;
+            }
+
+            $out->append("\n");
+            $y++;
+        }
+
+        return $out;
+    }
+}

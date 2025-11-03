@@ -1,5 +1,5 @@
 // the explicit read-only borrow. the same thing the by-value form is elided to
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 7;
 $a[] = 8;
 

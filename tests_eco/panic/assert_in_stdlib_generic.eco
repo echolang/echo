@@ -1,0 +1,10 @@
+// **the template and the instantiation are in different files**, which is the case a template sharing a
+// file with its instance cannot cover. `array<T>::get` is declared in the stdlib and instantiated here, so
+// the location it aborts with has to name the stdlib file - the file it was *written* in - and not this one
+//
+// it is baked into the message as a constant, and the definition is `t_odr_shared`, so getting this from the
+// ambient file being emitted would make two units' copies of one symbol disagree
+array<int32> $numbers = [1, 2, 3];
+
+echo $numbers->get(0);
+echo $numbers->get(7);

@@ -10,7 +10,7 @@
 // the two compose on one argument: convert first, then borrow the conversion's result. that is two
 // temporaries in one bind, which is what `TemporaryBindExprNode::temporaries` is a vector for
 
-class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+class local_buf { usize $capacity; usize $used; ptr<uint8> $bytes; }
 
 #[core: "string"]
 struct string
@@ -19,7 +19,7 @@ struct string
     struct view { ptr<const uint8> $bytes; usize $size; }
 
     string::view $window;
-    StringBuf $owner;
+    local_buf $owner;
 
     #[implicit]
     function view() : string::view { return $this->window; }

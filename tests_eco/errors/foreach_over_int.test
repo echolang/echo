@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 5:1
-'int32' cannot be iterated - it declares neither 'Iterator' nor 'Iterable'.
+'int32' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'.
 Begin: 'foreach'
 End: 'foreach'
 Code excerpt:

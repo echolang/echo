@@ -243,7 +243,7 @@ void TypeChecker::visitReturn(ReturnNode &node)
 void TypeChecker::visit_type_decl(TypeDeclNode &node)
 {
     // **ahead of the generic early-return below, deliberately.** a conformance is checked on the
-    // *template*: `struct Bag<E> : Iterable<E>`'s requirements mention the very `E` that Bag's own
+    // *template*: `struct Bag<E> : contract::iterable<E>`'s requirements mention the very `E` that Bag's own
     // methods mention, and both sides are the same TypeParamDecl *, so the exact comparison works
     // without any instantiation - and the check is then done once rather than per instance. checking it
     // behind the return would mean a generic implementor was never checked at all, since an

@@ -22,7 +22,7 @@ struct Owner
 
 function main() : void
 {
-    $a = Array<Owner>();
+    $a = array<Owner>();
     $a[] = Owner(1);
     $a[] = Owner(2);
 

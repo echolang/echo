@@ -1,0 +1,79 @@
+/**
+ * The language-level interfaces.
+ *
+ * A contract is a capability a type declares, and nothing more - no storage, no behaviour of its own. The
+ * three below are the iteration protocol: `foreach` knows these and nothing else, and there is no arm
+ * anywhere in the compiler that knows what an `array<T>` is. A type of your own conforms exactly the way
+ * `array<T>` does, and loops exactly as well. See book/concept/iteration.md.
+ *
+ * They sit in `contract` rather than at the root because they are not vocabulary you write every line -
+ * you name one where you declare a conformance or constrain a type parameter, and `array`, `string` and
+ * `die` are what you write the rest of the time. The compiler binds them with `#[core: ...]` and never by
+ * their spelling, so the name, the namespace and the documentation all live here: this file could rename
+ * every one of them and only Echo source would notice. A program compiled with `--no-stdlib` has none of
+ * them, and `foreach` then says so in a located diagnostic rather than crashing.
+ *
+ * The constraint below is written **unqualified** - `type Iter : iterator<V>` rather than
+ * `contract::iterator<V>` - which resolves because a name inside a namespace is searched outward from it.
+ * Both spellings work; the short one is what sharing a namespace is for.
+ *
+ * **File order does not matter.** The cursor these describe lives in slice.eco and names `slice<T>`,
+ * while array.eco names that cursor - the three parse passes publish every type name over every file
+ * before any signature is read, so there is no ordering to get right.
+ */
+
+namespace contract;
+
+/**
+ * A cursor. It knows how to step, and it knows what it is looking at.
+ *
+ * `advance()` is called first and its answer gates the loop, so `current()` is only ever reached after
+ * a `true`. That is the whole contract - and it is what lets `current()` skip a bounds check that
+ * `advance()` already performed.
+ */
+#[core: "iterator"]
+interface iterator<V>
+{
+    /**
+     * Step to the next element. False when there are none left.
+     */
+    function advance() : bool;
+
+    /**
+     * The element the cursor is looking at. Only valid after `advance()` answered true.
+     */
+    function current() : V&;
+}
+
+/**
+ * Anything that can hand you a fresh cursor.
+ *
+ * `Iter` is an associated type: the implementor chooses it and this interface only constrains it. You
+ * never write it - the compiler reads it off your `iterate()`.
+ */
+#[core: "iterable"]
+interface iterable<V>
+{
+    type Iter : iterator<V>;
+
+    /**
+     * A cursor positioned before the first element.
+     */
+    function iterate() : Iter;
+}
+
+/**
+ * The orthogonal capability that makes `foreach ($a as $k => $v)` spellable.
+ *
+ * Deliberately apart from `iterator<V>` rather than a second interface repeating `advance` and
+ * `current`: that is what lets the capability set grow. A future `reversible` or `random_access<V>` is
+ * another interface beside this one, and a cursor declares the ones it can honour.
+ */
+#[core: "keyed"]
+interface keyed<K>
+{
+    /**
+     * Where the current element sits. Only valid after `advance()` answered true.
+     */
+    function key() : K;
+}

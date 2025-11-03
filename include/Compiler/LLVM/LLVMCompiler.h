@@ -57,7 +57,7 @@ public:
     // emits a body into every unit that owes one for an ODR-shared definition, until no unit owes any.
     //
     // the loop is what makes it total: emitting a body runs the same lazy declaration paths a source body
-    // does, so `Array<Padded>::reserve` naming `mem::realloc<Padded>` appends to the queue being drained.
+    // does, so `array<Padded>::reserve` naming `mem::realloc<Padded>` appends to the queue being drained.
     // An up-front closure could not compute this set - a cloned instance's call nodes live in the
     // template's module, not the referencing one, and an interface vtable names an implementation after
     // build_function_maps has already finished
@@ -115,6 +115,10 @@ public:
     void link_into_main();
 
     void optimize();
+
+    // drops everything the entry point cannot reach - `run` only, see Backend::prune_to_entry
+    void prune_to_entry();
+
     void printIR(bool toFile);
     void run_code();
 

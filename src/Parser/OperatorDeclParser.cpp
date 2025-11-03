@@ -200,7 +200,7 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
         skip_paren_group(cursor);
     }
 
-    // **the index form**, `operator (Array<T>& $a)[usize $i]`. it is recognised here, ahead of the
+    // **the index form**, `operator (array<T>& $a)[usize $i]`. it is recognised here, ahead of the
     // symbol run, and never *by* the symbol run: its two tokens are not adjacent, so there is no run
     // to read. the bracket also cannot appear in any other symbol - is_allowed_symbol_token refuses
     // both of them - so a `[` in this position can only mean one thing and needs no lookahead
@@ -477,7 +477,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     funcdecl->ast_namespace = &payload.collector.namespaces.root();
 
     // the type parameters, declared and made visible before a single operand type is read - a
-    // parameter mentioned in `(Array<T>& $a)` has to resolve while that list is parsed.
+    // parameter mentioned in `(array<T>& $a)` has to resolve while that list is parsed.
     // parse_funcdecl's order exactly, and the same two calls: declare_type_parameters owns the shape
     // of FunctionDeclNode::type_parameters, TypeParamScope owns their visibility
     //
@@ -592,7 +592,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
         if (funcdecl->args.empty()) {
             return refuse(*header.symbol_token,
                 "an index operator takes the container as its first operand, e.g. "
-                "'operator (Array<int32>& $a)[usize $i] : int32&'.");
+                "'operator (array<int32>& $a)[usize $i] : int32&'.");
         }
     } else {
         const size_t wanted_arity = header.fixity == AST::OpFixity::t_infix ? 2 : 1;

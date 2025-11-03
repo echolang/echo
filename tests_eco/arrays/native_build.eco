@@ -1,7 +1,7 @@
 // the only case that exercises make_exec, and it is not another view of `run`: `build` defaults to
 // release, where every bounds `assert` in the element contract elides. so this pins that an array
 // works with the checks compiled out, which is the configuration a shipped program has
-Array<int32> $a = [3, 1, 2];
+array<int32> $a = [3, 1, 2];
 
 $a[] = 4;
 $a[0] = 30;

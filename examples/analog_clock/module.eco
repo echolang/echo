@@ -1,0 +1,14 @@
+/*
+ * A terminal analog clock, as an ordinary Echo application.
+ *
+ * There is nothing here beyond the four attributes a manifest has: the module's name, its version,
+ * and the files it is made of. The stdlib is not named as a dependency - `echoc` adds it as the first
+ * root of every build, so writing `#[depends: "stdlib"]` would be wrong rather than redundant.
+ *
+ * `#[sources: "src/*.eco"]` matches within `src/` only. Adding a file there needs no edit here.
+ */
+
+#[module: "analog_clock"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

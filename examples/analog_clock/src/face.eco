@@ -1,0 +1,139 @@
+/*
+ * The drawing: a dial, three hands, and a digital readout underneath.
+ *
+ * All the geometry is polar, and all of it is in `float64`. The one thing to keep in mind is that a
+ * terminal cell is about twice as tall as it is wide, so a circle drawn with equal radii comes out an
+ * egg - `Dial::aspect` is what stretches x to make it round.
+ */
+
+namespace clock;
+
+// owns nothing, so unlike a `Canvas` this is copied and passed around freely
+struct Dial
+{
+    float64 $radius;    // in rows
+    float64 $aspect;    // cell height divided by cell width
+    float64 $cx;
+    float64 $cy;
+
+    constructor(float64 $radius, float64 $aspect)
+    {
+        $this->radius = $radius;
+        $this->aspect = $aspect;
+        $this->cx = $radius * $aspect;
+        $this->cy = $radius;
+    }
+
+    function columns() : usize
+    {
+        usize $columns = $this->radius * $this->aspect * 2.0 + 1.0;
+        return $columns;
+    }
+
+    function rows() : usize
+    {
+        usize $rows = $this->radius * 2.0 + 1.0;
+        return $rows;
+    }
+}
+
+// where a point at `$turns` around the dial, `$reach` of the way out from the centre, lands.
+// clockwise from 12, so x follows the sine and y the negated cosine
+function dial_x(Dial& $d, float64 $turns, float64 $reach) : float64
+{
+    return $d->cx + std::math::sin($turns * 2.0 * pi()) * $d->radius * $reach * $d->aspect;
+}
+
+function dial_y(Dial& $d, float64 $turns, float64 $reach) : float64
+{
+    return $d->cy - std::math::cos($turns * 2.0 * pi()) * $d->radius * $reach;
+}
+
+function draw_dial(Canvas& $c, Dial& $d) : void
+{
+    // the ring, sampled finely enough to leave no gaps. the widest circumference is in x, so the step
+    // is chosen against that
+    float64 $samples = $d->radius * $d->aspect * 8.0;
+    float64 $i = 0.0;
+    while ($i < $samples) {
+        float64 $turns = $i / $samples;
+        $c->plot(dial_x($d, $turns, 1.0), dial_y($d, $turns, 1.0), glyph_ring());
+        $i = $i + 1.0;
+    }
+
+    // the twelve hour marks, on the ring, with the quarters called out
+    int32 $mark = 0;
+    while ($mark < 12) {
+        uint8 $id = glyph_hour_mark();
+        if ($mark % 3 == 0) { $id = glyph_quarter_mark(); }
+
+        float64 $turns = $mark;
+        $c->plot(dial_x($d, $turns / 12.0, 1.0), dial_y($d, $turns / 12.0, 1.0), $id);
+        $mark++;
+    }
+}
+
+// one routine for all three hands: walk out from the centre in half-row steps, plotting as you go.
+// half a row is under one cell in both directions, so the line comes out solid without any of
+// Bresenham's bookkeeping
+function draw_hand(Canvas& $c, Dial& $d, float64 $turns, float64 $reach, uint8 $id) : void
+{
+    float64 $length = $d->radius * $reach;
+    float64 $step = 0.5;
+
+    // starts one step out, so the pin at the centre stays visible under all three hands
+    float64 $at = $step;
+    while ($at <= $length) {
+        $c->plot(dial_x($d, $turns, $at / $d->radius), dial_y($d, $turns, $at / $d->radius), $id);
+        $at = $at + $step;
+    }
+}
+
+function draw_hands(Canvas& $c, Dial& $d, Time& $t) : void
+{
+    // longest last, so a hand that crosses another is drawn over it rather than under
+    draw_hand($c, $d, hour_turns($t), 0.55, glyph_hour_hand());
+    draw_hand($c, $d, minute_turns($t), 0.85, glyph_minute_hand());
+    draw_hand($c, $d, second_turns($t), 0.95, glyph_second_hand());
+
+    // the pin goes on top of all three - a hand pointing near the horizontal rounds onto the centre
+    // cell, and the dial reads better with the hub still there
+    $c->plot($d->cx, $d->cy, glyph_pin());
+}
+
+// `HH:MM:SS`. There is no int-to-string anywhere in the stdlib and no formatting, so the digits are
+// arithmetic: `48` is `'0'`, and each one goes through a `uint8` local because `48 + $value` is an
+// `int32` and narrowing is not something an argument position does for you.
+function two_digits(string& $out, int32 $value) : void
+{
+    uint8 $tens = 48 + $value / 10;
+    uint8 $ones = 48 + $value % 10;
+
+    $out->push_byte($tens);
+    $out->push_byte($ones);
+}
+
+function clock_text(Time& $t) : string
+{
+    string $out = '';
+    $out->reserve(8);
+
+    two_digits(&$out, $t->hour);
+    $out->append(':');
+    two_digits(&$out, $t->minute);
+    $out->append(':');
+    two_digits(&$out, $t->second);
+
+    return $out;
+}
+
+function draw_readout(Canvas& $c, Dial& $d, Time& $t) : void
+{
+    string $text = clock_text($t);
+
+    // centred under the dial, one blank row below it
+    int32 $x = $d->cx - 3.0;
+    int32 $y = $d->rows() + 1;
+
+    $c->write_text($x, $y, &$text);
+}

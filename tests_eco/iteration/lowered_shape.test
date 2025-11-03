@@ -1,7 +1,7 @@
 --- OUT --->
 1
 --- AST --->
-CHECK: foreach (varref<Array<T>>(var($a)) as $x)
+CHECK: foreach (varref<array<T>>(var($a)) as $x)
 
 --- RAST --->
 CHECK: vardecl<type<slice_iterator<int32>>>($__it) = call iterate

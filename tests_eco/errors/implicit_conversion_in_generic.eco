@@ -1,7 +1,7 @@
 // the conversion rule compares the declared return type with the parameter type exactly, and on a
 // generic owner the declaration still mentions `T` - so it would be accepted and then never fire.
 // refused at the declaration instead. see the todo this diagnostic points at
-// spelled `Window`/`Bag` rather than `Slice`/`Array`, which the stdlib now declares in the root
+// spelled `Window`/`Bag` rather than `slice`/`array`, which the stdlib now declares in the root
 // namespace - the refusal is about a generic owner, not about these two types
 struct Window<T> { ptr<T> $at; }
 

@@ -22,7 +22,7 @@ namespace AST
     // but the two are declared at different moments and that difference is load-bearing. An extern is a
     // name, so it costs nothing to declare eagerly. Resolving an intrinsic is a signature match against
     // LLVM's whole intrinsic table, so it is declared only where it is referenced, which is what keeps a
-    // program that touches no math from paying for every row of stdlib/math/intrinsics.eco.
+    // program that touches no math from paying for every row of stdlib/std/math/intrinsics.eco.
     enum class FunctionEmission
     {
         // no symbol exists anywhere, so nothing may declare or define one - a `declare` nobody defines

@@ -2,7 +2,7 @@
  * Stopping a program.
  *
  * These live in the root namespace rather than under a prefix, because a precondition that fails
- * is not a subsystem you opt into - `Array<T>::at` and your own code should both be able to say
+ * is not a subsystem you opt into - `array<T>::at` and your own code should both be able to say
  * so without an import.
  *
  * Both are compiler builtins: the message and the source location are folded into a constant at

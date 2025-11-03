@@ -3,11 +3,11 @@
 // element has none until AST::OperatorRewriter attaches the contract mid-fixpoint. so a member call
 // on an undetermined receiver is now kept pending rather than reported, which is the standing every
 // other unsettled call already had
-Array<int32> $src = [5, 6, 7];
+array<int32> $src = [5, 6, 7];
 
-Array<Slice<int32>> $views = [];
-$views[] = $src->slice();
-$views[] = $src->slice(1, 2);
+array<slice<int32>> $views = [];
+$views[] = $src->sub();
+$views[] = $src->sub(1, 2);
 
 echo $views[0]->count();
 echo $views[1]->count();
@@ -17,7 +17,7 @@ echo $views[0][2];
 echo $views[1][0];
 
 // the same over a type whose methods come from the stdlib
-Array<string> $names = [];
+array<string> $names = [];
 $names[] = "hello";
 $names[] = "hi";
 

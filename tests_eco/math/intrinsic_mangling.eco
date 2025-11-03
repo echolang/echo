@@ -3,23 +3,23 @@
 // ways must reach two different intrinsics
 
 // one overload type, one argument
-float64 $sqrt_d = math::sqrt(16.0);
-float $sqrt_f = math::sqrt(16.0f);
+float64 $sqrt_d = std::math::sqrt(16.0);
+float $sqrt_f = std::math::sqrt(16.0f);
 
 // one overload type, *two* arguments - the shape that used to be undeclarable, because the whole
 // argument list was handed to LLVM as the overload-type vector and mangled `llvm.pow.f64.f64`
-float64 $pow = math::pow(2.0, 10.0);
-float64 $copysign = math::copysign(3.0, 1.0);
+float64 $pow = std::math::pow(2.0, 10.0);
+float64 $copysign = std::math::copysign(3.0, 1.0);
 
 // one overload type, three arguments
-float64 $fma = math::fma(2.0, 3.0, 4.0);
+float64 $fma = std::math::fma(2.0, 3.0, 4.0);
 
 // integers, where signedness picks the intrinsic rather than the width. the operands go through
 // typed locals because an integer literal has no signedness suffix to select an overload with
 uint32 $three = 3;
 uint32 $nine = 9;
-int32 $smin = math::min(3, 9);
-uint32 $umax = math::max($three, $nine);
+int32 $smin = std::math::min(3, 9);
+uint32 $umax = std::math::max($three, $nine);
 
 echo $sqrt_d;
 echo $sqrt_f;

@@ -1,10 +1,10 @@
 // the index is an ordinary argument, judged by the ordinary conversion rule against the operand the
 // contract declares - so a `string` where a `usize` belongs is a refusal and not a codegen throw
 //
-// the *wording* is B20's, not this case's: `Array<T>` declares a writable and a read-only element
+// the *wording* is B20's, not this case's: `array<T>` declares a writable and a read-only element
 // contract, so the set holds two arity-2 candidates and neither is viable. with one candidate the
 // short-circuit inside match_function would earn the sharper "cannot implicitly convert 'string' to
 // 'usize'" instead, which is exactly the diagnostic B20 is about
-Array<int32> $a = [1];
+array<int32> $a = [1];
 
 echo $a["nope"];

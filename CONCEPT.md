@@ -112,7 +112,7 @@ echo $numbers->count() . "\n"; // 4
 When the array's type cannot be determined at the declaration of the variable, the type can be specified:
 
 ```echo
-Array<int> $numbers = [];
+array<int> $numbers = [];
 for($i = 0; $i < 10; $i++) {
     $numbers[] = $i;
 }
@@ -150,7 +150,7 @@ $airports['JFK'] = "New York John F. Kennedy";
 As this is a compiled language, there is no `<?php` tag. Instead, the entry point is a function called `main` that is called when the program starts.
 
 ```echo
-function main(Array<string> $argv): int {
+function main(array<string> $argv): int {
     echo "Hello World\n";
     return 0;
 }
@@ -340,7 +340,7 @@ Generics are supported for classes and functions. The following example shows ho
 
 ```echo
 class Stack<T> {
-    private Array<T> $items = [];
+    private array<T> $items = [];
 
     public function push(T $item): void {
         $this->items->push($item);
@@ -467,7 +467,7 @@ public const LOG_LEVEL_DEBUG = 0;
 public const LOG_LEVEL_INFO = 1;
 public const LOG_LEVEL_WARNING = 2;
 
-public Array<string> $logEntries = [];
+public array<string> $logEntries = [];
 ```
 
 Which can then be imported like this:
@@ -583,12 +583,12 @@ doSomething($foo); // Vroom
 // in its mutability. A struct is implicitly copied when mutated.
 struct String {
     uint64 $size;
-    Array<uint8> $data;
+    array<uint8> $data;
 }
 
 class String2 {
     uint64 $size;
-    Array<uint8> $data;
+    array<uint8> $data;
 }
 
 $stackString = String("Hey Whats up"); // allocated on the stack 
@@ -637,7 +637,7 @@ printLn($arcString); // implicit reference, implicit stakc copy inside the funct
 printLn($strRef2); // explicit reference, implicit stack copy inside the function scope
 
 
-Array<String> $logs = [];
+array<String> $logs = [];
 function logString(String $string) : void {
     $logs[] = $string;
 }
@@ -653,13 +653,13 @@ To fix this an object symbol must be either a stack or rc heap object during com
 // stack object 
 struct String {
     uint64 $size;
-    Array<uint8> $data;
+    array<uint8> $data;
 }
 
 // reference counted heap object
 class String2 {
     uint64 $size;
-    Array<uint8> $data;
+    array<uint8> $data;
 }
 
 $stackString = String("Hey Whats up");

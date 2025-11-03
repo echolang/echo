@@ -8,7 +8,7 @@ Begin: '['
 End: '['
 Code excerpt:
  [2]> // produces, not by a rule of the literal's own
- [3]> Array<int32> $mixed = [1, 2, "three"];
+ [3]> array<int32> $mixed = [1, 2, "three"];
                             ^
  [4]> 
 

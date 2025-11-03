@@ -13,9 +13,9 @@
 CHECK: vardecl<type<string>>($__temp1) = call clone(
 CHECK: vardecl<type<string::view>>($__temp2) = call view(addrof<string&>(varref<string>(var($__temp1))))
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp2))))
-CHECK: release(ma<StringBuf>(varref<string>(var($__temp1))->owner))
+CHECK: release(ma<str::buf>(varref<string>(var($__temp1))->owner))
 
 # and the same for a substring, which holds a second reference to the same buffer
 CHECK: vardecl<type<string>>($__temp3) = call sub(
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp4))))
-CHECK: release(ma<StringBuf>(varref<string>(var($__temp3))->owner))
+CHECK: release(ma<str::buf>(varref<string>(var($__temp3))->owner))

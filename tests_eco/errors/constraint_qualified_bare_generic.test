@@ -1,0 +1,29 @@
+expect: fail
+
+# the second issue is parse recovery, not a second mistake: the constraint list gave up and skipped to
+# the next statement, which lands past the signature. the unqualified spelling cascades identically
+
+--- OUT --->
+---- Issue ----
+Issue at 4:18
+'contract::iterable' is generic, so it needs its type arguments in the constraint of type parameter 'T' - write 'contract::iterable<...>'.
+Begin: 'contract'
+End: 'contract'
+Code excerpt:
+ [3]> // reach a qualified spelling too, and it names the type the way it was written
+ [4]> function each<T: contract::iterable>(T& $source) : void
+                       ^
+ [5]> {
+
+---- Issue ----
+Issue at 7:1
+Unexpected token 'close_brace '}'' found. Expected 'open_paren '(''
+Begin: '}'
+End: '}'
+Code excerpt:
+ [6]>     return;
+ [7]> }
+      ^
+ [8]> 
+
+Critical issues found, cannot compile.

@@ -57,6 +57,23 @@ AST::ComplexType *AST::CoreTypes::declared_template(AST::CoreTypeKind kind) cons
     return decl == nullptr ? nullptr : &decl->complex_type();
 }
 
+std::string AST::CoreTypes::spelling(AST::CoreTypeKind kind) const
+{
+    if (AST::TypeDeclNode *decl = declaration(kind)) {
+        return decl->namespaced_type_name();
+    }
+
+    // the reverse of the one table. a linear scan over six entries, deliberately not a second map to
+    // keep drifting out of sync with the first
+    for (const auto &[tag, tagged_kind] : core_type_table()) {
+        if (tagged_kind == kind) {
+            return fmt::format("<core \"{}\">", tag);
+        }
+    }
+
+    return "<core>";
+}
+
 std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::CoreTypes &types, std::string &out_error)
 {
     AST::TypeDeclNode *string_decl = types.declaration(AST::CoreTypeKind::t_string);

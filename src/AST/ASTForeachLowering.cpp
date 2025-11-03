@@ -172,8 +172,9 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     if (loop->key != nullptr && !plan.key_type.has_value()) {
         refuse(scope, index, *loop, loop->token_arrow.value_or(loop->token_foreach), fmt::format(
             "'{}' iterates, but its cursor declares no key contract - so there is no '$k' to bind. "
-            "Declare 'Keyed<...>' on it, or drop the '=>'.",
-            loop->source->result_type().get_type_desciption()));
+            "Declare '{}<...>' on it, or drop the '=>'.",
+            loop->source->result_type().get_type_desciption(),
+            _collector.core_types.spelling(CoreTypeKind::t_keyed)));
         return;
     }
 

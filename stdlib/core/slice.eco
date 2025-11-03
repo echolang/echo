@@ -2,7 +2,7 @@
  * A borrowed window over elements somebody else owns.
  *
  * Two words - an address and an element count - owning nothing, copying for free, keeping nothing
- * alive. It is to `Array<T>` what `string::view` is to `string`, and for the same reason: a
+ * alive. It is to `array<T>` what `string::view` is to `string`, and for the same reason: a
  * function that only *reads* elements should not have to care who owns them.
  *
  * Because it owns nothing, a shallow copy is the **correct** copy. It declares no destructor and no
@@ -16,7 +16,7 @@
  *
  * Counts and indices are `usize` throughout, matching `mem::`.
  */
-struct Slice<T> : Iterable<T>
+struct slice<T> : contract::iterable<T>
 {
     ptr<T> $data;
     usize $len;
@@ -71,7 +71,7 @@ struct Slice<T> : Iterable<T>
     /**
      * The same borrow, read-only, for when the window itself is `const`.
      *
-     * One overload set told apart by the receiver, exactly as `Array<T>::at` is: a mutable window
+     * One overload set told apart by the receiver, exactly as `array<T>::at` is: a mutable window
      * matches the borrow above exactly, a `const` one reaches only this.
      */
     const function at(usize $index) : const T&
@@ -91,15 +91,18 @@ struct Slice<T> : Iterable<T>
     /**
      * A sub-window, `$count` elements from `$from`.
      *
+     * Named `sub` to match `string::view::sub`, which already means exactly this - and because
+     * `$s->slice(...)` on a type *called* `slice` reads like a constructor rather than a narrowing.
+     *
      * **Two separate checks rather than one on the sum**, so the sum cannot wrap on the way to
      * being checked. `string::view::sub` is written the same way and for the same reason.
      */
-    function slice(usize $from, usize $count) : Slice<T>
+    function sub(usize $from, usize $count) : slice<T>
     {
         assert($from <= $this->len, "slice start out of range");
         assert($count <= $this->len - $from, "slice length out of range");
 
-        return Slice<T>($this->data:$ + $from, $count);
+        return slice<T>($this->data:$ + $from, $count);
     }
 }
 
@@ -107,11 +110,11 @@ struct Slice<T> : Iterable<T>
  * The element contract. `$s[$i]` reads, writes, takes `&` and chains with `->`, all through the
  * borrow this hands back - see book/concept/arrays.md, "Elements".
  *
- * There is deliberately **no** one-operand `operator (Slice<T>& $s)[]`: a slice does not own its
+ * There is deliberately **no** one-operand `operator (slice<T>& $s)[]`: a slice does not own its
  * storage, so it has nothing to grow. `$s[] = $v` is then an ordinary "no overload accepts these
  * arguments", with no rule anywhere saying which types may append.
  */
-operator<T> (Slice<T>& $s)[usize $index] : T&
+operator<T> (slice<T>& $s)[usize $index] : T&
 {
     assert($index < $s->len, "slice index out of range");
 
@@ -121,13 +124,71 @@ operator<T> (Slice<T>& $s)[usize $index] : T&
 /**
  * The same contract over a `const` window, handing back a borrow that only reads.
  *
- * Mirrors `Array<T>`'s const element operator rather than reasoning separately about what `const`
+ * Mirrors `array<T>`'s const element operator rather than reasoning separately about what `const`
  * means for a type that borrows its storage: the two are used interchangeably at call sites, so a
  * `const` one of either yields `const T&`.
  */
-operator<T> (const Slice<T>& $s)[usize $index] : const T&
+operator<T> (const slice<T>& $s)[usize $index] : const T&
 {
     assert($index < $s->len, "slice index out of range");
 
     return &$s->data:$[$index];
+}
+
+/**
+ * The cursor `array<T>` and `slice<T>` both iterate through.
+ *
+ * Owning nothing, so - like `slice<T>` itself - it declares no destructor and no copy constructor: a
+ * shallow copy is the correct copy.
+ *
+ * It lives here rather than beside the contracts it conforms to because it is a concrete type at the
+ * root, and `contract` holds interfaces only. A cursor over a window belongs with the window.
+ *
+ * **It holds the window by value, and that is load-bearing rather than incidental.** The length is
+ * then an ordinary local the optimiser can prove loop-invariant, which gives the loop a computable
+ * trip count and with it unrolling and vectorisation. A cursor holding an `array<T>&` and asking it
+ * `->count()` each turn would force a reload through a pointer nothing can prove unaliased, and the
+ * loop would be measurably worse for no gain. See book/concept/iteration.md, "What it costs".
+ *
+ * The usual borrow rule applies, unchanged: growing the array ends this window, exactly as it ends
+ * every other borrow into it.
+ */
+struct slice_iterator<T> : contract::iterator<T>, contract::keyed<usize>
+{
+    slice<T> $window;
+
+    // the index one *past* the element `current()` names, so the cursor starts before the first one
+    // without needing a signed type or a "have we started" flag
+    usize $pos;
+
+    constructor(slice<T> $window)
+    {
+        $this->window = $window;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->window->count()) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+        return true;
+    }
+
+    /**
+     * Indexed **unchecked**, on purpose: `advance()` already established that this element is there,
+     * and that is the entire content of "valid after a true advance". Routing this through `->at()`
+     * would re-test the bound every step in a debug build, checking something the protocol guarantees.
+     */
+    function current() : T&
+    {
+        return &$this->window->data:$[$this->pos - 1];
+    }
+
+    function key() : usize
+    {
+        return $this->pos - 1;
+    }
 }

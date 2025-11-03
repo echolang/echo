@@ -36,7 +36,7 @@ namespace Compiler::LLVM
         // drained by LLVMCompiler::drain_pending_definitions.
         //
         // it has to be a queue rather than a set computed up front, because the set is not knowable up
-        // front: emitting one of these bodies is what discovers the next. `Array<Padded>::reserve` calls
+        // front: emitting one of these bodies is what discovers the next. `array<Padded>::reserve` calls
         // `mem::realloc<Padded>`, and an interface vtable names an implementation lazily, at the widening
         // site, after every up-front scan has finished.
         //

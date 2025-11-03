@@ -2,7 +2,7 @@
 // `string` with a real buffer behind it, and the `#[implicit]` conversion hands back a `string::view`
 // pointing *into* that buffer. so the temporary holding the clone has to outlive the call the view is
 // handed to - and while a call bound the temporaries its arguments raised, it did not: the clone was
-// released, its StringBuf freed, and `show` read the bytes afterwards
+// released, its str::buf freed, and `show` read the bytes afterwards
 //
 // nothing about the shape says so from the outside. `clone` and `view` are ordinary library
 // declarations, which is why AST::OwnershipPass has no rule naming either one: a call binds nothing,

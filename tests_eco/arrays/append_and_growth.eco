@@ -3,7 +3,7 @@
 // alone, which is what AST::match_function compares first
 struct Mat2 { float64 $a; float64 $b; float64 $c; float64 $d; }
 
-$a = Array<int32>();
+$a = array<int32>();
 echo $a->count();
 echo $a->capacity();
 
@@ -18,7 +18,7 @@ echo $a->count();
 echo $a[3];
 
 // growth is amortized doubling, and `reserve` does it once up front
-$b = Array<int32>();
+$b = array<int32>();
 $b->reserve(64);
 echo $b->capacity();
 
@@ -33,7 +33,7 @@ echo $b->capacity();
 // **borrowing the new slot** rather than building a value to copy into it. `&$a[]` and
 // `->push_slot()` are the same thing; neither reads what is in the slot, which is why both are legal
 // where `echo $a[]` is not
-$m = Array<Mat2>();
+$m = array<Mat2>();
 Mat2& $slot = &$m[];
 $slot->a = 1.0;
 $slot->d = 1.0;

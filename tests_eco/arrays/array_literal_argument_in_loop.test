@@ -4,7 +4,7 @@
 # the wrapper scope sits *inside* the loop body, so the collection is built and destroyed once per
 # iteration. the drop landing before `$i = $i + 1` is the whole assertion - as a frame local it would
 # have sat after the loop, with one live buffer per iteration until then
-CHECK: vardecl<type<Array<int32>>>($__lit1) = call Array()
-CHECK: call first(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit1))))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit1))))
+CHECK: vardecl<type<array<int32>>>($__lit1) = call array()
+CHECK: call first(addrof<array<int32>&>(varref<array<int32>>(var($__lit1))))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__lit1))))
 CHECK: varref<int32>(var($i)) = binexp<int32>(varref<int32>(var($i)) + literal<int32>(1))

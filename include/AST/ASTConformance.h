@@ -29,11 +29,12 @@ namespace AST
     //
     // **no template_ref redirect here, unlike every lookup in ASTMemberLookup.h** - and that is the
     // point. an instantiation's conformances are substituted into its own list when it is interned
-    // (TypeRegistry::derive_instantiation), because `struct Bag<E> : Iterable<E>` conforms to
-    // `Iterable<int32>` and not to `Iterable<E>`. redirecting to the template instead would hand back
-    // a conformance still mentioning `E`, which compares equal to nothing a use site can ask about -
-    // and re-substituting at read time would need a TypeRegistry to intern `Iterable<int32>` with,
-    // which the readers below do not have. so the substitution happens once, where the layout's does
+    // (TypeRegistry::derive_instantiation), because `struct Bag<E> : contract::iterable<E>` conforms to
+    // `contract::iterable<int32>` and not to `contract::iterable<E>`. redirecting to the template instead
+    // would hand back a conformance still mentioning `E`, which compares equal to nothing a use site can ask
+    // about - and re-substituting at read time would need a TypeRegistry to intern
+    // `contract::iterable<int32>` with, which the readers below do not have. so the substitution happens
+    // once, where the layout's does
     //
     // a null `ct`, a non-interface `interface`, or an unconstrained type all answer false rather than
     // asserting: every reader is asking a question about types that may not be settled yet
@@ -60,14 +61,14 @@ namespace AST
     // which slot a method is in, which is the one thing a vtable cannot get wrong
     std::optional<size_t> interface_method_slot(const ComplexType *interface, const FunctionDeclNode *requirement);
 
-    // the associated types `interface` declares - `type Iter : Iterator<V>` - in declaration order.
+    // the associated types `interface` declares - `type Iter : contract::iterator<V>` - in declaration order.
     // empty for anything that is not an interface, and through the same `template_or_self` redirect
-    // interface_requirements takes, for the same reason: `Iterable<int32>` is an interned ComplexType
+    // interface_requirements takes, for the same reason: `contract::iterable<int32>` is an interned ComplexType
     // that declares nothing of its own
     const std::vector<TypeParamDecl *> &interface_associated_types(const ComplexType *interface);
 
-    // **which of `ct`'s conformances apply `interface_template`** - which `Iterable<...>` an
-    // `Array<int32>` conforms to.
+    // **which of `ct`'s conformances apply `interface_template`** - which `contract::iterable<...>` an
+    // `array<int32>` conforms to.
     //
     // the question conforms_to cannot answer, and deliberately so: it takes the *applied* interface,
     // because a use site always knows what it is asking about. this caller is the one trying to find
@@ -100,7 +101,7 @@ namespace AST
 
     // **an instantiation's conformance work belongs on its template, and the answer is substituted
     // back.** AST::find_member_functions redirects an instantiation through `template_ref`, so a member
-    // of `Array<int32>` is `Array<T>`'s declaration returning `slice_iterator<T>` - while a signature
+    // of `array<int32>` is `array<T>`'s declaration returning `slice_iterator<T>` - while a signature
     // substituted from the *applied* conformance reads `int32`. comparing those two directly never
     // matches, which is why AST::TypeChecker checks a generic conformance once on the template, where
     // both sides share the same TypeParamDecl.
@@ -161,9 +162,10 @@ namespace AST
         ValueType second;
 
         // t_constraint only: the associated type's constraint **substituted through this conformance**,
-        // e.g. `Iterator<int32>` rather than the `Iterator<V>` TypeParamDecl::constraint_spelling holds.
-        // carried rather than re-derived by the reporter, which has no substitution of its own - and
-        // naming the interface's own `V` at an implementor is the thing WantedSignature already avoids
+        // e.g. `contract::iterator<int32>` rather than the `contract::iterator<V>`
+        // TypeParamDecl::constraint_spelling holds. carried rather than re-derived by the reporter, which has
+        // no substitution of its own - and naming the interface's own `V` at an implementor is the thing
+        // WantedSignature already avoids
         std::string constraint_spelling;
     };
 
@@ -178,7 +180,7 @@ namespace AST
         const FunctionDeclNode *requirement = nullptr;
 
         // the requirement's signature with the interface's own type parameters substituted through the
-        // conformance being checked - `Iterable<int32>`'s `next()` reads `ptr<int32>`, not `ptr<T>`.
+        // conformance being checked - `contract::iterable<int32>`'s `next()` reads `ptr<int32>`, not `ptr<T>`.
         // what the diagnostic must render, because the unsubstituted form names a parameter the author
         // of the *implementor* never wrote
         std::string wanted_signature;
@@ -202,7 +204,7 @@ namespace AST
     // no registry to hand (a unit test asking only about methods) wants
     //
     // `types` is the bundle's own registry, and it has to be that one: substituting a requirement's
-    // `Array<T>` into `Array<int32>` re-interns, and interning through a second registry would mint a
+    // `array<T>` into `array<int32>` re-interns, and interning through a second registry would mint a
     // second ComplexType for one type - which would then compare unequal to the implementor's, since
     // ValueType equality *is* pointer identity. every such lookup here is a cache hit, because the
     // interface and the conformance clause both interned what they mention when they were parsed

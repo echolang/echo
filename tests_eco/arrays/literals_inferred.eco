@@ -1,5 +1,5 @@
 // **the elements decide the type.** a declaration with no type of its own takes the *first* element's
-// as its element type, so nothing here has to name Array at all
+// as its element type, so nothing here has to name array at all
 $names = ["Alice", "Bob", "Charlie"];
 
 foreach ($names as $name) {

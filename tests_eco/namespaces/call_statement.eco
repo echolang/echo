@@ -1,9 +1,9 @@
 // a call is a statement on its own, qualified or not, and a non-void result may be discarded
-float64 $root = math::sqrt(16.0);
+float64 $root = std::math::sqrt(16.0);
 echo $root;
 
 // as a bare statement, result discarded
-math::sqrt(9.0);
+std::math::sqrt(9.0);
 
 // the same for a plain unqualified call
 function twice(int32 $x) : int32

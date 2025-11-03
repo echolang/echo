@@ -64,6 +64,15 @@ void TypeLowering::create_cmp_units(
     // than the ambient current_file
     _ctx.function_file_map.clear();
 
+    // **all three ways a function is declared, or the map answers for none of them.** a free function is a
+    // file-root child; a method is a child of a type declaration that is; and an instantiation is neither -
+    // the monomorphizer appends it to the module, so it has no file of its own and takes its template's.
+    //
+    // recording only the first left the other two on the ambient fallback, and an instantiation is exactly
+    // the case the map exists for: it is `t_odr_shared`, so its `assert` message is baked into a definition
+    // two units may both emit. It read right for as long as the generic type happened to be declared in the
+    // stdlib file the walk reached first, which is luck rather than a rule, and adding one file ahead of it
+    // alphabetically was enough to make every `array<T>` bounds message name the wrong source file
     for (auto &module : bundle.modules) {
         for (auto &file : module->files()) {
             if (file.root == nullptr) {
@@ -74,6 +83,27 @@ void TypeLowering::create_cmp_units(
                 if (child.has_type<AST::FunctionDeclNode>()) {
                     _ctx.function_file_map[child.get_ptr<AST::FunctionDeclNode>()] = &file;
                 }
+                else if (child.has_type<AST::TypeDeclNode>()) {
+                    for (AST::FunctionDeclNode *method : child.get_ptr<AST::TypeDeclNode>()->methods()) {
+                        _ctx.function_file_map[method] = &file;
+                    }
+                }
+            }
+        }
+    }
+
+    // the instantiations, in a second sweep: a template must already be in the map before an instance can
+    // read through it, and a template is not guaranteed to be walked before the module holding its instances
+    for (auto &module : bundle.modules) {
+        for (AST::FunctionDeclNode *decl : module->nodes.of_type<AST::FunctionDeclNode>()) {
+            if (decl->template_ref == nullptr) {
+                continue;
+            }
+
+            auto found = _ctx.function_file_map.find(decl->template_ref);
+
+            if (found != _ctx.function_file_map.end()) {
+                _ctx.function_file_map[decl] = found->second;
             }
         }
     }
@@ -447,7 +477,7 @@ void TypeLowering::build_function_maps()
             // no symbol at all, and an extern or an intrinsic has one somebody else supplies. Each of
             // those is still declared by the reference-scoped loop below wherever it is actually named,
             // which is what keeps a program that touches no math from paying for every row of
-            // stdlib/math/intrinsics.eco: resolving one is a signature match against LLVM's whole
+            // stdlib/std/math/intrinsics.eco: resolving one is a signature match against LLVM's whole
             // intrinsic table
             const AST::FunctionEmission kind = AST::function_emission_kind(fncdecl);
 

@@ -5,7 +5,7 @@
 // property initializer is not a destination the expansion can reach
 struct Doc
 {
-    Array<int32> $body = [1, 2];
+    array<int32> $body = [1, 2];
 }
 
 echo 1;

@@ -6,7 +6,7 @@ flags: -O
 // the window's length and data pointer are loaded **once, in the entry block** - the cursor holds its
 // bound by value, so nothing in the loop can have written them and LICM may hoist both. that is what
 // gives the loop a computable trip count, and with it unrolling and vectorisation
-CHECK: define i32 @_totalZZMRBMLC5ArrayIMLPiE
+CHECK: define i32 @_totalZZMRBMLC5arrayIMLPiE
 CHECK: entry:
 CHECK: load i64
 CHECK: load ptr

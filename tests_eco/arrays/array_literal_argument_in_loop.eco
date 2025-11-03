@@ -3,11 +3,11 @@
 // built and destroyed once per iteration. as a frame local it would have held one live collection per
 // iteration until the whole block ended, which is a leak in everything but name
 //
-// the assertion is structural, in the RAST: `Array<T>`'s destructor frees the buffer without running its
+// the assertion is structural, in the RAST: `array<T>`'s destructor frees the buffer without running its
 // elements' destructors (notes/stdlib.md records that hole), so there is nothing to print - what there is
 // to check is *where* the drop sits, which is inside the loop body ahead of the next statement
 
-function first(Array<int32>& $a) : int32 { return $a[0]; }
+function first(array<int32>& $a) : int32 { return $a[0]; }
 
 int32 $i = 0;
 int32 $seen = 0;

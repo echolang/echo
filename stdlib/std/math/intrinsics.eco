@@ -1,4 +1,4 @@
-namespace math;
+namespace std::math;
 
 /**
  * Math functions that lower to a single LLVM intrinsic.
@@ -7,8 +7,8 @@ namespace math;
  * are a plain overload set: the argument type picks the candidate and each lowers to its own
  * `.f32` / `.f64` mangling, so single-precision math never round-trips through a double
  *
- * note that a float literal is double precision unless it ends in `f`, so `math::sqrt(2.0)` is the
- * float64 overload and `math::sqrt(2.0f)` the float one
+ * note that a float literal is double precision unless it ends in `f`, so `std::math::sqrt(2.0)` is the
+ * float64 overload and `std::math::sqrt(2.0f)` the float one
  */
 
 // ----------------------------------------------------------------------------

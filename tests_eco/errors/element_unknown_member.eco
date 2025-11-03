@@ -1,9 +1,9 @@
 // a member call whose receiver is an element is kept pending while the fixpoint decides what the
 // element is - so the "no such member" diagnostic is the *finalizing sweep's* to word, not the
 // parser's. without that last owner it escaped to codegen as an uncaught internal exception
-Array<int32> $src = [1, 2];
+array<int32> $src = [1, 2];
 
-Array<Slice<int32>> $views = [];
-$views[] = $src->slice();
+array<slice<int32>> $views = [];
+$views[] = $src->sub();
 
 echo $views[0]->nope();

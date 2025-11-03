@@ -183,7 +183,7 @@ namespace AST
         // in it by string, so minting a custom `+` would retype every `$i++` in the program
         Operator *find_or_declare(const std::vector<std::string> &symbol_tokens);
 
-        // the bracket operator, `operator (Array<T>& $a)[usize $i]`, minted on first declaration.
+        // the bracket operator, `operator (array<T>& $a)[usize $i]`, minted on first declaration.
         //
         // **it is registered by spelling only, never into the symbol trie**, and that is the whole
         // reason it is not find_or_declare({"[", "]"}). the trie is keyed on *adjacent* token values,

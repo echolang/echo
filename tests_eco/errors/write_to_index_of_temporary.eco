@@ -2,9 +2,9 @@
 // writing one does not. the bytes are destroyed at the end of the statement, so nothing would ever read
 // what was written - the same answer, from the same rule, that errors/write_to_member_of_temporary gives
 // for a field
-function make() : Array<int32>
+function make() : array<int32>
 {
-    Array<int32> $a = [1, 2];
+    array<int32> $a = [1, 2];
     return $a;
 }
 

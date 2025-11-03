@@ -1,5 +1,5 @@
 // `&$x` borrows the element, so a write reaches the array
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 $a[] = 2;
 $a[] = 3;

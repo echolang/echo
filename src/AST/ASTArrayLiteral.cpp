@@ -66,10 +66,12 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
     AST::ComplexType *array_tmpl = core.declared_template(AST::CoreTypeKind::t_array);
 
     if (array_tmpl == nullptr) {
+        // the one refusal here that cannot name the type the way the others do: there is no binding to
+        // read a spelling off, which is exactly what it is reporting. the example is the stdlib's own
         return refuse(
-            "an array literal with no declared type needs 'Array', and nothing in this program "
-            "declares '#[core: \"array\"]'. it lives in the standard library, which this compilation "
-            "left out - write the type, e.g. 'Array<int32> $a = [...];'.");
+            "an array literal with no declared type needs the core array type, and nothing in this "
+            "program declares '#[core: \"array\"]'. it lives in the standard library, which this "
+            "compilation left out - write the type, e.g. 'array<int32> $a = [...];'.");
     }
 
     // whatever `#[core: "array"]` names has to be applicable to one element type.
@@ -86,9 +88,10 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
     // book/concept/arrays.md says about it: it takes its type from where it is going, and here it is
     // going nowhere in particular
     if (literal.elements.empty()) {
-        return refuse(
+        return refuse(fmt::format(
             "an empty array literal has nothing to go on - it takes its type from where it is going. "
-            "Write the type, e.g. 'Array<int32> $a = [];'.");
+            "Write the type, e.g. '{}<int32> $a = [];'.",
+            core.spelling(AST::CoreTypeKind::t_array)));
     }
 
     if (literal.elements.front() == nullptr) {
@@ -107,7 +110,7 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
     }
 
     // the element's `const` is a property of *the place it was read from*, not of what the array
-    // holds - `const int32 $x = 1; $a = [$x];` fills an `Array<int32>`, exactly as `$b = $x` declares
+    // holds - `const int32 $x = 1; $a = [$x];` fills an `array<int32>`, exactly as `$b = $x` declares
     // an `int32`. the declaration's own `const` is put back on top by the caller
     const std::vector<AST::ValueType> args { AST::ValueType::make_mutable(element) };
 

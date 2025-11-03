@@ -1533,9 +1533,9 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // there might be a namespace used
     // like
-    //   math::sin(1.0)
-    //   math::PI
-    //   math::$foo
+    //   std::math::sin(1.0)
+    //   std::math::PI
+    //   std::math::$foo
     const AST::Namespace *ast_namespace = nullptr;
     if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
         auto ns_node = parse_namespace(payload);

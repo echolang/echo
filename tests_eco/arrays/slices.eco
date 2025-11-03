@@ -1,6 +1,6 @@
-// a `Slice<T>` is a borrowed window over elements somebody else owns - two words, owning nothing.
+// a `slice<T>` is a borrowed window over elements somebody else owns - two words, owning nothing.
 // a function should take its elements this way, because it does not care who owns them
-function total(Slice<int32>& $s) : int32
+function total(slice<int32>& $s) : int32
 {
     int32 $sum = 0;
     usize $i = 0;
@@ -13,12 +13,12 @@ function total(Slice<int32>& $s) : int32
     return $sum;
 }
 
-Array<int32> $a = [1, 2, 3, 4, 5];
+array<int32> $a = [1, 2, 3, 4, 5];
 
-$whole = $a->slice();
+$whole = $a->sub();
 echo total(&$whole);
 
-$tail = $a->slice(2, 2);
+$tail = $a->sub(2, 2);
 echo total(&$tail);
 echo $tail->count();
 echo $tail[0];
@@ -27,6 +27,6 @@ echo $tail[0];
 $tail[0] = 30;
 echo $a[2];
 
-// `->slice()` is written out rather than implicit: an Array does not silently decay to a Slice
-$sub = $whole->slice(1, 2);
+// `->sub()` is written out rather than implicit: an array does not silently decay to a slice
+$sub = $whole->sub(1, 2);
 echo total(&$sub);

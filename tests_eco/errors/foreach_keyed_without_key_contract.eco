@@ -1,7 +1,7 @@
-// `Keyed<K>` is an orthogonal capability. a cursor that does not declare it has no keys, and the
+// `contract::keyed<K>` is an orthogonal capability. a cursor that does not declare it has no keys, and the
 // refusal lands on the `=>` that asked for one
 
-struct plain_cursor : Iterator<int32>
+struct plain_cursor : contract::iterator<int32>
 {
     int32 $at;
 
@@ -16,7 +16,7 @@ struct plain_cursor : Iterator<int32>
     }
 }
 
-struct Plain : Iterable<int32>
+struct Plain : contract::iterable<int32>
 {
     function iterate() : plain_cursor {
         return plain_cursor(0);

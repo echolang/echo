@@ -11,10 +11,15 @@
  * the generated embedded header rather than source, and `sketches/` is for Echo that describes a type the
  * language cannot express yet - the directory name is what says it does not compile. Adding a file to an
  * existing directory needs no edit here; adding a directory does, which is the right way round.
+ *
+ * **The directories are the two tiers.** `core/` is the language's own vocabulary - the types the compiler
+ * binds with `#[core:]`, the builtins, and the namespaces those are built out of (`contract`, `mem`, `str`,
+ * `arr`). `std/` is ordinary utility with nothing to do with the language, and everything in it is under
+ * the `std` namespace. Which tier a name is in is visible in how you spell it, so the split is not
+ * bookkeeping: it is the answer to "where does this new thing go".
  */
 
 #[module: "stdlib"]
 
 #[sources: "core/*.eco"]
-#[sources: "math/*.eco"]
-#[sources: "mem/*.eco"]
+#[sources: "std/math/*.eco"]

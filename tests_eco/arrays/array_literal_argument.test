@@ -6,15 +6,15 @@
 # **the statement is wrapped in a scope of its own**, and that scope is the lifetime: the hoisted
 # declaration is its local, so the ordinary reverse-order frame drop destroys it where the statement
 # ends rather than where the enclosing block does
-CHECK: vardecl<type<Array<int32>>>($__lit1) = call Array()
-CHECK: call echo(call total(call Array(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit1)))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit1))))
+CHECK: vardecl<type<array<int32>>>($__lit1) = call array()
+CHECK: call echo(call total(call array(addrof<array<int32>&>(varref<array<int32>>(var($__lit1)))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__lit1))))
 
 # a borrow parameter takes the hoisted declaration as an ordinary place - t_borrow, not a temporary
-CHECK: call echo(call totalb(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit2))))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit2))))
+CHECK: call echo(call totalb(addrof<array<int32>&>(varref<array<int32>>(var($__lit2))))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__lit2))))
 
 # two literals in one statement are two declarations in one wrapper, destroyed in reverse
-CHECK: call echo(call both(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit3))), addrof<Array<int32>&>(varref<Array<int32>>(var($__lit4))))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit4))))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__lit3))))
+CHECK: call echo(call both(addrof<array<int32>&>(varref<array<int32>>(var($__lit3))), addrof<array<int32>&>(varref<array<int32>>(var($__lit4))))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__lit4))))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__lit3))))

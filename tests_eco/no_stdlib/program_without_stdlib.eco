@@ -1,5 +1,5 @@
 // the standard library is a module like any other, so a program can be compiled without it.
-// what this gives up is `die`, `assert` and the `mem::` / `math::` namespaces - everything the
+// what this gives up is `die`, `assert` and the `mem::` / `std::math::` namespaces - everything the
 // compiler itself provides is still here: primitives, structs, methods, control flow
 struct Counter
 {

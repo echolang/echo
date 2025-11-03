@@ -147,7 +147,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     }
 
     llvm::FunctionType *funcType = llvm::FunctionType::get(_ctx.builder->getInt32Ty(), false);
-    llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, "main", main_cmp_unit->llvm_module.get());
+    llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, ECO_ENTRY_SYMBOL_NAME, main_cmp_unit->llvm_module.get());
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", function);
     _ctx.builder->SetInsertPoint(entry);
 
@@ -304,7 +304,7 @@ namespace
     // definition, so two identical bodies in two units can still render differently:
     //
     //  - attribute group slots, `#0` / `#1`, numbered in the order a module first needed each group;
-    //  - the disambiguating suffix LLVM appends to a named type or a local, `%StringBuf.box.4`. Every unit
+    //  - the disambiguating suffix LLVM appends to a named type or a local, `%N3str3bufE.box.4`. Every unit
     //    builds its own StructType for the same Echo type and they all share one LLVMContext, so the
     //    second one to be created gets renamed. IRMover unifies them structurally at link time, and under
     //    separate object files the name is gone entirely - only the layout survives;
@@ -317,7 +317,7 @@ namespace
     // free functions rather than lambdas inside the check: none of them touches the compiler, and as
     // lambdas the text normalizer - the part most likely to need a fourth rule - could not be reached
     // from anywhere else.
-    // `Array<int32>.2` -> `Array<int32>`: the uniquing suffix, off the end of a name
+    // `array<int32>.2` -> `array<int32>`: the uniquing suffix, off the end of a name
     std::string strip_uniquing_suffix(const std::string &name)
     {
         size_t end = name.size();
@@ -350,7 +350,7 @@ namespace
                 continue;
             }
 
-            // `%"Array<int32>.2"` - a quoted name, which is how LLVM renders one holding characters an
+            // `%"array<int32>.2"` - a quoted name, which is how LLVM renders one holding characters an
             // identifier cannot. Taken whole rather than by the per-character rule below, because the
             // character before the suffix is then whatever the Echo type's name ended with - `>` for an
             // instantiation - and no plausible character rule covers that without covering too much
@@ -631,6 +631,7 @@ bool LLVMCompiler::link_executable(
 }
 
 void LLVMCompiler::optimize() { _backend.optimize(); }
+void LLVMCompiler::prune_to_entry() { _backend.prune_to_entry(); }
 void LLVMCompiler::printIR(bool toFile) { _backend.print_ir(toFile); }
 void LLVMCompiler::run_code() { _backend.run_code(); }
 bool LLVMCompiler::make_exec(std::string executable_name) { return _backend.make_exec(executable_name); }

@@ -16,15 +16,15 @@ namespace AST
     // where the cursor a loop drives comes from
     enum class IterationSource
     {
-        // the source conforms to `Iterable<V>`: call its `iterate()`
+        // the source conforms to `contract::iterable<V>`: call its `iterate()`
         t_iterable,
 
-        // the source *is* an `Iterator<V>`: drive it directly. this is what makes an adaptor - a filter,
-        // a map - an ordinary struct rather than a language feature
+        // the source *is* a `contract::iterator<V>`: drive it directly. this is what makes an adaptor - a
+        // filter, a map - an ordinary struct rather than a language feature
         t_iterator,
 
-        // an erased interface value that is an `Iterator<V>` application. the same shape as above, with
-        // the two calls dispatched through the vtable, and it costs the lowering nothing to permit:
+        // an erased interface value that is a `contract::iterator<V>` application. the same shape as above,
+        // with the two calls dispatched through the vtable, and it costs the lowering nothing to permit:
         // find_member_functions finds a requirement in the same `_methods` list, and gen_function_call
         // already routes on FunctionDeclNode::is_interface_requirement()
         t_erased_iterator,
@@ -45,7 +45,7 @@ namespace AST
         // V - the element type, carrying its own const
         ValueType element_type;
 
-        // K, when the cursor declares `Keyed<K>`. absent is not an error until a `=>` asks for it
+        // K, when the cursor declares `contract::keyed<K>`. absent is not an error until a `=>` asks for it
         std::optional<ValueType> key_type;
 
         // **no `yield` field.** `current()` hands back a borrow, full stop - that is what the protocol

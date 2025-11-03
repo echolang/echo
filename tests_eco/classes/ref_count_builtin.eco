@@ -1,4 +1,4 @@
-// `ref_count` is the one builtin that is both generic and takes an argument. it is declared in
+// `mem::ref_count` is the one builtin that is both generic and takes an argument. it is declared in
 // `stdlib/core/rc.eco` rather than here - a second declaration of it would not be a duplicate
 // signature (two templates' `T`s are distinct declarations) but an ambiguous call at every site
 
@@ -7,10 +7,10 @@ class Handle { int32 $x; }
 // a null handle owns nothing, so the count is 0. that is what lets a copy-on-write check read as one
 // condition: static bytes with no owner are not uniquely owned either, so they clone before mutating
 Handle? $none = null;
-echo ref_count($none);
+echo mem::ref_count($none);
 
 $a = Handle(1);
-echo ref_count($a);
+echo mem::ref_count($a);
 
 $b = $a;
-echo ref_count($a);
+echo mem::ref_count($a);

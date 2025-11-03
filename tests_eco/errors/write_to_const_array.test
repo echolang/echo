@@ -7,14 +7,14 @@ Const violation: cannot assign to const storage of type 'const int32'
 Begin: '='
 End: '='
 Code excerpt:
- [8]> // const - refused as a const violation rather than as a failed conversion to `Array<int32>&`
+ [8]> // const - refused as a const violation rather than as a failed conversion to `array<int32>&`
  [9]> $frozen[0] = 5;
                  ^
  [10]> 
 
 ---- Issue ----
 Issue at 13:10
-Const violation: cannot call 'Array::push(int32)' on a const 'Array<int32>' - the method is not declared const, so it may write. Mark it `const function push(...)` if it only reads.
+Const violation: cannot call 'array::push(int32)' on a const 'array<int32>' - the method is not declared const, so it may write. Mark it `const function push(...)` if it only reads.
 Begin: 'push'
 End: 'push'
 Code excerpt:

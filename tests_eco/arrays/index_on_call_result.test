@@ -5,14 +5,14 @@
 --- RAST --->
 # the temporary wraps the *read*, not the element call: `operator []` returns a `T&` into the array, so
 # a bind at the call would destroy the buffer the address points into. this ordering is the claim
-CHECK: tempbind<int32>(vardecl<type<Array<int32>>>($__temp1) = call make()
-CHECK: index<int32>(call operator [](addrof<Array<int32>&>(varref<Array<int32>>(var($__temp1)))
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__temp1))))
+CHECK: tempbind<int32>(vardecl<type<array<int32>>>($__temp1) = call make()
+CHECK: index<int32>(call operator [](addrof<array<int32>&>(varref<array<int32>>(var($__temp1)))
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__temp1))))
 
 # one temporary per statement, each destroyed before the next is built
-CHECK: tempbind<int32>(vardecl<type<Array<int32>>>($__temp2) = call make()
-CHECK: call destructor(addrof<Array<int32>&>(varref<Array<int32>>(var($__temp2))))
+CHECK: tempbind<int32>(vardecl<type<array<int32>>>($__temp2) = call make()
+CHECK: call destructor(addrof<array<int32>&>(varref<array<int32>>(var($__temp2))))
 
 # a read nested inside an arithmetic expression binds at the operand edge, which is still inside the
 # statement and still after the element has been read
-CHECK: binexp<int32>(tempbind<int32>(vardecl<type<Array<int32>>>($__temp3) = call make()
+CHECK: binexp<int32>(tempbind<int32>(vardecl<type<array<int32>>>($__temp3) = call make()

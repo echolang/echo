@@ -40,8 +40,13 @@ set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-Wall -Wextra -
 add_executable(${APPNAME} ${SOURCES})
 add_library(${LIBNAME} STATIC ${SOURCES})
 
-target_compile_definitions(${APPNAME} PRIVATE "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
-target_compile_definitions(${LIBNAME} PRIVATE "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
+# where the stdlib sources live. PRIVATE on each target that needs it rather than PUBLIC on the
+# library, because a consumer of echoc_lib is not thereby a consumer of the source tree - so the three
+# targets that do need it name it, and this variable is the one place the path is spelled
+set(ECO_STDLIB_DEFINITION "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
+
+target_compile_definitions(${APPNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
+target_compile_definitions(${LIBNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 
 # create an install target
 install(TARGETS ${APPNAME} DESTINATION bin)
@@ -106,17 +111,27 @@ add_executable(tests ${TEST_SOURCES})
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(tests PRIVATE ${LIBNAME})
 
+# the e2e corpus spawns its ~400 echoc subprocesses from a worker pool - the assertions that judge
+# them stay on the main thread, but the spawns do not
+find_package(Threads REQUIRED)
+target_link_libraries(tests PRIVATE Threads::Threads)
+
 # e2e (tests_eco): always run against a freshly built compiler and tell the runner
 # where the binary and the corpus live
 add_dependencies(tests ${APPNAME})
 #
-# ECO_E2E_TMP_DIR is where a `mode: build` case's native binary is linked. inside the build tree and
-# absolute: the tests binary's working directory is not fixed (ctest and CI run it from `build/`, a
-# developer runs `./build/tests` from the repo root), so a relative path is wrong in one of the two
+# ECO_E2E_TMP_DIR is the scratch root: one directory per case under it, holding that case's binary, the
+# objects emitted beside it and its module cache. inside the build tree and absolute, because the tests
+# binary's working directory is not fixed (ctest and CI run it from `build/`, a developer runs
+# `./build/tests` from the repo root), so a relative path is wrong in one of the two
+#
+# the stdlib definition is PRIVATE on the other two targets, so linking the library does not carry it
+# here. The tests need it to assert that nothing is written into the compiler's own source tree
 target_compile_definitions(tests PRIVATE
     "ECHOC_BINARY=\"$<TARGET_FILE:${APPNAME}>\""
     "ECO_E2E_TESTS_DIR=\"${CMAKE_SOURCE_DIR}/tests_eco\""
-    "ECO_E2E_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\"")
+    "ECO_E2E_TMP_DIR=\"${CMAKE_BINARY_DIR}/e2e_tmp\""
+    ${ECO_STDLIB_DEFINITION})
 
 # ctest integration
 enable_testing()

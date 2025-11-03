@@ -5,4 +5,4 @@ expect: ok
 9
 --- RAST --->
 // the drop, as an ordinary resolved call
-CHECK: call destructor(addrof<Array<int32>&>
+CHECK: call destructor(addrof<array<int32>&>

@@ -5,8 +5,8 @@
 // so the literal is never a *temporary*. it stays `t_addressless` in AST::storage_of, which is what
 // keeps "a literal fills storage" true of every position; only where the storage comes from changed
 
-function total(Array<int32> $a) : int32 { return $a[0] + $a[1] + $a[2]; }
-function totalb(Array<int32>& $a) : int32 { return $a[0] + $a[1] + $a[2]; }
+function total(array<int32> $a) : int32 { return $a[0] + $a[1] + $a[2]; }
+function totalb(array<int32>& $a) : int32 { return $a[0] + $a[1] + $a[2]; }
 
 // by value: the hoisted declaration is copied into the parameter, through the copy constructor
 echo total([1, 2, 3]);
@@ -15,5 +15,5 @@ echo total([1, 2, 3]);
 echo totalb([10, 20, 30]);
 
 // two in one statement, which is what the hoist names are numbered for
-function both(Array<int32>& $a, Array<int32>& $b) : int32 { return $a[0] + $b[0]; }
+function both(array<int32>& $a, array<int32>& $b) : int32 { return $a[0] + $b[0]; }
 echo both([7, 0, 0], [100, 0, 0]);

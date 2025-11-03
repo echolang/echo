@@ -14,6 +14,6 @@ class Handle
 
 $h = Handle(5);
 
-echo ref_count($h);
+echo mem::ref_count($h);
 dprint($h);
-echo ref_count($h);
+echo mem::ref_count($h);

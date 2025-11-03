@@ -3,24 +3,24 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 4:9
-The function 'Iterator' could not be found
-Begin: 'Iterator'
-End: 'Iterator'
+The function 'cursor' could not be found
+Begin: 'cursor'
+End: 'cursor'
 Code excerpt:
  [3]> 
- [4]> $bare = Iterator(1);
+ [4]> $bare = cursor(1);
               ^
  [5]> 
 
 ---- Issue ----
-Issue at 4:20
+Issue at 4:18
 cannot infer type of variable without an initializer
 Begin: ';'
 End: ';'
 Code excerpt:
  [3]> 
- [4]> $bare = Iterator(1);
-                         ^
+ [4]> $bare = cursor(1);
+                       ^
  [5]> 
 
 Critical issues found, cannot compile.

@@ -1,7 +1,7 @@
 // a `foreach` is a transient node: AST::ForeachLowering rewrites it inside the monomorphizer's
 // fixpoint, so `-a` (before) shows the loop and `-ar` (after) shows only the iterator and the while.
 // this pair is the only thing that pins "transient" - nothing else can see both sides
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 
 foreach ($a as $x) {

@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 3:1
-an array literal with no declared type needs 'Array', and nothing in this program declares '#[core: "array"]'. it lives in the standard library, which this compilation left out - write the type, e.g. 'Array<int32> $a = [...];'.
+an array literal with no declared type needs the core array type, and nothing in this program declares '#[core: "array"]'. it lives in the standard library, which this compilation left out - write the type, e.g. 'array<int32> $a = [...];'.
 Begin: '$a'
 End: '$a'
 Code excerpt:

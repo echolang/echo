@@ -31,25 +31,26 @@ namespace AST
         // `string::view` - a borrowed window over UTF-8 bytes, owning nothing
         t_string_view,
 
-        // `struct Array<T>` - the owning, growable sequence. bound so the compiler can **say**
-        // `Array<E>` for an array literal that has no destination to take a type from, and for nothing
+        // `struct array<T>` - the owning, growable sequence. bound so the compiler can **say**
+        // `array<E>` for an array literal that has no destination to take a type from, and for nothing
         // else: it knows no method, no property and no shape of it, which is what keeps this a name
         // binding rather than a second resolve_core_string_layout
         //
-        // `Slice<T>` deliberately gets none. nothing in the grammar spells a slice literal, so no
+        // `slice<T>` deliberately gets none. nothing in the grammar spells a slice literal, so no
         // slice type is ever *minted* by the compiler, and `foreach` finds one through its `Iterable`
         // conformance rather than by name
         t_array,
 
-        // `interface Iterator<V>` - the loop protocol: `advance()` then `current()`. what `foreach`
-        // lowers onto, and the one thing it requires
+        // `interface contract::iterator<V>` - the loop protocol: `advance()` then `current()`. what
+        // `foreach` lowers onto, and the one thing it requires
         t_iterator,
 
-        // `interface Iterable<V>` - anything that hands back a fresh `Iterator<V>` from `iterate()`
+        // `interface contract::iterable<V>` - anything that hands back a fresh
+        // `contract::iterator<V>` from `iterate()`
         t_iterable,
 
-        // `interface Keyed<K>` - the orthogonal capability that makes `$k => $v` spellable. an iterator
-        // that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
+        // `interface contract::keyed<K>` - the orthogonal capability that makes `$k => $v` spellable. an
+        // iterator that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
         t_keyed,
     };
 
@@ -79,10 +80,20 @@ namespace AST
         // the ComplexType the kind's declaration carries, or null when nothing declared it.
         //
         // **how every generic core kind is read.** `type()` above answers a generic declaration with
-        // the bare, un-substituted template - `Iterator` and not `Iterator<int32>` - which is not a
-        // type a caller may hold. what a caller wants is either the template to compare a conformance
+        // the bare, un-substituted template - the template and not `contract::iterator<int32>` - which is
+        // not a type a caller may hold. what a caller wants is either the template to compare a conformance
         // against, or the thing to apply arguments to, and both of those are this
         ComplexType *declared_template(CoreTypeKind kind) const;
+
+        // **how a diagnostic says a core type.** the bound declaration's own namespaced name, so a
+        // message telling the user to write `contract::iterable<...>` cannot drift from where the
+        // stdlib declares it - the same reason resolve_core_string_layout goes by property name and
+        // not by field order.
+        //
+        // an unbound kind answers the `#[core:]` tag in angle brackets rather than an invented name.
+        // a `--no-stdlib` program genuinely has no spelling to quote, and the tag is the only thing
+        // true about it in that case
+        std::string spelling(CoreTypeKind kind) const;
 
         ValueType string_type() const {
             return type(CoreTypeKind::t_string);

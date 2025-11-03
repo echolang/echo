@@ -2,9 +2,9 @@
 // array - so `-ar` shows it and the type checker validates it, exactly as it does for any other
 // owning type. nothing about scope exit is array-specific
 {
-    Array<int32> $inner = [1, 2, 3];
+    array<int32> $inner = [1, 2, 3];
     echo $inner->count();
 }
 
-Array<int32> $outer = [9];
+array<int32> $outer = [9];
 echo $outer[0];

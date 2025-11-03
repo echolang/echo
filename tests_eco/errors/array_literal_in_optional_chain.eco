@@ -13,7 +13,7 @@ class Holder
 
     constructor(int32 $n) { $this->n = $n; }
 
-    function take(Array<int32>& $a) : int32 { return $a[0]; }
+    function take(array<int32>& $a) : int32 { return $a[0]; }
 }
 
 Holder? $h = null;

@@ -16,6 +16,8 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/IPO/Inliner.h>
+#include <llvm/Transforms/IPO/GlobalDCE.h>
+#include <llvm/Transforms/IPO/Internalize.h>
 #include <llvm/Analysis/InlineCost.h>
 
 #include <fmt/core.h>
@@ -71,9 +73,9 @@ void Backend::run_code()
 
     EE->finalizeObject();
 
-    auto *func = EE->FindFunctionNamed("main");
+    auto *func = EE->FindFunctionNamed(ECO_ENTRY_SYMBOL_NAME);
     if (!func) {
-        llvm::errs() << "Function 'main' not found in module.\n";
+        llvm::errs() << "Function '" ECO_ENTRY_SYMBOL_NAME "' not found in module.\n";
         return;
     }
 
@@ -307,7 +309,16 @@ bool Backend::make_exec(std::string executable_name)
     return link_executable(executable_name, { object_path });
 }
 
-void Backend::optimize()
+// guards the module, builds the four analysis managers and cross-registers the proxies, then runs
+// whatever pipeline `build` filled in. Every module-pass entry point below goes through here, so how
+// analyses are registered is decided once - two spellings of it drift silently, and a pass that then
+// asks for an analysis nobody registered aborts inside LLVM rather than here.
+//
+// file-local rather than a member: llvm::ModulePassManager is a template alias, so a declaration in
+// Backend.h would drag the whole pass infrastructure into every translation unit that includes it
+static void run_module_passes(
+    CodegenContext &_ctx,
+    const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build)
 {
     if (!_ctx.current_module()) {
         llvm::errs() << "Module is not initialized.\n";
@@ -326,11 +337,34 @@ void Backend::optimize()
     passBuilder.registerLoopAnalyses(loopAM);
     passBuilder.crossRegisterProxies(loopAM, functionAM, cgsccAM, moduleAM);
 
-    // make the pipeline
-    llvm::ModulePassManager modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
-    modulePM.addPass(llvm::ModuleInlinerPass(llvm::getInlineParams(3, 0), llvm::InliningAdvisorMode::Default,
-                                  llvm::ThinOrFullLTOPhase::None));
+    llvm::ModulePassManager modulePM;
+    build(passBuilder, modulePM);
 
     modulePM.run(*_ctx.current_module(), moduleAM);
+}
+
+void Backend::optimize()
+{
+    run_module_passes(_ctx, [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+        modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+        modulePM.addPass(llvm::ModuleInlinerPass(llvm::getInlineParams(3, 0), llvm::InliningAdvisorMode::Default,
+                                      llvm::ThinOrFullLTOPhase::None));
+    });
+}
+
+void Backend::prune_to_entry()
+{
+    run_module_passes(_ctx, [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+        // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
+        // codegen hands it a module in which almost everything is externally linked.
+        //
+        // declarations are left alone by InternalizePass, which is what keeps the JIT able to resolve
+        // printf, malloc, free and every `extern` symbol out of the host process
+        modulePM.addPass(llvm::InternalizePass([](const llvm::GlobalValue &gv) {
+            return gv.getName() == ECO_ENTRY_SYMBOL_NAME;
+        }));
+
+        modulePM.addPass(llvm::GlobalDCEPass());
+    });
 }
 };

@@ -20,6 +20,13 @@
 // the name of the main module
 #define ECO_MAIN_MODULE_NAME "main"
 
+// the symbol the entry module's file-scope statements are emitted under - the C `main` a linker or a
+// JIT looks for. deliberately *not* ECO_MAIN_MODULE_NAME: that one names a module and is overridable
+// by a manifest, this one is fixed by the platform. Three places must agree on it - the definition
+// LLVMCompiler emits, the JIT lookup, and the root set Backend::prune_to_entry keeps - and a
+// disagreement leaves an empty module rather than a diagnostic
+#define ECO_ENTRY_SYMBOL_NAME "main"
+
 // the width of a pointer on the target, in bytes. this is what `usize` and `isize` lower to,
 // and it is the single place that knows it: AST::get_primitive_size answers from here and
 // TypeLowering picks its llvm integer width from here, so the two can never disagree

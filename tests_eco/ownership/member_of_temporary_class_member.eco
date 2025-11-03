@@ -33,6 +33,6 @@ echo 1;
 $kept = $b->make()->node;
 echo 2;
 echo $kept->v;
-echo ref_count($kept);
+echo mem::ref_count($kept);
 echo 3;
 // $kept is released here, and 900 follows

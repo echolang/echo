@@ -14,7 +14,7 @@
  *
  * **The known hole: an element type that owns something.** The copy constructor below is a
  * `mem::copy`, an element-wise *bitwise* copy, which is correct exactly when `T` owns nothing. An
- * `Array<Array<int32>>` would need a recursive per-element copy, and there is no way to ask whether
+ * `array<array<int32>>` would need a recursive per-element copy, and there is no way to ask whether
  * a type owns anything - constraints are a set of concrete types, not a capability. So a nested
  * owner compiles and is wrong, rather than being refused. See book/concept/arrays.md,
  * "Not yet specified".
@@ -22,15 +22,15 @@
  * Counts, capacities and indices are `usize` throughout, matching `mem::`. There is no allocator
  * parameter and deliberately none yet: mem::alloc is allocator-free and Echo has no function
  * pointers, so a per-container allocator would be an invented ABI. The intended future shape is a
- * monomorphized Array<T, A> plus mem::alloc_with, which is purely additive.
+ * monomorphized array<T, A> plus mem::alloc_with, which is purely additive.
  *
- * `#[core: "array"]` is what lets the compiler *say* `Array<E>`, and it needs to say it in exactly
+ * `#[core: "array"]` is what lets the compiler *say* `array<E>`, and it needs to say it in exactly
  * one situation: `$a = [1, 2, 3];`, an array literal with no declared type to take one from. It
  * knows no method, no property and no shape of this type - everything below is looked up the way
  * your own code is.
  */
 #[core: "array"]
-struct Array<T> : Iterable<T>
+struct array<T> : contract::iterable<T>
 {
     ptr<T> $data;
     usize $len;
@@ -53,19 +53,19 @@ struct Array<T> : Iterable<T>
     /**
      * The deep copy. Recognised rather than declared - any constructor taking one non-nullable
      * borrow of its own type is the copy constructor (`AST::is_copy_constructor`), which is what
-     * makes `$b = $a` and `Array<int32>($a)` the same operation.
+     * makes `$b = $a` and `array<int32>($a)` the same operation.
      *
      * Written out because a declared destructor disqualifies the synthesized copy, and rightly so:
      * a bitwise duplicate of a struct holding a heap pointer is two owners of one buffer.
      *
-     * Spelled `Array<T>&`, not `Array&`. Inside a generic struct the bare name is the *template*,
+     * Spelled `array<T>&`, not `array&`. Inside a generic struct the bare name is the *template*,
      * which is not a type; only the applied form matches.
      *
      * And `const`, because a copy reads its source and nothing more. That is what lets `$b = $a` and
      * `$a->clone()` work when `$a` is `const` - without it the copy is the one operation a const
      * array cannot take part in, including the one its own `clone()` is written through.
      */
-    constructor(const Array<T>& $other)
+    constructor(const array<T>& $other)
     {
         $this->data:$ = null;
         $this->len = 0;
@@ -136,7 +136,7 @@ struct Array<T> : Iterable<T>
      * allocation for the whole loop.
      *
      * **This may move the buffer**, so every borrow into the array is stale afterwards: every
-     * `Slice<T>` you took, every `&$a[$i]`. See book/concept/arrays.md, "Growth and invalidation".
+     * `slice<T>` you took, every `&$a[$i]`. See book/concept/arrays.md, "Growth and invalidation".
      */
     function reserve(usize $count) : void
     {
@@ -239,43 +239,46 @@ struct Array<T> : Iterable<T>
     /**
      * A borrowed window over everything.
      *
-     * Written out rather than implicit. An `Array<T>` does not silently decay to a `Slice<T>` at a
+     * Written out rather than implicit. An `array<T>` does not silently decay to a `slice<T>` at a
      * call site - the conversion allocates nothing, but it does hand out a borrow, and handing out
      * a borrow is a decision you should see. That is a choice, not a limitation.
      */
-    function slice() : Slice<T>
+    function sub() : slice<T>
     {
-        return $this->slice(0, $this->len);
+        return $this->sub(0, $this->len);
     }
 
     /**
      * A borrowed window over `$count` elements from `$from`.
+     *
+     * Named `sub` rather than `slice` to match `slice<T>::sub` and `string::view::sub` - one word for
+     * "a narrower window over the same bytes", wherever you ask for one.
      */
-    function slice(usize $from, usize $count) : Slice<T>
+    function sub(usize $from, usize $count) : slice<T>
     {
         assert($from <= $this->len, "slice start out of range");
         assert($count <= $this->len - $from, "slice length out of range");
 
-        return Slice<T>($this->data:$ + $from, $count);
+        return slice<T>($this->data:$ + $from, $count);
     }
 
     /**
      * A cursor over the elements.
      *
-     * Written *through* `->slice()` so the window rules have one implementation and this cannot drift
-     * from what `$a->slice()` hands out.
+     * Written *through* `->sub()` so the window rules have one implementation and this cannot drift
+     * from what `$a->sub()` hands out.
      */
     function iterate() : slice_iterator<T>
     {
-        return slice_iterator<T>($this->slice());
+        return slice_iterator<T>($this->sub());
     }
 
     /**
      * An explicit deep copy - the same thing `$b = $a` does, said out loud at the call site.
      */
-    const function clone() : Array<T>
+    const function clone() : array<T>
     {
-        return Array<T>($this);
+        return array<T>($this);
     }
 }
 
@@ -286,7 +289,7 @@ struct Array<T> : Iterable<T>
  * Bounds-checked with `assert`, so a debug build catches the mistake and a release build pays
  * nothing - the same bargain `->at()` and `string::view::byte_at` make.
  */
-operator<T> (Array<T>& $a)[usize $index] : T&
+operator<T> (array<T>& $a)[usize $index] : T&
 {
     assert($index < $a->len, "array index out of range");
 
@@ -303,7 +306,7 @@ operator<T> (Array<T>& $a)[usize $index] : T&
  * `const T&` is what makes it read-only all the way through: `$c[$i] = v` is then a write through a
  * const pointee, which the compiler refuses by naming exactly that.
  */
-operator<T> (const Array<T>& $a)[usize $index] : const T&
+operator<T> (const array<T>& $a)[usize $index] : const T&
 {
     assert($index < $a->len, "array index out of range");
 
@@ -321,7 +324,7 @@ operator<T> (const Array<T>& $a)[usize $index] : const T&
  * (`AssignNode::is_initialization`), not this function's, but it is the reason this function is
  * allowed to hand back a slot it has not filled.
  */
-operator<T> (Array<T>& $a)[] : T&
+operator<T> (array<T>& $a)[] : T&
 {
     $a->reserve($a->len + 1);
     $a->len = $a->len + 1;

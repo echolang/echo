@@ -12,9 +12,9 @@ CHECK: Module: [main]
 // the inference itself, which OUT cannot show: three declarations, three element types, none of
 // them written down. and one destructor each - a body holding an unexpanded literal is not
 // concrete, so the ownership pass waited for the expansion rather than walking past it
-CHECK: vardecl<type<Array<string>>>($names) = call Array(): Array<string>
-CHECK: vardecl<type<Array<int32>>>($numbers) = call Array(): Array<int32>
-CHECK: vardecl<type<Array<float64>>>($ratios) = call Array(): Array<float64>
-CHECK: call destructor(addrof<Array<float64>&>
-CHECK: call destructor(addrof<Array<int32>&>
-CHECK: call destructor(addrof<Array<string>&>
+CHECK: vardecl<type<array<string>>>($names) = call array(): array<string>
+CHECK: vardecl<type<array<int32>>>($numbers) = call array(): array<int32>
+CHECK: vardecl<type<array<float64>>>($ratios) = call array(): array<float64>
+CHECK: call destructor(addrof<array<float64>&>
+CHECK: call destructor(addrof<array<int32>&>
+CHECK: call destructor(addrof<array<string>&>

@@ -2,7 +2,7 @@
 // is a usize - and the parser's binary reconciliation had already run. AST::OperatorRewriter's
 // widen_binary_operands is the post-parse half of that rule; without it this asserts in codegen with
 // a message naming neither the loop nor the comparison
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 $a[] = 2;
 $a[] = 3;

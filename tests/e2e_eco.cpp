@@ -1,14 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "eco_test_file.h"
+#include "subprocess.h"
 
 #include <algorithm>
-#include <array>
-#include <cstdio>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
-#include <optional>
+#include <mutex>
 #include <string>
-#include <sys/wait.h>
+#include <thread>
 #include <vector>
 
 // end-to-end suite
@@ -37,52 +38,10 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    // the exit status matters now: `expect` is what makes a deliberately broken program's rejection
-    // part of the contract, rather than a coincidence of the text it happened to print
-    struct ProcessResult
-    {
-        int exit_code = 0;
-        std::string output;
-    };
-
-    // runs a shell command capturing merged stdout+stderr.
-    //
-    // one function rather than a popen block per call site, so the wait status is decoded in exactly
-    // one place - and so a future `timeout:` setting has one place to go. a signal is reported as
-    // `128 + signo`, the way a shell reports it, which keeps a JIT segfault distinguishable from a
-    // clean rejection in the failure message.
-    //
-    // a failure to spawn is reported through `exit_code` like any other, never with a Catch2
-    // assertion: this is the suite's process primitive, and a primitive that asserts can only be
-    // called from inside an assertion context - which a cached probe run at static-init time is not
-    ProcessResult run_capturing(const std::string &command)
-    {
-        ProcessResult result;
-
-        std::array<char, 4096> buf;
-        FILE *pipe = popen(command.c_str(), "r");
-
-        if (!pipe) {
-            result.exit_code = 127;
-            result.output = "could not spawn: " + command;
-            return result;
-        }
-
-        size_t n;
-        while ((n = fread(buf.data(), 1, buf.size(), pipe)) > 0) {
-            result.output.append(buf.data(), n);
-        }
-
-        const int status = pclose(pipe);
-        result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-
-        return result;
-    }
-
-    std::string quoted(const fs::path &p)
-    {
-        return "\"" + p.string() + "\"";
-    }
+    // the shared process primitive - see subprocess.h
+    using EchoTests::ProcessResult;
+    using EchoTests::quoted;
+    using EchoTests::run_capturing;
 
     // `echoc <run|build -o bin> [dump] [flags] <file>`.
     //
@@ -94,60 +53,81 @@ namespace
     // which subcommand it is comes off `test.mode` and not off whether a binary was handed in: those
     // were two encodings of one fact, and passing null for a `mode: build` case silently produced a
     // *run* invocation that nothing in here would have noticed
+    // **everything one case writes goes into one directory of its own, inside the build tree** - the
+    // `-o` binary, the per-module objects echoc emits beside it, and the module cache. This function is
+    // the only thing that says where that is, so nothing has to agree with a second spelling of it.
+    //
+    // one directory *per case* rather than one shared tree, for two reasons. A case that passes only
+    // because an earlier case populated something is not a test - and per case is what makes the order
+    // cases run in irrelevant, which is what lets Catch2 shuffle them. It is also what lets the cleanup
+    // be a single `remove_all` instead of a guess about how echoc names what it emits.
+    //
+    // absolute because the tests binary's working directory is not fixed - CI runs `./tests` from inside
+    // `build/`, a developer runs `./build/tests` from the repo root - so any relative path is wrong in one
+    // of the two, and a repo-root-relative one drops artifacts among tracked files
+    fs::path case_scratch_dir(const fs::path &eco, const fs::path &root)
+    {
+        return fs::path(ECO_E2E_TMP_DIR) / fs::relative(eco, root).replace_extension("");
+    }
+
     std::string echoc_command(
         const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path *binary,
-        const std::string &dump)
+        const std::string &dump, const fs::path &root, const fs::path &scratch)
     {
         const bool is_build = test.mode == EchoTests::RunMode::t_build;
 
         REQUIRE((binary != nullptr) == is_build);
 
+        // without --cache-dir the default store applies, which is `.echo` beside each manifest - so
+        // running the corpus would write artifacts into tests_eco/ and into stdlib/, and two cases
+        // sharing a manifest would share a cache
         return "\"" ECHOC_BINARY "\" "
             + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
             + (dump.empty() ? "" : dump + " ")
-            + test.compiler_flags()
+            + "--cache-dir " + quoted(scratch / "cache") + " "
+            + test.compiler_flags(root)
             + quoted(eco) + " 2>&1";
     }
 
-    // where a `mode: build` case's binary goes: the build tree, absolute.
+    // brackets a case's scratch directory: empty on the way in, gone on the way out.
     //
-    // absolute because the tests binary's working directory is not fixed - CI runs `./tests` from
-    // inside `build/`, a developer runs `./build/tests` from the repo root - so any relative path is
-    // wrong in one of the two, and a repo-root-relative one drops artifacts among tracked files
-    fs::path temp_binary_for(const fs::path &eco, const fs::path &root)
-    {
-        std::string name = fs::relative(eco, root).replace_extension("").string();
-        std::replace(name.begin(), name.end(), '/', '_');
-        std::replace(name.begin(), name.end(), '\\', '_');
-
-        return fs::path(ECO_E2E_TMP_DIR) / name;
-    }
-
-    // make_exec leaves two artifacts, the executable and `<executable>.o`. both go, always,
-    // including after a failure - Catch2's INFO has already captured everything a human needs by
-    // then, and a stale binary from a previous run is a false pass waiting to happen
-    struct ScopedBinary
+    // it goes *always*, including after a failure - Catch2's INFO has already captured everything a
+    // human needs by then, and a stale binary or a cached object from a previous run is a false pass
+    // waiting to happen. `build` emits one object per module that was not served from the cache, so what
+    // is in here is not a fixed list of names; wiping the directory is the only cleanup that cannot
+    // fall behind codegen. It is also what keeps the module cache from outliving the compiler that
+    // filled it - `compute_module_keys` hashes sources, not the binary that read them
+    struct ScopedScratch
     {
         fs::path path;
 
-        ScopedBinary(fs::path p) : path(std::move(p))
+        ScopedScratch(fs::path p) : path(std::move(p))
         {
             std::error_code ec;
-            fs::create_directories(path.parent_path(), ec);
-            remove_artifacts();
+            fs::remove_all(path, ec);
+            fs::create_directories(path, ec);
         }
 
-        ~ScopedBinary()
-        {
-            remove_artifacts();
-        }
-
-        void remove_artifacts()
+        ~ScopedScratch()
         {
             std::error_code ec;
-            fs::remove(path, ec);
-            fs::remove(path.string() + ".o", ec);
+            fs::remove_all(path, ec);
         }
+    };
+
+    // the outcome of a case's *spawns*, and nothing else.
+    //
+    // this is the half of a case that never touches Catch2 - a command to start, what it printed, what
+    // it exited with - which is exactly the half worth running on another thread. the assertions that
+    // judge it stay on the main thread, in section order, because Catch2's macros are not thread safe.
+    // the split is the whole of what makes the corpus parallel: nothing below this struct spawns, and
+    // nothing above it asserts
+    struct CaseOutcome
+    {
+        ProcessResult primary;             // `echoc run`, or `echoc build`
+        bool binary_exists = false;        // `mode: build` - did the link actually leave one behind
+        ProcessResult program;             // the linked binary, when the build got that far
+        std::vector<ProcessResult> dumps;  // one per `test.checks`, same order
     };
 
     // `clang` is what Backend::make_exec shells out to link with. a FAIL rather than a skip: a suite
@@ -188,21 +168,11 @@ namespace
     // runs at all
     void check_dump_section(
         const EchoTests::EcoTestFile &test, const EchoTests::CheckSection &section,
-        const fs::path &eco, const fs::path &root)
+        const ProcessResult &result)
     {
-        const std::string flag = EchoTests::dump_flag(section.kind);
-
-        // the binary is what a build-mode dump invocation owes `-o`, and nothing here reads it. one
-        // invocation rather than one per mode: the subcommand is echoc_command's to decide
-        std::optional<ScopedBinary> binary;
-
         if (test.mode == EchoTests::RunMode::t_build) {
             require_clang();
-            binary.emplace(temp_binary_for(eco, root));
         }
-
-        const ProcessResult result = run_capturing(
-            echoc_command(test, eco, binary.has_value() ? &binary->path : nullptr, flag));
 
         INFO("dump:\n" << result.output);
 
@@ -231,26 +201,21 @@ namespace
         check_status(test, result, actor);
     }
 
-    // asserts the OUT golden and the exit status of a `mode: run` case
-    void check_run_output(const EchoTests::EcoTestFile &test, const fs::path &eco)
-    {
-        check_program_output(test, run_capturing(echoc_command(test, eco, nullptr, "")), "echoc");
-    }
-
-    // the same for `mode: build`: link a native binary, then run it.
+    // a `mode: build` case: the build's own status, then the linked program's output.
+    //
+    // a `mode: run` case needs no counterpart - `echoc run` is the one process, so the judge is
+    // check_program_output on the primary spawn and nothing more.
     //
     // the OUT golden is the *program's* output only. the build step is asserted through its exit code
     // alone, because its stdout carries absolute object and executable paths - putting those in a
     // golden would fail on every machine but the one that recorded it, and filtering them would put a
     // copy of the compiler's output format in here
     void check_build_output(
-        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path &root)
+        const EchoTests::EcoTestFile &test, const fs::path &binary, const CaseOutcome &outcome)
     {
         require_clang();
 
-        const ScopedBinary binary(temp_binary_for(eco, root));
-
-        const ProcessResult build = run_capturing(echoc_command(test, eco, &binary.path, ""));
+        const ProcessResult &build = outcome.primary;
 
         if (build.exit_code != 0) {
             INFO("build log:\n" << build.output);
@@ -269,12 +234,12 @@ namespace
 
         // make_exec used to report all three of its failure paths by printing and returning, so
         // "exited 0" is on its own no proof that anything was linked
-        if (!fs::exists(binary.path)) {
+        if (!outcome.binary_exists) {
             INFO("build log:\n" << build.output);
-            FAIL("echoc build exited 0 but produced no binary at " << binary.path.string());
+            FAIL("echoc build exited 0 but produced no binary at " << binary.string());
         }
 
-        check_program_output(test, run_capturing(quoted(binary.path) + " 2>&1"), "the program");
+        check_program_output(test, outcome.program, "the program");
     }
 
     // one discovered case: the program, its parsed contract, and whether there was one to parse
@@ -285,6 +250,21 @@ namespace
         bool has_test_file = false;
         EchoTests::EcoTestFile test;
         std::string parse_error;
+
+        // where this case writes, and what it writes there. Both come off case_scratch_dir at discovery,
+        // so the `-o` target is decided once: the worker brackets its spawns with the directory, the
+        // judge names the binary in a failure, and echoc_command puts both on the command line.
+        //
+        // `scratch` is empty for a case that is not runnable, `binary` for anything but `mode: build`
+        fs::path scratch;
+        fs::path binary;
+
+        // is there anything to spawn at all? a case with no `.test`, or one that would not parse, FAILs
+        // on that alone - it never reaches an outcome, so nothing should be started for it
+        bool runnable() const
+        {
+            return has_test_file && parse_error.empty();
+        }
     };
 
     struct Corpus
@@ -292,6 +272,222 @@ namespace
         std::vector<DiscoveredCase> cases;
         std::vector<fs::path> orphans;   // a `.test` with no `.eco` beside it
     };
+
+    // every spawn one case owes, start to finish, with no assertion anywhere in it.
+    //
+    // the build chain lives here rather than being split across the judge, because the second spawn is
+    // conditional on the first: a build that never linked has no program to run. `ScopedScratch` brackets
+    // the whole sequence, so the dumps - which reuse the same `-o` target and the same cache - cannot
+    // outlive the cleanup, and the program is run before a dump invocation can overwrite the binary
+    // underneath it
+    CaseOutcome run_case(
+        const DiscoveredCase &entry, const std::string &command,
+        const std::vector<std::string> &dump_commands)
+    {
+        CaseOutcome outcome;
+        ScopedScratch scratch(entry.scratch);
+
+        outcome.primary = run_capturing(command);
+
+        if (!entry.binary.empty()) {
+            std::error_code ec;
+            outcome.binary_exists = fs::exists(entry.binary, ec);
+
+            if (outcome.primary.exit_code == 0 && outcome.binary_exists) {
+                outcome.program = run_capturing(quoted(entry.binary) + " 2>&1");
+            }
+        }
+
+        for (const auto &dump : dump_commands) {
+            outcome.dumps.push_back(run_capturing(dump));
+        }
+
+        return outcome;
+    }
+
+    // the corpus's outcomes, produced by a pool of workers running a window ahead of whichever case
+    // the assertions have reached.
+    //
+    // **a window rather than all of them up front.** Eager would be three lines shorter and would make
+    // `tests "[e2e]" -c "eco: arrays/literals.eco"` pay for the whole corpus; that invocation costs one
+    // case today and is the loop a person actually works in. Catch2 enters the sections of a single
+    // test case in declaration order - it shuffles test *cases* - so "the next K" is always work that
+    // will really be asked for, and a filtered run overruns by at most K.
+    //
+    // the slots are sized once and never resized, so a reference handed out by `at` stays valid while
+    // later cases are still being filled in around it
+    class ResultCache
+    {
+    public:
+        ResultCache(const std::vector<DiscoveredCase> &cases, fs::path root)
+            : _cases(cases), _root(std::move(root)), _slots(cases.size())
+        {
+            const unsigned detected = std::thread::hardware_concurrency();
+            const unsigned workers = detected == 0 ? 4 : detected;
+
+            for (unsigned i = 0; i < workers; i++) {
+                _workers.emplace_back([this] { work(); });
+            }
+        }
+
+        ~ResultCache()
+        {
+            {
+                std::lock_guard<std::mutex> lock(_mutex);
+                _stopping = true;
+            }
+
+            _wake_workers.notify_all();
+
+            for (auto &worker : _workers) {
+                worker.join();
+            }
+        }
+
+        const CaseOutcome &at(size_t index)
+        {
+            std::unique_lock<std::mutex> lock(_mutex);
+
+            // claim this case and the window behind it in one go, so the pool is already busy on what
+            // the next sections will ask for by the time this one is judged.
+            //
+            // the commands are built *here* and not at discovery, for two reasons that point the same
+            // way: echoc_command asserts, and only this thread may - and a filtered run should no more
+            // pay for 400 commands it will never spawn than for the spawns themselves
+            //
+            // the window is twice the pool, so every worker has one case in hand and one behind it
+            for (size_t i = index; i < _slots.size() && i < index + 2 * _workers.size(); i++) {
+                if (_slots[i].state != Slot::State::t_idle) {
+                    continue;
+                }
+
+                // a case with no `.test`, or one that would not parse, FAILs on that alone - it has
+                // nothing to spawn, so it is done the moment it is looked at rather than being queued
+                // for a worker to discover it has no command
+                if (!_cases[i].runnable()) {
+                    _slots[i].state = Slot::State::t_done;
+                    continue;
+                }
+
+                build_commands(i);
+
+                _slots[i].state = Slot::State::t_claimed;
+                _queue.push_back(i);
+            }
+
+            _wake_workers.notify_all();
+            _slot_done.wait(lock, [&] { return _slots[index].state == Slot::State::t_done; });
+
+            return _slots[index].outcome;
+        }
+
+    private:
+        struct Slot
+        {
+            enum class State { t_idle, t_claimed, t_done };
+
+            State state = State::t_idle;
+            std::string command;
+            std::vector<std::string> dump_commands;
+            CaseOutcome outcome;
+        };
+
+        // called under the lock, on the main thread only, and for a runnable case only - see `at`
+        void build_commands(size_t index)
+        {
+            const DiscoveredCase &entry = _cases[index];
+            const fs::path *binary = entry.binary.empty() ? nullptr : &entry.binary;
+
+            _slots[index].command
+                = echoc_command(entry.test, entry.eco, binary, "", _root, entry.scratch);
+
+            for (const auto &section : entry.test.checks) {
+                _slots[index].dump_commands.push_back(echoc_command(
+                    entry.test, entry.eco, binary, EchoTests::dump_flag(section.kind), _root,
+                    entry.scratch));
+            }
+        }
+
+        void work()
+        {
+            for (;;) {
+                size_t index = 0;
+                std::string command;
+                std::vector<std::string> dump_commands;
+
+                {
+                    std::unique_lock<std::mutex> lock(_mutex);
+
+                    _wake_workers.wait(lock, [&] { return _stopping || !_queue.empty(); });
+
+                    if (_queue.empty()) {
+                        return;         // stopping, and nothing left worth finishing
+                    }
+
+                    index = _queue.front();
+                    _queue.pop_front();
+
+                    // moved out, not copied: nothing reads a slot's commands again once its worker has
+                    // them, so this is also where the strings are released rather than being kept for
+                    // the whole run alongside the outcome
+                    command = std::move(_slots[index].command);
+                    dump_commands = std::move(_slots[index].dump_commands);
+                }
+
+                CaseOutcome outcome = run_case(_cases[index], command, dump_commands);
+
+                {
+                    std::lock_guard<std::mutex> lock(_mutex);
+
+                    _slots[index].outcome = std::move(outcome);
+                    _slots[index].state = Slot::State::t_done;
+                }
+
+                _slot_done.notify_one();     // the main thread is the only waiter, ever
+            }
+        }
+
+        const std::vector<DiscoveredCase> &_cases;
+        const fs::path _root;
+        std::vector<Slot> _slots;
+        std::deque<size_t> _queue;
+        std::vector<std::thread> _workers;
+        bool _stopping = false;
+
+        std::mutex _mutex;
+        std::condition_variable _wake_workers;
+        std::condition_variable _slot_done;
+    };
+
+    // a `.eco` that belongs to a *module* rather than being a case of its own: it lives at or below a
+    // directory holding a `module.eco`, so a manifest is what claims it.
+    //
+    // the corpus rule is that an unpaired `.eco` is an error, never a silent skip - a program nothing
+    // asserts is invisible. A library fixture's sources are the one legitimate exception.
+    //
+    // **the exception is the manifest's *presence*, not its contents.** This tests for the filename
+    // `module.eco`, the same convention Parser::read_module_manifest resolves a `depends` directory
+    // through; it does not read the manifest, so a source under a module directory that the manifest's
+    // `#[sources:]` does not actually name is skipped here too. Reading it would close that hole, and
+    // would need a policy for the fixtures whose manifests are deliberately unparseable
+    // (`modules/bad_attribute`, `modules/empty_sources`) - which is why it is not done yet
+    bool belongs_to_a_module(const fs::path &eco, const fs::path &root)
+    {
+        // walks down from the root rather than up from the file: `eco` always sits under `root` (the
+        // caller got it from a recursive iterator over it), so descending needs one termination
+        // condition where ascending needed a guard against walking off the top
+        fs::path directory = root;
+
+        for (const auto &part : fs::relative(eco.parent_path(), root)) {
+            if (fs::exists(directory / "module.eco")) {
+                return true;
+            }
+
+            directory /= part;
+        }
+
+        return fs::exists(directory / "module.eco");
+    }
 
     Corpus discover_corpus(const fs::path &root)
     {
@@ -304,7 +500,7 @@ namespace
                 continue;
             }
 
-            if (entry.path().extension() == ".eco") {
+            if (entry.path().extension() == ".eco" && !belongs_to_a_module(entry.path(), root)) {
                 eco_files.push_back(entry.path());
             }
             else if (entry.path().extension() == ".test") {
@@ -328,6 +524,14 @@ namespace
             if (discovered.has_test_file
                 && !EchoTests::parse_eco_test_file(test_path, discovered.test, discovered.parse_error)) {
                 discovered.test.checks.clear();
+            }
+
+            if (discovered.runnable()) {
+                discovered.scratch = case_scratch_dir(eco, root);
+
+                if (discovered.test.mode == EchoTests::RunMode::t_build) {
+                    discovered.binary = discovered.scratch / eco.stem();
+                }
             }
 
             corpus.cases.push_back(std::move(discovered));
@@ -359,11 +563,18 @@ namespace
 
         return discovered;
     }
+
+    // the pool, cached for the same reason and with the same lifetime as the corpus it runs
+    ResultCache &results()
+    {
+        static ResultCache cache(corpus().cases, ECO_E2E_TESTS_DIR);
+
+        return cache;
+    }
 };
 
 TEST_CASE("eco end-to-end", "[e2e]")
 {
-    const fs::path root = ECO_E2E_TESTS_DIR;
     const Corpus &discovered = corpus();
 
     REQUIRE_FALSE(discovered.cases.empty());
@@ -378,7 +589,9 @@ TEST_CASE("eco end-to-end", "[e2e]")
         }
     }
 
-    for (const auto &entry : discovered.cases) {
+    for (size_t index = 0; index < discovered.cases.size(); index++) {
+        const DiscoveredCase &entry = discovered.cases[index];
+
         DYNAMIC_SECTION("eco: " << entry.rel)
         {
             INFO("file: " << entry.eco.string());
@@ -392,21 +605,25 @@ TEST_CASE("eco end-to-end", "[e2e]")
                 FAIL(entry.parse_error);
             }
 
+            const CaseOutcome &outcome = results().at(index);
+
             if (entry.test.mode == EchoTests::RunMode::t_build) {
-                check_build_output(entry.test, entry.eco, root);
+                check_build_output(entry.test, entry.binary, outcome);
             }
             else {
-                check_run_output(entry.test, entry.eco);
+                check_program_output(entry.test, outcome.primary, "echoc");
             }
         }
 
         // the optional other half: what the emitted IR or either AST dump must contain. empty for a
         // case that did not parse, so a broken `.test` reports its parse error once and not per section
-        for (const auto &section : entry.test.checks) {
+        for (size_t check = 0; check < entry.test.checks.size(); check++) {
+            const EchoTests::CheckSection &section = entry.test.checks[check];
+
             DYNAMIC_SECTION(EchoTests::dump_section_name(section.kind) << ": " << entry.rel)
             {
                 INFO("file: " << entry.eco.string());
-                check_dump_section(entry.test, section, entry.eco, root);
+                check_dump_section(entry.test, section, results().at(index).dumps.at(check));
             }
         }
     }

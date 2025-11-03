@@ -11,16 +11,16 @@ function count_of<T>(T& $container) : usize
     return $container->count();
 }
 
-Array<int32> $numbers = [1, 2, 3];
-echo count_of<Array<int32>>(&$numbers);
+array<int32> $numbers = [1, 2, 3];
+echo count_of<array<int32>>(&$numbers);
 
-Array<string> $names = [];
+array<string> $names = [];
 $names[] = "a";
 $names[] = "b";
-echo count_of<Array<string>>(&$names);
+echo count_of<array<string>>(&$names);
 
-$window = $numbers->slice(1, 2);
-echo count_of<Slice<int32>>(&$window);
+$window = $numbers->sub(1, 2);
+echo count_of<slice<int32>>(&$window);
 
 // a template nobody instantiates is silent, not an error - reporting it would blame a declaration
 // for going unused

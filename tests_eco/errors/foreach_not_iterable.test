@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 ---- Issue ----
 Issue at 10:1
-'Bag' cannot be iterated - it declares neither 'Iterator' nor 'Iterable'. Declare one, e.g. 'struct Bag : Iterable<...>'.
+'Bag' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'. Declare one, e.g. 'struct Bag : contract::iterable<...>'.
 Begin: 'foreach'
 End: 'foreach'
 Code excerpt:

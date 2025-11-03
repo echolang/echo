@@ -1,8 +1,8 @@
 // an array of *class handles*. the element type is a reference, so the array owns three words per
-// element and the objects own themselves - nothing in Array<T> knows the difference
+// element and the objects own themselves - nothing in array<T> knows the difference
 class Counter { int32 $n; }
 
-Array<Counter> $counters = [];
+array<Counter> $counters = [];
 
 $counters[] = Counter(1);
 $counters[] = Counter(2);
@@ -15,8 +15,8 @@ $counters[0] = Counter(10);
 echo $counters[0]->n;
 
 // an array as a struct property, so its destructor is reached through the owner's
-struct Registry { Array<Counter> $items; }
+struct Registry { array<Counter> $items; }
 
-$r = Registry(Array<Counter>());
+$r = Registry(array<Counter>());
 $r->items[] = Counter(5);
 echo $r->items[0]->n;

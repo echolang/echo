@@ -1,0 +1,16 @@
+expect: fail
+
+# the IR section is the one that states the rule, and it deliberately stops at the colon: array.eco is
+# edited often, and a check that fails whenever a line moves says nothing about where the location came
+# from. what matters is that the constant names the file the assert was *written* in - never the one being
+# emitted, which is this test's own file
+#
+# the OUT section carries the line as well, because the harness wants one and an exact match is what it
+# offers. if a change to array.eco moves the assert, update the number here; the IR check is the claim
+
+--- OUT --->
+1
+assertion failed: array index out of range
+  at array.eco:311
+--- IR --->
+CHECK: at array.eco:

@@ -489,10 +489,10 @@ void AST::TypeRegistry::derive_instantiation(
     }
 
     // the conformances, at the same moment and through the same substitution as the properties, because
-    // they go stale together: `struct Bag<E> : Iterable<E>` conforms to `Iterable<int32>` once E is
-    // bound. done here rather than redirected through template_or_self at read time, which is what lets
-    // AST::conforms_to stay a pure membership test - it has no TypeRegistry to re-intern
-    // `Iterable<int32>` with, and neither has TypeParamDecl::allows(), its caller
+    // they go stale together: `struct Bag<E> : contract::iterable<E>` conforms to `contract::iterable<int32>`
+    // once E is bound. done here rather than redirected through template_or_self at read time, which is what
+    // lets AST::conforms_to stay a pure membership test - it has no TypeRegistry to re-intern
+    // `contract::iterable<int32>` with, and neither has TypeParamDecl::allows(), its caller
     inst->_conformances.clear();
     for (const auto &conformance : tmpl->_conformances) {
         inst->_conformances.push_back(substitute_type(conformance, subst, *this));

@@ -61,9 +61,9 @@ namespace Parser
     // user type. Returns the parsed parameters, or an empty vector if the cursor is not
     // positioned at a `<`. Consumes through the closing `>`
     // the constraint half of that grammar, `: atom (| atom)*`, on its own - so an interface's
-    // associated type (`type Iter : Iterator<V>`) is constrained by the same rule a type parameter is,
-    // rather than by a second scanner that could drift from it. no-op and true when the cursor is not
-    // on a ':'; false when it reported and gave up
+    // associated type (`type Iter : contract::iterator<V>`) is constrained by the same rule a type parameter
+    // is, rather than by a second scanner that could drift from it. no-op and true when the cursor is not on
+    // a ':'; false when it reported and gave up
     bool parse_constraint_atoms(Payload &payload, ParsedTypeParam &param);
 
     std::vector<ParsedTypeParam> parse_type_param_list(Payload &payload);

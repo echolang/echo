@@ -1,7 +1,7 @@
 // a slice does not own its storage, so it has nothing to grow - and it says so by simply not
 // declaring the one-operand `operator []`. no rule anywhere names which types may append
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 
-$s = $a->slice();
+$s = $a->sub();
 $s[] = 2;

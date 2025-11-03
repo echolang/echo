@@ -16,19 +16,19 @@ float64 $neg_d = 0.0 - 3.0;
 float $neg_f = 0.0f - 3.0f;
 
 // the generic, instantiated at int32
-int32 $abs_i = math::abs($neg_i);
+int32 $abs_i = std::math::abs($neg_i);
 
 // the concrete intrinsics
-float64 $abs_d = math::abs($neg_d);
-float $abs_f = math::abs($neg_f);
+float64 $abs_d = std::math::abs($neg_d);
+float $abs_f = std::math::abs($neg_f);
 
 // min is the same question with six candidates instead of three, none of them generic. the int64
 // operands go through locals because an integer literal carries no width suffix
 int64 $three = 3;
 int64 $nine = 9;
-int32 $min_i = math::min(3, 9);
-int64 $min_l = math::min($three, $nine);
-float64 $min_d = math::min(3.0, 9.0);
+int32 $min_i = std::math::min(3, 9);
+int64 $min_l = std::math::min($three, $nine);
+float64 $min_d = std::math::min(3.0, 9.0);
 
 echo $abs_i;
 echo $abs_d;

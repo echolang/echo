@@ -389,8 +389,8 @@ void Parser::publish_declaration_markers(
 
     // no validation here on purpose, unlike `#[implicit]`. The attribute is meaningless rather than wrong
     // on a declaration with no body of ours - an extern, an intrinsic, a builtin - and the stdlib stacks it
-    // on every intrinsic in math/intrinsics.eco already. AST::function_emission_kind answers those before it
-    // ever looks at this flag, so the combination costs nothing and refusing it would break that file
+    // on every intrinsic in std/math/intrinsics.eco already. AST::function_emission_kind answers those before
+    // it ever looks at this flag, so the combination costs nothing and refusing it would break that file
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
 }
 
@@ -466,7 +466,7 @@ void Parser::publish_implicit_conversion(
 
     // the whole conversion rule compares the declared return type with the parameter type, exactly.
     // on a generic owner the walk reaches the *template*, whose return type still mentions the
-    // owner's `T`, and that never equals a concrete `Slice<int32>` - so the declaration would be
+    // owner's `T`, and that never equals a concrete `slice<int32>` - so the declaration would be
     // accepted and then silently never fire. the walk reaches the template because an instantiation
     // holds no `_methods` of its own and reaches the template's through the template_or_self redirect -
     // the same reason AST::find_member_functions redirects an instantiation through `template_ref` - so

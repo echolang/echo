@@ -33,7 +33,7 @@
  * by-value class argument is one more reference, so the printer would be perturbing exactly what you
  * called it to look at; a by-value struct argument is a copy, so a struct declaring a copy
  * constructor would run it and you would be reading the copy. As a borrow it reads in place and
- * changes nothing - `ref_count($x)` reads the same on both sides of a `dprint($x)`.
+ * changes nothing - `mem::ref_count($x)` reads the same on both sides of a `dprint($x)`.
  *
  * **It walks the static type, not the object graph.** A type that reaches itself is cut with
  * `<cycle>` the second time it appears on the way down, so a three-element linked list prints one

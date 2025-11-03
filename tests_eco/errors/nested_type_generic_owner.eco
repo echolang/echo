@@ -1,6 +1,6 @@
 // refused rather than shipped wrong: one nested layout shared by every instantiation is the right
 // answer only while it cannot mention the owner's T, and nothing enforces that
-struct Box<T> { struct Iterator { usize $i; } T $v; }
+struct Box<T> { struct cursor { usize $i; } T $v; }
 
 $b = Box(1);
 echo $b->v;

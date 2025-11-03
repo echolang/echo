@@ -30,11 +30,11 @@ function linked() : void
 
     // two owners each, and one of the two is the other object - so neither count can ever reach zero.
     // in the weak version $a reads 1 here, which is the entire difference
-    echo ref_count($a);
-    echo ref_count($b);
+    echo mem::ref_count($a);
+    echo mem::ref_count($b);
 
     // the strong references hold one weak reference between them, and nothing else is watching
-    echo weak_count($a);
+    echo mem::weak_count($a);
 }
 
 linked();

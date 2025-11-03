@@ -39,6 +39,23 @@ namespace Compiler::LLVM
         void init_target();
 
         void optimize();
+
+        // drops everything the entry point cannot reach, by internalizing the module and running
+        // GlobalDCE over what is left. The root set is ECO_ENTRY_SYMBOL_NAME and nothing else, so it
+        // is not a parameter: there is exactly one legal answer and it is the same one run_code looks up.
+        //
+        // **`run` only, and sound only there.** It merges every unit into one module because the JIT
+        // can only be handed one, and the sole thing ever looked up by name in that module is the
+        // entry symbol - which makes it the complete root set. A `build` must not do this: its
+        // per-module objects are the cache contract, and a library's object may not depend on which
+        // application consumes it.
+        //
+        // without it a `return 0;` program still machine-codes the whole of core/string.eco,
+        // core/mem.eco and core/panic.eco - 54 definitions to reach two. Nothing else prunes them:
+        // codegen gives every function ExternalLinkage and only weakens `t_odr_shared` to
+        // linkonce_odr, so GlobalDCE alone - which is all `-O` has - cannot touch them
+        void prune_to_entry();
+
         void print_ir(bool to_file);
         void run_code();
 

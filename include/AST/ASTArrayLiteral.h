@@ -25,7 +25,7 @@ namespace AST
 
     // **the sole answer to "what type does a declaration take from its array literal".**
     //
-    // `Array<int32> $a = [1, 2, 3];` never asks: the declaration said what holds them, and
+    // `array<int32> $a = [1, 2, 3];` never asks: the declaration said what holds them, and
     // AST::OperatorRewriter fills that. This is the other half - `$a = [1, 2, 3];`, where the elements
     // are all there is, which is what book/concept/arrays.md promises they are enough for.
     //
@@ -51,7 +51,7 @@ namespace AST
 
         Result result = Result::t_pending;
 
-        // the applied `Array<E>`, with no opinion about `const` - the declaration's own, which the
+        // the applied `array<E>`, with no opinion about `const` - the declaration's own, which the
         // caller puts back on top exactly as AST::infer_declaration_type does
         ValueType type;
 

@@ -1,5 +1,5 @@
-// `Keyed<usize>` on the cursor is what makes `=>` spellable
-$a = Array<int32>();
+// `contract::keyed<usize>` on the cursor is what makes `=>` spellable
+$a = array<int32>();
 $a[] = 10;
 $a[] = 20;
 $a[] = 30;

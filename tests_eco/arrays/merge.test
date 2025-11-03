@@ -1,0 +1,16 @@
+# `capacity()` is 5 and not 8: the merge reserves `$a->count() + $b->count()` before it pushes, so the
+# result is one allocation rather than the doubling run a bare loop of appends would leave behind. that
+# is the whole reason merge is a function rather than something a caller writes twice
+
+--- OUT --->
+5
+1
+2
+3
+4
+5
+3
+2
+5
+3
+3

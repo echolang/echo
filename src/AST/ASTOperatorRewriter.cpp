@@ -248,7 +248,7 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
     }
 
     // the container is the first operand and the indices follow, which is the order the declaration
-    // writes them in: `operator (Array<T>& $a)[usize $i]`. the receiver is *not* addressed here - the
+    // writes them in: `operator (array<T>& $a)[usize $i]`. the receiver is *not* addressed here - the
     // parameter is a borrow, and AST::CallResolver inserts the address-of a borrow parameter wants,
     // exactly as it does for every other call
     std::vector<ExprNode *> operands;
@@ -288,7 +288,7 @@ OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node 
         return {};
     }
 
-    // a declaration's initializer: `Array<int32> $a = [1, 2, 3];`
+    // a declaration's initializer: `array<int32> $a = [1, 2, 3];`
     if (statement->get_node_type() == NodeType::n_vardecl) {
         auto *decl = static_cast<VarDeclNode *>(statement);
 
@@ -331,7 +331,7 @@ bool OperatorRewriter::settle_destination_type(
 
     // **the declaration said nothing about what holds these, so the elements are asked.**
     // AST::array_literal_type_for owns that question and answers three ways, so `[f(), g()]` is asked
-    // again next round rather than refused on the first - `$a = [1, 2, 3]` is an `Array<int32>`
+    // again next round rather than refused on the first - `$a = [1, 2, 3]` is an `array<int32>`
     // because its elements say so, which is what book/concept/arrays.md specifies
     if (destination.declares && is_undetermined_type(destination_type)) {
         const ArrayLiteralLookup look =
@@ -445,7 +445,7 @@ bool OperatorRewriter::build_literal_expansion(
 
     // **the constructor of the destination type, named rather than looked up.** an instantiation
     // carries its template's name and its own type arguments, which is exactly what a call site
-    // writes as `Array<int32>()` - so this builds the call a user would have written and lets
+    // writes as `array<int32>()` - so this builds the call a user would have written and lets
     // AST::CallResolver choose the overload, with no rule of its own about what a collection is
     const ComplexType *tmpl = ct->template_or_self();
 

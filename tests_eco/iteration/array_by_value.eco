@@ -1,5 +1,5 @@
 // the default binding. `$x` is the element's value - writing it leaves the array alone
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 1;
 $a[] = 2;
 $a[] = 3;

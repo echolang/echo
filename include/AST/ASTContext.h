@@ -168,7 +168,7 @@ namespace AST
         // the interface whose associated types are in scope, null outside one.
         //
         // **a pointer to the owner rather than a type-parameter frame**, because the list *grows* as
-        // the body is read: `type Iter : Iterator<V>` has to be resolvable by the requirement written
+        // the body is read: `type Iter : contract::iterator<V>` has to be resolvable by the requirement written
         // under it, and push_type_param_scope copies the vector, so a frame is a snapshot that cannot
         // learn about a declaration made after it was pushed
         const ComplexType *associated_owner = nullptr;

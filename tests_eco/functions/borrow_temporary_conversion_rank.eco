@@ -5,7 +5,7 @@
 // both overloads are present on purpose. with one candidate, matching rule 2 wins without consulting
 // types at all, so a rank in entirely the wrong place would still pass
 
-class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+class local_buf { usize $capacity; usize $used; ptr<uint8> $bytes; }
 
 #[core: "string"]
 struct string
@@ -14,7 +14,7 @@ struct string
     struct view { ptr<const uint8> $bytes; usize $size; }
 
     string::view $window;
-    StringBuf $owner;
+    local_buf $owner;
 
     #[implicit]
     function view() : string::view { return $this->window; }

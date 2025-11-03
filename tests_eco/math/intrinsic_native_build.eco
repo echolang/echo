@@ -5,13 +5,13 @@
 // lowered or emitted every one of these. an intrinsic that only ever ran under `run` could be
 // broken in a shipped binary and nothing here would say so
 
-float64 $sqrt = math::sqrt(16.0);
-float64 $pow = math::pow(2.0, 10.0);
-float64 $log2 = math::log2(1024.0);
-float64 $floor = math::floor(2.7);
-float64 $fma = math::fma(2.0, 3.0, 4.0);
-float64 $clamp = math::clamp(9.0, 0.0, 5.0);
-int32 $min = math::min(3, 9);
+float64 $sqrt = std::math::sqrt(16.0);
+float64 $pow = std::math::pow(2.0, 10.0);
+float64 $log2 = std::math::log2(1024.0);
+float64 $floor = std::math::floor(2.7);
+float64 $fma = std::math::fma(2.0, 3.0, 4.0);
+float64 $clamp = std::math::clamp(9.0, 0.0, 5.0);
+int32 $min = std::math::min(3, 9);
 
 echo $sqrt;
 echo $pow;

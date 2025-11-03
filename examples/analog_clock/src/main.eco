@@ -1,0 +1,33 @@
+/*
+ * The program.
+ *
+ * An Echo program is the top-level statements of the entry module's files, in filename order - there is
+ * no `main` to declare. Every other file here holds only declarations, so this one is the program and
+ * the order does not matter.
+ *
+ * Ctrl-C is the way out, and it cannot be trapped - so nothing about the terminal is switched on that
+ * would have to be switched back off. No alternate screen buffer, no hidden cursor: the screen is
+ * cleared once, and every frame after that only homes the cursor and overwrites what is there.
+ */
+
+// a dial eleven rows in radius, in cells twice as tall as they are wide
+clock::Dial $dial = clock::Dial(11.0, 2.0);
+
+// two rows taller than the dial: a blank one, then the readout
+clock::Canvas $canvas = clock::Canvas($dial->columns(), $dial->rows() + 2);
+
+echo "\x1b[2J";
+
+while (true) {
+    clock::Time $now = clock::now();
+
+    $canvas->fill(clock::glyph_empty());
+    clock::draw_dial($canvas, $dial);
+    clock::draw_hands($canvas, $dial, $now);
+    clock::draw_readout($canvas, $dial, $now);
+
+    echo $canvas->to_frame();
+
+    // five redraws a second: the second hand lands on its tick promptly without the process spinning
+    clock::sleep_ms(200);
+}

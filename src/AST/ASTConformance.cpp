@@ -41,7 +41,7 @@ const std::vector<AST::FunctionDeclNode *> &AST::interface_requirements(const AS
         return none;
     }
 
-    // an interface is never instantiated as a *layout*, but `Iterable<int32>` is still an interned
+    // an interface is never instantiated as a *layout*, but `contract::iterable<int32>` is still an interned
     // ComplexType with no methods of its own - the requirements are declared on the template. so this
     // is the one place conformance work does take the template_or_self redirect every member lookup
     // takes, and for exactly that reason
@@ -58,8 +58,8 @@ const std::vector<AST::TypeParamDecl *> &AST::interface_associated_types(const A
         return none;
     }
 
-    // the same redirect interface_requirements takes, and for the same reason: `Iterable<int32>` is an
-    // interned ComplexType that declares nothing of its own
+    // the same redirect interface_requirements takes, and for the same reason: `contract::iterable<int32>` is
+    // an interned ComplexType that declares nothing of its own
     return interface->template_or_self()->associated_types();
 }
 
@@ -174,7 +174,7 @@ std::optional<size_t> AST::interface_method_slot(
 namespace
 {
     // the interface's own type parameters bound to the arguments the conformance spelled out.
-    // `Iterable<int32>` binds `T` to `int32`, so `next() : ptr<T>` is asked for as `ptr<int32>`
+    // `contract::iterable<int32>` binds `T` to `int32`, so `next() : ptr<T>` is asked for as `ptr<int32>`
     //
     // empty for a non-generic interface, which is what leaves its requirements compared as written.
     // this is only *half* of what a conformance binds - AST::conformance_bindings adds the associated
@@ -437,7 +437,7 @@ AST::ConformanceBinding AST::conformance_bindings(
                 }
 
                 // the associated type's own constraint, **substituted through this conformance**:
-                // `type Iter : Iterator<V>` means nothing until `V` is bound, which is exactly why
+                // `type Iter : contract::iterator<V>` means nothing until `V` is bound, which is exactly why
                 // AST::constraint_admits exists apart from TypeParamDecl::allows
                 std::vector<AST::ValueType> constraint;
                 constraint.reserve(assoc->constraint.size());

@@ -1,0 +1,7 @@
+# 27 is 4+8+15 over the array, 23 is 8+15 over a two-element window of it. both satisfy one constraint,
+# named through the contract rather than through either concrete type
+
+--- OUT --->
+27
+23
+7

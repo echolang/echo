@@ -3,7 +3,7 @@
 // nothing here is array-specific - `operator []` is an ordinary function and this is an ordinary call
 struct Point { int32 $x; int32 $y; }
 
-$a = Array<int32>();
+$a = array<int32>();
 $a[] = 10;
 $a[] = 20;
 $a[] = 30;
@@ -28,7 +28,7 @@ $e = 300;
 echo $a[2];
 
 // `->` reaches through to a field
-$pts = Array<Point>();
+$pts = array<Point>();
 $pts[] = Point(3, 4);
 $pts[0]->x = 7;
 echo $pts[0]->x + $pts[0]->y;

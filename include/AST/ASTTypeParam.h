@@ -23,7 +23,7 @@ namespace AST
         t_type,
         t_function,
 
-        // an interface's associated type - `type Iter : Iterator<V>`. its owner is a ComplexType like
+        // an interface's associated type - `type Iter : contract::iterator<V>`. its owner is a ComplexType like
         // t_type's, so this one is read off TypeParamDecl::is_associated rather than off which owner
         // pointer is set
         t_associated,
@@ -33,7 +33,7 @@ namespace AST
     //
     // extracted from TypeParamDecl::allows, which is now its one-line caller, so that an *associated*
     // type can be checked against its constraint substituted through the conformance: `type Iter :
-    // Iterator<V>` means nothing until `V` is bound, and `allows` reads `this->constraint` verbatim
+    // contract::iterator<V>` means nothing until `V` is bound, and `allows` reads `this->constraint` verbatim
     //
     // still the sole owner of "is this type argument allowed" - two callers, one rule
     bool constraint_admits(const std::vector<ValueType> &constraint, const ValueType &type);

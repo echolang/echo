@@ -1,0 +1,94 @@
+/*
+ * Where the time comes from, and where the program waits.
+ *
+ * The stdlib has neither, so both are libc through `extern`. That is the intended shape: a binding is
+ * a declaration, not a wrapper the compiler has to know about.
+ */
+
+namespace clock;
+
+// C's `struct tm`, as far as we read it. The nine leading fields are `int` on every platform we
+// build for, so the offsets line up; libc's own `tm_gmtoff` and `tm_zone` follow the ones declared
+// here and are simply not spelled out.
+//
+// **This is only ever read.** `localtime` hands back a pointer into libc's own static storage, so
+// nothing of ours writes through it and the fields left undeclared cannot be overrun. A binding that
+// asked libc to *fill* a `tm` of ours would have to declare all of them.
+struct tm
+{
+    int32 $sec;
+    int32 $min;
+    int32 $hour;
+    int32 $mday;
+    int32 $mon;
+    int32 $year;
+    int32 $wday;
+    int32 $yday;
+    int32 $isdst;
+}
+
+extern {
+    function time as c_time(ptr<int64> $out) : int64;
+    function localtime as c_localtime(ptr<int64> $t) : ptr<tm>;
+    function usleep as c_usleep(uint32 $usec) : int32;
+}
+
+// the time of day, and nothing else - the rest of the program never sees a `tm`
+struct Time
+{
+    int32 $hour;
+    int32 $minute;
+    int32 $second;
+}
+
+function now() : Time
+{
+    int64 $epoch = 0;
+    c_time(&$epoch);
+
+    // `->` reaches through the pointer directly; a plain read of `$raw` would deref it and copy the
+    // whole struct out of libc's storage
+    ptr<tm> $raw = c_localtime(&$epoch);
+
+    return Time($raw->hour, $raw->min, $raw->sec);
+}
+
+function sleep_ms(uint32 $ms) : void
+{
+    c_usleep($ms * 1000);
+}
+
+// there is no `PI` in the stdlib and no way to write a global, so the constant is a function. it
+// costs nothing: the body is one `ret` of a constant
+function pi() : float64
+{
+    return 3.14159265358979323846;
+}
+
+// -- where each hand points, in fractions of a full turn clockwise from 12 -----------------------
+//
+// each one folds the smaller unit in, which is what makes the hands creep rather than jump: the hour
+// hand is already a third of the way to the next hour at twenty past.
+
+function hour_turns(Time& $t) : float64
+{
+    float64 $hours = $t->hour % 12;
+    float64 $minutes = $t->minute;
+
+    return $hours / 12.0 + $minutes / 720.0;
+}
+
+function minute_turns(Time& $t) : float64
+{
+    float64 $minutes = $t->minute;
+    float64 $seconds = $t->second;
+
+    return $minutes / 60.0 + $seconds / 3600.0;
+}
+
+function second_turns(Time& $t) : float64
+{
+    float64 $seconds = $t->second;
+
+    return $seconds / 60.0;
+}

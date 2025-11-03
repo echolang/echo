@@ -1,0 +1,7 @@
+// a generic named bare in a constraint resolves to the *template*, which no value's type ever equals -
+// so the constraint would reject every argument while looking perfectly correct. the refusal has to
+// reach a qualified spelling too, and it names the type the way it was written
+function each<T: contract::iterable>(T& $source) : void
+{
+    return;
+}

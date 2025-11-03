@@ -1,4 +1,4 @@
-namespace math;
+namespace std::math;
 
 /**
  * Returns the absolute value of a number.
@@ -26,7 +26,7 @@ function abs<T>(T $value) : T
  */
 function clamp(float $value, float $min, float $max) : float
 {
-    return math::min(math::max($value, $min), $max);
+    return min(max($value, $min), $max);
 }
 
 /**
@@ -40,5 +40,5 @@ function clamp(float $value, float $min, float $max) : float
  */
 function clamp(float64 $value, float64 $min, float64 $max) : float64
 {
-    return math::min(math::max($value, $min), $max);
+    return min(max($value, $min), $max);
 }

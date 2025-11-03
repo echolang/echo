@@ -1,4 +1,4 @@
-class StringBuf { usize $capacity; usize $used; ptr<uint8> $bytes; }
+class local_buf { usize $capacity; usize $used; ptr<uint8> $bytes; }
 
 #[core: "string"]
 struct string
@@ -7,7 +7,7 @@ struct string
     struct view { ptr<const uint8> $bytes; usize $size; }
 
     string::view $window;
-    StringBuf $owner;
+    local_buf $owner;
 
     // marked, not named: the compiler finds the conversion by the attribute, never by the spelling
     #[implicit]

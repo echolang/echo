@@ -253,7 +253,7 @@ namespace AST
     // a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what turns
     // a place argument into an address. it also has to be the rule here rather than "a written `&` over a
     // class", which was tried: six generic accessors in stdlib/core take `&` of a `T` place and need the
-    // slot address, so keying on the operand made `Array<int32>` compile and `Array<Counter>` not - a
+    // slot address, so keying on the operand made `array<int32>` compile and `array<Counter>` not - a
     // generic body whose meaning depends on its instantiation, which is the one thing a generic must not be
     //
     // this node is also how every *compiler-inserted* borrow is spelled - a method receiver
@@ -588,7 +588,7 @@ namespace AST
     // strong count, so it must be visible at the site that pays for it, and **it can fail** - the object
     // may already be gone - so its result is a `T?` the program has to acknowledge before using
     //
-    // a keyword form rather than a `#[builtin:]` in stdlib/core/rc.eco, unlike `ref_count` beside it,
+    // a keyword form rather than a `#[builtin:]` in stdlib/core/mem.eco, unlike `ref_count` beside it,
     // because `weak` has to be a keyword anyway to be a type constructor, and a language whose two halves
     // of one idea live in different places - one in the grammar, one in a library that `--no-stdlib`
     // removes - would be answering "where is weak from" twice
@@ -881,7 +881,7 @@ namespace AST
         }
 
         // **what is actually being indexed** - the base's type with every *transparent* level taken
-        // off it, because a borrow is not part of the answer: `$a[0]` over an `Array<int32>& $a`
+        // off it, because a borrow is not part of the answer: `$a[0]` over an `array<int32>& $a`
         // parameter indexes the array, not the pointer that reaches it
         //
         // non-nullable pointer levels are peeled and a nullable one is not, which is exactly the line
@@ -911,7 +911,7 @@ namespace AST
     // collection they go into is decided by the storage they are written to, the same expected-type
     // rule that types every scalar literal.
     //
-    // **not `Array<T>`-specific.** AST::OperatorRewriter expands one into a zero-argument constructor
+    // **not `array<T>`-specific.** AST::OperatorRewriter expands one into a zero-argument constructor
     // of the destination type plus one `$dest[] = element` per element, so any type with both works -
     // which is what a `Map<K, V>` literal will reuse rather than re-derive.
     //

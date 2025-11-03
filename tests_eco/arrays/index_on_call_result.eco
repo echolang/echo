@@ -8,9 +8,9 @@
 // the buffer the address points into. the destructor below runs after the read, and the output order is
 // the assertion
 
-function make() : Array<int32>
+function make() : array<int32>
 {
-    Array<int32> $a = [10, 20, 30];
+    array<int32> $a = [10, 20, 30];
     return $a;
 }
 

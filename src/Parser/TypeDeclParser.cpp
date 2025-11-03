@@ -40,7 +40,7 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
     return decl;
 }
 
-// `type Iter : Iterator<V>;` in an interface body - an associated type: one the *implementor* chooses
+// `type Iter : contract::iterator<V>;` in an interface body - an associated type: one the *implementor* chooses
 // and the interface only constrains.
 //
 // four refusals, each declining to publish, so ComplexType::associated_types() only ever holds entries
@@ -177,7 +177,7 @@ static void parse_associated_type(
     finish();
 }
 
-// reads `: Drawable, Iterable<E>` and publishes what it resolves onto the type, modelled on
+// reads `: Drawable, contract::iterable<E>` and publishes what it resolves onto the type, modelled on
 // publish_implicit_conversion: each refusal declines to *publish*, so ComplexType::conformances() only
 // ever holds valid, deduplicated interface types and no reader has to re-filter
 //
@@ -880,7 +880,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // type grammar. the type-name pass walks these tokens through its own loop and never gets here
     //
     // the tokens are read before the type parameters are declared below, so they are re-read after the
-    // TypeParamScope is open - `: Iterable<E>` mentions this type's own E
+    // TypeParamScope is open - `: contract::iterable<E>` mentions this type's own E
     const std::optional<TokenReference> conformance_token =
         cursor.is_type(Token::Type::t_colon) ? std::optional(cursor.current()) : std::nullopt;
     const auto conformance_snapshot = cursor.snapshot();
@@ -1043,8 +1043,8 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // is written once and both later passes read it, so appending twice would double the list
     const bool collect_members = !struct_node->members_collected();
 
-    // the conformance clause, now that this type's own parameters resolve - `struct Bag<E> : Iterable<E>`
-    // names E
+    // the conformance clause, now that this type's own parameters resolve - `struct Bag<E> :
+    // contract::iterable<E>` names E
     if (conformance_token.has_value() && collect_members) {
         parse_conformance_clause(payload, *struct_node, conformance_snapshot, conformance_token.value());
     }
@@ -1159,7 +1159,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             parse_typedecl(payload);
         }
-        // `type Iter : Iterator<V>;` - an interface's associated type.
+        // `type Iter : contract::iterator<V>;` - an interface's associated type.
         //
         // recognised contextually rather than through a `t_type` keyword token, which would break every
         // `struct type`, `function type()` and plain identifier spelled that way for no gain. the
@@ -1261,12 +1261,13 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             payload.collect_unexpected_token(Token::Type::t_unknown);
 
             // when we encounter an unexpected token, we skip until we find a semicolon or a brace
-            // in the hopes that there is    simply a typo in the code or something minor that we can recover from
-            // we might have to skip till the end of the scope otherwise..
+            // in the hopes that there is    simply a typo in the code or something minor that we can recover
+            // from we might have to skip till the end of the scope otherwise..
             cursor.skip(); // always skip the token causing the issue
             cursor.skip_until({ Token::Type::t_semicolon, Token::Type::t_open_brace, Token::Type::t_close_brace });
 
-            // if we find a semicolon or a close brace, we skip it in the hopes that afterwards we can continue parsing
+            // if we find a semicolon or a close brace, we skip it in the hopes that afterwards we can
+            // continue parsing
             if (cursor.is_type({ Token::Type::t_semicolon, Token::Type::t_close_brace })) {
                 cursor.skip();
             }

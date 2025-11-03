@@ -145,7 +145,7 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
 // leaving the standard library out is leaving one module out, nothing more - nothing downstream
 // looks a module up by that name, codegen only ever asks for ECO_MAIN_MODULE_NAME, and the core
 // types are bound by whichever source declares `#[core: ...]` rather than by the stdlib. what the
-// program gives up is `die`, `assert` and the `mem::`/`math::` namespaces, which is the point: a
+// program gives up is `die`, `assert` and the `mem::`/`std::math::` namespaces, which is the point: a
 // test reading the emitted IR or an AST dump does not want several hundred lines of library
 // standing between its first assertion and the code it is about
 #if ECO_USE_EMBEDDED_STDLIB
@@ -255,7 +255,7 @@ static int parse_manifest_modules(
 
 // builds the bundle both `run` and `build` compile: the stdlib module, then the main module with
 // the user's sources. one function rather than two copies, because the copies had already drifted
-// - `build` never created a stdlib module at all, so any program calling `mem::` or `math::`
+// - `build` never created a stdlib module at all, so any program calling `mem::` or `std::math::`
 // compiled under `run` and failed under `build`
 static int build_bundle(
     argparse::ArgumentParser &cli,
@@ -799,6 +799,21 @@ int main_run(argparse::ArgumentParser &cli)
         compiler.printIR(false);
     }
 
+    // **after `-p`, deliberately.** The prune is not codegen, and `-p` is how codegen is read: half the
+    // corpus's IR contracts are about what codegen *emitted* and where - a definition's placement, an
+    // alloca hoisted to the entry block, a `foreach` that copies nothing - and every one of them is
+    // about a body `main` may well never call. A `-p` that showed the pruned module would answer a
+    // different question than the one it is asked, and would hide any function under debug that the
+    // entry point does not happen to reach.
+    //
+    // so the JIT is handed a smaller module than `-p` printed. that is the only place in the compiler
+    // where a dump and the thing it describes diverge, and it is why this runs in its own named phase
+    // rather than inside run_code: `-t` is what makes the difference visible
+    {
+        Compiler::ScopedPhase phase("prune");
+        compiler.prune_to_entry();
+    }
+
     {
         Compiler::ScopedPhase phase("jit");
         compiler.run_code();
@@ -1002,7 +1017,8 @@ int main(int argc, char *argv[])
         auto &stdlib_use = command.get().add_mutually_exclusive_group();
 
         stdlib_use.add_argument("--no-stdlib")
-            .help("Compile without the standard library. 'die', 'assert' and 'mem::' are then undeclared.")
+            .help("Compile without the standard library. 'array', 'string', 'die', 'assert' and the "
+                  "'contract::', 'mem::', 'str::', 'arr::' and 'std::' namespaces are then undeclared.")
             .default_value(false)
             .implicit_value(true);
 
