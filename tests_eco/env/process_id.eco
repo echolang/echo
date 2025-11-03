@@ -1,0 +1,4 @@
+// `pid` is a plain `extern` call and nothing more. There is no value to assert, so the case pins the one
+// thing that is always true of it and would not be if the binding were wrong.
+
+echo std::env::pid() > 0;

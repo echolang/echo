@@ -1,0 +1,15 @@
+// the counter is the compiler's, not the library's. so a program with no standard library behind it - no
+// `mem::`, no `array<T>`, no `string` - still has its allocations counted, because the only thing
+// allocating here is the class runtime, which is emitted rather than linked
+//
+// `mem::live_allocations()` is unspellable without the stdlib, which is exactly why --explain-memory
+// exists as well as the builtin: the report needs nothing declared
+class Node
+{
+    int32 $value;
+}
+
+{
+    Node $n = Node(7);
+    echo $n->value;
+}

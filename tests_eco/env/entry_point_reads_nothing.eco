@@ -1,0 +1,15 @@
+// **the "pay nothing" claim, made testable.** A program that never mentions `std::env` still gets the
+// widened entry point - the capture is unconditional - and the assertion is that the prologue is the *end*
+// of it: three stores, and not one load anywhere in `main`.
+//
+// scoped to `main` rather than to the whole module, and that is not a weaker claim than it looks. The
+// stdlib's own cursor methods do load the globals, and they are ordinary definitions in the stdlib unit
+// exactly as `str::buf`'s methods are - so they are present in an unpruned dump whether this program calls
+// them or not. What `-p` prints is deliberately the *unpruned* module, so their absence is not something
+// this file could assert; the JIT's prune drops them, and `--explain-prune` is where that is visible.
+//
+// the `#[inline]` wrappers - `args`, `vars`, `pid`, `exe` - are a different case and genuinely absent:
+// AST::function_emission_kind answers `t_odr_shared` for them, so an unreferenced one is defined in no
+// unit at all.
+
+echo 1;

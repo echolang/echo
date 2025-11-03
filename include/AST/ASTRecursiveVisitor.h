@@ -42,6 +42,7 @@ namespace AST
         void visitType(TypeNode &node) override;
         void visitTypeCast(TypeCastNode &node) override;
         void visitVarDecl(VarDeclNode &node) override;
+        void visit_const_decl(ConstDeclNode &node) override;
         void visitVarRef(VarRefNode &node) override;
         void visitLiteralFloatExpr(LiteralFloatExprNode &node) override;
         void visitLiteralIntExpr(LiteralIntExprNode &node) override;
@@ -52,6 +53,7 @@ namespace AST
         void visit_deref_expr(DerefExprNode &node) override;
         void visit_pointer_value(PointerValueNode &node) override;
         void visit_move_expr(MoveExprNode &node) override;
+        void visit_const_ref(ConstRefExprNode &node) override;
         void visit_class_alloc_expr(ClassAllocExprNode &node) override;
         void visit_retain_expr(RetainExprNode &node) override;
         void visit_strong_expr(StrongExprNode &node) override;

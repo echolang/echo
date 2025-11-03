@@ -1,0 +1,26 @@
+// `std::env::var` and friends, over a key the `.test` header sets - so the assertions are about this
+// module rather than about whatever the machine running the suite happened to inherit.
+//
+// the three shapes absence takes here, and they are deliberately different: `has` tells a variable set to
+// the empty string from one that is not set at all, the one-argument `var` puts absence in the type, and
+// the two-argument one collapses it to a fallback.
+
+echo std::env::has('ECO_CORPUS_KEY');
+echo std::env::has('ECO_CORPUS_EMPTY');
+echo std::env::has('ECO_CORPUS_SURELY_UNSET');
+
+// set, so the guard binds and the non-null type is what the body reads
+guard string::view $found = std::env::var('ECO_CORPUS_KEY') else { die('ECO_CORPUS_KEY was unset'); }
+echo $found;
+
+// unset, so `??` takes the right side
+echo std::env::var('ECO_CORPUS_SURELY_UNSET', 'fell_back');
+
+// set, so it does not
+echo std::env::var('ECO_CORPUS_KEY', 'fell_back');
+
+// set but empty - `has` said true above, and this is the case a fallback cannot see
+echo std::env::var('ECO_CORPUS_EMPTY', 'fell_back')->is_empty();
+
+// nothing here allocates: every answer is a view into the environment block
+echo mem::live_allocations();

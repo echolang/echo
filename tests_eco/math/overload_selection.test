@@ -6,7 +6,7 @@
 3
 3.000000
 --- IR --->
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # no float intrinsic touches the integer abs. scoped here rather than at the end of the section: a
 # CHECK-NOT covers the region between its neighbouring CHECKs, so to say anything about how $abs_i

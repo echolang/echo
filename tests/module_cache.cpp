@@ -296,20 +296,31 @@ TEST_CASE("a library's object does not depend on which application consumes it",
         "#[inline]\n"
         "function hot(int32 $n) : int32 { return $n + 1; }\n"
         "\n"
-        "function plain(int32 $n) : int32 { return $n * 2; }\n");
+        "function plain(int32 $n) : int32 { return $n * 2; }\n"
+        "\n"
+        "const usize PAGE = 4096;\n");
 
     // two applications that use the library differently: one instantiates the generic over int32 and calls
     // the inline function, the other instantiates over a type *it* declares and calls only the plain one
+    //
+    // both also read the library's compile-time constant, which is the shape that would break this in a way
+    // the generic does not: a constant is expanded into a *clone* of its value, and cloning it into the
+    // declaring module's arena rather than the consuming one would put a node the application emits into the
+    // library's collection - so the library's object would grow a copy per consumer
     write_file(project.root() / "app_a" / "app.eco",
         "shared::Holder<int32> $h = shared::Holder<int32>(7);\n"
         "echo $h->get();\n"
-        "echo shared::hot(1);\n");
+        "echo shared::hot(1);\n"
+        "usize $page = shared::PAGE;\n"
+        "echo $page;\n");
 
     write_file(project.root() / "app_b" / "app.eco",
         "struct Local { int32 $x; }\n"
         "shared::Holder<Local> $h = shared::Holder<Local>(Local(3));\n"
         "echo $h->get()->x;\n"
-        "echo shared::plain(4);\n");
+        "echo shared::plain(4);\n"
+        "usize $half = shared::PAGE / 2;\n"
+        "echo $half;\n");
 
     const fs::path manifest = project.root() / "lib" / "module.eco";
     const fs::path cache_a = project.root() / "cache_a";

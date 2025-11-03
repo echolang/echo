@@ -165,6 +165,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_expr_peel, StorageClass::t_addressless },
         { NodeType::n_expr_move, StorageClass::t_addressless },
         { NodeType::n_expr_temp_bind, StorageClass::t_addressless },
+        { NodeType::n_expr_const_ref, StorageClass::t_addressless },
 
         // and everything else is a value the program computed and did not name. the last five are the
         // ones the allow-list had lost: `f($a ?? $b)` against a `T&` parameter could not resolve, with
@@ -201,6 +202,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
     // out rather than derived, so that the sweep below is a genuine partition of NodeType
     const std::vector<NodeType> not_expressions = {
         NodeType::n_void, NodeType::n_scope, NodeType::n_operator, NodeType::n_vardecl,
+        NodeType::n_const_decl,
         NodeType::n_var, NodeType::n_assign, NodeType::n_type, NodeType::n_release,
         NodeType::n_func_decl, NodeType::n_func_return, NodeType::n_if_statement, NodeType::n_guard,
         NodeType::n_while_statement, NodeType::n_for_statement, NodeType::n_loop_control,

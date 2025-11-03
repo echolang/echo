@@ -18,13 +18,13 @@
 # the llvm struct name is deliberately not spelled: the stdlib compilation unit declares `%string`
 # first, so the main unit's copy of the same Echo type is uniquified to `%string.N`. what matters is
 # the shape, and the shape is the tail of the line
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 CHECK: { ptr @str, i64 5 }, ptr null }
 
 # and getting all of that costs nothing. no allocation for the bytes, and no reference count moved -
-# the owner is null and both operations are null-guarded. scoped to main on purpose: `mem::` declares
-# @malloc at module level and `->clone()` calls it, neither of which this program reaches
-CHECK-NOT: call ptr @malloc
+# the owner is null and both operations are null-guarded. scoped to main on purpose: the allocation seam
+# is defined at module level and `->clone()` calls it, neither of which this program reaches
+CHECK-NOT: call ptr @__eco_alloc
 CHECK-NOT: strong.inc
 
 CHECK: ret i32 0

@@ -1,0 +1,5 @@
+// substitution has no fixed point to stop at, so a cycle is refused rather than unfolded
+const A = B;
+const B = A;
+
+echo A;

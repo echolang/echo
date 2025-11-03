@@ -1,0 +1,22 @@
+stdlib: off
+
+--- OUT --->
+1
+--- IR --->
+# `linkonce_odr` rather than one external definition in the entry module, and that is forced rather than
+# chosen: a manifest module's object must not depend on its consumers, and a `declare` here that only
+# main's unit defines is exactly that dependency
+CHECK: @__eco_argc = linkonce_odr global i64 0
+CHECK: @__eco_argv = linkonce_odr global ptr null
+CHECK: @__eco_envp = linkonce_odr global ptr null
+
+# `int main(int argc, char **argv, char **envp)` - the three-argument form, always, whether or not the
+# program reads any of them. POSIX on both platforms we target and a documented CRT extension on Windows
+CHECK: define i32 @main(i32 %argc, ptr %argv, ptr %envp)
+
+# the whole unconditional cost of the seam: three stores of registers the platform already handed us.
+# argc is widened here rather than at every read, because `usize` is what Echo counts with
+CHECK: %argc.widened = sext i32 %argc to i64
+CHECK: store i64 %argc.widened, ptr @__eco_argc
+CHECK: store ptr %argv, ptr @__eco_argv
+CHECK: store ptr %envp, ptr @__eco_envp

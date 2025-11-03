@@ -13,7 +13,7 @@
 // tag - `zeroinitializer` over `{ i1 __has, T }` - and the free shape is a null handle. before the binding
 // the null had no type at all and every one of these was a `ptr null`, which for the two wrapped
 // parameters is not even the right *width*, let alone the right value
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 CHECK: call i32 @_tag_ofZZMQLPi(%eco.optional.MLPi zeroinitializer)
 CHECK: call i32 @_x_ofZZMQLC5Point(%eco.optional.MLC5Point zeroinitializer)
 CHECK: call i32 @_node_tagZZMQLC4Node(ptr null)

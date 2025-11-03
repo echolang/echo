@@ -13,7 +13,7 @@ stdlib: off
 # nobody wrote, that it chose the right overload in spite of being able to, and that the marked
 # method and the explicitly written one are the same declaration
 
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # span($buf) - the conversion, inserted from an argument list. its receiver is a borrow, which is
 # what the `MRB` in the mangle says, so the caller's storage is read in place

@@ -45,6 +45,17 @@ namespace Compiler::LLVM
         // on the day both were written. `detail` may be empty, and then the headline stands alone
         void gen_abort(const std::string &headline, const std::string &detail, const std::string &location);
 
+        // stop with a chosen exit code, printing nothing. what `std::env::exit` lowers to
+        //
+        // here rather than in ProcessCodegen because *how a program stops* is this subsystem's question,
+        // and `exit` is the symbol it already owns - a second declaration of it elsewhere would be two
+        // spellings of one name with only one of them carrying NoReturn
+        //
+        // no flush, unlike the abort thunk: libc's `exit` flushes every open stream on its way out, and
+        // the only reason `__eco_abort` does it by hand is that its message goes out through `write(2)`
+        // and would otherwise overtake the buffered `echo`s ahead of it
+        void gen_exit(llvm::Value *code);
+
         // stop when `condition` is true, and leave the builder on the path where it was not. this is
         // the shape the null check has always had; `assert` is the same shape with the condition
         // negated

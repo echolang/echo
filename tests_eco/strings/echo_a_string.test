@@ -15,7 +15,7 @@ utf-8: héllo 😀
 # not NUL-terminated in general - a substring shares its owner's buffer and simply stops early, and a
 # `%s` would run off the end of one
 
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # stdout is buffered and the write is not, so the flush is what keeps a string in order with the
 # printf that every other `echo` still emits

@@ -21,7 +21,7 @@ CHECK: call showv(tempbind<string::view>(vardecl<type<string>>($__temp3) = liter
 # is for the borrow of the conversion's result
 CHECK: tempbind<void>(vardecl<type<string::view>>($__temp4) = call view(addrof<string&>(varref<string>(var($owned))))
 --- IR --->
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # the literal is still a constant with a null owner, so the release the ownership pass wrapped it in is a
 # null-guarded no-op and no reference count moves. that is the property that would silently regress if the

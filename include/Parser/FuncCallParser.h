@@ -10,7 +10,19 @@
 
 namespace Parser
 {
-    AST::FunctionCallExprNode *parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace = nullptr);
+    // a call written by name: `foo(...)`, `a::b::foo(...)`, `foo<int32>(...)`. The cursor sits on the name;
+    // a namespace prefix has already been consumed by the caller and arrives as `requested_namespace`.
+    //
+    // `out_is_call` makes the explicit type argument list **speculative**, which is what an operand position
+    // needs: a compile-time constant is a bare identifier, so `LIMIT < $n` reaches here on a `<` that opens
+    // no type argument list. When it is given and no `(` follows the list, the cursor is restored to the
+    // name, nothing is reported, and the caller reads the tokens as whatever else they are. Without it the
+    // `<` is committed to and a missing `>` is an error - which is right at a statement head, where nothing
+    // else could have been meant
+    AST::FunctionCallExprNode *parse_funccall(
+        Parser::Payload &payload,
+        const AST::Namespace *requested_namespace = nullptr,
+        bool *out_is_call = nullptr);
 
     // the call a user operator lowers to: an ordinary FunctionCallExprNode over the root namespace's
     // overload set for `op` at `fixity`, with the operands as its arguments. `at` is the operator's

@@ -11,7 +11,7 @@ stdlib: off
 # the cost model, which is the whole reason `string::view` is a public type: handing a `string` to a
 # view parameter touches no reference count, while handing it by value takes exactly one retain
 
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # the literal, as ever, a constant
 CHECK: store %string { %view { ptr @str, i64 4 }, ptr null }

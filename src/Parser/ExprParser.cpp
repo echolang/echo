@@ -1,5 +1,6 @@
 #include "Parser/ExprParser.h"
 
+#include "AST/ConstRefExprNode.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTNullability.h"
@@ -1531,6 +1532,37 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return Parser::parse_postfix_chain(payload, AST::make_ref(cast));
     }
 
+    // `self::MAX` - a constant of the type this expression is written inside.
+    //
+    // a soft keyword, the precedent being `constructor` and `type` in a struct body: `self` is an ordinary
+    // identifier to the lexer, and it is recognised here by value. It has to be claimed *before* the
+    // namespace walk below, because NamespaceManager::retrieve creates what it does not find - a namespace
+    // literally called `self` would be minted and then never resolve to anything.
+    //
+    // which type it means is not decided here: AST::FunctionBodyScope deliberately carries no self type, so
+    // a method body has no way back to its owner at parse time. The expander answers it from the enclosing
+    // declaration instead
+    if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "self"
+        && cursor.peek_is_type(1, Token::Type::t_namespace_sep)) {
+        const auto self_token = cursor.current();
+        cursor.skip(2); // `self` and the `::`
+
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(self_token),
+                "'self::' names a constant of the type it is written inside - write `self::NAME`.");
+            cursor.try_skip_to_next_statement();
+            return AST::make_void_ref();
+        }
+
+        auto &const_ref = payload.context.emplace_node<AST::ConstRefExprNode>(
+            cursor.current(), payload.context.current_namespace, /*is_qualified=*/true);
+        const_ref.is_self_qualified = true;
+        cursor.skip();
+
+        return Parser::parse_postfix_chain(payload, AST::make_ref(const_ref));
+    }
+
     // there might be a namespace used
     // like
     //   std::math::sin(1.0)
@@ -1544,22 +1576,48 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     }
 
     // potential function call - `name(...)` or, with explicit type arguments, `name<...>(...)`
-    // a bare identifier is never a comparison operand (values are $-prefixed), so an identifier
-    // followed by '<' here is a generic call, not a less-than
+    //
+    // `name<` is only a call if a `(` follows the type argument list. It used to be unconditional, on the
+    // grounds that a bare identifier could not be a comparison operand - values carry a `$` - and a
+    // compile-time constant is exactly that, so `LIMIT < $n` would have been read as a call to `LIMIT<$n>`.
+    // parse_funccall speculates for us and hands the tokens back untouched when it declines
     if (
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren }) ||
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
     ) {
-        auto fcall = parse_funccall(payload, ast_namespace);
+        bool is_call = false;
+        auto fcall = parse_funccall(payload, ast_namespace, &is_call);
 
-        if (fcall == nullptr) {
+        if (fcall != nullptr) {
+            // **and then the suffixes**, which every other operand producer in this function already does.
+            // without it a `->` after a free call was `Unexpected token '->'` - not a decision about
+            // reading a member off a call result, just the one arm that forgot to continue the chain
+            return Parser::parse_postfix_chain(payload, AST::make_ref(*fcall));
+        }
+
+        // committed to a call and it did not parse - the diagnostic is already collected
+        if (is_call) {
             return AST::make_void_ref();
         }
 
-        // **and then the suffixes**, which every other operand producer in this function already does.
-        // without it a `->` after a free call was `Unexpected token '->'` - not a decision about
-        // reading a member off a call result, just the one arm that forgot to continue the chain
-        return Parser::parse_postfix_chain(payload, AST::make_ref(*fcall));
+        // not a call after all - fall through and read the identifier as an operand in its own right
+    }
+
+    // a bare identifier that is not a call names a **compile-time constant**: `MAX`, `std::math::PI`,
+    // `buffer::MAX`. It is the one operand shape whose meaning cannot be settled here - a constant's name is
+    // published by the declaration pass, which runs over every file, and a use site written above the
+    // declaration or in another module is the ordinary case rather than the exception. So the node records
+    // the name and where to look for it, and AST::ConstantExpander replaces it with a clone of the
+    // constant's value - or reports an unknown constant, at this token
+    if (cursor.is_type(Token::Type::t_identifier)) {
+        auto &const_ref = payload.context.emplace_node<AST::ConstRefExprNode>(
+            cursor.current(),
+            ast_namespace != nullptr ? ast_namespace : payload.context.current_namespace,
+            /*is_qualified=*/ast_namespace != nullptr);
+
+        cursor.skip();
+
+        return Parser::parse_postfix_chain(payload, AST::make_ref(const_ref));
     }
 
     // `&` reached here means it was not followed by a variable name, so there is no storage to

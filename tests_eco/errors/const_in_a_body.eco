@@ -1,0 +1,9 @@
+// a constant has no storage, so there is nothing for it to be local to - its value is copied to each use site,
+// and a block is not a place a copy could come from. `const $name = ...;` is the block-local form
+function f() : void
+{
+    const INNER = 1;
+    echo INNER;
+}
+
+f();

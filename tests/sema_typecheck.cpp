@@ -172,7 +172,7 @@ TEST_CASE("numeric binary operators are not flagged", "[sema]")
 TEST_CASE("assigning an address into a pointee is rejected", "[sema][pointer]")
 {
     // `$p = &$b` is not a rebind: a plain assignment writes through, so this stores an address
-    // into the int32 that $p points at (book/concept/pointers_and_refs_v2.md, L87)
+    // into the int32 that $p points at (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
     EchoTests::assert_code_emits_issue(
         "$a = 1;\n$b = 2;\nptr<int> $p = &$a;\n$p = &$b;\n",
         "Invalid type conversion: cannot assign 'int32&' to 'int32' - to change where a pointer points, assign to ':$'");
@@ -442,4 +442,40 @@ TEST_CASE("per-branch operator gaps are left to the codegen safety net", "[sema]
         "echo true % false;\n");
 
     REQUIRE_FALSE(has_issue_containing(*bundle, "operator '%'"));
+}
+
+TEST_CASE("live_allocations is refused when nothing is counting", "[sema][memory]")
+{
+    // the only builtin whose *availability* is a question, and the only reason AST::TypeChecker reads the
+    // compiler options at all. without --track-allocations there is no counter, and a load of one would
+    // answer 0 - which is the single wrong answer a caller cannot distinguish from the right one, since
+    // the whole reason to write this call is to assert that a program came back to zero
+    //
+    // **the e2e corpus cannot test this.** tests/eco_test_file.cpp passes --track-allocations to every
+    // case deliberately, so there is no `.test` shaped  like its absence - which is what this is for
+    const std::string program =
+        "#[builtin: \"live_allocations\"]\n"
+        "function live_allocations() : usize;\n"
+        "echo live_allocations();\n";
+
+    Compiler::CompilerOptions untracked;
+    untracked.track_allocations = false;
+
+    auto refused = EchoTests::tests_make_parsed_bundle(program, untracked);
+
+    REQUIRE(has_issue_containing(*refused,
+        "'live_allocations' has nothing to read without allocation tracking"));
+    REQUIRE(refused->collector.has_critical_issues());
+
+    // and with the flag it is an ordinary call. the negative control matters here more than usual: a
+    // refusal keyed on the wrong thing would reject every program rather than only the untracked ones
+    Compiler::CompilerOptions tracked;
+    tracked.track_allocations = true;
+
+    auto accepted = EchoTests::tests_make_parsed_bundle(program, tracked);
+
+    for (const auto &issue : accepted->collector.issues) {
+        INFO("unexpected issue: " << issue->message());
+    }
+    REQUIRE_FALSE(accepted->collector.has_critical_issues());
 }

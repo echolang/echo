@@ -1,0 +1,6 @@
+modules: const/lib_const
+
+--- OUT --->
+4096
+2048
+64

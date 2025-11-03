@@ -144,6 +144,32 @@ namespace Compiler::LLVM
         // type and the slot, and routes
         void gen_dprint_builtin(AST::FunctionCallExprNode &node);
 
+        // `alloc_bytes` / `realloc_bytes` / `free_bytes`: the raw allocator, routed to the one place that
+        // hands out heap memory. concrete, so unlike every other builtin here there is no type argument to
+        // read - the arguments are ordinary values and the only work is evaluating them
+        //
+        // `kind` is passed for gen_type_query_builtin's reason, and it carries more here: it is also what
+        // says how many arguments to expect, so the three cannot disagree about their own arities
+        void gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
+
+        // `live_allocations()`. concrete, argument-less, and the only builtin that reads state the *running
+        // program* maintains rather than a fact the compiler knows - so it is the only one that folds to
+        // nothing and loads instead
+        void gen_live_allocations_builtin(AST::FunctionCallExprNode &node);
+
+        // `process_argc` / `process_argv` / `process_envp`. concrete, argument-less, and reading running
+        // state like the one above - except the state is what the entry point was handed rather than
+        // something the program accumulated, so there is nothing to gate on and nothing to refuse
+        //
+        // `kind` is passed for gen_type_query_builtin's reason: one arm, three globals, and the routing
+        // decision made once
+        void gen_process_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
+
+        // `exit(int32 $code)`. pushes no value and terminates the block, the shape `die` has - the
+        // difference is that the code is a runtime value rather than a compile-time message, so this is
+        // the one stop site whose argument has to be evaluated
+        void gen_exit_builtin(AST::FunctionCallExprNode &node);
+
         // `echo` of a string or a string view: a length-counted write(2) rather than a printf, because
         // the bytes are not NUL-terminated in general. the codegen half of the rule
         // TypeChecker::visitFunctionCallExpr admits

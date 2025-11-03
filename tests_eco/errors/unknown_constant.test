@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 3:6
+Unknown constant 'NOPE'. A variable carries a '$' - did you mean '$NOPE'? A constant is declared at file, namespace or struct scope, as `const NOPE = ...;`
+Begin: 'NOPE'
+End: 'NOPE'
+Code excerpt:
+ [2]> // likelier mistake
+ [3]> echo NOPE;
+           ^
+ [4]> 
+
+Critical issues found, cannot compile.

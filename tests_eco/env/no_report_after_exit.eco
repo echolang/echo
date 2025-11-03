@@ -1,0 +1,12 @@
+// `-em` prints its `[memory]` section from the entry point's epilogue, so a program that leaves through
+// `exit` never reaches it - exactly as a module-scope `die` does not.
+//
+// that is deliberate rather than incidental: `exit` can be called from the middle of a scope that still
+// owns things, so a count taken there would name allocations that were about to be released. This case is
+// the mirror of memory/no_report_after_a_die.eco.
+
+array<int32> $held = [1, 2, 3];
+
+echo $held[0];
+
+std::env::exit(0);

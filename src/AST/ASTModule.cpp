@@ -29,7 +29,8 @@ AST::File &AST::Module::add_file(const std::filesystem::path &path)
     return file;
 }
 
-AST::TokenizedFile AST::Module::tokenize(Lexer &lexer, const AST::File &file)
+AST::TokenizedFile AST::Module::tokenize(
+    Lexer &lexer, const AST::File &file, const AST::Module::TokenFilter &filter)
 {
     // throw an error if the file content is not available
     if (!file.content.has_value()) {
@@ -48,6 +49,18 @@ AST::TokenizedFile AST::Module::tokenize(Lexer &lexer, const AST::File &file)
     // module's first parse pass rather than per file at lex time
     size_t startindex = tokens.size();
     lexer.tokenize(tokens, file.content.value());
+
+    // **between lexing and the slice**, which is the whole of why the filter is a parameter here rather
+    // than something a caller does afterwards: a slice measured first and filtered second would name
+    // tokens that are no longer at those indices
+    if (filter) {
+        std::string error;
+
+        if (!filter(tokens, startindex, error)) {
+            throw TokenFilterException(error);
+        }
+    }
+
     size_t endindex = tokens.size();
 
     _tokenized_files.push_back(TokenizedFile {

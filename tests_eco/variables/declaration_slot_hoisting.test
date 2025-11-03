@@ -5,12 +5,16 @@
 41
 --- IR --->
 // the one thing a declaration's position still decides: a class constructor's `$this` carries the heap
-// allocation in its *initializer*, so the slot may be seated early but the malloc may not move - and the
-// field write has to follow it rather than store through a handle nothing allocated yet
+// allocation in its *initializer*, so the slot may be seated early but the allocation may not move - and
+// the field write has to follow it rather than store through a handle nothing allocated yet
+//
+// `@__eco_alloc` rather than `@malloc` because the corpus compiles with --track-allocations, which routes
+// every allocation in the language through the one counting seam. an untracked build calls `@malloc` here
+// directly, and that difference is exactly why the flag is uniform across the corpus rather than a setting
 CHECK: define ptr @_Counter
 CHECK: %this = alloca ptr
 CHECK-NOT: %value_ptr = getelementptr
-CHECK: call ptr @malloc
+CHECK: call ptr @__eco_alloc
 CHECK: store ptr %obj, ptr %this
 CHECK: %value_ptr = getelementptr
 // every slot in the function sits in `entry`, ahead of the first store - including the loop body's `%p`,

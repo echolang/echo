@@ -1,0 +1,10 @@
+// an interface holds requirements - behaviour an implementor answers. A constant is a value its owner names, so
+// it is refused for the reason a property is
+interface countable
+{
+    const usize N = 1;
+
+    function count() : usize;
+}
+
+echo 1;

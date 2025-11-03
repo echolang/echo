@@ -1,0 +1,52 @@
+// `string` is the one type in the language with two ways of holding its bytes, and only one of them is
+// an allocation: a literal is a window over static bytes with a null owner, and a mutation clones into a
+// `str::buf` that owns a heap block. nothing before this proved the second kind was ever given back -
+// `string` declares no destructor deliberately, so the buffer is released by the owner's reference count
+// and there was no way to watch it happen
+//
+// **a buffered string is two allocations, not one**, and that is worth reading off the count rather than
+// out of the source: `str::buf` is a class, so it is a reference-counted block of its own, and the bytes
+// it owns are a second. both halves of the seam in one value
+
+// a literal costs nothing at all
+{
+    $literal = 'hello';
+    echo $literal;
+    assert(mem::live_allocations() == 0, "a literal is a window, not an allocation");
+}
+
+// writing to one pays for a buffer, once
+{
+    $s = '';
+    $s->append('hello');
+
+    assert(mem::live_allocations() == 2, "the first write allocated a buf and its bytes");
+
+    $s->append(', world');
+    echo $s;
+
+    // appending again grows the same block rather than taking a second one
+    assert(mem::live_allocations() == 2, "and the second write grew it in place");
+}
+
+assert(mem::live_allocations() == 0, "both went back with the buf's last reference");
+
+// copy-on-write: two strings share one buffer until one of them is written to
+{
+    $a = '';
+    $a->append('shared');
+    $b = $a;
+
+    assert(mem::live_allocations() == 2, "one buf, two strings");
+
+    $b->append('!');
+
+    assert(mem::live_allocations() == 4, "the write cloned it, buf and bytes");
+
+    echo $a;
+    echo $b;
+}
+
+assert(mem::live_allocations() == 0, "and both were released");
+
+echo "balanced";

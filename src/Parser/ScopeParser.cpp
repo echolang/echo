@@ -193,6 +193,14 @@ AST::ScopeNode & Parser::parse_scope(
             parse_attribute(payload);
         }
 
+        // a compile-time constant, which the *declaration* pass has already read in full - name, value and
+        // symbol. skipped here rather than parsed again, and silently: that pass is the one owner of every
+        // diagnostic about one, including the refusal of a constant written inside a body, which this arm is
+        // also reached for. asked ahead of starts_vardecl, which answers yes to a leading `const` outright
+        else if (starts_constdecl(payload)) {
+            cursor.try_skip_to_next_statement();
+        }
+
         // var declaration 
         // can be:
         //   int $foo =

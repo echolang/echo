@@ -1,0 +1,3 @@
+// a bare identifier that names no constant. The message offers the other reading, since a missing `$` is the
+// likelier mistake
+echo NOPE;

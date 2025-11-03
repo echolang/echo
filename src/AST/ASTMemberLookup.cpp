@@ -114,17 +114,20 @@ AST::FunctionDeclNode *AST::find_copy_constructor(const AST::ComplexType *ct)
     return ct->is_instantiated() ? ct->template_ref->copy_constructor() : nullptr;
 }
 
+AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode *place)
+{
+    if (place->result_type().is_pointer()) {
+        return place;
+    }
+
+    return &module.nodes.emplace_back<AST::AddrOfExprNode>(place);
+}
+
 AST::FunctionCallExprNode &AST::make_resolved_member_call(
     AST::Module &module, AST::FunctionDeclNode *callee, const TokenReference &at, AST::ExprNode *place)
 {
-    AST::ExprNode *receiver = place;
-
-    if (!place->result_type().is_pointer()) {
-        receiver = &module.nodes.emplace_back<AST::AddrOfExprNode>(place);
-    }
-
     auto &call = module.nodes.emplace_back<AST::FunctionCallExprNode>(
-        at, std::vector<AST::ExprNode *>{ receiver });
+        at, std::vector<AST::ExprNode *>{ receiver_for_member_call(module, place) });
 
     call.decl = callee;
     call.settlement = AST::CallSettlement::t_uncoerced;

@@ -4,7 +4,7 @@
 // iteration until the whole block ended, which is a leak in everything but name
 //
 // the assertion is structural, in the RAST: `array<T>`'s destructor frees the buffer without running its
-// elements' destructors (notes/stdlib.md records that hole), so there is nothing to print - what there is
+// elements' destructors, so there is nothing to print - what there is
 // to check is *where* the drop sits, which is inside the loop body ahead of the next statement
 
 function first(array<int32>& $a) : int32 { return $a[0]; }

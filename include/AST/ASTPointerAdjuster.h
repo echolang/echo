@@ -49,6 +49,8 @@ namespace AST
         // the six positions that read a value *toward a type*. everything else is the base's descent
         // plus as_value(), which is what rewrite_value_edge below hands it
         void visitVarDecl(VarDeclNode &node) override;
+        void visit_const_decl(ConstDeclNode &node) override;
+        void visit_const_ref(ConstRefExprNode &node) override;
         void visit_assign(AssignNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;

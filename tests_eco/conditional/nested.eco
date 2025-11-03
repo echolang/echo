@@ -1,0 +1,26 @@
+// a condition inside a condition, both depths, and the case that matters: a *nested* region inside an arm
+// that was not taken is still read structurally - its `#[end]` has to be consumed, or the frames unbalance
+// and the rest of the file is swallowed.
+
+#[if: os == darwin]
+    echo 1;
+
+    #[if: arch == arm64]
+    echo 2;
+    #[else]
+    echo 91;
+    #[end]
+
+    echo 3;
+#[else]
+    echo 92;
+
+    // never parsed, and its `#[end]` still has to balance
+    #[if: arch == arm64]
+    echo 93;
+    #[end]
+
+    echo 94;
+#[end]
+
+echo 4;

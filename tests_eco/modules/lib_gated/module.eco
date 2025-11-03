@@ -1,0 +1,21 @@
+/*
+ * A manifest that gates its own source list. A `module.eco` is Echo read by the real lexer through the
+ * same filtered path every other file takes, so `#[if:]` around a `#[sources:]` line needs no manifest
+ * grammar of its own - the untaken arms are dropped from the token stream before pass 1 and the attribute
+ * reader never sees them.
+ *
+ * The point of the two cases beside this file is the *facts* those conditions are evaluated against: this
+ * has to be what `--target-os` said, not what the host is. Reading the host here picked one platform's
+ * sources and then compiled them as another, silently.
+ */
+
+#[module: "modgated"]
+#[version: "0.1.0"]
+
+#[if: os == darwin]
+#[sources: "dar/*.eco"]
+#[elif: os == linux]
+#[sources: "lin/*.eco"]
+#[else]
+#[sources: "other/*.eco"]
+#[end]

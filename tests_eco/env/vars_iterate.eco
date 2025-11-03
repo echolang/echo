@@ -1,0 +1,27 @@
+// `foreach` over the whole environment block, which is a null-terminated run of `KEY=VALUE` strings the
+// entry point was handed - so this is the one case that exercises `raw_envp` end to end.
+//
+// the count is not asserted: it is whatever the machine has. What *is* asserted is that the pair this
+// case set is in there, split correctly, and that no key kept its `=` - the split is the only interesting
+// thing this iterator does.
+
+bool $found = false;
+usize $count = 0;
+
+foreach (std::env::vars() as $key => $value) {
+    $count = $count + 1;
+
+    // `index_of` answers the size when there is no match, so this is "no `=` survived in the key"
+    assert($key->index_of('=') == $key->size, 'a key kept its =');
+
+    if ($key->equals('ECO_CORPUS_ITER')) {
+        $found = true;
+        echo $value;
+    }
+}
+
+echo $found;
+echo $count > 0;
+
+// walking the block copies nothing
+echo mem::live_allocations();

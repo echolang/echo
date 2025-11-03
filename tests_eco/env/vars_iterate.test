@@ -1,0 +1,7 @@
+env: ECO_CORPUS_ITER=iterated_value
+
+--- OUT --->
+iterated_value
+1
+1
+0

@@ -1,0 +1,7 @@
+flags: -em
+expect: fail
+
+--- OUT --->
+1
+fatal error: stopping with memory still held
+  at no_report_after_a_die.eco:9

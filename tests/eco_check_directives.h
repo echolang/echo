@@ -42,7 +42,7 @@ namespace EchoTests
     //
     // a positive CHECK advances a cursor, so ordering is part of the assertion and each CHECK can
     // only match at or after the last one. that is what gives free function scoping - a
-    // `CHECK: define i32 @main()` followed by CHECKs that can then only match below it - and it is
+    // `CHECK: define i32 @main(` followed by CHECKs that can then only match below it - and it is
     // why a CHECK-NOT is scoped to the region *between* its neighbours rather than to the whole
     // text. whole-text would be useless here: `mem::` declares `@malloc` and the class runtime
     // calls it, both above `main`, so "this function does not allocate" has to mean "not in this

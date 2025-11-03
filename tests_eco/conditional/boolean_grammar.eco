@@ -1,0 +1,59 @@
+// the whole condition grammar: `||`, `&&`, `!`, parens, precedence, and `!=` on an axis.
+//
+// evaluated by the filter itself over the token slice - there is no Echo expression here to hand to the
+// expression parser, because `darwin` is a name nothing in the language declares and never will be.
+
+// or
+#[if: os == darwin || os == linux]
+echo 1;
+#[end]
+
+// and - both true
+#[if: os == darwin && arch == arm64]
+echo 2;
+#[end]
+
+// and - one false, so nothing
+#[if: os == darwin && arch == x86_64]
+echo 99;
+#[end]
+
+// the negated comparison
+#[if: os != windows]
+echo 3;
+#[end]
+
+// unary not, over a group
+#[if: !(os == windows)]
+echo 4;
+#[end]
+
+// precedence: `&&` binds tighter than `||`, so this is `false || (true && true)`
+#[if: os == windows || os == darwin && arch == arm64]
+echo 5;
+#[end]
+
+// and the parenthesised reading of the same tokens, which differs - `(false || true) && false`
+#[if: (os == windows || os == darwin) && arch == x86_64]
+echo 98;
+#[end]
+
+// a flag, and a flag combined with an axis
+#[if: TRACE]
+echo 6;
+#[end]
+
+#[if: TRACE && os == darwin]
+echo 7;
+#[end]
+
+#[if: !TRACE]
+echo 97;
+#[end]
+
+// an undefined flag is false, never an error - that is what lets a condition ask about one at all
+#[if: NEVER_DEFINED]
+echo 96;
+#[else]
+echo 8;
+#[end]

@@ -7,6 +7,7 @@
 #include <Parser/ModuleParser.h>
 #include <AST/ASTBundle.h>
 #include <AST/ExprNode.h>
+#include <Compiler/CompilerOptions.h>
 
 #include <memory>
 #include <string>
@@ -34,11 +35,31 @@ namespace EchoTests
         Parser::Payload payload;
     };
 
+    // the options every helper builds a bundle under. **allocation tracking is on**, matching the e2e
+    // runner, so a test asking about `mem::live_allocations()` sees the same compiler the corpus does -
+    // and the one diagnostic that depends on a flag is not accidentally asserted from the wrong side
+    inline Compiler::CompilerOptions tests_compiler_options() {
+        Compiler::CompilerOptions options;
+        options.track_allocations = true;
+        return options;
+    }
+
     ParserEnv tests_make_parser_env(std::string content);
     
     AST::Module tests_make_tokenized_module(std::string content);
 
+    // **mirrors run_semantic_passes in src/main.cpp**, and is the only place these tests spell the sequence -
+    // a pass registered in one and not the other makes every test diverge from the real pipeline, and two
+    // copies of the list here made that two chances to forget instead of one
+    void run_test_semantic_passes(AST::Bundle &bundle, Compiler::CompilerOptions options);
+
     std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(std::string content);
+
+    // the same, under options the caller chose. exists for the one diagnostic that depends on a flag:
+    // `mem::live_allocations()` is refused without --track-allocations, and the e2e corpus *cannot* test
+    // that - it passes the flag to every case, by design, so there is no case shaped like its absence
+    std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(
+        std::string content, Compiler::CompilerOptions options);
 
     // parses several files into one module, mirroring a real multi file compile: every file's
     // symbols are collected before any of them is fully parsed

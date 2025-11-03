@@ -1,0 +1,5 @@
+mode: build
+expect: 3
+
+--- OUT --->
+1

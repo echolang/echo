@@ -9,7 +9,7 @@
 --- IR --->
 # scoped to main, because the stdlib's own clamp bodies call minnum/maxnum further down and would
 # otherwise satisfy checks meant for the calls written in this program
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # the same source spelling reaching two different intrinsics is the whole point of declaring each
 # function at both precisions

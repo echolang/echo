@@ -77,6 +77,7 @@ uint64_t Compiler::fnv1a64(const std::string &text, uint64_t seed)
 bool Compiler::compute_module_keys(
     const std::vector<Parser::ModuleManifest> &manifests,
     const CompilerOptions &options,
+    const TargetFacts &facts,
     bool optimize,
     std::map<std::string, ModuleCacheKey> &out_keys,
     std::string &out_error)
@@ -90,12 +91,25 @@ bool Compiler::compute_module_keys(
     // and `-O` because a cached release object must never be folded against a fresh debug one. `-O` bypasses
     // the cache today, so it cannot collide - but that is the caller's behaviour, not this key's, and a key
     // that depends on a caller staying the way it is has the wrong inputs
+    //
+    // allocation tracking is a third one, and it is *not* covered by the build mode: it decides whether a
+    // body's allocations go through the counting seam or straight to the allocator, which is a difference in
+    // every module that allocates. --explain-memory is deliberately absent - it only changes the entry
+    // module, which is never cached, and it already implies this one
     uint64_t environment = k_fnv_offset_basis;
     environment = fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), environment);
     environment = fnv1a64(std::string(LLVM_VERSION_STRING), environment);
     environment = fnv1a64(llvm::sys::getDefaultTargetTriple(), environment);
     environment = fnv1a64(options.assertions_enabled() ? std::string("debug") : std::string("release"), environment);
     environment = fnv1a64(optimize ? std::string("O") : std::string("noO"), environment);
+    environment = fnv1a64(
+        options.tracking_allocations() ? std::string("track") : std::string("notrack"), environment);
+
+    // **what the conditional filter saw**, which decides which declarations a module even has. The triple
+    // above is not enough on its own: `--target-os` and `--define` change the answer without changing the
+    // host, so two builds differing only in a define would otherwise share one object. The signature is
+    // TargetFacts' own, so a fact added there reaches this key without an edit here
+    environment = fnv1a64(facts.cache_signature(), environment);
 
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;

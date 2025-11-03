@@ -105,6 +105,12 @@ void AbortCodegen::gen_abort(
     _ctx.builder->CreateUnreachable();
 }
 
+void AbortCodegen::gen_exit(llvm::Value *code)
+{
+    _ctx.builder->CreateCall(get_exit(), { code });
+    _ctx.builder->CreateUnreachable();
+}
+
 void AbortCodegen::gen_abort_if(llvm::Value *condition,
     const std::string &headline, const std::string &detail, const std::string &location)
 {

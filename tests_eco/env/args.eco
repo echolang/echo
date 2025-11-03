@@ -1,0 +1,24 @@
+// the argument surface, over an `args:` line - all four spellings of it, agreeing.
+//
+// `arg(0)` is the program's own name and is a path that differs per machine and per run mode, so what is
+// asserted about it is a shape rather than a value. Everything after it is the case's own.
+
+echo std::env::argc();
+
+// the program name: under `run` the source file, under `build` the linked binary
+echo std::env::arg(0)->ends_with('.eco');
+
+// indexed
+echo std::env::arg(1);
+echo std::env::arg(2);
+
+// the cursor - and its key contract, which is what makes the index available
+foreach (std::env::args() as $i => $a) {
+    echo $i;
+}
+
+// materialized, and agreeing with the indexed reads
+array<string::view> $all = std::env::argv();
+echo $all->count();
+echo $all[1]->equals(std::env::arg(1));
+echo $all[2]->equals(std::env::arg(2));

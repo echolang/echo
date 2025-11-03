@@ -1,0 +1,25 @@
+// the allocation seam through a real link, and in a release build. three things only this can check:
+// that the `linkonce_odr` thunks and the mutable counter survive being emitted into per-module objects
+// and folded by the system linker, that the count is maintained with no debug build behind it - the flag
+// is deliberately not tied to --debug - and that `main`'s report reaches a native binary's stdout
+//
+// the check is the report rather than an `assert`, and it has to be: `build` is a release build, so an
+// assertion here would be compiled out and would assert nothing at all
+//
+// both halves of the seam are exercised: `Box` is the runtime's own block, `array<int32>` is the
+// stdlib's raw buffer, and one counter sees both
+class Box
+{
+    int32 $value;
+}
+
+{
+    Box $b = Box(7);
+    Box $c = $b;
+
+    array<int32> $numbers = [1, 2];
+    $numbers->push(3);
+
+    echo $c->value;
+    echo $numbers[2];
+}

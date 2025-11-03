@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Compiler/CompilerOptions.h"
+#include "Compiler/TargetFacts.h"
 #include "Parser/ManifestParser.h"
 
 #include <cstdint>
@@ -43,6 +44,7 @@ namespace Compiler
     bool compute_module_keys(
         const std::vector<Parser::ModuleManifest> &manifests,
         const CompilerOptions &options,
+        const TargetFacts &facts,
         bool optimize,
         std::map<std::string, ModuleCacheKey> &out_keys,
         std::string &out_error);

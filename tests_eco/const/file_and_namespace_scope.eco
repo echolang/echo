@@ -1,0 +1,25 @@
+// **a compile-time constant**, which is not a `const` variable: no `$`, no storage, and its value is copied
+// into every place it is used. See const/const_variable.eco for the other form and how they differ.
+const usize MAX = 100;
+
+// untyped, taking whatever the initializer is
+const GREETING = 'hello';
+
+// and one defined in terms of another, which is what says the expansion is recursive rather than one deep
+const HALF = MAX / 2;
+
+usize $n = MAX;
+echo $n;
+echo GREETING;
+echo HALF;
+
+// a namespace is a file-level statement, so a constant written after one belongs to it - and is reached the
+// way every other namespaced name is
+namespace app;
+
+const LIMIT = 7;
+
+echo app::LIMIT;
+
+// unqualified from inside the namespace that declared it: the outward walk types already follow
+echo LIMIT;

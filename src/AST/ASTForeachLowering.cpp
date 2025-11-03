@@ -89,11 +89,15 @@ FunctionCallExprNode &ForeachLowering::iterator_call(
 {
     auto &var = _current_module->nodes.emplace_back<VarNode>(&iterator, iterator.token_varname);
     auto &var_ref = _current_module->nodes.emplace_back<VarRefNode>(&var);
-    auto &receiver = _current_module->nodes.emplace_back<AddrOfExprNode>(&var_ref);
 
+    // through AST::receiver_for_member_call, which owns "addressed only if it is not already an address".
+    // `lower`'s middle arm binds `$__it` as a borrow of a cursor the caller owns, and `ptr<C>` is what a
+    // receiver wants already - wrapping it again yields `C&&`, which unifies against nothing. the third
+    // arm deliberately leaves `$__it` untyped for the re-derivation sweep, and an untyped one answers
+    // `unknown` here and gets the address it needs
     auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
         _current_module->make_virtual_token(name, Token::Type::t_identifier, at),
-        std::vector<ExprNode *>{ &receiver });
+        std::vector<ExprNode *>{ receiver_for_member_call(*_current_module, &var_ref) });
 
     // **left unresolved on purpose, and `lookup_namespace` left null** - that is what makes it a member
     // call: CallResolver::candidates_for reads the receiver's type off argument 0, and `$__it` is not
@@ -252,6 +256,13 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         // a cursor produced by a call - `foreach ($a->iterate() as ...)`. `$__it` owns it, and the
         // ownership pass drops it at the wrapper's end through the ordinary frame machinery
         iterator_decl.init_expr = loop->source;
+
+        // **typed here for the same reason the iterable arm is**, and not left to the re-derivation
+        // sweep: until `$__it` has a type, `advance()` has no receiver type to resolve against, and the
+        // call reaches codegen carrying a declaration nothing emitted a body for. the plan already
+        // carries the cursor's type - for the two iterator kinds it is the source's own
+        iterator_decl.set_type_node(
+            &_current_module->nodes.emplace_back<TypeNode>(plan.iterator_type));
     }
 
     // used exactly once on every path above, so "one subtree per use" holds by construction

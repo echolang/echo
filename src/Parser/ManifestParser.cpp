@@ -6,6 +6,7 @@
 #include "Parser/ModuleParser.h"
 #include "Parser/SymbolParser.h"
 
+#include "AST/ASTAttributes.h"
 #include "AST/ASTBundle.h"
 #include "AST/AttributeNode.h"
 #include "AST/LiteralValueNode.h"
@@ -23,28 +24,10 @@
 namespace
 {
 
-// the attribute names a manifest may use. Anything else is an error rather than an ignored line, which is
-// the one rule the whole format rests on: `#[sources: ...]` misspelled `#[source: ...]` would otherwise
-// produce a module with no files and no complaint
-constexpr std::string_view k_known_attributes[] = { "module", "version", "depends", "sources" };
-
-std::string known_attribute_list()
-{
-    std::string out;
-    for (const std::string_view name : k_known_attributes) {
-        if (!out.empty()) {
-            out += ", ";
-        }
-        out += name;
-    }
-    return out;
-}
-
-bool is_known_attribute(const std::string &name)
-{
-    return std::find(std::begin(k_known_attributes), std::end(k_known_attributes), name)
-        != std::end(k_known_attributes);
-}
+// the attribute names a manifest may use are AST::is_known_manifest_attribute's, spelled there beside the
+// union the shared attribute parser answers with. Anything else is an error rather than an ignored line,
+// which is the one rule the whole format rests on: `#[sources: ...]` misspelled `#[source: ...]` would
+// otherwise produce a module with no files and no complaint
 
 // `<file>:<line>: <what>`, the spelling the .test reader uses. One helper so every message from this file
 // is locatable the same way
@@ -173,6 +156,12 @@ struct ManifestScratch
     Parser::ModuleParser parser;
     size_t next_module = 0;
 
+    // the facts come from the caller and there is no default: this parser is a *second* one, beside the one
+    // the module's sources are parsed with, and the two have to agree about what platform this is. When it
+    // resolved the host's facts for itself, `--target-os linux` read a gated manifest's darwin arm and then
+    // compiled those files as linux
+    explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
+
     // a *fresh module* per manifest even so, because the attributes are read back out of the module's own
     // NodeCollection - reusing one would hand the second manifest every attribute the first declared.
     // The collector is deliberately shared: a manifest declares nothing into it
@@ -243,9 +232,9 @@ bool read_manifest_attributes(
         const std::string name = attribute->attribute_id.value();
         const uint32_t line = attribute->attribute_id.line();
 
-        if (!is_known_attribute(name)) {
+        if (!AST::is_known_manifest_attribute(name)) {
             out_error = locate(out.path, line, fmt::format(
-                "unknown manifest attribute '{}', expected one of: {}", name, known_attribute_list()));
+                "unknown manifest attribute '{}', expected one of: {}", name, AST::known_manifest_attribute_list()));
             return false;
         }
 
@@ -411,6 +400,10 @@ bool read_manifest_with(
     {
         Parser::Payload payload =
             parser.make_parser_payload(tokenized, module, scratch.bundle.collector, Parser::Pass::t_type_names);
+
+        // so parse_attribute leaves the unknown-name diagnostic to read_manifest_attributes below, which
+        // knows the four names a manifest actually accepts
+        payload.is_manifest = true;
         Parser::parse_type_names(payload);
     }
 
@@ -420,6 +413,8 @@ bool read_manifest_with(
     {
         Parser::Payload payload =
             parser.make_parser_payload(tokenized, module, scratch.bundle.collector, Parser::Pass::t_declarations);
+
+        payload.is_manifest = true;
         Parser::parse_symbols(payload);
 
         std::string reported =
@@ -443,21 +438,25 @@ bool read_manifest_with(
 };
 
 bool Parser::read_module_manifest(
-    const std::filesystem::path &path, Parser::ModuleManifest &out, std::string &out_error)
+    const std::filesystem::path &path,
+    const Compiler::TargetFacts &facts,
+    Parser::ModuleManifest &out,
+    std::string &out_error)
 {
-    ManifestScratch scratch;
+    ManifestScratch scratch(facts);
     return read_manifest_with(scratch, path, out, out_error);
 }
 
 bool Parser::resolve_module_graph(
     const std::vector<std::filesystem::path> &roots,
+    const Compiler::TargetFacts &facts,
     std::vector<Parser::ModuleManifest> &out,
     std::string &out_error)
 {
     out.clear();
 
     // one scratch for the whole reachable set - see ManifestScratch
-    ManifestScratch scratch;
+    ManifestScratch scratch(facts);
 
     std::map<std::filesystem::path, ModuleManifest> loaded;
 

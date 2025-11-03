@@ -1,0 +1,6 @@
+// a typo in an axis *value*. Caught, and that is the whole reason a condition names its axis: as a bare
+// string this would have been indistinguishable from a flag nobody defined, so the block would have
+// vanished silently and taken a platform's implementation with it.
+#[if: os == darwn]
+echo 1;
+#[end]

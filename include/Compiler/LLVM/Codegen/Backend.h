@@ -40,24 +40,28 @@ namespace Compiler::LLVM
 
         void optimize();
 
-        // drops everything the entry point cannot reach, by internalizing the module and running
-        // GlobalDCE over what is left. The root set is ECO_ENTRY_SYMBOL_NAME and nothing else, so it
-        // is not a parameter: there is exactly one legal answer and it is the same one run_code looks up.
-        //
-        // **`run` only, and sound only there.** It merges every unit into one module because the JIT
-        // can only be handed one, and the sole thing ever looked up by name in that module is the
-        // entry symbol - which makes it the complete root set. A `build` must not do this: its
-        // per-module objects are the cache contract, and a library's object may not depend on which
-        // application consumes it.
-        //
-        // without it a `return 0;` program still machine-codes the whole of core/string.eco,
-        // core/mem.eco and core/panic.eco - 54 definitions to reach two. Nothing else prunes them:
-        // codegen gives every function ExternalLinkage and only weakens `t_odr_shared` to
-        // linkonce_odr, so GlobalDCE alone - which is all `-O` has - cannot touch them
-        void prune_to_entry();
-
         void print_ir(bool to_file);
-        void run_code();
+
+        // JIT-executes the main module, having first pruned it to what the entry point reaches - see
+        // prune_to_entry. So the module that runs is smaller than the one print_ir printed
+        //
+        // `arguments` is the program's whole `argv`, its own name at index 0 included, and `environment`
+        // is a null-terminated block in `envp` shape. Both are the *program's*, not echoc's: under `run`
+        // there is no process boundary to separate them, so the driver has to say which is which - it
+        // splits its own command line on `--` and forwards the tail. Handing the program echoc's argv
+        // instead would have `env::arg(1)` answer with a compiler flag
+        //
+        // returns what the entry point returned, so `echoc run` exits the way the program did. A
+        // module-scope `die` or `env::exit` never reaches this - both call libc's `exit` from inside the
+        // JIT'd code, which takes echoc down with them, and that is already the right exit status
+        int run_code(const std::vector<std::string> &arguments, const char *const *environment);
+
+        // what the prune dropped and what survived it: the `[prune]` section `--explain-prune` asks for,
+        // empty until run_code has pruned - which is what makes it print nothing on a `build`.
+        //
+        // a string rather than a print, the shape PhaseTimings::report() already uses: which diagnostics
+        // a compile prints is the driver's question, and the driver is the only place that sees the flag
+        const std::string &prune_report() const { return _prune_report; }
 
         // emits the object file and links it into `executable_name`, false on any of its three
         // failure paths. it reports by return value rather than only by printing, because a caller
@@ -81,12 +85,44 @@ namespace Compiler::LLVM
             const std::string &executable_name, const std::vector<std::filesystem::path> &objects);
 
     private:
+        // drops everything the entry point cannot reach, by internalizing the module and running
+        // GlobalDCE over what is left. The root set is ECO_ENTRY_SYMBOL_NAME and nothing else, so it
+        // is not a parameter: there is exactly one legal answer and it is the same one run_code looks up.
+        //
+        // **`run` only, and sound only there** - which is why it is private and run_code is its one
+        // caller. It merges every unit into one module because the JIT can only be handed one, and the
+        // sole thing ever looked up by name in that module is the entry symbol - which makes it the
+        // complete root set. A `build` must not do this: its per-module objects are the cache contract,
+        // and a library's object may not depend on which application consumes it. Reachable only from
+        // the JIT, it cannot be asked for anywhere that would be unsound.
+        //
+        // without it a `return 0;` program still machine-codes the whole of core/string.eco,
+        // core/mem.eco and core/panic.eco - 54 definitions to reach two. Nothing else prunes them:
+        // codegen gives every function ExternalLinkage and only weakens `t_odr_shared` to
+        // linkonce_odr, so GlobalDCE alone - which is all `-O` has - cannot touch them.
+        //
+        // **`-p` prints the module this has not run on, deliberately.** The prune is not codegen, and
+        // `-p` is how codegen is read: half the corpus's IR contracts are about what codegen *emitted*
+        // and where - a definition's placement, an alloca hoisted to the entry block, a `foreach` that
+        // copies nothing - and every one of them is about a body `main` may well never call. A `-p` that
+        // showed the pruned module would answer a different question than the one it is asked, and would
+        // hide any function under debug that the entry point does not happen to reach. Being part of the
+        // JIT is what guarantees that ordering: the dump is a step the driver takes before it runs
+        // anything, so it cannot see this. That is the one place in the compiler where a dump and the
+        // thing it describes diverge, and `--explain-prune` is what makes the difference sayable
+        void prune_to_entry();
+
         CodegenContext &_ctx;
 
         // the host target, resolved once by init_target. object emission needs one too and it
         // must describe the same target as the layout codegen ran against, so it is the same
         // instance rather than a second lookup
         std::unique_ptr<llvm::TargetMachine> _target_machine;
+
+        // built by prune_to_entry, read by prune_report. accumulated unconditionally: it costs one walk
+        // of the function list, and a diagnostic that only computes itself when asked for is a second
+        // code path through the thing it is meant to describe
+        std::string _prune_report;
     };
 };
 

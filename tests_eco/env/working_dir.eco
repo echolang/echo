@@ -1,0 +1,14 @@
+// `working_dir` is the one function in this module that allocates: `getcwd` writes into a buffer the
+// caller sizes, so the bytes are ours and an owning `string` is the only honest return type.
+//
+// the path itself differs per machine, so what is asserted is its shape - and the count, which is **two**
+// rather than one: a `string` owns a `str::buf`, and that is a class, so there is its heap block and the
+// byte buffer inside it. The scratch buffer the growth loop allocated is *not* among them, which is the
+// thing worth pinning - it is freed on both the success and the retry path.
+
+string $cwd = std::env::working_dir();
+
+echo $cwd->size() > 0;
+echo $cwd->starts_with('/');
+
+echo mem::live_allocations();

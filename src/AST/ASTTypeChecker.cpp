@@ -156,9 +156,10 @@ static const ExprNode *strip_implicit_casts(const ExprNode *expr)
     return expr;
 }
 
-TypeChecker::TypeChecker(Bundle &bundle) :
+TypeChecker::TypeChecker(Bundle &bundle, Compiler::CompilerOptions options) :
     _bundle(bundle),
-    _collector(bundle.collector)
+    _collector(bundle.collector),
+    _options(options)
 {
 }
 
@@ -637,6 +638,35 @@ void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
     }
 }
 
+// **the only builtin that can be unavailable**, and the only reason this pass reads the compiler options
+// at all. `mem::live_allocations()` reads a counter the allocation seam maintains, and the seam only
+// maintains one when --track-allocations asked it to - so without the flag the load would answer 0.
+//
+// which is the one wrong answer that cannot be told apart from the right one: a person adds
+// `assert(mem::live_allocations() == 0)` to prove a program is balanced, and gets a passing assertion that
+// proves nothing. A refusal here is not pedantry, it is the difference between a leak check and a
+// decoration
+//
+// here rather than in ExprCodegen, where the builtin is lowered, because codegen's only failure is
+// InternalCompilerException: it names the enclosing function and no line. This pass has the call's own
+// token, so the message can point at the call and name the flag that fixes it
+void TypeChecker::check_allocation_tracking(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()
+        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_live_allocations) {
+        return;
+    }
+
+    if (_options.tracking_allocations()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.token_function_name),
+        "'live_allocations' has nothing to read without allocation tracking - compile with "
+        "'--track-allocations' (or '--explain-memory', which implies it)");
+}
+
 void TypeChecker::check_abort_message(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin()) {
@@ -764,6 +794,10 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // runs. inside the gate it would never fire and the failure would stay a location-less codegen throw
     if (node.decl != nullptr) {
         check_dprint_argument(node);
+
+        // outside the gate too, and for a plainer reason than its neighbour's: the question is whether
+        // the *builtin* may be called at all, which does not depend on a single argument being resolved
+        check_allocation_tracking(node);
     }
 
     // generic templates are resolved to concrete instances by the monomorphizer; only a

@@ -1,0 +1,8 @@
+// **which arm of a gated manifest was read.** The library beside this case gates its `#[sources:]` on the
+// operating system, so what this prints is the name of the source directory the manifest chose - and the
+// override on the command line is what it has to choose by.
+//
+// A separate file rather than a second `.test` beside one program, because the corpus pairs one `.eco` with
+// one `.test`. `gated_manifest_linux.eco` is the same program read as the other platform.
+
+echo modgated::gated_platform();

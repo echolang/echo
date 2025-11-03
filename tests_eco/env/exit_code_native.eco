@@ -1,0 +1,8 @@
+// the same exit code through a linked binary rather than the JIT.
+//
+// worth its own case because the two get there differently: under `run` the JIT'd code calls libc `exit`
+// and takes *echoc itself* down with it, so the status the suite sees is the program's only because
+// nothing intervenes. Here it is an ordinary process exit.
+
+echo 1;
+std::env::exit(3);

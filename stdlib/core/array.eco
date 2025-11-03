@@ -14,10 +14,10 @@
  *
  * **The known hole: an element type that owns something.** The copy constructor below is a
  * `mem::copy`, an element-wise *bitwise* copy, which is correct exactly when `T` owns nothing. An
- * `array<array<int32>>` would need a recursive per-element copy, and there is no way to ask whether
- * a type owns anything - constraints are a set of concrete types, not a capability. So a nested
- * owner compiles and is wrong, rather than being refused. See book/concept/arrays.md,
- * "Not yet specified".
+ * `array<array<int32>>` would need a recursive per-element copy, keyed on whether the element type
+ * owns anything. A constraint can name a capability rather than a set of concrete types since
+ * interfaces landed, so that question is now expressible - but nothing declares such an interface and
+ * this copy does not ask for it. So a nested owner compiles and is wrong, rather than being refused.
  *
  * Counts, capacities and indices are `usize` throughout, matching `mem::`. There is no allocator
  * parameter and deliberately none yet: mem::alloc is allocator-free and Echo has no function

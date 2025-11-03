@@ -1,0 +1,5 @@
+flags: --target-os linux
+modules: modules/lib_gated
+
+--- OUT --->
+linux

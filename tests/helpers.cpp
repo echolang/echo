@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <AST/ASTConstantExpander.h>
 #include <AST/ASTMonomorphizer.h>
 #include <AST/ASTPointerAdjuster.h>
 #include <AST/ASTTypeChecker.h>
@@ -16,7 +17,7 @@ EchoTests::ParserEnv EchoTests::tests_make_parser_env(std::string content)
     auto &file = echomod->add_file("/tmp/testfile.eco");
     file.set_content(content);
 
-    auto module_parser = Parser::ModuleParser();
+    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
 
     // parse the file
     auto tfile = module_parser.make_tokenized_file(*echomod, file);
@@ -42,7 +43,7 @@ AST::Module EchoTests::tests_make_tokenized_module(std::string content)
     auto &file = module.add_file("/tmp/testfile.eco");
     file.set_content(content);
 
-    auto module_parser = Parser::ModuleParser();
+    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
 
     // parse the file
     auto tfile = module_parser.make_tokenized_file(module, file);
@@ -50,7 +51,21 @@ AST::Module EchoTests::tests_make_tokenized_module(std::string content)
     return module;
 }
 
+void EchoTests::run_test_semantic_passes(AST::Bundle &bundle, Compiler::CompilerOptions options)
+{
+    AST::ConstantExpander(bundle).run();
+    AST::Monomorphizer(bundle).run();
+    AST::PointerAdjuster(bundle).run();
+    AST::TypeChecker(bundle, options).run();
+}
+
 std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string content)
+{
+    return tests_make_parsed_bundle(std::move(content), tests_compiler_options());
+}
+
+std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
+    std::string content, Compiler::CompilerOptions options)
 {
     auto bundle = std::make_unique<AST::Bundle>();
     auto module_handle = bundle->modules.add_module("test");
@@ -64,15 +79,10 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string con
         .collector = bundle->collector
     };
 
-    auto module_parser = Parser::ModuleParser();
+    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
     module_parser.parse_input(input);
 
-    // resolve generics into concrete instances, matching the real compile pipeline
-    AST::Monomorphizer(*bundle).run();
-
-    // run semantic analysis, matching the real compile pipeline
-    AST::PointerAdjuster(*bundle).run();
-    AST::TypeChecker(*bundle).run();
+    run_test_semantic_passes(*bundle, options);
 
     return bundle;
 }
@@ -93,12 +103,10 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(const std::vect
         .collector = bundle->collector
     };
 
-    auto module_parser = Parser::ModuleParser();
+    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
     module_parser.parse_input(input);
 
-    AST::Monomorphizer(*bundle).run();
-    AST::PointerAdjuster(*bundle).run();
-    AST::TypeChecker(*bundle).run();
+    run_test_semantic_passes(*bundle, EchoTests::tests_compiler_options());
 
     return bundle;
 }

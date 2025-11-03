@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <fstream>
 #include <optional>
 #include <set>
@@ -114,19 +115,77 @@ namespace
     }
 };
 
-bool status_matches(Expectation expect, int exit_code)
+bool status_matches(const Expectation &expect, int exit_code)
 {
-    return expect == Expectation::t_ok ? exit_code == 0 : exit_code != 0;
+    switch (expect.kind) {
+        case Expectation::Kind::t_ok:
+            return exit_code == 0;
+
+        case Expectation::Kind::t_fail:
+            return exit_code != 0;
+
+        case Expectation::Kind::t_status:
+            return exit_code == expect.status;
+    }
+
+    // no tail: a kind added without an arm is a compile error rather than a case that silently passes
+    assert(false && "unhandled Expectation::Kind - add its comparison");
+    return false;
 }
 
-const char *expectation_name(Expectation expect)
+std::string expectation_name(const Expectation &expect)
 {
-    return expect == Expectation::t_ok ? "succeed" : "fail";
+    switch (expect.kind) {
+        case Expectation::Kind::t_ok:
+            return "succeed";
+
+        case Expectation::Kind::t_fail:
+            return "fail";
+
+        case Expectation::Kind::t_status:
+            return "exit with " + std::to_string(expect.status);
+    }
+
+    assert(false && "unhandled Expectation::Kind - add its name");
+    return "";
+}
+
+std::string EcoTestFile::environment_prefix() const
+{
+    std::string result;
+
+    for (const std::string &pair : environment) {
+        result += pair + " ";
+    }
+
+    return result;
+}
+
+std::string EcoTestFile::argument_suffix() const
+{
+    std::string result;
+
+    for (const std::string &argument : arguments) {
+        result += " " + argument;
+    }
+
+    return result;
 }
 
 std::string EcoTestFile::compiler_flags(const std::filesystem::path &corpus_root) const
 {
     std::string result;
+
+    // **every case in the corpus, unconditionally.** Two things follow from that and both are the
+    // point: `mem::live_allocations()` is readable from any case without a header line, so asserting a
+    // leak is a line of Echo rather than a setting; and the allocation call has *one* spelling across
+    // the whole corpus, so an `--- IR --->` check naming `@__eco_alloc` cannot be silently right for
+    // half the cases and vacuous for the other half
+    //
+    // not a `.test` setting for the same reason `stdlib` is one and this is not: a setting exists where
+    // cases genuinely differ. tests/module_cache.cpp builds its own commands and passes nothing, which
+    // is what still covers the untracked lowering
+    result += "--track-allocations ";
 
     if (!stdlib) {
         result += "--no-stdlib ";
@@ -195,7 +254,59 @@ namespace
     // enumerate the same list - the same reason dump_section_name is the only spelling of a section
     // name. a key added to the dispatch and forgotten here would leave the error telling an author
     // that a valid key is invalid
-    constexpr std::string_view k_setting_keys[] = { "flags", "modules", "stdlib", "expect", "mode" };
+    constexpr std::string_view k_setting_keys[] = {
+        "flags", "modules", "stdlib", "expect", "mode", "env", "args" };
+
+    // whitespace separated into `out_list`. the shape `modules`, `env` and `args` share - three settings
+    // that each mean a list because the header forbids a repeated key
+    void read_list(const std::string &value, std::vector<std::string> &out_list)
+    {
+        std::istringstream stream(value);
+        std::string entry;
+
+        while (stream >> entry) {
+            out_list.push_back(entry);
+        }
+    }
+
+    // `ok`, `fail`, or an exact non-negative status.
+    //
+    // its own reader rather than a read_enumerated call, because the third form is not a spelling from a
+    // list - and an unrecognised value has to blame the whole grammar rather than only the two words
+    bool read_expectation(
+        const std::string &origin,
+        const LineRecord &record,
+        const std::string &value,
+        Expectation &out_value,
+        std::string &out_error)
+    {
+        if (value == "ok") {
+            out_value = Expectation{ Expectation::Kind::t_ok, 0 };
+            return true;
+        }
+
+        if (value == "fail") {
+            out_value = Expectation{ Expectation::Kind::t_fail, 0 };
+            return true;
+        }
+
+        // digits only, so `3x` and `-1` are rejected rather than read as far as they parse. a negative
+        // status is not a thing a process can exit with, and `from_chars` on the whole span is what makes
+        // a trailing character an error instead of a truncation
+        int status = 0;
+        const char *first = value.data();
+        const char *last = first + value.size();
+        const std::from_chars_result parsed = std::from_chars(first, last, status);
+
+        if (parsed.ec == std::errc() && parsed.ptr == last && status >= 0) {
+            out_value = Expectation{ Expectation::Kind::t_status, status };
+            return true;
+        }
+
+        out_error = locate(origin, record.number,
+            "setting 'expect' must be 'ok', 'fail' or an exit status like '3', got: " + value);
+        return false;
+    }
 
     // a setting's value, checked against its enumeration and written straight into the field it
     // settles. one helper because all three enumerated settings report their mistake the same way,
@@ -272,11 +383,28 @@ namespace
         // whitespace separated, because the header forbids a repeated key and a list is what this setting
         // means. A path holding a space is not supported and does not need to be: these are corpus fixtures
         if (key == "modules") {
-            std::istringstream stream(value);
-            std::string entry;
-            while (stream >> entry) {
-                out_file.modules.push_back(entry);
+            read_list(value, out_file.modules);
+            return true;
+        }
+
+        if (key == "env") {
+            read_list(value, out_file.environment);
+
+            // a pair with no `=` would reach the shell as a command rather than an assignment, and the
+            // spawn would fail in a way that names neither this file nor this line
+            for (const std::string &pair : out_file.environment) {
+                if (pair.find('=') == std::string::npos) {
+                    out_error = locate(origin, record.number,
+                        "setting 'env' takes KEY=VALUE pairs, got: " + pair);
+                    return false;
+                }
             }
+
+            return true;
+        }
+
+        if (key == "args") {
+            read_list(value, out_file.arguments);
             return true;
         }
 
@@ -286,9 +414,7 @@ namespace
         }
 
         if (key == "expect") {
-            return read_enumerated<Expectation>(origin, record, key, value,
-                { { "ok", Expectation::t_ok }, { "fail", Expectation::t_fail } },
-                out_file.expect, out_error);
+            return read_expectation(origin, record, value, out_file.expect, out_error);
         }
 
         if (key == "mode") {

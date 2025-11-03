@@ -40,11 +40,12 @@ static AST::CallResolver::Result resolve_funccall(Parser::Payload &payload, AST:
 // an optional explicit type-argument list, `<int32, float64>`, consumed through its closing `>`
 // answers true when there was none to read at all, false when the tokens are not a list after all
 //
-// `speculative` is the only difference between the two call forms, and it is a reporting policy, not
-// a second grammar: a bare identifier is never a comparison operand so `foo <` is unambiguously a
-// list, while a *member* is - `$a->count < 3` reaches this with the cursor on a `<` that is not a
-// list at all, and only the caller's `(` test settles it. a speculative failure therefore reports
-// nothing and leaves the caller to restore its snapshot
+// `speculative` is the only difference between the callers, and it is a reporting policy, not a second
+// grammar: what settles whether a `<` opened a list is the caller's `(` test, and only a caller that can
+// *reinterpret* the tokens needs the failure kept quiet. Two can - `$a->count < 3` and, since compile-time
+// constants made a bare identifier a value operand, `LIMIT < $n`. A speculative failure therefore reports
+// nothing and leaves the caller to restore its snapshot; a committed one is an error, which is right at a
+// statement head where nothing else could have been meant
 static bool parse_explicit_type_args(
     Parser::Payload &payload,
     const TokenReference &at_token,
@@ -158,9 +159,10 @@ bool Parser::starts_call_statement(Parser::Payload &payload)
         return false;
     }
 
-    // `(` is a plain call, `<` an explicitly parameterised one. a bare identifier is never a
-    // comparison operand - values carry a `$` - so `foo <` is unambiguous, the same reasoning
-    // parse_varexpr relies on
+    // `(` is a plain call, `<` an explicitly parameterised one. Unambiguous **here** because this is a
+    // statement head: a bare identifier can be a comparison operand now that a compile-time constant is
+    // one, but `LIMIT < $n;` as a whole statement computes a value nobody reads. In an operand position the
+    // `<` is speculative instead - see parse_funccall's out_is_call
     return cursor.peek_is_type(offset + 1, Token::Type::t_open_paren)
         || cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
 }
@@ -210,8 +212,19 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
     return &payload.context.emplace_node<AST::IndirectCallExprNode>(callee, std::move(arguments), at);
 }
 
-AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, const AST::Namespace *requested_namespace)
+AST::FunctionCallExprNode *Parser::parse_funccall(
+    Parser::Payload &payload, const AST::Namespace *requested_namespace, bool *out_is_call)
 {
+    // the whole call, so declining can put the name back too - the caller has to be able to read it as
+    // something else entirely
+    const auto before_call = payload.cursor.snapshot();
+
+    // asking for this is what makes the `<` speculative, exactly as it is in parse_member_call
+    const bool speculative = out_is_call != nullptr;
+    if (speculative) {
+        *out_is_call = false;
+    }
+
     // a call is `name(` or, with explicit type arguments, `name<...>(`
     if (!payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_paren}) &&
         !payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_open_angle})) {
@@ -226,17 +239,35 @@ AST::FunctionCallExprNode *Parser::parse_funccall(Parser::Payload &payload, cons
     payload.cursor.skip();
 
     // optional explicit type arguments: name<int, float>(...)
+    //
+    // **speculative when the caller can reinterpret**, and that is not a nicety: a bare identifier used to
+    // be impossible as a comparison operand - values carry a `$` - and a compile-time constant is one, so
+    // `LIMIT < $n` arrives here with the cursor on a `<` that opens no type argument list. The only thing
+    // that settles it is whether a `(` follows the close, which is the rule parse_member_call already
+    // lives by for the same reason: `$a->count < 3`
     std::vector<AST::TypeNode *> explicit_type_args;
-    if (!parse_explicit_type_args(payload, funcname_token, explicit_type_args, false)) {
+    const bool type_args_read = parse_explicit_type_args(payload, funcname_token, explicit_type_args, speculative);
+
+    if (!type_args_read || !payload.cursor.is_type(Token::Type::t_open_paren)) {
+        // the tokens go back exactly as they were, including the '>>' split state - which is why this
+        // restores a snapshot rather than counting tokens back
+        if (speculative) {
+            payload.cursor.restore(before_call);
+            return nullptr;
+        }
+
+        // a list that failed to read has already reported itself; a missing `(` after a good one has not
+        if (type_args_read) {
+            payload.collect_unexpected_token(Token::Type::t_open_paren);
+        }
+
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
 
-    // the open parenthesis is required
-    if (!payload.cursor.is_type(Token::Type::t_open_paren)) {
-        payload.collect_unexpected_token(Token::Type::t_open_paren);
-        payload.cursor.try_skip_to_next_statement();
-        return nullptr;
+    // committed: from here on this is a call, and a failure is reported rather than reinterpreted
+    if (speculative) {
+        *out_is_call = true;
     }
 
     // skip the open parenthesis

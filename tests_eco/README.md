@@ -24,8 +24,8 @@ mode: build
 --- OUT --->
 42
 --- IR --->
-CHECK: define i32 @main()
-CHECK-NOT: call ptr @malloc
+CHECK: define i32 @main(
+CHECK-NOT: call ptr @__eco_alloc
 --- RAST --->
 CHECK: Module: [main]
 CHECK: ReleaseNode
@@ -49,9 +49,51 @@ test that quietly asserts less than its author wrote.
 |---|---|---|
 | `flags` | anything | extra `echoc` flags, spliced in as typed |
 | `modules` | space-separated paths | module manifests to build alongside the case, each passed as `-m`. Paths are relative to `tests_eco/` |
-| `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `std::math::` become undeclared names |
-| `expect` | `ok` (default) / `fail` | the exit status the case must produce |
+| `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `std::` become undeclared names |
+| `expect` | `ok` (default) / `fail` / an exit status like `3` | the exit status the case must produce |
 | `mode` | `run` (default) / `build` | JIT the module, or link a native binary and execute it |
+| `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
+| `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
+
+`expect` takes an **exact status** as well as `ok`/`fail`, and that exists because `std::env::exit($code)`
+made the status something a program *chooses*: pinned as `fail`, a case asserting `exit(3)` would pass just
+as well if the compiler crashed. In `mode: build` an exact status is the *program's* — a build that fails
+before producing a binary is reported as a build failure, not matched against it.
+
+`env` and `args` exist for the same reason: without them `std::env` can only be tested against whatever the
+machine running the suite inherited, which differs between a developer and CI and asserts almost nothing.
+Both are shell-level — a `KEY=VALUE` prefix and an argument suffix on the spawned command — so they reach a
+JIT'd program and a linked binary by the same route, and neither can leak into the suite's own environment
+or into a parallel case. Neither a value nor an argument may contain a space; a pair without an `=` is a
+located error rather than a word the shell would try to run.
+
+### Testing another platform
+
+`flags: --target-os linux` compiles the Linux arm of a `#[if: os == ...]` region on whatever machine runs the
+suite — see [book/concept/conditional.md](../book/concept/conditional.md). It is **not** cross-compilation:
+the code is still built for the host, so a foreign arm usually fails at link or at runtime, and that is fine.
+What the case asserts is that the arm parses, resolves and type-checks, which is the only check a
+platform-specific region gets from a machine that is not that platform.
+
+`env/exe_other_platform` is the model: `--target-os linux` plus `expect: fail`, with the resulting `die` as
+the golden. Without a case like it, half of every platform-gated file is verified only by CI on a host the
+author does not have.
+
+`flags: --define NAME` declares a condition flag the same way.
+
+### Program arguments
+
+`args` reaches a JIT'd program through echoc's `--` separator, which is what tells the driver where its own
+command line stops. On the `build` path there is no separator: the binary *is* the program, so its argv is
+the program's already. `arg(0)` differs between the two — the source file under `run`, the linked binary
+under `build` — so a case asserting it should assert a shape rather than a value.
+
+**Every case is compiled with `--track-allocations`**, which is not a setting because no case wants it
+off. Two things follow. `mem::live_allocations()` is readable from any case, so asserting the absence of
+a leak needs no header line — see *Checking for a leak* below. And every allocation in the language is
+spelled `@__eco_alloc` rather than `@malloc`, uniformly, so an `IR` section naming it cannot be
+accidentally vacuous. (An untracked build calls `@malloc` directly; `tests/module_cache.cpp` is what
+covers that lowering, since it builds its own commands.)
 
 `#` comment lines and blank lines are ignored in the header. All settings must sit above the first
 delimiter; a `key: value` line *inside* a section is content.
@@ -101,17 +143,21 @@ content.
 ## Exit status
 
 `expect` asserts the exit status of the processes the case spawns, and nothing else — no string
-sniffing. `ok` means every process exited 0, `fail` means the last one did not.
+sniffing. `ok` means every process exited 0, `fail` means the last one did not, and a number means it was
+exactly that.
 
 Two things worth knowing:
 
 - **`fail` does not distinguish a rejected program from a program that called `die`.** Both exit 1:
   under the JIT, `AbortCodegen`'s `exit(1)` takes `echoc` itself down. The `OUT` golden tells them
   apart unambiguously — one contains `---- Issue ----`, the other a panic message — so `expect` does
-  not need to.
-- In `mode: run`, `Backend::run_code` discards the JIT'd `main`'s return value, so a non-zero `return`
-  from a program is invisible. In `mode: build` it is the real process status. Moot today, since the
-  only non-zero exit a program can produce is an abort.
+  not need to. Write an exact status when the difference matters.
+- **A program's own status reaches the suite in both modes**, by two different routes. `mode: build` is an
+  ordinary process exit. In `mode: run`, `Backend::run_code` returns what `runFunctionAsMain` returned and
+  `main_run` propagates it — but a `die` or a `std::env::exit` never gets that far, because both call libc's
+  `exit` from *inside* the JIT'd code and take `echoc` down with them. That is already the right status, so
+  the two paths agree; see `env/exit_code` and `env/exit_code_native`, which assert the same `3` through
+  each.
 
 ## Checking a dump
 
@@ -138,10 +184,10 @@ on every machine but the one that recorded it and churn on every commit — and 
 without being read asserts nothing.
 
 **`CHECK:` advances a cursor**, so order is part of the assertion and each CHECK can only match at or
-after the previous one. That is what gives free function scoping — a `CHECK: define i32 @main()`
+after the previous one. That is what gives free function scoping — a `CHECK: define i32 @main(`
 followed by CHECKs that can then only match inside it — and it is why `CHECK-NOT:` is scoped to the
 region *between* its neighbours rather than to the whole dump. Whole-dump would be useless here:
-`mem::` declares `@malloc` and the class runtime calls it, both above `main`, so "this function does
+the allocation seam is defined above `main` and the class runtime calls it, so "this function does
 not allocate" has to mean "not in this region".
 
 Each section is a separate `echoc` invocation, so `--print-ir` can never pollute the `OUT` golden, and
@@ -159,6 +205,47 @@ CHECK: Module: [main]
 or a `CHECK: function foo` can quietly match something in `stdlib/std/math/functions.eco`. This is the
 strongest practical reason `stdlib: off` exists;
 [`no_stdlib/program_without_stdlib.test`](no_stdlib/program_without_stdlib.test) is the worked example.
+
+## Checking for a leak
+
+There are two ways, at two genuinely different moments, and there is deliberately no `.test` setting for
+either — a leak check is a line of Echo.
+
+**In the program**, with `mem::live_allocations()`, which reads how many allocations the whole program
+still holds. It counts *allocations*, not bytes: a class, a closure's captured environment, an `array<T>`'s
+buffer and a `mem::alloc` are one each.
+
+```php
+{
+    Node $n = Node(1);
+    assert(mem::live_allocations() > 0);
+}
+assert(mem::live_allocations() == 0);
+```
+
+**Read it after a scope, not at the end of a file.** A declaration at module scope is released *after* the
+last statement, so a check written there still counts its own owners — which is why the block above is a
+block. This is the one thing authors get wrong, and it fails as an assertion firing rather than as a
+silently passing one. Exit status and the `OUT` golden already assert the result, and it works in `run`
+and `build` alike — except that `build` is a release build, where `assert` is elided and asserts nothing.
+
+**Or with `flags: -em`**, which has `main` print a `[memory]` section on its way out. This is the only way
+to see the state *past* the program's own module-scope teardown, so it is the whole-program answer:
+
+```
+flags: -em
+
+--- OUT --->
+7
+[memory]
+  0 live allocations
+```
+
+A `die` at module scope prints no `[memory]` line — the program already stopped, so there is no teardown
+to report on ([`memory/no_report_after_a_die.test`](memory/no_report_after_a_die.test) pins that).
+[`memory/explain_memory.test`](memory/explain_memory.test) is the worked example, and
+[`memory/leak_is_visible.eco`](memory/leak_is_visible.eco) is the contrast case — a counter that only ever
+reads zero would prove nothing, so one case leaks on purpose and reads the leak.
 
 ## `mode: build`
 

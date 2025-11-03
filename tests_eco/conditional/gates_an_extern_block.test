@@ -1,0 +1,4 @@
+flags: --target-os darwin
+
+--- OUT --->
+5

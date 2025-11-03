@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:7
+The type 'foo' is already declared on line 3 column 8. The first declaration is the one that is used
+Begin: 'foo'
+End: 'foo'
+Code excerpt:
+ [4]> 
+ [5]> const foo = 1;
+            ^
+ [6]> 
+
+Critical issues found, cannot compile.

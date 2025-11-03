@@ -163,9 +163,11 @@ static bool skip_type_shape(Parser::Cursor &cursor)
         }
         cursor.skip();
 
-        // a generic application, `Foo<Arg, Arg>`. a bare identifier is never a value operand -
-        // values carry a `$` - so a `<` after a type name is a type argument list and nothing else,
-        // which is why this needs no reinterpretation the way `->name<` does
+        // a generic application, `Foo<Arg, Arg>`. this needs no reinterpretation the way `->name<` does, and
+        // no longer because a bare identifier could not be a value operand - a compile-time constant is one,
+        // so `MAX < $n` reaches here at a statement head. It declines anyway, and for a sturdier reason: the
+        // list below is a list of *type shapes*, and a `$n` is not one, so the scan fails and the statement
+        // is not read as a declaration
         if (cursor.is_type(Token::Type::t_open_angle)) {
             cursor.skip();
 
@@ -188,6 +190,47 @@ static bool skip_type_shape(Parser::Cursor &cursor)
     return true;
 }
 
+bool Parser::constdecl_omits_its_type(Parser::Cursor &cursor)
+{
+    // `NAME =` or `NAME ;`. The second is a constant with no value, claimed here so that parse_constdecl is
+    // the one that gets to say so rather than the type parser failing on a `;`
+    return cursor.is_type(Token::Type::t_identifier)
+        && (cursor.peek_is_type(1, Token::Type::t_assign) || cursor.peek_is_type(1, Token::Type::t_semicolon));
+}
+
+bool Parser::starts_constdecl(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    if (!cursor.is_type(Token::Type::t_const)) {
+        return false;
+    }
+
+    // the scan moves the cursor and puts it back, snapshot-restored for skip_type_shape's '>>' reason
+    const auto snapshot = cursor.snapshot();
+    cursor.skip(); // the `const`
+
+    // **the typed form first.** `const usize MAX` - a whole type followed by a bare identifier.
+    //
+    // the order is the content: on `const MAX = 1` the shape scan happily eats `MAX` as a type name and
+    // then finds `=` rather than an identifier, so it declines and the untyped arm below answers. Reversed,
+    // the untyped arm would never be reached for anything typed
+    const auto after_const = cursor.snapshot();
+    if (skip_type_shape(cursor) && cursor.is_type(Token::Type::t_identifier)) {
+        cursor.restore(snapshot);
+        return true;
+    }
+    cursor.restore(after_const);
+
+    // the untyped form, through the same predicate parse_constdecl reads to decide whether to parse a type -
+    // one answer to "which spelling is this", not two that could drift
+    const bool is_const_decl = constdecl_omits_its_type(cursor);
+
+    cursor.restore(snapshot);
+
+    return is_const_decl;
+}
+
 bool Parser::starts_vardecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -199,8 +242,16 @@ bool Parser::starts_vardecl(Parser::Payload &payload)
     // `weak` is only *almost* true here: `weak($obj)` is an expression too. it is still safe, because a
     // declaration is the reading that needs the whole statement and the expression form is reached from
     // parse_varexpr either way - see the arm in ExprParser
-    if (cursor.is_type(Token::Type::t_const)
-        || cursor.is_type(Token::Type::t_ptr)
+    // `const` is the one of the three that begins something else after all: a **compile-time constant**,
+    // which differs only in carrying no `$` on its name. Deferring to that predicate rather than answering
+    // yes outright is what keeps the two a genuine partition - every dispatch site asks the constant one
+    // first, and a site that did not would otherwise read `const MAX = 100;` as a declaration whose name
+    // token is a `=`
+    if (cursor.is_type(Token::Type::t_const)) {
+        return !starts_constdecl(payload);
+    }
+
+    if (cursor.is_type(Token::Type::t_ptr)
         || cursor.is_type_sequence(0, { Token::Type::t_weak, Token::Type::t_open_angle })) {
         return true;
     }

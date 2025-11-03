@@ -17,6 +17,8 @@
 #include "Compiler/LLVM/Codegen/StmtCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeDeclCodegen.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/MemoryCodegen.h"
+#include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
@@ -67,6 +69,7 @@ public:
     void visitType(AST::TypeNode &node);
     void visitTypeCast(AST::TypeCastNode &node);
     void visitVarDecl(AST::VarDeclNode &node);
+    void visit_const_decl(AST::ConstDeclNode &node);
     void visitVarRef(AST::VarRefNode &node);
     void visitLiteralFloatExpr(AST::LiteralFloatExprNode &node);
     void visitLiteralIntExpr(AST::LiteralIntExprNode &node);
@@ -77,6 +80,7 @@ public:
     void visit_deref_expr(AST::DerefExprNode &node);
     void visit_pointer_value(AST::PointerValueNode &node);
     void visit_move_expr(AST::MoveExprNode &node);
+    void visit_const_ref(AST::ConstRefExprNode &node);
     void visit_class_alloc_expr(AST::ClassAllocExprNode &node);
     void visit_retain_expr(AST::RetainExprNode &node);
     void visit_strong_expr(AST::StrongExprNode &node);
@@ -116,11 +120,18 @@ public:
 
     void optimize();
 
-    // drops everything the entry point cannot reach - `run` only, see Backend::prune_to_entry
-    void prune_to_entry();
-
     void printIR(bool toFile);
-    void run_code();
+
+    // JITs the program, after dropping everything the entry point cannot reach - so the module that runs
+    // is smaller than the one printIR prints. See Backend::prune_to_entry for why that belongs here and
+    // nowhere a `build` could reach it
+    //
+    // `arguments` and `environment` are the *program's*, and returns what it returned - see
+    // Backend::run_code, which owns both of those decisions
+    int run_code(const std::vector<std::string> &arguments, const char *const *environment);
+
+    // what that prune dropped, for `--explain-prune`. Empty on any path that has not run one
+    const std::string &prune_report() const;
 
     // false when no binary was produced, see Backend::make_exec
     bool make_exec(std::string executable_name);
@@ -145,6 +156,8 @@ private:
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
+    Compiler::LLVM::MemoryCodegen _memory;
+    Compiler::LLVM::ProcessCodegen _process;
     Compiler::LLVM::DebugPrintCodegen _debug_print;
     Compiler::LLVM::Backend _backend;
 };

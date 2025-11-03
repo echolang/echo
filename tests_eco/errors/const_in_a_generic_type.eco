@@ -1,0 +1,11 @@
+// a constant is expanded before the monomorphizer runs, so an initializer mentioning the owner's `T` would have
+// nothing to substitute it from - and no later pass that could. Refused whole, exactly as a nested type in a
+// generic owner is
+struct box<T>
+{
+    const usize N = 1;
+
+    T $v;
+}
+
+echo 1;

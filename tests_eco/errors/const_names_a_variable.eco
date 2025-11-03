@@ -1,0 +1,7 @@
+// the one thing a constant's initializer may not do. Everything else is allowed - a call, a constructor - because
+// the initializer is copied rather than evaluated; but `$x` does not exist where the copy lands
+int32 $x = 5;
+
+const BAD = $x + 1;
+
+echo BAD;

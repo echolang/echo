@@ -111,6 +111,17 @@ add_executable(tests ${TEST_SOURCES})
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(tests PRIVATE ${LIBNAME})
 
+# the same LLVM components the compiler links, because the tests link the whole compiler library and any
+# archive member they pull in may reach LLVM. This was latent until Compiler::TargetFacts - it reads the
+# host triple, and ModuleParser's constructor resolves the host's facts, so every test that builds a parser
+# now extracts that member. Deliberately `${LLVM_LIBS}` rather than the one component that happens to be
+# missing today: a test binary linking a subset of what the library needs is a link error waiting for the
+# next member to become reachable
+#
+# note this is target_link_libraries and *not* link_directories - see the loud comment at the top of this
+# file for why the latter must never be added
+target_link_libraries(tests PRIVATE ${LLVM_LIBS})
+
 # the e2e corpus spawns its ~400 echoc subprocesses from a worker pool - the assertions that judge
 # them stay on the main thread, but the spawns do not
 find_package(Threads REQUIRED)

@@ -208,11 +208,6 @@ namespace Compiler::LLVM
             const char *zero_block_name,
             llvm::function_ref<void(llvm::Value *handle)> on_zero);
 
-        // libc, declared into the current unit the way printf is. the RC runtime is emitted inline
-        // rather than living in the stdlib, so these two are the only external symbols it needs
-        llvm::FunctionCallee get_malloc();
-        llvm::FunctionCallee get_free();
-
         // the address of one header word inside `handle`'s block. takes the box type rather than a layout,
         // because half its callers do not have one: an erased operand and a closure environment know only
         // the shared header, and `TypeLowering::class_header_llvm_type()` is a prefix of every box by

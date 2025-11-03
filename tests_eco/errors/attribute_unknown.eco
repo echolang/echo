@@ -1,0 +1,10 @@
+// an attribute nobody reads. Until conditional compilation arrived this parsed, attached to the declaration
+// and did nothing at all - leaving a bodyless function with no implementation and no diagnostic.
+//
+// what made it intolerable rather than untidy: a misspelled `#[fi: os == darwin]` is not one of the four
+// directives, so the conditional filter passes it straight through - and it would then have been dropped
+// here without a word, taking a whole platform's block with it.
+#[bultin: "size_of"]
+function mistyped<T>() : usize;
+
+echo 1;

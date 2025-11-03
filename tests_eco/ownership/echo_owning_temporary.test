@@ -1,0 +1,15 @@
+mode: build
+
+--- OUT --->
+1
+buffer!
+2
+buffer!
+plain
+--- RAST --->
+// the print is the binding's body, and the release comes after it - the value is still there while it
+// is being written out
+CHECK: tempbind<void>(vardecl<type<string>>($__temp1) = call label(): string; call echo(varref<string>(var($__temp1))): void; release(
+// a named local already owns its value, so its print is bound around nothing
+CHECK: vardecl<type<string>>($named) = call label(): string
+CHECK: call echo(varref<string>(var($named))): void

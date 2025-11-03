@@ -9,4 +9,4 @@ expect: ok
 // conformance table anywhere in the module - each call is monomorphized to a direct one
 CHECK-NOT: eco.iface
 CHECK-NOT: vtable
-CHECK: define i32 @main()
+CHECK: define i32 @main(

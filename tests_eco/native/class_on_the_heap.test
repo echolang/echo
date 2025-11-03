@@ -13,8 +13,8 @@ flags: -O
 # and it removes all of it: the allocation, the retain for `$c = $b`, the two releases at scope end and
 # the reads through the handle are all gone, and both echoes are folded to the constant 7. that is only
 # sound because the counts balanced, so it is worth pinning
-CHECK: i32 @main()
-CHECK-NOT: call ptr @malloc
+CHECK: i32 @main(
+CHECK-NOT: call ptr @__eco_alloc
 CHECK-NOT: call void @__eco_release
 CHECK-NOT: strong.inc
 CHECK: ret i32 0

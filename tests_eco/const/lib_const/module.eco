@@ -1,0 +1,10 @@
+/*
+ * A library whose whole surface is compile-time constants - which is the case a file-scope *variable* cannot
+ * answer: a non-entry module's file root emits only functions, so a variable declared there is parsed, checked
+ * and then silently dropped. A constant needs no storage at all, so it sidesteps that entirely.
+ */
+
+#[module: "modlimits"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

@@ -1,0 +1,11 @@
+// the same source as os_branches.eco, read as another platform. A separate file rather than a second
+// `.test` beside the first, because the corpus pairs one `.eco` with one `.test`.
+#[if: os == darwin]
+function platform() : string { return 'darwin'; }
+#[elif: os == linux]
+function platform() : string { return 'linux'; }
+#[else]
+function platform() : string { return 'other'; }
+#[end]
+
+echo platform();

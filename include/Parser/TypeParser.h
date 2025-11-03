@@ -36,8 +36,33 @@ namespace Parser
     // them. a scan has one arm per *grammar production* instead, which is the thing that has a
     // fixed number of cases
     //
+    // the one exception is a leading `const`, which begins a *constant* declaration as readily as a variable
+    // one - so this defers to starts_constdecl below rather than claiming it. The two are a partition
+    //
     // pure lookahead: the scan moves the cursor and restores it before returning
     bool starts_vardecl(Payload &payload);
+
+    // true when the cursor sits on a **compile-time constant** declaration: `const NAME = ...` or
+    // `const <type> NAME = ...`, where NAME is a bare identifier.
+    //
+    // one question split from starts_vardecl on the one token that separates them - a `$`. Both spellings
+    // begin with `const`, and what follows the type says which it is: a variable has storage in the scope
+    // it was written in, a constant has none and is copied to each of its use sites. Every dispatch site
+    // asks this one **before** starts_vardecl, and starts_vardecl defers to it on a leading `const` - so the
+    // two answer yes to disjoint sets of inputs rather than relying on the dispatch order alone
+    //
+    // it lives here for the reason starts_callable_type does: the answer is a scan of the type grammar, and
+    // this file owns that grammar
+    //
+    // pure lookahead, same as its sibling: the scan moves the cursor and restores it before returning
+    bool starts_constdecl(Payload &payload);
+
+    // with the cursor **past** the `const`: is this the untyped spelling, `const NAME = ...`?
+    //
+    // shared by starts_constdecl and Parser::parse_constdecl, which would otherwise each carry their own copy
+    // of the test - and a parser that disagreed with the predicate that routed it there would read the name as
+    // a type and then report a missing one
+    bool constdecl_omits_its_type(Cursor &cursor);
 
     AST::TypeNode *parse_type(Payload &payload);
 

@@ -10,6 +10,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTModuleEmbedder.h"
+#include "AST/ASTConstantExpander.h"
 #include "AST/ASTMonomorphizer.h"
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTTypeChecker.h"
@@ -123,12 +124,17 @@ void print_critical_error(std::string title, std::string message)
 
 int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayload &input)
 {
-#if ECO_DONT_CATCH_EXCEPTIONS
-    parser.parse_input(input);
-#else
+    // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, unlike the tokenization error inside. That macro
+    // exists to let a *compiler bug* crash with a stack trace, and a malformed `#[if: ...]` is not one - it
+    // is a mistake in the source being compiled, and reporting it as a crash would blame echoc for it
     try {
         parser.parse_input(input);
     }
+    catch (AST::Module::TokenFilterException &e) {
+        print_critical_error("Conditional Compilation Failed", e.what());
+        return 1;
+    }
+#if !ECO_DONT_CATCH_EXCEPTIONS
     catch (Parser::ModuleParser::TokenizationException &e) {
         print_critical_error("Tokenization Failed", e.what());
         return 1;
@@ -183,6 +189,7 @@ static std::optional<std::filesystem::path> discover_project_manifest()
 // library that depends on another pulls the other in, once, in the right order
 static bool resolve_manifests(
     argparse::ArgumentParser &cli,
+    const Compiler::TargetFacts &facts,
     std::vector<Parser::ModuleManifest> &out,
     std::vector<std::filesystem::path> &out_roots)
 {
@@ -216,7 +223,7 @@ static bool resolve_manifests(
     }
 
     std::string error;
-    if (!Parser::resolve_module_graph(roots, out, error)) {
+    if (!Parser::resolve_module_graph(roots, facts, out, error)) {
         print_critical_error("Module Manifest Error", error);
         return false;
     }
@@ -277,7 +284,10 @@ static int build_bundle(
     std::vector<std::filesystem::path> roots;
     {
         Compiler::ScopedPhase phase("resolve manifests");
-        if (!resolve_manifests(cli, manifests, roots)) {
+
+        // the parser's own facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
+        // list of files and the conditions inside those files have to be decided by the same answer
+        if (!resolve_manifests(cli, parser.target_facts, manifests, roots)) {
             return 1;
         }
     }
@@ -418,8 +428,16 @@ static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundl
 // the analysis pipeline between parsing and codegen. shared for the same reason build_bundle is:
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference
 // tests/helpers.cpp mirrors this list and has to be updated alongside it
-static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundle)
+static int run_semantic_passes(
+    argparse::ArgumentParser &cli, AST::Bundle &bundle, const Compiler::CompilerOptions &options)
 {
+    // **before the monomorphizer, not inside its fixpoint.** every reference to a compile-time constant
+    // becomes a clone of that constant's value here, and AST::OwnershipPass - which runs inside that
+    // fixpoint - walks a body exactly once, ever: a reference still in a body when it gets there makes
+    // that walk's answer permanent and wrong. Nothing in an expansion depends on what the fixpoint
+    // produces, so one pass is all it needs
+    AST::ConstantExpander(bundle).run();
+
     // resolve generics into concrete instances before compilation
     AST::Monomorphizer monomorphizer(bundle);
     monomorphizer.run();
@@ -434,7 +452,9 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
     // read in a value position gains a deref node, so from here on result_type() is honest
     AST::PointerAdjuster(bundle).run();
 
-    AST::TypeChecker(bundle).run();
+    // the one pass that reads the options: a builtin can be unavailable, and only the command line
+    // knows whether this one is
+    AST::TypeChecker(bundle, options).run();
 
     print_resolved_ast(cli, bundle);
 
@@ -447,27 +467,37 @@ static int run_semantic_passes(argparse::ArgumentParser &cli, AST::Bundle &bundl
     return 0;
 }
 
-// resolves --debug/--release against the subcommand's default. one function because the two
-// subcommands disagree only about the default, and a second spelling of the rule would let them
-// drift - `build` is a release build unless told otherwise
+// resolves every option that describes *the program being compiled* against the subcommand's
+// defaults. one function because the two subcommands disagree only about those defaults, and a second
+// spelling of the rules would let them drift - `build` is a release build unless told otherwise
 //
-// still orthogonal to -O, and now visibly so: both subcommands read that flag, so `build --release`
-// without it emits release *semantics* - no asserts, no null checks - without the optimizer having
-// run over them
+// the build mode is still orthogonal to -O, and now visibly so: both subcommands read that flag, so
+// `build --release` without it emits release *semantics* - no asserts, no null checks - without the
+// optimizer having run over them
 //
-// cannot fail: the mutually exclusive group refuses both flags at parse time
+// `--explain-memory` implying `--track-allocations` is settled here rather than at the two places that
+// read them, because a report over a counter nothing maintains does not fail - it reads zero forever,
+// which is the answer a person hoped for
+//
+// cannot fail: the mutually exclusive group refuses --debug with --release at parse time
 static Compiler::CompilerOptions resolve_options(
     argparse::ArgumentParser &cli, Compiler::BuildMode fallback)
 {
+    Compiler::CompilerOptions options;
+
+    options.mode = fallback;
+
     if (cli.get<bool>("--debug")) {
-        return { Compiler::BuildMode::t_debug };
+        options.mode = Compiler::BuildMode::t_debug;
+    }
+    else if (cli.get<bool>("--release")) {
+        options.mode = Compiler::BuildMode::t_release;
     }
 
-    if (cli.get<bool>("--release")) {
-        return { Compiler::BuildMode::t_release };
-    }
+    options.report_allocations = cli.get<bool>("--explain-memory");
+    options.track_allocations = options.report_allocations || cli.get<bool>("--track-allocations");
 
-    return { fallback };
+    return options;
 }
 
 
@@ -562,12 +592,14 @@ static bool compute_cache_keys(
     argparse::ArgumentParser &cli,
     const std::vector<Parser::ModuleManifest> &manifests,
     const Compiler::CompilerOptions &options,
+    const Compiler::TargetFacts &facts,
     std::map<std::string, Compiler::ModuleCacheKey> &out_keys)
 {
     Compiler::ScopedPhase phase("cache keys");
 
     std::string error;
-    if (!Compiler::compute_module_keys(manifests, options, cli.get<bool>("--optimize"), out_keys, error)) {
+    if (!Compiler::compute_module_keys(
+            manifests, options, facts, cli.get<bool>("--optimize"), out_keys, error)) {
         print_critical_error("Module Cache Error", error);
         return false;
     }
@@ -716,6 +748,11 @@ struct FrontEnd
     std::string entry_module;
     Compiler::CompilerOptions options;
 
+    // what the conditional filter was evaluated against. Carried here rather than re-resolved because the
+    // module cache folds it into every key, and a key derived from a second resolution is a key that could
+    // disagree with the one the parse actually used
+    Compiler::TargetFacts target_facts;
+
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
 };
@@ -730,11 +767,32 @@ static bool needs_cache_keys(argparse::ArgumentParser &cli, bool whole_program)
 static bool run_front_end(
     argparse::ArgumentParser &cli,
     AST::Bundle &bundle,
-    Parser::ModuleParser &parser,
     Compiler::BuildMode fallback,
     bool whole_program,
     FrontEnd &out)
 {
+    // **before the parse**, and that is not a preference: the conditional filter runs between lexing and
+    // pass 1, so what a condition sees has to be settled before a single file is read. Everything here
+    // comes off the command line, so there is nothing to wait for
+    {
+        std::string error;
+
+        if (!Compiler::TargetFacts::resolve(
+                cli.present("--target-os") ? cli.get<std::string>("--target-os") : std::string(),
+                cli.present("--target-arch") ? cli.get<std::string>("--target-arch") : std::string(),
+                cli.get<std::vector<std::string>>("--define"),
+                out.target_facts,
+                error)) {
+            print_critical_error("Invalid Target", error);
+            return false;
+        }
+    }
+
+    // **after the facts and not before**, which is why the parser is built here rather than handed in: it
+    // takes them at construction, so there is no window in which one exists that has not been told what
+    // platform it is reading for. Neither subcommand touches it once the front end is done
+    Parser::ModuleParser parser(out.target_facts);
+
     {
         Compiler::ScopedPhase phase("parse");
         if (build_bundle(cli, bundle, parser, out.manifests, out.entry_module) != 0) {
@@ -742,33 +800,60 @@ static bool run_front_end(
         }
     }
 
+    // ahead of the semantic passes, because one of them reads it: AST::TypeChecker refuses
+    // `mem::live_allocations()` when nothing is counting. it depends on nothing but the command line, so
+    // the only thing its old position bought was the appearance of an order
+    out.options = resolve_options(cli, fallback);
+
     {
         Compiler::ScopedPhase phase("semantic passes");
-        if (run_semantic_passes(cli, bundle) != 0) {
+        if (run_semantic_passes(cli, bundle, out.options) != 0) {
             return false;
         }
     }
 
-    out.options = resolve_options(cli, fallback);
-
     if (needs_cache_keys(cli, whole_program)
-        && !compute_cache_keys(cli, out.manifests, out.options, out.cache_keys)) {
+        && !compute_cache_keys(cli, out.manifests, out.options, out.target_facts, out.cache_keys)) {
         return false;
     }
 
     return true;
 }
 
-int main_run(argparse::ArgumentParser &cli)
+// what a JIT'd program should see as its own `argv[0]`
+//
+// the source file the invocation named, because that is the closest thing a program with no process of
+// its own has to a path it was started from. `echoc` is emphatically the wrong answer: it is the
+// process but not the program, and handing it over would have `env::exe()` name the compiler. A
+// manifest-only invocation names no source file, and then the module root is the best there is - and
+// `fallback` covers the last case, a manifest discovered rather than asked for
+std::string program_name(argparse::ArgumentParser &cli, const std::string &fallback)
+{
+    const std::vector<std::string> sources = cli.get<std::vector<std::string>>("source");
+    if (!sources.empty()) {
+        return sources.front();
+    }
+
+    const std::vector<std::string> modules = cli.get<std::vector<std::string>>("--module");
+    if (!modules.empty()) {
+        return modules.front();
+    }
+
+    return fallback;
+}
+
+int main_run(
+    argparse::ArgumentParser &cli,
+    const std::vector<std::string> &program_arguments,
+    const char *const *environment)
 {
     auto bundle = AST::Bundle();
-    auto parser = Parser::ModuleParser();
 
     // `run` reuses nothing: the JIT is handed one module, so every unit is merged and there are no per-module
     // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
     // module beside main's, which is a question about duplicate weak symbols rather than about caching
     FrontEnd front;
-    if (!run_front_end(cli, bundle, parser, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
+    if (!run_front_end(cli, bundle, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
         return 1;
     }
 
@@ -799,35 +884,38 @@ int main_run(argparse::ArgumentParser &cli)
         compiler.printIR(false);
     }
 
-    // **after `-p`, deliberately.** The prune is not codegen, and `-p` is how codegen is read: half the
-    // corpus's IR contracts are about what codegen *emitted* and where - a definition's placement, an
-    // alloca hoisted to the entry block, a `foreach` that copies nothing - and every one of them is
-    // about a body `main` may well never call. A `-p` that showed the pruned module would answer a
-    // different question than the one it is asked, and would hide any function under debug that the
-    // entry point does not happen to reach.
-    //
-    // so the JIT is handed a smaller module than `-p` printed. that is the only place in the compiler
-    // where a dump and the thing it describes diverge, and it is why this runs in its own named phase
-    // rather than inside run_code: `-t` is what makes the difference visible
-    {
-        Compiler::ScopedPhase phase("prune");
-        compiler.prune_to_entry();
-    }
+    // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
+    // entry module was read from - not `echoc`, which is the process but not the program. So the tail
+    // the driver split off a `--` is prepended with it rather than used as-is
+    std::vector<std::string> argv = { program_name(cli, entry_module) };
+    argv.insert(argv.end(), program_arguments.begin(), program_arguments.end());
 
+    // the JIT prunes the module to what the entry point reaches before it runs anything - see
+    // Backend::prune_to_entry, which is where that has to live to be sound and is why `-p` above still
+    // prints the whole of what codegen emitted
+    int status = 0;
     {
         Compiler::ScopedPhase phase("jit");
-        compiler.run_code();
+        status = compiler.run_code(argv, environment);
+    }
+
+    // after the program, because the prune happened inside the run - the same position `[timings]` takes,
+    // and for the same reason
+    if (cli.get<bool>("--explain-prune")) {
+        std::cout << compiler.prune_report();
     }
 
     std::cout << Compiler::PhaseTimings::instance().report();
 
-    return 0;
+    // the program's own status, so `echoc run` exits the way it did. Today that is always 0 on this
+    // path - the entry point's epilogue returns 0 and every other ending goes through libc's `exit`
+    // from inside the JIT, which never comes back here at all
+    return status;
 }
 
 int main_build(argparse::ArgumentParser &cli)
 {
     auto bundle = AST::Bundle();
-    auto parser = Parser::ModuleParser();
 
     // **before anything is compiled.** This used to sit after codegen and after the optimizer, so a
     // forgotten `-o` threw away the whole compile to say one sentence - and the output path is now an
@@ -840,7 +928,7 @@ int main_build(argparse::ArgumentParser &cli)
     const bool whole_program = wants_whole_program_module(cli);
 
     FrontEnd front;
-    if (!run_front_end(cli, bundle, parser, Compiler::BuildMode::t_release, whole_program, front)) {
+    if (!run_front_end(cli, bundle, Compiler::BuildMode::t_release, whole_program, front)) {
         return 1;
     }
 
@@ -908,8 +996,27 @@ int main_build(argparse::ArgumentParser &cli)
     return 0;
 }
 
-int main(int argc, char *argv[]) 
+// `envp` is taken rather than reached for, and that is the whole reason `std::env` needs no platform
+// conditionals: the environment block arrives as a parameter on every platform we target, whereas the
+// `environ` symbol it would otherwise have to read is spelled `_NSGetEnviron()` on Darwin and is not
+// portably addressable from IR anywhere. `run` forwards this to the JIT'd program; a `build`'s binary
+// gets its own from the OS
+int main(int argc, char *argv[], char *envp[])
 {
+    // **everything after a bare `--` belongs to the program, not to echoc.** Split it off before
+    // argparse ever sees it: `source` is declared `.remaining()`, so it would otherwise swallow the
+    // whole tail as filenames and `echoc run p.eco -- a b` would look for a file called `a`
+    std::vector<std::string> program_arguments;
+    int echoc_argc = argc;
+
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--") {
+            echoc_argc = i;
+            program_arguments.assign(argv + i + 1, argv + argc);
+            break;
+        }
+    }
+
     argparse::ArgumentParser cli("echoc");
     cli.add_description("The echo programming language compiler");
 
@@ -929,6 +1036,16 @@ int main(int argc, char *argv[])
     
     build_command.add_argument("-o", "--output")
         .help("Output file name.");
+
+    // the third measurement dump, and the only one not shared: `build` never prunes, because the prune is
+    // part of the JIT and a per-module object may not depend on what reaches `main`. A flag a subcommand
+    // accepts and silently ignores is worse than one it rejects - `-O` was exactly that on `build` - so
+    // this is registered where it means something and nowhere else. `-o` above is the same asymmetry the
+    // other way round
+    run_command.add_argument("-ep", "--explain-prune")
+        .help("Print what the JIT prune dropped, and what the entry point still reaches.")
+        .default_value(false)
+        .implicit_value(true);
 
     // add IR & AST printing flag
     for (auto &command : {std::ref(run_command), std::ref(build_command)}) {
@@ -966,10 +1083,11 @@ int main(int argc, char *argv[])
             .help("Where compiled module artifacts are stored. Defaults to '.echo' beside each manifest.")
             .default_value(std::string(""));
 
-        // the two measurement dumps. They sit with `-a`/`-ar`/`-p`/`-syt`/`-pi` rather than off to one side
-        // because they answer the same kind of question those do - what did the compiler actually do - and a
-        // number nobody can ask for is a number nobody looks at. Both print a `[section]` header, the shape
-        // --print-symbol-table already uses, so the output is greppable and stays stable enough to assert on
+        // the measurement dumps both subcommands have. They sit with `-a`/`-ar`/`-p`/`-syt`/`-pi` rather than
+        // off to one side because they answer the same kind of question those do - what did the compiler
+        // actually do - and a number nobody can ask for is a number nobody looks at. Each prints a `[section]`
+        // header, the shape --print-symbol-table already uses, so the output is greppable and stays stable
+        // enough to assert on. `--explain-prune` above is the third and belongs to `run` alone
         command.get().add_argument("-ec", "--explain-cache")
             .help("Print each module's cache key, whether its artifact is present, and what changed.")
             .default_value(false)
@@ -979,6 +1097,46 @@ int main(int argc, char *argv[])
             .help("Print where the compile spent its time, by phase.")
             .default_value(false)
             .implicit_value(true);
+
+        // and the fourth, which is unlike the other three in one way worth knowing before you reach for
+        // it: `-ec`, `-t` and `-ep` print something echoc worked out, and this one **changes the program
+        // that is emitted**. It maintains a counter beside every allocation and has `main` print what is
+        // still outstanding on its way out, so the number describes the program's own run rather than the
+        // compile. Off by default for exactly that reason
+        //
+        // no entry in the module cache key: the entry module is never cached, so the report can never be
+        // silently missing from a served artifact. --track-allocations *is* in the key, because it
+        // changes what every other module's object contains
+        command.get().add_argument("-em", "--explain-memory")
+            .help("Make the compiled program print how many allocations were still outstanding when it "
+                  "ended. Implies --track-allocations.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // the bookkeeping on its own, for a program that wants to read the count from Echo with
+        // `mem::live_allocations()` rather than have one printed at the end
+        command.get().add_argument("-ta", "--track-allocations")
+            .help("Count how many allocations are outstanding, so 'mem::live_allocations()' can be read.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // what `#[if: ...]` regions are evaluated against. Repeatable, bare names only - a define is a
+        // flag a condition can test and carries no value, because naming a *value* is what `const`
+        // declarations are for
+        command.get().add_argument("--define")
+            .help("Declare a flag that '#[if: NAME]' can test. May be given more than once.")
+            .default_value(std::vector<std::string>{})
+            .append();
+
+        // **not cross-compilation.** These change what a condition sees and nothing else: the code is
+        // still compiled for the host, so asking for a foreign OS will usually fail at link. They exist so
+        // that a test can assert what *another* platform's branch does without owning that platform, which
+        // is the only way a `#[if: os == linux]` region is ever checked on a Mac
+        command.get().add_argument("--target-os")
+            .help("Evaluate conditions as if targeting this OS. Does not cross-compile.");
+
+        command.get().add_argument("--target-arch")
+            .help("Evaluate conditions as if targeting this architecture. Does not cross-compile.");
 
         // repeatable, and the graph is resolved as a whole - so naming a library that depends on another
         // pulls the other in too, once, ahead of it. A dependency does not have to be spelled here
@@ -1034,7 +1192,7 @@ int main(int argc, char *argv[])
     cli.add_subparser(build_command);
 
     try {
-        cli.parse_args(argc, argv);
+        cli.parse_args(echoc_argc, argv);
     }
     catch (const std::exception &err) {
         std::cerr << err.what() << std::endl;
@@ -1053,7 +1211,7 @@ int main(int argc, char *argv[])
     }
 
     if (cli.is_subcommand_used(run_command)) {
-        return main_run(run_command);
+        return main_run(run_command, program_arguments, envp);
     }
     else if (cli.is_subcommand_used(build_command)) {
         return main_build(build_command);

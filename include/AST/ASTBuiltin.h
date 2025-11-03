@@ -67,6 +67,59 @@ namespace AST
         // argument is a copy - so a struct that declares a copy constructor would run it, and the printer
         // would be printing something other than the value it was handed
         t_dprint,
+
+        // the C allocator, reached through the compiler's own allocation seam rather than bound as an
+        // `extern` symbol. what `mem::alloc`, `mem::realloc` and `mem::free` are written on top of, and
+        // between them the whole of where an `array<T>`'s storage, a `str::buf`'s bytes and every raw
+        // buffer in the language come from
+        //
+        // they were `extern malloc`/`realloc`/`free` until the compiler needed to be able to say how much
+        // memory a program had outstanding. Two sites allocated - these, and the class runtime's box - and
+        // because nothing saw both, the question had no answer at all rather than an expensive one.
+        // Builtins rather than externs so that the seam has *one* owner (Compiler::LLVM::MemoryCodegen)
+        // instead of two spellings of one symbol name that nothing checks against each other
+        //
+        // the **first concrete, value-returning builtins**: `die`/`assert` are concrete and push nothing,
+        // `size_of`/`ref_count` return a value and are generic. So they are also the first that need no
+        // arm in AST::TypeChecker - an ordinary declared signature is one AST::CallResolver already
+        // checks, which `T&` and a `void`-accepting parameter are not
+        t_alloc_bytes,
+        t_realloc_bytes,
+        t_free_bytes,
+
+        // how many allocations the three above have outstanding. reads the counter the seam maintains,
+        // which is what makes a leak something the corpus can *assert* rather than infer from destructor
+        // output - the same argument t_weak_count is here for, one level further down
+        //
+        // it is the only builtin whose availability is conditional: without --track-allocations there is
+        // no counter, and answering 0 would be a lie in the one shape a person cannot tell from the truth
+        // they hoped for. AST::TypeChecker refuses it there, at the call site, with a location
+        t_live_allocations,
+
+        // the three words the platform hands `main`, read back out of the globals the entry point's
+        // prologue stored them in (Compiler::LLVM::ProcessCodegen)
+        //
+        // builtins because there is no other way down: the values exist only as `main`'s arguments,
+        // and Echo has no globals to park them in - a file-scope variable is a stack slot in whichever
+        // function is being emitted, and in a library module it is dropped without a word. An `extern`
+        // cannot reach them either, since `environ` is a *data* symbol and `argv` is not a symbol at all
+        //
+        // they are the raw pointers rather than anything shaped, deliberately: `std::env` builds the
+        // iterators, the bounds checks and the `KEY=VALUE` split on top in Echo, where they can be read.
+        // The compiler's whole contribution is three loads
+        t_process_argc,
+        t_process_argv,
+        t_process_envp,
+
+        // stop with a chosen exit code, as opposed to `die`'s hardcoded 1
+        //
+        // a builtin rather than `extern exit` for two reasons. Compiler::LLVM::AbortCodegen already
+        // declares that symbol, with NoReturn, so a second Echo-side spelling would be two declarations
+        // of one symbol that nothing checks against each other - the mistake the raw-memory trio above
+        // exists to have stopped making. And a `void`-returning extern is a call that *returns* as far
+        // as the rest of the compiler knows, so `function f() : int32 { env::exit(1); }` would be a
+        // missing return; AST::scope_exit_kind gives it the arm `t_die` has instead
+        t_exit,
     };
 
     // resolves a builtin name to its kind, or nullopt when the name is not one. the single place
@@ -84,6 +137,15 @@ namespace AST
     // could drift into checking one argument and folding another - and the failure is silent,
     // because a non-literal simply yields no detail rather than an error
     std::optional<size_t> builtin_message_index(BuiltinKind kind);
+
+    // **does a call to this builtin never come back?** `die` and `exit` do not, so a statement that is
+    // one leaves the function just as surely as a `return` does.
+    //
+    // here rather than as a switch inside AST::scope_exit_kind, and exhaustive for builtin_message_index's
+    // reason: a builtin added without an arm is a compile error rather than one that silently answers
+    // "control continues", which would cost a spurious missing-return diagnostic or a block codegen leaves
+    // unterminated
+    bool builtin_never_returns(BuiltinKind kind);
 };
 
 #endif

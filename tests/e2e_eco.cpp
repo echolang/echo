@@ -81,12 +81,21 @@ namespace
         // without --cache-dir the default store applies, which is `.echo` beside each manifest - so
         // running the corpus would write artifacts into tests_eco/ and into stdlib/, and two cases
         // sharing a manifest would share a cache
-        return "\"" ECHOC_BINARY "\" "
+        // an `args:` line reaches a JIT'd program through echoc's own `--` separator, which is what tells
+        // the driver where its command line stops and the program's begins. On the `build` path it
+        // belongs to the binary instead, so it is appended where that is invoked and not here -
+        // `echoc build -- foo` would be echoc's argument, not the program's
+        const std::string program_arguments = (is_build || test.arguments.empty())
+            ? std::string()
+            : " --" + test.argument_suffix();
+
+        return test.environment_prefix()
+            + "\"" ECHOC_BINARY "\" "
             + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
             + (dump.empty() ? "" : dump + " ")
             + "--cache-dir " + quoted(scratch / "cache") + " "
             + test.compiler_flags(root)
-            + quoted(eco) + " 2>&1";
+            + quoted(eco) + program_arguments + " 2>&1";
     }
 
     // brackets a case's scratch directory: empty on the way in, gone on the way out.
@@ -224,7 +233,11 @@ namespace
             // log - the OUT section is mandatory precisely so that no combination of settings makes
             // it optional again, and a bare `SUCCEED()` here made "rejected somehow" the whole
             // assertion for every build-mode case rejected at compile time
-            if (test.expect == EchoTests::Expectation::t_fail) {
+            // `fail` and not `status_matches`, deliberately: an exact `expect:` pins what the *program*
+            // exits with, and a build that never produced one has not met it. Reaching the FAIL below
+            // with "echoc build exited 3" is the honest report there, rather than a pass for the right
+            // number produced by the wrong process
+            if (test.expect.kind == EchoTests::Expectation::Kind::t_fail) {
                 check_program_output(test, build, "echoc build");
                 return;
             }
@@ -294,7 +307,11 @@ namespace
             outcome.binary_exists = fs::exists(entry.binary, ec);
 
             if (outcome.primary.exit_code == 0 && outcome.binary_exists) {
-                outcome.program = run_capturing(quoted(entry.binary) + " 2>&1");
+                // the environment goes on both spawns and the arguments only on this one: a linked binary
+                // is the program, so its argv *is* the program's, with no `--` needed to say so
+                outcome.program = run_capturing(
+                    entry.test.environment_prefix() + quoted(entry.binary)
+                    + entry.test.argument_suffix() + " 2>&1");
             }
         }
 

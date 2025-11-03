@@ -14,7 +14,7 @@ flags: -O
 # that merge is why `-O` deliberately does not use the module object cache: cached objects are per-module, and
 # handing the optimizer one unit at a time would turn `doubled` into a `declare` it cannot inline. If this
 # case ever starts failing on the `doubled` line, the merge was skipped for an optimized build.
-CHECK: i32 @main()
+CHECK: i32 @main(
 CHECK-NOT: call i32 @_modcore_tripled
 CHECK-NOT: call i32 @_modcore_doubled
 CHECK: ret i32 0

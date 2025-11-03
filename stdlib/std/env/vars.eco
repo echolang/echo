@@ -1,0 +1,149 @@
+/**
+ * Environment variables.
+ *
+ * Nothing is read until it is asked for. `var` is a `getenv` call and no more - there is no table
+ * built at startup, no copy of the environment block, and nothing to invalidate. A program that
+ * never asks does no work at all.
+ *
+ * **Every answer is a `string::view` that borrows the environment block.** That is what makes the
+ * above true: a copy would need an allocation, and the bytes already live as long as the process
+ * does. The one thing it costs is that a view is stale after a `setenv` - which this module does not
+ * offer, so today the only way to reach that is through a C binding of your own. Take a `clone()`
+ * if you are going to.
+ */
+
+namespace std::env;
+
+/**
+ * True when `$key` is set, whatever its value - including empty.
+ *
+ * The distinction `var` cannot make on its own: a variable set to the empty string and a variable
+ * that is not set both read as "nothing useful here" through the fallback overload, and only this
+ * tells them apart.
+ */
+function has(string::view $key) : bool
+{
+    ptr<uint8> $found = c_getenv($key->c_str());
+
+    return $found:$ != null;
+}
+
+/**
+ * The value of `$key`, or null when it is not set.
+ *
+ * Absence is in the type rather than folded into an empty string, so a caller has to say what it
+ * means by it - `guard`, `??` or `?->`, whichever fits. The two-argument overload below is the
+ * short spelling of the common choice.
+ *
+ * `$key` is read through `->c_str()`, which needs it NUL-terminated. Every literal is, and so is
+ * every whole `string`; a **sub-window** of one is not, and asking with one is a `die`. `clone()`
+ * it first.
+ */
+function var(string::view $key) : string::view?
+{
+    ptr<uint8> $found = c_getenv($key->c_str());
+
+    if ($found:$ == null) {
+        return null;
+    }
+
+    return str::view_of_c_str($found);
+}
+
+/**
+ * The value of `$key`, or `$fallback` when it is not set.
+ *
+ * The fallback is a view like everything else here, so it has to outlive the result - a literal
+ * always does, and so does anything held in a variable the caller still has. It is *not* safe to
+ * pass a temporary built on the spot.
+ */
+function var(string::view $key, string::view $fallback) : string::view
+{
+    return var($key) ?? $fallback;
+}
+
+/**
+ * A cursor over the whole environment, yielding `key => value`.
+ *
+ * The block is a run of `KEY=VALUE` strings ending in a null pointer, so unlike `arg_iterator` there
+ * is no count to compare against - the terminator *is* the end, and `advance()` testing it is the whole
+ * of the bound.
+ *
+ * Both halves are **stored**, for `arg_iterator`'s reason: `current()` owes a borrow, so there has to
+ * be something for it to name. `advance()` overwrites both, so neither survives the next step.
+ *
+ * Entries are handed out in the order the platform laid them down, which is not sorted and not
+ * deduplicated. A `KEY` appearing twice is yielded twice, and `var` would answer with the first.
+ */
+struct var_iterator : contract::iterator<string::view>, contract::keyed<string::view>
+{
+    ptr<ptr<uint8>> $block;
+    usize $pos;
+
+    string::view $key;
+    string::view $value;
+
+    constructor()
+    {
+        // re-seated through `:$` - a plain `=` on a pointer property writes through it, not to it
+        $this->block:$ = raw_envp();
+        $this->pos = 0;
+        $this->key = string::view(null, 0);
+        $this->value = string::view(null, 0);
+    }
+
+    function advance() : bool
+    {
+        // absent on a platform that does not hand `main` an environment, which is not a thing either
+        // of the two supported ones does - but a null block is a legal answer and iterating it has to
+        // mean "nothing", not a crash
+        if ($this->block:$ == null) {
+            return false;
+        }
+
+        ptr<uint8> $entry = $this->block:$[$this->pos];
+
+        if ($entry:$ == null) {
+            return false;
+        }
+
+        string::view $whole = str::view_of_c_str($entry);
+        usize $split = $whole->index_of('=');
+
+        // `index_of` answers the size when there is no match, and then the key is the whole entry and the
+        // value is empty - which is the honest reading of an entry with no `=` in it
+        $this->key = $whole->sub(0, $split);
+
+        // past the `=` itself, on the paths where there was one
+        usize $start = $whole->size;
+
+        if ($split < $whole->size) {
+            $start = $split + 1;
+        }
+
+        $this->value = $whole->sub($start, $whole->size - $start);
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : string::view&
+    {
+        return &$this->value;
+    }
+
+    function key() : string::view
+    {
+        return $this->key;
+    }
+}
+
+/**
+ * A cursor over every environment variable, for `foreach`. Allocates nothing.
+ */
+#[inline]
+function vars() : var_iterator
+{
+    return var_iterator();
+}

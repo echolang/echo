@@ -1,0 +1,14 @@
+// what the JIT hands its execution engine is not what codegen emitted: everything the entry point cannot
+// reach is dropped first. `unreached` below is called by nobody, so it is not in the surviving set
+
+function reached(int32 $n): int32
+{
+    return $n * 2;
+}
+
+function unreached(int32 $n): int32
+{
+    return $n + 1;
+}
+
+echo reached(21);

@@ -1,0 +1,83 @@
+// **`foreach` over something that is already a cursor**, which is the other half of AST::iteration_plan_for
+// and had no coverage at all until this file. `user_iterable.eco` covers the `iterable` path - a type with an
+// `iterate()` - and every iteration in the stdlib went through that one, so both arms below shipped broken.
+//
+// the distinction the two arms make is *whose cursor it is*, and it is visible in the output:
+//
+//  - a **place** - a cursor sitting in a variable - is borrowed, not copied, because driving it advances it
+//    and the caller has to see that. so the second loop over the same cursor finds it already spent
+//  - a **call result** has no owner but the loop, so `$__it` takes it by value and drops it at loop exit
+//
+// each was broken in its own way, and neither could have been caught by the other's test: the place arm
+// addressed a receiver that was already an address (`counter&&`, which unifies against nothing), and the
+// call arm left `$__it` untyped, so `advance()` had no receiver type to resolve against and reached codegen
+// with a declaration nothing had emitted a body for.
+
+struct counter : contract::iterator<int32>, contract::keyed<usize>
+{
+    int32 $value;
+    int32 $limit;
+    usize $step;
+
+    constructor(int32 $limit)
+    {
+        $this->value = 0;
+        $this->limit = $limit;
+        $this->step = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->value >= $this->limit) {
+            return false;
+        }
+
+        $this->value = $this->value + 1;
+        $this->step = $this->step + 1;
+
+        return true;
+    }
+
+    function current() : int32&
+    {
+        return &$this->value;
+    }
+
+    function key() : usize
+    {
+        return $this->step - 1;
+    }
+}
+
+// -- a cursor in a variable: borrowed, so the loop consumes it ---------------
+
+counter $held = counter(3);
+
+foreach ($held as $v) {
+    echo $v;
+}
+
+// spent - the loop drove the caller's own cursor rather than a copy of it
+echo $held->value;
+
+foreach ($held as $v) {
+    echo -1;
+}
+
+// -- a cursor from a call: owned by the loop ---------------------------------
+
+foreach (counter(2) as $v) {
+    echo $v;
+}
+
+// and again, to show each call gets its own
+foreach (counter(2) as $v) {
+    echo $v;
+}
+
+// -- the key contract, on the same cursor -----------------------------------
+
+foreach (counter(2) as $k => $v) {
+    echo $k;
+    echo $v;
+}

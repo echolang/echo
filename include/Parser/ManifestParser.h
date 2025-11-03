@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Compiler/TargetFacts.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -72,8 +74,16 @@ namespace Parser
     //
     // a `depends` entry may name either a manifest file or the directory holding one, in which case
     // `module.eco` inside it is used.
+    //
+    // `facts` is what a `#[if: ...]` in the manifest is evaluated against, and it is a parameter rather than
+    // a host default for the reason the whole feature exists: a manifest may gate its own `#[sources:]`, and
+    // a source list chosen for one platform while the files in it are filtered for another is silent. It
+    // must be the same facts the module's sources will be parsed with - the invocation's, not the machine's
     bool read_module_manifest(
-        const std::filesystem::path &path, ModuleManifest &out, std::string &out_error);
+        const std::filesystem::path &path,
+        const Compiler::TargetFacts &facts,
+        ModuleManifest &out,
+        std::string &out_error);
 
     // every manifest reachable from `roots`, in the order the modules must be parsed: a dependency before
     // whatever depends on it.
@@ -85,6 +95,7 @@ namespace Parser
     // depended on twice is parsed once.
     bool resolve_module_graph(
         const std::vector<std::filesystem::path> &roots,
+        const Compiler::TargetFacts &facts,
         std::vector<ModuleManifest> &out,
         std::string &out_error);
 };

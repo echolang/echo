@@ -1,0 +1,23 @@
+// **a `const` variable, which is not a compile-time constant.** It has storage, it lives in whatever scope
+// it was written in - including a block - and it carries a `$` like every other value in the language. A
+// constant is the `$`-less form, declared at file, namespace or struct scope; see const/ for those.
+//
+// this form parsed from the day `const` did and was never pinned by anything. It is here so the two cannot
+// be confused for one change: nothing below may move when constants arrive.
+
+const usize $max = 100;
+
+usize $n = $max;
+echo $n;
+
+// inferred, which is the other spelling: `const $x = ...` takes its type from the initializer and applies
+// the const bit to it
+const $limit = 42;
+echo $limit;
+
+// and a block-local one, which is exactly what a compile-time constant may *not* be - the copy a constant
+// makes at each use site has no scope to be local to
+if (1 == 1) {
+    const $inner = 7;
+    echo $inner;
+}

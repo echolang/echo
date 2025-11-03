@@ -1,0 +1,30 @@
+// the host's own facts, with no override - which is what every ordinary compile uses.
+//
+// deliberately says nothing about *which* platform this is: that differs between a developer's machine and
+// CI, and a golden naming one would fail on the other. What it pins is that exactly one arm survived, which
+// is the property the filter owes regardless of where it runs.
+
+usize $arms = 0;
+
+#[if: os == darwin]
+$arms = $arms + 1;
+#[elif: os == linux]
+$arms = $arms + 1;
+#[elif: os == windows]
+$arms = $arms + 1;
+#[else]
+$arms = 99;
+#[end]
+
+echo $arms;
+
+// the same for the architecture axis
+usize $cpus = 0;
+
+#[if: arch == arm64]
+$cpus = $cpus + 1;
+#[elif: arch == x86_64]
+$cpus = $cpus + 1;
+#[end]
+
+echo $cpus;

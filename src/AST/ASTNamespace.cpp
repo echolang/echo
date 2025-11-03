@@ -1,5 +1,6 @@
 #include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
+#include "AST/ASTValueType.h"
 
 #include "Debugging.h"
 
@@ -278,4 +279,23 @@ std::string AST::Namespace::debug_dump_symbols() const
     }
 
     return buffer;
+}
+
+AST::Namespace *AST::member_surface_namespace(AST::NamespaceManager &namespaces, const AST::ComplexType &owner)
+{
+    // an anonymous owner has no path to hang a child off; a closure environment is the only one, and it
+    // declares neither a nested type nor a constant
+    if (!owner.name.has_value()) {
+        return nullptr;
+    }
+
+    // path_segments() rather than mangling_segments() because this namespace is one a user writes -
+    // `A::Inner(1)`, `buffer::MAX` - and a type's namespace is never lexical, which is the only place the
+    // two views differ
+    std::vector<std::string> parts =
+        owner.ast_namespace != nullptr ? owner.ast_namespace->path_segments() : std::vector<std::string>{};
+
+    parts.push_back(owner.name.value());
+
+    return &namespaces.retrieve(parts);
 }

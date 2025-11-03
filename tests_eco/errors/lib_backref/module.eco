@@ -1,0 +1,13 @@
+/*
+ * A library that reaches *forward* into the program consuming it, which no module may do.
+ *
+ * Every other kind of name gets this rule for free: resolution happens while parsing, and a later module has
+ * not been parsed yet. A constant is resolved after the whole program is parsed, so it is the one that has to
+ * ask - and the answer matters more here than elsewhere, because the expansion would put a clone of the
+ * application's expression into this library's arena, and a library's object may not depend on its consumer.
+ */
+
+#[module: "backref"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

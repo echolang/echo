@@ -1,0 +1,7 @@
+flags: -em
+
+--- OUT --->
+7
+4
+[memory]
+  0 live allocations

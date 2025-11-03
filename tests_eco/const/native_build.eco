@@ -1,0 +1,20 @@
+// the same constants through `build` rather than `run`, which is the only thing that exercises make_exec - and
+// a release build besides, so the expansion is checked with assertions elided
+const usize PAGE = 4096;
+
+struct sizes
+{
+    const usize SLOT = 64;
+
+    usize $slots;
+
+    constructor()
+    {
+        $this->slots = self::SLOT;
+    }
+}
+
+usize $page = PAGE;
+echo $page;
+echo sizes::SLOT;
+echo sizes()->slots;

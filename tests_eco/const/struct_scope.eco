@@ -1,0 +1,30 @@
+// a constant in a struct body is published into the struct's **member surface** - the same namespace a nested
+// type's constructors land in, so `buffer::CAPACITY` resolves through the ordinary namespace path and needs no
+// grammar of its own.
+//
+// from inside the struct it is `self::CAPACITY`. Not a bare `CAPACITY`: a method body has no way back to its
+// owner at parse time, and the language already draws this line the same way - `A::Inner(1)` works where a
+// bare `Inner(1)` does not.
+struct buffer
+{
+    const usize CAPACITY = 4096;
+
+    // a property initializer, which is parsed in the same pass the constant is declared in
+    usize $used = self::CAPACITY / 4;
+
+    constructor(usize $used)
+    {
+        $this->used = $used;
+    }
+
+    function headroom() : usize
+    {
+        return self::CAPACITY - $this->used;
+    }
+}
+
+echo buffer::CAPACITY;
+
+buffer $b = buffer(1024);
+echo $b->used;
+echo $b->headroom();

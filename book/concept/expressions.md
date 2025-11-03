@@ -1,166 +1,163 @@
 # Expressions
 
-## Literals 
+Echo is statically typed, but you rarely have to say so. Most of this chapter is about how the compiler works
+out what type an expression has, and the one rule that decides it when there's a choice: **the destination
+wins.**
 
-A literal is a fixed value that is written directly in the code. The literal will directly determine the type of the value.
+## Literals
 
-```echo
-$someInt = 1; // int32
-$someDouble = 1.0; // float64 aka double
-```
-
-Almost all native types have a literal representation.
+A literal is a fixed value written directly in the code, and it's what gives a value its initial type.
 
 ```echo
-$someFloat = 1.0f; // float32
-
-// ints 
-$myInt = 420i32; // int32(420)
-$myUnsignedInt = 420u32; // uint32(420)
-$myLong = 1i64; // int64(1)
-$myUnsignedLong = 1u64; // uint64(1)
-$myShort = 1i16; // int16(1)
-$myUnsignedShort = 1u16; // uint16(1)
-$myByte = 1i8; // int8(1)
-$myUnsignedByte = 1u8; // uint8(1)
+$someInt = 1;        // int32
+$someFloat = 1.0;    // float64
 ```
 
-A literal will be auto-converted to the type it's expected to be in by the context.
-
-Note: If that operation causes a loss of precision, a compile-time error will be thrown. (This error checking only applies to literals)
+That second one catches people out, so it's worth saying plainly: **a bare decimal literal is a `float64`.**
+Add an `f` when you want single precision:
 
 ```echo
-int64 $someInt = 1.0; // works
-int64 $someInt = 1.1; // compiler error
-
-float $someFloat = 3.14; // works
-double $someDouble = 3.14f; // works if there is no loss of precision
+$single = 1.0f;      // float32
 ```
 
-Literals will be converted at compile time and not at runtime.
-
-## Implicit Type Conversion
-
-Echo will make assumptions about the type of a value based on the context in which it is used.
-
-I understand that this is controversial to some, but I believe it greatly simplifies the language and the experience of using it.
-At the cost of some potential for unexpected behavior, also, it's not like the conversions are semi-random; they follow a strict set of rules.
-
-### Floating point values win
-
-Any operation that involves a floating point value will result in a float of the same type.
+Hex literals work too, and they take the smallest unsigned type that fits:
 
 ```echo
-echo 3.14f * 2; // float 6.28
-
-// will be auto converted to
-echo 3.14f * 2.0f 
+dprint(0xFF);         // [uint8] 255
+dprint(0xFFFF);       // [uint16] 65535
+dprint(0xFFFFFFFF);   // [uint32] 4294967295
 ```
 
-Remember that without the `f` suffix we consider the value to be a double.
+`f` is the only suffix. There's no `420i32` or `1u64` — to get a specific integer type, say it at the
+destination and the literal converts on the way in:
 
 ```echo
-echo 3.14 * 2; // double 6.28
-
-// will be auto converted to
-echo 3.14 * 2.0;
+int64 $big = 420;    // int64
+uint8 $small = 200;  // uint8
 ```
 
-#### Higher precision wins
+`int` and `float` are accepted as aliases for `int32` and `float32`, and `double` for `float64`. The explicit
+spellings are what the rest of these chapters use.
 
-To avoid loss of precision, the higher precision type will be used.
+### Losing precision is an error
+
+A literal converts to whatever the destination asks for, as long as nothing is lost:
 
 ```echo
-echo 3.14f * 2.0; // double 6.28
-
-// will be auto converted to
-echo 3.14 * 2.0;
+int64 $a = 1.0;      // works — 1.0 is exactly 1
+int64 $b = 1.1;      // error: this would lose the .1
 ```
 
-This logic will apply to all arithmetic infix operators.
+The same check catches a decimal that doesn't fit in single precision, which is the other half of why `f`
+exists:
 
 ```echo
-echo 3.14f * 2 + 10;
-
-// will be auto converted to
-echo (3.14f * 2.0f) + 10.0f
+float32 $x = 3.14;   // error: the literal '3.14' is stored in 32bit float which will result
+                     //        in the effective value 3.14
+float32 $y = 3.14f;  // works
+float64 $z = 3.14;   // works
 ```
 
-### Expected types
+Note: this check applies to *literals*. The compiler knows the exact value at compile time, so it can tell you.
+It can't do that for a variable, and it doesn't pretend to — see the underflow example at the end.
 
-If the context expects a specific type, the value will be converted to that type. Depending on the situation, this will happen at compile time or runtime.
+Literals are converted at compile time, not at runtime. `int64 $a = 1.0;` costs nothing.
+
+## Implicit type conversion
+
+Echo makes assumptions about the type of a value based on where it's used.
+
+I understand this is controversial to some. I still prefer it, because it greatly simplifies both the language
+and the experience of writing it. The cost is some room for surprise — but the conversions aren't
+semi-random, they follow a strict set of rules, and here they are.
+
+### Floating point wins
+
+Any arithmetic involving a floating point value produces a float of the same type.
 
 ```echo
-int $myNumber = 1.0; // int 1
+dprint(3.14f * 2);   // [float32] 6.28
+
+// conceptually
+dprint(3.14f * 2.0f);
 ```
 
-Because 1.0 can be logically converted to an int, the compiler will do so at compile time.
+And remember that without the `f`, you're working in double precision:
 
-Now, if you have an expression, the expected type will influence how the expression types are converted.
+```echo
+dprint(3.14 * 2);    // [float64] 6.28
+```
+
+### Higher precision wins
+
+When two floats meet, the wider one decides — the point being to not throw away bits you had:
+
+```echo
+dprint(3.14f * 2.0);   // [float64] 6.28
+```
+
+This applies to every arithmetic infix operator, and it applies left to right through the whole expression:
+
+```echo
+dprint(3.14f * 2 + 10);   // [float32] 16.28
+
+// conceptually
+dprint((3.14f * 2.0f) + 10.0f);
+```
+
+### The destination has the final say
+
+If the context expects a specific type, the expression is converted to it. Depending on what's in the
+expression, that happens at compile time or at runtime.
+
+```echo
+int32 $myNumber = 1.0;   // int32 1, decided at compile time
+```
+
+`1.0` converts to an `int32` losslessly, so the compiler just does it. Now put a variable in there:
 
 ```echo
 $multiplier = 2;
-float $val = 3.14 * $multiplier; // float 6.28
+float32 $val = 3.14f * $multiplier;   // float32 6.28
 
-// will be auto converted to
-float $val = 3.14f * float($multiplier);
+// conceptually
+float32 $val = 3.14f * float32($multiplier);
 ```
 
-Because `$multiplier` is a variable which we can't modify for the sole purpose of this operation, a runtime conversion will be performed. 
-_In this specific scenario, an optimizer might optimize this away at compile time, but for the sake of the example, let's assume it doesn't._
+`$multiplier` is a variable, so the compiler can't change its type for the sake of this one operation. A
+runtime conversion is inserted instead. *An optimizer might well fold this away, but for the sake of the
+example assume it doesn't.*
 
-This means when the expected type is a float, all literals in the expression will be converted to a float and vice versa.
+This is what "the destination wins" means in practice — the expected type reaches back into the whole
+expression:
 
 ```echo
-int $val = 3.0 * 2 + 5.000; // int 6
+$i = 1;
+$f = 1.0;
 
-// will be auto converted to
-int $val = (3 * 2) + 5
+dprint($i + $f);           // [float64] 2   — no destination, so floating point wins
+int32 $sum = $i + $f;      // [int32] 2     — the destination said int32
 ```
 
-Non-literal values will be converted at runtime to fit the expected type.
+Same expression, two answers, and neither of them is a coin flip.
+
+### When it can't be done
+
+If the types are genuinely incompatible, you get a compile-time error:
 
 ```echo
-function doubleMyValue(int $val): int {
-    return $val * 2;
-}
-
-float $a = 5.0;
-float $val = doubleMyValue($a * 3); // float 30.0
-
-// will be auto converted to
-float $val = float(doubleMyValue(int($a) * 3));
+uint8 $myVal = 10 + -1;   // error: -1 cannot be converted to uint8
 ```
 
-If the types are incompatible, a compile-time error will be thrown.
-
-```echo
-uint8 $myVal = 10 + -1; // compile-time error, because "-1" cannot be converted to uint8
-```
-
-This is also true for non literal values, but no overflow / underflow checks will be performed.
+Here's the catch, and it's the important one in this chapter: **that only works because they're literals.** The
+compiler evaluated `10 + -1` and looked at the result. For variables, it can't:
 
 ```echo
 uint8 $a = 10;
 uint8 $b = 1;
 
-$val = $b - $a; // results in a (uint8) if $a and $b would not be literals this would underflow without error
+$val = $b - $a;    // uint8 247. underflowed, silently
 ```
 
-While this is valid code, echo will throw a warning that the implicit conversion might cause a loss of precision.
-
-
-
-```echo
-$intVal = 1;
-$floatVal = 1.0;
-
-// performing an arithmetic operation with an int and a float
-// will implicitly convert the int to a float and return a float
-//   - float $sum = copy<float>($intVal) + $floatVal
-$sum = $intVal + $floatVal; // 2.0
-
-// except when the receiver of the operation has a datatype declared
-//   - int $intSum = $intVal + copy<int>($floatVal)
-int $intSum = $intVal + $floatVal; // 2
-```
+That's valid code and nothing warns you. The arithmetic is unsigned, `1 - 10` wraps, and you get 247. If you
+want the negative number, use a type that can hold one.

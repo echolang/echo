@@ -1,4 +1,5 @@
 #include "Parser/TypeDeclParser.h"
+#include "Parser/ConstDeclParser.h"
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
@@ -1200,6 +1201,40 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                         "'{}' is a requirement of the interface '{}', so it cannot have a body - end it "
                         "with ';' and let each implementor write one.",
                         member->signature_description(), struct_node->type_name()));
+            }
+        }
+        // **also ahead of starts_vardecl**, and for the sharpest version of the arm above's reason: both
+        // spellings begin with `const`, and only the `$` on the name says which. Parser::starts_constdecl is
+        // the one owner of that question
+        else if (starts_constdecl(payload)) {
+            const TokenReference at = cursor.current();
+
+            // a requirement is behaviour. a constant is a value the owner names, so it is storage-shaped in
+            // every sense that matters here - refused for the reason a property is
+            if (is_interface_body) {
+                refuse_interface_member(at, "a constant");
+                cursor.try_skip_to_next_statement();
+            }
+            // the nested-type refusal's reason, exactly: the initializer may mention the owner's `T`, and a
+            // constant is expanded into its use sites *before* the monomorphizer runs - so there is nothing
+            // to substitute that `T` from, and no later pass that could
+            else if (struct_node->is_generic()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(at),
+                    fmt::format(
+                        "A constant cannot be declared inside the generic type '{}' - its value is copied to "
+                        "each use site before type arguments are known. Declare it alongside its owner "
+                        "instead.",
+                        struct_node->type_name()));
+                cursor.try_skip_to_next_statement();
+            }
+            // published in the declaration pass only, the idiom parse_associated_type follows: both passes
+            // walk this body, and publishing twice would report the second as a redeclaration of the first
+            else if (collect_members) {
+                parse_constdecl(payload, struct_node);
+            }
+            else {
+                cursor.try_skip_to_next_statement();
             }
         }
         else if (starts_vardecl(payload)) {

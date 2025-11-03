@@ -102,17 +102,19 @@ namespace AST
     // lookup already answers for, and it is the only gate OwnershipPass synthesizes behind
     FunctionDeclNode *find_copy_constructor(const ComplexType *ct);
 
+    // **argument 0 of a synthesized member call: the place, addressed unless it already is an address.**
+    // the parameter is the borrow `Foo&`, so a value ranked against it would be no fit at all - but a
+    // place that is *already* a pointer must be handed over bare. a synthesized class deinit's `$this` is
+    // one, and so is a borrow parameter a `foreach` iterates. addressing one of those twice hands the
+    // callee a `ptr<ptr<Foo>>`, which unifies against nothing: the call is then **never instantiated at
+    // all, silently**, and only the type checker notices, far away. one function, because a rule whose
+    // failure mode is silence must not have two copies of itself to keep in step - and it is asked of the
+    // *expression*, so a receiver whose declaration is not typed yet answers `unknown` and gets addressed
+    ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
+
     // **a member call a pass synthesizes, with its callee already chosen.** a member call is a
-    // FunctionCallExprNode with the receiver prepended - there is no other machinery - so all this owns
-    // is the one rule that is easy to get wrong at either of the sites that build one.
-    //
-    // **the receiver is addressed, unless it already is an address.** the parameter is the borrow
-    // `Foo&`, so a value ranked against it would be no fit at all - but a place that is *already* a
-    // pointer must be handed over bare. a synthesized class deinit's `$this` is one, and so is a borrow
-    // parameter a `foreach` iterates. addressing one of those twice hands the callee a `ptr<ptr<Foo>>`,
-    // which unifies against nothing: the call is then **never instantiated at all, silently**, and only
-    // the type checker notices, far away. one function, because a rule whose failure mode is silence
-    // must not have two copies of itself to keep in step.
+    // FunctionCallExprNode with the receiver prepended - there is no other machinery - so all this owns is
+    // the rule above and the settlement below.
     //
     // the call is published as **resolved but uncoerced**: there is no name to look up and no overload
     // set to search, and for an instantiation `callee` is the *template's* declaration - the

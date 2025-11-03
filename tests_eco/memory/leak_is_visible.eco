@@ -1,0 +1,19 @@
+// the contrast case for every leak check in the corpus: a counter that reports nothing outstanding is
+// only evidence if it can also report something outstanding. so this leaks on purpose, reads the leak,
+// and only then gives the memory back
+//
+// tests_eco/classes/cycle_leak_is_measurable.eco is the same argument for the reference-counted half
+ptr<int32> $p = mem::alloc<int32>(1);
+assert(mem::live_allocations() == 1, "one allocation is outstanding");
+
+// two, and still counted one at a time rather than by size
+ptr<int32> $q = mem::alloc<int32>(1024);
+assert(mem::live_allocations() == 2, "and now two");
+
+mem::free($p);
+assert(mem::live_allocations() == 1, "one given back, one still held");
+
+mem::free($q);
+assert(mem::live_allocations() == 0, "balanced");
+
+echo "balanced";

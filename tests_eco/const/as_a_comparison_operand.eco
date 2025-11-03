@@ -1,0 +1,17 @@
+// **`LIMIT < $n` has to parse as a comparison.** A bare identifier used to be impossible as an operand - values
+// carry a `$` - so `name <` was read as an explicitly parameterised call and nothing else. A constant is exactly
+// that impossible thing, so the type argument list is speculative now: no `(` after it, and the tokens go back.
+const LIMIT = 10;
+
+int32 $n = 3;
+
+if (LIMIT < $n) { echo 1; } else { echo 2; }
+if ($n < LIMIT) { echo 3; }
+if (LIMIT > $n) { echo 4; }
+
+// and the generic call it must not have broken, in both the one- and two-argument spellings
+function ident<T>(T $v) : T { return $v; }
+struct Box<T> { T $v; function get() : T { return $this->v; } }
+
+echo ident<int32>(5);
+echo Box<Box<int32>>(Box<int32>(6))->get()->get();

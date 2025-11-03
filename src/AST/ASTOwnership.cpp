@@ -1,5 +1,7 @@
 #include "AST/ASTOwnership.h"
 
+#include "AST/ConstRefExprNode.h"
+
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
@@ -69,6 +71,18 @@ namespace
         ExprNode *rewrite_value_edge(ExprNode *expr) override
         {
             return answerable ? RecursiveVisitor::rewrite_value_edge(expr) : expr;
+        }
+
+        // a constant reference stands for an expression nobody has substituted in yet, so nothing about
+        // what a body owns can be answered while one is present.
+        //
+        // belt-and-braces, unlike the two arms below: AST::ConstantExpander runs *before* the fixpoint
+        // rather than inside it, so a reference should never reach this walk at all. the arm is here so
+        // the invariant enforces itself if that order ever moves - this walk answers a body exactly once,
+        // ever, and an early yes cannot be revisited
+        void visit_const_ref(ConstRefExprNode &node) override
+        {
+            answerable = false;
         }
 
         // an untyped declaration is one the monomorphizer has not re-derived yet, and a typed one
@@ -165,8 +179,7 @@ namespace
     // the local a `mv` names, or null when the operand is not a bare variable read. only a whole
     // variable can be moved out of today: moving one field (`mv $doc->body`) leaves a partly-moved
     // struct whose destructor has no defined behaviour, and moving an element (`mv $items[0]`) has a
-    // runtime index with nothing static to mark unset. both are listed as unspecified in
-    // book/concept/ownership_and_moving.md, "Not yet specified"
+    // runtime index with nothing static to mark unset. both are refused rather than half-supported.
     VarDeclNode *whole_variable_moved(ExprNode *operand)
     {
         if (operand == nullptr || operand->get_node_type() != NodeType::n_varref) {
@@ -997,12 +1010,28 @@ PendingEdge OwnershipPass::pending_edge(ExprNode *owner) const
         case NodeType::n_member_access:
             return {nullptr, &static_cast<MemberAccessNode *>(owner)->get_base_node()};
 
+        // **the one call that registers, and it registers its argument.** unlike the three above, the
+        // owner is not asking for an address - it is asking for something to *own* the value it printed,
+        // which is the same slot and the same drop for a different reason. an ordinary call never
+        // registers, so the same AST::is_print_call the walker gates on is asked here too: a second call
+        // shape that starts registering one hits the assert below rather than silently claiming argument 0
+        case NodeType::n_expr_call:
+        {
+            auto *call = static_cast<FunctionCallExprNode *>(owner);
+
+            if (is_print_call(*call) && !call->arguments.empty()) {
+                return {&call->arguments[0], nullptr};
+            }
+
+            break;
+        }
+
         default:
             break;
     }
 
-    // the three arms above are exactly the three sites that push onto _pending_temporaries. a fourth
-    // reaching here means one was added without an edge, which would otherwise blind-cast
+    // the arms above are exactly the sites that push onto _pending_temporaries. one more reaching here
+    // means a request was added without an edge, which would otherwise blind-cast
     assert(false && "a pending temporary was requested by a node with no operand edge");
     return {};
 }
@@ -1255,6 +1284,22 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 }
 
                 call->arguments[i] = resolve_value_arrival(call->arguments[i], wanted, param, ValueDestination::t_argument);
+            }
+
+            // **a print call is the last owner of what it printed.** every other by-value argument hands
+            // the value to a callee, and a callee releases its parameter - that is what makes an owning
+            // temporary at an argument position safe with no rule here. `echo` has no callee: it is
+            // recognised at the call site and lowered inline, so an owning value written straight into one
+            // is read, printed, and then referred to by nothing at all. one leaked string per statement,
+            // which is invisible until the statement is in a loop
+            //
+            // **requested rather than bound**, for the reason a call forwards: the value has to outlive the
+            // print, and the scope that does is the statement's own value edge. binding here would tear it
+            // down before the write it was built for
+            if (is_print_call(*call) && !call->arguments.empty() && call->arguments[0] != nullptr
+                && !is_place_expression(*call->arguments[0])
+                && needs_destruction(call->arguments[0]->result_type())) {
+                request_storage_for(expr);
             }
 
             break;

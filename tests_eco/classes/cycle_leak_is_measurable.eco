@@ -1,0 +1,49 @@
+// the sibling of `cycle_leaks_when_both_edges_own.eco`, and the reason it is a sibling rather than an
+// edit: that case pins the leak by the *absence* of destructor output, which is a golden anybody could
+// break by accident, and its whole value is being byte-stable beside `weak_cycle_no_leak.eco`
+//
+// what it could not say is that memory was actually retained. an absent `echo` is evidence about the
+// destructor, not about the block. this says it directly
+class Node
+{
+    int32 $tag;
+    Node? $next;
+    Node? $prev;
+}
+
+function owning() : void
+{
+    Node $a = Node(1, null, null);
+    Node $b = Node(2, null, null);
+
+    // both edges own, so neither count can ever reach zero
+    $a->next = $b;
+    $b->prev = $a;
+}
+
+function borrowing() : void
+{
+    Node $a = Node(1, null, null);
+    Node $b = Node(2, null, null);
+
+    // and here the back edge only watches - the same two objects, one word different
+    $a->next = $b;
+}
+
+assert(mem::live_allocations() == 0, "nothing outstanding yet");
+
+owning();
+
+// **still held.** the two blocks outlive the function they were built in, and nothing warns. `> 0`
+// rather than `== 2` on purpose: the claim is that memory was retained, and an exact figure would churn
+// the day a class box gains a header word
+assert(mem::live_allocations() > 0, "a cycle of owning edges is never collected");
+
+echo "leaked";
+
+// the acyclic version, for the contrast that makes the line above mean something
+usize $before = mem::live_allocations();
+borrowing();
+assert(mem::live_allocations() == $before, "an acyclic graph is collected in full");
+
+echo "collected";

@@ -60,6 +60,14 @@ ISSUE_MESSAGE_FNC(UnknownFunction)
     return fmt::format("The function '{}' could not be found", function_name);
 }
 
+ISSUE_MESSAGE_FNC(UnknownConstant)
+{
+    return fmt::format(
+        "Unknown constant '{}'. A variable carries a '$' - did you mean '${}'? A constant is declared at "
+        "file, namespace or struct scope, as `const {} = ...;`",
+        constant_name, constant_name, constant_name);
+}
+
 ISSUE_MESSAGE_FNC(LossOfPrecision)
 {
     return fmt::format("This operation results in a loss of precision: {}", _message);

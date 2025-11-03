@@ -1,0 +1,30 @@
+// **an owning value printed straight out of a call.** every other by-value argument hands the value to
+// a callee, and a callee releases its parameter - `echo` has no callee at all, it is recognised at the
+// call site and lowered inline, so the string here was read, printed, and then referred to by nothing.
+// one leak per statement, and in a loop that is one per iteration.
+//
+// the leak is invisible in the output, which is the whole reason this is a golden: `string` declares no
+// destructor and its buffer's teardown says nothing. the RAST is where the fix is visible - the print is
+// wrapped in a binding that owns what it printed and releases it after the write
+
+function label() : string
+{
+    string $s = 'buffer';
+    $s->append('!');
+
+    return $s;
+}
+
+echo 1;
+echo label();
+echo 2;
+
+// a place is somebody else's already: a named local owns this one, so nothing is bound around the print
+string $named = label();
+echo $named;
+
+// a literal binds too, and deliberately so: it is the same value a declaration initialized from one
+// gets, and that declaration is released at the end of its scope. asking "does this expression own what
+// it produced" any other way here would be a second answer to a question `needs_destruction` already
+// owns - and the release is the same null-tolerant one, so a literal's static buffer is left alone
+echo 'plain';

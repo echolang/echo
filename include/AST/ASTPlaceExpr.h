@@ -71,6 +71,10 @@ namespace AST
             // a transient marker saying a *place* is being handed over. the storage question is about
             // its operand, and a `mv` that survives to codegen is a compiler defect either way
             case NodeType::n_expr_move:
+            // likewise transient: a constant reference is replaced by a clone of the constant's
+            // initializer before anything asks about storage, and whatever *that* is answers for it. one
+            // that survives is a compiler defect, so the honest answer here is "not addressable"
+            case NodeType::n_expr_const_ref:
             // already carries its own request outward through the pending queue
             case NodeType::n_expr_temp_bind:
                 return StorageClass::t_addressless;

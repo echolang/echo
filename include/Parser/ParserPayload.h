@@ -44,6 +44,16 @@ namespace Parser
         // function you called - so every call site in between had to convert or forward it
         Pass pass = Pass::t_bodies;
 
+        // is this a `module.eco` rather than a `.eco` source file?
+        //
+        // a manifest is **Echo**, read by this same lexer and this same attribute parser into a scratch
+        // bundle - which is what makes the format honest, and is also why one flag is needed. The two
+        // grammars accept different attribute names, and each has to report against *its own* set:
+        // `#[source:]` in a manifest is worth "expected one of: module, version, depends, sources" and not
+        // a list naming `#[inline]`, which is legal nowhere near it. So Parser::parse_attribute defers to
+        // Parser::read_manifest_attributes here rather than answering first with the wrong vocabulary
+        bool is_manifest = false;
+
         // reports the token the cursor is sitting on as unexpected where `expected` was wanted
         // every parser needs this and all three of the pieces it takes - the cursor for the token,
         // the context to locate it, the collector to record it - already live here

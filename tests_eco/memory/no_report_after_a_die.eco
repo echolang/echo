@@ -1,0 +1,9 @@
+// the branch the report deliberately does not take. a `die` at module scope leaves `main`'s block
+// terminated - the abort runtime already called exit(1) - so there is no moment after the teardown left
+// for a report to describe, and `[memory]` is absent rather than printed with a stale number
+//
+// it also holds an allocation when it stops, so the absence cannot be mistaken for "nothing to say"
+ptr<int32> $p = mem::alloc<int32>(4);
+echo mem::live_allocations();
+
+die("stopping with memory still held");

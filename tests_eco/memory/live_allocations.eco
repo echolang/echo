@@ -1,0 +1,32 @@
+// the counter's arithmetic, one case per way the allocator can be asked for something. every one of
+// these is a delta the seam has to get right, and four of the six move the count by nothing - which is
+// the half that a naive "was it live, is it live now" implementation gets wrong
+//
+// see stdlib/core/mem.eco for the surface
+echo mem::live_allocations();
+
+// an allocation is one allocation, whatever it holds
+ptr<int32> $p = mem::alloc<int32>(4);
+echo mem::live_allocations();
+
+mem::free($p);
+echo mem::live_allocations();
+
+// freeing null is legal and is not a free. a destructor over a field nobody allocated takes this path,
+// so it is ordinary rather than an edge case
+mem::free(ptr<int32>(null));
+echo mem::live_allocations();
+
+// growing a block that already exists produces no second allocation, whether or not the allocator had
+// to move it. this is where an `array<T>` spends its life
+ptr<int32> $q = mem::alloc<int32>(2);
+$q:$ = mem::realloc($q, 4096);
+echo mem::live_allocations();
+
+// ...and growing *nothing* does. `realloc(null, n)` is spelled as a resize and behaves as an alloc
+ptr<int32> $r = mem::realloc(ptr<int32>(null), 8);
+echo mem::live_allocations();
+
+mem::free($q);
+mem::free($r);
+echo mem::live_allocations();

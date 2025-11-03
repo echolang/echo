@@ -1,0 +1,8 @@
+namespace modgated;
+
+// ordinary Echo, deliberately: nothing here is platform-specific, so the selected arm compiles and runs on
+// any host. `--target-os` does not cross-compile - what is under test is which *sources* the manifest named
+function gated_platform() : string
+{
+    return 'darwin';
+}

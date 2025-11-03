@@ -1,0 +1,6 @@
+// the scalar case of the const refusal, which the array and member-path cases beside it never covered:
+// a plain `const` local is a place expression whose storage carries the const bit, and
+// TypeChecker::check_const_target reads it off the target rather than off the declaration
+const usize $max = 100;
+
+$max = 5;

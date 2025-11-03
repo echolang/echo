@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:5
+A constant cannot be declared inside the generic type 'box' - its value is copied to each use site before type arguments are known. Declare it alongside its owner instead.
+Begin: 'const'
+End: 'const'
+Code excerpt:
+ [5]> {
+ [6]>     const usize N = 1;
+          ^
+ [7]> 
+
+Critical issues found, cannot compile.

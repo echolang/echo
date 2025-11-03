@@ -1,0 +1,6 @@
+namespace modgated;
+
+function gated_platform() : string
+{
+    return 'linux';
+}

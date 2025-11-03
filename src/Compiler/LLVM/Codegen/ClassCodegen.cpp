@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
+#include "Compiler/LLVM/Codegen/MemoryCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
@@ -17,20 +18,6 @@
 
 namespace Compiler::LLVM
 {
-
-llvm::FunctionCallee ClassCodegen::get_malloc()
-{
-    return _ctx.libc_callee("malloc",
-        _ctx.opaque_ptr_type(),
-        { llvm::Type::getInt64Ty(*_ctx.llvm_context) });
-}
-
-llvm::FunctionCallee ClassCodegen::get_free()
-{
-    return _ctx.libc_callee("free",
-        llvm::Type::getVoidTy(*_ctx.llvm_context),
-        { _ctx.opaque_ptr_type() });
-}
 
 llvm::Value *ClassCodegen::gen_header_ptr(
     llvm::Value *handle, llvm::Type *box_type, unsigned index, const llvm::Twine &name)
@@ -64,8 +51,10 @@ llvm::Value *ClassCodegen::gen_class_box_alloc(const AST::ValueType &class_type)
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     const uint64_t block_size = _ctx.layout().getTypeAllocSize(layout.box);
 
-    llvm::Value *handle = _ctx.builder->CreateCall(
-        get_malloc(), { llvm::ConstantInt::get(i64, block_size) }, "obj");
+    // through the memory subsystem rather than straight to `malloc`, so a class box and an `array<T>`'s
+    // storage are counted by one counter. that this and mem.eco's raw allocation had no common owner is
+    // the whole reason "did this program give everything back" was unanswerable
+    llvm::Value *handle = _ctx.memory->gen_alloc(llvm::ConstantInt::get(i64, block_size), "obj");
 
     // the whole block, header included, before either header word is written. a constructor writes
     // only the properties it was given, and a property nobody writes is read by the very first thing
@@ -145,10 +134,14 @@ llvm::Function *ClassCodegen::get_or_create_weak_release_thunk()
         declare_release_thunk(name, "obj"),
         _ctx.types->class_header_llvm_type(), ClassBox::weak_index, "free",
         [this](llvm::Value *handle) {
-            // **the only free in the runtime.** the payload is already torn down by the time any path
-            // arrives here - the strong release ran the deinit before dropping its collective weak
-            // reference - so this gives back memory and reads nothing
-            _ctx.builder->CreateCall(get_free(), { handle });
+            // **the only place the class runtime gives memory back.** the payload is already torn down
+            // by the time any path arrives here - the strong release ran the deinit before dropping its
+            // collective weak reference - so this gives back memory and reads nothing
+            //
+            // through the memory subsystem, which is what makes a class box show up in the count. asking
+            // it for the free thunk from inside this one's body is safe: it guards and restores its own
+            // insert point, exactly as the abort thunk already does when a body stops
+            _ctx.memory->gen_free(handle);
         });
 }
 

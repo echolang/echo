@@ -9,6 +9,7 @@ namespace AST
     class TypeNode;
     class TypeCastNode;
     class VarDeclNode;
+    class ConstDeclNode;
     class VarRefNode;
     class LiteralFloatExprNode;
     class LiteralIntExprNode;
@@ -19,6 +20,7 @@ namespace AST
     class DerefExprNode;
     class PointerValueNode;
     class MoveExprNode;
+    class ConstRefExprNode;
     class ClassAllocExprNode;
     class RetainExprNode;
     class GuardNode;
@@ -60,6 +62,7 @@ namespace AST
         virtual void visitType(TypeNode &node) = 0;
         virtual void visitTypeCast(TypeCastNode &node) = 0;
         virtual void visitVarDecl(VarDeclNode &node) = 0;
+        virtual void visit_const_decl(ConstDeclNode &node) = 0;
         virtual void visitVarRef(VarRefNode &node) = 0;
         virtual void visitLiteralFloatExpr(LiteralFloatExprNode &node) = 0;
         virtual void visitLiteralIntExpr(LiteralIntExprNode &node) = 0;
@@ -70,6 +73,7 @@ namespace AST
         virtual void visit_deref_expr(DerefExprNode &node) = 0;
         virtual void visit_pointer_value(PointerValueNode &node) = 0;
         virtual void visit_move_expr(MoveExprNode &node) = 0;
+        virtual void visit_const_ref(ConstRefExprNode &node) = 0;
         virtual void visit_class_alloc_expr(ClassAllocExprNode &node) = 0;
         virtual void visit_retain_expr(RetainExprNode &node) = 0;
         virtual void visit_strong_expr(StrongExprNode &node) = 0;

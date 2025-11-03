@@ -1,6 +1,10 @@
 // a capturing closure's environment is heap allocated and reference counted, so the loop below has to
-// give every one of them back. it used to be the whole risk of the feature: nothing observable goes
-// wrong when an environment leaks, the process just grows
+// give every one of them back. this case checks the *arithmetic* - that every closure still answers what
+// it captured however many references its environment carried
+//
+// that the environments are actually released is `closure_environment_no_leak.eco`, and until the
+// allocation count existed it could not be asked at all: nothing observable went wrong when an
+// environment leaked, the process just grew
 //
 // bounded so the golden is fast; the unbounded version peaks at ~1MB for two million iterations, which
 // is what says the release actually runs

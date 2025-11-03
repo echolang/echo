@@ -1,0 +1,13 @@
+// `exit` stops with a code the program chose, which is the whole of what separates it from `die` - `die`
+// is hardcoded to 1 and prints a message, this prints nothing.
+//
+// pinned with an exact `expect:` rather than `fail`, and that is the point of the setting existing: as
+// `fail` this case would pass just as well if the compiler crashed.
+
+echo 1;
+
+std::env::exit(3);
+
+// unreachable, and the compiler knows it - AST::scope_exit_kind gives `exit` the arm `die` has, so
+// nothing below is emitted
+echo 2;

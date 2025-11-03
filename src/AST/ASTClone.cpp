@@ -21,6 +21,8 @@
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/ConstDeclNode.h"
+#include "AST/ConstRefExprNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/AssignNode.h"
@@ -330,6 +332,21 @@ Node *VarDeclNode::clone(CloneContext &cc) const
     c->init_expr = cc.child(c->init_expr);
     c->points_to = cc.rebind(c->points_to);
     return c;
+}
+
+Node *ConstDeclNode::clone(CloneContext &cc) const
+{
+    ConstDeclNode *c = cc.shallow(this);
+    c->_type_node = cc.child(c->_type_node);
+    c->value = cc.child(c->value);
+    return c;
+}
+
+Node *ConstRefExprNode::clone(CloneContext &cc) const
+{
+    // nothing to fix up: every field is the name and where to look for it, and the resolved declaration is
+    // deliberately not among them - a clone is resolved by the expander like any other reference
+    return cc.shallow(this);
 }
 
 // ---------------------------------------------------------------------------

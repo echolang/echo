@@ -86,7 +86,7 @@ TEST_CASE("An inferred declaration nests when the source already holds a pointer
 TEST_CASE("Generic decay collapses a pointer argument onto the pointee's instance", "[Integration][pointer][generics]")
 {
     // the reason the decay rule exists: without it `box($p)` and `box($var)` would produce two
-    // instances that behave identically (book/concept/pointers_and_refs_v2.md, L161)
+    // instances that behave identically (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function box<T>(T $v) : T { return $v; }\n"
         "$var = 7;\n"

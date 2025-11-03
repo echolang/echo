@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+Conditional Compilation Failed
+------------------------------
+line 4: unknown os 'darwn', expected one of: darwin, linux, windows

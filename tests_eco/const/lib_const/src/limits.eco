@@ -1,0 +1,14 @@
+namespace modlimits;
+
+const usize PAGE = 4096;
+
+// one constant in terms of another, across the same module
+const usize HALF_PAGE = PAGE / 2;
+
+// and one on a struct, reached as `modlimits::sizes::SLOT` from anywhere
+struct sizes
+{
+    const usize SLOT = 64;
+
+    int32 $unused;
+}

@@ -1,0 +1,16 @@
+// the other way to check a leak, and the only one that can see the state *after* the program's own
+// module-scope teardown: --explain-memory, which has `main` print what is outstanding on its way out
+//
+// `$c` is released after the last statement of this file, so `mem::live_allocations()` written here would
+// still count it. the report is emitted past that point, which is what makes it the whole-program answer
+class Counter
+{
+    int32 $value;
+}
+
+Counter $c = Counter(7);
+echo $c->value;
+
+array<int32> $numbers = [1, 2, 3];
+$numbers->push(4);
+echo $numbers[3];

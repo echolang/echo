@@ -1,0 +1,45 @@
+// the assertion `closure_environment_refcount.eco` could not make. that case runs the loop and checks the
+// arithmetic, and its comment used to say the obvious: nothing observable goes wrong when an environment
+// leaks, the process just grows. so it proved the closures *worked*, not that they were given back
+//
+// with the allocation count readable, an environment is an allocation like any other and a leak is a
+// number. same loop, one assertion
+int32 $i = 0;
+int32 $sum = 0;
+
+{
+    while ($i < 200) {
+        function<int32()> $f = function() : int32 { return $i; };
+
+        // a copy shares the environment, so this round holds two references to it and owes two releases
+        function<int32()> $copy = $f;
+
+        $sum = $sum + $f() + $copy();
+        $i = $i + 1;
+    }
+}
+
+echo $sum;
+
+// **after the scope, not inside it.** the environment the last round allocated is released when the
+// declarations holding it leave scope, which is the closing brace above and not the line before it
+assert(mem::live_allocations() == 0, "every environment was released");
+
+// and reassignment: the loop below allocates one environment per round and gives back the one the
+// variable held before. a leak here would be 1000 environments rather than one
+int32 $j = 0;
+
+{
+    function<int32()> $rolling = function() : int32 { return 0; };
+
+    while ($j < 100) {
+        $rolling = function() : int32 { return $j; };
+        $j = $j + 1;
+    }
+
+    echo $rolling();
+}
+
+assert(mem::live_allocations() == 0, "reassignment released the environment it replaced");
+
+echo "balanced";

@@ -1,0 +1,73 @@
+/**
+ * The directories a process is told about.
+ *
+ * Two of the three are environment variables and cost exactly what reading one costs. The working
+ * directory is the exception: `getcwd` writes into a buffer the caller sizes, so it is the one place
+ * in this module that allocates, and the one that hands back an owning `string`.
+ */
+
+namespace std::env;
+
+/**
+ * The current working directory.
+ *
+ * An owning `string`, unlike everything else here, and that is forced rather than chosen: the bytes
+ * come from a buffer this function allocated, so a view over them would be dangling the moment it
+ * was handed back.
+ *
+ * `getcwd` answers null when the path does not fit rather than saying how much it needs, so the
+ * buffer is grown until it does. The cap is there to turn a broken `getcwd` into a message instead
+ * of a loop that allocates until the machine gives up; no path on any supported platform comes near
+ * it.
+ */
+function working_dir() : string
+{
+    usize $capacity = 256;
+
+    while ($capacity <= 65536) {
+        ptr<uint8> $raw = mem::alloc<uint8>($capacity);
+
+        // bound to a local because `:$` needs a place to reach the pointer of, and a call result has
+        // no storage - AST::storage_of calls that addressless
+        ptr<uint8> $written = c_getcwd($raw, $capacity);
+
+        // the failure grows and retries, so the success below is straight-line. written the other way
+        // round, `$path` would be declared inside a branch and moved out of on only that one, which
+        // AST::OwnershipPass refuses - it has no way to destroy it on the path that did not return
+        if ($written:$ == null) {
+            mem::free($raw);
+            $capacity = $capacity * 2;
+            continue;
+        }
+
+        // the copy is what lets the buffer go - `from_c_str` takes the bytes along
+        string $path = str::from_c_str($raw);
+        mem::free($raw);
+
+        return $path;
+    }
+
+    die('the working directory does not fit in 64 KiB - getcwd is not behaving');
+}
+
+/**
+ * The current user's home directory, or null when `HOME` is not set.
+ *
+ * Nullable because an unset `HOME` has no honest answer. Returning `""` would hand back a path that
+ * resolves - to the working directory - and the caller could not tell that from a real one.
+ */
+function home_dir() : string::view?
+{
+    return var('HOME');
+}
+
+/**
+ * The directory for temporary files, `/tmp` when `TMPDIR` is not set.
+ *
+ * Not nullable, because unlike `HOME` there *is* an honest answer when the variable is missing: the
+ * path every POSIX system has.
+ */
+function tmp_dir() : string::view
+{
+    return var('TMPDIR', '/tmp');
+}

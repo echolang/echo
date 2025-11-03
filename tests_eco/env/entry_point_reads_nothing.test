@@ -1,0 +1,21 @@
+--- OUT --->
+1
+--- IR --->
+CHECK: define i32 @main(i32 %argc, ptr %argv, ptr %envp)
+
+# the prologue writes, and that is all it does
+CHECK: store i64 %argc.widened, ptr @__eco_argc
+CHECK: store ptr %argv, ptr @__eco_argv
+CHECK: store ptr %envp, ptr @__eco_envp
+
+# nothing between the prologue and the return reads any of them back
+CHECK-NOT: load i64, ptr @__eco_argc
+CHECK-NOT: load ptr, ptr @__eco_argv
+CHECK-NOT: load ptr, ptr @__eco_envp
+
+# an unreferenced `#[inline]` wrapper is defined in no unit at all. spelled as the whole symbol, because
+# a CHECK is a plain substring match and not a pattern - a `{{.*}}` here would be a literal nothing ever
+# matches, and a CHECK-NOT that cannot match passes without asserting anything
+CHECK-NOT: define linkonce_odr i32 @_std_env_pidZ
+
+CHECK: ret i32 0

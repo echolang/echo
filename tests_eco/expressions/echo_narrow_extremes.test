@@ -23,7 +23,7 @@ CHECK: c"%u\0A\00"
 CHECK: c"%d\0A\00"
 CHECK: c"%f\0A\00"
 
-CHECK: define i32 @main()
+CHECK: define i32 @main(
 
 # int8 at its minimum: sign-extended, and the i32 is what `%d` reads. `zext` here would print 128
 CHECK: load i8

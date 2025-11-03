@@ -1,0 +1,13 @@
+// the real resolved executable path, not `argv[0]`.
+//
+// `mode: build`, because that is where the question has an interesting answer: under `run` a JIT'd program
+// is echoc's own process, so `exe()` truthfully reports the compiler. Here it is the linked binary.
+//
+// the path differs per machine, so what is asserted is its shape - absolute, non-empty, and *not* the
+// relative path `argv[0]` carries, which is what makes this more than a restatement of arg(0).
+
+string $path = std::env::exe();
+
+echo $path->size() > 0;
+echo $path->starts_with('/');
+echo $path->ends_with('exe');

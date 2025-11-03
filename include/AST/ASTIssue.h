@@ -86,6 +86,10 @@ namespace AST
         MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
         MAKE_ISSUE_DEF1(UnknownFunction, IssueSeverity::Error, const std::string, function_name);
+        // a bare identifier in an operand position that names no constant. its own kind rather than a
+        // GenericError because it is one of the two things a reader could have meant, and the message has to
+        // offer the other: a value carries a `$`, so a missing one lands here rather than at UnknownVariable
+        MAKE_ISSUE_DEF1(UnknownConstant, IssueSeverity::Error, const std::string, constant_name);
         // MAKE_ISSUE_DEF2(ValueTypeConflict, IssueSeverity::Error, const ValueType *, expected, ValueType *, actual);
 
         MAKE_ISSUE_DEF1(LossOfPrecision, IssueSeverity::Warning, const std::string, _message);

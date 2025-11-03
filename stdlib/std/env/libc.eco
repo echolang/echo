@@ -1,0 +1,52 @@
+/**
+ * The C symbols this module is built out of, in one place.
+ *
+ * They are gathered into a file of their own rather than sitting beside the functions that call
+ * them, because **a C symbol may only be declared once per module**: two `extern` blocks naming
+ * `getenv` with signatures that disagree is a diagnostic, and one place to declare a symbol is one
+ * place for that to be true. `TypeLowering` unifies matching declarations through
+ * `getOrInsertFunction` and refuses mismatched ones, so the failure is loud - but it is a failure
+ * this file's existence means nobody has to think about.
+ *
+ * Nothing here is meant to be called from outside `std::env`. There are no visibility modifiers
+ * yet, so the `c_` prefix is what says so.
+ *
+ * **Types are ours to get right** - nothing checks a declaration against the real C header. `usize`
+ * stands in for `size_t` and `int32` for C's `int`.
+ */
+
+namespace std::env;
+
+extern {
+    // returns null when the name is not set, and a pointer into the environment block when it is.
+    // the bytes belong to the process, not to the caller
+    function getenv as c_getenv(ptr<const uint8> $name) : ptr<uint8>;
+
+    // writes the path into `$buf` and hands it back, or null when it does not fit - which is the
+    // only failure `working_dir` has to distinguish, and why it grows its buffer rather than
+    // reading errno
+    function getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
+
+    function getpid as c_getpid() : int32;
+}
+
+// **the one platform-specific binding in the module**, and the reason conditional compilation exists.
+//
+// there is no portable call for "where is this executable". Each platform has exactly one, none of them
+// exists anywhere else, and a declaration of the wrong one is a *link* error rather than a compile error -
+// so the declaration has to be absent on the platforms that lack it, which is what the filter buys. The
+// arms are the block, not just the body.
+#[if: os == darwin]
+extern {
+    // writes the path into `$buf` and the length it needed into `$size`. 0 on success, -1 when the buffer
+    // was too small - and on that path it has already overwritten `$size` with the length required, which
+    // is what makes the retry exact rather than a doubling guess
+    function _NSGetExecutablePath as c_exe_path(ptr<uint8> $buf, ptr<uint32> $size) : int32;
+}
+#[elif: os == linux]
+extern {
+    // the byte count written, or -1. It does **not** terminate, which is the one thing a caller here has to
+    // remember - `str::from_c_str` would read past the end
+    function readlink as c_readlink(ptr<const uint8> $path, ptr<uint8> $buf, usize $size) : int64;
+}
+#[end]

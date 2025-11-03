@@ -1,0 +1,6 @@
+# an explicit target rather than the host's, so this asserts the same thing on every machine
+flags: --target-os linux
+stdlib: off
+
+--- OUT --->
+20

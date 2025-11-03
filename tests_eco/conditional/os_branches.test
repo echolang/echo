@@ -1,0 +1,6 @@
+# **an explicit target rather than the host's**, so this case asserts the same thing on every machine.
+# The host is exercised by host_arm.eco, which asserts that exactly one arm ran without naming which.
+flags: --target-os darwin
+
+--- OUT --->
+darwin

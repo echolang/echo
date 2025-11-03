@@ -1,0 +1,9 @@
+// the same arguments through a *linked binary*, where argv arrives from the OS on the stack rather than
+// from `ExecutionEngine::runFunctionAsMain`. The two paths agree on everything except `arg(0)`, which is
+// the binary here and the source file under `run` - so this case is what pins that the widened
+// `main(argc, argv, envp)` is filled in by the platform and not only by the JIT.
+
+echo std::env::argc();
+echo std::env::arg(1);
+echo std::env::arg(2);
+echo std::env::var('ECO_CORPUS_KEY', 'fell_back');

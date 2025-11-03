@@ -12,6 +12,8 @@
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/ConstDeclNode.h"
+#include "AST/ConstRefExprNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/AssignNode.h"
@@ -156,6 +158,11 @@ void RecursiveVisitor::visitVarDecl(VarDeclNode &node)
     value_edge(node.init_expr);
 }
 
+void RecursiveVisitor::visit_const_decl(ConstDeclNode &node)
+{
+    value_edge(node.value);
+}
+
 void RecursiveVisitor::visit_assign(AssignNode &node)
 {
     value_edge(node.target);
@@ -251,6 +258,12 @@ void RecursiveVisitor::visit_pointer_value(PointerValueNode &node)
 void RecursiveVisitor::visit_move_expr(MoveExprNode &node)
 {
     value_edge(node.operand);
+}
+
+void RecursiveVisitor::visit_const_ref(ConstRefExprNode &node)
+{
+    // a leaf: `decl` is a cross-reference into a declaration this walk does not own, and the initializer it
+    // points at is walked in its own right - once, by AST::ConstantExpander, rather than once per use site
 }
 
 void RecursiveVisitor::visit_class_alloc_expr(ClassAllocExprNode &node)

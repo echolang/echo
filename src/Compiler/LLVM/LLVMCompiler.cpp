@@ -22,7 +22,7 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _debug_print(_ctx), _backend(_ctx)
+      _abort(_ctx), _memory(_ctx), _process(_ctx), _debug_print(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -34,6 +34,8 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.lvalues = &_lvalues;
     _ctx.classes = &_classes;
     _ctx.abort = &_abort;
+    _ctx.memory = &_memory;
+    _ctx.process = &_process;
     _ctx.debug_print = &_debug_print;
 }
 
@@ -146,12 +148,31 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
             "no entry module '{}' in the bundle", _ctx.entry_module_name), nullptr);
     }
 
-    llvm::FunctionType *funcType = llvm::FunctionType::get(_ctx.builder->getInt32Ty(), false);
+    // `int main(int argc, char **argv, char **envp)` - the three-argument form, always, whether or not
+    // this program reads any of them. It is POSIX on both platforms we target and a documented CRT
+    // extension on Windows, and it is the *only* way the arguments and the environment reach Echo:
+    // `environ` is a data symbol an extern block cannot bind, `argv` is not a symbol at all, and the
+    // language has no globals to cache either in
+    //
+    // unconditional rather than widened only for programs that ask, which was considered and is worse:
+    // it would trade three stores of registers already in hand for a whole-program AST query, an entry
+    // point whose signature varies per program, and a silent failure - a call the query missed leaves
+    // ProcessCodegen's globals reading the zero they were initialized with
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+    llvm::FunctionType *funcType = llvm::FunctionType::get(
+        _ctx.builder->getInt32Ty(), { _ctx.builder->getInt32Ty(), opaque_ptr, opaque_ptr }, false);
     llvm::Function *function = llvm::Function::Create(funcType, llvm::Function::ExternalLinkage, ECO_ENTRY_SYMBOL_NAME, main_cmp_unit->llvm_module.get());
+    function->getArg(0)->setName("argc");
+    function->getArg(1)->setName("argv");
+    function->getArg(2)->setName("envp");
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", function);
     _ctx.builder->SetInsertPoint(entry);
 
     _ctx.current_cmp_unit = main_cmp_unit;
+
+    // before the file-root walk below, because a module-scope `env::arg(1)` is one of the statements it
+    // emits and would otherwise read a global nothing had filled in yet
+    _process.gen_capture(function);
 
     {
     Compiler::ScopedPhase entry_phase("entry point");
@@ -171,7 +192,14 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     }
 
     // terminate the function, unless the program already stopped itself
+    //
+    // the `[memory]` section goes inside this guard rather than before it, and the terminated case
+    // printing nothing is the point: a `die` at module scope already ran the abort runtime's exit(1),
+    // so there is no post-teardown moment left to report on. this *is* that moment on the other path -
+    // the file-root walk above emitted every module-scope release, which `-ar` shows as the last
+    // statements inside the root scope
     if (!_ctx.block_is_terminated()) {
+        _memory.gen_report();
         _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
     }
     }
@@ -569,6 +597,17 @@ void LLVMCompiler::visit_move_expr(AST::MoveExprNode &node)
 {
     throw _ctx.error("'mv' survived the ownership pass");
 }
+void LLVMCompiler::visit_const_ref(AST::ConstRefExprNode &node)
+{
+    throw _ctx.error("a constant reference survived AST::ConstantExpander");
+}
+void LLVMCompiler::visit_const_decl(AST::ConstDeclNode &node)
+{
+    // a compile-time constant has no storage and no symbol - it was copied into each of its use sites, and
+    // there is nothing left to emit. reaching here means one was added to a scope's children, which is the
+    // one thing its declaration is documented never to be
+    throw _ctx.error("a constant declaration reached codegen - it belongs to no scope");
+}
 void LLVMCompiler::visit_class_alloc_expr(AST::ClassAllocExprNode &node) { _classes.gen_class_alloc(node); }
 void LLVMCompiler::visit_retain_expr(AST::RetainExprNode &node) { _classes.gen_retain_expr(node); }
 void LLVMCompiler::visit_strong_expr(AST::StrongExprNode &node) { _expr.gen_strong_expr(node); }
@@ -631,7 +670,10 @@ bool LLVMCompiler::link_executable(
 }
 
 void LLVMCompiler::optimize() { _backend.optimize(); }
-void LLVMCompiler::prune_to_entry() { _backend.prune_to_entry(); }
 void LLVMCompiler::printIR(bool toFile) { _backend.print_ir(toFile); }
-void LLVMCompiler::run_code() { _backend.run_code(); }
+int LLVMCompiler::run_code(const std::vector<std::string> &arguments, const char *const *environment)
+{
+    return _backend.run_code(arguments, environment);
+}
+const std::string &LLVMCompiler::prune_report() const { return _backend.prune_report(); }
 bool LLVMCompiler::make_exec(std::string executable_name) { return _backend.make_exec(executable_name); }

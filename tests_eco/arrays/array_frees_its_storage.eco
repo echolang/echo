@@ -1,0 +1,41 @@
+// an `array<T>` owns a heap buffer, and its growth is the busiest `realloc` path in the language:
+// `reserve` doubles, so pushing past capacity resizes a block that already exists. nothing before this
+// proved the buffer was ever given back - the destructor's `mem::free` was reached on faith
+{
+    array<int32> $numbers = [1, 2, 3];
+
+    assert(mem::live_allocations() == 1, "one buffer");
+
+    // past the initial capacity several times over, so the doubling runs more than once. every one of
+    // these is a resize rather than a new allocation, which is the count staying at 1
+    usize $i = 0;
+    while ($i < 100) {
+        $numbers->push(7);
+        $i = $i + 1;
+    }
+
+    assert(mem::live_allocations() == 1, "still one buffer, however often it grew");
+
+    echo $numbers->count();
+    echo $numbers[99];
+}
+
+// the destructor ran, and it freed
+assert(mem::live_allocations() == 0, "the array gave its storage back");
+
+// and a copy owns its own buffer rather than sharing one
+{
+    array<int32> $a = [1, 2, 3];
+    array<int32> $b = $a;
+
+    $b->push(4);
+
+    assert(mem::live_allocations() == 2, "a copy is a second buffer");
+
+    echo $a->count();
+    echo $b->count();
+}
+
+assert(mem::live_allocations() == 0, "both gave theirs back");
+
+echo "balanced";

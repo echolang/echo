@@ -1,0 +1,7 @@
+stdlib: off
+flags: -em
+
+--- OUT --->
+7
+[memory]
+  0 live allocations

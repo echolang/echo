@@ -1,0 +1,5 @@
+// the same program as gated_manifest_darwin.eco, read as another platform. **This is the case that catches
+// the manifest reading the host's facts instead of the command line's**: on a Darwin machine it printed
+// `darwin` while asking for linux, which is one platform's sources compiled as another's code.
+
+echo modgated::gated_platform();

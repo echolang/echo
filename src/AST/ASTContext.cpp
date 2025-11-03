@@ -59,21 +59,12 @@ AST::MemberTypeScope::MemberTypeScope(
     const AST::ComplexType &owner) :
     context(context), previous(context.current_namespace)
 {
-    // an anonymous owner has no path to hang a child off; a closure environment is the only one, and it
-    // declares no nested types. leaving the namespace alone is the safe answer either way
-    if (!owner.name.has_value()) {
-        return;
+    // through the one owner of that question, which a struct's compile-time constants are published into
+    // as well - so `A::Inner(1)` and `buffer::MAX` cannot end up in two different namespaces.
+    // leaving the namespace alone is the safe answer for an anonymous owner, which has no path at all
+    if (AST::Namespace *surface = AST::member_surface_namespace(namespaces, owner)) {
+        context.current_namespace = surface;
     }
-
-    // the owner's own path plus its name. path_segments() rather than mangling_segments() because this
-    // namespace is one a user writes - `A::Inner(1)` - and a type's namespace is never lexical, which is
-    // the only place the two views differ
-    std::vector<std::string> parts =
-        owner.ast_namespace != nullptr ? owner.ast_namespace->path_segments() : std::vector<std::string>{};
-
-    parts.push_back(owner.name.value());
-
-    context.current_namespace = &namespaces.retrieve(parts);
 }
 
 const AST::TypeParamDecl *AST::Context::find_type_param(const std::string &name) const

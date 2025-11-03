@@ -1,0 +1,5 @@
+flags: --target-os darwin
+modules: modules/lib_gated
+
+--- OUT --->
+darwin

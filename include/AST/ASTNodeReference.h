@@ -83,6 +83,7 @@ namespace AST
                    parent_type == NodeType::n_expr_indirect_call ||
                    parent_type == NodeType::n_expr_instanceof ||
                    parent_type == NodeType::n_expr_temp_bind ||
+                   parent_type == NodeType::n_expr_const_ref ||
                    parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||

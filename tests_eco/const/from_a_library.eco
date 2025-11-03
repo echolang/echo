@@ -1,0 +1,8 @@
+// a constant declared in a manifest library and used here. It carries no storage, so nothing had to be emitted
+// into the library's object for it - the value is copied into *this* module, which is also what keeps that
+// object independent of who consumes it (tests/module_cache.cpp pins that byte for byte).
+usize $page = modlimits::PAGE;
+echo $page;
+
+echo modlimits::HALF_PAGE;
+echo modlimits::sizes::SLOT;

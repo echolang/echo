@@ -3,6 +3,7 @@
 #include "Compiler/PhaseTimings.h"
 
 #include "eco.h"
+#include "Parser/ConditionalFilter.h"
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 
@@ -11,7 +12,8 @@
 #include <sstream>
 #include <memory>
 
-Parser::ModuleParser::ModuleParser()
+Parser::ModuleParser::ModuleParser(Compiler::TargetFacts facts) :
+    target_facts(std::move(facts))
 {
     _lexer = std::make_unique<Lexer>();
 }
@@ -73,7 +75,12 @@ void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const
 
 AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
 {
-    return module.tokenize(*_lexer.get(), file);
+    // the conditional filter is handed *in* rather than called by Module::tokenize, so that AST knows only
+    // that something may shorten the range before the slice is taken - see AST::Module::TokenFilter
+    return module.tokenize(*_lexer.get(), file,
+        [this](TokenCollection &tokens, size_t from, std::string &out_error) {
+            return Parser::filter_conditional_tokens(tokens, from, target_facts, out_error);
+        });
 }
 
 void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &collector) const

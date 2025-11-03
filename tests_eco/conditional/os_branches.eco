@@ -1,0 +1,19 @@
+// **the payoff case**: one file, three platforms, and only one of them is ever parsed.
+//
+// each arm declares the *same* function, which is what makes this more than a formatting exercise - as
+// three ordinary declarations they would collide as a DuplicateFunctionSignature. Nothing collides because
+// the two that do not apply never reach pass 2 at all, and that is the whole point of the filter running
+// before the parser rather than inside it.
+//
+// asserted from every side by the `.test` files beside this one: `--target-os` picks an arm without
+// touching codegen, so all three are checked on one machine.
+
+#[if: os == darwin]
+function platform() : string { return 'darwin'; }
+#[elif: os == linux]
+function platform() : string { return 'linux'; }
+#[elif: os == windows]
+function platform() : string { return 'windows'; }
+#[end]
+
+echo platform();

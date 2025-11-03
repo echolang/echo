@@ -2,6 +2,7 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTAttributes.h"
 #include "AST/ExprNode.h"
 #include "AST/LiteralValueNode.h"
 
@@ -65,6 +66,20 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
     }
 
     auto name_token = payload.cursor.current();
+
+    // **an unknown attribute is refused here**, at the name, rather than accepted and left for a consumer
+    // that will never come looking. Until this check existed, `#[bultin: "size_of"]` parsed, attached and
+    // did nothing - leaving a bodyless function with no implementation and no diagnostic anywhere.
+    //
+    // reported and then *skipped past* rather than returned as null, so that the declaration after it still
+    // parses: one misspelled attribute should cost one message, not the whole file
+    if (!payload.is_manifest && !AST::is_known_attribute(name_token.value())) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            "unknown attribute '" + name_token.value() + "', expected one of: "
+                + AST::known_attribute_list());
+    }
+
     auto att_token_start = payload.cursor.snapshot();
     payload.cursor.skip(); // skip the identifier
 

@@ -1,0 +1,16 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 6:6
+Const violation: cannot assign to '$max' - it is declared const
+Begin: '='
+End: '='
+Code excerpt:
+ [5]> 
+ [6]> $max = 5;
+           ^
+ [7]> 
+
+Critical issues found, cannot compile.

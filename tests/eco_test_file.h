@@ -42,17 +42,30 @@ namespace EchoTests
     };
 
     // what the case asserts about the exit status of the processes it spawns
-    enum class Expectation
+    //
+    // `ok` and `fail` are the two the corpus almost always wants - zero, and anything but zero. An exact
+    // status is the third, and it exists because `std::env::exit($code)` made the status something a
+    // program *chooses*: pinned as `fail`, `exit(3)` would pass just as well if the compiler crashed
+    struct Expectation
     {
-        t_ok,
-        t_fail
+        enum class Kind
+        {
+            t_ok,
+            t_fail,
+            t_status
+        };
+
+        Kind kind = Kind::t_ok;
+
+        // only read when kind is t_status
+        int status = 0;
     };
 
     // did an exit status match what the case says it expects?
-    bool status_matches(Expectation expect, int exit_code);
+    bool status_matches(const Expectation &expect, int exit_code);
 
-    // "succeed" / "fail", for the message when it did not
-    const char *expectation_name(Expectation expect);
+    // "succeed" / "fail" / "exit with 3", for the message when it did not
+    std::string expectation_name(const Expectation &expect);
 
     struct CheckSection
     {
@@ -73,8 +86,19 @@ namespace EchoTests
         std::vector<std::string> modules;
 
         bool stdlib = true;
-        Expectation expect = Expectation::t_ok;
+        Expectation expect;
         RunMode mode = RunMode::t_run;
+
+        // `KEY=VALUE` pairs to set in the environment of everything this case spawns, and the arguments
+        // to hand the program. Both exist for `std::env`, which can otherwise only be tested against
+        // whatever the machine running the suite happens to have inherited - `PATH` exists, some invented
+        // key does not - which asserts almost nothing and differs between developers and CI
+        //
+        // whitespace separated, for `modules`' reason: the header forbids a repeated key, so a list is
+        // what one line has to mean. Neither a value nor an argument may contain a space, which is no
+        // loss for a corpus fixture and is what keeps these out of shell-quoting territory
+        std::vector<std::string> environment;
+        std::vector<std::string> arguments;
 
         // the OUT section, mandatory. may be empty: a program that prints nothing is a legitimate
         // case, "output not asserted" is not
@@ -90,6 +114,20 @@ namespace EchoTests
         // is the format's, and a setting whose meaning is spelled in the runner is a setting the
         // README's table can silently disagree with
         std::string compiler_flags(const std::filesystem::path &corpus_root) const;
+
+        // `KEY=VALUE KEY2=VALUE2 ` to prefix a command with, empty when the case sets none. A shell
+        // assignment prefix rather than a `setenv` in the test process, because every spawn here goes
+        // through `popen` and a prefix therefore reaches the JIT'd program and a linked binary by the
+        // same route - and it cannot leak into the suite's own environment or into a parallel case
+        //
+        // trailing space when non-empty, the convention compiler_flags already follows
+        std::string environment_prefix() const;
+
+        // ` alpha beta` to append to a program invocation, empty when the case passes none.
+        //
+        // `run` needs a `--` ahead of them and a linked binary does not, which is the one thing the two
+        // spellings differ in - so the separator is the caller's to supply and this is just the words
+        std::string argument_suffix() const;
     };
 
     // strips a single trailing newline, the one difference the OUT golden forgives. applied to the

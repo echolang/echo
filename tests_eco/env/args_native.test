@@ -1,0 +1,9 @@
+mode: build
+args: alpha beta
+env: ECO_CORPUS_KEY=native_value
+
+--- OUT --->
+3
+alpha
+beta
+native_value

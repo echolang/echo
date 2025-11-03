@@ -1,0 +1,6 @@
+// the library beside this case declares `backref::DERIVED` in terms of `APP_BASE`, which is declared here - in
+// the module compiled last. See lib_backref/module.eco for why that has to be refused.
+const usize APP_BASE = 21;
+
+usize $n = backref::DERIVED;
+echo $n;

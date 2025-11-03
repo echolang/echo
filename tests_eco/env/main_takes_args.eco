@@ -1,0 +1,12 @@
+// **the one case that owns the shape of the entry point.** Every other IR golden in the corpus anchors on
+// `define i32 @main(` and asserts nothing about its parameters, deliberately - so that widening it again
+// is one edit here rather than fourteen.
+//
+// `stdlib: off` so that main's prologue is the *only* thing that touches the three globals. With the
+// stdlib linked they are created by whichever of its bodies reaches a `process_*` builtin first, which
+// makes their order in the module incidental - and a golden that depends on an incidental order is one
+// that breaks for the wrong reason. Here the order is `gen_capture`'s own, which is the thing under test.
+//
+// nothing below reads any of them, which is the other half of the claim: the capture is unconditional.
+
+echo 1;

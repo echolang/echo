@@ -1,0 +1,8 @@
+mode: build
+flags: -em
+
+--- OUT --->
+7
+3
+[memory]
+  0 live allocations

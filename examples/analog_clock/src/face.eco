@@ -24,26 +24,28 @@ struct Dial
         $this->cy = $radius;
     }
 
+    #[inline]
     function columns() : usize
     {
-        usize $columns = $this->radius * $this->aspect * 2.0 + 1.0;
-        return $columns;
+        return $this->radius * $this->aspect * 2.0 + 1.0;
     }
-
+    
+    #[inline]
     function rows() : usize
     {
-        usize $rows = $this->radius * 2.0 + 1.0;
-        return $rows;
+        return $this->radius * 2.0 + 1.0;
     }
 }
 
 // where a point at `$turns` around the dial, `$reach` of the way out from the centre, lands.
 // clockwise from 12, so x follows the sine and y the negated cosine
+#[inline]
 function dial_x(Dial& $d, float64 $turns, float64 $reach) : float64
 {
     return $d->cx + std::math::sin($turns * 2.0 * pi()) * $d->radius * $reach * $d->aspect;
 }
 
+#[inline]
 function dial_y(Dial& $d, float64 $turns, float64 $reach) : float64
 {
     return $d->cy - std::math::cos($turns * 2.0 * pi()) * $d->radius * $reach;
@@ -104,6 +106,7 @@ function draw_hands(Canvas& $c, Dial& $d, Time& $t) : void
 // `HH:MM:SS`. There is no int-to-string anywhere in the stdlib and no formatting, so the digits are
 // arithmetic: `48` is `'0'`, and each one goes through a `uint8` local because `48 + $value` is an
 // `int32` and narrowing is not something an argument position does for you.
+#[inline]
 function two_digits(string& $out, int32 $value) : void
 {
     uint8 $tens = 48 + $value / 10;

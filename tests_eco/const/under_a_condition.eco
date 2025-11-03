@@ -1,0 +1,14 @@
+// a constant inside an `#[if:]` region falls out for free: the filter drops the untaken arms from the token
+// stream before pass 1, so an excluded declaration is never parsed, never published and never expanded.
+//
+// the other direction is the boundary worth knowing, and it is architectural: a condition can never *name* a
+// constant. The filter runs before pass 1, and a constant's name is published in pass 2.
+#[if: os == darwin]
+const PLATFORM_LIMIT = 10;
+#[elif: os == linux]
+const PLATFORM_LIMIT = 20;
+#[else]
+const PLATFORM_LIMIT = 30;
+#[end]
+
+echo PLATFORM_LIMIT;

@@ -9,6 +9,7 @@
 #include "Lexer.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
+#include "Compiler/TargetFacts.h"
 
 #include <memory>
 #include <exception>
@@ -60,7 +61,18 @@ namespace Parser
         // after parsing all files in the module
         bool dump_symbols = false;
 
-        ModuleParser();
+        // what `#[if: ...]` regions are evaluated against, for every file this parser lexes.
+        //
+        // a member rather than a parameter on parse_module, because it is the same for the whole
+        // invocation and threading it through four call sites would invite one of them defaulting - and
+        // **const, set at construction**, because a mutable one with a host default is exactly how the
+        // manifest reader came to evaluate conditions against the wrong platform: it built a second parser
+        // of its own, the facts were already populated, and nothing was unset enough to be noticed.
+        // Compiler::TargetFacts::host() is what a caller with no command line to read asks for, and it says
+        // so at the call site
+        const Compiler::TargetFacts target_facts;
+
+        explicit ModuleParser(Compiler::TargetFacts facts);
         ~ModuleParser() {};
         
         AST::TokenizedFile make_tokenized_file(AST::Module &module, AST::File &file) const;

@@ -1,0 +1,3 @@
+// an `#[if]` with no `#[end]`. Being out of file is the proof nothing was going to close it.
+#[if: os == darwin]
+echo 1;

@@ -7,6 +7,7 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTNullability.h"
+#include "Compiler/CompilerOptions.h"
 
 namespace AST
 {
@@ -27,7 +28,13 @@ namespace AST
     class TypeChecker : public RecursiveVisitor
     {
     public:
-        explicit TypeChecker(Bundle &bundle);
+        // the options come in because one diagnostic depends on them: `mem::live_allocations()` reads a
+        // counter only --track-allocations maintains, and a builtin that answers 0 where nothing counted
+        // is the one wrong answer a caller cannot tell from the right one. it is refused here rather than
+        // in codegen because codegen has only InternalCompilerException, which carries no source location
+        //
+        // defaulted, so a test or a tool that only wants the type checking need not have an opinion
+        explicit TypeChecker(Bundle &bundle, Compiler::CompilerOptions options = {});
 
         void run();
 
@@ -59,6 +66,10 @@ namespace AST
     private:
         Bundle &_bundle;
         Collector &_collector;
+
+        // what the invocation asked for, read through its predicates rather than compared - the same
+        // rule every other reader of it follows
+        Compiler::CompilerOptions _options;
 
         // the function whose body is being walked, so a return knows what it has to fit and
         // which variables are the caller's. null at file scope
@@ -123,6 +134,10 @@ namespace AST
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);
+
+        // the one builtin whose *availability* is a question rather than its arguments: without
+        // --track-allocations there is no counter for `mem::live_allocations()` to read
+        void check_allocation_tracking(FunctionCallExprNode &node);
 
         // the shared half of the three arms above: refuse an operand that can never be absent, worded
         // by AST::certainly_present_refusal. the three differ only in which expression they hand it

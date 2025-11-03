@@ -1,0 +1,27 @@
+// **the whole semantics in one program.** A constant is not a value the compiler worked out once - it is the
+// expression it was written as, copied into each place it is used. So a call in one runs per use site, and a
+// constructor in one builds a fresh value per use site.
+//
+// that is a cost worth knowing about rather than a defect: it is what lets the initializer be any expression
+// at all, and what lets a constant live in a library module, where a file-scope variable has nowhere to live.
+function tick() : int32
+{
+    echo 9;
+    return 1;
+}
+
+const TICK = tick();
+
+// twice, so the `9` appears twice
+echo TICK;
+echo TICK;
+
+struct point { int32 $x; int32 $y; }
+
+const ORIGIN = point(3, 4);
+
+// a member read off a constant, which is the postfix chain continuing past the expansion
+echo ORIGIN->x;
+
+point $p = ORIGIN;
+echo $p->y;

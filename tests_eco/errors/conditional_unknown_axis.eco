@@ -1,0 +1,6 @@
+// a name that is not an axis, followed by a comparison. Reported as an unknown axis rather than read as a
+// flag with a stray `==` after it - the second reading is what the grammar would do unaided, and it blames
+// the operator instead of the mistake.
+#[if: cpu == arm64]
+echo 1;
+#[end]

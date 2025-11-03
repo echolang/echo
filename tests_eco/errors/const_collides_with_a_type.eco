@@ -1,0 +1,7 @@
+// one namespace slot holds one node per name, so a constant and a type cannot share one. Reported rather than
+// silently replacing the type symbol, which is what push_symbol would otherwise do
+struct foo { int32 $a; }
+
+const foo = 1;
+
+echo 1;

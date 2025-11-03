@@ -7,6 +7,7 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/OperatorDeclParser.h"
+#include "Parser/ConstDeclParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -233,6 +234,29 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
+        }
+        else if (starts_constdecl(payload)) {
+            // a compile-time constant, name *and* initializer, in this pass - the same standing a struct
+            // property's initializer has, and for the same reason: this pass completes over every file
+            // before any body is parsed, so a constant is nameable from anywhere in the program regardless
+            // of which file declared it. References inside the initializer are resolved later still, by
+            // AST::ConstantExpander, so not even two constants have an order between them.
+            //
+            // **and this is the one owner of the body refusal.** `block_token.has_value()` is exactly
+            // "inside a function body or a block", which is where a constant may not be: it has no storage
+            // to be local to, and every use site gets a copy of its expression. The body pass skips the
+            // statement silently on the strength of this arm having spoken
+            if (block_token.has_value()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(cursor.current()),
+                    "A constant cannot be declared inside a body - its value is copied to every use site, "
+                    "so it belongs at file, namespace or struct scope. Write `const $name = ...;` for a "
+                    "block-local variable that is const.");
+                cursor.try_skip_to_next_statement();
+            }
+            else {
+                parse_constdecl(payload, nullptr);
+            }
         }
         else if (cursor.is_type(Token::Type::t_open_brace)) {
             // a bare nested block, which is its own declaration scope - the body pass mirrors this in

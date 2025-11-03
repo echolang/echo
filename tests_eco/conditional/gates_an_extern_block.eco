@@ -1,0 +1,24 @@
+// **the case declaration-level gating could not have covered.**
+//
+// an `extern { }` block accepts nothing but `function` inside it and has no attribute plumbing at all, so
+// there is no `#[target:]` to hang on one. A token filter does not care: the block is tokens like anything
+// else, and the arm that is not taken never reaches ExternParser.
+//
+// this is also the only way a platform-only *symbol* can be named. `_NSGetExecutablePath` does not exist on
+// Linux, so declaring it there is a link error rather than a compile one - the declaration has to be absent,
+// not merely unused.
+
+#[if: os == darwin]
+extern {
+    function strlen as measure(ptr<const uint8> $s) : usize;
+}
+#[elif: os == linux]
+extern {
+    // a symbol that exists on Linux and not on Darwin. Never parsed here, so never linked
+    function __strlen_sse2 as measure(ptr<const uint8> $s) : usize;
+}
+#[end]
+
+string $text = 'hello';
+
+echo measure($text->c_str());

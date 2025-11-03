@@ -1,0 +1,9 @@
+// the `#[else]` fallback, reached by asking for a platform neither arm names. This is the shape a stdlib
+// function wants when it has a real answer for two platforms and an approximation for the rest.
+#[if: os == darwin]
+echo 'darwin';
+#[elif: os == linux]
+echo 'linux';
+#[else]
+echo 'fallback';
+#[end]

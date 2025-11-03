@@ -1,0 +1,19 @@
+stdlib: off
+
+--- OUT --->
+9
+1
+9
+1
+3
+4
+--- RAST --->
+# the expansion, and the point of the case: two independent calls to `tick()`, one per use site, where the
+# source wrote the constant once. A constant that folded to a value would show one.
+CHECK: call echo(call tick(): int32): void
+CHECK: call echo(call tick(): int32): void
+# the same for a constructor: two independent `point(3, 4)` calls, not one value shared
+CHECK: call point(literal<int32>(3), literal<int32>(4)): point
+CHECK: call point(literal<int32>(3), literal<int32>(4)): point
+# and no marker left over - every reference was replaced
+CHECK-NOT: constref

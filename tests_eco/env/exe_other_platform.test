@@ -1,0 +1,6 @@
+flags: --target-os linux
+expect: fail
+
+--- OUT --->
+fatal error: readlink("/proc/self/exe") failed
+  at process.eco:209

@@ -1,0 +1,5 @@
+// a closure captures its environment where it is *written*; a constant is copied to where it is *used*. The two
+// cannot both be true of one expression
+const HANDLER = function() : int32 { return 1; };
+
+echo 1;

@@ -1,0 +1,14 @@
+// **the cross-check, and the reason `--target-os` exists.**
+//
+// this compiles the *Linux* arm of `exe()` on whatever machine runs the suite. It cannot succeed - there is
+// no `/proc/self/exe` on Darwin, so the `readlink` fails and the function dies - and succeeding is not the
+// point. The point is that the arm parses, resolves, type-checks and reaches codegen, which is the only
+// check a platform-specific region ever gets from a machine that is not that platform.
+//
+// without this, half of every `#[if: os == ...]` in the stdlib would be verified only by CI on a host the
+// author does not have. It caught a real error in this very function the first time it ran: a `->` on a
+// string literal, which has no storage to be a receiver.
+
+string $path = std::env::exe();
+
+echo $path;

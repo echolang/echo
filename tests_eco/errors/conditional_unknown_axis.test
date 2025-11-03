@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+Conditional Compilation Failed
+------------------------------
+line 4: unknown condition axis 'cpu', expected one of: os, arch

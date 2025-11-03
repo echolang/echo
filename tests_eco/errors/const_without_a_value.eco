@@ -1,0 +1,4 @@
+// a constant *is* its expression, so there is nothing to declare without one
+const MISSING;
+
+echo 1;

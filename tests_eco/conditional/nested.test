@@ -1,0 +1,7 @@
+flags: --target-os darwin --target-arch arm64
+
+--- OUT --->
+1
+2
+3
+4

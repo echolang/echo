@@ -38,6 +38,8 @@ namespace Compiler::LLVM
     class LValueCodegen;
     class ClassCodegen;
     class AbortCodegen;
+    class MemoryCodegen;
+    class ProcessCodegen;
     class DebugPrintCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
@@ -203,6 +205,16 @@ namespace Compiler::LLVM
         // one message shape and one release-mode gate
         AbortCodegen *abort = nullptr;
 
+        // the memory subsystem: the one owner of where heap memory comes from. the class subsystem's
+        // boxes and environments and the stdlib's raw buffers both go through it, which is what makes
+        // "how much is still outstanding" a question with an answer at all
+        MemoryCodegen *memory = nullptr;
+
+        // the process subsystem: the one owner of where a program's arguments and environment come
+        // from. the entry point fills it in and the three `process_*` builtins read it back, which is
+        // the whole of how anything the platform hands `main` reaches Echo
+        ProcessCodegen *process = nullptr;
+
         // the debug-print subsystem: the whole of how `dprint` renders a value. reachable from the
         // expression subsystem, which is where the builtin's call site is - and its own subsystem
         // because it carries state across a recursion and creates basic blocks, neither of which an
@@ -232,6 +244,27 @@ namespace Compiler::LLVM
         // the opaque `ptr`, spelled once - it appears in almost every emitted runtime signature
         llvm::Type *opaque_ptr_type() const {
             return llvm::PointerType::get(*llvm_context, 0);
+        }
+
+        // a **zero-initialized linkonce_odr global** in the current module, or the one already there.
+        //
+        // the emitted runtime's state lives in these - the allocation counter and the three process
+        // globals - and every one of them wants the same three properties for the same reason the runtime
+        // functions beside them do: emitted per unit rather than linked, folded by the linker, and
+        // starting at zero so a unit whose `main` never ran the capture reads a defined value rather than
+        // whatever was there. spelled per subsystem they were two identical copies of this
+        llvm::GlobalVariable *get_or_create_odr_global(const char *symbol, llvm::Type *type) {
+            if (auto *existing = current_module()->getGlobalVariable(symbol, true)) {
+                return existing;
+            }
+
+            return new llvm::GlobalVariable(
+                *current_module(),
+                type,
+                /*isConstant=*/false,
+                llvm::GlobalValue::LinkOnceODRLinkage,
+                llvm::Constant::getNullValue(type),
+                symbol);
         }
 
         // **has the block being emitted into already ended?** one question with many askers, and

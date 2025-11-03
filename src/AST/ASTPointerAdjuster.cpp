@@ -320,6 +320,24 @@ void PointerAdjuster::visit_release(ReleaseNode &node)
     // borrow is never a release target anyway: needs_destruction is false for a pointer
 }
 
+void PointerAdjuster::visit_const_ref(ConstRefExprNode &node)
+{
+    // a transient node AST::ConstantExpander was supposed to have erased - by replacing it with a clone of
+    // the constant's initializer, or by replacing it with a void after refusing it. one reaching here would
+    // have every deref inside whatever it stood for silently skipped, which is AST::ForeachNode's contract
+    // and for the same reason
+    throw std::runtime_error(
+        "a constant reference survived the constant expander - it should have been replaced by the "
+        "constant's initializer, or by a void after a refusal");
+}
+
+void PointerAdjuster::visit_const_decl(ConstDeclNode &node)
+{
+    // reachable only from a root, and a constant declaration is a child of no root by construction
+    throw std::runtime_error(
+        "a constant declaration was reached from a body - it is owned by the arena and belongs to no scope");
+}
+
 void PointerAdjuster::visit_foreach(ForeachNode &node)
 {
     // a transient node AST::ForeachLowering was supposed to have erased - by lowering it, or by

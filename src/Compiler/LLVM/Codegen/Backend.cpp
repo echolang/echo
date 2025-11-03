@@ -1,6 +1,8 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/PhaseTimings.h"
+#include "Compiler/TargetFacts.h"
 
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
@@ -25,8 +27,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Compiler::LLVM
@@ -43,7 +47,7 @@ void Backend::print_ir(bool to_file)
     main->llvm_module->print(llvm::outs(), nullptr);
 }
 
-void Backend::run_code()
+int Backend::run_code(const std::vector<std::string> &arguments, const char *const *environment)
 {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -52,6 +56,14 @@ void Backend::run_code()
     auto main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
         throw Compiler::InternalCompilerException("No main module found to run", nullptr);
+    }
+
+    // before the EngineBuilder below, which moves the module out - and inside run_code rather than beside
+    // it, because the JIT is the only place the prune is sound. `-t` sees it either way: PhaseTimings is
+    // process-wide precisely so a phase can be claimed by whichever object owns the work
+    {
+        Compiler::ScopedPhase phase("prune");
+        prune_to_entry();
     }
 
     std::string errorStr;
@@ -66,7 +78,7 @@ void Backend::run_code()
 
     if (!EE) {
         llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
-        return;
+        return 1;
     }
 
     // enable debugging
@@ -76,14 +88,19 @@ void Backend::run_code()
     auto *func = EE->FindFunctionNamed(ECO_ENTRY_SYMBOL_NAME);
     if (!func) {
         llvm::errs() << "Function '" ECO_ENTRY_SYMBOL_NAME "' not found in module.\n";
-        return;
+        return 1;
     }
 
-    std::vector<llvm::GenericValue> noargs;
-    llvm::GenericValue gv = EE->runFunction(func, noargs);
+    // runFunctionAsMain rather than runFunction with no arguments: it is the one place that knows how to
+    // marshal argc/argv/envp into a call, and the entry point now takes all three. It dispatches on the
+    // parameter count and report_fatal_error()s on a shape it does not recognise, so the agreement with
+    // LLVMCompiler's FunctionType is load-bearing and pinned by tests_eco/env
+    int status = EE->runFunctionAsMain(func, arguments, environment);
 
     delete EE;
     // llvm::llvm_shutdown();
+
+    return status;
 }
 
 void Backend::init_target()
@@ -177,13 +194,14 @@ std::optional<std::vector<std::string>> host_linker_command(
         return std::nullopt;
     }
 
-#if defined(__aarch64__) || defined(__arm64__)
-    const std::string arch = "arm64";
-#elif defined(__x86_64__)
-    const std::string arch = "x86_64";
-#else
-    return std::nullopt;
-#endif
+    // Compiler::TargetFacts owns "what architecture is this", and derives it from the same default
+    // triple Backend::init_target hands the TargetMachine - so what is compiled and what is linked
+    // cannot disagree. Spelled here as its own `#if defined(__aarch64__)` chain, they could
+    const std::string arch = Compiler::TargetFacts::host().architecture;
+
+    if (arch.empty()) {
+        return std::nullopt;
+    }
 
     std::vector<std::string> command = { "ld", "-o", executable_name };
     append_objects(command, objects);
@@ -352,8 +370,48 @@ void Backend::optimize()
     });
 }
 
+// the module's own function definitions, by symbol name.
+//
+// declarations are deliberately not among them: InternalizePass leaves them alone, so they were never
+// candidates for the prune to drop - they are how the JIT resolves printf, malloc, free and every
+// `extern` symbol out of the host process
+static std::vector<std::string> definition_names(const llvm::Module *module)
+{
+    std::vector<std::string> names;
+
+    if (!module) {
+        return names;
+    }
+
+    for (const llvm::Function &function : module->functions()) {
+        if (!function.isDeclaration()) {
+            names.push_back(function.getName().str());
+        }
+    }
+
+    return names;
+}
+
+// how many of them there are, which the "before" half of the report is all that wants - a name vector
+// built to be measured and dropped is one heap copy per definition for a number
+static size_t definition_count(const llvm::Module *module)
+{
+    if (!module) {
+        return 0;
+    }
+
+    return static_cast<size_t>(std::count_if(
+        module->begin(), module->end(),
+        [](const llvm::Function &function) { return !function.isDeclaration(); }));
+}
+
 void Backend::prune_to_entry()
 {
+    // taken before the passes run, so the report can say what was *removed* rather than only what is left.
+    // A prune that dropped nothing at all - a root predicate that stopped matching, a module the pass
+    // manager declined - reads as two equal numbers, which is the failure this diagnostic exists to catch
+    const size_t before = definition_count(_ctx.current_module());
+
     run_module_passes(_ctx, [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
@@ -366,5 +424,18 @@ void Backend::prune_to_entry()
 
         modulePM.addPass(llvm::GlobalDCEPass());
     });
+
+    // sorted rather than left in module order: which body LLVM happens to hold first is a property of how
+    // codegen emitted them, and a report keyed on that moves whenever an unrelated emission order does
+    std::vector<std::string> survivors = definition_names(_ctx.current_module());
+    std::sort(survivors.begin(), survivors.end());
+
+    // the symbol names, so a survivor lines up with what a `-p` dump calls it
+    _prune_report = fmt::format("[prune]\n  {} function definitions, {} reachable from {}\n",
+        before, survivors.size(), ECO_ENTRY_SYMBOL_NAME);
+
+    for (const std::string &name : survivors) {
+        _prune_report += fmt::format("    {}\n", name);
+    }
 }
 };

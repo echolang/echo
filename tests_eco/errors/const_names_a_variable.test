@@ -1,0 +1,30 @@
+stdlib: off
+expect: fail
+# two diagnostics, and the second is not noise: the declaration was refused, so nothing was published,
+# and the use site below then names a constant that genuinely does not exist. A refusal that published
+# anyway would be a compiler accepting what it just rejected
+
+--- OUT --->
+---- Issue ----
+Issue at 5:13
+A constant's value cannot name a variable. '$x' does not exist where 'BAD' is used, because the value is copied to every use site rather than read from here. Write `const $x = ...;` for a variable that is const instead
+Begin: '$x'
+End: '$x'
+Code excerpt:
+ [4]> 
+ [5]> const BAD = $x + 1;
+                  ^
+ [6]> 
+
+---- Issue ----
+Issue at 7:6
+Unknown constant 'BAD'. A variable carries a '$' - did you mean '$BAD'? A constant is declared at file, namespace or struct scope, as `const BAD = ...;`
+Begin: 'BAD'
+End: 'BAD'
+Code excerpt:
+ [6]> 
+ [7]> echo BAD;
+           ^
+ [8]> 
+
+Critical issues found, cannot compile.

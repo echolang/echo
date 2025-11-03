@@ -23,14 +23,14 @@ namespace
             return AST::ExitKind::t_function;
         }
 
-        // a `die` never comes back, so a statement that is one leaves just as surely as a `return`.
-        // recognised through AST::BuiltinKind rather than by name, so it cannot drift from what actually
-        // stops the program - and `assert` is deliberately *not* on the list, it returns when it holds
+        // a statement that never comes back leaves just as surely as a `return`. which builtins those are
+        // is AST::builtin_never_returns's question, not this one's - recognised through AST::BuiltinKind
+        // rather than by name, so it cannot drift from what actually stops the program
         if (statement.has_type<AST::FunctionCallExprNode>()) {
             auto *call = statement.get_ptr<AST::FunctionCallExprNode>();
 
             if (call->decl != nullptr && call->decl->is_builtin()
-                && AST::builtin_kind_for(call->decl->builtin.value()) == AST::BuiltinKind::t_die) {
+                && AST::builtin_never_returns(AST::builtin_kind_for(call->decl->builtin.value()))) {
                 return AST::ExitKind::t_function;
             }
         }

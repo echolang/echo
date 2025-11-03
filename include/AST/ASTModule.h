@@ -10,6 +10,7 @@
 #include "ScopeNode.h"
 
 #include <filesystem>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 #include <memory>
@@ -42,7 +43,33 @@ namespace AST
 
         File &add_file(const std::filesystem::path &path);
         
-        TokenizedFile tokenize(Lexer &lexer, const File &file);
+        // a TokenFilter refused the file. Thrown rather than collected, for the reason a lexer error is:
+        // this happens before any AST exists, so there is no node to hang an issue off - and a file whose
+        // conditional structure is broken has no meaningful parse to continue into
+        struct TokenFilterException : public std::exception
+        {
+            std::string message;
+
+            TokenFilterException(std::string message) : message(std::move(message)) {};
+
+            const char *what() const noexcept override {
+                return message.c_str();
+            }
+        };
+
+        // applied to the tokens `file` just contributed, before its slice is measured. `from` is the index
+        // the file started at, so the range is always the tail of the collection - which is what makes
+        // dropping tokens inside it safe: no earlier file's slice can move.
+        //
+        // false with a `line N: ...` sentence stops the tokenization. See
+        // Parser::filter_conditional_tokens, the only implementation
+        //
+        // a **callback** rather than a call, because *what* may be dropped is a Parser question and this is
+        // AST. The one thing owned here is the ordering: the slice is taken after the filter, never before
+        typedef std::function<bool(TokenCollection &tokens, size_t from, std::string &out_error)>
+            TokenFilter;
+
+        TokenizedFile tokenize(Lexer &lexer, const File &file, const TokenFilter &filter = nullptr);
 
         bool is_owner_of(const TokenReference &tokenref) const {
             return tokenref.belongs_to(tokens);

@@ -5,6 +5,8 @@
 #include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/MemoryCodegen.h"
+#include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
@@ -807,6 +809,30 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
         case AST::BuiltinKind::t_dprint:
             gen_dprint_builtin(node);
             return;
+
+        case AST::BuiltinKind::t_alloc_bytes:
+        case AST::BuiltinKind::t_realloc_bytes:
+        case AST::BuiltinKind::t_free_bytes:
+            // one arm for all three: they evaluate their arguments and route to the allocation seam,
+            // and differ in nothing but arity - which the kind already says
+            gen_raw_memory_builtin(node, kind);
+            return;
+
+        case AST::BuiltinKind::t_live_allocations:
+            gen_live_allocations_builtin(node);
+            return;
+
+        case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_process_argv:
+        case AST::BuiltinKind::t_process_envp:
+            // one arm for all three, for the reason the raw-memory trio has one: they read three
+            // globals through one subsystem and differ in nothing the kind does not already say
+            gen_process_query_builtin(node, kind);
+            return;
+
+        case AST::BuiltinKind::t_exit:
+            gen_exit_builtin(node);
+            return;
     }
 }
 
@@ -957,6 +983,109 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         : _ctx.layout().getABITypeAlign(llvm_subject).value();
 
     _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
+}
+
+void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
+{
+    // no argument check: all three carry an ordinary declared signature in mem.eco, so AST::CallResolver
+    // already refused every call whose arity or types did not fit - the same reason the two builtins below
+    // do not check either
+
+    // a byte count, as the seam wants it. the declaration says `usize`, and AST::CallResolver already
+    // coerced the argument to it - so this is the one conversion left, and it is between two spellings of
+    // the same 64-bit integer rather than between two types
+    const AST::ValueType size_type = AST::ValueType(AST::ValueTypePrimitive::t_uint64);
+
+    // and a block address. **nullable**, because that is the whole of what these three promise: `alloc`
+    // hands back null when the allocator could not, `free` accepts null, and `realloc` takes and returns
+    // it - which is why the raw allocator is spelled `ptr<uint8>` in the stdlib and not `uint8&`
+    const AST::ValueType block_type = AST::ValueType::make_pointer(
+        AST::ValueType(AST::ValueTypePrimitive::t_uint8), /*nullable=*/true);
+
+    std::vector<llvm::Value *> args;
+
+    for (size_t i = 0; i < node.arguments.size(); i++) {
+        node.arguments[i]->accept(*_ctx.visitor);
+
+        // by position rather than by kind: the block, where there is one, is always first
+        const AST::ValueType &wanted = (i == 0 && kind != AST::BuiltinKind::t_alloc_bytes)
+            ? block_type
+            : size_type;
+
+        args.push_back(_ctx.types->coerce_value(
+            _ctx.pop(), node.arguments[i]->result_type(), wanted, *_ctx.current_cmp_unit));
+    }
+
+    // `free` returns void, so it pushes nothing - the one of the three that is a statement
+    if (kind == AST::BuiltinKind::t_free_bytes) {
+        _ctx.memory->gen_free(args[0]);
+        return;
+    }
+
+    llvm::Value *block = kind == AST::BuiltinKind::t_alloc_bytes
+        ? _ctx.memory->gen_alloc(args[0], "bytes")
+        : _ctx.memory->gen_realloc(args[0], args[1], "bytes");
+
+    _ctx.value_stack.push(_ctx.types->coerce_value(
+        block, block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
+}
+
+void ExprCodegen::gen_live_allocations_builtin(AST::FunctionCallExprNode &node)
+{
+    // no argument check: the declaration takes none, so AST::CallResolver already refused every call
+    // that passed one. no availability check either - AST::TypeChecker refuses this builtin without
+    // --track-allocations, at the call site, where it can name a line
+    _ctx.value_stack.push(_ctx.types->coerce_value(
+        _ctx.memory->gen_live_count("live"),
+        AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+        node.decl->get_return_type(), *_ctx.current_cmp_unit));
+}
+
+void ExprCodegen::gen_process_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
+{
+    // no argument check, for gen_live_allocations_builtin's reason: all three declarations take none,
+    // so AST::CallResolver already refused every call that passed one
+    if (kind == AST::BuiltinKind::t_process_argc) {
+        _ctx.value_stack.push(_ctx.types->coerce_value(
+            _ctx.process->gen_argc("argc"),
+            AST::ValueType(AST::ValueTypePrimitive::t_uint64),
+            node.decl->get_return_type(), *_ctx.current_cmp_unit));
+        return;
+    }
+
+    // `ptr<ptr<uint8>>`, and **nullable at both levels** - which is not a formality. The outer word can
+    // genuinely be null: `envp` is absent on a platform that does not pass it, and both blocks are null
+    // in a unit whose `main` never ran the capture. The inner one is how each block says it has ended,
+    // since both are NUL-terminated rather than counted
+    const AST::ValueType block_type = AST::ValueType::make_pointer(
+        AST::ValueType::make_pointer(
+            AST::ValueType(AST::ValueTypePrimitive::t_uint8), /*nullable=*/true),
+        /*nullable=*/true);
+
+    llvm::Value *block = kind == AST::BuiltinKind::t_process_argv
+        ? _ctx.process->gen_argv("argv")
+        : _ctx.process->gen_envp("envp");
+
+    _ctx.value_stack.push(_ctx.types->coerce_value(
+        block, block_type, node.decl->get_return_type(), *_ctx.current_cmp_unit));
+}
+
+void ExprCodegen::gen_exit_builtin(AST::FunctionCallExprNode &node)
+{
+    // no argument check, for gen_raw_memory_builtin's reason: the declaration takes exactly one code, so
+    // AST::CallResolver already refused every call that did not
+    node.arguments[0]->accept(*_ctx.visitor);
+
+    // C's exit takes an `int`, which is `int32` here. the declaration already says so and
+    // AST::CallResolver already coerced to it, so this is the last spelling difference rather than a
+    // conversion
+    llvm::Value *code = _ctx.types->coerce_value(
+        _ctx.pop(), node.arguments[0]->result_type(),
+        AST::ValueType(AST::ValueTypePrimitive::t_int32), *_ctx.current_cmp_unit);
+
+    // pushes nothing and terminates the block, like `die` - the two ways a program stops share one
+    // owner, so the `unreachable` and the NoReturn on the symbol are decided in one place
+    _ctx.abort->gen_exit(code);
 }
 
 void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)

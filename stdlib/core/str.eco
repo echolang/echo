@@ -110,3 +110,44 @@ class buf
         mem::free($this->bytes);
     }
 }
+
+extern {
+    function strlen as c_strlen(ptr<const uint8> $s) : usize;
+}
+
+/**
+ * A window over a NUL-terminated C string, without copying it.
+ *
+ * The counterpart to `string::view::c_str()`, which goes the other way. Everything C hands back is
+ * shaped like this - a bare pointer with the length left implicit in a terminator - so this is the
+ * seam every binding crosses on the way in, the way `c_str()` is the one they cross going out.
+ *
+ * **It borrows.** The bytes belong to whoever allocated them, and the window is valid only while
+ * they are. That is the right default for the two callers that matter: an `argv` entry and an
+ * environment variable both live as long as the process does, so copying them would be an
+ * allocation bought for nothing. Reach for `from_c_str` when the bytes are *not* yours to rely on -
+ * a buffer you are about to free, or anything behind a `setenv`.
+ */
+function view_of_c_str(ptr<const uint8> $s) : string::view
+{
+    return string::view($s, c_strlen($s));
+}
+
+/**
+ * An owning copy of a NUL-terminated C string.
+ *
+ * `view_of_c_str` with the bytes taken along, for when the source will not outlive the result. The
+ * copy goes through `buf::append_bytes` rather than by hand so this file's two invariants are
+ * maintained where they are declared, and the block is sized up front so that append does not grow
+ * it - the same bargain `string::clone_reserving` makes.
+ */
+function from_c_str(ptr<const uint8> $s) : string
+{
+    usize $n = c_strlen($s);
+
+    // `+ 1` is the NUL slot `$capacity` does not count
+    buf $owner = buf($n, 0, mem::alloc<uint8>($n + 1));
+    $owner->append_bytes($s, $n);
+
+    return string(string::view($owner->bytes, $n), $owner);
+}

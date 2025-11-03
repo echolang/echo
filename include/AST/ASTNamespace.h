@@ -15,6 +15,8 @@
 
 namespace AST
 {
+    class ComplexType;
+
     // a namespace, and - for a *lexical* one - the declaration scope of a `{ }` block.
     //
     // that a lexical scope is a namespace is the whole of B18's fix: `{ function helper() {} }` puts
@@ -163,6 +165,16 @@ namespace AST
     private:
         Namespace _root;
     };
+
+    // **the one owner of "which namespace holds a type's member surface"**: the owner's own path plus its
+    // name, created on first ask. Null for an anonymous owner - a closure environment is the only one, and
+    // it has nothing to publish.
+    //
+    // two things live in there and they have to live in the *same* place: a nested type's constructors and
+    // methods, so `A::Inner(1)` resolves through the ordinary namespace path, and a struct's compile-time
+    // constants, so `buffer::MAX` does too. That is what buys struct-level constants for no new expression
+    // grammar at all - and it is why this is a function rather than the same three lines written twice
+    Namespace *member_surface_namespace(NamespaceManager &namespaces, const ComplexType &owner);
 };
 
 #endif
