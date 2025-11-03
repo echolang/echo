@@ -1,0 +1,7 @@
+// a bodyless declaration is only legitimate when it says where its implementation comes from - an
+// `extern` block, an `#[intrinsic:]` or a `#[builtin:]`. without one of those it used to compile
+// without a word and fail as an undefined symbol at link time, with nothing pointing at the
+// declaration
+function mystery(int32 $x) : int32;
+
+echo 1;

@@ -1,0 +1,7 @@
+// a *template* owes a body just as an ordinary function does, and it is the reason the check cannot
+// be spelled over AST::function_emission_kind: a template has no symbol, so `emission_has_body` is
+// false for it, and this one would have slipped through. nothing instantiates a body that is not
+// there, so the template is where it has to be reported
+function twin<T>(T $value) : T;
+
+echo 1;

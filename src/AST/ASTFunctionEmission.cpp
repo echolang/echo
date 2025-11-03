@@ -50,6 +50,27 @@ bool AST::emission_needs_declaration(AST::FunctionEmission kind)
     return kind != FunctionEmission::t_no_symbol;
 }
 
+bool AST::declaration_owes_a_body(const AST::FunctionDeclNode *decl)
+{
+    // a null decl is an unresolved call, and the resolution failure is the diagnostic there
+    if (decl == nullptr) {
+        return false;
+    }
+
+    // the same first arm function_emission_kind takes, and for the same reason: a builtin is
+    // answered at its call sites and a requirement is answered by its implementors
+    if (decl->is_builtin() || decl->is_interface_requirement()) {
+        return false;
+    }
+
+    if (decl->is_extern() || decl->intrinsic.has_value()) {
+        return false;
+    }
+
+    // no arm for `is_generic()`, deliberately - a template owes a body just like anything else
+    return true;
+}
+
 bool AST::emission_has_body(AST::FunctionEmission kind)
 {
     switch (kind) {

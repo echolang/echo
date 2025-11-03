@@ -207,7 +207,9 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         return;
     }
 
-    // and a kind that claims a body and then has none is a compiler bug rather than a source error: the
+    // and a kind that claims a body and then has none is a compiler bug rather than a source error - the
+    // source case is `AST::declaration_owes_a_body`'s, reported located by the type checker, which gates
+    // compilation long before this: the
     // symbol was declared on the strength of the same answer, so returning quietly here would link
     // against something nobody defines. That is exactly what the bare `if (!is_generic()) return;` this
     // replaces used to swallow - a member whose body error recovery skipped past reached codegen, got a

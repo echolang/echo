@@ -91,6 +91,11 @@ namespace AST
         // generic implementor is checked on its template - see the note there
         void check_conformances(TypeDeclNode &node);
 
+        // reports a declaration that has no body and no marker saying where its implementation comes
+        // from. **called ahead of the generic early-return** in visitFunctionDecl, since a bodyless
+        // template is exactly one of the cases - see the note there
+        void check_has_implementation(FunctionDeclNode &node);
+
         // does this value conform but still fail to be *storable* as `to`? reports and answers true when
         // so. see the implementation for why it runs ahead of the ordinary conversion check
         bool check_interface_erasure(const ValueType &to, const ExprNode &value, const TokenReference &at);

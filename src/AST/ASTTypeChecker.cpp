@@ -21,6 +21,7 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/LiteralValueNode.h"
@@ -183,6 +184,12 @@ void TypeChecker::run()
 
 void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
 {
+    // **ahead of the generic early-return below, deliberately** - the same reason check_conformances
+    // sits ahead of visit_type_decl's. a template with no body is one of the shapes this reports, and
+    // it has no instance for the return to hand the check to: nothing instantiates a body that is not
+    // there
+    check_has_implementation(node);
+
     // a generic template's body legitimately mentions its type parameters; it is only
     // meaningful once cloned into a concrete instance, which is checked separately
     if (node.is_generic()) {
@@ -193,6 +200,40 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     _current_function = &node;
     RecursiveVisitor::visitFunctionDecl(node);
     _current_function = prev;
+}
+
+void TypeChecker::check_has_implementation(FunctionDeclNode &node)
+{
+    if (node.body != nullptr || !declaration_owes_a_body(&node)) {
+        return;
+    }
+
+    // an anonymous declaration has no token to report against, and a closure that reached here with
+    // no body is a compiler bug rather than a source omission - ExprCodegen says so already
+    if (node.is_anonymous()) {
+        return;
+    }
+
+    // a constructor or a destructor is not this check's to report: the struct parser reports one at
+    // the tail of its body pass, where it knows which members that walk actually reached. Two
+    // diagnostics for one declaration reads worse than the narrower owner does
+    if (node.is_constructor() || node.is_destructor()) {
+        return;
+    }
+
+    // an instance of a bodyless template inherits the omission rather than committing it - the clone
+    // has nothing to copy, and the template it came from is reported above. one per call site
+    // otherwise, all of them pointing at the one declaration nobody wrote a body for
+    if (node.is_instantiated()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.declaration_site_token()),
+        fmt::format("'{}' was declared but never given a body - write one, or say where its "
+                    "implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an "
+                    "'extern' block.",
+            node.signature_description()));
 }
 
 void TypeChecker::visitReturn(ReturnNode &node)

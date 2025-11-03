@@ -69,6 +69,18 @@ namespace AST
     // StmtCodegen::gen_function_decl is the one attaching it. They were two predicates over one switch
     // until a test had to pin them as equal - which is the shape of a second answer, not of two questions.
     bool emission_has_body(FunctionEmission kind);
+
+    // did the *author* owe this declaration a body? four shapes get their implementation from
+    // somewhere else: an `extern { }` member, from another object file; an `#[intrinsic:]`, from
+    // LLVM; a `#[builtin:]`, folded at each call site; and an interface requirement, from every
+    // implementor. Anything else with no body is a source omission, which is what AST::TypeChecker
+    // reports with it.
+    //
+    // deliberately **not** `!emission_has_body(function_emission_kind(decl))`, close as the two
+    // look: that one answers where a *symbol's* definition goes, and a generic template has no
+    // symbol at all while still owing a body. The two sets differ on exactly that shape, and a
+    // bodyless template is the case that must not escape.
+    bool declaration_owes_a_body(const FunctionDeclNode *decl);
 };
 
 #endif

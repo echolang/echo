@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:10
+'twin<T>(T)' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
+Begin: 'twin'
+End: 'twin'
+Code excerpt:
+ [4]> // there, so the template is where it has to be reported
+ [5]> function twin<T>(T $value) : T;
+               ^
+ [6]> 
+
+Critical issues found, cannot compile.

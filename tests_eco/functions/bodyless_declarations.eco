@@ -1,0 +1,35 @@
+// the four shapes that legitimately have no body, in one file: each of them gets its implementation
+// from somewhere else, so none of them owes one - see AST::declaration_owes_a_body
+extern {
+    function abs as c_abs(int32 $value) : int32;
+}
+
+// LLVM supplies the body
+#[intrinsic: "llvm.fabs"]
+function magnitude(float64 $x) : float64;
+
+// the compiler answers this one at each call site, so it has no symbol at all
+#[builtin: "size_of"]
+function byte_size<T>() : usize;
+
+// and the implementors hold the bodies of an interface's requirements
+interface Named
+{
+    function name() : int32;
+}
+
+class Thing : Named
+{
+    int32 $id;
+
+    function name() : int32 {
+        return $this->id;
+    }
+}
+
+echo c_abs(-42);
+echo magnitude(-1.5);
+echo byte_size<int32>();
+
+Named $n = Thing(7);
+echo $n->name();
