@@ -33,8 +33,8 @@ namespace AST
     }
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
-        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle), _operators(bundle),
-          _foreach(bundle)
+        : _bundle(bundle), _collector(bundle.collector), _ownership(bundle),
+          _const_folding(bundle), _operators(bundle), _foreach(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -480,6 +480,29 @@ namespace AST
 
             progressed |= instantiate_generic_calls(rounds);
 
+            // **everything the language asked the compiler to decide, decided before anything else looks
+            // at it.** three constraints pin this position and all three are load-bearing.
+            //
+            // *after instantiate_generic_calls*, because that is what binds `decl->instantiation_args[0]`
+            // on `mem::is_trivially_copyable<T>()`. AST::classify_copy and AST::needs_destruction both
+            // answer "no" for an unsettled type parameter on purpose - a not-yet rather than a refusal -
+            // so folding either against a `T` the monomorphizer has not bound yet is silently the wrong
+            // answer in the one direction that compiles. the same sentence ExprCodegen has always carried.
+            //
+            // *ahead of both rewriters below*, and this is the point rather than tidiness: they do not
+            // merely waste work on a subtree about to vanish, they **create call sites in it**. an
+            // `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at clone
+            // time - and AST::OperatorRewriter is what turns them into `operator []` calls that the next
+            // round instantiates and codegen emits. a `foreach` in an untaken arm is the same story one
+            // level up: AST::ForeachLowering mints its `iterate()`. discarding first is the only way not
+            // to pay for either.
+            //
+            // *before the ownership pass*, which walks a body **exactly once, ever**. a `T $doomed` in an
+            // untaken arm is a local that pass gives a drop, and a drop of an owning `T` is one more
+            // generic call site. OwnershipPass::body_is_concrete answers false while a ConstIfNode or a
+            // ConstExprNode is in the body, which is what makes this safe rather than merely early
+            progressed |= _const_folding.run_round();
+
             // operand syntax whose meaning the types just settled: a bracket over a container, an
             // operator over what was a bare type parameter. **ahead of the re-derivation below**,
             // because a declaration inferred from `$a[0]` has no type at all until the element call
@@ -521,6 +544,11 @@ namespace AST
         //
         // in the round order, and for the round order's reason: a literal refused here leaves its
         // declaration untyped, and a loop over that declaration is what the next line refuses
+        // first of the three, in the round order and for the round order's reason: a `const if` refused
+        // here leaves an empty scope behind, and there is nothing left inside it for the two below to
+        // blame - where the other way round they would report against arms that were never going to be
+        // compiled
+        _const_folding.finalize();
         _operators.finalize();
         _foreach.finalize();
 

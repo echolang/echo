@@ -1,0 +1,39 @@
+--- OUT --->
+1
+9
+3
+--- IR --->
+# the unoptimized module on purpose: `-O` inlines this constructor into its one caller, and a claim about
+# a function that no longer exists is a check that quietly stops checking. what is pinned here is the
+# *choice*, which is made before any optimizer runs
+
+CHECK: define linkonce_odr %"array<int32>" @_arrayZZMRBCLC5arrayIMLPiEGMLPi(
+
+# **the branch is not folded here, it is gone.** `const if (mem::is_trivially_copyable<T>())` is decided in
+# the *tree*: AST::ConstFolding replaced the statement with the arm the condition selected, so there is no
+# second arm and nothing for an optimizer to see through.
+#
+# this used to check `br i1 true`, which was the weaker claim - it said the condition had folded while the
+# element loop's blocks were still materialized behind it, removed by LLVM under `-O` and shipped at `-O0`.
+# an absence is the stronger assertion, and it is the one the feature is about
+CHECK-NOT: br i1 true
+CHECK-NOT: br i1 false
+
+# nothing here reaches the element operator, which is what the loop arm is built out of. it is not merely
+# unreachable now - it is absent, and so is the `operator []` instantiation the arm used to create
+CHECK-NOT: @_operatorx20x5b
+
+# and the arm it selected is the one call this whole fast path is about
+CHECK: call void @_mem_copy
+
+# **the mirror, in truncate().** the same source branches on `mem::needs_destruction<T>()`, and for an
+# int32 that arm is what allocated `%doomed` and called `mem::take`. the whole body is now the one store
+# `count()` promises.
+#
+# checked here rather than in `clear()` because this is where the teardown lives now - `clear()` is
+# `truncate(0)`, the way `push` is the append and `at` is the element operator. the *only* `br i1` left is
+# the real `$count >= $this->len` guard, so unlike the constructor above this cannot assert on branches
+CHECK: define linkonce_odr void @_M5array_truncateZZMRBMLC5arrayIMLPiEZMLPyGMLPi(
+CHECK-NOT: alloca i32
+CHECK-NOT: call
+CHECK: ret void

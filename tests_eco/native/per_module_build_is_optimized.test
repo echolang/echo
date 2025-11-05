@@ -1,0 +1,30 @@
+mode: build
+
+--- OUT --->
+6
+--- UNIT_IR --->
+# **per unit and with no merge**, which is what makes this different from every other IR section in the
+# corpus: `--print-unit-ir` prints each compilation unit as the object writer receives it, where `-p` prints
+# the one module `-O` folded them into. On a `mode: build` case those are genuinely different programs.
+
+CHECK: [unit main]
+
+# `nonnull` is the type system's own claim about a borrow, finally said out loud - `T&` differs from
+# `ptr<T>` by one bit on ValueType and both used to lower to a bare `ptr`. `nocapture` and `readonly` are
+# LLVM's, derived from a body it can now reason about
+CHECK: define i32 @_totalZZMRBCLC5arrayIMLPiE(ptr nocapture nonnull readonly
+
+# the length is read once, in the entry block, rather than through `count()` per turn - which is what gives
+# the loop a computable trip count, and with it unrolling and vectorisation
+CHECK: entry:
+CHECK: load i64
+
+# and the body holds no calls at all: `count()` and the element operator are inlined away, the cursor
+# arithmetic is SSA, and the bounds `assert` was dropped by the release build. bounded by the branch below
+# rather than run to the end of the module
+CHECK: body:
+CHECK-NOT: call
+CHECK-NOT: alloca
+CHECK: getelementptr i32
+CHECK-NOT: call
+CHECK: br i1

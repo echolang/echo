@@ -1,0 +1,18 @@
+--- OUT --->
+5
+4
+5
+--- IR --->
+# the unoptimized module on purpose, for trivial_copy_stays_a_memcpy's reason: `-O` inlines this into its
+# one caller, and a claim about a function that no longer exists is a check that quietly stops checking.
+# what is pinned is the *choice*, which is made before any optimizer runs
+
+CHECK: define linkonce_odr void @_M5array_extendZZMRBMLC5arrayIMLPiEZMRBCLC5arrayIMLPiEGMLPi(
+
+# `const if (mem::is_trivially_copyable<T>())` is decided in the **tree** by AST::ConstFolding, so the
+# element loop is not merely unreachable for an int32 - it is absent, and so is the `operator []`
+# instantiation it would have created. bounded by the memcpy below rather than run to the end of the module
+CHECK-NOT: @_operatorx20x5b
+
+# and the arm it selected: one call, for the whole append
+CHECK: call void @_mem_copy

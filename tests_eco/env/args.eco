@@ -17,8 +17,16 @@ foreach (std::env::args() as $i => $a) {
     echo $i;
 }
 
-// materialized, and agreeing with the indexed reads
-array<string::view> $all = std::env::argv();
+// materialized, and agreeing with the indexed reads. `array<string>` and not `array<string::view>`: this
+// one *owns* its arguments, so they outlive the walk above - which is the whole reason to pay for it
+array<string> $all = std::env::argv();
 echo $all->count();
-echo $all[1]->equals(std::env::arg(1));
-echo $all[2]->equals(std::env::arg(2));
+
+// through `->view()`, because the two sides are different types now: an owning `string` compared against
+// the `string::view` `arg()` hands back. that is the cost of owning them, and it is one call
+echo $all[1]->view()->equals(std::env::arg(1));
+echo $all[2]->view()->equals(std::env::arg(2));
+
+// and they own their bytes rather than windowing argv's: the block the platform handed `main` is not
+// where these live, which is the whole difference from `args()` above
+echo mem::live_allocations() > 0;

@@ -1,0 +1,20 @@
+// `const(E)` is a demand: the compiler works E out now, or says it could not.
+//
+// what it buys over writing 32 is that the arithmetic stays readable - and what it buys over writing
+// `4 * 8` without the marker is that a value the compiler cannot decide becomes an error here rather
+// than arithmetic the program carries around at runtime.
+int32 $slots = const(4 * 8);
+echo $slots;
+
+// it folds at the destination's type, so this is a uint8 255 rather than an int32 that gets narrowed
+uint8 $full = const(200 + 55);
+echo $full;
+
+// the two ownership questions are foldable, so they may be asked outside a `const if` too
+bool $trivial = const(mem::is_trivially_copyable<int32>());
+echo $trivial;
+
+// and it nests, in either direction
+const if (const(2 + 2) == 4) {
+    echo 'four';
+}

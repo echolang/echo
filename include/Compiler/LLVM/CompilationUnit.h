@@ -45,6 +45,11 @@ namespace Compiler::LLVM
         std::vector<const AST::FunctionDeclNode *> pending_definitions;
         std::unordered_set<const AST::FunctionDeclNode *> definition_queued;
 
+        // has Backend::optimize_unit already run over this module? two callers reach it - the dump and
+        // the object writer, in that order under `--print-unit-ir` - and the dump exists precisely to
+        // show what the writer is handed, so the second call has nothing left to do but pay for it again
+        bool optimized = false;
+
         CmpUnit() {
             function_table = FunctionTable();
             structure_table = std::make_unique<StructureTable>();

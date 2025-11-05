@@ -17,8 +17,7 @@ Echo has three types and each one answers a different question:
 | `slice<T>` | somebody else's | no | no |
 | `FixedArray<T, N>` | inline, where the value lives | yes, trivially | no |
 
-`array<T>` is the one you want by default, and the one this chapter is mostly about. There's no
-`List<T>` and no `Vector<T>` — those names are retired, not reserved.
+`array<T>` is the one you want by default, and the one this chapter is mostly about.
 
 ## The one big idea
 
@@ -216,14 +215,33 @@ Counts and indices are `usize` throughout, matching `mem::`:
 | `->pop() : T` | remove the last element and hand over its ownership |
 | `->get($i) : T` | a copy of the element, bounds-checked in every build |
 | `->at($i) : T&` | a borrow of the element, bounds-checked in every build |
-| `->reserve($n) : void` | make room for `$n` elements without changing `count()` |
-| `->clear() : void` | destroy every element; keeps the buffer |
+| `->extend($other) : void` | append every element of another array. One allocation, and one `memcpy` for most element types |
+| `->swap_remove($i) : T` | remove the element at `$i` in O(1), moving the last one into the hole. **Does not preserve order** |
+| `->reserve($n) : void` | make room for at least `$n` elements without changing `count()` |
+| `->reserve_exact($n) : void` | the same, sized to the byte — no doubling, no floor |
+| `->shrink_to_fit() : void` | give back everything past `count()` |
+| `->truncate($n) : void` | destroy every element past `$n`; keeps the buffer |
+| `->clear() : void` | destroy every element; keeps the buffer. `truncate(0)` |
 | `->sub() : slice<T>` | a borrowed window over everything |
 | `->sub($from, $len) : slice<T>` | a borrowed window over part of it |
 | `->clone() : array<T>` | an explicit deep copy |
 
 There's no `->free()`. The destructor releases the buffer at scope exit, which is the point of owning
 it.
+
+And `arr::with_capacity<T>($n)` builds one with room already made — `array<T>()` followed by
+`->reserve($n)`, which is the pair you'd otherwise write every time:
+
+```echo
+array<int32> $a = arr::with_capacity<int32>(64);
+
+echo $a->count();       // 0 — room is not length
+echo $a->capacity();    // 64
+```
+
+It's a function rather than `array<int32>(64)` on purpose. That would read as *sixty-four elements* to
+anyone who has met `vec![0; 64]` in Rust, and room for 64 and a length of 64 are different things — so the
+spelling that's ambiguous isn't one you can write.
 
 ## Pushing without copying
 
@@ -289,6 +307,26 @@ An array grows by allocating a larger buffer and moving into it, doubling capaci
 appends costs an amortized constant each. `->reserve($n)` does it once, up front, when you already know
 the size.
 
+The first allocation has a **floor**, so a short array doesn't reallocate on each of its first few
+appends:
+
+```echo
+array<usize> $a;
+$a[] = 1;
+
+echo $a->capacity();    // 4, not 1
+
+array<uint8> $b;
+$b[] = 1;
+
+echo $b->capacity();    // 8 — the smaller the element, the more of them fit in the
+                        // smallest block an allocator will hand out anyway
+```
+
+The floor only ever applies to *growth*. `->reserve(1000)` is exactly 1000, and `->reserve_exact($n)` is
+how you ask for a small buffer sized to the byte — at the cost that the next append past `$n` reallocates
+immediately, because there's no headroom left to absorb it.
+
 Which brings the hazard, and it's one you've met before in a different shape.
 
 Growing an array may move its buffer, so it invalidates every borrow into it. That means:
@@ -336,11 +374,21 @@ return $a;             // moves out
 Borrow it if the callee only reads it. Move it if you're handing it over. Reach for `->clone()` when you
 want the copy to be visible at the call site rather than implied by an `=`.
 
-One array-specific limit, and it's a sharp one: the deep copy is only correct when the element type owns
-nothing itself. Copying an `array<array<int32>>` or an `array<string>` needs a recursive per-element
-copy, and what happens instead is a flat copy of the elements' bytes — so two arrays end up owning one
-buffer each element. It compiles, and it's wrong. Until that's fixed, keep owning types out of an array,
-or move the array rather than copying it.
+The deep copy goes all the way down. An `array<string>` copies each string the way a string is copied,
+and an `array<array<int32>>` copies each inner array the way an array is copied — recursively, for as
+many levels as you nest. Destroying one destroys every element it still holds before it gives the buffer
+back. You don't have to think about which kind of element you have.
+
+What that costs is worth knowing rather than worrying about. For an element type that owns nothing —
+`int32`, a struct of numbers, a `slice<T>` — the whole copy is one `memcpy` and the destructor is a
+single `free`, exactly as if elements had no lifetimes at all. The per-element work only appears for
+element types that need it.
+
+The one case that isn't a copy is the one you'd expect: an element type that owns something and hasn't
+said what copying it means — a destructor and no copy constructor — makes copying the array a compile
+error, naming the element type. Nothing is guessed, and nothing is bit-copied behind your back. Such an
+array still works in every other way; give the element type a copy constructor, or move the array
+instead.
 
 ## Slices
 
@@ -410,8 +458,7 @@ FixedArray<int32, 4> $quad = [1, 2, 3, 4];
 ```
 
 It owns its elements trivially, in the sense that there's no separate resource to release. So it needs
-no destructor, and copying one really is a copy of its bytes. That makes it the one array flavor whose
-semantics are already correct under the way the compiler copies structs today.
+no destructor, and copying one really is a copy of its bytes.
 
 Indexing would work exactly as above. It doesn't grow, so `$quad[] = 5` would be an error rather than a
 resize.

@@ -68,6 +68,64 @@ function size_of<T>() : usize;
 function align_of<T>() : usize;
 
 /**
+ * True when duplicating a `T` is duplicating its bytes and nothing else, as a compile-time constant.
+ *
+ * False for anything a copy has to *arrange*: a class or an interface, where a copy is one more
+ * reference; a type whose author wrote a copy constructor; a struct holding any of those, however
+ * deep. The compiler decides this for every copy it inserts anyway - this is that same answer, said
+ * out loud, so a container can be written against it instead of assuming one way or the other.
+ *
+ * What it is for: a buffer of `T` can be duplicated with one `mem::copy` exactly when this is true,
+ * and has to be copied element by element when it is not. `array<T>` branches on it, and the two arms
+ * are both correct for every `T` - the branch buys back the `memcpy`, it does not decide correctness.
+ *
+ * Write the element-wise arm anyway. This says a bulk copy is *allowed*, never that a per-element one
+ * would be wrong.
+ */
+#[builtin: "is_trivially_copyable"]
+function is_trivially_copyable<T>() : bool;
+
+/**
+ * True when a `T` going out of scope has something to give back, as a compile-time constant.
+ *
+ * The teardown counterpart of `is_trivially_copyable`, and the same kind of answer: true for a class
+ * or an interface, for a type whose author wrote a destructor, and for a struct holding any of those.
+ * False for a primitive, for a pointer - an address says nothing about what is behind it - and for a
+ * struct made only of those.
+ *
+ * What it is for: a container holding raw storage has to destroy its elements before it frees the
+ * block, and there is nothing to do when this is false. Guarding the loop with it is what keeps an
+ * `array<int32>`'s destructor free rather than a walk over `count()` elements that each do nothing.
+ */
+#[builtin: "needs_destruction"]
+function needs_destruction<T>() : bool;
+
+/**
+ * The value at `$place`, handed over. **The storage keeps its bytes and stops being an owner.**
+ *
+ * The read that *ends* a claim rather than duplicating it. `$x = $buffer:$[3]` copies - a `string`
+ * element gets its retain, and the slot still names the buffer it named before, so something has to
+ * release it later. This does not copy: what comes back is the only owner, and whatever was managing
+ * that storage is now managing storage that holds nothing.
+ *
+ * Which is why it is here, in the namespace where `free` lives, and not a keyword. **Nothing checks
+ * this for you.** Take twice from one place and two owners release one value, exactly as freeing
+ * twice frees one block twice. It is for the code that already accounts for its own storage - a
+ * container whose `count()` says which slots are live - and for nothing else.
+ *
+ * `mv` is what you want for a variable, and this refuses one: a local's scope still owes it a
+ * teardown, so emptying it here would destroy the value twice. A temporary is refused for the mirror
+ * reason - it owns its value already and has no storage to empty.
+ *
+ * `array<T>` is written on this three times: its destructor and `clear()` take each live element and
+ * let it fall out of scope, and `pop()` takes the last one and hands it to the caller. Without it
+ * `pop()` could only *copy* the element out, leaving the slot holding a second owner that nothing
+ * would ever release.
+ */
+#[builtin: "take"]
+function take<T>(T& $place) : T;
+
+/**
  * Allocates room for `$count` elements of `T`, uninitialized.
  *
  * Returns `null` when the allocation fails. Because the result is `ptr<T>` and not `T&`, the type

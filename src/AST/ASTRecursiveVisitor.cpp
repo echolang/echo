@@ -26,6 +26,8 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
@@ -187,6 +189,23 @@ void RecursiveVisitor::visitIfStatement(IfStatementNode &node)
     value_edge(node.condition);
     statement_edge(node.if_scope);
     statement_edge(node.else_scope);
+}
+
+// identical to the branch above, deliberately: the only difference between the two nodes is *when* the
+// condition is answered, and a walk does not care. AST::ConstFolding is what tells them apart
+void RecursiveVisitor::visit_const_if(ConstIfNode &node)
+{
+    value_edge(node.condition);
+    statement_edge(node.if_scope);
+    statement_edge(node.else_scope);
+}
+
+// the operand, as a value: a `const(...)` is transparent, so the position it sits in is the position its
+// operand sits in. a *place* edge would be wrong - AST::ConstFolding replaces this with a literal, and a
+// literal has no address
+void RecursiveVisitor::visit_const_expr(ConstExprNode &node)
+{
+    value_edge(node.operand);
 }
 
 void RecursiveVisitor::visitWhileStatement(WhileStatementNode &node)

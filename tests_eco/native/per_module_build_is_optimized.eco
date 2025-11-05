@@ -1,0 +1,27 @@
+// **the path an ordinary `echoc build` takes, which nothing used to be able to look at.**
+//
+// `-p` folds every unit into one module before printing, because that is the only thing an O3 pipeline or a
+// single dump can see - so every IR golden in this corpus was asserting about the *whole-program* build, and
+// the per-module one had no coverage at all. That is where Backend::optimize_unit runs, and before it existed
+// the default build emitted completely unoptimized IR: every parameter spilled to a stack slot and reloaded
+// per use, every accessor a real call - on the one path the object cache exists to serve.
+//
+// So this is the claim tests_eco/iteration/lowered_cost makes for `-O`, made here for `build` with no merge:
+// the loop over an array is a load, an add and a branch, and the calls are gone.
+
+function total(const array<int32>& $a) : int32
+{
+    int32 $sum = 0;
+    usize $i = 0;
+
+    while ($i < $a->count()) {
+        $sum = $sum + $a[$i];
+        $i = $i + 1;
+    }
+
+    return $sum;
+}
+
+array<int32> $xs = [1, 2, 3];
+
+echo total($xs);

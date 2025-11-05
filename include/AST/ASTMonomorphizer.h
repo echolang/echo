@@ -7,6 +7,7 @@
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTOperatorRewriter.h"
 #include "AST/ASTForeachLowering.h"
+#include "AST/ASTConstFolding.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTValueType.h"
 
@@ -53,6 +54,12 @@ namespace AST
         // this fixpoint has to instantiate. it lives in its own translation unit; only the call is
         // here
         OwnershipPass _ownership;
+
+        // `const if` and `const(...)`, decided and then removed. driven from inside here because what a
+        // condition asks about is a type this fixpoint decides, and it must run before anything else in
+        // the round touches an arm that is about to disappear - see its header, and the ordering comment
+        // at its call site in run()
+        ConstFolding _const_folding;
 
         // operand syntax whose meaning depends on a type this fixpoint is still deciding: a bracket,
         // and an operator over a bare type parameter. driven from inside here for the ownership

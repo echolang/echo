@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTDetach.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
@@ -123,6 +124,12 @@ void ForeachLowering::discard(ScopeNode &scope, size_t index, ForeachNode &loop)
     // "unknown type" messages underneath the one real diagnostic
     auto &empty = _current_module->nodes.emplace_back<ScopeNode>();
     empty.parent_ptr = &scope;
+
+    // and the arena stops answering for it. nothing here is kept - every path that reaches this one has
+    // decided the loop cannot be lowered at all - so the whole loop is what left the tree. without this its
+    // `iterate()` receiver and everything in its body stayed visible to Monomorphizer::snapshot_calls,
+    // which is what turned one refused loop into a second diagnostic underneath the real one
+    forget_subtree(_bundle, loop);
 
     scope.children[index] = make_ref(empty);
 

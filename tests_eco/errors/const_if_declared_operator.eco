@@ -1,0 +1,12 @@
+// a declared operator runs; it does not fold. so the gate refuses rather than working the comparison out
+// from the operands` bits, which for a struct would not even be arithmetic.
+struct Point { int32 $x; }
+
+operator (Point $a) < (Point $b) : bool
+{
+    return $a->x < $b->x;
+}
+
+const if (Point(1) < Point(2)) {
+    echo 1;
+}

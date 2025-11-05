@@ -4,12 +4,32 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 
+#include <algorithm>
+
 namespace
 {
+    // **both arms, and both of them leaving.** a two-armed branch with no `else` falls through by
+    // construction, and one arm returning says nothing at all about the other - so this is the only
+    // branching shape where the statement after it provably cannot be reached, and codegen agrees:
+    // gen_if_statement leaves no merge block at all when every arm terminated its own
+    //
+    // the *weaker* of the two, so one arm returning and the other breaking says the scope is left but the
+    // function is not - which is exactly true, and is the reason this is an ordering and not a bool
+    AST::ExitKind branch_exit_kind(const AST::ScopeNode *if_scope, const AST::ScopeNode *else_scope)
+    {
+        if (if_scope == nullptr || else_scope == nullptr) {
+            return AST::ExitKind::t_none;
+        }
+
+        return std::min(AST::scope_exit_kind(*if_scope), AST::scope_exit_kind(*else_scope));
+    }
+
     // **how far does control go at this one statement?** the per-statement half of the question; the scope
     // walk below is what turns it into an answer about the scope.
     //
@@ -42,22 +62,27 @@ namespace
             return AST::ExitKind::t_scope;
         }
 
-        // **both arms, and both of them leaving.** an `if` with no else falls through by construction, and
-        // one arm returning says nothing at all about the other - so this is the only branching shape where
-        // the statement after the `if` provably cannot be reached, and codegen agrees: gen_if_statement
-        // leaves no merge block at all when every arm terminated its own
-        //
-        // the *weaker* of the two, so one arm returning and the other breaking says the scope is left but
-        // the function is not - which is exactly true, and is the reason this is an ordering and not a bool
+        // the two-armed rule, and branch_exit_kind above is the whole of it
         if (statement.has_type<AST::IfStatementNode>()) {
             auto *branch = statement.get_ptr<AST::IfStatementNode>();
 
-            if (branch->if_scope == nullptr || branch->else_scope == nullptr) {
-                return AST::ExitKind::t_none;
-            }
+            return branch_exit_kind(branch->if_scope, branch->else_scope);
+        }
 
-            return std::min(AST::scope_exit_kind(*branch->if_scope),
-                            AST::scope_exit_kind(*branch->else_scope));
+        // **and the same answer for a `const if` - the one question a transient node owes an arm for.**
+        // every other pass that could meet one runs *after* the monomorphizer's fixpoint and therefore
+        // never does, but this is asked by Parser::parse_guard and AST::close_constructor_body while the
+        // parse is still building the tree, so "AST::ConstFolding has removed it by then" is not available
+        // here.
+        //
+        // it is also *conservative in the right direction*: this reads both arms where the lowering will
+        // keep only one, so a `const if` whose taken arm returns and whose untaken arm falls through
+        // answers t_none here and t_function later. answering above t_none when it is not certain is the
+        // failure mode this file's header refuses, and under-answering only costs a dead trailing statement
+        if (statement.has_type<AST::ConstIfNode>()) {
+            auto *branch = statement.get_ptr<AST::ConstIfNode>();
+
+            return branch_exit_kind(branch->if_scope, branch->else_scope);
         }
 
         // a bare nested block leaves for whatever reason its own children do. without this arm a

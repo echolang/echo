@@ -122,20 +122,22 @@ function args() : arg_iterator
 }
 
 /**
- * Every argument, as an array.
+ * Every argument, as an array of owning strings.
  *
  * `args()` without the loop, for when the list is the thing you want rather than the walk. The one
  * function in this module that allocates on purpose, so it is a call and not a property: nothing is
- * built unless you ask.
+ * built unless you ask - and it allocates twice per argument, since each `string` owns a copy of its
+ * bytes rather than windowing the block the platform handed `main`.
  *
- * `array<string::view>` rather than `array<string>` deliberately - the array copy constructor is a
- * bitwise `mem::copy`, which is correct for a view and would double-free a `string`.
+ * **Reach for `args()` or `arg($i)` when reading is all you need.** Both hand back a `string::view`
+ * over the platform's own bytes and allocate nothing at all; this exists for when the arguments have
+ * to outlive the walk, be sorted, be kept in a struct - the cases a borrow cannot cover.
  */
-function argv() : array<string::view>
+function argv() : array<string>
 {
     usize $count = argc();
 
-    array<string::view> $out = array<string::view>();
+    array<string> $out = array<string>();
     $out->reserve($count);
 
     // indexed rather than `foreach`ed, the shape `arr::merge` uses: a cursor buys nothing when the count
@@ -143,7 +145,10 @@ function argv() : array<string::view>
     usize $i = 0;
 
     while ($i < $count) {
-        $out[] = arg($i);
+        // through the raw C string rather than the view `arg` builds, the shape `exe`'s fallback uses:
+        // `str::from_c_str` is the one function that turns bytes nobody owns into bytes this array does,
+        // and re-measuring them costs a `strlen` the view had already paid for
+        $out[] = str::from_c_str(arg($i)->c_str());
         $i = $i + 1;
     }
 

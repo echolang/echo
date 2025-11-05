@@ -117,8 +117,15 @@ module directory that the manifest's `#[sources:]` does not actually name is ski
 
 ### Sections
 
-`OUT` is a byte golden. `IR`, `AST` and `RAST` are directive sections, checked against
-`--print-ir`, `--print-ast` and `--print-resolved-ast` respectively.
+`OUT` is a byte golden. `IR`, `UNIT_IR`, `AST` and `RAST` are directive sections, checked against
+`--print-ir`, `--print-unit-ir`, `--print-ast` and `--print-resolved-ast` respectively.
+
+> **`IR` is the whole program, `UNIT_IR` is one unit at a time.** `--print-ir` folds every compilation
+> unit into one module first, because that is the only thing an O3 pipeline or a single dump can look at -
+> so an `IR` section always describes the `-O` build even when the case sets no flags. `UNIT_IR` prints
+> each unit as the object writer receives it, which is what an ordinary `echoc build` emits, and each unit
+> is preceded by a `[unit <name>]` header to anchor on. It is only meaningful on a **`mode: build`** case:
+> `run` merges unconditionally, because the JIT can take only one module.
 
 > **`OUT` is verbatim** — no comment lines, no blank-line stripping, nothing ignored. A `#` in it is a
 > `#`. Only a single trailing newline is trimmed, from both sides, so a golden need not be pedantic
@@ -166,7 +173,7 @@ allocation, that `echo` of a string reaches `write` and not `printf`, that a `st
 reference count, that a drop landed where the ownership pass said it would — every one of those prints
 exactly the same thing whether it holds or not.
 
-`IR`, `AST` and `RAST` assert them with LLVM's FileCheck syntax, reduced to the two directives that
+`IR`, `UNIT_IR`, `AST` and `RAST` assert them with LLVM's FileCheck syntax, reduced to the two directives that
 carry their weight:
 
 ```

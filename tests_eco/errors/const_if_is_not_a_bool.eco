@@ -1,0 +1,4 @@
+// the condition folded, and to a number. `const if` selects an arm, so it needs an answer that says which.
+const if (3) {
+    echo 1;
+}

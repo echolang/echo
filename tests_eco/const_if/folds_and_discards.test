@@ -1,0 +1,11 @@
+--- OUT --->
+bytes
+chained
+after
+--- RAST --->
+CHECK: Module: [main]
+
+# the marker is gone: every `const if` became the arm its condition selected, and the two arms that were
+# not selected are not in the tree at all. this is the claim of the whole feature, so it is checked as an
+# absence rather than inferred from the output above
+CHECK-NOT: const if

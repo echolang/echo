@@ -118,13 +118,25 @@ namespace Compiler::LLVM
         // slot holding a handle, and the address of the object field is precisely that
         void gen_virtual_call(AST::FunctionCallExprNode &node);
 
-        // `size_of` / `align_of`: folded to a constant, asked of the instance's single type
-        // argument, which the monomorphizer stamped on when it resolved `size_of<int32>()` from
-        // `size_of<T>()`. the only builtin family that pushes a value
+        // **a question about a type, folded to a constant**: `size_of` / `align_of`, and the two
+        // ownership predicates `is_trivially_copyable` / `needs_destruction`. all four are asked of the
+        // instance's single type argument, which the monomorphizer stamped on when it resolved
+        // `size_of<int32>()` from `size_of<T>()`
+        //
+        // one arm for the layout pair and the taxonomy pair, even though one reads a DataLayout and the
+        // other reads the AST: what they share is the part that is easy to get wrong, which is the
+        // *concreteness* guard on that type argument. every fold in the language that answers "no" for an
+        // unsettled type parameter belongs behind one check, not behind two written at different times
         //
         // `kind` is passed rather than re-derived: gen_builtin_call has already made the routing
-        // decision, and taking it as a parameter says in the signature that only two kinds arrive
+        // decision, and taking it as a parameter says in the signature that only those kinds arrive
         void gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
+
+        // `take`: the value at a place, read out with no copy inserted and nothing written back
+        //
+        // one load, and every consequence follows from this being a *call* rather than a place - see
+        // AST::BuiltinKind::t_take. no `kind` parameter, because it is the only one of its family
+        void gen_take_builtin(AST::FunctionCallExprNode &node);
 
         // `die`: stop, unconditionally
         void gen_die_builtin(AST::FunctionCallExprNode &node);

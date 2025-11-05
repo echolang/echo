@@ -169,6 +169,92 @@ The facts a manifest's conditions read are the *invocation's*, not the host's �
 be parsed with. So `--target-os linux` picks the Linux file list *and* compiles those files as Linux, rather
 than mixing one platform's sources with the other's filtering.
 
+## A branch inside a body: `const if`
+
+Everything above is about which code is *read*. There's a second question, and `#[if:]` can't answer it:
+which of two statements inside a body should be **compiled**, when the answer depends on a type.
+
+```echo
+const if (mem::is_trivially_copyable<T>()) {
+    mem::copy<T>($this->data, $other->data, $other->len);
+}
+else {
+    // copied one element at a time, so each gets whatever its own copy means
+}
+```
+
+That's real code from `array<T>`'s copy constructor. Both arms are correct for every `T` — the branch only
+buys back the bulk copy for element types that can take one. What `const` adds is that the arm that loses is
+**gone**: not compiled, not emitted, not there.
+
+`else` and `else const if` chain the way you'd expect:
+
+```echo
+const if (A) { }
+else const if (B) { }
+else { }
+```
+
+And the same marker works on a value, where it means "work this out now":
+
+```echo
+int32 $slots = const(4 * 8);          // the literal 32 reaches the compiler's output
+```
+
+### The compiler says so when it can't
+
+That's the point of writing `const` rather than hoping. A condition the compiler cannot decide is an error
+where you wrote it:
+
+```
+const if ($n > 0) {
+```
+```
+line 5: this is not something the compiler can work out for itself - it needs storage, a call, or
+something that only exists while the program runs.
+```
+
+An ordinary `if` would have compiled that into a runtime branch, which is exactly the silence this avoids.
+The same holds for a value: `const(255 + 1)` at a `uint8` is refused rather than wrapped to 0 — a `const`
+value is one the compiler stands behind.
+
+### What a condition can test
+
+Anything the compiler already knows: `mem::is_trivially_copyable<T>()` and `mem::needs_destruction<T>()`,
+`true` and `false`, whole-number literals, a [constant](constants.md), the comparisons, `&&` and `||`, and
+`+ - * / %`.
+
+What it can't: anything with storage (a `$variable`, a field), an ordinary function's result, a floating
+point value, and — for now — `mem::size_of<T>()` and `mem::align_of<T>()`, which the compiler only works out
+once it is emitting code for a particular machine.
+
+### Which of the two to reach for
+
+| | |
+|---|---|
+| `#[if:]` | code that must not be **read** — a symbol this platform doesn't have, a whole `extern` block, a `struct` that only exists on Windows |
+| `const if` | a statement inside a body that must not be **compiled** — and the thing `#[if:]` can never do: name a type parameter |
+
+### One thing to know about the arms
+
+**An arm is a block**, so it can't declare something the code after it uses. Unlike C's `#if`, which pastes
+tokens, this selects a *scope*:
+
+```echo
+usize $size = 0;                    // declare out here
+
+const if (mem::needs_destruction<T>()) {
+    $size = 1;                      // and assign inside
+}
+```
+
+That's the one place `const if` is genuinely weaker than a token-level directive.
+
+### And one thing it can do that a runtime `if` cannot
+
+A [move](ownership_and_moving.md) inside an arm is an *unconditional* move, because the arm is the only code
+there is. Inside a runtime `if` the same `mv` is a conditional move, and the compiler says so.
+
 ## Two things a condition deliberately can't do
 
 **It can't name a constant, or any other declaration.** Not an omission — a consequence of running before
@@ -182,6 +268,9 @@ The filter decides which regions are parsed *at all*, and a constant's name is p
 ordering is what lets an excluded region mention symbols this platform doesn't have, so it isn't a trade I'd
 give up for this. See [Constants](constants.md), which composes the other way round quite happily: a constant
 inside an `#[if:]` region is dropped with the rest of it.
+
+**`const if` is the answer to this one**, and it can name a constant precisely because it runs after
+everything is declared — see the section above.
 
 **A define carries no value.** `--define NAME=VALUE` is refused rather than quietly ignored — a flag answers
 "is this on", and naming a *value* is what a [`const` declaration](constants.md) is for.

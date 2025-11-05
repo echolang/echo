@@ -22,6 +22,42 @@ namespace AST
         t_size_of,
         t_align_of,
 
+        // **the two ownership questions, asked from Echo.** the same shape as the two above - generic,
+        // argument-less, folded to a constant at the call site - but what they fold is an *AST* fact
+        // rather than a layout one: AST::classify_copy and AST::needs_destruction, verbatim
+        //
+        // they exist so a library body can be written against the taxonomy instead of guessing at it.
+        // `array<T>`'s copy constructor was a bitwise `mem::copy` and its destructor freed the buffer
+        // without touching the elements, both because "there is no way to ask whether `T` owns
+        // anything" - so an `array<string>` compiled, double-freed, and had no diagnostic anywhere
+        //
+        // builtins rather than a `contract::` interface a `T` could conform to, which is the other way
+        // the question is expressible: conformance is something a type's author opts into, and the
+        // answer here must hold for every type including the ones written before the question existed.
+        // the compiler already knows, and one owner that already decides it is the point
+        t_is_trivially_copyable,
+        t_needs_destruction,
+
+        // **move the value out of a place**, leaving the storage behind it dead
+        //
+        // the verb the two predicates above are useless without: knowing `T` owns something buys nothing
+        // if the only way to get an element out of a raw buffer is to *copy* it, which leaves the slot
+        // holding a second owner nothing will ever release. what a container needs is the read that ends
+        // the source's claim, and Echo has no spelling for one - `mv` transfers a *variable*, and an
+        // element of a buffer this type is itself managing is not one
+        //
+        // its lowering is one load through the borrow, and everything else follows from it being a
+        // **call**: a call result is not a place, so AST::OwnershipPass inserts no copy, and the owner it
+        // hands back is destroyed by the ordinary frame drop of wherever it lands. so `pop()` is a move,
+        // and a destructor's element loop is a take whose value is dropped at the end of the iteration -
+        // with no arm for either anywhere in that pass
+        //
+        // unsafe by construction, and squarely in `mem::` for that reason: taking twice from one place
+        // duplicates ownership exactly as freeing twice duplicates a free. AST::TypeChecker refuses the
+        // two misuses that have a correct spelling instead - a source that is not a place, and a whole
+        // local variable, which is what `mv` is for
+        t_take,
+
         // the two ways a program stops itself. unlike the two above they take arguments, return
         // void and are not generic - so they are the first builtins to rely on `is_builtin()`
         // rather than the `is_generic()` guard that happens to sit ahead of it in TypeLowering
@@ -121,6 +157,35 @@ namespace AST
         // missing return; AST::scope_exit_kind gives it the arm `t_die` has instead
         t_exit,
     };
+
+    // **can this builtin be answered before codegen, and if not, why not?**
+    //
+    // three answers rather than a bool, because the two ways "no" happens are two different sentences
+    // to whoever wrote the call. a layout query *could* be foldable one day and is not today; a
+    // `dprint` never will be, and telling someone to wait for the first is useless advice about the
+    // second
+    enum class BuiltinFoldability
+    {
+        // AST::classify_copy and AST::needs_destruction, verbatim - the tree and nothing else, so
+        // AST::const_fold can answer them from a ValueType alone
+        t_ast_fact,
+
+        // size_of / align_of. an llvm::DataLayout and a TypeRegistry, which exist only at codegen -
+        // and asking the AST for a struct's stride is asking it for an ABI it does not model. what is
+        // missing is a target layout at AST level, not an arm here
+        t_needs_layout,
+
+        // not a query at all: it allocates, prints, stops the program, or moves a value out of a place
+        t_not_a_query,
+    };
+
+    // here rather than as a switch inside AST::const_fold, and exhaustive for builtin_message_index's
+    // reason: a builtin added without an arm is a compile error rather than one that silently answers
+    // "not foldable", which would cost a `const if` a refusal nobody could explain
+    //
+    // two readers, which is what earns it a home of its own: AST::const_fold, and
+    // ExprCodegen::gen_builtin_call's routing of the four type queries
+    BuiltinFoldability builtin_foldability(BuiltinKind kind);
 
     // resolves a builtin name to its kind, or nullopt when the name is not one. the single place
     // that knows the set, so the parser can reject an unknown name where the attribute is written

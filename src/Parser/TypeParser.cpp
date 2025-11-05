@@ -1,5 +1,6 @@
 #include "Parser/TypeParser.h"
 #include "Parser/NamespaceParser.h"
+#include "Parser/IfStatementParser.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTNamespace.h"
@@ -242,13 +243,14 @@ bool Parser::starts_vardecl(Parser::Payload &payload)
     // `weak` is only *almost* true here: `weak($obj)` is an expression too. it is still safe, because a
     // declaration is the reading that needs the whole statement and the expression form is reached from
     // parse_varexpr either way - see the arm in ExprParser
-    // `const` is the one of the three that begins something else after all: a **compile-time constant**,
-    // which differs only in carrying no `$` on its name. Deferring to that predicate rather than answering
-    // yes outright is what keeps the two a genuine partition - every dispatch site asks the constant one
-    // first, and a site that did not would otherwise read `const MAX = 100;` as a declaration whose name
-    // token is a `=`
+    // `const` is the one of the three that begins something else after all - and it begins **two** other
+    // things, not one. a **compile-time constant**, which differs only in carrying no `$` on its name, and
+    // a **compile-time branch**, `const if (...)`. Deferring to both predicates rather than answering yes
+    // outright is what keeps the three a genuine partition - every dispatch site asks the other two first,
+    // and a site that did not would otherwise read `const MAX = 100;` as a declaration whose name token is
+    // a `=`, or `const if (X) { }` as one whose name token is a `(`
     if (cursor.is_type(Token::Type::t_const)) {
-        return !starts_constdecl(payload);
+        return !starts_constdecl(payload) && !starts_const_if(cursor);
     }
 
     if (cursor.is_type(Token::Type::t_ptr)

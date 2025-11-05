@@ -16,6 +16,8 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/GuardNode.h"
@@ -137,6 +139,32 @@ namespace
             }
 
             RecursiveVisitor::visitFunctionCallExpr(node);
+        }
+
+        // **an unlowered `const if` is never answerable**, and this is the arm whose absence is silent.
+        // which of its two arms exists at all is not decided yet, and this pass walks a body exactly
+        // once - so a walk now would resolve the ownership of statements about to be thrown away, and
+        // give a `T $doomed` in the untaken arm a drop, which is one more generic call site.
+        //
+        // silent because walk_statement's `default:` reads `child.is_expression_node() ? ... : nullptr`,
+        // and a ConstIfNode is not an expression - so without this the whole subtree would simply never
+        // be walked, with no diagnostic anywhere. AST::ConstFolding runs earlier in the same round; once
+        // it has, this node is gone and the arm it left behind is an ordinary scope
+        void visit_const_if(ConstIfNode &node) override
+        {
+            answerable = false;
+
+            RecursiveVisitor::visit_const_if(node);
+        }
+
+        // the same for its expression sibling: an unfolded `const(...)` is a value nothing knows yet, and
+        // a copy or a drop decided around it would be decided against the operand's type rather than the
+        // literal's - which is the same type, but only because the node is transparent *on purpose*
+        void visit_const_expr(ConstExprNode &node) override
+        {
+            answerable = false;
+
+            RecursiveVisitor::visit_const_expr(node);
         }
 
         // **an unlowered foreach is never answerable.** it declares `$el` and `$k` with no type, and
@@ -2119,8 +2147,22 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     decl.return_type = &self_type;
 
     // the borrow AST::is_copy_constructor recognises, which is also what makes the call
-    // emit_resolved_member_call builds fit without a cast
-    auto &other_decl = add_borrow_parameter(decl, "$other", own_type, site);
+    // emit_resolved_member_call builds fit without a cast - that lookup drops const on both sides, so
+    // `const Foo&` answers it exactly as `Foo&` would
+    //
+    // **const wherever the properties allow it**, which is AST::copy_source_may_be_const's whole job and
+    // deliberately not a decision taken here: this body only reads `$other`, but the per-property copies
+    // it delegates to may not, and a hand-written `constructor(Point& $other)` is the author reserving
+    // that right. asking makes the two agree instead of making this one optimistic.
+    //
+    // it matters because a `const` parameter is what lets a copy be taken out of a const *place* -
+    // `$other[$i]` inside stdlib/core/array.eco's `constructor(const array<T>& $other)`, which is how an
+    // owning array copies its elements at all. with a mutable parameter AST::borrow_preserves_const
+    // refuses that argument, and the whole family of copies out of a const value is unspellable
+    const ValueType source_type =
+        copy_source_may_be_const(own_type) ? ValueType::make_const(own_type) : own_type;
+
+    auto &other_decl = add_borrow_parameter(decl, "$other", source_type, site);
 
     ScopeNode &body = *decl.body;
 

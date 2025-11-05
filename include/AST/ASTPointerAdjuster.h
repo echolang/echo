@@ -61,6 +61,8 @@ namespace AST
         void visitFunctionDecl(FunctionDeclNode &node) override;
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visit_release(ReleaseNode &node) override;
+        void visit_const_if(ConstIfNode &node) override;
+        void visit_const_expr(ConstExprNode &node) override;
         void visit_foreach(ForeachNode &node) override;
 
     protected:

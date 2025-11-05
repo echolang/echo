@@ -218,6 +218,8 @@ const char *dump_flag(DumpKind kind)
     switch (kind) {
     case DumpKind::t_ir:
         return "--print-ir";
+    case DumpKind::t_unit_ir:
+        return "--print-unit-ir";
     case DumpKind::t_ast:
         return "--print-ast";
     case DumpKind::t_resolved_ast:
@@ -236,6 +238,8 @@ const char *dump_section_name(DumpKind kind)
     switch (kind) {
     case DumpKind::t_ir:
         return "IR";
+    case DumpKind::t_unit_ir:
+        return "UNIT_IR";
     case DumpKind::t_ast:
         return "AST";
     case DumpKind::t_resolved_ast:

@@ -494,6 +494,8 @@ static Compiler::CompilerOptions resolve_options(
         options.mode = Compiler::BuildMode::t_release;
     }
 
+    options.no_optimize = cli.get<bool>("--no-optimize");
+
     options.report_allocations = cli.get<bool>("--explain-memory");
     options.track_allocations = options.report_allocations || cli.get<bool>("--track-allocations");
 
@@ -968,6 +970,13 @@ int main_build(argparse::ArgumentParser &cli)
         compiler.printIR(false);
     }
 
+    // after the merge decision above and before the emit below, so what it prints is what gets written.
+    // it optimizes the units it prints unless told not to - the same call emit_objects makes, so the dump
+    // and the object cannot disagree
+    if (cli.get<bool>("--print-unit-ir")) {
+        compiler.print_unit_ir();
+    }
+
     const std::string output = cli.get<std::string>("-o");
 
     {
@@ -1075,7 +1084,27 @@ int main(int argc, char *argv[], char *envp[])
             .implicit_value(true);
 
         command.get().add_argument("-O", "--optimize")
-            .help("Sets the optimization level to 3, makes your code go brrrrrr.")
+            .help("Whole-program: fold every unit into one module and run the O3 pipeline over it. "
+                  "Bypasses the module object cache, which per-module objects and a merge cannot both have.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // **the dump for the path that has no merge.** `-p` folds every unit into one module, because that
+        // is the only thing an O3 pipeline or a single dump can look at - so it can only ever show the
+        // whole-program build. This one shows each unit as the object writer gets it, which is what an
+        // ordinary `echoc build` actually emits, and is the only way to assert on it
+        command.get().add_argument("-pu", "--print-unit-ir")
+            .help("Print each compilation unit's IR separately, as the object writer receives it. The "
+                  "per-module path, where '-p' shows the merged whole-program one.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // **not the inverse of -O**, and the help text has to say so: -O changes *what is compiled
+        // together*, this only turns off the per-unit pipeline every build otherwise gets. For reading raw
+        // IR and for bisecting a miscompile against the optimizer
+        command.get().add_argument("--no-optimize")
+            .help("Emit unoptimized IR: skip the per-unit pipeline an ordinary build runs. Not the inverse "
+                  "of -O, which merges every unit and optimizes the whole program.")
             .default_value(false)
             .implicit_value(true);
 

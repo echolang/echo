@@ -1,0 +1,45 @@
+// the other arm of `extend`'s `const if`: an element type that owns something is copied element by
+// element, so each gets whatever its own copy means. the bulk `memcpy` would duplicate a reference and
+// leave two owners where there is one release.
+//
+// **the leak check is the assertion.** a `const if` that kept the wrong arm would still print the right
+// elements below - what would be missing is the copies, and only the count of live allocations says so.
+// the work is in a function so everything it touched is destroyed before the count is read.
+function exercise() : void
+{
+    array<string> $a;
+    $a[] = 'one';
+    $a[] = 'two';
+
+    array<string> $b;
+    $b[] = 'three';
+
+    $a->extend($b);
+
+    echo $a->count();
+    echo $a[2];
+
+    // $b still holds its own element - extend borrows, it does not consume
+    echo $b->count();
+    echo $b[0];
+
+    // truncating an owning array releases what it drops rather than forgetting it
+    $a->truncate(1);
+    echo $a->count();
+    echo $a[0];
+
+    // and swap_remove hands one element over while keeping the rest. order is not preserved: the last
+    // element is relocated into the hole, so what was 'z' is now first
+    array<string> $c;
+    $c[] = 'x';
+    $c[] = 'y';
+    $c[] = 'z';
+
+    echo $c->swap_remove(0);
+    echo $c->count();
+    echo $c[0];
+}
+
+exercise();
+
+echo mem::live_allocations();

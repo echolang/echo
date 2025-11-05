@@ -102,6 +102,8 @@ public:
     void visitFunctionDecl(AST::FunctionDeclNode &node);
     void visitReturn(AST::ReturnNode &node);
     void visitIfStatement(AST::IfStatementNode &node);
+    void visit_const_if(AST::ConstIfNode &node);
+    void visit_const_expr(AST::ConstExprNode &node);
     void visitWhileStatement(AST::WhileStatementNode &node);
     void visit_loop_control(AST::LoopControlNode &node);
     void visit_foreach(AST::ForeachNode &node);
@@ -121,6 +123,7 @@ public:
     void optimize();
 
     void printIR(bool toFile);
+    void print_unit_ir();
 
     // JITs the program, after dropping everything the entry point cannot reach - so the module that runs
     // is smaller than the one printIR prints. See Backend::prune_to_entry for why that belongs here and

@@ -84,11 +84,15 @@ namespace AST
                    parent_type == NodeType::n_expr_instanceof ||
                    parent_type == NodeType::n_expr_temp_bind ||
                    parent_type == NodeType::n_expr_const_ref ||
+                   parent_type == NodeType::n_expr_const ||
                    parent_type == NodeType::n_member_access ||
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||
                    parent_type == NodeType::n_literal_bool ||
                    parent_type == NodeType::n_literal_string;
+            // **n_const_if is deliberately absent**, beside n_scope, n_if_statement and n_foreach: a
+            // `const if` is a statement. its sibling n_expr_const *is* here, because `const(...)` is an
+            // expression - the two spellings share a keyword and nothing else
         }
 
         template <typename T>

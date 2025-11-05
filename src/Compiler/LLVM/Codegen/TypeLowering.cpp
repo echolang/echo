@@ -120,6 +120,76 @@ void TypeLowering::create_cmp_units(
     }
 }
 
+void TypeLowering::apply_function_attributes(
+    const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    // a *hint*, which is exactly what `#[inline]` is: FunctionDeclNode::is_inline is documented as "not a
+    // promise the optimizer has to keep", so `inlinehint` fits that wording where `alwaysinline` would
+    // contradict it. the attribute is what makes the placement `#[inline]` already buys worth something -
+    // the body was being copied into every referencing unit and then judged on cost alone
+    if (node->is_inline) {
+        func->addFnAttr(llvm::Attribute::InlineHint);
+    }
+
+    for (size_t i = 0; i < node->args.size(); i++) {
+        const AST::VarDeclNode *arg = node->args[i];
+
+        if (arg == nullptr || !arg->has_type() || i >= func->arg_size()) {
+            continue;
+        }
+
+        const AST::ValueType type = arg->type();
+
+        // **`t_pointer` only, and deliberately not a class handle.** a class also lowers to a bare `ptr`,
+        // but it points at a payload inside a heap block whose header sits *before* it - so a size taken
+        // from the payload type is not the size that is dereferenceable from that address. the borrow is
+        // the case where the type system's answer and the address agree
+        if (!type.is_pointer()) {
+            continue;
+        }
+
+        // the whole of what distinguishes a borrow `T&` from a `ptr<T>` is this one bit, and it is the
+        // reason for the attributes below. a `ptr<T>` may legitimately be null and gets nothing
+        if (type.is_nullable()) {
+            continue;
+        }
+
+        llvm::Argument *param = func->getArg(static_cast<unsigned>(i));
+
+        // **the bargain, stated because it is a real one.** a borrow is non-nullable by the type system,
+        // and the one path that can produce a null one is a `ptr<T>` narrowing whose check a release build
+        // drops - so in a program that is already undefined, this lets the optimizer act on it. That is
+        // the same trade C++ makes for a reference, and it is the trade this language already took when
+        // it made the narrowing check a debug-only one
+        param->addAttr(llvm::Attribute::NonNull);
+
+        const AST::ValueType pointee = AST::value_type_of(type);
+
+        // **`dereferenceable` and `align` want a size, and a size wants the pointee lowered - which this
+        // must not do.** get_llvm_type answers a bare `ptr` for every pointer level precisely so that a
+        // pointer never drags its pointee's layout into a unit that has not declared it, and asking it
+        // here for the pointee anyway minted a *second* `%"array<int32>"` in the module. so only a
+        // primitive gets the two size-dependent attributes: those lower to LLVM's own interned integer and
+        // float types and create nothing at module level, which is what makes them safe to ask about.
+        //
+        // a struct or class borrow keeps `nonnull` alone. that is the attribute that carries the type
+        // system's actual claim; the other two only let a load be speculated
+        if (!pointee.is_primitive() || pointee.is_void()) {
+            continue;
+        }
+
+        llvm::Type *lowered = get_llvm_type(pointee, cmp_unit);
+
+        if (lowered == nullptr || !lowered->isSized()) {
+            continue;
+        }
+
+        param->addAttrs(llvm::AttrBuilder(*_ctx.llvm_context)
+            .addDereferenceableAttr(_ctx.layout().getTypeAllocSize(lowered))
+            .addAlignmentAttr(_ctx.layout().getABITypeAlign(lowered)));
+    }
+}
+
 llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit)
 {
     auto func_name = AST::mangle_function_name(node);
@@ -213,6 +283,10 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     // is also the path a unit takes to *reference* one it does not define - so the linkage a symbol ends
     // up with is decided by whether a body was emitted into this unit, not by what it is
     llvm::Function *llvm_func = llvm::Function::Create(requested_type, llvm::Function::ExternalLinkage, func_name, cmp_unit.llvm_module.get());
+
+    // the declaration is where the attributes go, not the definition: a unit that only *references* this
+    // symbol has to make the same promises about it, or the caller side of a call cannot use them
+    apply_function_attributes(node, llvm_func, cmp_unit);
 
     // store in the function map
     cmp_unit.function_table.push_function(func_name, node, llvm_func);

@@ -57,6 +57,17 @@ namespace Compiler::LLVM
         void build_struct_maps();
 
         llvm::Function *create_llvm_func_decl(const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
+
+        // **what the type system knows and the IR did not say.** every declaration went to LLVM with no
+        // attribute of any kind, so the optimizer had to re-derive from raw IR what `ValueType` had
+        // already decided - most of all that a borrow is never null, which is one bit on the type
+        // (`t_nullable`) and was the difference between a load it may forward and one it must repeat.
+        //
+        // here rather than in the AST layer because it needs a `DataLayout` and a lowered `llvm::Type` to
+        // say *how much* is dereferenceable, and neither exists before codegen. the AST supplies the
+        // facts, this supplies the spelling - one owner, called from the one place that mints a Function
+        void apply_function_attributes(
+            const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property

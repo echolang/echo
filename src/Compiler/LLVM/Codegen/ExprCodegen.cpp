@@ -2,6 +2,9 @@
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
 #include "AST/ASTNullability.h"
+#include "AST/ASTConstFold.h"
+#include "AST/ASTCopy.h"
+#include "AST/ASTDestruction.h"
 #include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
@@ -786,9 +789,15 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
     switch (kind) {
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
             // the kind is handed down rather than looked up again: this switch has already made
-            // the routing decision, so the callee's contract is two kinds, not four
+            // the routing decision, so the callee's contract is four kinds, not all of them
             gen_type_query_builtin(node, kind);
+            return;
+
+        case AST::BuiltinKind::t_take:
+            gen_take_builtin(node);
             return;
 
         case AST::BuiltinKind::t_die:
@@ -969,20 +978,106 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
     }
 
     const AST::ValueType &subject = decl->instantiation_args[0];
-    llvm::Type *llvm_subject = _ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit);
 
-    // the result is whatever the declaration promised - usize in the stdlib - so the constant
-    // lands with the type the caller's arithmetic already expects
+    // the result is whatever the declaration promised - usize for the two sizes, bool for the two
+    // predicates - so the constant lands with the type the caller already expects, and an i1 needs no
+    // arm of its own here
     llvm::Type *result_type = _ctx.types->get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
 
-    // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the stride between
-    // array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]` mean, and using the store
-    // size would under-allocate for any padded struct
-    const uint64_t value = kind == AST::BuiltinKind::t_size_of
-        ? _ctx.layout().getTypeAllocSize(llvm_subject)
-        : _ctx.layout().getABITypeAlign(llvm_subject).value();
+    // no tail: the four kinds this is routed for are the four answered here, and a fifth added to the
+    // dispatch above without one is a compile error rather than a constant zero nothing would notice
+    uint64_t value = 0;
+
+    switch (kind) {
+        // getTypeAllocSize, not getTypeStoreSize: it includes tail padding, so it is the stride between
+        // array elements. that is exactly what `alloc<T>(count)` and `$p:$[n]` mean, and using the store
+        // size would under-allocate for any padded struct
+        case AST::BuiltinKind::t_size_of:
+            value = _ctx.layout().getTypeAllocSize(_ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit));
+            break;
+
+        case AST::BuiltinKind::t_align_of:
+            value = _ctx.layout().getABITypeAlign(
+                _ctx.types->get_llvm_type(subject, *_ctx.current_cmp_unit)).value();
+            break;
+
+        // **the taxonomy answering for itself, through its one owner.** these two read no layout at all -
+        // they are AST facts - and they used to be folded here *as well as* in AST::const_fold, which a
+        // `const if` needs one pass earlier. two spellings of one fact, held in step by nothing, is the
+        // recurring bug in this codebase, so this arm asks rather than answering.
+        //
+        // the arity guard above stays and is still the load-bearing part: it is what guarantees `subject`
+        // is concrete. the two callers' answers to "is `T` bound yet" are deliberately different - a
+        // fixpoint round gets `t_pending`, because it has more rounds, and this throws, because an
+        // un-instantiated template reaching codegen is a compiler bug rather than a source error
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction: {
+            const AST::ConstFoldResult folded = AST::const_fold(&node);
+
+            if (folded.result != AST::ConstFoldResult::Result::t_folded) {
+                throw _ctx.error(fmt::format(
+                    "Builtin '{}' did not fold for a settled call: {} {}",
+                    decl->builtin.value(),
+                    folded.refusal.empty() ? "its type argument is not bound" : folded.refusal,
+                    _ctx.function_context()));
+            }
+
+            value = folded.bits;
+            break;
+        }
+
+        case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_ref_count:
+        case AST::BuiltinKind::t_weak_count:
+        case AST::BuiltinKind::t_dprint:
+        case AST::BuiltinKind::t_alloc_bytes:
+        case AST::BuiltinKind::t_realloc_bytes:
+        case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_live_allocations:
+        case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_process_argv:
+        case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_exit:
+            throw _ctx.error(fmt::format(
+                "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
+    }
 
     _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
+}
+
+void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
+{
+    // the shape is TypeChecker::check_take_argument's, not this arm's - what is left here is the
+    // invariant a settled call already carries
+    if (node.arguments.size() != 1 || node.arguments[0] == nullptr) {
+        throw _ctx.error(fmt::format("'take' takes exactly one argument {}", _ctx.function_context()));
+    }
+
+    const AST::ValueType argument_type = node.arguments[0]->result_type();
+
+    if (!argument_type.is_pointer()) {
+        throw _ctx.error(fmt::format(
+            "'take' expects the address of a place, got '{}' {}",
+            argument_type.get_type_desciption(), _ctx.function_context()));
+    }
+
+    node.arguments[0]->accept(*_ctx.visitor);
+    llvm::Value *address = _ctx.pop();
+
+    // **the whole lowering: one load through the borrow.** the parameter is `T&`, so what arrives is the
+    // address of the slot rather than what is in it, and the pointer adjuster inserts no deref because
+    // the argument sits in a pointer position - so this read is owed at exactly this site, the same way
+    // gen_ref_count_builtin's is
+    //
+    // gen_load and not that arm's CreateLoad: a count is always a handle and can name its own llvm type,
+    // and `T` here is any type at all
+    //
+    // nothing is written back. that *is* the move - the slot keeps its bits and stops being an owner,
+    // which is a claim about the source that only its manager can make and is why this sits in `mem::`
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(
+        LValue{ address, AST::value_type_of(argument_type) }, "take"));
 }
 
 void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)

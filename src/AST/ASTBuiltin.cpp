@@ -11,6 +11,9 @@ namespace
         static const std::unordered_map<std::string, AST::BuiltinKind> table = {
             { "size_of", AST::BuiltinKind::t_size_of },
             { "align_of", AST::BuiltinKind::t_align_of },
+            { "is_trivially_copyable", AST::BuiltinKind::t_is_trivially_copyable },
+            { "needs_destruction", AST::BuiltinKind::t_needs_destruction },
+            { "take", AST::BuiltinKind::t_take },
             { "die", AST::BuiltinKind::t_die },
             { "assert", AST::BuiltinKind::t_assert },
             { "ref_count", AST::BuiltinKind::t_ref_count },
@@ -41,6 +44,45 @@ AST::BuiltinKind AST::builtin_kind_for(const std::string &name)
     return it->second;
 }
 
+AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
+{
+    // no tail, for builtin_message_index's reason
+    switch (kind) {
+        // the two AST facts. AST::const_fold owns them now and ExprCodegen asks it, so the answer has
+        // one spelling rather than two held in step by nothing
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
+            return AST::BuiltinFoldability::t_ast_fact;
+
+        // and the two that read a DataLayout. they still fold, at codegen, where there is one
+        case AST::BuiltinKind::t_size_of:
+        case AST::BuiltinKind::t_align_of:
+            return AST::BuiltinFoldability::t_needs_layout;
+
+        // everything else does something rather than answering something. `take` moves a value out of
+        // a place, `ref_count` and `weak_count` read a word of a live heap block, `dprint` prints, the
+        // raw-memory trio allocates, `live_allocations` reads a counter the program maintains, the
+        // three process accessors read globals `main` filled in, and `die`/`assert`/`exit` stop
+        case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_ref_count:
+        case AST::BuiltinKind::t_weak_count:
+        case AST::BuiltinKind::t_dprint:
+        case AST::BuiltinKind::t_alloc_bytes:
+        case AST::BuiltinKind::t_realloc_bytes:
+        case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_live_allocations:
+        case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_process_argv:
+        case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_exit:
+            return AST::BuiltinFoldability::t_not_a_query;
+    }
+
+    return AST::BuiltinFoldability::t_not_a_query;
+}
+
 bool AST::builtin_never_returns(AST::BuiltinKind kind)
 {
     // no tail, for builtin_message_index's reason
@@ -53,6 +95,9 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:
@@ -81,7 +126,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_assert:
             return 1;
 
-        // nothing to fold: size_of and align_of take no arguments at all, the two counts' one argument
+        // nothing to fold: size_of, align_of and the two ownership predicates take no arguments at all,
+        // `take`'s one argument is the place it is emptying, the two counts' one argument
         // is a class handle rather than a message, and dprint's is the value being printed - it renders
         // whatever it is handed, so there is nothing about it that has to be a literal. the raw-memory
         // trio takes sizes and addresses, and live_allocations takes nothing. the three process
@@ -89,6 +135,9 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         // way of stopping that prints *nothing*, which is what separates it from `die`
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:

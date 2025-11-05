@@ -1,0 +1,116 @@
+// **an `array<T>` owns its elements**, and this is the case that says so in the only terms that cannot be
+// argued with: allocation counts either side of a copy.
+//
+// `array<string>` compiled long before it was correct. The copy constructor was one `mem::copy` - a
+// bitwise duplicate of the buffer - so both arrays' elements named one `str::buf` with a single retain
+// between them, and the second scope exit freed a block the first had already given back. The destructor
+// was the mirror of it: the buffer went back and the elements in it never did. Neither had a diagnostic,
+// which is why `std::env::argv()` used to hand back views.
+//
+// The arithmetic to read this against is `strings/string_frees_its_buffer.eco`: a literal is 0
+// allocations, a written string is 2 - the `str::buf` class box plus its bytes - and `$b = $a` on two
+// strings is a retain, not a second buffer. Add one per array for its own element storage.
+
+// a copy of an array of owning elements retains each element rather than duplicating it
+{
+    array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->append('hello');
+
+    // the array's buffer, the buf, and the buf's bytes
+    assert(mem::live_allocations() == 3, "one array, one written string");
+
+    array<string> $b = $a;
+
+    // **the number that is the whole ticket.** one more allocation and not two: the second array bought
+    // its own element buffer, and the string inside it is the same `str::buf` with one more reference. a
+    // bitwise copy would also read 4 here - and would double-free at the end of this block
+    assert(mem::live_allocations() == 4, "a second buffer, and the element retained rather than copied");
+
+    echo $b[0];
+    echo $b->count();
+}
+
+assert(mem::live_allocations() == 0, "both arrays gave back their buffers and released their elements");
+
+// and the destructor is what makes that last assertion mean anything: an array that is never copied still
+// has to destroy what it holds
+{
+    array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->append('one');
+    $a[] = '';
+    $a[1]->append('two');
+
+    assert(mem::live_allocations() == 5, "one array and two written strings");
+}
+
+assert(mem::live_allocations() == 0, "the elements went with it, not just the buffer");
+
+// `clear()` is that same teardown without the free - the buffer stays, the elements do not
+{
+    array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->append('gone');
+
+    assert(mem::live_allocations() == 3, "one array, one written string");
+
+    $a->clear();
+
+    echo $a->count();
+    assert(mem::live_allocations() == 1, "the element was destroyed and the buffer kept");
+
+    // and the kept buffer is still usable, which is the reason to clear rather than reassign
+    $a[] = '';
+    $a[0]->append('again');
+    echo $a[0];
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+// `pop()` **hands over** rather than copying: the element leaves the array and the caller owns it, with
+// no reference created and none leaked
+{
+    array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->append('popped');
+
+    assert(mem::live_allocations() == 3, "one array, one written string");
+
+    {
+        string $out = $a->pop();
+
+        echo $out;
+        echo $a->count();
+
+        // still three: the string did not become two owners on its way out. reading `$a[0]` instead would
+        // have been a copy, and the slot the array no longer counts would still hold a claim on the buf
+        assert(mem::live_allocations() == 3, "handed over, not duplicated");
+    }
+
+    assert(mem::live_allocations() == 1, "and destroyed with the local that received it");
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+// `clone()` routes through the same copy constructor, so it is the same guarantee said out loud
+{
+    array<string> $a = [];
+
+    $a[] = '';
+    $a[0]->append('cloned');
+
+    array<string> $b = $a->clone();
+
+    assert(mem::live_allocations() == 4, "a second buffer, the element retained");
+
+    echo $b[0];
+}
+
+assert(mem::live_allocations() == 0, "balanced");
+
+echo "balanced";

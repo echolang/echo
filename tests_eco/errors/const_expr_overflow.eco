@@ -1,0 +1,4 @@
+// a `const` value is refused rather than wrapped. the same expression without the marker stores 0, which
+// is exactly what asking the compiler to stand behind the value is for.
+uint8 $full = const(255 + 1);
+echo $full;

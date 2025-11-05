@@ -12,12 +12,21 @@
  * when you are handing it over, and reach for `->clone()` when you want the copy to be visible at
  * the call site rather than implied by an `=`.
  *
- * **The known hole: an element type that owns something.** The copy constructor below is a
- * `mem::copy`, an element-wise *bitwise* copy, which is correct exactly when `T` owns nothing. An
- * `array<array<int32>>` would need a recursive per-element copy, keyed on whether the element type
- * owns anything. A constraint can name a capability rather than a set of concrete types since
- * interfaces landed, so that question is now expressible - but nothing declares such an interface and
- * this copy does not ask for it. So a nested owner compiles and is wrong, rather than being refused.
+ * **It owns its elements, whatever they are.** An `array<string>` copies by copying each string, and
+ * destroys each of them when it goes; an `array<int32>` copies with one `memcpy` and has nothing to
+ * destroy. Both are this file, and the difference between them is `mem::is_trivially_copyable<T>()`
+ * and `mem::needs_destruction<T>()` - the compiler's own answers about `T`, asked out loud, so a
+ * nested owner is *correct* rather than a bitwise duplicate with no diagnostic anywhere.
+ *
+ * The one thing to know about the fast path: it is a fast path, not a rule. Both arms of every branch
+ * below are correct for every `T`. The branch is there to buy back the `memcpy` for element types that
+ * do not need the loop, and nothing about the type's behaviour depends on which arm ran.
+ *
+ * An element type that owns something and has *not* said how it is copied - a destructor and no copy
+ * constructor - makes copying the array a located error rather than a silent bit copy. That is
+ * `AST::classify_copy`'s refusal arriving here through the element assignment, and it is the answer:
+ * the array cannot invent a copy its element type declined to define. Such an array is still built,
+ * appended to, iterated and destroyed; it just cannot be duplicated.
  *
  * Counts, capacities and indices are `usize` throughout, matching `mem::`. There is no allocator
  * parameter and deliberately none yet: mem::alloc is allocator-free and Echo has no function
@@ -64,6 +73,13 @@ struct array<T> : contract::iterable<T>
      * And `const`, because a copy reads its source and nothing more. That is what lets `$b = $a` and
      * `$a->clone()` work when `$a` is `const` - without it the copy is the one operation a const
      * array cannot take part in, including the one its own `clone()` is written through.
+     *
+     * It is also what the element loop below stands on, and that direction is worth naming: `$other[$i]`
+     * through a `const array<T>&` is a `const T&`, so copying it needs the element type's own copy to
+     * accept a const source. The compiler synthesizes one that does wherever the properties allow it
+     * (`AST::copy_source_may_be_const`) - so an element type that declares a *mutable* copy constructor
+     * by hand is one this array cannot copy, which is that author's decision arriving here rather than
+     * a limitation of this file.
      */
     constructor(const array<T>& $other)
     {
@@ -82,21 +98,58 @@ struct array<T> : contract::iterable<T>
         if ($other->len > 0) {
             $this->data:$ = mem::alloc<T>($other->len);
             $this->cap = $other->len;
-            $this->len = $other->len;
 
-            mem::copy<T>($this->data, $other->data, $other->len);
+            // **one branch, two correct answers.** a `T` that copies as bytes copies in bulk, and one
+            // that does not is copied an element at a time so each gets whatever its own copy means - a
+            // retain for a class, a copy constructor for a struct that declares one.
+            //
+            // the loop is not the fallback and the memcpy is not the rule: both arms produce the same
+            // array. what the condition buys is the bulk copy for the element types that can take one,
+            // which is most of them
+            //
+            // **`const if` and not `if`**: both arms are correct for every `T` but only one of them is
+            // *about* this `T`, so the other must not be compiled. an `array<int32>` used to carry the
+            // element loop's blocks and the `operator []` instantiation they needed, behind a branch that
+            // could not be taken
+            const if (mem::is_trivially_copyable<T>()) {
+                $this->len = $other->len;
+
+                mem::copy<T>($this->data, $other->data, $other->len);
+            }
+            else {
+                usize $i = 0;
+
+                while ($i < $other->len) {
+                    // `$this[]` and not a write into `$this->data:$[$i]`, and the difference is the
+                    // whole reason this loop is correct: the append is the one element-write the
+                    // compiler reads as an *initialization* (`AssignNode::is_initialization`), so the
+                    // uninitialized slot it just grew is not torn down before being written. an indexed
+                    // write is a *re*-assignment, which would release whatever bytes the fresh
+                    // allocation happened to contain
+                    //
+                    // it re-checks capacity per element, which is already reserved above and so is a
+                    // compare and a branch. that is the price of the append owning the fresh-slot rule
+                    // instead of this loop restating it
+                    $this[] = $other[$i];
+
+                    $i = $i + 1;
+                }
+            }
         }
     }
 
     /**
-     * Releases the buffer. Runs at the end of the scope that owns the array, once.
+     * Destroys every element, then releases the buffer. Runs at the end of the scope that owns the
+     * array, once.
      *
-     * It does **not** destroy the elements, and that is the hole in the header rather than an
-     * oversight here: there is no way to ask whether `T` needs destroying, so there is nothing to
-     * call. For every `T` the copy above is correct for, there is also nothing to do.
+     * Written *through* `clear()`, the way `push` is written through `$a[] =` and `iterate` through
+     * `sub()`: what it means to destroy the elements is one implementation rather than two that could
+     * drift, and the difference between clearing an array and destroying one is the `mem::free` below.
      */
     destructor()
     {
+        $this->clear();
+
         mem::free<T>($this->data);
     }
 
@@ -133,7 +186,9 @@ struct array<T> : contract::iterable<T>
      *
      * Doubling rather than fitting exactly, so a run of appends costs an amortized constant each
      * instead of being O(n²). Call it up front when you already know the size - that is the one
-     * allocation for the whole loop.
+     * allocation for the whole loop, because a request above the floor below is honoured exactly.
+     *
+     * Use `reserve_exact()` when you want a small array sized to the byte.
      *
      * **This may move the buffer**, so every borrow into the array is stale afterwards: every
      * `slice<T>` you took, every `&$a[$i]`. See book/concept/arrays.md, "Growth and invalidation".
@@ -150,10 +205,88 @@ struct array<T> : contract::iterable<T>
             $grown = $count;
         }
 
+        // **a floor on the first allocation.** doubling from zero is zero, so without this the clamp
+        // above hands back exactly `$count`, and an array filled one element at a time reallocates on
+        // its first, second *and* third push to arrive at four elements - three trips through the
+        // allocator to do one allocation's work.
+        //
+        // it can only ever raise `$grown`, and `$grown` is already max(cap * 2, $count) - so a request
+        // above the floor is untouched and the doc's promise about reserving up front is unchanged.
+        // `reserve_exact` is the way to ask for a small buffer sized to the byte.
+        //
+        // by element size, which is what Rust's RawVec calls MIN_NON_ZERO_CAP: the smaller the element,
+        // the more of them fit in the smallest block an allocator will hand out at all, so the floor
+        // costs nothing there and saves more. A `T` bigger than a page gets no floor, because for one of
+        // those the allocation *is* the cost and rounding it up doubles that.
+        //
+        // plain `if`s and not `const if`: `mem::size_of<T>()` folds to a constant at the call site in
+        // codegen, so both tests are already decided by the time LLVM sees them - but AST::const_fold
+        // cannot answer a layout query before codegen, so `const if` would refuse it. When todo/A41
+        // lands these should become `const if` and stop being branches in an unoptimized build too
+        usize $floor = 4;
+
+        if (mem::size_of<T>() == 1) {
+            $floor = 8;
+        }
+
+        if (mem::size_of<T>() > 1024) {
+            $floor = 1;
+        }
+
+        if ($grown < $floor) {
+            $grown = $floor;
+        }
+
         // re-seated through `:$`, because realloc hands back an address rather than writing through
         // the old one
+        //
+        // and a bitwise move of the existing elements, which is correct for an owning `T` and not the
+        // hole the copy constructor's `mem::copy` was: nothing is *duplicated* here. each element is
+        // relocated, the old block is gone, and the count of owners is unchanged - so there is no copy
+        // to run and none to skip
         $this->data:$ = mem::realloc<T>($this->data, $grown);
         $this->cap = $grown;
+    }
+
+    /**
+     * Makes room for exactly `$count` elements - no doubling, no floor.
+     *
+     * For the array you will fill once and keep: `reserve()` may hand back more than you asked for, and
+     * for a long-lived array holding a known number of elements that slack is memory nobody reclaims.
+     *
+     * The trade is the one its name implies. Filling past `$count` afterwards reallocates immediately,
+     * because there is no headroom left to absorb it - so this is the wrong call for an array that is
+     * still growing, and `reserve()` is the right one.
+     */
+    function reserve_exact(usize $count) : void
+    {
+        if ($this->cap >= $count) {
+            return;
+        }
+
+        $this->data:$ = mem::realloc<T>($this->data, $count);
+        $this->cap = $count;
+    }
+
+    /**
+     * Gives back everything past `count()`, so `capacity()` becomes `count()`.
+     *
+     * The other half of what `reserve` and `pop` leave behind: nothing else in this type ever lowers
+     * `cap`, so an array that grew large and then emptied holds its buffer until it is destroyed.
+     *
+     * **This may move the buffer**, exactly as `reserve` may - every borrow into the array is stale
+     * afterwards.
+     */
+    function shrink_to_fit() : void
+    {
+        if ($this->cap == $this->len) {
+            return;
+        }
+
+        // `mem::realloc` over a zero count is the same shape as `mem::free` plus a null, and `$data` may
+        // legitimately end up null here - which every method in this type is already written for
+        $this->data:$ = mem::realloc<T>($this->data, $this->len);
+        $this->cap = $this->len;
     }
 
     /**
@@ -165,6 +298,54 @@ struct array<T> : contract::iterable<T>
     function push(T $value) : void
     {
         $this[] = $value;
+    }
+
+    /**
+     * Appends every element of `$other`, leaving `$other` untouched.
+     *
+     * **One allocation and, for most element types, one `memcpy`.** Reserving up front is what makes it
+     * one allocation; the `const if` below is what makes it one copy. Appending in a loop instead costs
+     * a capacity re-check and a growth test per element, and for a `T` that copies as bytes it costs
+     * that instead of nothing at all.
+     */
+    function extend(const array<T>& $other) : void
+    {
+        // read once, not per use and not per iteration: `$other` is a `const` borrow so nothing here can
+        // change what it answers, and the loop below would otherwise pay a call per element on the `run`
+        // path, which performs no IR passes at all
+        usize $n = $other->count();
+
+        // an empty source appends nothing, and reserving for it would round a zero-length request up to
+        // the floor - allocating a buffer for a call that was asked to do nothing
+        if ($n == 0) {
+            return;
+        }
+
+        $this->reserve($this->len + $n);
+
+        // **one branch, two correct answers**, exactly as the copy constructor above says of itself: a
+        // `T` that copies as bytes copies in bulk, and one that does not is copied an element at a time
+        // so each gets whatever its own copy means. `const if`, so the arm this `T` does not use is not
+        // compiled - an `array<int32>` carries no element loop and an owning one carries no `memcpy`
+        const if (mem::is_trivially_copyable<T>()) {
+            mem::copy<T>($this->data:$ + $this->len, $other->data, $n);
+
+            // written after the copy, not before: `len` is what says which slots are live, and between
+            // the two statements the new ones are not yet
+            $this->len = $this->len + $n;
+        }
+        else {
+            usize $i = 0;
+
+            while ($i < $n) {
+                // `$this[]` and not an indexed write, for the reason the copy constructor gives: the
+                // append is the one element-write the compiler reads as an *initialization*, so the
+                // uninitialized slot it just grew is not torn down before being written
+                $this[] = $other[$i];
+
+                $i = $i + 1;
+            }
+        }
     }
 
     /**
@@ -183,14 +364,63 @@ struct array<T> : contract::iterable<T>
 
     /**
      * Removes the last element and hands over its ownership.
+     *
+     * Hands over, and does not duplicate: the caller receives the element the array was holding, and
+     * the array is no longer holding it. For an element type that owns something that is the whole
+     * difference between this and reading `$a[$a->count() - 1]`, which copies.
      */
     function pop() : T
     {
         assert($this->len > 0, "pop from an empty array");
 
+        // shortened first, so the slot is already outside `len` when its value is taken. between these
+        // two statements nothing else may look at this array, and nothing does
         $this->len = $this->len - 1;
 
-        return $this->data:$[$this->len];
+        // reading the slot here would be a *copy* - the element is a place, so the ownership pass gives
+        // it a retain or a copy constructor, and the slot it came from keeps the claim it always had.
+        // for a `string` that is a reference nothing will ever release, once per pop
+        return mem::take<T>($this->data:$[$this->len]);
+    }
+
+    /**
+     * Removes the element at `$index` and hands over its ownership, moving the last element into the
+     * hole. **Does not preserve order.**
+     *
+     * O(1), which is the entire reason it exists: it is the removal that does not shift everything after
+     * the index down. When order does not matter - a working set, a free list, anything being filtered -
+     * this is the one to reach for.
+     *
+     * The last element is not a special case: removing it is the whole operation with the relocation
+     * skipped, so there is one `mem::take` and one `return` on every path.
+     */
+    function swap_remove(usize $index) : T
+    {
+        assert($index < $this->len, "swap_remove index out of range");
+
+        // taken rather than read, so the array stops holding it and the caller starts - a read would
+        // copy, leaving the slot owning a second reference nothing releases. taken *first* and
+        // unconditionally, which is what keeps the single `return` below outside any branch: an owning
+        // local moved out of on one arm and not the other is a conditional move, and the ownership pass
+        // says so. the copy constructor above works around the same rule for the same reason (todo/C7)
+        T $doomed = mem::take<T>($this->data:$[$index]);
+
+        // the hole is filled from the end - unless it *is* the end, and the guard is not merely a
+        // shortcut: `mem::copy`'s two regions must not overlap, and for the last element they are one
+        // slot.
+        //
+        // **a bitwise relocation, and deliberately not `$this[$index] = ...`.** an indexed write is a
+        // *re*-assignment, so the ownership pass would release whatever the destination held - and what
+        // it holds is the slot `mem::take` has just emptied. this is `reserve`'s argument at the scale of
+        // one element: nothing is duplicated, the last slot is about to fall outside `len`, and the count
+        // of owners is unchanged, so there is no copy to run and none to skip
+        if ($index + 1 < $this->len) {
+            mem::copy<T>($this->data:$ + $index, $this->data:$ + ($this->len - 1), 1);
+        }
+
+        $this->len = $this->len - 1;
+
+        return $doomed;
     }
 
     /**
@@ -229,11 +459,61 @@ struct array<T> : contract::iterable<T>
     }
 
     /**
-     * Forgets every element and keeps the buffer, so the next fill reuses the allocation.
+     * Destroys every element and keeps the buffer, so the next fill reuses the allocation.
+     *
+     * `count()` goes to zero and `capacity()` does not move. For an element type that owns something
+     * each element is destroyed here, at this call, rather than being forgotten about - forgetting is
+     * what leaks it, since the buffer is raw storage nothing else walks.
+     *
+     * This is where the array's element teardown lives; the destructor is this plus the `mem::free`.
      */
     function clear() : void
     {
-        $this->len = 0;
+        $this->truncate(0);
+    }
+
+    /**
+     * Destroys every element past `$count` and keeps the buffer.
+     *
+     * `count()` becomes `$count` - or stays where it is, if it was already that short. `capacity()` does
+     * not move; `shrink_to_fit()` is what gives the buffer back.
+     *
+     * This is where the array's element teardown lives. `clear()` is this with a bound of zero, and the
+     * destructor is `clear()` plus the `mem::free` - so what it means to destroy a run of elements has one
+     * implementation rather than three that could drift.
+     */
+    function truncate(usize $count) : void
+    {
+        // shortening to something longer than it already is means nothing, and must not *grow* `len` -
+        // which the loop below would not do, but the final store would
+        if ($count >= $this->len) {
+            return;
+        }
+
+        // nothing to run for an element type that owns nothing, and the guard is what keeps that free:
+        // without it an `array<int32>` walks the elements it is dropping to do nothing to each of them
+        //
+        // `const if`, so "free" is literal rather than nearly: there is no guard in the emitted code and no
+        // loop behind it. `array<int32>::truncate` is the one store `count()` promises, and so is `clear`
+        const if (mem::needs_destruction<T>()) {
+            // counting down and shortening as it goes, so `len` always says exactly which slots are
+            // still live. that matters if a `T`'s destructor ever reaches back into this array: it sees
+            // a shorter, consistent array rather than one whose elements have already been taken
+            //
+            // `mem::take` and not a read: a read *copies*, which would leave the slot holding a second
+            // owner nothing will ever release. this hands the element over and leaves the storage dead,
+            // which is exactly what `len` above has just claimed
+            //
+            // `$doomed` is a local of this loop's body, so it is destroyed at the end of each iteration
+            // by the ordinary scope rule. there is no drop written here and none to keep in step
+            while ($this->len > $count) {
+                $this->len = $this->len - 1;
+
+                T $doomed = mem::take<T>($this->data:$[$this->len]);
+            }
+        }
+
+        $this->len = $count;
     }
 
     /**

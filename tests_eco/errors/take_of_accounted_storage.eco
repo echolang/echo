@@ -1,0 +1,35 @@
+// `mem::take` reads a value out of storage and writes nothing back, which means the storage it read from
+// has stopped being an owner - and nothing in the compiler is told so. That is what makes it useful and
+// what makes it narrow: it is for storage the *caller* accounts for, which is storage reached through a
+// pointer, because a pointer is not an owner and no teardown walks one.
+//
+// Everything else already has somebody accounting for it. A local gets a scope-exit drop, a property gets
+// one from its owner's teardown, and a call result gets one from the frame the temporary was bound to. In
+// all three the value would be destroyed twice, at a distance, with no crash anywhere near the mistake -
+// so all three are refused here rather than being left to the counts.
+
+struct Holder
+{
+    string $name;
+}
+
+function make() : string
+{
+    string $s = '';
+    $s->append('built');
+
+    return $s;
+}
+
+// a variable: `mv` is the spelling that hands one over, and it tells the scope
+string $local = '';
+$local->append('mine');
+
+string $a = mem::take<string>($local);
+
+// a property: its owner's teardown still reaches it
+Holder $h = Holder('');
+string $b = mem::take<string>($h->name);
+
+// a temporary: bound to this frame, and destroyed with it
+string $c = mem::take<string>(make());

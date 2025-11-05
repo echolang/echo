@@ -140,6 +140,11 @@ namespace AST
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);
 
+        // `mem::take<T>` ends its source's claim on a value without writing anything back, so the two
+        // ways of getting it wrong are a source that was never a place and a source something *else*
+        // already accounts for. refused here, where the call has a token to point at
+        void check_take_argument(FunctionCallExprNode &node);
+
         // the one builtin whose *availability* is a question rather than its arguments: without
         // --track-allocations there is no counter for `mem::live_allocations()` to read
         void check_allocation_tracking(FunctionCallExprNode &node);

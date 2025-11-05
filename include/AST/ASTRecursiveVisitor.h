@@ -75,6 +75,8 @@ namespace AST
         void visitFunctionDecl(FunctionDeclNode &node) override;
         void visitReturn(ReturnNode &node) override;
         void visitIfStatement(IfStatementNode &node) override;
+        void visit_const_if(ConstIfNode &node) override;
+        void visit_const_expr(ConstExprNode &node) override;
         void visitWhileStatement(WhileStatementNode &node) override;
         void visit_loop_control(LoopControlNode &node) override;
         void visit_foreach(ForeachNode &node) override;
@@ -110,9 +112,16 @@ namespace AST
         void place_edge(NodeReference &edge);
 
         // a statement, a scope or a declaration: descended into, never replaced. no pass replaces one
-        // of *these* edges - the two that replace statements do it through a scope's child list, which
-        // is visitScope's business and stays there
-        void statement_edge(Node *node);
+        // of *these* edges - the ones that replace statements do it through a scope's child list, which
+        // is visitScope's business and stays there.
+        //
+        // **virtual, which makes it the third seam.** the two above are "what happens to this expression
+        // edge"; this is "what happens to this statement edge", and between them every owned edge the base
+        // descends passes through one or the other. that totality is what a walk needs to be able to reach
+        // *every* node in a subtree - which is what AST::ConstFolding needs before it discards one, since
+        // NodeCollection::forget is unsound if it is given anything less than the whole of what went away.
+        // a read-only walk overrides neither and notices nothing
+        virtual void statement_edge(Node *node);
         void statement_edges(NodeReferenceList &edges);
 
     private:

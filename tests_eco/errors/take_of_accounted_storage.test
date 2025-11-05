@@ -1,0 +1,37 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 28:18
+'mem::take' can only empty storage reached through a pointer, such as an element of a buffer you allocated. This source is a variable, a property or a temporary, and the scope or the value holding it already owes it a teardown - so taking it here would destroy it twice. Write 'mv' to hand a variable over.
+Begin: 'take'
+End: 'take'
+Code excerpt:
+ [27]> 
+ [28]> string $a = mem::take<string>($local);
+                       ^
+ [29]> 
+
+---- Issue ----
+Issue at 32:18
+'mem::take' can only empty storage reached through a pointer, such as an element of a buffer you allocated. This source is a variable, a property or a temporary, and the scope or the value holding it already owes it a teardown - so taking it here would destroy it twice. Write 'mv' to hand a variable over.
+Begin: 'take'
+End: 'take'
+Code excerpt:
+ [31]> Holder $h = Holder('');
+ [32]> string $b = mem::take<string>($h->name);
+                       ^
+ [33]> 
+
+---- Issue ----
+Issue at 35:18
+'mem::take' can only empty storage reached through a pointer, such as an element of a buffer you allocated. This source is a variable, a property or a temporary, and the scope or the value holding it already owes it a teardown - so taking it here would destroy it twice. Write 'mv' to hand a variable over.
+Begin: 'take'
+End: 'take'
+Code excerpt:
+ [34]> // a temporary: bound to this frame, and destroyed with it
+ [35]> string $c = mem::take<string>(make());
+                       ^
+ [36]> 
+
+Critical issues found, cannot compile.

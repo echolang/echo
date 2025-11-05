@@ -41,6 +41,8 @@ namespace AST
     class FunctionDeclNode;
     class ReturnNode;
     class IfStatementNode;
+    class ConstIfNode;
+    class ConstExprNode;
     class WhileStatementNode;
     class LoopControlNode;
     class ForeachNode;
@@ -95,6 +97,8 @@ namespace AST
         virtual void visitFunctionDecl(FunctionDeclNode &node) = 0;
         virtual void visitReturn(ReturnNode &node) = 0;
         virtual void visitIfStatement(IfStatementNode &node) = 0;
+        virtual void visit_const_if(ConstIfNode &node) = 0;
+        virtual void visit_const_expr(ConstExprNode &node) = 0;
         virtual void visitWhileStatement(WhileStatementNode &node) = 0;
         virtual void visit_loop_control(LoopControlNode &node) = 0;
         virtual void visit_foreach(ForeachNode &node) = 0;

@@ -679,6 +679,70 @@ void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
     }
 }
 
+// `mem::take<T>(T& $place)` hands the value at a place over and writes nothing back, so the storage it
+// read from is no longer an owner - and *nothing in the compiler knows that*. that is deliberate: the only
+// thing that can say so is whatever manages the storage, which for `array<T>` is the array's own `len`.
+//
+// so the rule is about **which storage the compiler is already accounting for**, and it is narrow on
+// purpose: a local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
+// property gets one from its owner's teardown. `take` tells none of them otherwise, so emptying any of
+// them destroys the value twice, silently and far from here. what is left is storage reached *through a
+// pointer* - `$p:$[$i]`, `$p:$` - which is exactly the storage nothing walks, because a pointer is not an
+// owner. that is the same line `mem::free` sits on, which is why both live in `mem::`
+//
+// reported at this pass rather than in codegen for check_ref_count_argument's reason: the call has a token
+// to point at, and ExprCodegen's failure is an internal compiler error naming only the enclosing function
+void TypeChecker::check_take_argument(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin() || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_take) {
+        return;
+    }
+
+    if (node.arguments.empty() || node.arguments[0] == nullptr) {
+        return;
+    }
+
+    // the parameter is `T&`, so AST::CallResolver wrapped the source in the `&` this looks through - one
+    // level out from the value being taken, exactly as ref_count's and dprint's arguments are
+    auto *address = node.arguments[0];
+
+    if (address->get_node_type() != NodeType::n_expr_addrof) {
+        return;
+    }
+
+    ExprNode *source = static_cast<AddrOfExprNode *>(address)->operand;
+
+    // a read through a pointer, which is the whole of what is allowed. an index is asked through
+    // AST::IndexExprNode::indexed_base_type rather than by looking at the base's node kind, because that
+    // is the sole owner of "is this a pointer index" - `$a[$i]` on an `array<T>` reaches the element
+    // operator and is a place the array accounts for, while `$p:$[$i]` is raw storage and is not
+    bool reads_through_pointer = source->get_node_type() == NodeType::n_expr_deref;
+
+    if (source->get_node_type() == NodeType::n_expr_index) {
+        reads_through_pointer = static_cast<IndexExprNode *>(source)->indexed_base_type().is_pointer();
+    }
+
+    if (reads_through_pointer) {
+        return;
+    }
+
+    // a still-generic body is not this pass's to judge: the monomorphizer reports an uninstantiated call
+    // itself, and an unsettled operand here means nothing was decided yet. the same early out
+    // check_ref_count_argument takes, for the same reason
+    const ValueType taken = value_type_of(node.arguments[0]->result_type());
+
+    if (is_undetermined_type(taken) || taken.is_type_param()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.token_function_name),
+        "'mem::take' can only empty storage reached through a pointer, such as an element of a buffer "
+        "you allocated. This source is a variable, a property or a temporary, and the scope or the value "
+        "holding it already owes it a teardown - so taking it here would destroy it twice. Write 'mv' to "
+        "hand a variable over.");
+}
+
 // **the only builtin that can be unavailable**, and the only reason this pass reads the compiler options
 // at all. `mem::live_allocations()` reads a counter the allocation seam maintains, and the seam only
 // maintains one when --track-allocations asked it to - so without the flag the load would answer 0.
@@ -875,6 +939,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 
         check_abort_message(node);
         check_ref_count_argument(node);
+        check_take_argument(node);
     }
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and

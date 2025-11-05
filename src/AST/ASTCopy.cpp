@@ -1,6 +1,7 @@
 #include "AST/ASTCopy.h"
 
 #include "AST/ASTMemberLookup.h"
+#include "AST/FunctionDeclNode.h"
 
 AST::FunctionDeclNode *AST::copy_constructor_for(const AST::ValueType &type)
 {
@@ -93,4 +94,49 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     }
 
     return fold_property_copies(ct);
+}
+
+bool AST::copy_source_may_be_const(const AST::ValueType &type)
+{
+    switch (AST::classify_copy(type)) {
+        // nothing is called, so there is nothing to be refused by. bytes are read wherever they sit, and
+        // a retain writes a count inside the block rather than through the handle it was handed
+        case AST::CopyKind::t_bytes:
+        case AST::CopyKind::t_retain:
+            return true;
+
+        // **the author's declaration is the answer.** `constructor(const Point& $other)` promises to read
+        // its source and `constructor(Point& $other)` does not, and the second one is a legitimate thing
+        // to write - so what it says is what holds, here and transitively for everything holding one
+        case AST::CopyKind::t_constructor:
+        {
+            const AST::FunctionDeclNode *ctor = AST::copy_constructor_for(type);
+
+            return ctor != nullptr && ctor->parameter_type(0).pointee().is_const();
+        }
+
+        // the body the compiler writes is a copy per property, so it can read a const source exactly
+        // when every one of those copies can. the same fold classify_copy just did, asked one question
+        // further along - and it terminates where that one does, since a class property answers above
+        // without being descended into
+        case AST::CopyKind::t_synthesizable:
+        {
+            const AST::ComplexType *ct = type.get_complex_type();
+
+            for (size_t i = 0; i < ct->property_count(); i++) {
+                if (!AST::copy_source_may_be_const(ct->get_property_type(i))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // there is no copy to give a parameter to. answered so the switch stays total rather than because
+        // anything reads it - AST::OwnershipPass reports this arm and never reaches a synthesis
+        case AST::CopyKind::t_none:
+            return true;
+    }
+
+    return true;
 }

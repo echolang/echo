@@ -1,0 +1,28 @@
+// a `const if` decides its own condition, and the arm it did not select never reaches a later pass.
+//
+// spelled with an explicit type argument rather than inside a generic, deliberately: this is the shape
+// with no template around it to hide a failure, so the branch has to be decided in the first round.
+const if (mem::is_trivially_copyable<int32>()) {
+    echo 'bytes';
+}
+else {
+    echo 'element by element';
+}
+
+// the mirror, and the arm that is absent this time - a false condition with no `else` leaves nothing
+const if (mem::needs_destruction<int32>()) {
+    echo 'this line is not compiled';
+}
+
+// an `else const if` chain, and statements after it still belong to the enclosing scope
+const if (mem::needs_destruction<int32>()) {
+    echo 'no';
+}
+else const if (mem::is_trivially_copyable<int32>()) {
+    echo 'chained';
+}
+else {
+    echo 'no';
+}
+
+echo 'after';

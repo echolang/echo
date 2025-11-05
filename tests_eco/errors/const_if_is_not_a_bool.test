@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 2:1
+a 'const if' condition has to be a 'bool', and this one works out to a 'int32'. compare it against something rather than branching on the value itself.
+Begin: 'const'
+End: 'const'
+Code excerpt:
+ [1]> // the condition folded, and to a number. `const if` selects an arm, so it needs an answer that says which.
+ [2]> const if (3) {
+      ^
+ [3]>     echo 1;
+
+Critical issues found, cannot compile.

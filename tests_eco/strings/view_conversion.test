@@ -27,7 +27,11 @@ CHECK-NOT: strong.inc
 
 # which(string) - by value, so this one *does* go through the synthesized copy, whose body holds the
 # retain. the two calls sitting next to each other is the contrast worth pinning
-CHECK: call %string @_stringZZMRBMLC6string
+#
+# the `C` before `LC6string` is the parameter's pointee being **const**: a synthesized copy takes
+# `const Foo&` wherever its properties allow one (AST::copy_source_may_be_const), and a string's are a
+# view and a class handle, neither of which needs to write through the source
+CHECK: call %string @_stringZZMRBCLC6string
 CHECK: call void @_whichZZMLC6string
 
 CHECK: ret i32 0

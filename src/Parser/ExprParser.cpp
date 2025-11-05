@@ -23,9 +23,15 @@
 #include "Parser/NamespaceParser.h"
 #include "Parser/TypeParser.h"
 #include "AST/TypeNode.h"
+#include "AST/ConstExprNode.h"
 
 #include <fmt/core.h>
 #include <stack>
+
+bool Parser::starts_const_expr(const Parser::Cursor &cursor)
+{
+    return cursor.is_type_sequence(0, { Token::Type::t_const, Token::Type::t_open_paren });
+}
 
 bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
 {
@@ -759,6 +765,9 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // which is the trap `mv` and the closure literal below already document
            cursor.is_type(Token::Type::t_weak) ||
            cursor.is_type(Token::Type::t_strong) ||
+           // `const(E)` - a value the compiler is required to work out. named for the reason the closure
+           // literal below is: this and the production that reads one must agree on what admits it
+           Parser::starts_const_expr(cursor) ||
            // `mv E` is a prefix operator, so it begins one too. without this the shunting-yard loop
            // never enters and the expression comes back empty
            cursor.is_type(Token::Type::t_mv) ||
@@ -1496,6 +1505,28 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // `strong($w)` - the upgrade back, and the only way to read through a weak reference
     else if (cursor.is_type_sequence(0, { Token::Type::t_strong, Token::Type::t_open_paren })) {
         return AST::make_ref(Parser::parse_strong_expr(payload));
+    }
+
+    // `const(E)` - a demand rather than a hint: AST::ConstFolding replaces it with the literal it folded
+    // to, and refuses with a location when it could not. written like `weak(...)` and `strong(...)` and
+    // parsed through the same parenthesised-operand reader, so the three keyword-call forms have one shape
+    else if (Parser::starts_const_expr(cursor)) {
+        auto const_token = cursor.current();
+
+        cursor.skip(); // `const`
+
+        // **the destination reaches through the marker.** a `const(...)` becomes the literal it folds to,
+        // and the type that literal has to have is the destination's - so the operand is parsed with the
+        // same hint it would have been given had the marker not been written. without it `255 + 1` at a
+        // `uint8` destination folds as int32 256 and the assignment narrows it to 0, silently, which is
+        // precisely the answer AST::const_fold's overflow refusal exists to prevent
+        auto *operand = parse_parenthesized_operand(payload, expected_type);
+
+        if (operand == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        return AST::make_ref(&payload.context.emplace_node<AST::ConstExprNode>(const_token, operand));
     }
 
     // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an

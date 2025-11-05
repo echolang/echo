@@ -6,6 +6,8 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -561,6 +563,24 @@ void LLVMCompiler::visit_foreach(AST::ForeachNode &node)
     throw _ctx.error("a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered "
         "into an iterator and a while " + _ctx.function_context());
 }
+
+// **both unreachable in practice, and written for that reason.** AST::PointerAdjuster throws for either
+// survivor first, and run_semantic_passes gates on has_critical_issues() only *after* it - so these are
+// the second line of a defence whose first line already fired. a plausible answer here would be worse
+// than a throw: emitting the `if` as a runtime branch is exactly the silence `const if` exists to end
+void LLVMCompiler::visit_const_if(AST::ConstIfNode &node)
+{
+    throw _ctx.error("a 'const if' survived the monomorphizer's fixpoint - its condition should have "
+        "selected an arm, or the statement should have been discarded after a refusal "
+        + _ctx.function_context());
+}
+
+void LLVMCompiler::visit_const_expr(AST::ConstExprNode &node)
+{
+    throw _ctx.error("a 'const(...)' survived the monomorphizer's fixpoint - it should have become the "
+        "literal it folded to, or been refused " + _ctx.function_context());
+}
+
 void LLVMCompiler::visit_assign(AST::AssignNode &node) { _stmt.gen_assign(node); }
 
 void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node) { _expr.gen_type_cast(node); }
@@ -650,6 +670,14 @@ bool LLVMCompiler::emit_objects(
             continue;
         }
 
+        // **the baseline pipeline, per unit, before the object is written.** this is the path an ordinary
+        // `echoc build` takes, and until now it ran no IR pass at all - see Backend::optimize_unit. It is
+        // deliberately here and not inside emit_object: the whole-program path also emits an object, and
+        // that module has already been through Backend::optimize
+        if (!_ctx.options.no_optimize) {
+            _backend.optimize_unit(*cmp_unit);
+        }
+
         const std::filesystem::path object_path = object_for(cmp_unit->ast_module->name);
 
         if (!_backend.emit_object(*cmp_unit, object_path)) {
@@ -671,6 +699,7 @@ bool LLVMCompiler::link_executable(
 
 void LLVMCompiler::optimize() { _backend.optimize(); }
 void LLVMCompiler::printIR(bool toFile) { _backend.print_ir(toFile); }
+void LLVMCompiler::print_unit_ir() { _backend.print_unit_ir(); }
 int LLVMCompiler::run_code(const std::vector<std::string> &arguments, const char *const *environment)
 {
     return _backend.run_code(arguments, environment);

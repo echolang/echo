@@ -8,6 +8,8 @@
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
 
 #include "ASTNodeTypes.h"
 #include "ASTNodeReference.h"
@@ -89,7 +91,37 @@ namespace AST
         inline size_t size() const {
             return nodes->size();
         }
-               
+
+        // **stop answering for these nodes.** the unique_ptrs stay in `nodes`, so every pointer anything
+        // still holds stays valid - what changes is only what `of_type` reports.
+        //
+        // it exists because that answer was wrong for a subtree no scope holds any more, and because the
+        // sweeps reading it are the expensive ones. `of_type` is not a tree walk, so a pass that replaces
+        // a statement leaves everything under the old one visible forever: Monomorphizer::snapshot_calls
+        // mints a generic instance per call it finds, TypeLowering::build_function_maps' second loop
+        // declares a symbol and **queues a linkonce_odr body** per callee it finds, and
+        // Monomorphizer::finalize_calls will happily report an unknown name against one. so an arm
+        // AST::ConstFolding discarded still had its callees emitted, and could still fail the compile.
+        //
+        // **order-preserving, and that is load-bearing**: `of_type` order is insertion order, and it decides
+        // the order codegen declares functions in - IR goldens name symbols by position - so this is an
+        // erase-remove and never a swap-and-pop.
+        //
+        // **the obligation this creates**: forgetting a node the tree still holds makes a live call
+        // invisible, which is a missing symbol at link time. so a caller must walk exactly what is going
+        // away, which is why the passes that discard release each subtree they keep *before* collecting
+        void forget(const std::unordered_set<const Node *> &gone) {
+            if (gone.empty()) {
+                return;
+            }
+
+            for (auto &[type, bucket] : node_map) {
+                bucket.erase(
+                    std::remove_if(bucket.begin(), bucket.end(),
+                        [&gone](Node *node) { return gone.count(node) > 0; }),
+                    bucket.end());
+            }
+        }
     };
 };
 

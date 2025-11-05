@@ -1,0 +1,7 @@
+// a `const if` promises the compiler can decide the condition. when it cannot, that is an error at the
+// `const` - never a branch that quietly becomes a runtime one.
+int32 $n = 3;
+
+const if ($n > 0) {
+    echo 1;
+}

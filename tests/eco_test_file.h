@@ -16,6 +16,13 @@ namespace EchoTests
     enum class DumpKind
     {
         t_ir,
+
+        // the same IR, but per compilation unit and without the whole-program merge - the path an
+        // ordinary `echoc build` takes. **only meaningful on a `mode: build` case**: `run` folds every
+        // unit into one module because the JIT can only take one, so on that path this and t_ir would
+        // print the same thing
+        t_unit_ir,
+
         t_ast,
         t_resolved_ast
     };
@@ -31,7 +38,7 @@ namespace EchoTests
     // fourth kind is added in one place - the alternative is a second list of names in the parser,
     // which is exactly what dump_section_name exists to prevent
     inline constexpr DumpKind k_dump_kinds[] = {
-        DumpKind::t_ir, DumpKind::t_ast, DumpKind::t_resolved_ast };
+        DumpKind::t_ir, DumpKind::t_unit_ir, DumpKind::t_ast, DumpKind::t_resolved_ast };
 
     // how the program is put in front of its output. `run` is the JIT; `build` links a native binary
     // and executes it, which is the only thing that exercises LLVMCompiler::make_exec

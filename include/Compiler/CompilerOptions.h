@@ -34,6 +34,15 @@ namespace Compiler
         // where the options are built - a report over a counter nothing maintains reads zero forever
         bool report_allocations = false;
 
+        // **turns off the per-unit baseline pipeline** that Backend::optimize_unit runs on every ordinary
+        // build. for reading raw IR, for bisecting a miscompile against the optimizer, and for the two
+        // goldens that pin unoptimized output on purpose. it is not the inverse of `-O`, which is a
+        // *different* thing: that one merges every unit and runs O3 over the result
+        //
+        // both emitters read it from here rather than from the flag - Backend::print_unit_ir dumps what
+        // LLVMCompiler::emit_objects is about to write, so a second reader is a way for the two to disagree
+        bool no_optimize = false;
+
         // one predicate, because more than one emitter asks it - the `assert` builtin and the
         // `ptr<T>` -> `T&` narrowing today, whatever check comes next tomorrow. never compare the
         // enum at a call site, or the next check added answers the question its own way

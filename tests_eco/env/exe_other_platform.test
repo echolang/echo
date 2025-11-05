@@ -3,4 +3,4 @@ expect: fail
 
 --- OUT --->
 fatal error: readlink("/proc/self/exe") failed
-  at process.eco:209
+  at process.eco:214

@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:1
+this is not something the compiler can work out for itself - it needs storage, a call, or something that only exists while the program runs.
+Begin: 'const'
+End: 'const'
+Code excerpt:
+ [4]> 
+ [5]> const if ($n > 0) {
+      ^
+ [6]>     echo 1;
+
+Critical issues found, cannot compile.

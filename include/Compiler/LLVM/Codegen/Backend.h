@@ -40,7 +40,15 @@ namespace Compiler::LLVM
 
         void optimize();
 
+        // the baseline pipeline for one unit, on the ordinary `echoc build` path where no merge happens.
+        // see the implementation for why it is per unit and why that is what makes the object cache and
+        // optimized IR stop being mutually exclusive
+        void optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit);
+
         void print_ir(bool to_file);
+
+        // the per-unit dump, for the build path that has no merge - see the implementation
+        void print_unit_ir();
 
         // JIT-executes the main module, having first pruned it to what the entry point reaches - see
         // prune_to_entry. So the module that runs is smaller than the one print_ir printed

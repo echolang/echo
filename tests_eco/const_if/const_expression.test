@@ -1,0 +1,16 @@
+--- OUT --->
+32
+255
+1
+four
+--- RAST --->
+CHECK: Module: [main]
+
+# each marker became the literal it folded to. `literal<int32>(32)` rather than a multiplication is the
+# whole point - the arithmetic is gone before codegen, not left for the optimizer
+CHECK: vardecl<type<int32>>($slots) = literal<int32>(32)
+CHECK: vardecl<type<uint8>>($full) = literal<uint8>(255)
+CHECK: vardecl<type<bool>>($trivial) = literal<bool>(true)
+
+# and no marker survives
+CHECK-NOT: const(

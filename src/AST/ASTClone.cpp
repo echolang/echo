@@ -33,6 +33,8 @@
 #include "AST/ReturnNode.h"
 #include "AST/GuardNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 #include "AST/WhileStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
@@ -378,6 +380,29 @@ Node *IfStatementNode::clone(CloneContext &cc) const
     c->condition = cc.child(c->condition);
     c->if_scope = cc.child(c->if_scope);
     c->else_scope = cc.child(c->else_scope);
+    return c;
+}
+
+// **clone totality is the feature here, not a formality.** the only `const if` that matters today lives
+// in a generic body - stdlib/core/array.eco's - and the *only* way it ever reaches a concrete `T` is by
+// being cloned into an instance. a missing edge here would leave an arm behind in the template
+Node *ConstIfNode::clone(CloneContext &cc) const
+{
+    ConstIfNode *c = cc.shallow(this);
+
+    c->condition = cc.child(c->condition);
+    c->if_scope = cc.child(c->if_scope);
+    c->else_scope = cc.child(c->else_scope);
+
+    return c;
+}
+
+Node *ConstExprNode::clone(CloneContext &cc) const
+{
+    ConstExprNode *c = cc.shallow(this);
+
+    c->operand = cc.child(c->operand);
+
     return c;
 }
 

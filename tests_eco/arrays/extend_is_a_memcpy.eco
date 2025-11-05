@@ -1,0 +1,13 @@
+// appending a whole array is one allocation and, for an element type that copies as bytes, one `memcpy`.
+//
+// This is the kind of thing that regresses without anything failing: an `extend` written as a push loop
+// produces the same elements, just one store and two calls at a time, and no OUT section would notice.
+// `arr::merge` *was* that loop, which is why it is written through this now.
+array<int32> $a = [1, 2, 3];
+array<int32> $b = [4, 5];
+
+$a->extend($b);
+
+echo $a->count();
+echo $a[3];
+echo $a[4];

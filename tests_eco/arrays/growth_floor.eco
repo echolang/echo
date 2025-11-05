@@ -1,0 +1,31 @@
+// `reserve` doubles, and doubling from zero is zero - so without a floor on the first allocation an array
+// filled one element at a time reallocates on its first, second *and* third push to reach four elements.
+//
+// the floor is by element size, which is what Rust's RawVec calls MIN_NON_ZERO_CAP: the smaller the
+// element, the more of them fit in the smallest block an allocator hands out at all.
+usize $i = 0;
+
+array<usize> $words;
+array<uint8> $bytes;
+
+while ($i < 10) {
+    $words[] = $i;
+    $bytes[] = 1;
+
+    echo $words->capacity();
+    echo $bytes->capacity();
+
+    $i = $i + 1;
+}
+
+// and a request *above* the floor is honoured exactly, which is what keeps reserve's promise that calling
+// it up front is the one allocation for the whole loop
+array<usize> $big;
+$big->reserve(1000);
+echo $big->capacity();
+
+// while `reserve_exact` is the way to ask for a small buffer sized to the byte - the floor is on the
+// growth path only
+array<usize> $tight;
+$tight->reserve_exact(3);
+echo $tight->capacity();

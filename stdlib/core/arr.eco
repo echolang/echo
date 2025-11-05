@@ -5,9 +5,10 @@
  * What lives here is what is built *on* it: things that could be methods but should not be, because they
  * answer a question about arrays rather than about one array.
  *
- * A function goes here rather than on the type when it does not need the type's internals. `merge` below
- * touches no property of either argument, only `count()` and `push()`, so putting it in the struct would
- * grow the surface every reader of `array<T>` has to walk past for no gain in what it can do.
+ * A function goes here rather than on the type when it does not need the type's internals. Neither
+ * function below touches a property of either argument - `merge` is two `extend` calls and
+ * `with_capacity` is a constructor and a `reserve` - so putting them in the struct would grow the
+ * surface every reader of `array<T>` has to walk past for no gain in what they can do.
  */
 
 namespace arr;
@@ -17,34 +18,42 @@ namespace arr;
  *
  * Both inputs are `const` borrows, so nothing here consumes or changes them. Elements are **copied** into
  * the result by the ordinary rules - which means a `T` whose copy needs a constructor needs one here too,
- * and that refusal comes from `array<T>::push` exactly as it would at any other call site. There is no
+ * and that refusal comes from `array<T>::extend` exactly as it would at any other call site. There is no
  * rule about copying written into this function.
  *
- * The result is reserved once, up front, so a merge is one allocation rather than a run of doublings.
- *
- * **Indexed rather than `foreach`ed**, and not for style: `iterate()` hands out a cursor over `T&`, so it
- * is not `const` and a `const array<T>&` cannot be iterated at all. Reading through the `const get()` is
- * the only spelling available here, and it is the correct one - copying an element is exactly what this
- * does. A const cursor yielding `const T&` would let the loop read as a loop, and there is not one yet.
+ * One allocation, reserved up front, and then two `extend` calls - which for an element type that copies
+ * as bytes is two `memcpy`s and no loop at all. This used to push element by element through `get()`,
+ * paying a copy, a call and a redundant capacity re-check per element; `extend` is where that decision
+ * lives now, so a merge and a hand-written append are the same code.
  */
 function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
 {
+    // the room is asked for ahead of both appends rather than letting each reserve its own half:
+    // `extend` reserves for what it is about to add, so two of them would double once in between
+    array<T> $out = with_capacity<T>($a->count() + $b->count());
+
+    $out->extend($a);
+    $out->extend($b);
+
+    return $out;
+}
+
+/**
+ * A new empty array with room for `$count` elements already.
+ *
+ * `array<T>()` followed by `->reserve($count)` says the same thing; this is the spelling for when the
+ * size is known at the point the array is created, which is most of the time.
+ *
+ * A **function** rather than a `constructor(usize)`, and deliberately: `array<int32>(5)` would read as
+ * five elements to anyone who has met `vec![0; 5]`, and there is no way to name a constructor. Room for
+ * five and a length of five are different things, so the one that is ambiguous is not spelled.
+ *
+ * `count()` is `0` afterwards. Use `reserve_exact` through this if the slack matters.
+ */
+function with_capacity<T>(usize $count) : array<T>
+{
     array<T> $out = array<T>();
-    $out->reserve($a->count() + $b->count());
-
-    usize $i = 0;
-
-    while ($i < $a->count()) {
-        $out->push($a->get($i));
-        $i = $i + 1;
-    }
-
-    $i = 0;
-
-    while ($i < $b->count()) {
-        $out->push($b->get($i));
-        $i = $i + 1;
-    }
+    $out->reserve($count);
 
     return $out;
 }

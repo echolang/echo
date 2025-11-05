@@ -47,6 +47,34 @@ void Backend::print_ir(bool to_file)
     main->llvm_module->print(llvm::outs(), nullptr);
 }
 
+// **every unit, in order, as the object writer will see it.** `print_ir` prints one merged module, which is
+// what `-O` produces and therefore what almost every IR golden pins - and that left the *ordinary* build path
+// with no way to be looked at or asserted on at all, which is exactly where Backend::optimize_unit now runs.
+//
+// each unit is optimized first, deliberately: a dump of what the emitter is about to be handed is worth
+// having, and a dump of something else is a check that pins nothing. `--no-optimize` is how to see the raw IR
+//
+// read off the options rather than taken as a parameter, because the promise above is only true while this
+// and LLVMCompiler::emit_objects ask the same thing of the same source. optimize_unit is idempotent, so the
+// emit that follows this dump re-optimizes nothing
+void Backend::print_unit_ir()
+{
+    for (auto &cmp_unit : _ctx.cmp_units) {
+        if (!cmp_unit->llvm_module) {
+            continue;
+        }
+
+        if (!_ctx.options.no_optimize) {
+            optimize_unit(*cmp_unit);
+        }
+
+        // a header per unit, in the `[section]` shape --print-symbol-table and the measurement dumps use,
+        // so a golden can anchor on the unit it means rather than on whatever came first
+        llvm::outs() << "[unit " << cmp_unit->ast_module->name << "]\n";
+        cmp_unit->llvm_module->print(llvm::outs(), nullptr);
+    }
+}
+
 int Backend::run_code(const std::vector<std::string> &arguments, const char *const *environment)
 {
     llvm::InitializeNativeTarget();
@@ -335,14 +363,9 @@ bool Backend::make_exec(std::string executable_name)
 // file-local rather than a member: llvm::ModulePassManager is a template alias, so a declaration in
 // Backend.h would drag the whole pass infrastructure into every translation unit that includes it
 static void run_module_passes(
-    CodegenContext &_ctx,
+    llvm::Module &module,
     const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build)
 {
-    if (!_ctx.current_module()) {
-        llvm::errs() << "Module is not initialized.\n";
-        return;
-    }
-
     llvm::PassBuilder passBuilder;
     llvm::LoopAnalysisManager loopAM;
     llvm::FunctionAnalysisManager functionAM;
@@ -358,15 +381,56 @@ static void run_module_passes(
     llvm::ModulePassManager modulePM;
     build(passBuilder, modulePM);
 
-    modulePM.run(*_ctx.current_module(), moduleAM);
+    modulePM.run(module, moduleAM);
 }
 
 void Backend::optimize()
 {
-    run_module_passes(_ctx, [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+    if (!_ctx.current_module()) {
+        llvm::errs() << "Module is not initialized.\n";
+        return;
+    }
+
+    run_module_passes(*_ctx.current_module(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+        // **the O3 pipeline and nothing after it.** this used to append a second ModuleInlinerPass once
+        // the pipeline had already finished, which is a shape worth naming so it is not added back:
+        // whatever that pass inlined was never simplified again. the O3 pipeline interleaves its inliner
+        // with SROA, instcombine and GVN precisely so that an inlined body gets cleaned up, and a round
+        // bolted on the end gets none of that - it could only ever grow the module.
+        //
+        // the goldens that care are tests_eco/iteration/lowered_cost (no calls at all in a foreach body),
+        // modules/cross_module_inline and native/class_on_the_heap (the whole refcount runtime removed).
+        // all three still hold on the pipeline's own inliner, which is the evidence the extra round was
+        // not buying them
         modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
-        modulePM.addPass(llvm::ModuleInlinerPass(llvm::getInlineParams(3, 0), llvm::InliningAdvisorMode::Default,
-                                      llvm::ThinOrFullLTOPhase::None));
+    });
+}
+
+void Backend::optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit)
+{
+    if (!cmp_unit.llvm_module || cmp_unit.optimized) {
+        return;
+    }
+
+    cmp_unit.optimized = true;
+
+    // **O2 per unit, and the reason it is not O3 is not timidity - it is that this one has to stay
+    // cheap.** `Backend::optimize` runs once, over a merged module, for a build that asked for it. This
+    // runs on every unit of every ordinary `echoc build`, whose whole point is that it is the fast path.
+    //
+    // it exists because that path previously ran **no IR pass at all**: no mem2reg, no SROA, no inlining.
+    // Every parameter of every function is spilled to an entry alloca by StmtCodegen and reloaded per use,
+    // every accessor is a real call, and CodegenContext::entry_alloca goes to the trouble of putting slots
+    // where mem2reg can find them - for a pipeline that was never run. The backend was already at -O2 for
+    // instruction selection, so the IR was the only part left unoptimized.
+    //
+    // **per unit, which is what keeps it compatible with the object cache.** a pipeline over one unit is a
+    // pure function of that unit's IR, so a cached object stays a function of its own sources plus its
+    // dependencies' keys - which is what Compiler::compute_module_keys promises and tests/module_cache.cpp
+    // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
+    // are no longer all or nothing, which is the actual change here
+    run_module_passes(*cmp_unit.llvm_module, [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+        modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
     });
 }
 
@@ -412,7 +476,12 @@ void Backend::prune_to_entry()
     // manager declined - reads as two equal numbers, which is the failure this diagnostic exists to catch
     const size_t before = definition_count(_ctx.current_module());
 
-    run_module_passes(_ctx, [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+    if (!_ctx.current_module()) {
+        llvm::errs() << "Module is not initialized.\n";
+        return;
+    }
+
+    run_module_passes(*_ctx.current_module(), [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
         //

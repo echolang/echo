@@ -1,0 +1,31 @@
+// statements written after an `else if` chain belong to the enclosing scope, not to the else arm.
+//
+// they used to belong to the arm. an `else` that continues with another branch has no brace of its own, and
+// the parser read its body with `parse_scope`, which keeps reading statements until it meets a `}` or runs
+// out - so everything after the chain was swallowed into the branch that was not taken. silent, and wrong
+// in the most ordinary shape there is.
+//
+// pinned for both spellings, because they share one arm reader now: `else if` and `else const if`.
+if (true) {
+    echo 'first';
+}
+else if (false) {
+    echo 'second';
+}
+else {
+    echo 'third';
+}
+
+echo 'after the runtime chain';
+
+const if (true) {
+    echo 'const first';
+}
+else const if (false) {
+    echo 'const second';
+}
+else {
+    echo 'const third';
+}
+
+echo 'after the const chain';

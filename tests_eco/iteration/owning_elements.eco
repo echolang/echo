@@ -1,6 +1,11 @@
 // a by-value binding over elements that own something is a real copy per iteration, and it is dropped
 // per iteration too - the loop body is an ordinary scope and the copy an ordinary local. nothing about
 // either is foreach-specific
+//
+// the two drops after `end` are the *array's*, and they are the reason to read this case twice: the
+// elements are destroyed in reverse when the array goes, at ids 2 then 1 rather than the 11 and 12 the
+// loop printed, because the by-value binding copied them and never wrote back. this case ended at `end`
+// until array<T> owned its elements - the buffer was freed with two live `Owner`s in it
 struct Owner
 {
     int32 $id;

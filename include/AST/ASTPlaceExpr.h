@@ -75,6 +75,11 @@ namespace AST
             // initializer before anything asks about storage, and whatever *that* is answers for it. one
             // that survives is a compiler defect, so the honest answer here is "not addressable"
             case NodeType::n_expr_const_ref:
+            // transient for the same reason and answered the same way: a `const(...)` is replaced by the
+            // literal it folded to before anything asks about storage, and *that* literal answers. the
+            // question would be incoherent anyway - the address of a value the compiler worked out is not
+            // a thing the program can be given
+            case NodeType::n_expr_const:
             // already carries its own request outward through the pending queue
             case NodeType::n_expr_temp_bind:
                 return StorageClass::t_addressless;

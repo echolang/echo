@@ -8,6 +8,8 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/ConstIfNode.h"
+#include "AST/ConstExprNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/ReturnNode.h"
@@ -336,6 +338,24 @@ void PointerAdjuster::visit_const_decl(ConstDeclNode &node)
     // reachable only from a root, and a constant declaration is a child of no root by construction
     throw std::runtime_error(
         "a constant declaration was reached from a body - it is owned by the arena and belongs to no scope");
+}
+
+// **the enforcement half of AST::ConstFolding::finalize().** a marker a pass was supposed to erase is a
+// compiler bug, and answering with something plausible hides it: one reaching here would have every deref
+// inside both arms silently skipped, and codegen would read the wrong number of levels with no diagnostic.
+// AST::PointerValueNode's contract, and AST::ForeachNode's below
+void PointerAdjuster::visit_const_if(ConstIfNode &node)
+{
+    throw std::runtime_error(
+        "a 'const if' survived the monomorphizer's fixpoint - its condition should have selected an arm, "
+        "or the statement should have been discarded after a refusal");
+}
+
+void PointerAdjuster::visit_const_expr(ConstExprNode &node)
+{
+    throw std::runtime_error(
+        "a 'const(...)' survived the monomorphizer's fixpoint - it should have become the literal it "
+        "folded to, or been refused");
 }
 
 void PointerAdjuster::visit_foreach(ForeachNode &node)

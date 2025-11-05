@@ -1,0 +1,21 @@
+// the element loop that made `array<string>` correct must not have cost `array<int32>` its bulk copy.
+//
+// `array<T>`'s copy constructor branches on `mem::is_trivially_copyable<T>()`, and both arms are correct
+// for every `T` - the branch exists only to buy back the `memcpy`. That makes the fast path exactly the
+// kind of thing that regresses without anything failing: an `array<int32>` copied element by element
+// still produces the right answer, just one store at a time, and no OUT section anywhere would notice.
+//
+// So this pins the lowering rather than the result - and what it pins is now an *absence*. The branch is a
+// `const if`, so AST::ConstFolding replaces the statement with the arm the predicate selected before codegen
+// ever sees it: what reaches the IR is a `memcpy`, and the element loop is not there at all rather than
+// there and unreachable.
+
+array<int32> $a = [1, 2, 3];
+array<int32> $b = $a;
+
+$b[0] = 9;
+
+// distinct buffers, so the copy really happened
+echo $a[0];
+echo $b[0];
+echo $b->count();

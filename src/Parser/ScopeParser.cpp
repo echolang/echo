@@ -153,6 +153,16 @@ AST::ScopeNode & Parser::parse_scope(
         else if (cursor.is_type(Token::Type::t_return)) {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));
         }
+        // `const if (<condition>) { }` - a branch the compiler decides, whose untaken arm never reaches a
+        // later pass. **ahead of the plain `if` arm and of both `const` predicates below**: `const` begins
+        // three statements and only the token behind it says which, and starts_vardecl answered yes to a
+        // leading `const` whenever the other two declined. it defers to this one now, so the three are a
+        // partition rather than an order - but the order is kept anyway, exactly as it is for starts_constdecl
+        else if (starts_const_if(cursor)) {
+            if (auto *branch = parse_const_ifstatement(payload)) {
+                scope_node.children.push_back(AST::make_ref(branch));
+            }
+        }
         else if (cursor.is_type(Token::Type::t_if)) {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
         }

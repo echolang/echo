@@ -104,6 +104,26 @@ namespace AST
     {
         return classify_copy(type) == CopyKind::t_synthesizable;
     }
+
+    // **may a copy of this type read a `const` source?** - which is to say, what does the parameter of
+    // the copy constructor AST::OwnershipPass synthesizes have to be, `const Foo&` or `Foo&`
+    //
+    // asked rather than fixed, because it is not this pass's to decide. a hand-written
+    // `constructor(Point& $other)` takes a *mutable* borrow, and by doing so reserves the right to write
+    // through it - so a value holding a `Point` cannot promise to copy itself out of a const source
+    // however it is spelled here. the const-ness has to be folded out of the properties for the same
+    // reason CopyKind is, and this is the same walk with a different question at its leaves
+    //
+    // the answer is `const` wherever it can be, and that is what matters: it is the difference between
+    // `$b = $a` working on a `const Foo&` and being the one operation a const value cannot take part in
+    // - including a copy out of a const *place*, `$other[$i]` inside stdlib/core/array.eco's
+    // `constructor(const array<T>& $other)`, which is how an owning array copies its elements at all
+    //
+    // deliberately **not** answered by stripping const at the call instead. a teardown may do that
+    // (AST::OwnershipPass::receiver_for_teardown says why: the storage is going away, so nothing that
+    // happens to it afterwards is observable) and a copy may **not** - its source outlives it and is
+    // read again, so a `Point&` constructor writing through one would be observable
+    bool copy_source_may_be_const(const ValueType &type);
 };
 
 #endif
