@@ -94,6 +94,31 @@ namespace AST
             return member_kind == MemberKind::t_operator;
         }
 
+        // **the symbol an operator declaration was written with**, recovered from its decorated name.
+        //
+        // an operator's name token holds `AST::operator_function_name`'s answer - "operator +",
+        // "operator prefix !!", "operator []" - because the fixity has to be *in* the name for the
+        // overload set to tell a prefix from a suffix. a diagnostic wants the symbol back out of it, and
+        // this is the one place that reverses the decoration rather than each message slicing the string
+        // its own way
+        //
+        // the empty string for anything that is not an operator, so a caller that forgot to ask
+        // is_operator() first gets nothing to print rather than a misleading fragment
+        std::string operator_spelling() const {
+            if (!is_operator()) {
+                return "";
+            }
+
+            const std::string decorated = func_name();
+            const size_t last_space = decorated.rfind(' ');
+
+            if (last_space == std::string::npos) {
+                return decorated;
+            }
+
+            return decorated.substr(last_space + 1);
+        }
+
         inline bool is_member() const {
             return owner_type != nullptr;
         }

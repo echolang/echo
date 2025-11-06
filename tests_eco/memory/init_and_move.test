@@ -1,0 +1,15 @@
+# the assertions are in the program rather than here, because what this case is about is a count only
+# the running program can read - see the arithmetic in the .eco header
+
+expect: ok
+
+--- OUT --->
+hello
+world
+hello
+0
+10
+30
+40
+50
+0

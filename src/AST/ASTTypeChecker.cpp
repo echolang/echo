@@ -1,5 +1,6 @@
 #include "AST/ASTTypeChecker.h"
 
+
 #include "AST/ASTOperatorSemantics.h"
 
 #include "AST/ASTModule.h"
@@ -139,22 +140,6 @@ static bool arg_assignable_to(const ValueType &arg, const ExprNode *expr, const 
 static bool implicit_conversion_is_legal(const ValueType &from, const ValueType &to)
 {
     return arg_assignable_to(from, nullptr, to);
-}
-
-// looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
-// expression the user actually wrote. `null` is the case that needs it: the null-specific rules
-// all test for the raw n_null tag, and a cast inserted to reconcile the argument with its
-// parameter hides that tag behind an n_type_cast
-static const ExprNode *strip_implicit_casts(const ExprNode *expr)
-{
-    while (expr != nullptr && expr->get_node_type() == NodeType::n_type_cast) {
-        const auto *cast = static_cast<const TypeCastNode *>(expr);
-        if (!cast->is_implcit) {
-            break;
-        }
-        expr = cast->expr;
-    }
-    return expr;
 }
 
 TypeChecker::TypeChecker(Bundle &bundle, Compiler::CompilerOptions options) :
@@ -692,9 +677,19 @@ void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
 //
 // reported at this pass rather than in codegen for check_ref_count_argument's reason: the call has a token
 // to point at, and ExprCodegen's failure is an internal compiler error naming only the enclosing function
-void TypeChecker::check_take_argument(FunctionCallExprNode &node)
+// `mem::init<T>(T& $place, T $value)` is the mirror and is judged by the same rule, so the two share one
+// check rather than one predicate spelled twice. Only the sentence differs, because the two ways of
+// getting it wrong are opposites: taking from accounted storage destroys the value twice, initializing it
+// leaks what was already there
+void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
 {
-    if (!node.decl->is_builtin() || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_take) {
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (kind != BuiltinKind::t_take && kind != BuiltinKind::t_init) {
         return;
     }
 
@@ -702,45 +697,44 @@ void TypeChecker::check_take_argument(FunctionCallExprNode &node)
         return;
     }
 
-    // the parameter is `T&`, so AST::CallResolver wrapped the source in the `&` this looks through - one
-    // level out from the value being taken, exactly as ref_count's and dprint's arguments are
+    // the parameter is `T&`, so AST::CallResolver wrapped the place in the `&` this looks through - one
+    // level out from the value itself, exactly as ref_count's and dprint's arguments are
     auto *address = node.arguments[0];
 
     if (address->get_node_type() != NodeType::n_expr_addrof) {
         return;
     }
 
-    ExprNode *source = static_cast<AddrOfExprNode *>(address)->operand;
-
-    // a read through a pointer, which is the whole of what is allowed. an index is asked through
-    // AST::IndexExprNode::indexed_base_type rather than by looking at the base's node kind, because that
-    // is the sole owner of "is this a pointer index" - `$a[$i]` on an `array<T>` reaches the element
-    // operator and is a place the array accounts for, while `$p:$[$i]` is raw storage and is not
-    bool reads_through_pointer = source->get_node_type() == NodeType::n_expr_deref;
-
-    if (source->get_node_type() == NodeType::n_expr_index) {
-        reads_through_pointer = static_cast<IndexExprNode *>(source)->indexed_base_type().is_pointer();
-    }
-
-    if (reads_through_pointer) {
+    if (AST::is_unaccounted_storage(*static_cast<AddrOfExprNode *>(address)->operand)) {
         return;
     }
 
     // a still-generic body is not this pass's to judge: the monomorphizer reports an uninstantiated call
     // itself, and an unsettled operand here means nothing was decided yet. the same early out
     // check_ref_count_argument takes, for the same reason
-    const ValueType taken = value_type_of(node.arguments[0]->result_type());
+    const ValueType place = value_type_of(node.arguments[0]->result_type());
 
-    if (is_undetermined_type(taken) || taken.is_type_param()) {
+    if (is_undetermined_type(place) || place.is_type_param()) {
+        return;
+    }
+
+    if (kind == BuiltinKind::t_take) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            "'mem::take' can only empty storage reached through a pointer, such as an element of a buffer "
+            "you allocated. This source is a variable, a property or a temporary, and the scope or the "
+            "value holding it already owes it a teardown - so taking it here would destroy it twice. "
+            "Write 'mv' to hand a variable over.");
+
         return;
     }
 
     _collector.collect_issue<Issue::GenericError>(
         code_ref_for(node.token_function_name),
-        "'mem::take' can only empty storage reached through a pointer, such as an element of a buffer "
-        "you allocated. This source is a variable, a property or a temporary, and the scope or the value "
-        "holding it already owes it a teardown - so taking it here would destroy it twice. Write 'mv' to "
-        "hand a variable over.");
+        "'mem::init' can only fill storage reached through a pointer, such as an element of a buffer you "
+        "allocated. This destination is a variable, a property or a temporary, and something already owes "
+        "whatever it holds a teardown - so initializing it here would leak that value. Write an ordinary "
+        "'=', which ends the old value before storing the new one.");
 }
 
 // **the only builtin that can be unavailable**, and the only reason this pass reads the compiler options
@@ -850,6 +844,7 @@ void TypeChecker::check_call_argument(
     const ValueType &param_type,
     size_t arg_number,
     const std::string &callee_name,
+    bool callee_is_operator,
     const TokenReference &at)
 {
     // the declaration site already refuses to seed a non-nullable parameter with null - the call site
@@ -857,10 +852,26 @@ void TypeChecker::check_call_argument(
     // callee read through it
     if (is_written_null(argument)) {
         if (const char *reason = null_rejection_reason(param_type)) {
-            _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(at),
-                fmt::format("argument {} of '{}' is '{}', which cannot be null - {}",
-                    arg_number, callee_name, param_type.get_type_desciption(), reason));
+            // an operator says it in its own words, for visitTypeCast's reason: every operator shares the
+            // root namespace, so naming the losing candidate's parameter type here tells the author about
+            // a type no file of theirs mentions. `$p == null` on a struct would otherwise be answered with
+            // a sentence about 'const string&'
+            //
+            // silent while the operand rule has already answered: visitFunctionCallExpr wrote the
+            // sentence that says what to do ("it is always there, write 'P?'"), and this one would be
+            // a second, vaguer report of the same mistake
+            if (callee_is_operator) {
+                if (!_context_operands_refused) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(at), null_operand_refusal(callee_name));
+                }
+            }
+            else {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(at),
+                    fmt::format("argument {} of '{}' is '{}', which cannot be null - {}",
+                        arg_number, callee_name, param_type.get_type_desciption(), reason));
+            }
         }
         return;
     }
@@ -893,6 +904,36 @@ void TypeChecker::check_call_argument(
 
 void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 {
+    // **what is wrong with an operator's operands, worked out once for the whole call.** the two
+    // readers below - the null refusal in check_call_argument and the conversion refusal in
+    // visitTypeCast - each see one argument, and both of these rules are about the pair. computed
+    // here and only *read* where a refusal is already being written, so a call that resolves cleanly
+    // can never be refused by it: a user-declared `operator (ptr<int32> $a) == (int32 $b)` is a
+    // perfectly good declaration that the address rule would otherwise reject at every use
+    const bool prev_operands_refused = _context_operands_refused;
+    _context_operands_refused = false;
+
+    if (node.decl != nullptr && node.decl->is_operator() && node.arguments.size() == 2
+        && node.arguments[0] != nullptr && node.arguments[1] != nullptr) {
+        // **the operands as the author wrote them**, under the casts the resolver put there to reach
+        // the candidate it chose. without the strip the message names the *parameter's* type, which is
+        // the whole thing this is here to stop saying
+        const auto refusal = binary_operand_refusal(
+            _collector.operators.get_operator(node.decl->operator_spelling()),
+            adjusted_operand(strip_implicit_casts(node.arguments[0])),
+            adjusted_operand(strip_implicit_casts(node.arguments[1])));
+
+        // reported **here**, once, rather than by the two readers below: they see one argument each, so
+        // a refusal about the pair would be written twice - once by the null rule and once by the
+        // conversion. they stay silent while the flag is set, and their own wordings are the fallback
+        if (refusal.has_value()) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_function_name), *refusal);
+
+            _context_operands_refused = true;
+        }
+    }
+
     // **outside the generic gate below**, unlike its two neighbours, because the one thing it catches is
     // precisely a call the monomorphizer could not instantiate: `dprint(some_void_call())` binds T to
     // void, which is a type there is no slot to allocate, so `decl` is still the template when this pass
@@ -932,14 +973,15 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     node.arguments[i],
                     params[i]->type(),
                     node.decl->user_arg_number(i),
-                    node.decl->func_name(),
+                    node.decl->is_operator() ? node.decl->operator_spelling() : node.decl->func_name(),
+                    node.decl->is_operator(),
                     node.token_function_name);
             }
         }
 
         check_abort_message(node);
         check_ref_count_argument(node);
-        check_take_argument(node);
+        check_raw_storage_argument(node);
     }
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
@@ -992,9 +1034,20 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // walk arguments with this call's name token as the location context, so an illegal implicit
     // cast inserted around an argument is reported at the call site
     const TokenReference *prev = _context_token;
+    const FunctionDeclNode *prev_callee = _context_callee;
+
     _context_token = &node.token_function_name;
+
+    // the callee travels with the token, so visitTypeCast can tell an operator's argument from an
+    // ordinary one - see _context_callee. null is legitimate: an unresolved call is a normal
+    // intermediate state, and there is nothing to name in the operator's words if nothing was chosen
+    _context_callee = node.decl;
+
     RecursiveVisitor::visitFunctionCallExpr(node);
+
     _context_token = prev;
+    _context_callee = prev_callee;
+    _context_operands_refused = prev_operands_refused;
 }
 
 void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
@@ -1025,6 +1078,8 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
                     signature.parameter_types[i],
                     i + 1,
                     callee_name,
+                    // an indirect call is through a callable value, which is never an operator
+                    /*callee_is_operator=*/false,
                     node.token);
             }
         }
@@ -1085,10 +1140,36 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         }
 
         if (!implicit_conversion_is_legal(from, node.cast_to)) {
-            _collector.collect_issue<Issue::InvalidTypeConversion>(
-                code_ref_for(*_context_token),
-                fmt::format("cannot implicitly convert '{}' to '{}'",
-                    from.get_type_desciption(), node.cast_to.get_type_desciption()));
+            // **an operator says it in its own words.** every `operator` declaration in the program shares
+            // the root namespace, so a program has every operator's overload set whether it uses the types
+            // or not - and naming the losing candidate's parameter type here tells the author about a type
+            // no file of theirs mentions. one `operator ==` for `string` in the standard library otherwise
+            // degrades `==` for every struct in every program to "cannot convert 'P' to 'const string&'".
+            //
+            // the operand types are what the author actually wrote, so they are what the message carries;
+            // "no overload of it accepts" rather than "is not supported", because a declaration does exist
+            // and saying otherwise would be a lie the author cannot act on
+            //
+            // and silent where AST::binary_operand_refusal already answered about the *pair* of
+            // operands: visitFunctionCallExpr reported that one, it carries the advice, and this would
+            // be the same mistake said again more vaguely. this stays the wording for the refusals that
+            // really are about one argument not fitting a parameter
+            if (_context_callee != nullptr && _context_callee->is_operator()) {
+                if (!_context_operands_refused) {
+                    _collector.collect_issue<Issue::InvalidTypeConversion>(
+                        code_ref_for(*_context_token),
+                        fmt::format(
+                            "no overload of operator '{}' accepts a '{}' here - declare one for it, or "
+                            "convert the operand first.",
+                            _context_callee->operator_spelling(), from.get_type_desciption()));
+                }
+            }
+            else {
+                _collector.collect_issue<Issue::InvalidTypeConversion>(
+                    code_ref_for(*_context_token),
+                    fmt::format("cannot implicitly convert '{}' to '{}'",
+                        from.get_type_desciption(), node.cast_to.get_type_desciption()));
+            }
         }
     }
 
@@ -1115,52 +1196,13 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         const ValueType &lhs = lhs_facts.type;
         const ValueType &rhs = rhs_facts.type;
 
-        // comparing against null only means something on an address. `$p == null` would read
-        // the int32 at address zero - exactly the crash the check is meant to prevent - so it
-        // is rejected and `$p:$ == null` is the way to ask
-        // (book/concept/pointers_and_refs_v2.md, "Nullability")
-        const bool lhs_null = lhs_facts.is_null;
-        const bool rhs_null = rhs_facts.is_null;
-
-        if (lhs_null != rhs_null) {
-            const ValueType &other = lhs_null ? rhs : lhs;
-            // a class handle is itself the address, so it is compared directly - there is no slot to
-            // peel to and `:$` on it would ask about the variable rather than the object.
-            //
-            // and **anything nullable**, which is what generalising the flag added here: a `T?` is exactly
-            // the type that may be absent, whatever `T` is, so asking is always meaningful. for a wrapped
-            // one - `int32?`, a nullable struct - it is a tag test rather than an address comparison, and
-            // ExprCodegen::gen_has_value is the one place that tells the two shapes apart
-            //
-            // a weak too: it answers whether the reference was ever taken. **not** whether its object is
-            // still alive, which is `strong($w)` - so the refusal below is worth keeping distinct from
-            // the ones above rather than folded into a single "cannot compare"
-            if (!other.is_pointer() && !other.is_class() && !other.is_nullable() && !other.is_weak()) {
-                _collector.collect_issue<Issue::GenericError>(
-                    code_ref_for(node.op_node->token_literal),
-                    other.is_struct()
-                        ? fmt::format("cannot compare '{}' against null - it is always there, write "
-                            "'{}?' if it may be absent",
-                            other.get_type_desciption(), other.get_type_desciption())
-                        : fmt::format("cannot compare '{}' against null - null-check the address with ':$'",
-                            other.get_type_desciption()));
-            }
-        }
-
-        // comparing an address against a non-address. codegen lowers a pointer comparison to an
-        // icmp over two pointers, and llvm asserts outright when the operand types differ - so
-        // without this the compiler aborted with "Both operands to ICmp instruction are not of
-        // the same type!" and no location at all
-        //
-        // scoped to comparisons: `$p:$ + 1` mixes a pointer and an int legitimately, because
-        // arithmetic on an address is offsetting rather than comparing
-        if (!lhs_null && !rhs_null && lhs.is_pointer() != rhs.is_pointer()
-            && !lhs.is_void() && !rhs.is_void()
-            && node.op_node->op->is_comparison()) {
+        // **what is wrong with the operands**, asked of AST::binary_operand_refusal rather than
+        // decided here. the same two rules have to be reachable from an operator *call*, which is what
+        // a use site becomes as soon as anybody in the program declares an infix form of the symbol -
+        // see that function
+        if (auto refusal = binary_operand_refusal(node.op_node->op, lhs_facts, rhs_facts)) {
             _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(node.op_node->token_literal),
-                fmt::format("cannot compare '{}' against '{}' - an address only compares against another address",
-                    lhs.get_type_desciption(), rhs.get_type_desciption()));
+                code_ref_for(node.op_node->token_literal), *refusal);
         }
 
         // **the one predicate**, AST::binary_has_builtin_meaning, which the parser reads to decide
@@ -1189,10 +1231,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
                         node.op_node->op->spelling,
                         lhs.get_type_desciption(),
                         rhs.get_type_desciption())
-                    : fmt::format("operator '{}' is not supported on operands of type '{}' and '{}'",
-                        node.op_node->op->spelling,
-                        lhs.get_type_desciption(),
-                        rhs.get_type_desciption()));
+                    : binary_unsupported_operands(node.op_node->op, lhs_facts, rhs_facts));
         }
     }
 
@@ -1247,6 +1286,11 @@ void TypeChecker::check_const_target(AssignNode &node)
     // the write-*through* above: a `ptr<const T>` property means the pointee is not this constructor's
     // to write, however fresh the slot holding the pointer is. so the exemption starts here rather
     // than at the call site, which used to skip this function whole
+    //
+    // the flag is the whole question, and this exemption is why it has to stay that way: anything folded in
+    // here becomes a way to launder a `const` away. a container that seats an element on demand declares an
+    // element-*write* operator, which is a call and not an assignment - so a `const` container is refused
+    // where the write is decided, in AST::OperatorRewriter::resolve_index_write, and nothing reaches here
     if (node.is_initialization) {
         return;
     }

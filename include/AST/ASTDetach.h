@@ -33,6 +33,32 @@ namespace AST
     // subtree is one whole-arena sweep per subtree - and AST::ConstFolding discards one per `const if` and
     // one per `const(...)`, on every round of the monomorphizer's fixpoint. the same obligation applies
     void collect_subtree(Node &root, std::unordered_set<const Node *> &gone);
+
+    // **a round's worth of discards, told to the arena once.**
+    //
+    // the pair above spelled out: the set, plus the flush that empties it. Both rewriting passes inside the
+    // monomorphizer's fixpoint discard subtrees per round and both have to batch for the reason
+    // `collect_subtree` gives - so "collect as you go, flush once when the round ends" is one object here
+    // rather than a raw set and a two-line flush repeated in each of them.
+    //
+    // **the obligation on every caller is `forget_subtree`'s**: release whatever you are keeping from a
+    // subtree before collecting it.
+    class DetachBatch
+    {
+    public:
+
+        void collect(Node &root) {
+            collect_subtree(root, _gone);
+        }
+
+        // hands this round's discards over and starts the next one empty. `Bundle::forget_nodes` returns
+        // immediately on an empty set, so a round that discarded nothing costs nothing
+        void flush(Bundle &bundle);
+
+    private:
+
+        std::unordered_set<const Node *> _gone;
+    };
 };
 
 #endif

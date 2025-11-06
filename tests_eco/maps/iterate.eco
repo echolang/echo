@@ -1,0 +1,79 @@
+// `foreach` over a map, with and without the key.
+//
+// the cursor is `map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>` - a concrete type at the
+// root beside `map<K, V>`, because a nested type inside a generic owner is refused. `Iter` is an associated
+// type and is inferred from `iterate()`'s return type; it is never spelled
+//
+// **the assertions are order-independent on purpose.** a map's iteration order is unspecified and changes
+// as the table grows, so everything below is a sum or a count rather than a sequence
+
+map<string, int32> $m = map<string, int32>();
+
+$m['a'] = 1;
+$m['b'] = 2;
+$m['c'] = 3;
+$m['d'] = 4;
+
+// the keyed form
+int32 $sum = 0;
+int32 $visits = 0;
+
+foreach ($m as $k => $v) {
+    $sum = $sum + $v;
+    $visits = $visits + 1;
+}
+
+echo $sum;
+echo $visits;
+
+// and without the key
+int32 $sum2 = 0;
+
+foreach ($m as $v) {
+    $sum2 = $sum2 + $v;
+}
+
+echo $sum2;
+
+// the keys really arrive - collected and checked by membership rather than by position
+int32 $key_hits = 0;
+
+foreach ($m as $k => $v) {
+    if ($k == 'a') { $key_hits = $key_hits + 1; }
+    if ($k == 'b') { $key_hits = $key_hits + 1; }
+    if ($k == 'c') { $key_hits = $key_hits + 1; }
+    if ($k == 'd') { $key_hits = $key_hits + 1; }
+}
+
+echo $key_hits;
+
+// a write through the binding reaches the map: the cursor's `current()` hands back a `V&`
+foreach ($m as &$v) {
+    $v = $v * 10;
+}
+
+echo $m->get('a');
+echo $m->get('d');
+
+// an empty map yields nothing, and a map that never allocated is the first-call case - `$cap` is 0
+map<string, int32> $e = map<string, int32>();
+int32 $never = 0;
+
+foreach ($e as $k => $v) {
+    $never = $never + 1;
+}
+
+echo $never;
+
+// iteration walks past tombstones
+$m->remove('b');
+$m->remove('c');
+
+int32 $left = 0;
+
+foreach ($m as $v) {
+    $left = $left + 1;
+}
+
+echo $left;
+echo $m->count();

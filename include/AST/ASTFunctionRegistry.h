@@ -68,7 +68,14 @@ namespace AST
         // the overload set for a name, searched from `ns` outward. the first namespace holding
         // any candidate for the name answers - an outer namespace does not extend an inner one's
         // set, it is hidden by it. empty when the name is unknown everywhere
-        std::vector<FunctionDeclNode *> overloads(const std::string &name, const Namespace &ns) const;
+        //
+        // **by reference**, because the callers that only ask a question of the set - "does any candidate
+        // take this receiver", "does any answer this requirement" - were each allocating a copy of a
+        // registry bucket per ask, and AST::declares_index_write is asked per index-write node per
+        // monomorphizer round. It is the registry's own vector, so a caller that registers a declaration
+        // while holding it has invalidated it; the one caller that keeps the set past that point,
+        // CallResolver::candidates_for, still hands back a copy by its own return type
+        const std::vector<FunctionDeclNode *> &overloads(const std::string &name, const Namespace &ns) const;
 
         // the declaration already registered as written at this token, or null on the first pass
         // over it. this is the declaration-pass / body-pass reconciliation
@@ -107,7 +114,11 @@ namespace AST
         // declaration that cannot be looked up (null or anonymous) and for the second parse pass
         // reaching a site already claimed - the shared prologue of both register_ entry points, so
         // the two-pass idempotency rule is stated exactly once
-        bool claim_declaration_site(FunctionDeclNode *decl);
+        //
+        // takes the collector and the location because it is also where that rule is *checked*, and a
+        // violation is reachable from malformed input - so it is reported like everything else rather
+        // than asserted
+        bool claim_declaration_site(Collector &collector, const CodeRef &at, FunctionDeclNode *decl);
 
         // declaration order, so a diagnostic or a dump listing declarations is reproducible across
         // runs - the namespace and name maps are unordered and would not be

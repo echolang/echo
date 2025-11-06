@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include "AST/ASTDetach.h"
 #include "AST/ASTRecursiveVisitor.h"
 
 #include "Token.h"
 
 #include <optional>
 #include <string>
-#include <unordered_set>
 
 namespace AST
 {
@@ -132,7 +132,7 @@ namespace AST
         bool _finalizing = false;
 
         // what left the tree this round, handed to the arena in one go at the end of it
-        std::unordered_set<const Node *> _detached;
+        DetachBatch _detached;
     };
 };
 

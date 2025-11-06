@@ -1,0 +1,20 @@
+// **two recoveries over one failure used to eat a closing brace**, and the compiler aborted on an
+// assertion with no location at all.
+//
+// `$x` is not declared, so the call's argument fails; the call recovers past the `;` that ends this
+// statement. the `return` around it then found no `;` and recovered a second time - and that skip took
+// the function's `}`. from there the body pass was one brace-level deep for the rest of the file, so it
+// reached `struct bar` inside the function's lexical scope while the declaration pass, which walks a
+// block token by token, had seen it at file scope. two AST nodes for one struct, two field-wise
+// constructors at one name token, and AST::FunctionRegistry::claim_declaration_site aborting on the
+// second one.
+//
+// the struct *after* the function is the whole of what makes it visible: a `function` there would have
+// been reconciled by find_by_declaration_site, and a struct declared *before* is found by name in either
+// scope. what is pinned here is that the file reports the one thing that is actually wrong with it
+
+function f() : bar { return bar($x); }
+
+struct bar { usize $pos; }
+
+echo 1;

@@ -115,7 +115,33 @@ namespace AST
                 return;
             }
 
-            for (auto &[type, bucket] : node_map) {
+            // **only the buckets these nodes are actually in.** the sweep is an erase-remove over a bucket
+            // and the arena has one per node kind ever allocated, so touching them all costs a pass over
+            // every node in the program - and both rewriting passes inside the monomorphizer's fixpoint
+            // flush a batch per round, to remove a handful of nodes of five or six kinds.
+            //
+            // the *dynamic* type is the key, and it is the same one the node was filed under: emplace_back
+            // requires NodeTypeProvider<T> and constructs a `T`, so every bucket is keyed by a concrete
+            // leaf kind and `typeid(*node)` cannot name a different one. that identity is what keeps this
+            // total - under-collecting here is the silent direction, a live call left visible after its
+            // statement went away
+            std::unordered_set<std::type_index> kinds;
+
+            for (const Node *node : gone) {
+                if (node != nullptr) {
+                    kinds.insert(std::type_index(typeid(*node)));
+                }
+            }
+
+            for (const auto &kind : kinds) {
+                const auto found = node_map.find(kind);
+
+                if (found == node_map.end()) {
+                    continue;
+                }
+
+                auto &bucket = found->second;
+
                 bucket.erase(
                     std::remove_if(bucket.begin(), bucket.end(),
                         [&gone](Node *node) { return gone.count(node) > 0; }),

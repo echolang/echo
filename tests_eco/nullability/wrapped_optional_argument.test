@@ -1,0 +1,19 @@
+# `5 -1 7` is the plain function - a value, a null, and an already-nullable local; `5 -1` twice is the same
+# through a generic parameter and through an element write; `0 1` is a struct's two-word optional, asked
+# against null on both sides
+#
+# every line of it used to be an *internal* compiler error - "Call parameter type does not match function
+# signature", from the IR verifier, with no location
+
+expect: ok
+
+--- OUT --->
+5
+-1
+7
+5
+-1
+5
+-1
+0
+1

@@ -1,0 +1,8 @@
+// `!` answers for a bool and for anything that may be absent. a plain struct is neither, and the
+// refusal is AST::unary_has_builtin_meaning's, read by the type checker
+
+struct Point { int32 $x; }
+
+$p = Point(1);
+
+echo !$p;

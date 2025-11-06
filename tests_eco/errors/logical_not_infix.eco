@@ -1,0 +1,7 @@
+// `!` is the one built-in symbol with no infix meaning, so it cannot join two operands. reported
+// rather than read as a BinaryExprNode, which gen_binary_expr would have thrown on with no location
+
+bool $a = true;
+bool $b = false;
+
+echo $a ! $b;

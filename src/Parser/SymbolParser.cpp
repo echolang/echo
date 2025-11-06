@@ -12,22 +12,24 @@
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
 
+#include <cassert>
+
 void Parser::parse_type_names(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
-    // the struct bodies this walk is currently inside, innermost last, each paired with the brace
-    // depth its body opened at. a nested type is registered on its *owner* rather than in the
-    // namespace, so this pass has to know where it is - and it walks token by token without ever
-    // consuming a body, which is what makes that a tracked depth rather than a recursion
-    struct OpenBody
+    // one entry per open `{`, innermost last, saying what that brace opened. a nested type is
+    // registered on its *owner* rather than in the namespace and a name written in a *block* is
+    // registered by neither, so this pass has to know which kind of region it is in - and it walks token
+    // by token without ever consuming a body, which is what makes that a tracked stack rather than a
+    // recursion. the stack's depth *is* the brace depth: two notions that had to agree are one
+    struct OpenRegion
     {
-        size_t depth;
-        AST::TypeDeclNode *node;
+        // the type whose body this brace opened, null for a function, method, constructor or bare block
+        AST::TypeDeclNode *type_body;
     };
 
-    std::vector<OpenBody> open_bodies;
-    size_t brace_depth = 0;
+    std::vector<OpenRegion> open_regions;
 
     // the declaration just read, waiting for the `{` that opens its body. anything other than that
     // brace arriving next clears it: a malformed declaration must not adopt a later block
@@ -36,8 +38,20 @@ void Parser::parse_type_names(Parser::Payload &payload)
     while (!cursor.is_done()) {
         // `namespace a::b;` is a statement, not a block - it names the namespace the rest of the
         // file declares into, so this pass has to follow it to push a symbol into the right one
+        //
+        // **only at file scope**, because that is the only place the statement is legal:
+        // parse_namespacedecl refuses one written inside a block, and its refusal reads
+        // `current_namespace->is_lexical()` - never true in this pass, which opens no lexical scope. so
+        // following it here would move every *later* declaration in the file into a namespace the two
+        // passes that come after keep at the file's, and the refusal stays theirs to report
         if (cursor.is_type(Token::Type::t_namespace)) {
-            parse_namespacedecl(payload);
+            if (open_regions.empty()) {
+                parse_namespacedecl(payload);
+                continue;
+            }
+
+            pending_body = nullptr;
+            cursor.skip();
             continue;
         }
 
@@ -62,7 +76,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
             // one test for both, because any brace open here is one or the other - a namespace is a
             // statement in this language, not a block. reported by parse_operatordecl in the passes
             // that follow, which is what keeps this pass one that validates nothing
-            if (brace_depth == 0) {
+            if (open_regions.empty()) {
                 publish_operator_symbol(payload, header);
             }
 
@@ -76,19 +90,13 @@ void Parser::parse_type_names(Parser::Payload &payload)
             // token by token rather than skipping bodies whole, which is also how parse_symbols
             // walks - so a `struct` written inside a function body is reached by both
             if (cursor.is_type(Token::Type::t_open_brace)) {
-                brace_depth += 1;
-
-                if (pending_body != nullptr) {
-                    open_bodies.push_back(OpenBody { brace_depth, pending_body });
-                }
+                // every brace pushes a region, carrying the declaration that opened it or nothing.
+                // pushing only the type bodies is what made this two counters that had to agree
+                open_regions.push_back(OpenRegion { pending_body });
             }
             else if (cursor.is_type(Token::Type::t_close_brace)) {
-                if (!open_bodies.empty() && open_bodies.back().depth == brace_depth) {
-                    open_bodies.pop_back();
-                }
-
-                if (brace_depth > 0) {
-                    brace_depth -= 1;
+                if (!open_regions.empty()) {
+                    open_regions.pop_back();
                 }
             }
 
@@ -97,16 +105,23 @@ void Parser::parse_type_names(Parser::Payload &payload)
             continue;
         }
 
-        // the struct whose body this declaration sits *directly* inside, if any. the depth comparison
-        // is what makes "directly" true: a method body's `{` bumps the depth without pushing anything,
-        // so without it a `struct` written in a *function* body would be adopted by the enclosing
-        // struct here while parse_typedecl - which asks Context::self_struct_ptr, cleared by
-        // AST::FunctionBodyScope - sees no owner and mints a second node for one type. one notion of
-        // where a member body ends, spelled twice, has to agree at both spellings
-        AST::TypeDeclNode *owner =
-            (!open_bodies.empty() && open_bodies.back().depth == brace_depth)
-                ? open_bodies.back().node
-                : nullptr;
+        // **a type written in a block is registered by neither of the two arms below.** its name
+        // belongs to the block's *lexical* namespace, and only the two later passes can mint that: the
+        // namespace is named after the enclosing function, which this pass does not parse a signature to
+        // learn, and AST::retrieve_lexical is create-or-reuse - so a namespace minted here with no name
+        // to give it is the object those passes would then reuse, stripping the `outer::` prefix off
+        // every block-local diagnostic in the program. parse_typedecl publishes it in pass 2 instead,
+        // where the scope exists; a body-local name is visible in one block of one file, and this pass
+        // is here so a name written *out of order across files* resolves
+        if (!open_regions.empty() && open_regions.back().type_body == nullptr) {
+            pending_body = nullptr;
+            cursor.skip(); // the struct or class keyword, and the loop walks the rest of it
+            continue;
+        }
+
+        // the struct whose body this declaration sits directly inside, if any. an empty stack is the
+        // file's own namespace, and every other region was answered above
+        AST::TypeDeclNode *owner = open_regions.empty() ? nullptr : open_regions.back().type_body;
 
         const AST::ComplexTypeKind kind = typedecl_kind(cursor);
 
@@ -115,13 +130,16 @@ void Parser::parse_type_names(Parser::Payload &payload)
         auto name_token = cursor.current();
         cursor.skip();
 
-        // find before create: push_symbol replaces the slot and frees what was there, so a second
-        // declaration of the same name would leave the first node's Symbol dangling and hand
-        // codegen two TypeDeclNodes for one type. parse_typedecl then reuses whichever node is here
-        // the duplicate is left symbol-less deliberately and reported nowhere here: both later passes
-        // then find the *first* node and parse_typedecl reports the redeclaration at the duplicate's own
-        // name token, which is also where the body-skip recovery lives. this pass has no such
-        // recovery, and its detection is a strict subset of parse_typedecl's anyway
+        // this pass opens no lexical scope, and the one statement that could have moved it elsewhere is
+        // declined above - so the namespace here is always one the user wrote, which is what makes the
+        // three uses of it below the file's own
+        assert(!payload.context.current_namespace->is_lexical());
+
+        // **find before mint**, a strict subset of Parser::publish_type_symbol's question and asked one
+        // step earlier because this pass would otherwise mint a second node for the name and declare its
+        // type parameters. the duplicate is left symbol-less deliberately and reported nowhere here:
+        // both later passes then find the *first* node and parse_typedecl reports the redeclaration at
+        // the duplicate's own name token, which is also where the body-skip recovery lives
         //
         // a nested type is in no namespace, so the same question is asked of its owner instead
         if (owner != nullptr) {
@@ -130,7 +148,8 @@ void Parser::parse_type_names(Parser::Payload &payload)
             }
         }
         else {
-            auto *existing = payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.declaring_namespace());
+            auto *existing =
+                payload.collector.namespaces.find_symbol(name_token.value(), *payload.context.current_namespace);
             if (existing != nullptr && existing->node.get_ptr<AST::TypeDeclNode>() != nullptr) {
                 continue;
             }
@@ -139,7 +158,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // the kind is settled here, at the only place the node is created. parse_typedecl reuses this
         // node in both later passes, so it never has to re-derive it from the keyword
         auto &type_node = payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
-        type_node.set_namespace(payload.context.declaring_namespace());
+        type_node.set_namespace(payload.context.current_namespace);
 
         // the type parameters, not only the name: for a generic type the arity is part of its
         // identity, and parse_generic_application reads the arity off the template to check an
@@ -160,7 +179,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
             owner->complex_type().add_member_type(name_token.value(), &type_node);
         }
         else {
-            payload.context.declaring_namespace()->push_symbol(std::make_unique<AST::Symbol>(&type_node));
+            Parser::publish_type_symbol(payload, *payload.context.current_namespace, type_node);
         }
 
         // the body this declaration is about to open, so the `{` arriving next knows whose it is

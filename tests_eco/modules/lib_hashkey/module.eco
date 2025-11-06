@@ -1,0 +1,3 @@
+#[module: "lib_hashkey"]
+
+#[sources: "*.eco"]

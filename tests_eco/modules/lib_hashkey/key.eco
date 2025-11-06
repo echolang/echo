@@ -1,0 +1,10 @@
+// a key type of its own, at the root: the struct and its equality
+struct sku
+{
+    int32 $n;
+}
+
+operator (const sku& $a) == (const sku& $b) : bool
+{
+    return $a->n == $b->n;
+}

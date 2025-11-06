@@ -26,6 +26,7 @@ namespace Parser
     //
     //   operator [ '<' type-params '>' ] [ '(' <int> ',' (left|right) ')' ]
     //       ( '(' params ')' '[' [ params ] ']'          // index (the second operand is bracketed)
+    //       | '(' params ')' '[' [ params ] ']' '=' '(' params ')'   // index write (the value follows)
     //       | '(' params ')' SYM [ '(' params ')' ]      // infix (two groups) or suffix (one)
     //       | SYM '(' params ')' )                       // prefix
     //       ':' <type> <body>
@@ -54,6 +55,12 @@ namespace Parser
         // same role `left_params` plays, and recorded for the same reason: the header walks past it
         // on its way to the `:` and the fixity is only settled once it has
         std::optional<Cursor::Snapshot> index_params;
+
+        // the `(` of an index-*write* operator's value operand list, when the declaration is one. the
+        // same role the two above play: the header walks past it on its way to the `:`, and the one
+        // token that tells the write form from the borrowing one - the `=` - is only reached after the
+        // bracket group has been stepped over
+        std::optional<Cursor::Snapshot> value_params;
 
         // the type parameters of an `operator<T>`, parsed **once**, here. the list's grammar has one
         // owner - Parser::parse_type_param_list, which is what a function's declaration uses - and the

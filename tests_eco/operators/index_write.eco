@@ -1,0 +1,134 @@
+// the **index-write** contract: `operator (C& $c)[K $k] = (V $v) : void` is one call that owns the whole
+// insert-or-replace, so there is no assignment behind it for the compiler to push a teardown onto and no
+// bargain a library has to keep by hand. `seat` still owes the replaced value its end - it always did - but
+// now for a reason nothing has to be told
+//
+// **deliberately a non-generic container.** the write decision and the read decision are made from one
+// `indexed_base_type()` read, at one moment, with the write asked first - and a concrete operator gets no
+// free round from CallResolver's generic gate, so this is the case that fails if the two are ever split
+// across a round. AST::OwnershipPass walks a body exactly once, ever
+//
+// it also pins the other half: the bracket **reads and borrows** as well, through the
+// borrowing overloads beside the write one. that is what `array<T>` always did and what a container that
+// seats an element could not do before
+
+struct slots
+{
+    ptr<string> $d;
+    usize $n;
+
+    constructor()
+    {
+        $this->d:$ = mem::alloc<string>(4);
+        $this->n = 0;
+    }
+
+    destructor()
+    {
+        usize $i = 0;
+
+        while ($i < $this->n) {
+            string $dead = mem::take<string>($this->d:$[$i]);
+
+            $i = $i + 1;
+        }
+
+        mem::free<string>($this->d);
+    }
+
+    // written *through* the brackets, the way `array<T>`'s are - one probe, one implementation
+    const function get(usize $i) : string
+    {
+        return $this[$i];
+    }
+
+    function at(usize $i) : string&
+    {
+        return &$this[$i];
+    }
+
+    /**
+     * The slot at `$i`, ready to be written: grown if it is new, and **emptied if it is not**.
+     *
+     * The write operator below is the only thing that calls this, and the emptying is why: on every path the
+     * slot it hands to `mem::init` holds nothing, so there is nothing there for the write to end.
+     */
+    function seat(usize $i) : usize
+    {
+        if ($i < $this->n) {
+            string $doomed = mem::take<string>($this->d:$[$i]);
+
+            return $i;
+        }
+
+        $this->n = $this->n + 1;
+
+        return $i;
+    }
+}
+
+operator (slots& $s)[usize $i] = (string $v) : void
+{
+    usize $at = $s->seat($i);
+
+    mem::init<string>($s->d:$[$at], mv $v);
+}
+
+// and the borrowing contract beside it, which is what makes the bracket readable at all
+operator (slots& $s)[usize $i] : string&
+{
+    assert($i < $s->n, 'slot not written');
+
+    return &$s->d:$[$i];
+}
+
+operator (const slots& $s)[usize $i] : const string&
+{
+    assert($i < $s->n, 'slot not written');
+
+    return &$s->d:$[$i];
+}
+
+{
+    slots $s = slots();
+
+    string $a = '';
+    $a->append('first');
+
+    // an insert. the buffer, plus the written string's str::buf and its bytes
+    $s[0] = $a;
+
+    assert(mem::live_allocations() == 3, "the buffer and one written string");
+    assert(mem::ref_count<str::buf>($a->owner) == 2, "the local and the slot");
+
+    // **the read goes through the bracket**, which a container that inserts could not do before
+    echo $s[0];
+
+    string $b = '';
+    $b->append('second');
+
+    // **a replace.** `seat` destroyed what was there, so the first string loses the slot's reference and
+    // `$a` is left holding it alone - nothing leaked and nothing was released twice
+    $s[0] = $b;
+
+    assert(mem::live_allocations() == 5, "$a's string is still live, held by $a alone");
+    assert(mem::ref_count<str::buf>($a->owner) == 1, "the slot gave its reference back");
+    assert(mem::ref_count<str::buf>($b->owner) == 2, "and the new value has it");
+
+    echo $s->get(0);
+
+    // and so does the borrow. `&$s[0]` and `$s->at(0)` are the same thing now, because `at` *is* the bracket
+    string& $slot = &$s[0];
+
+    $slot->append('!');
+
+    echo $s[0];
+
+    // a const receiver picks the const overload, with no rule anywhere but argument_fit's
+    const slots& $ro = &$s;
+
+    echo $ro[0];
+}
+
+assert(mem::live_allocations() == 0, "the container, both strings, nothing twice");
+echo mem::live_allocations();

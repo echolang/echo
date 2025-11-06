@@ -1,0 +1,21 @@
+# the two `200`s and the two `300`s are the case: the first of each pair is AST::const_fold's answer
+# and the second is ExprCodegen::gen_unary_expr's, over the same operand. a symbol folded in one and
+# thrown on in the other is how a `const if` and the `if` beside it come to take different arms
+
+expect: ok
+
+--- OUT --->
+a
+b
+c
+d
+e
+0
+1
+0
+0
+200
+200
+300
+300
+0

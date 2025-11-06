@@ -1,0 +1,8 @@
+// `<< >> & |` sit beside `^` in the predefined operator set and in AST::op_precedence, so they parse
+// and resolve - and `^` is the only one ExprCodegen::gen_binary_expr lowers. the other three used to
+// be accepted by AST::binary_has_builtin_meaning and then abort the compiler with no location; the
+// predicate enumerates what that function actually has an arm for now
+
+int32 $a = 12;
+
+echo $a << 1;

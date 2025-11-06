@@ -671,8 +671,10 @@ namespace AST
         }
 
         // the namespace the type was declared in, null when unknown or root. instantiations
-        // inherit it from their template, so a mangled name can always be fully qualified
-        const Namespace *ast_namespace = nullptr;
+        // inherit it from their template, so a mangled name can always be fully qualified.
+        // non-const because a type *declares into* it: AST::member_surface_namespace hangs the type's
+        // nested types and constants off this very object rather than off a path from the root
+        Namespace *ast_namespace = nullptr;
 
         // the type this one is declared *inside*, null for a top-level type. it is part of this type's
         // identity, not decoration: a nested type is in no namespace, so without it `string::view` and
@@ -883,7 +885,8 @@ namespace AST
         // the methods that declare an implicit conversion *from* this type - the ones the user marked
         // `#[implicit]`. a value handed to a parameter of one of their return types is converted by a
         // call to it, with nothing written at the call site; AST::find_implicit_conversion is the
-        // lookup and AST::argument_fit ranks the result last of the real ranks
+        // lookup and AST::argument_fit ranks the result last of the real ranks - below even a borrow
+        // of a temporary, so an overload taking the owning type always beats one taking the window
         //
         // **declarations only, never the target type.** the declaration's return type already *is* the
         // target, and a second copy of it here would be a member field on ComplexType carrying a type -
@@ -1109,7 +1112,7 @@ namespace AST
         // already live: `_owned` keeps it alive for the whole compilation, which is what lets a ValueType
         // hold it by raw pointer. nothing downstream needs a declaration node - StructureTable keys a
         // layout on the ComplexType and create_llvm_struct_for_instance builds it from the properties
-        ComplexType *create_anonymous_type(const std::string &name, ComplexTypeKind kind, const Namespace *ns);
+        ComplexType *create_anonymous_type(const std::string &name, ComplexTypeKind kind, Namespace *ns);
 
         // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
         // register_template maps to themselves. used by the --print-instances dump

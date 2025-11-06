@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 12:8
+The function 'P' could not be found
+Begin: 'P'
+End: 'P'
+Code excerpt:
+ [11]> 
+ [12]> P $q = P(1);
+             ^
+ [13]> echo $q->x;
+
+Critical issues found, cannot compile.

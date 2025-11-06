@@ -1,0 +1,351 @@
+/**
+ * `ordered_map<K, V>` - a hash map that remembers the order its keys arrived in.
+ *
+ * Everything `map<K, V>` does, plus a defined iteration order: `foreach` yields entries in the order they
+ * were first inserted. Re-writing an existing key does **not** move it to the back, which is the semantics
+ * every insertion-ordered map has settled on.
+ *
+ * A key type owes exactly what `map<K, V>` asks of it - a `hash::of` overload and an `operator ==` - plus
+ * one thing more: **`K` must be copyable**, because the order is kept as a second array of keys. A `K` with
+ * a destructor and no copy constructor can be a `map` key and cannot be an `ordered_map` key.
+ *
+ * ## It composes, and that is the whole design
+ *
+ *     map<K, V> $table;
+ *     array<K> $order;
+ *
+ * Two properties and no ownership code at all. Every `const if`, every `mem::take`, every fresh-slot write
+ * and the rehash relocation stay in `map.eco`, in one implementation - which is the 250 lines of this
+ * feature that are actually hard.
+ *
+ * And it declares **neither a destructor nor a copy constructor**, yet gets both correctly: `map<K, V>` has
+ * both and `array<K>` has both, so the compiler synthesizes this type's teardown from its two properties -
+ * and, because no destructor is declared, synthesizes its copy too. That copy takes a `const&`, because both
+ * properties accept a const source. So the type with the *most* ownership surface in the pair ends up with
+ * the *least* ownership code. `struct string` makes the same argument for a different reason.
+ *
+ * ## What it costs
+ *
+ * Four things, all of them real:
+ *
+ *  - **one extra `K` per entry.** `$order` holds a second copy of every key. For a `string` that is two
+ *    words and one more reference to the same buffer, not a second allocation; for a large `K` it is memory
+ *  - **`K` must be copyable**, as above
+ *  - **`remove` is O(n)**: the key has to come out of `$order` in place, which is a scan plus a shift
+ *  - **iteration costs one hash lookup per step**, because the values are reached through the table by key.
+ *    Sequential in the keys, random in the values
+ *
+ * If any of those ever stops being worth it the swap is internal: the surface below is identical either way.
+ */
+struct ordered_map<K, V> : contract::iterable<V>
+{
+    map<K, V> $table;
+
+    // the keys, in the order they first arrived. the only reason this type exists
+    array<K> $order;
+
+    /**
+     * An empty ordered map. Allocates nothing, because neither of its two properties does.
+     */
+    constructor()
+    {
+        $this->table = map<K, V>();
+        $this->order = array<K>();
+    }
+
+    // no destructor and no copy constructor, deliberately - see the file header
+
+    const function count() : usize
+    {
+        return $this->table->count();
+    }
+
+    /**
+     * The table's slot count. `map<K, V>::capacity`'s meaning, with the same warning: it is slots and not
+     * entries, so treat every insert as one that re-seats the table and invalidates your borrows.
+     */
+    const function capacity() : usize
+    {
+        return $this->table->capacity();
+    }
+
+    const function is_empty() : bool
+    {
+        return $this->table->is_empty();
+    }
+
+    const function has(const K& $key) : bool
+    {
+        return $this->table->has($key);
+    }
+
+    const function get(const K& $key) : V
+    {
+        return $this->table->get($key);
+    }
+
+    /**
+     * A borrow of the value under `$key`, asserted to be there.
+     *
+     * Forwarded straight through rather than bound to a local first: a borrow local's storage ends with the
+     * call, so `V& $v = $this->table->at($key); return $v;` is refused - it reads as returning the local's
+     * own slot. Handing the call's result back directly is the spelling.
+     */
+    function at(const K& $key) : V&
+    {
+        return $this->table->at($key);
+    }
+
+    const function at(const K& $key) : const V&
+    {
+        return $this->table->at($key);
+    }
+
+    /**
+     * Stores `$value` under `$key`, appending the key to the order if it is new.
+     */
+    function set(const K& $key, V $value) : void
+    {
+        $this[$key] = mv $value;
+    }
+
+    /**
+     * Removes `$key`'s entry and its place in the order. True when there was one.
+     *
+     * **O(n)**, which is the cost the file header names: closing the gap in `$order` without reordering
+     * what is left is a scan plus a shift.
+     */
+    function remove(const K& $key) : bool
+    {
+        // the table's own answer, not a `has` ahead of it: "was it there" is what `map<K, V>::remove`
+        // returns, so asking first is a second full hash and a second probe for a question already
+        // answered. `forget` only ever touches `$order`, so it is free to run after the entry is gone
+        if (!$this->table->remove($key)) {
+            return false;
+        }
+
+        $this->forget($key);
+
+        return true;
+    }
+
+    /**
+     * Removes `$key`'s entry and **hands the value over**, asserted to be there. O(n), for `remove`'s reason.
+     */
+    function take(const K& $key) : V
+    {
+        // the assert is `map<K, V>::take`'s, for `remove`'s reason - one probe, and one wording
+        V $out = $this->table->take($key);
+
+        $this->forget($key);
+
+        return mv $out;
+    }
+
+    function clear() : void
+    {
+        $this->table->clear();
+        $this->order->clear();
+    }
+
+    function reserve(usize $count) : void
+    {
+        $this->table->reserve($count);
+        $this->order->reserve($count);
+    }
+
+    /**
+     * Copies every entry of `$other` across, in `$other`'s order.
+     */
+    function extend(const ordered_map<K, V>& $other) : void
+    {
+        // read once, not per iteration: `$other` is a `const` borrow so nothing here can change what it
+        // answers, and the loop would otherwise pay a call per entry on the `run` path
+        usize $n = $other->order->count();
+
+        usize $i = 0;
+
+        while ($i < $n) {
+            // by value, not `const K&`: reading a `const array<K>`'s element yields a `const K` rather
+            // than a borrow of one, so there is nothing here for a borrow to bind to. a copy per entry is
+            // what an extend was going to cost anyway
+            K $key = $other->order[$i];
+
+            // through the write contract, the way `set` is: the order and the table are written by one
+            // thing, so the insertion-order rule has one implementation rather than a second one here
+            $this[$key] = $other->table->get($key);
+
+            $i = $i + 1;
+        }
+    }
+
+    /**
+     * Every key, **in insertion order** - the one method that is cheaper here than on `map<K, V>`, because
+     * the answer is exactly what `$order` already is.
+     */
+    const function keys() : array<K>
+    {
+        return $this->order->clone();
+    }
+
+    /**
+     * Every value, in the same order. One hash lookup per entry.
+     */
+    const function values() : array<V>
+    {
+        array<V> $out = array<V>();
+
+        // read once, not per iteration
+        usize $n = $this->order->count();
+
+        $out->reserve($n);
+
+        usize $i = 0;
+
+        while ($i < $n) {
+            $out[] = $this->table->get($this->order[$i]);
+
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+
+    function iterate() : ordered_map_iterator<K, V>
+    {
+        return ordered_map_iterator<K, V>(&$this->table, $this->order->sub());
+    }
+
+    /**
+     * An explicit deep copy, for where `$b = $a` would not read as one.
+     *
+     * Written as a declaration and a `return` rather than `ordered_map<K, V>($this)`: the copy this type
+     * gets is **synthesized**, and a synthesized copy is not a constructor overload a call can name - the
+     * only constructors in the set are the one declared above and the field-wise one. So the copy is
+     * reached the way every other copy is, by a declaration whose initializer is a place.
+     */
+    const function clone() : ordered_map<K, V>
+    {
+        ordered_map<K, V> $out = $this;
+
+        return $out;
+    }
+
+    // ---- internals ------------------------------------------------------------------------------------
+
+    /**
+     * Drops `$key` out of the order, keeping everything else in place. O(n).
+     */
+    function forget(const K& $key) : void
+    {
+        // read once: the loop returns on the removal, so nothing here outlives the count it was given
+        usize $n = $this->order->count();
+
+        usize $i = 0;
+
+        while ($i < $n) {
+            if ($this->order[$i] == $key) {
+                K $dead = $this->order->remove($i);
+
+                return;
+            }
+
+            $i = $i + 1;
+        }
+    }
+}
+
+/**
+ * The **write** contract. `$m[$key] = $value` inserts or replaces, and records the key's place on the way.
+ *
+ * Written straight through `map<K, V>`'s own write bracket, which is what makes this three lines. That was
+ * not expressible while the map's bracket was an initializing one that could only be *written*
+ * to, so this had to reach past it into `seat` and hand the raw slot back itself. Now there is one write
+ * contract to forward to, and `ordered_map` is back to owning no teardown of its own.
+ *
+ * **The key is appended when the table gained an entry**, which is the whole of "re-writing a key does not
+ * move it to the back" - and reading that off `count()` is what makes this **one** probe. Asking `has` first
+ * was the same question the write below already answers on its way through `seat`, at the price of a second
+ * full hash and a second walk on the single most-used operation of the type.
+ */
+operator<K, V> (ordered_map<K, V>& $m)[const K& $key] = (V $value) : void
+{
+    usize $before = $m->table->count();
+
+    $m->table[$key] = mv $value;
+
+    if ($m->table->count() > $before) {
+        $m->order[] = $key;
+    }
+}
+
+/**
+ * The **borrowing** contract, over a mutable ordered map: the element that is there, asserted.
+ */
+operator<K, V> (ordered_map<K, V>& $m)[const K& $key] : V&
+{
+    return $m->table->at($key);
+}
+
+/**
+ * The same over a `const` ordered map.
+ */
+operator<K, V> (const ordered_map<K, V>& $m)[const K& $key] : const V&
+{
+    // forwarded through the const `at`, which already hands back a borrow. reading `$m->table[$key]` here
+    // instead would be a *value* read of the map's own const bracket, and a `const V` does not fit a
+    // `const V&` return
+    return $m->table->at($key);
+}
+
+/**
+ * The cursor `ordered_map<K, V>` iterates through. Insertion order, because `$order` is.
+ *
+ * It holds the table by **pointer** and the order by **slice**: a pointer is not an owner, and a slice is
+ * two words that copy for free. Holding the order by value would copy every key on every `foreach`.
+ *
+ * **Each step costs a hash lookup**, which is the composed design's price and is worth knowing rather than
+ * worrying about: the keys are read sequentially, the values are not.
+ */
+struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
+{
+    ptr<map<K, V>> $table;
+    slice<K> $order;
+
+    // one *past* the entry `current()` names, slice_iterator's convention
+    usize $pos;
+
+    constructor(ptr<map<K, V>> $table, slice<K> $order)
+    {
+        $this->table:$ = $table;
+        $this->order = $order;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->order->count()) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    /**
+     * The value under the key at this position, borrowed out of the table.
+     *
+     * Forwarded directly, for `ordered_map::at`'s reason: binding it to a `V&` local first and returning
+     * that is refused, because the local's own storage ends with the call.
+     */
+    function current() : V&
+    {
+        return $this->table->at($this->order[$this->pos - 1]);
+    }
+
+    function key() : K
+    {
+        return $this->order[$this->pos - 1];
+    }
+}

@@ -1,0 +1,17 @@
+# and a const borrow is the same silent no-op from the other side
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 4:25
+an index-write operator takes its container as a mutable borrow - 'C&', not 'const bag&'. The write has to reach the caller's container: by value it would land in a copy that dies with the call, and through a 'const' borrow it would not land at all.
+Begin: '['
+End: '['
+Code excerpt:
+ [3]> 
+ [4]> operator (const bag& $b)[usize $i] = (int32 $v) : void
+                              ^
+ [5]> {
+
+Critical issues found, cannot compile.

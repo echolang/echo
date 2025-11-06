@@ -1,0 +1,21 @@
+# the assertions are in the program: what this pins is a set of reference counts and an allocation
+# balance only the running program can read. the arithmetic is in the .eco header
+
+expect: ok
+
+--- OUT --->
+hello
+bye
+1
+bye
+1
+2
+1
+0
+1
+1
+0
+0
+gone
+0
+0

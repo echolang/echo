@@ -36,6 +36,13 @@ namespace Parser
     // so the two cannot disagree about where a member ends - they differ only in what they keep, which
     // `payload.pass` tells them
     AST::TypeDeclNode *parse_typedecl(Payload &payload);
+
+    // **the one publisher of a type name into a namespace**, and find-before-create because
+    // Namespace::push_symbol replaces the slot and frees what was there: a second declaration of the
+    // name would leave the first node's Symbol dangling and hand codegen two TypeDeclNodes for one type.
+    // returns whether this node now holds the name - false when a *different* type already did, which
+    // both callers leave to parse_typedecl's redeclaration report at the duplicate's own name token
+    bool publish_type_symbol(Payload &payload, AST::Namespace &ns, AST::TypeDeclNode &node);
 };
 
 

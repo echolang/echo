@@ -1,9 +1,11 @@
 // **the rank, pinned from above and below.** a borrow of real storage must always beat a borrow of a
 // value the compiler had to invent, and a free numeric promotion must beat inventing storage at all -
-// so t_borrow_temporary sits last, below even t_declared_conversion
+// so t_borrow_temporary sits below every rank that reads an existing value. it is also the last rank
+// that leaves the *type* alone, so it sits above every conversion: a conversion materialises its result
+// too and changes the type as well
 //
-// both directions in one file on purpose: a test that only pinned one of them would still pass with
-// the rank in entirely the wrong place
+// all three directions in one file on purpose: a test that pinned only one of them would still pass
+// with the rank in entirely the wrong place, which is how it came to sit last for as long as it did
 
 function w(int32& $a) : int32 { return 1; }
 function w(int64 $a) : int32 { return 2; }
@@ -15,3 +17,15 @@ echo w($place);
 
 // a literal: t_promotion beats t_borrow_temporary
 echo w(42);
+
+// and the boundary below. `c(float64)` is a plain conversion for an int32 literal - crossing families,
+// so not a promotion - while `c(const int32&)` binds a temporary of the literal's own type. the borrow
+// wins, and it is the pair that used to resolve the other way
+function c(const int32& $a) : int32 { return 3; }
+function c(float64 $a) : int32 { return 4; }
+
+echo c(7);
+
+// a place takes the same overload for the ordinary reason, six ranks higher up - so the two answers
+// agreeing here is what says the literal did not fall through to something else
+echo c($place);

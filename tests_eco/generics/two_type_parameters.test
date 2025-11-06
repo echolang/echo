@@ -1,0 +1,34 @@
+# the assertions live in the program: what this case pins is a set of *counts* only the running
+# program can read, plus that four instantiations of one two-parameter template each pick the right
+# arm of every `const if` in it
+#
+# three findings this case records, each of which cost a debugging round:
+#   - `as` is a keyword, so `$as` is not a spellable property name
+#   - a borrow may be forwarded (`return $this->at(0);`) or bound (`int32& $s = ...`), but
+#     bind-then-return is refused, and a borrow-returning call cannot be read as a value
+#   - a two-parameter owner needs `contract::iterable<...>` on itself, not only on its cursor
+
+expect: ok
+
+--- OUT --->
+2
+20
+10
+11
+99
+99
+1
+99
+2
+20
+hello
+1
+hello
+7
+hello
+value
+key
+value
+nested
+1
+0

@@ -1,0 +1,82 @@
+// `mem::init` is `mem::take`'s mirror: take empties storage the compiler is not accounting for, init
+// fills it. Both are judged by AST::is_unaccounted_storage - one predicate, two readers - so "which
+// storage may I move through" cannot come to two answers
+//
+// the reason it has to exist is the first block. an ordinary `$buf:$[0] = $a` is a *re*-assignment, so
+// AST::OwnershipPass ends whatever the destination held - and over a slot straight out of mem::alloc
+// that is a destructor call over whatever bytes the allocator handed back. `array<T>` never needs this
+// because its append operator says "fresh slot" by its shape (AST::IndexExprNode::is_append, which the
+// parser reads off the empty brackets); a container that seats an element at an index a probe chose has
+// no shape to say it with
+//
+// the numbers: 1 for the buffer, and 2 per *written* string - its str::buf and that buf's bytes. a
+// string literal allocates nothing at all, which is why both strings below are appended to
+
+{
+    ptr<string> $buf = mem::alloc<string>(2);
+
+    string $a = '';
+    $a->append('hello');
+
+    string $b = '';
+    $b->append('world');
+
+    assert(mem::live_allocations() == 5, "the buffer and two written strings");
+    assert(mem::ref_count<str::buf>($a->owner) == 1, "one owner so far");
+
+    mem::init<string>($buf:$[0], $a);
+    mem::init<string>($buf:$[1], $b);
+
+    // **still 5**, and this is the whole assertion of the case: init allocated nothing. what it moved
+    // into the slot is the owner the by-value parameter already copied, which the count below is what
+    // actually proves - two owners of one str::buf, the local and the slot
+    assert(mem::live_allocations() == 5, "init moved an owner in rather than allocating one");
+    assert(mem::ref_count<str::buf>($a->owner) == 2, "the local and the slot");
+
+    echo $buf:$[0];
+    echo $buf:$[1];
+
+    // and back out. take hands the slot's owner over, so the count is unchanged - the slot stops being
+    // an owner at the same moment `$out` starts being one. that is what leaves the slots dead, so the
+    // free below owes them nothing
+    string $out = mem::take<string>($buf:$[0]);
+    string $gone = mem::take<string>($buf:$[1]);
+
+    assert(mem::live_allocations() == 5, "take moved an owner out rather than releasing one");
+    assert(mem::ref_count<str::buf>($a->owner) == 2, "still the local and now the taken value");
+
+    echo $out;
+
+    mem::free<string>($buf);
+
+    // one fewer: the buffer went back. the four string allocations are still live, held by the four
+    // locals, which is exactly right
+    assert(mem::live_allocations() == 4, "the buffer, and nothing else");
+}
+
+assert(mem::live_allocations() == 0, "nothing was destroyed twice and nothing leaked");
+echo mem::live_allocations();
+
+// `mem::move` is the one of the byte trio whose regions may **overlap**, which is what shifting a tail
+// down by a slot needs - `mem::copy` promises they do not, and this is the case that breaks it
+{
+    ptr<int32> $n = mem::alloc<int32>(5);
+
+    $n:$[0] = 10;
+    $n:$[1] = 20;
+    $n:$[2] = 30;
+    $n:$[3] = 40;
+    $n:$[4] = 50;
+
+    // drop element 1 by moving the three above it down over it. source and destination overlap
+    mem::move<int32>($n:$ + 1, $n:$ + 2, 3);
+
+    echo $n:$[0];
+    echo $n:$[1];
+    echo $n:$[2];
+    echo $n:$[3];
+
+    mem::free<int32>($n);
+}
+
+echo mem::live_allocations();

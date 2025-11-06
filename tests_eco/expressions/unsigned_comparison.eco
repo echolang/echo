@@ -1,0 +1,28 @@
+// **an ordering operator over an unsigned type is emitted unsigned.** the integer arm of
+// gen_binary_expr used to emit the signed spelling for every integer - `icmp sgt`, `sdiv`, `srem` -
+// so a uint64 above the signed maximum compared as negative and `$big > 1` answered false, silently
+// and at every optimisation level. the unsigned spellings already in that file belong to the pointer
+// arm above it, where they are right because an address is unsigned
+uint64 $big = 18446744073709551615;
+uint64 $one = 1;
+
+if ($big > $one) { echo 1; } else { echo 0; }
+
+// **the same comparison, one pass earlier.** AST::const_fold reads the operand type's signedness off
+// the same reconciled type this arm does, so the two cannot answer differently. while they did, this
+// pair of statements printed two different digits - which is the shape that made the bug visible
+const uint64 HUGE = 18446744073709551615;
+
+const if (HUGE > 1) { echo 1; } else { echo 0; }
+
+// division and modulo ask the same question of the same owner: an unsigned half of uint64's maximum
+// is the signed maximum, and a signed division of the same bits would answer 0
+echo $big / 2;
+echo $big % 10;
+
+// and a signed operand still gets the signed spelling, which is the half a fix could quietly break
+int64 $neg = -5;
+
+if ($neg < 1) { echo 7; } else { echo 8; }
+
+echo $neg / 2;

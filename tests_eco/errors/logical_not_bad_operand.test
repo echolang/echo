@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 8:6
+operator '!' is not supported on an operand of type 'Point'
+Begin: '!'
+End: '!'
+Code excerpt:
+ [7]> 
+ [8]> echo !$p;
+           ^
+ [9]> 
+
+Critical issues found, cannot compile.

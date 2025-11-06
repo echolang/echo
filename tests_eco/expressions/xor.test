@@ -1,0 +1,16 @@
+# the two `100`s are the case: the first is AST::const_fold's answer, the second is
+# ExprCodegen::gen_binary_expr's, over the same operands. a symbol folded in one and thrown on in the
+# other is how a `const if` and the `if` beside it come to take different arms
+
+expect: ok
+
+--- OUT --->
+14695981039346656077
+6
+240
+-1
+0
+4
+100
+100
+255

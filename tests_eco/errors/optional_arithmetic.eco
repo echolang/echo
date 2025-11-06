@@ -1,0 +1,9 @@
+// **the one case here that was silently wrong rather than an abort.** `is_integer_type()` is true for
+// an `int32?`, so two of them reached ExprCodegen's integer arm and it compared the `{ i1, i32 }`
+// pairs as numbers - presence bit and all. the only question a value that may be absent answers is
+// whether it is there, which is `== null`, `guard`, `??` and `!`
+
+int32? $a = 1;
+int32? $b = 1;
+
+echo $a == $b;

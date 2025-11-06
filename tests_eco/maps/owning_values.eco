@@ -1,0 +1,118 @@
+// **the case the whole design is answerable to.** a `map<string, string>` owns its values, so every one of
+// them has to be destroyed exactly once - and the two moments that could get it wrong are a *replace*,
+// where `seat` owes the old value its end because nothing else does, and a *copy*,
+// where the element must be retained rather than bit-copied.
+//
+// the arithmetic to read the numbers against:
+//
+//   - an empty map is **0**: a null buffer is a legitimate state, so `map<K, V>()` allocates nothing
+//   - a non-empty map is **3**: `$hashes`, `$keys` and `$values`, three parallel allocations because
+//     `mem::take` can only empty storage reached through a pointer
+//   - a *written* string is **2**: its `str::buf` and that buf's bytes. a string **literal** is 0, which is
+//     why the keys below never appear in the count at all
+
+{
+    map<string, string> $m = map<string, string>();
+
+    assert(mem::live_allocations() == 0, 'an empty map allocates nothing');
+
+    string $v = '';
+    $v->append('hello');
+
+    assert(mem::live_allocations() == 2, 'one written string');
+
+    $m->set('greet', $v);
+
+    // +3 for the table. the value was **retained**, not duplicated - which is what the count below says
+    assert(mem::live_allocations() == 5, 'the three buffers, and the string retained rather than copied');
+    assert(mem::ref_count<str::buf>($v->owner) == 2, 'the local and the slot');
+
+    echo $m->get('greet');
+
+    string $v2 = '';
+    $v2->append('bye');
+
+    assert(mem::live_allocations() == 7, 'a second written string');
+
+    // **the replace.** the write is one call, so there is no assignment for the compiler to end anything at -
+    // `seat` ended the
+    // old value on the way - and the two counts below are the whole of the evidence: nothing was leaked
+    // (still 7, `$v` holds its own buffer) and nothing was released twice (`$v`'s count fell by exactly
+    // one, the slot's)
+    $m->set('greet', $v2);
+
+    assert(mem::live_allocations() == 7, 'nothing allocated and nothing leaked');
+    assert(mem::ref_count<str::buf>($v->owner) == 1, 'the slot gave its reference back');
+    assert(mem::ref_count<str::buf>($v2->owner) == 2, 'and the new value has it');
+
+    echo $m->get('greet');
+    echo $m->count();
+
+    // **the copy.** three more buffers for the second table, and the element retained a third time rather
+    // than bit-copied - a bitwise copy would read 10 here too, and would double-free at the end of the block
+    map<string, string> $c = $m;
+
+    assert(mem::live_allocations() == 10, 'a second table, and the element retained');
+    assert(mem::ref_count<str::buf>($v2->owner) == 3, 'the local and both maps');
+
+    echo $c->get('greet');
+    echo $c->count();
+
+    // the copy is independent
+    $c->set('extra', $v);
+    echo $c->count();
+    echo $m->count();
+}
+
+assert(mem::live_allocations() == 0, 'two tables, three strings, each destroyed exactly once');
+echo mem::live_allocations();
+
+// ---- an owning **key**, which exercises the `const if` on K independently of the one on V
+
+{
+    map<string, int32> $m = map<string, int32>();
+
+    string $k = '';
+    $k->append('key');
+
+    $m->set($k, 1);
+
+    assert(mem::live_allocations() == 5, 'the three buffers and the written key');
+    assert(mem::ref_count<str::buf>($k->owner) == 2, 'the local and the stored key');
+
+    echo $m->get($k);
+
+    // removing destroys the key as well as the value
+    echo $m->remove($k);
+
+    assert(mem::ref_count<str::buf>($k->owner) == 1, 'the stored key was destroyed');
+    echo $m->count();
+}
+
+assert(mem::live_allocations() == 0, 'an owning key is torn down too');
+echo mem::live_allocations();
+
+// ---- take hands the value over rather than copying it
+
+{
+    map<string, string> $m = map<string, string>();
+
+    string $s = '';
+    $s->append('gone');
+
+    $m->set('k', $s);
+
+    assert(mem::ref_count<str::buf>($s->owner) == 2, 'the local and the slot');
+
+    string $out = $m->take('k');
+
+    // **unchanged**: the slot stopped being an owner at the same moment `$out` started being one
+    assert(mem::ref_count<str::buf>($s->owner) == 2, 'handed over, not duplicated');
+    assert(mem::live_allocations() == 5, 'and nothing was allocated to do it');
+
+    echo $out;
+    echo $m->count();
+}
+
+assert(mem::live_allocations() == 0, 'nothing leaked through the hand-over');
+echo mem::live_allocations();

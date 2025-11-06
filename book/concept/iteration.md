@@ -133,6 +133,8 @@ foreach ($a as $i => $item) {
 }
 ```
 
+A map is where a non-`usize` key is most obviously useful - see [Maps](maps.md).
+
 The key arrives **by value** — an index, a hash key, a line number. All three element bindings work beside
 it, so `foreach ($a as $i => &$item)` is the keyed form of a write-through loop.
 

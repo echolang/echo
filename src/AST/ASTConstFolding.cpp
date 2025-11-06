@@ -53,15 +53,14 @@ bool ConstFolding::run_round()
     // NodeCollection::of_type: this walk goes through scope children, and the sweeps that do care -
     // Monomorphizer::snapshot_calls and TypeLowering::build_function_maps - are the next round and
     // codegen respectively
-    _bundle.forget_nodes(_detached);
-    _detached.clear();
+    _detached.flush(_bundle);
 
     return _changed;
 }
 
 void ConstFolding::forget(Node &root)
 {
-    collect_subtree(root, _detached);
+    _detached.collect(root);
 }
 
 void ConstFolding::finalize()

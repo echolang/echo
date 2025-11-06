@@ -55,7 +55,8 @@ struct Clamped
 // the control: an `if` with no else *does* fall through, so the implicit return is still owed - even
 // though a `return` is written in the body. a fix that answered "always exits" too eagerly would leave
 // this constructor handing back undef. its field is an `int32` rather than a `Handle` so the early
-// return stays about control flow and not about a value moved out of on one branch (todo/C7)
+// return stays about control flow and nothing else - the owning shape is
+// tests_eco/ownership/constructor_early_return
 struct Floored
 {
     int32 $v;

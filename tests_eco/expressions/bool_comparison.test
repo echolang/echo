@@ -1,0 +1,19 @@
+# the two 200s and the two 300s are the case: the first of each pair is AST::const_fold's answer and
+# the second is ExprCodegen::gen_binary_expr's, over the same operands
+
+expect: ok
+
+--- OUT --->
+1
+0
+1
+0
+a
+b
+1
+1
+200
+200
+300
+300
+1

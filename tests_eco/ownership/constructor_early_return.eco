@@ -1,0 +1,34 @@
+// a bare `return;` in a constructor hands back `$this`, so both paths out of this body move it - and
+// neither is a conditional move. the arm that returns does not reach the code after the `if`, so what it
+// moved is not merged into the fall-through there
+
+struct Buffer
+{
+    ptr<uint8> $data;
+    usize $len;
+
+    constructor(usize $len)
+    {
+        $this->data:$ = null;
+        $this->len = 0;
+
+        // an empty buffer allocates nothing
+        if ($len == 0) {
+            return;
+        }
+
+        $this->data:$ = mem::alloc<uint8>($len);
+        $this->len = $len;
+    }
+
+    destructor()
+    {
+        echo $this->len;
+        mem::free($this->data);
+    }
+}
+
+$empty = Buffer(0);
+$four = Buffer(4);
+
+echo $four->len;

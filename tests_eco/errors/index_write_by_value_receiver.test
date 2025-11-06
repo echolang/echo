@@ -1,0 +1,17 @@
+# a by-value receiver would register, be chosen, and write into a copy that dies with the call
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:18
+an index-write operator takes its container as a mutable borrow - 'C&', not 'bag'. The write has to reach the caller's container: by value it would land in a copy that dies with the call, and through a 'const' borrow it would not land at all.
+Begin: '['
+End: '['
+Code excerpt:
+ [4]> 
+ [5]> operator (bag $b)[usize $i] = (int32 $v) : void
+                       ^
+ [6]> {
+
+Critical issues found, cannot compile.

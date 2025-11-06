@@ -82,6 +82,12 @@ namespace AST
 
     // renders "foo(int32, float64)" for a diagnostic listing what was tried
     std::string describe_candidates(const std::vector<FunctionDeclNode *> &candidates);
+
+    // renders "a 'P'" / "a 'P' and a 'null'" - the *arguments* rather than the candidates, for a
+    // diagnostic that must not name a declaration. beside describe_candidates because it is the other
+    // half of the same choice: an operator's overload set is the whole program's, so a refusal about
+    // one has to be worded from what the author wrote
+    std::string describe_operands(const std::vector<ValueType> &operand_types);
 };
 
 #endif

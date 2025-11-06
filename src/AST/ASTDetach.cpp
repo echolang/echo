@@ -56,6 +56,12 @@ void AST::collect_subtree(AST::Node &root, std::unordered_set<const AST::Node *>
     detached.collect(root);
 }
 
+void AST::DetachBatch::flush(AST::Bundle &bundle)
+{
+    bundle.forget_nodes(_gone);
+    _gone.clear();
+}
+
 void AST::forget_subtree(AST::Bundle &bundle, AST::Node &root)
 {
     std::unordered_set<const AST::Node *> gone;

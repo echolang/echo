@@ -1,0 +1,21 @@
+// an array literal as the value of a keyed write. it works because the write is a *call*: the literal is an
+// ordinary argument, so AST::OperatorRewriter hoists a declaration for it ahead of the statement the way it
+// does at every other argument position.
+//
+// it used to be refused - the write was an assignment whose destination was a bracket, and a
+// literal needs a *declaration* to fill. which is also why the rewrite runs ahead of the literal expansion
+// rather than after it: after, the refusal would be reported against a destination about to be removed
+map<string, array<int32>> $m = map<string, array<int32>>();
+
+$m['a'] = [1, 2, 3];
+$m['b'] = [4, 5];
+
+echo $m['a']->count();
+echo $m['b']->count();
+echo $m['a'][2];
+
+// and a replace, so the array the slot held is destroyed by `seat` rather than leaked
+$m['a'] = [9];
+
+echo $m['a']->count();
+echo $m['a'][0];

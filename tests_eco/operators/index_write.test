@@ -1,0 +1,14 @@
+# the assertions are in the program: what this pins is a set of reference counts and an allocation
+# balance that only the running program can read. the numbers are worked out in the .eco header
+#
+# the two trailing `second!`s are the point - one read through `&$s[0]` and one through the const
+# overload, on a container whose bracket also inserts
+
+expect: ok
+
+--- OUT --->
+first
+second
+second!
+second!
+0

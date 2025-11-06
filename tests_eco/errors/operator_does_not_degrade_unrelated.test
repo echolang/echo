@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 24:9
+operator '==' is not supported on operands of type 'Tag' and 'Tag'
+Begin: 'operator =='
+End: 'operator =='
+Code excerpt:
+ [23]> 
+ [24]> echo $s == $t;
+              ^
+ [25]> 
+
+Critical issues found, cannot compile.

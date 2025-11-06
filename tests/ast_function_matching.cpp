@@ -73,18 +73,30 @@ TEST_CASE( "argument_fit ranks conversions best to worst", "[fnmatch]" )
     // end to end in tests_eco/structs/implicit_conversion; only the ordering can be asked here
     REQUIRE( ArgumentFit::t_conversion < ArgumentFit::t_declared_conversion );
 
-    // and a borrow of a value the compiler had to invent storage for sits below *all* of them - the last
-    // real rank. every rank above describes how an existing value is read or converted; this one adds an
-    // alloca and a lifetime to the program, so it is the fallback that lets a caller hand a value where a
-    // borrow is wanted, never a way to hide a better-matching overload
+    // and a borrow of a value the compiler had to invent storage for sits between the two groups, with a
+    // different reason on each side. below every read and widening above, because it is the only rank
+    // that adds an alloca and a lifetime to the program rather than reading a value that already exists -
+    // so it is the fallback that lets a caller hand a value where a borrow is wanted, never a way to hide
+    // a better-matching overload. above every conversion below, because it is the last rank that leaves
+    // the *type* alone, and a conversion pays the same materialisation cost while changing the type too.
     //
     // pinned from both sides, because a rank in entirely the wrong place still satisfies one of them:
     // below t_borrow means real storage always wins, and below t_promotion means `w(int64)` beats
     // `w(int32&)` for `w(42)`. both are asserted end to end in tests_eco/functions/borrow_temporary_rank
     REQUIRE( ArgumentFit::t_borrow < ArgumentFit::t_borrow_temporary );
     REQUIRE( ArgumentFit::t_promotion < ArgumentFit::t_borrow_temporary );
-    REQUIRE( ArgumentFit::t_declared_conversion < ArgumentFit::t_borrow_temporary );
     REQUIRE( ArgumentFit::t_borrow_temporary < ArgumentFit::t_undetermined );
+
+    // and the boundary that makes an overload pair over a type and its `#[implicit]` view usable at
+    // all: while a declared conversion out-ranked a temporary borrow, a literal meeting a borrow of
+    // *its own type* lost to a conversion to a different one, and `$s == 'hello'` was ambiguous
+    // against the two `==` pairs in stdlib/core/string.eco
+    REQUIRE( ArgumentFit::t_borrow_temporary < ArgumentFit::t_conversion );
+    REQUIRE( ArgumentFit::t_borrow_temporary_const < ArgumentFit::t_declared_conversion );
+
+    // the `_const` twin stays one step below its own arm rather than moving on its own, or const
+    // overloading resolves for a place and is ambiguous for a temporary
+    REQUIRE( ArgumentFit::t_borrow_temporary < ArgumentFit::t_borrow_temporary_const );
 
     // **a null expression still declines it**, exactly as it declines t_borrow. that is what keeps
     // visitTypeCast correct: a cast is not an address-of, so it offers no expression and must not be

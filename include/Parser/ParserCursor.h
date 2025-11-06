@@ -192,7 +192,23 @@ namespace Parser
 
         // this function is usally called after an error has been detected
         // it will skip until the next statement or block is found to continue parsing
+        //
+        // **recovery may end a statement, never a scope.** it stops at the next `;` or `}` and
+        // consumes only the first: a closing brace belongs to whichever parser opened it, which is
+        // sitting one frame up waiting for that very token. so this lands either *after* a
+        // terminator or *on* a brace, and a caller's loop sees the block end where it really is
         void try_skip_to_next_statement();
+
+        // steps over a whole statement from its first token, landing after its `;` - stepping *over* any
+        // braced group on the way, so a value that contains one (a closure literal) is not mistaken for
+        // the statement's end
+        //
+        // deliberately not try_skip_to_next_statement, and the difference is which of the two is a guess.
+        // that one is error *recovery*: the statement is already known to be malformed, so the first
+        // terminator it can see is the best it can do, and stepping over a brace it has no reason to trust
+        // would jump out of the block the error was in. this one is asked about a statement a *different
+        // pass already parsed successfully*, so its shape is known-good and the whole of it is skippable
+        void skip_statement();
 
 
     private:

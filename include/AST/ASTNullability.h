@@ -126,6 +126,16 @@ namespace AST
     // binds it. returns true when the null now carries a type
     bool bind_null_to(ExprNode *expr, const ValueType &destination);
 
+    // **what an operator says about a `null` operand it has no overload for.** one wording with two
+    // askers, because the two arrive from opposite directions and would otherwise drift: AST::CallResolver
+    // reaches it when the operator has several overloads and none of them fits, AST::TypeChecker when it
+    // has one, which the matcher takes without consulting types at all and the coercion then refuses.
+    //
+    // deliberately says nothing about a parameter type. every `operator` declaration in the program shares
+    // the root namespace, so naming the losing candidate's parameter tells the author about a type no file
+    // of theirs mentions - `$p == null` on a struct answered with a sentence about 'const string&'
+    std::string null_operand_refusal(const std::string &operator_spelling);
+
     // `guard`'s "the else arm must leave" rule used to live here, back when `guard` was its only caller.
     // it is AST::scope_always_exits ([AST/ASTControlFlow.h]) now - control flow is not a nullability
     // question, and it has a second asker

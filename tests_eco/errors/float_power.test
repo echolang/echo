@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 7:12
+operator '**' is not supported on operands of type 'float64' and 'float64'
+Begin: '**'
+End: '**'
+Code excerpt:
+ [6]> 
+ [7]> echo $base ** 3.0;
+                 ^
+ [8]> 
+
+Critical issues found, cannot compile.

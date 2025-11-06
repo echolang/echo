@@ -41,6 +41,6 @@
 // automatically - this constant covers the one input nothing can detect: a change to this compiler's own
 // lowering. Forgetting it means a stale object silently linked into a new build, which is the single failure
 // mode in the cache with no diagnostic
-#define ECO_MODULE_CACHE_VERSION "9"
+#define ECO_MODULE_CACHE_VERSION "16"
 
 #endif // ECO_H

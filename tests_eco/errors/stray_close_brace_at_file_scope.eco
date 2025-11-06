@@ -1,0 +1,12 @@
+// a `}` at file scope closes a scope nothing opened. the body pass used to read it as the end of the
+// root scope and stop, so everything below it was never parsed - no diagnostic, no output, and a clean
+// exit status. the declaration pass walked straight past it, which is the disagreement: one pass saw
+// the `echo` and the struct, the other saw neither
+//
+// reported and skipped now, so the two passes reach the same declarations and the file is refused
+
+}
+
+echo 1;
+
+struct bar { usize $pos; }

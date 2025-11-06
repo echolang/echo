@@ -50,9 +50,24 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         return unify_type(param.weak_target(), arg.weak_target(), out, false);
     }
 
-    // a bare type parameter binds directly to the argument type
+    // a bare type parameter binds directly to the argument type, **with the top-level `const` stripped**
+    //
+    // `const` is a property of the *place* a value was read from, not of the value: `$key` inside
+    // `f(const K& $key)` reads as a `const K`, and passing it on must bind `K` and not `const K`. Without
+    // the strip one intent mints two instantiations - `map<const string, int32>` beside
+    // `map<string, int32>` - and because ValueType equality is exact they are unrelated types, so the
+    // receiver of the second call no longer converts to the first. Which is how it surfaced: a container
+    // whose accessors take `const K&` could not call one from another
+    //
+    // the same rule AST::constraint_admits already applies when it compares ("compare with const stripped
+    // so `const float` still matches `float`") and the same one AST::array_literal_type_for applies when it
+    // mints from an element. stated here so inference agrees with both rather than being a third answer
+    //
+    // **top level only**, which is what make_mutable does: `const` is a per-level bit, so a `ptr<const T>`
+    // argument still binds `ptr<const T>` and only the outermost qualifier - the one belonging to the place
+    // rather than to the type - is dropped
     if (param.is_type_param()) {
-        out.bind(param.get_type_param(), arg);
+        out.bind(param.get_type_param(), ValueType::make_mutable(arg));
         return true;
     }
 

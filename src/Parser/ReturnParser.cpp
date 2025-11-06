@@ -73,12 +73,18 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     auto expr = parse_expr(payload, expected_type);
 
     // ensure we have a semicolon at the end of the return statement
-    if (!payload.cursor.is_type(Token::Type::t_semicolon)) {
+    if (payload.cursor.is_type(Token::Type::t_semicolon)) {
+        payload.cursor.skip();
+    }
+    // **a failed sub-parse has already reported and already recovered**, so a missing terminator here
+    // is a token this statement no longer owns rather than one the author left out.
+    // `return f($undeclared);` recovers past its own semicolon inside the call, and reporting anyway
+    // named the *next* statement's first token - a reader hunting for a semicolon that is written
+    // right there. the skip is still owed either way: a sub-parse that failed without moving leaves
+    // the terminator in place, and it is this statement's to consume
+    else if (expr != nullptr) {
         payload.collect_unexpected_token(Token::Type::t_semicolon);
         payload.cursor.try_skip_to_next_statement();
-    }
-    else {
-        payload.cursor.skip();
     }
 
     return payload.context.emplace_node<AST::ReturnNode>(expr, return_token);

@@ -5,6 +5,7 @@
 #include <AST/FunctionDeclNode.h>
 #include <AST/ExprNode.h>
 #include <AST/ScopeNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
 
 #include "helpers.h"
@@ -410,7 +411,7 @@ TEST_CASE("a lexical namespace is unreachable by name", "[lexical]")
     REQUIRE(lexical != nullptr);
     REQUIRE(lexical->is_lexical());
 
-    // not addressable, and the namespace a *type* declared in that body would go into is the real one
+    // not addressable, and the nearest namespace the user could have written is the real one
     REQUIRE_FALSE(bundle->collector.namespaces.exists(lexical->name()));
     REQUIRE_FALSE(lexical->declaring_namespace()->is_lexical());
 
@@ -438,6 +439,175 @@ TEST_CASE("a body-local struct's constructor is emitted", "[lexical]")
     auto ctors = decls_named(m, "P");
     REQUIRE(ctors.size() == 1);
     REQUIRE(is_file_root_child(m, ctors[0]));
+}
+
+TEST_CASE("two bodies may each declare a struct of the same name", "[lexical]")
+{
+    // the type half of the case above it: a type declared in a block belongs to the block, so these are
+    // two types with one name rather than a redeclaration - and they must be two *layouts*, because
+    // struct equality is ComplexType* identity and a shared node would type both bodies alike
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    struct P { int32 $x; }\n"
+        "    P $p = P(41);\n"
+        "    return $p->x;\n"
+        "}\n"
+        "function other() : int32 {\n"
+        "    struct P { int32 $a; int32 $b; }\n"
+        "    P $p = P(2, 3);\n"
+        "    return $p->a * $p->b;\n"
+        "}\n"
+        "echo outer();\n"
+        "echo other();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto types = EchoTests::types_named(m, "P");
+    REQUIRE(types.size() == 2);
+    REQUIRE(types[0]->properties().size() == 1);
+    REQUIRE(types[1]->properties().size() == 2);
+
+    // distinct symbols, or the two field-wise constructors land in one llvm::Function
+    REQUIRE(types[0]->complex_type().mangled_token() != types[1]->complex_type().mangled_token());
+
+    // and each body constructs its own, which is the half a shared node would have hidden
+    auto ctors = decls_named(m, "P");
+    REQUIRE(ctors.size() == 2);
+
+    auto calls = calls_to(m, "P");
+    REQUIRE(calls.size() == 2);
+    REQUIRE(calls[0]->decl == ctors[0]);
+    REQUIRE(calls[1]->decl == ctors[1]);
+}
+
+TEST_CASE("two sibling blocks of one function may each declare a struct of the same name", "[lexical]")
+{
+    // the case a *display*-named member surface would have passed silently: both blocks render as
+    // `outer`, so anything keyed on the display path collapses them into one
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $total = 0;\n"
+        "    { struct P { int32 $x; } P $p = P(10); $total = $total + $p->x; }\n"
+        "    { struct P { int32 $y; int32 $z; } P $p = P(1, 2); $total = $total + $p->y + $p->z; }\n"
+        "    return $total;\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto types = EchoTests::types_named(m, "P");
+    REQUIRE(types.size() == 2);
+    REQUIRE(types[0]->properties().size() == 1);
+    REQUIRE(types[1]->properties().size() == 2);
+    REQUIRE(types[0]->complex_type().mangled_token() != types[1]->complex_type().mangled_token());
+}
+
+TEST_CASE("a body-local struct is not visible at file scope", "[lexical]")
+{
+    // an unresolved *unqualified* type name is silent by design, so what reports this is the call:
+    // `P(1)` finds no overload set anywhere on the walk out of the file's namespace
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    struct P { int32 $x; }\n"
+        "    P $p = P(41);\n"
+        "    return $p->x;\n"
+        "}\n"
+        "P $q = P(1);\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "The function 'P' could not be found"));
+}
+
+TEST_CASE("a body-local struct's name lives in the block's lexical namespace", "[lexical]")
+{
+    // the mechanism the three cases above rest on, asserted directly: the symbol is in the block's
+    // namespace and in no namespace a `namespace <x>;` could ever name
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    struct P { int32 $x; }\n"
+        "    function helper() : int32 { return 1; }\n"
+        "    P $p = P(41);\n"
+        "    return $p->x + helper();\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    // the block's namespace, read off the function declared beside the struct
+    auto helpers = decls_named(m, "helper");
+    REQUIRE(helpers.size() == 1);
+    const AST::Namespace *lexical = helpers[0]->ast_namespace;
+    REQUIRE(lexical != nullptr);
+    REQUIRE(lexical->is_lexical());
+
+    REQUIRE(bundle->collector.namespaces.find_symbol("P", *lexical) != nullptr);
+    REQUIRE(bundle->collector.namespaces.find_symbol("P", bundle->collector.namespaces.root()) == nullptr);
+}
+
+TEST_CASE("a body-local struct's member surface is not a writable namespace", "[lexical]")
+{
+    // AST::member_surface_namespace hangs a type's constants and nested types off its namespace *object*
+    // rather than off a path from the root. a path would land under a display name a block shares with
+    // every sibling block, and - far worse - create that namespace as one a `namespace outer;` could
+    // then merge into, which is exactly what a lexical namespace exists not to be
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    struct P {\n"
+        "        const int32 MAX = 9;\n"
+        "        int32 $x;\n"
+        "    }\n"
+        "    P $p = P(4);\n"
+        "    return $p->x;\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &namespaces = bundle->collector.namespaces;
+    REQUIRE_FALSE(namespaces.exists("P"));
+    REQUIRE_FALSE(namespaces.exists("outer"));
+    REQUIRE_FALSE(namespaces.exists("outer::P"));
+}
+
+TEST_CASE("an inner block's struct is not visible in the enclosing block", "[lexical]")
+{
+    // the walk is outward only, so a name declared deeper is not reachable from where the block closed -
+    // the same asymmetry a nested `function` already has
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    { struct P { int32 $x; } P $inner = P(1); echo $inner->x; }\n"
+        "    P $p = P(41);\n"
+        "    return $p->x;\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "The function 'P' could not be found"));
+}
+
+TEST_CASE("a namespace declaration inside a body moves nothing", "[lexical]")
+{
+    // the statement is refused, and the type-name pass has to decline to *follow* it as well: that pass
+    // opens no lexical scope, so the refusal below - which reads current_namespace->is_lexical() - is
+    // never true there, and a pass that followed it would put every later type in the file into `x`
+    // while the two passes after it kept them at the file's
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f() : void { namespace x; }\n"
+        "struct Q { int32 $v; }\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(count_issues_containing(*bundle, "cannot appear inside a body") == 1);
+
+    auto &m = bundle->modules.find_module("test");
+    REQUIRE(EchoTests::types_named(m, "Q").size() == 1);
+
+    auto &namespaces = bundle->collector.namespaces;
+    REQUIRE(namespaces.find_symbol("Q", namespaces.root()) != nullptr);
+    REQUIRE_FALSE(namespaces.exists("x"));
 }
 
 TEST_CASE("a body-local struct is refused where a type parameter is visible", "[lexical][generics]")

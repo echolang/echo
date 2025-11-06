@@ -1,0 +1,72 @@
+// unary `!` - the prefix position, the lowering and the fold, which had to land together. before
+// this the parser had no arm for it at all and `if (!$b)` aborted the compiler on an assertion
+//
+// the last two blocks are the point of the case, the same one `xor.eco` makes: AST::const_fold and
+// ExprCodegen::gen_unary_expr have to agree, or a `const if` takes one arm and the `if` beside it
+// takes the other
+
+function truthy() : bool
+{
+    return true;
+}
+
+bool $t = true;
+bool $f = false;
+int32 $n = 0;
+
+if (!$t) { echo 'bad'; } else { echo 'a'; }
+if (!$f) { echo 'b'; } else { echo 'bad'; }
+
+// a parenthesized operand, which parse_prefix_unary's `(` arm reads
+if (!($n == 0)) { echo 'bad'; } else { echo 'c'; }
+if (!($n == 1)) { echo 'd'; } else { echo 'bad'; }
+
+// a call, which the fall-through to parse_expr_node reads
+if (!truthy()) { echo 'bad'; } else { echo 'e'; }
+
+// as a value rather than a condition
+bool $x = !$t;
+echo $x;
+
+// chained, right to left - parse_prefix_unary recurses for exactly this
+echo !!$t;
+echo !!$f;
+
+// `!` binds tighter than any binary operator, the prefix position being consumed before the
+// shunting yard sees the operand at all: this is `(!$t) && $f`, which is false, and not
+// `!($t && $f)`, which would be true
+echo !$t && $f;
+
+// folded at compile time
+const if (!true) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+// and emitted at runtime, from the same operand. one answer or the case fails
+if (!$t) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+const if (!false) {
+    echo 300;
+}
+else {
+    echo 400;
+}
+
+if (!$f) {
+    echo 300;
+}
+else {
+    echo 400;
+}
+
+// a `const` declaration folds through it too
+const bool OFF = !true;
+echo OFF;

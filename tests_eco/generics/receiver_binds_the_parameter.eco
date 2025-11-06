@@ -1,0 +1,37 @@
+// **argument 0's bindings are authoritative.** where one type parameter is mentioned by the receiver *and* by
+// a later argument, the receiver decides: its type is one the author declared, while a literal's is its
+// destination's to decide.
+//
+// bound the other way round - which is what `TypeSubstitution::bind` does between two arguments of equal
+// standing, replacing rather than reconciling - every widening through such a parameter was unreachable, and
+// the receiver became the operand reported as not fitting. see todo/B50 for the half that is still open
+array<int64> $wide = array<int64>();
+
+// an int32 literal into an `array<int64>`: T binds from the receiver, and the literal widens
+$wide->push(5);
+$wide->push(9);
+
+echo $wide->count();
+echo $wide[0] + $wide[1];
+
+// the same through an element write, where the value is the third operand of a call
+map<string, int64> $m = map<string, int64>();
+
+$m['a'] = 5;
+$m['b'] = 7;
+
+echo $m['a'] + $m['b'];
+
+// and a float64 element taking an integer literal, which is a different widening through the same rule
+array<float64> $f = array<float64>();
+
+$f->push(2);
+
+echo $f[0] > 1.5;
+
+// two arguments of *equal* standing keep the old rule, so this still reconciles the way it did
+function pick<T>(T $a, T $b) : T { return $a; }
+
+int64 $big = 9;
+
+echo pick(1, $big);

@@ -1,0 +1,220 @@
+namespace hash;
+
+/**
+ * Hashing, as an **overload set** rather than an interface.
+ *
+ * `map<K, V>` needs a number for a key, and the way it asks for one is `hash::of($key)`. Everything in
+ * this file exists to answer that call for the types a program already has, and to let you answer it for
+ * a type of your own.
+ *
+ * ## Why an overload set and not a `contract::`
+ *
+ * A `contract::hashable` with a `hash()` requirement would read better, and it cannot work: a
+ * *primitive* cannot declare a conformance, so `map<int32, V>` and `map<string, V>` - the two maps
+ * everybody writes first - would be refused by their own key constraint. An overload set has no such
+ * limit, because an overload's parameter type can be anything at all.
+ *
+ * It is worth noticing that this is the mirror image of the argument `array<T>` makes about its
+ * elements. There, opt-in conformance was rejected because a type that *forgets* to opt in goes back to
+ * being bit-copied in silence. Here it is rejected because a type that *cannot* opt in is excluded
+ * outright. Same shape, opposite failure.
+ *
+ * ## Adding your own
+ *
+ * A type of your own joins the set by declaring another `of` in this same namespace:
+ *
+ *     namespace hash;
+ *
+ *     function of(const point& $p) : uint64
+ *     {
+ *         return combine(of($p->x), of($p->y));
+ *     }
+ *
+ * What makes that work is that a namespace is found or created *by name*, so every `namespace hash;`
+ * file in a program lands on the same namespace object and every `of` in them shares one overload set -
+ * the set `map<K, V>`'s own body resolves against. Your declaration reaches the standard library's body
+ * with nothing registered anywhere to make it happen.
+ *
+ * **It has to be a file of its own, and that is a real cost rather than a style note.** A namespace is a
+ * file-level statement, so a `namespace hash;` file cannot also hold your `struct point`, its
+ * `operator ==`, or the program using them. A single-file program cannot extend this set at all.
+ *
+ * Two ways to get it wrong, both of which look like nothing happening:
+ *
+ *  - **a nested namespace.** `namespace app::hash;` is a different namespace. `hash::of` will not find
+ *    what is in it, and inside that file a bare `of(...)` *hides* the real set rather than extending it,
+ *    because an overload set stops at the first namespace with a candidate for the name.
+ *  - **the root namespace.** `hash::of` is a qualified name, and a qualified name is looked up in
+ *    exactly that namespace rather than walked outward. An `of` at the root is invisible to it.
+ *
+ * A key type with no overload here is a located error at `map<K, V>`'s own call site, once the key type
+ * is bound. That diagnostic points into `map.eco` rather than at your own code, which is the ordinary
+ * shape of every generic library body and not something particular to this one.
+ *
+ * ## What these numbers are not
+ *
+ * FNV-1a, 64 bit. Not cryptographic, not stable across architectures, and not a serialization format:
+ * `of(int32 1)` and `of(int64 1)` differ, and both differ between a big- and a little-endian target.
+ * This is an in-memory bucket index and nothing else. Do not write one to a file.
+ */
+
+/**
+ * The FNV-1a 64 offset basis and prime.
+ *
+ * The canonical constants. Note that the compiler's own `fnv1a64` - which hashes module cache keys -
+ * carries a basis one digit short of this one; the two are unrelated uses that never compare a value,
+ * so this file spells the real thing rather than mirroring that.
+ */
+const uint64 OFFSET_BASIS = 14695981039346656037;
+const uint64 PRIME = 1099511628211;
+
+/**
+ * One FNV-1a step: folds `$byte` into `$seed`.
+ *
+ * The multiply overflows constantly, and that is the algorithm rather than a bug - it is defined on
+ * wrapping 64-bit arithmetic. Which is also why nothing here is usable in a `const if`: the folder
+ * refuses an overflow rather than wrapping it, deliberately.
+ *
+ * `#[inline]`, because this is the innermost operation of every key hash and it is a *call* inside
+ * `bytes`'s per-byte loop. `of_bytes<T>` is a generic instantiation and so is emitted into the caller's
+ * unit, but these two are ordinary module symbols - so without the attribute nothing inlines them
+ * across that boundary short of `-O`'s whole-program merge, and the `run` path performs no IR pass at all.
+ */
+#[inline]
+function step(uint64 $seed, uint8 $byte) : uint64
+{
+    return ($seed ^ $byte) * PRIME;
+}
+
+/**
+ * `$size` bytes read from `$data`, folded into `$seed`. The whole of FNV-1a.
+ *
+ * Takes a seed rather than starting from the basis, so a type made of several byte runs can fold them
+ * all into one hash without going through `combine`.
+ *
+ * `#[inline]` for `step`'s reason: this is the loop every map lookup and every insert runs.
+ */
+#[inline]
+function bytes(ptr<const uint8> $data, usize $size, uint64 $seed) : uint64
+{
+    uint64 $h = $seed;
+    usize $i = 0;
+
+    while ($i < $size) {
+        $h = step($h, $data:$[$i]);
+
+        $i = $i + 1;
+    }
+
+    return $h;
+}
+
+/**
+ * Folds a second hash into a first, for a type made of parts.
+ *
+ * The composition primitive, and the one a hand-written `of` reaches for. Not commutative on purpose:
+ * `combine(of($x), of($y))` and `combine(of($y), of($x))` differ, so a pair and its reverse do not
+ * collide.
+ */
+function combine(uint64 $seed, uint64 $value) : uint64
+{
+    return bytes(ptr<const uint8>(&$value), 8, $seed);
+}
+
+/**
+ * A `T`'s **raw bytes**, hashed. The explicit spelling of the thing `of` must never do by default.
+ *
+ * Byte-hashing is right for a type that *is* its bytes, and wrong for every type that holds an address.
+ * A `string` byte-hashed is a heap pointer hashed, so two strings holding the same text in two buffers
+ * would land in two buckets while comparing equal - which is the one way a hash table breaks that
+ * nothing else catches. It is wrong for a struct with padding too, since the padding is whatever the
+ * allocator left there.
+ *
+ * So there is deliberately **no generic `of<T>`** above this. A catch-all would answer for a type nobody
+ * thought about, silently. This is that capability with the decision left where it belongs: at the call
+ * site, in your own `of`, where you know what your type is made of.
+ */
+function of_bytes<T>(const T& $value) : uint64
+{
+    return bytes(ptr<const uint8>($value:$), mem::size_of<T>(), OFFSET_BASIS);
+}
+
+/**
+ * The integer overloads.
+ *
+ * Written out one per type rather than as one generic, for the reason `of_bytes` gives. `usize` and
+ * `isize` are their own primitives rather than spellings of `uint64` and `int64`, so they are their own
+ * signatures and are not redundant. `int`, `uint` and `float` are aliases and need nothing.
+ *
+ * Every one takes `const T&`: a lookup must not touch a reference count, and a map's probe loop is the
+ * hot path that rule exists for.
+ */
+function of(const int8& $value) : uint64 { return of_bytes<int8>($value); }
+function of(const int16& $value) : uint64 { return of_bytes<int16>($value); }
+function of(const int32& $value) : uint64 { return of_bytes<int32>($value); }
+function of(const int64& $value) : uint64 { return of_bytes<int64>($value); }
+function of(const isize& $value) : uint64 { return of_bytes<isize>($value); }
+
+function of(const uint8& $value) : uint64 { return of_bytes<uint8>($value); }
+function of(const uint16& $value) : uint64 { return of_bytes<uint16>($value); }
+function of(const uint32& $value) : uint64 { return of_bytes<uint32>($value); }
+function of(const uint64& $value) : uint64 { return of_bytes<uint64>($value); }
+function of(const usize& $value) : uint64 { return of_bytes<usize>($value); }
+
+function of(const bool& $value) : uint64 { return of_bytes<bool>($value); }
+
+/**
+ * The float overloads, which are **not** a plain byte hash.
+ *
+ * `+0.0` and `-0.0` compare equal and do not share their bytes, so byte-hashing them puts one key in
+ * two buckets: `$m[0.0]` would miss an entry stored under `-0.0`. Normalized here, once, where the hash
+ * is minted - the alternative is every caller remembering.
+ *
+ * The other half of IEEE-754 has no fix and is worth knowing: **a NaN is never equal to itself**, so a
+ * NaN key can be stored and then never found, whatever its hash. That is arithmetic arriving rather than
+ * a defect here, and it is the reason a float makes a poor key.
+ */
+function of(const float32& $value) : uint64
+{
+    float32 $normal = $value;
+
+    // fires for both zeroes, because that is what `== 0.0` means over them
+    if ($normal == 0.0) {
+        $normal = 0.0;
+    }
+
+    return of_bytes<float32>($normal);
+}
+
+function of(const float64& $value) : uint64
+{
+    float64 $normal = $value;
+
+    if ($normal == 0.0) {
+        $normal = 0.0;
+    }
+
+    return of_bytes<float64>($normal);
+}
+
+/**
+ * A string's **text**, hashed - not its bytes.
+ *
+ * A `string` is a window and a `str::buf` handle, so `of_bytes<string>` would hash an address and a
+ * length: two strings holding the same text in two buffers would hash differently while `==` said they
+ * were equal, and a map keyed on them would lose entries. So this goes through the window, and a
+ * substring of a large buffer hashes as its own text rather than as its parent's.
+ *
+ * Two overloads and not one. A `string` argument matches the `string` overload at borrow-const, which
+ * beats the `#[implicit]` view conversion outright - a declared conversion ranks below every built-in
+ * one - so neither ever surprises the other.
+ */
+function of(const string& $value) : uint64
+{
+    return of($value->window);
+}
+
+function of(const string::view& $value) : uint64
+{
+    return bytes($value->bytes, $value->size, OFFSET_BASIS);
+}

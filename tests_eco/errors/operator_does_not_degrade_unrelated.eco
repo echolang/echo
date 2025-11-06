@@ -1,0 +1,24 @@
+// **declaring an operator for one type must not change the diagnostic for another.** every
+// `operator` declaration shares the root namespace, so a program carries every operator's overload
+// set whether it names those types or not - and the refusal used to be phrased against whichever
+// candidate lost, which is a type no file of the author's mentions
+//
+// `Point` below is the declared one and `Tag` is the unrelated one. the message must name `Tag`
+
+struct Point { int32 $x; int32 $y; }
+struct Tag { int32 $id; }
+
+operator (const Point& $a) == (const Point& $b) : bool
+{
+    return $a->x == $b->x && $a->y == $b->y;
+}
+
+$p = Point(1, 2);
+$q = Point(1, 2);
+
+echo $p == $q;
+
+$s = Tag(7);
+$t = Tag(7);
+
+echo $s == $t;

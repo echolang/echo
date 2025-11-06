@@ -1,0 +1,10 @@
+// `mem::init` is only sound over storage nothing else accounts for - the mirror of `mem::take`'s rule
+// and the same predicate, AST::is_unaccounted_storage. a local's scope already owes its value a
+// teardown, so initializing over it leaks what was there
+string $s = '';
+$s->append('hello');
+
+string $v = '';
+$v->append('world');
+
+mem::init<string>($s, $v);

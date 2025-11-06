@@ -1,17 +1,10 @@
+# NOTE: this used to report a second issue as well - "cannot implicitly convert 'Res' to 'bool'" -
+# because BinaryExprNode::result_type() answered a comparison with its *operand* type. It answers
+# `bool` now, so the knock-on is gone and what is left is the one accurate diagnostic.
+
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:6
-Invalid type conversion: cannot implicitly convert 'Res' to 'bool'
-Begin: '$less'
-End: '$less'
-Code excerpt:
- [6]> $b = Res(2);
- [7]> bool $less = $a < $b;
-           ^
- [8]> 
-
 ---- Issue ----
 Issue at 7:17
 operator '<' is not supported on operands of type 'Res' and 'Res'

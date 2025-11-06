@@ -1,0 +1,8 @@
+// a bool is a yes/no rather than a small number: `==`/`!=` ask whether two agree, and ordering one
+// against another is refused the way ordering two class handles is. reported here rather than in
+// codegen, which is where every operand pair with no lowering used to end up - with no location
+
+bool $a = true;
+bool $b = false;
+
+echo $a < $b;

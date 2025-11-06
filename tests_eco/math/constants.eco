@@ -1,0 +1,40 @@
+// the stdlib's first compile-time constants, which is a different thing from its first functions: a constant
+// has no storage, so nothing about these is emitted into the stdlib's object - the initializer is cloned into
+// *this* module at each use site. That is what lets them live in a library module at all, and it is also why
+// the `_F32` twins are twins rather than a conversion: a float literal is double precision unless it ends in
+// `f`, and the constant is the literal.
+
+float64 $pi = std::math::PI;
+float64 $tau = std::math::TAU;
+float64 $half_pi = std::math::HALF_PI;
+float64 $e = std::math::E;
+float64 $ln_2 = std::math::LN_2;
+float64 $ln_10 = std::math::LN_10;
+float64 $sqrt_2 = std::math::SQRT_2;
+
+echo $pi;
+echo $tau;
+echo $half_pi;
+echo $e;
+echo $ln_2;
+echo $ln_10;
+echo $sqrt_2;
+
+// the single-precision spellings, which are the same numbers held in a `float`
+float $pi_f = std::math::PI_F32;
+float $e_f = std::math::E_F32;
+
+echo $pi_f;
+echo $e_f;
+
+// used in an expression rather than only copied into a slot - TAU is 2 * PI, so this is 0 exactly
+float64 $delta = std::math::TAU - (2.0 * std::math::PI);
+echo $delta;
+
+// and passed to an overload set, where the constant's type is what picks the candidate: the float64
+// intrinsic for PI and the float one for PI_F32. sin(PI) is 0 to within the representation
+echo std::math::cos(std::math::PI);
+echo std::math::cos(std::math::PI_F32);
+
+// no `const if` over these on purpose: floating-point arithmetic belongs to the target rather than to the
+// tree, so AST::const_fold refuses a float operand and `const if (PI > 3.0)` is an error rather than a fold

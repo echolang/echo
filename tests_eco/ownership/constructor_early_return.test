@@ -1,0 +1,15 @@
+--- OUT --->
+4
+4
+0
+--- RAST --->
+// the constructor hands `$this` back twice and destroys it neither time. CHECK-NOT is scoped between
+// the two surrounding CHECKs, so it asserts about the body between the early return and the implicit
+// one rather than about the file - the destructor calls at file scope are `$four` and `$empty`
+CHECK: function Buffer
+CHECK: return(varref<Buffer>(var($this)))
+CHECK-NOT: call destructor(addrof<Buffer&>(varref<Buffer>(var($this))))
+CHECK: return(varref<Buffer>(var($this)))
+// and the two locals are destroyed once each, in reverse declaration order
+CHECK: call destructor(addrof<Buffer&>(varref<Buffer>(var($four))))
+CHECK: call destructor(addrof<Buffer&>(varref<Buffer>(var($empty))))

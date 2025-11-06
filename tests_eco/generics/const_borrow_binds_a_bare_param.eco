@@ -1,0 +1,110 @@
+// **inference strips the top-level `const` when it binds a type parameter.**
+//
+// `const` is a property of the *place* a value was read from, not of the value: `$key` inside
+// `f(const K& $key)` reads as a `const K`, and passing it on has to bind `K` and not `const K`. Without the
+// strip one intent mints two instantiations - `box<const string, int32>` beside `box<string, int32>` - and
+// because ValueType equality is exact those are unrelated types, so the receiver of the second call no
+// longer converts to the first.
+//
+// which is how it surfaced: a container whose accessors take `const K&` could not call one of them from
+// another. `map<K, V>` is written that way throughout, and every one of its lookups is this shape
+struct box<K, V>
+{
+    ptr<K> $ks;
+    ptr<V> $vs;
+    usize $n;
+
+    constructor()
+    {
+        $this->ks:$ = mem::alloc<K>(4);
+        $this->vs:$ = mem::alloc<V>(4);
+        $this->n = 0;
+    }
+
+    destructor()
+    {
+        const if (mem::needs_destruction<K>() || mem::needs_destruction<V>()) {
+            usize $i = 0;
+
+            while ($i < $this->n) {
+                const if (mem::needs_destruction<K>()) {
+                    K $dead_k = mem::take<K>($this->ks:$[$i]);
+                }
+
+                const if (mem::needs_destruction<V>()) {
+                    V $dead_v = mem::take<V>($this->vs:$[$i]);
+                }
+
+                $i = $i + 1;
+            }
+        }
+
+        mem::free<K>($this->ks);
+        mem::free<V>($this->vs);
+    }
+
+    function put(const K& $key, V $value) : void
+    {
+        mem::init<K>($this->ks:$[$this->n], $key);
+        mem::init<V>($this->vs:$[$this->n], $value);
+
+        $this->n = $this->n + 1;
+    }
+
+    // the shape that failed: a `const K&` parameter passed on to another method taking `const K&`
+    const function find(const K& $key) : usize
+    {
+        usize $i = 0;
+
+        while ($i < $this->n) {
+            if ($this->ks:$[$i] == $key) {
+                return $i;
+            }
+
+            $i = $i + 1;
+        }
+
+        return $this->n;
+    }
+
+    const function has(const K& $key) : bool
+    {
+        return $this->find($key) < $this->n;
+    }
+
+    // and one more link in the chain, so it is not only a single hop that works
+    const function has_either(const K& $a, const K& $b) : bool
+    {
+        return $this->has($a) || $this->has($b);
+    }
+}
+
+// an index operator whose key parameter is also `const K&` - inference binds K from the receiver and from
+// the key, and the two must agree
+operator<K, V> (const box<K, V>& $b)[const K& $key] : const V&
+{
+    usize $at = $b->find($key);
+
+    assert($at < $b->n, 'key not found');
+
+    return &$b->vs:$[$at];
+}
+
+{
+    box<string, int32> $b = box<string, int32>();
+
+    $b->put('one', 1);
+    $b->put('two', 2);
+
+    echo $b->has('one');
+    echo $b->has('three');
+    echo $b->has_either('three', 'two');
+    echo $b->has_either('three', 'four');
+    echo $b->find('two');
+
+    // through the index operator, whose key parameter is a `const K&` too
+    string $two = 'two';
+    echo $b[$two];
+}
+
+echo mem::live_allocations();

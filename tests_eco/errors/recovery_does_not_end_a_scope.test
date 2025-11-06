@@ -1,0 +1,18 @@
+expect: fail
+# one diagnostic, and it is the only thing wrong with the file. the `return`'s own terminator check is
+# skipped when its expression failed - the sub-parse already reported and already recovered, so asking
+# about the terminator reports a missing ';' against the next statement's first token
+
+--- OUT --->
+---- Issue ----
+Issue at 16:33
+The variable '$x' is not declared in the current scope
+Begin: '$x'
+End: '$x'
+Code excerpt:
+ [15]> 
+ [16]> function f() : bar { return bar($x); }
+                                      ^
+ [17]> 
+
+Critical issues found, cannot compile.

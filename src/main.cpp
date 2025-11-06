@@ -1205,7 +1205,7 @@ int main(int argc, char *argv[], char *envp[])
 
         stdlib_use.add_argument("--no-stdlib")
             .help("Compile without the standard library. 'array', 'string', 'die', 'assert' and the "
-                  "'contract::', 'mem::', 'str::', 'arr::' and 'std::' namespaces are then undeclared.")
+                  "'contract::', 'mem::', 'str::', 'arr::', 'hash::' and 'std::' namespaces are then undeclared.")
             .default_value(false)
             .implicit_value(true);
 

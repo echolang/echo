@@ -1,14 +1,12 @@
 expect: fail
+# the wording is AST::CallResolver's operator arm, not the candidate list every other name gets: an
+# operator's overload set is the whole program's, so listing it named `map<K,V>` and `ordered_map<K,V>`
+# at a program that mentions neither. what it says instead is the operand the author wrote
 
 --- OUT --->
 ---- Issue ----
 Issue at 7:3
-No overload of 'operator []' accepts these arguments. Candidates are:
-  operator []<T>(array<T>&, usize)
-  operator []<T>(const array<T>&, usize)
-  operator []<T>(array<T>&)
-  operator []<T>(slice<T>&, usize)
-  operator []<T>(const slice<T>&, usize)
+no overload of operator '[]' accepts a 'slice<int32>'. Declare one for it, or convert the operands first.
 Begin: 'operator []'
 End: 'operator []'
 Code excerpt:

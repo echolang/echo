@@ -217,6 +217,9 @@ bool Token::is_operator_type() const
         Token::Type::t_op_mod,
         Token::Type::t_op_pow,
         Token::Type::t_op_inc,
-        Token::Type::t_op_dec
+        Token::Type::t_op_dec,
+        // `!`, the one prefix-only symbol the language spells - see AST::Operator::is_prefix_only.
+        // `!=` is its own token and the lexer trie takes the longest match, so this never splits one
+        Token::Type::t_exclamation
     });
 }

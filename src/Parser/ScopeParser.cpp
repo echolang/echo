@@ -130,8 +130,20 @@ AST::ScopeNode & Parser::parse_scope(
 
             cursor.skip();
         }
+        // this block's own closing brace, left for the caller that opened it - except at the file
+        // root, which opened nothing, so a `}` there closes a scope that was never entered
+        //
+        // reported and skipped rather than treated as the end of the walk, because the declaration
+        // pass already walks past it (Parser::parse_declaration_surface's tail skips an unrecognised
+        // token) and the two passes must reach the same declarations. breaking here left every
+        // statement in the rest of the file unparsed, with no diagnostic and a clean exit status
         else if (cursor.is_type(Token::Type::t_close_brace)) {
-            break;
+            if (block_token.has_value()) {
+                break;
+            }
+
+            payload.collect_unexpected_token(Token::Type::t_unknown);
+            cursor.skip();
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
@@ -208,7 +220,11 @@ AST::ScopeNode & Parser::parse_scope(
         // diagnostic about one, including the refusal of a constant written inside a body, which this arm is
         // also reached for. asked ahead of starts_vardecl, which answers yes to a leading `const` outright
         else if (starts_constdecl(payload)) {
-            cursor.try_skip_to_next_statement();
+            // the whole statement, not "on to the next terminator": the declaration pass read this one
+            // in full, so its shape is known-good, and a value containing a braced group - a closure
+            // literal, which that pass refuses but only *after* reading it - has a `;` inside it that
+            // is not this statement's
+            cursor.skip_statement();
         }
 
         // var declaration 
@@ -276,8 +292,11 @@ AST::ScopeNode & Parser::parse_scope(
             cursor.skip(); // always skip the token causing the issue
             cursor.skip_until({ Token::Type::t_semicolon, Token::Type::t_open_brace, Token::Type::t_close_brace });
 
-            // if we find a semicolon or a close brace, we skip it in the hopes that afterwards we can continue parsing
-            if (cursor.is_type({ Token::Type::t_semicolon, Token::Type::t_close_brace })) {
+            // the terminator is consumed and neither brace is - Cursor::try_skip_to_next_statement's
+            // rule, spelled here too because this arm hand-rolls the same skip. a `}` ends the loop
+            // above rather than this scope's contents, and progress is already guaranteed by the
+            // skip of the offending token
+            if (cursor.is_type(Token::Type::t_semicolon)) {
                 cursor.skip();
             }
         }

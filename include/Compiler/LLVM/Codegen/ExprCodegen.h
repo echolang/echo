@@ -43,6 +43,7 @@ namespace AST
 namespace Compiler::LLVM
 {
     struct CodegenContext;
+    struct LValue;
 
     // lowers expression nodes (literals, casts, arithmetic/logical operators, calls, variable and
     // pointer references) to llvm values, leaving the produced value on the context value stack
@@ -132,11 +133,29 @@ namespace Compiler::LLVM
         // decision, and taking it as a parameter says in the signature that only those kinds arrive
         void gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind);
 
+        // the address of the place argument 0 names, for the two builtins that read or write raw storage.
+        //
+        // one invariant - "argument 0 is the address of a place" - and therefore one guard: `take` and
+        // `init` are a load and a store *through the same thing*, and their preambles were two copies of
+        // the arity check, the pointer check and the message that names it. What is left in each arm is
+        // its one instruction.
+        //
+        // the shape is AST::TypeChecker::check_raw_storage_argument's, not this one's - what is checked
+        // here is the invariant a settled call already carries. `name` is what the refusals say, `arity`
+        // how many arguments the builtin declares
+        LValue gen_raw_place(AST::FunctionCallExprNode &node, const char *name, size_t arity);
+
         // `take`: the value at a place, read out with no copy inserted and nothing written back
         //
         // one load, and every consequence follows from this being a *call* rather than a place - see
         // AST::BuiltinKind::t_take. no `kind` parameter, because it is the only one of its family
         void gen_take_builtin(AST::FunctionCallExprNode &node);
+
+        // `init`: the value stored into a place that held nothing, with no teardown of what was there
+        //
+        // one store, and the mirror of the arm above in every respect - see AST::BuiltinKind::t_init.
+        // pushes nothing: it returns void, so it is a statement, as `free_bytes` is
+        void gen_init_builtin(AST::FunctionCallExprNode &node);
 
         // `die`: stop, unconditionally
         void gen_die_builtin(AST::FunctionCallExprNode &node);

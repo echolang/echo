@@ -103,15 +103,20 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &
 
     // iterate over the parts and find the namespace
     for (const auto &part : parts) {
-        if (current->_children.find(part) == current->_children.end()) {
-            current->_children[part] = std::make_unique<Namespace>(part);
-            current->_children[part]->_parent = current;
-        }
-
-        current = current->_children[part].get();
+        current = &retrieve(*current, part);
     }
 
     return *current;
+}
+
+AST::Namespace &AST::NamespaceManager::retrieve(AST::Namespace &parent, const std::string &name)
+{
+    if (parent._children.find(name) == parent._children.end()) {
+        parent._children[name] = std::make_unique<Namespace>(name);
+        parent._children[name]->_parent = &parent;
+    }
+
+    return *parent._children[name];
 }
 
 AST::Namespace &AST::NamespaceManager::retrieve_lexical(
@@ -234,7 +239,8 @@ AST::Symbol *AST::NamespaceManager::find_symbol_in_scope(
 {
     // innermost first, exactly as FunctionRegistry::overloads walks - the nearest namespace that
     // declares the name answers, and an outer one is hidden by it rather than consulted as well.
-    // a lexical namespace holds no type symbols, so the walk simply passes through one
+    // a lexical namespace is a frame of this walk like any other, which is the whole of what makes a
+    // block-local type shadow a file-scope one: no rule of its own, just the namespace it is asked from
     for (const Namespace *current = &from; current != nullptr; current = current->parent()) {
         if (AST::Symbol *found = find_symbol(symbol_name, *current)) {
             return found;
@@ -267,8 +273,9 @@ std::string AST::Namespace::debug_dump_symbols() const
         buffer += DD::tabbify(child.second->debug_dump_symbols(), 1, '|');
     }
 
-    // a lexical namespace holds no type symbols today - functions live in AST::FunctionRegistry - so
-    // one with nothing under it would be pure noise in every dump of every program that has a block
+    // a lexical namespace holds a type symbol only when a block declared one, and never a function -
+    // those live in AST::FunctionRegistry - so an empty one would be pure noise in every dump of every
+    // program that has a block, which is nearly all of them
     for (const auto &child : _lexical_children) {
         if (child.second->_symbols.empty() && child.second->_children.empty()
             && child.second->_lexical_children.empty()) {
@@ -289,13 +296,14 @@ AST::Namespace *AST::member_surface_namespace(AST::NamespaceManager &namespaces,
         return nullptr;
     }
 
-    // path_segments() rather than mangling_segments() because this namespace is one a user writes -
-    // `A::Inner(1)`, `buffer::MAX` - and a type's namespace is never lexical, which is the only place the
-    // two views differ
-    std::vector<std::string> parts =
-        owner.ast_namespace != nullptr ? owner.ast_namespace->path_segments() : std::vector<std::string>{};
+    // a child of the owner's namespace *object*, never a path from the root. for everything the user
+    // wrote the two are the same chain and this returns the identical namespace either way - but a
+    // body-local owner sits in a lexical namespace, and a path would land two of them in one place
+    // (the display path drops a block's empty display name) *and* create that place as a writable
+    // namespace a `namespace outer;` could then merge into. under a lexical parent the surface is
+    // reachable outward from inside the block and from nowhere else, which is what the owner is
+    AST::Namespace &parent =
+        owner.ast_namespace != nullptr ? *owner.ast_namespace : namespaces.root();
 
-    parts.push_back(owner.name.value());
-
-    return &namespaces.retrieve(parts);
+    return &namespaces.retrieve(parent, owner.name.value());
 }

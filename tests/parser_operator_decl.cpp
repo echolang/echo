@@ -4,6 +4,7 @@
 #include <AST/ASTOperatorSemantics.h>
 #include <AST/ASTOps.h>
 #include <AST/FunctionDeclNode.h>
+#include <AST/VarDeclNode.h>
 
 #include "helpers.h"
 
@@ -427,6 +428,135 @@ TEST_CASE("the index fixity's name and mangling", "[operator_decl]")
     REQUIRE(name.find(' ') != std::string::npos);
     REQUIRE(mangle_operator_name(name) == "operatorx20x5bx5d");
     REQUIRE(std::string(op_fixity_name(OpFixity::t_index)) == "index");
+}
+
+// **the write form carries punctuation where prefix and suffix carry a word**, and it has to carry
+// something: arity cannot separate it from the borrowing form, since `operator (M&)[K, K] : V&` and
+// `operator (M&)[K] = (V) : void` are both three operands. a missing arm in operator_function_name's
+// switch would silently answer `"operator []"` - the borrowing form's own name - and land both contracts
+// in one overload set, which is the failure this pins
+TEST_CASE("the index-write fixity's name and mangling", "[operator_decl]")
+{
+    const std::string name = operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index_write);
+
+    REQUIRE(name == "operator []=");
+    REQUIRE(mangle_operator_name(name) == "operatorx20x5bx5dx3d");
+    REQUIRE(std::string(op_fixity_name(OpFixity::t_index_write)) == "index write");
+
+    // and the two names are distinct, which is the whole of what keeps the two sets apart
+    REQUIRE(name != operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index));
+
+    REQUIRE(AST::is_index_fixity(OpFixity::t_index));
+    REQUIRE(AST::is_index_fixity(OpFixity::t_index_write));
+    REQUIRE_FALSE(AST::is_index_fixity(OpFixity::t_infix));
+}
+
+// **two overload sets over one registry entry.** a container may declare a borrowing bracket and a
+// writing one, and which a use site asks is decided by the position it sits in - so the declarations
+// must not share a set, while the *symbol* must stay one `Operator` carrying both fixity bits. no
+// end-to-end case can see either half
+TEST_CASE("an index-write operator is a separate overload set from the borrowing one", "[operator_decl]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "operator (Bag& $b)[] : int32& { return &$b->at:$[0]; }\n"
+        "operator (Bag& $b)[usize $i] = (int32 $v) : void { $b->at:$[$i] = $v; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    // one registry entry for `[`, carrying both bracket fixities
+    const Operator *bracket = op_named(*bundle, OperatorRegistry::bracket_spelling());
+    REQUIRE(bracket != nullptr);
+    REQUIRE(bracket->has_fixity(OpFixity::t_index));
+    REQUIRE(bracket->has_fixity(OpFixity::t_index_write));
+
+    auto &module = bundle->modules.find_module("test");
+
+    // the two borrowing forms in one set, told apart by arity...
+    REQUIRE(decls_named(module, operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index)).size() == 2);
+
+    // ...and the write on its own, under its own name
+    auto writes = decls_named(module, operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index_write));
+
+    REQUIRE(writes.size() == 1);
+    REQUIRE(writes[0]->args.size() == 3);
+    REQUIRE(writes[0]->get_return_type().is_void());
+}
+
+// **the arity range starts one higher than the borrowing form's**, because the value is not optional:
+// two operands is the append write `$c[] = $v`, three or more an element write
+TEST_CASE("an index-write operator's arity starts at two", "[operator_decl]")
+{
+    auto too_few = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; }\n"
+        "operator (Bag& $b)[] = () : void { }\n");
+
+    REQUIRE(too_few->collector.has_critical_issues());
+
+    // the append write, which is exactly the minimum and is legal
+    auto append = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { ptr<int32> $at; usize $n; }\n"
+        "operator (Bag& $b)[] = (int32 $v) : void { $b->at:$[$b->n] = $v; }\n");
+
+    REQUIRE_FALSE(append->collector.has_critical_issues());
+}
+
+// **which type an operator is declared over**, and the `template_or_self` redirect that lets an
+// instantiation find its template's declaration. the one new predicate behind the write rewrite, and
+// nothing else pins it - an e2e case can only see the outcome, never the wrong-arity answer
+TEST_CASE("declares_index_write finds a contract through the template", "[operator_decl]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag<T> { ptr<T> $at; }\n"
+        "operator<T> (Bag<T>& $b)[usize $i] = (T $v) : void { $b->at:$[$i] = $v; }\n"
+        "function make(ptr<int32> $p) : Bag<int32> { Bag<int32> $b = Bag<int32>($p); return $b; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    auto writes = decls_named(module, operator_function_name(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index_write));
+
+    REQUIRE(writes.size() == 1);
+
+    // the receiver read off the declaration is the template's own application, `Bag<T>` - the operand as a
+    // value, with the borrow level taken off
+    const ValueType receiver = AST::operator_receiver_type(*writes[0]);
+    REQUIRE(receiver.has_complex_type());
+    REQUIRE_FALSE(receiver.is_pointer());
+
+    // one index, so arity 3 - which the declaration has
+    REQUIRE(AST::declares_index_write(bundle->collector, receiver, 1));
+
+    // **the arity is part of the question**, so a two-index bracket over the same type is a different
+    // contract, and so is the append write - neither of which this type declares
+    REQUIRE_FALSE(AST::declares_index_write(bundle->collector, receiver, 2));
+    REQUIRE_FALSE(AST::declares_index_write(bundle->collector, receiver, 0));
+
+    // and asked with the **instantiation's** type it still finds the template's declaration, which is the
+    // `template_or_self` redirect on both sides. `Bag<int32>` is a distinct ComplexType from `Bag<T>`, so
+    // pointer identity alone would answer no here
+    ValueType instance = ValueType::make_unknown();
+    for (auto *decl : module.nodes.of_type<VarDeclNode>()) {
+        if (!decl->has_type() || !decl->type().has_complex_type()) {
+            continue;
+        }
+
+        // the instantiation rather than the operator's own `Bag<T>&` parameter, which is a pointer
+        if (!decl->type().is_pointer()
+            && decl->type().get_complex_type() != receiver.get_complex_type()) {
+            instance = decl->type();
+        }
+    }
+
+    REQUIRE(instance.has_complex_type());
+    REQUIRE(instance.get_complex_type() != receiver.get_complex_type());
+    REQUIRE(AST::declares_index_write(bundle->collector, instance, 1));
 }
 
 // **`operator<T>` versus a prefix `<`**, which is the one ambiguity the type-parameter list

@@ -15,6 +15,7 @@ namespace
             { "string", AST::CoreTypeKind::t_string },
             { "string_view", AST::CoreTypeKind::t_string_view },
             { "array", AST::CoreTypeKind::t_array },
+            { "map", AST::CoreTypeKind::t_map },
             { "iterator", AST::CoreTypeKind::t_iterator },
             { "iterable", AST::CoreTypeKind::t_iterable },
             { "keyed", AST::CoreTypeKind::t_keyed },
@@ -63,7 +64,7 @@ std::string AST::CoreTypes::spelling(AST::CoreTypeKind kind) const
         return decl->namespaced_type_name();
     }
 
-    // the reverse of the one table. a linear scan over six entries, deliberately not a second map to
+    // the reverse of the one table. a linear scan over seven entries, deliberately not a second map to
     // keep drifting out of sync with the first
     for (const auto &[tag, tagged_kind] : core_type_table()) {
         if (tagged_kind == kind) {

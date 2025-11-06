@@ -1,0 +1,30 @@
+// a type of your own joining the `hash::` overload set, which is what makes hashing extensible without a
+// `contract::` - and therefore without excluding every primitive
+//
+// the module beside this case declares `struct sku` and its `operator ==` at the root in one file, and its
+// `hash::of` in another. **two files, and that is the extension point's real cost**: a namespace is a
+// file-level statement, so a `namespace hash;` file cannot also hold the type it is about - which means a
+// single-file program cannot extend the set at all
+//
+// what makes it work is that a namespace is found or created *by name*, so every `namespace hash;` file in
+// the program lands on one namespace object and shares one overload set - the set map<K, V>'s own body
+// resolves against
+
+sku $a = sku(7);
+sku $b = sku(7);
+sku $c = sku(9);
+
+// the user's own overload answers
+echo hash::of($a);
+echo hash::of($b);
+echo hash::of($a) == hash::of($b);
+echo hash::of($a) == hash::of($c);
+
+// and the stdlib's overloads still answer for their own types - the user's declaration extended the set
+// rather than hiding it
+echo hash::of(7);
+echo hash::of($a) == hash::of(7);
+
+// the user's `==` resolves too
+echo $a == $b;
+echo $a == $c;

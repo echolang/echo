@@ -113,6 +113,11 @@ AST::ConstDeclNode *Parser::parse_constdecl(Parser::Payload &payload, AST::TypeD
                 "A constant's value cannot be a closure. A closure captures where it is written and a "
                 "constant is copied to where it is used, so '{}' would have no environment to capture",
                 name_token.value()));
+
+        // the closure's body goes with it, brace-depth aware - a skip to the next `;` stops at the
+        // first one *inside* the body and leaves its closing brace to be reported against whatever
+        // follows. the trailing skip is the constant's own terminator, after the body is gone
+        Parser::skip_refused_function(payload);
         cursor.try_skip_to_next_statement();
         return nullptr;
     }
@@ -136,7 +141,7 @@ AST::ConstDeclNode *Parser::parse_constdecl(Parser::Payload &payload, AST::TypeD
     // resolve with no expression grammar of its own
     AST::Namespace *target = owner != nullptr
         ? AST::member_surface_namespace(payload.collector.namespaces, owner->complex_type())
-        : payload.context.declaring_namespace();
+        : payload.context.current_namespace;
 
     if (target == nullptr) {
         return nullptr;

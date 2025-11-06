@@ -377,10 +377,10 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
         return std::vector<AST::ValueType>{ primitive };
     }
 
-    // the declaring namespace, not the current one: a type is not block-scoped, so a type name written
-    // inside a `{ }` block resolves exactly as it does outside one
+    // the namespace this constraint is *written* in, searched outward - so a block-local type is
+    // nameable inside the block that declared it and a file-scope one still resolves from inside a block
     auto symbol = payload.collector.namespaces.find_symbol_in_scope(
-        name, *payload.context.declaring_namespace());
+        name, *payload.context.current_namespace);
     if (symbol && symbol->type() == AST::SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
         return std::vector<AST::ValueType>{ decl->value_type() };
@@ -408,12 +408,12 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
         return nullptr;
     }
 
-    // the declaring namespace, not the current one - a type is not block-scoped, the same rule
-    // resolve_constraint_atom above states. searched *outward* from it, so an owner written
-    // unqualified is found wherever it is in scope - including from inside another nested type's
-    // body, which parses in a namespace named after its own owner
+    // the namespace this type is written in, the same rule resolve_constraint_atom above states.
+    // searched *outward* from it, so an owner written unqualified is found wherever it is in scope -
+    // including from inside another nested type's body, which parses in a namespace named after its own
+    // owner, and including a block-local owner declared beside this use
     auto *symbol = payload.collector.namespaces.find_symbol_in_scope(
-        cursor.current().value(), *payload.context.declaring_namespace());
+        cursor.current().value(), *payload.context.current_namespace);
 
     if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
         return nullptr;
@@ -1030,7 +1030,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
     // a type may be namespace qualified: `a::b::Foo`. the prefix is consumed here so the name
     // token below resolves in that namespace instead of the current one. a qualified name is
     // never a primitive or a type parameter, so those lookups are skipped for it
-    const AST::Namespace *lookup_namespace = payload.context.declaring_namespace();
+    const AST::Namespace *lookup_namespace = payload.context.current_namespace;
     bool is_qualified = false;
     if (payload.cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
         auto *ns_node = parse_namespace(payload);

@@ -409,7 +409,7 @@ std::string AST::ValueType::get_type_desciption() const
 }
 
 AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
-    const std::string &name, AST::ComplexTypeKind kind, const AST::Namespace *ns)
+    const std::string &name, AST::ComplexTypeKind kind, AST::Namespace *ns)
 {
     auto owned = std::make_unique<ComplexType>();
     ComplexType *type = owned.get();

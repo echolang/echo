@@ -1,0 +1,158 @@
+// `ordered_map<K, V>` - everything `map<K, V>` does, plus a defined iteration order.
+//
+// unlike the map cases, **the golden output here is a sequence and that is the point**: these assertions are
+// order-*dependent* on purpose, because the order is the whole feature. `map<K, V>`'s own iteration order is
+// unspecified, which is why its cases are all sums and counts
+//
+// it composes - a `map<K, V>` and an `array<K>` - so it declares neither a destructor nor a copy constructor
+// and the compiler synthesizes both from its two properties. the owning block at the end is what pins that
+
+{
+    ordered_map<string, int32> $m = ordered_map<string, int32>();
+
+    // deliberately not alphabetical, so insertion order is distinguishable from sorted order
+    $m['zebra'] = 1;
+    $m['apple'] = 2;
+    $m['mango'] = 3;
+
+    echo $m->count();
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // **re-writing a key does not move it to the back.** the write contract appends to the order only when
+    // the table gained an entry, which is the whole of it
+    $m['zebra'] = 10;
+
+    echo $m->get('zebra');
+    echo $m->count();
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // removing from the middle closes the gap and keeps the rest in order
+    echo $m->remove('apple');
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // and a re-inserted key goes **last**, because it is a new arrival as far as the order is concerned
+    $m['apple'] = 20;
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // keys() is `$order` itself, so it is already ordered - the one method cheaper here than on a map
+    array<string> $ks = $m->keys();
+
+    echo $ks[0];
+    echo $ks[1];
+    echo $ks[2];
+
+    // and values() lines up with it index for index
+    array<int32> $vs = $m->values();
+
+    echo $vs[0];
+    echo $vs[1];
+    echo $vs[2];
+
+    // the call form agrees with the bracket
+    $m->set('kiwi', 4);
+
+    echo $m->count();
+    echo $m->get('kiwi');
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // take hands the value over and closes the gap
+    echo $m->take('zebra');
+    echo $m->count();
+
+    foreach ($m as $k => $v) {
+        echo $k;
+    }
+
+    // a const ordered map reads, through methods and through its own bracket
+    const ordered_map<string, int32>& $ro = &$m;
+
+    echo $ro->count();
+    echo $ro['apple'];
+    echo $ro->has('kiwi');
+
+    // clear empties both halves
+    $m->clear();
+
+    echo $m->count();
+    echo $m->is_empty();
+
+    int32 $after_clear = 0;
+
+    foreach ($m as $v) {
+        $after_clear = $after_clear + 1;
+    }
+
+    echo $after_clear;
+}
+
+assert(mem::live_allocations() == 0, 'the table and the order array both gave their buffers back');
+
+// ---- extend keeps the source's order
+
+{
+    ordered_map<string, int32> $a = ordered_map<string, int32>();
+    $a['x'] = 1;
+
+    ordered_map<string, int32> $b = ordered_map<string, int32>();
+    $b['p'] = 2;
+    $b['q'] = 3;
+
+    $a->extend($b);
+
+    echo $a->count();
+
+    foreach ($a as $k => $v) {
+        echo $k;
+    }
+}
+
+assert(mem::live_allocations() == 0, 'and again');
+
+// ---- owning values, and the two members the compiler synthesized
+
+{
+    ordered_map<string, string> $m = ordered_map<string, string>();
+
+    string $v = '';
+    $v->append('hello');
+
+    $m['k'] = $v;
+
+    echo $m->get('k');
+    echo $m->count();
+
+    // the synthesized copy: a table of its own, an order array of its own, and the value retained
+    ordered_map<string, string> $c = $m;
+
+    echo $c->get('k');
+
+    $c['k2'] = $v;
+
+    // independent
+    echo $m->count();
+    echo $c->count();
+
+    // and the explicit spelling of the same thing
+    ordered_map<string, string> $cl = $m->clone();
+
+    echo $cl->count();
+    echo $cl->get('k');
+}
+
+assert(mem::live_allocations() == 0, 'three ordered maps and one string, each destroyed exactly once');
+echo mem::live_allocations();

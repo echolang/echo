@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 13:9
+operator '==' is not supported on operands of type 'P' and 'P'
+Begin: 'operator =='
+End: 'operator =='
+Code excerpt:
+ [12]> 
+ [13]> echo $a == $b;
+              ^
+ [14]> 
+
+Critical issues found, cannot compile.

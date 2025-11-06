@@ -1,0 +1,57 @@
+# **the output is a sequence and that is the point.** unlike the map cases, these checks are
+# order-dependent on purpose - the order is the whole feature. note the block after the first re-write:
+# zebra/apple/mango, unchanged, because re-writing a key does not move it to the back
+
+expect: ok
+
+--- OUT --->
+3
+zebra
+apple
+mango
+10
+3
+zebra
+apple
+mango
+1
+zebra
+mango
+zebra
+mango
+apple
+zebra
+mango
+apple
+10
+3
+20
+4
+4
+zebra
+mango
+apple
+kiwi
+10
+3
+mango
+apple
+kiwi
+3
+20
+1
+0
+1
+0
+3
+x
+p
+q
+hello
+1
+hello
+1
+2
+1
+hello
+0

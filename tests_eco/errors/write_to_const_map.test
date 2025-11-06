@@ -1,0 +1,19 @@
+# the const write refusal, said at the write. left to the call it would come back as "no overload of
+# 'operator []=' accepts these arguments" with a candidate list - true, and useless beside the message
+# every other const write gets
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 10:10
+Const violation: cannot write to an element of 'const map<string,int32>' - it is const, and the element contract that writes takes the container as a mutable borrow
+Begin: '='
+End: '='
+Code excerpt:
+ [9]> 
+ [10]> $ro['a'] = 2;
+               ^
+ [11]> 
+
+Critical issues found, cannot compile.

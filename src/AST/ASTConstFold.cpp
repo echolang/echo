@@ -256,14 +256,26 @@ namespace
                 return checked(op == Token::Type::t_op_div ? lhs / rhs : lhs % rhs);
             }
 
+            // **`^` cannot leave the type it folds at**, which is the whole of why it needs none of the
+            // overflow machinery above: both operands already fit, and every bit of the answer comes from
+            // one of them. `checked` stays anyway rather than returning `folded` directly, so the arm
+            // makes no claim of its own about what fits - one answer to that question, in one lambda
+            case Token::Type::t_xor:
+                return checked(lhs ^ rhs);
+
             // **`**` is deliberately not folded.** ExprCodegen lowers it by casting both operands to
-            // double, calling llvm.pow and casting back to int32 - so an integer answer worked out here
-            // would differ from the emitted one for any input where that round trip loses precision, and
-            // it would differ *silently*. `<<` and `>>` are not folded because codegen lowers neither:
-            // they reach its `default:` throw, so there is no emitted behaviour to agree with
+            // double, calling llvm.pow and casting back to the operand type - so an integer answer worked
+            // out here would differ from the emitted one for any input where that round trip loses
+            // precision, and it would differ *silently*. the round trip is the reason, not the width it
+            // lands in.
+            //
+            // `& | << >>` are not folded because codegen lowers none of them: they reach its `default:`
+            // throw, so there is no emitted behaviour to agree with. that is the same reason `^` was not
+            // folded until it *was* lowered, and the two halves have to move together - a symbol folded
+            // here and thrown on there makes a `const if` and the `if` beside it take different arms
             default:
                 return ConstFoldResult::refused(fmt::format(
-                    "'{}' is not something the compiler folds. `+ - * / %`, the comparisons and "
+                    "'{}' is not something the compiler folds. `+ - * / % ^`, the comparisons and "
                     "`&&`/`||` are.", spelling));
         }
     }
@@ -285,11 +297,11 @@ namespace
                 "'{}' has no order over a '{}'.", spelling, type.get_type_desciption()));
         }
 
-        // **read through the type's own signedness, which ExprCodegen does not.** gen_binary_expr emits
-        // CreateICmpS* for every integer, so `uint64 $big = 18446744073709551615; $big > 1` answers
-        // *false* today - see todo/B39. this answers correctly rather than bug-compatibly: writing a
-        // known-wrong answer into a new owner to match an old one is worse than the divergence, and the
-        // divergence is confined to `< > <= >=` over a value above the signed maximum
+        // **read through the type's own signedness**, which is the same thing
+        // ExprCodegen::gen_binary_expr reads to pick between `icmp ult` and `icmp slt`. the type is the
+        // reconciled one both sides get from AST::binary_operation_type, so a `const if` and the `if`
+        // beside it cannot take different arms - which they did, for any unsigned value above the
+        // signed maximum, while that arm emitted CreateICmpS* unconditionally
         const bool is_signed = AST::get_integer_size(type.get_primitive_type()).is_signed;
 
         const auto ordered = [&](auto a, auto b) {
@@ -400,8 +412,22 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
                 return operand;
             }
 
-            // the parser folds unary `+` away and codegen lowers nothing but negation, so `-` is the
-            // whole built-in surface here. anything else is a declared operator, which is the arm below
+            // **`!` over a bool.** its other meaning - the presence test over a value that may be
+            // absent - is deliberately *not* folded: that is a runtime question, and none of the
+            // presence tests are folded on the binary side either, so folding this one would be the
+            // one moment where `const if (!$maybe)` and the `if` beside it could disagree
+            if (unary.token_operator.type() == Token::Type::t_exclamation) {
+                if (!is_foldable_bool(operand.type)) {
+                    return ConstFoldResult::refused(fmt::format(
+                        "'!' folds over a bool, and this operand is a '{}'.",
+                        operand.type.get_type_desciption()));
+                }
+
+                return fold_bool(operand.bits == 0);
+            }
+
+            // the parser folds unary `+` away, so `-` and `!` are the whole built-in surface here.
+            // anything else is a declared operator, which is the arm below
             if (unary.token_operator.type() != Token::Type::t_op_sub) {
                 return ConstFoldResult::refused(fmt::format(
                     "'{}' is not an operator the compiler folds.", unary.token_operator.value()));
@@ -428,10 +454,16 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             // so `operator (Point $a) < (Point $b)` reaches this refusal instead of being folded on
             // operand bits. asked with the *parse-time* operand facts, because this runs inside the
             // fixpoint and AST::PointerAdjuster has not inserted its derefs yet
+            //
+            // the wording covers both halves of what a false answer means, because the folder cannot
+            // tell them apart and neither one is foldable: a symbol somebody declared runs, and a pair
+            // the language spells no meaning for - `1 << 2` - has nothing to fold *to*. it used to name
+            // only the first, and said "here is a declared operator" about `<<`
             if (!binary_has_builtin_meaning(
                     binary.op_node->op, parse_time_operand(binary.lhs), parse_time_operand(binary.rhs))) {
                 return ConstFoldResult::refused(fmt::format(
-                    "'{}' here is a declared operator, and a declared operator runs rather than folding.",
+                    "'{}' has no built-in meaning for these operands, so there is nothing to fold - "
+                    "a declared operator runs instead.",
                     binary.op_node->token_literal.value()));
             }
 
@@ -460,6 +492,10 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             // so ask the one owner rather than guessing which side wins, and then re-check both values
             // against the type it named: widening is what reconciliation does, so nothing should fail
             // here, and if something does it is a value that never fitted
+            //
+            // asked directly rather than through AST::binary_operation_type, which is the same rule and
+            // what ExprCodegen reads: that spelling folds "no common type" into "they already agree",
+            // and this is the one caller that has to tell those apart to report the first
             ValueType folded_at = lhs.type;
 
             if (!(lhs.type == rhs.type)) {

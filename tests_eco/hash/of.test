@@ -1,0 +1,22 @@
+# the three repeated `11831194018420276491`s are the point of the case: a literal, a string built by
+# appending, and a substring of a larger buffer all hash the same text to the same number. that is
+# canonical FNV-1a 64 of "hello" and can be checked against any other implementation
+
+expect: ok
+
+--- OUT --->
+11831194018420276491
+11831194018420276491
+1
+11831194018420276491
+11831194018420276491
+5717881983045765875
+12478008331234465636
+9929646806074584996
+9929646806074584996
+12638152016183539244
+12638152016183539244
+1
+1
+0
+1

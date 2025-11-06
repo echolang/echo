@@ -1,0 +1,8 @@
+// an index-write operator is a *statement* - `$c[$k] = $v` produces nothing - so `void` is not merely
+// tolerated there but required. the mirror of the refusal every other fixity gets for returning void
+struct bag { ptr<int32> $d; }
+
+operator (bag& $b)[usize $i] = (int32 $v) : int32&
+{
+    return &$b->d:$[$i];
+}

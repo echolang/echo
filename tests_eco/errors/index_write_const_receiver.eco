@@ -1,0 +1,7 @@
+// and through a `const` borrow it does not land at all - the same silent no-op from the other side
+struct bag { ptr<int32> $d; }
+
+operator (const bag& $b)[usize $i] = (int32 $v) : void
+{
+    $b->d:$[$i] = $v;
+}

@@ -181,6 +181,19 @@ AST::TypeDeclNode *EchoTests::type_named(AST::Module &m, const std::string &name
     return nullptr;
 }
 
+std::vector<AST::TypeDeclNode *> EchoTests::types_named(AST::Module &m, const std::string &name)
+{
+    std::vector<AST::TypeDeclNode *> types;
+
+    for (auto *decl : m.nodes.of_type<AST::TypeDeclNode>()) {
+        if (decl->type_name() == name) {
+            types.push_back(decl);
+        }
+    }
+
+    return types;
+}
+
 size_t EchoTests::count_issues_containing(const AST::Bundle &bundle, const std::string &needle)
 {
     size_t count = 0;

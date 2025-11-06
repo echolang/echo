@@ -1,0 +1,111 @@
+// **a borrow read and handed to a by-value parameter is copied.** it was not, and nothing said so:
+// AST::CallResolver wraps such an argument in an implicit cast - the ownership pass runs inside the
+// fixpoint, so the argument is still `ptr<const T>` where the parameter says `T` - and a cast is not
+// a place, so `arrive_value`'s "a non-place is already a move" early return fired. two owners shared
+// one reference count and the first teardown freed what the other still named
+//
+// one block per AST::classify_copy answer, because the classifier is what the fix newly reaches. and
+// each one twice, from a `const T&` and from a mutable `T&`: the cast is inserted for both, so a fix
+// keyed on the const strip would have covered half of it
+
+class Handle
+{
+    int32 $id;
+
+    constructor(int32 $id) { $this->id = $id; }
+}
+
+// t_retain - a class handle
+function take_class(Handle $h) : int32
+{
+    return mem::ref_count<Handle>($h);
+}
+
+function through_const_class(const Handle& $h) : int32
+{
+    return take_class($h);
+}
+
+function through_mut_class(Handle& $h) : int32
+{
+    return take_class($h);
+}
+
+// t_constructor - a struct with a declared copy constructor
+struct Counted
+{
+    int32 $v;
+
+    constructor(int32 $v) { $this->v = $v; }
+
+    constructor(const Counted& $other)
+    {
+        // one more than the source, so a copy that did not happen is visible in the value
+        $this->v = $other->v + 1;
+    }
+}
+
+function take_counted(Counted $c) : int32
+{
+    return $c->v;
+}
+
+function through_const_counted(const Counted& $c) : int32
+{
+    return take_counted($c);
+}
+
+function through_mut_counted(Counted& $c) : int32
+{
+    return take_counted($c);
+}
+
+// a `string`, which owns a buffer through a class
+function take_string(string $s) : usize
+{
+    return mem::ref_count<str::buf>($s->owner);
+}
+
+function through_const_string(const string& $s) : usize
+{
+    return take_string($s);
+}
+
+function through_mut_string(string& $s) : usize
+{
+    return take_string($s);
+}
+
+{
+    Handle $h = Handle(1);
+
+    // one for `$h`, one for the by-value parameter
+    echo through_const_class($h);
+    echo through_mut_class($h);
+
+    // and the copies are gone again once the calls returned
+    echo mem::ref_count<Handle>($h);
+}
+
+{
+    Counted $c = Counted(10);
+
+    echo through_const_counted($c);
+    echo through_mut_counted($c);
+
+    // the source is untouched by either copy
+    echo $c->v;
+}
+
+{
+    string $s = '';
+    $s->append('x');
+
+    echo through_const_string($s);
+    echo through_mut_string($s);
+
+    echo mem::ref_count<str::buf>($s->owner);
+}
+
+// nothing the copies took was left behind
+echo mem::live_allocations();

@@ -1,0 +1,13 @@
+// two structs with no `operator ==` between them. the message is about the operands the author
+// wrote, and it stays that way however many `==` declarations the program happens to link - the
+// standard library declares two, for `string` and `string::view`, and neither belongs here
+//
+// this is the wording a use site had before any operator was declared anywhere. it lives in
+// AST::binary_unsupported_operands so the built-in path and the operator-call path cannot drift
+
+struct P { int32 $v; }
+
+$a = P(1);
+$b = P(2);
+
+echo $a == $b;

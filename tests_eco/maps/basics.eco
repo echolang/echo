@@ -1,0 +1,98 @@
+// `map<K, V>` - the surface, over a trivial key and a trivial value so nothing here is about ownership
+//
+// note `$m['a'] = 1` and `$m->set('a', 1)` are the same operation, and now literally so: `set`'s body *is*
+// `$this[$key] = mv $value`, the mirror of `array<T>::push` being `$this[] = $value`. one implementation of
+// the write rather than two that have to agree
+
+map<string, int32> $m = map<string, int32>();
+
+echo $m->count();
+echo $m->is_empty();
+echo $m->capacity();
+
+$m['a'] = 1;
+$m['b'] = 2;
+$m->set('c', 3);
+
+echo $m->count();
+echo $m->is_empty();
+
+// a replace, not an insert
+$m['a'] = 9;
+echo $m->count();
+echo $m->get('a');
+
+// reads
+echo $m->get('b');
+echo $m->has('a');
+echo $m->has('zz');
+
+// a borrow, written through. the key is bound first, because a `&` local refuses a temporary source
+string $kb = 'b';
+int32& $slot = $m->at($kb);
+$slot = 20;
+echo $m->get('b');
+
+// remove answers whether there was anything
+echo $m->remove('c');
+echo $m->remove('c');
+echo $m->count();
+
+// take hands the value over
+echo $m->take('a');
+echo $m->count();
+
+// keys() and values() line up index for index, in the map's own unspecified order
+$m['x'] = 100;
+$m['y'] = 200;
+
+array<string> $ks = $m->keys();
+array<int32> $vs = $m->values();
+
+echo $ks->count();
+echo $vs->count();
+
+int32 $sum = 0;
+usize $i = 0;
+
+while ($i < $vs->count()) {
+    $sum = $sum + $vs[$i];
+    $i = $i + 1;
+}
+
+echo $sum;
+
+// clear keeps the buffers, shrink_to_fit gives them back
+$m->clear();
+echo $m->count();
+echo $m->is_empty();
+
+// extend copies every entry across
+map<string, int32> $o = map<string, int32>();
+$o['p'] = 7;
+$o['q'] = 8;
+
+$m->extend($o);
+echo $m->count();
+echo $m->get('p');
+echo $m->get('q');
+
+// a const map reads, through methods and through its own bracket overload
+const map<string, int32>& $ro = &$m;
+echo $ro->count();
+echo $ro->get('p');
+echo $ro['q'];
+echo $ro->has('p');
+
+// **and so does a mutable one.** the bracket that inserts is a different declaration
+// from the one that reads, so reading through a *mutable* map neither inserts nor asserts on a key that is
+// there, and `->at()` is now written through the bracket rather than around it
+echo $m['p'];
+
+string $kp = 'p';
+int32& $through_bracket = &$m[$kp];
+$through_bracket = 42;
+echo $m->get('p');
+
+// and nothing was inserted by any of that
+echo $m->count();

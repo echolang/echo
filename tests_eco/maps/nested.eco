@@ -1,0 +1,60 @@
+// a bracket over a bracket, and a `->` through one. all of these used to be refused, because the
+// bracket could not be *read* at all on a container that seats an element - now only the innermost write goes
+// through the write contract and every step outside it is an ordinary borrowing read.
+//
+// **the key is a variable wherever the bracket sits in a target position**, and that is a rule rather than a
+// style: an assignment target and an `&` operand refuse to give a temporary storage, so a *literal* key there
+// is refused - the same rule that refuses `f().field = 1`. Reading is free, so `echo $m['a']` is fine
+{
+    map<string, map<string, int32>> $outer = map<string, map<string, int32>>();
+    string $a = 'a';
+
+    map<string, int32> $inner = map<string, int32>();
+    $inner['x'] = 1;
+
+    $outer[$a] = $inner;
+
+    // the outer bracket *reads* - it hands back a borrow of the map that is there - and the inner one writes
+    $outer[$a]['x'] = 7;
+    $outer[$a]['y'] = 8;
+
+    echo $outer[$a]['x'];
+    echo $outer[$a]['y'];
+    echo $outer[$a]->count();
+}
+
+assert(mem::live_allocations() == 0, 'both tables gave their buffers back');
+
+// a map of arrays: the outer bracket reads, and the inner write is `array<T>`'s ordinary place write - so one
+// statement uses both mechanisms, which is what pins that they compose
+{
+    map<string, array<int32>> $m = map<string, array<int32>>();
+    string $k = 'a';
+
+    array<int32> $arr = [1, 2];
+    $m[$k] = $arr;
+
+    $m[$k][0] = 5;
+
+    echo $m[$k][0];
+    echo $m[$k][1];
+}
+
+assert(mem::live_allocations() == 0, 'and the arrays too');
+
+// and `->` through a read bracket, onto a struct property
+struct point { int32 $x; int32 $y; }
+
+{
+    map<string, point> $m = map<string, point>();
+    string $k = 'o';
+
+    $m[$k] = point(1, 2);
+
+    $m[$k]->x = 9;
+
+    echo $m[$k]->x;
+    echo $m['o']->y;
+}
+
+echo mem::live_allocations();

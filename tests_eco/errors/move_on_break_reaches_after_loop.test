@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 31:6
+'$a' may have been moved out of.
+Begin: '$a'
+End: '$a'
+Code excerpt:
+ [30]> 
+ [31]> echo $a->id;
+           ^
+ [32]> 
+
+Critical issues found, cannot compile.

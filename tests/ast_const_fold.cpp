@@ -191,8 +191,8 @@ TEST_CASE("mismatched operands are reconciled through common_numeric_type", "[co
     REQUIRE(folded.is_bool());
     REQUIRE(folded.as_bool());
 
-    // and the unsigned ordering path it reaches, which is the one gen_binary_expr gets wrong (todo/B39):
-    // this answers correctly rather than bug-compatibly
+    // and the unsigned ordering path it reaches, which ExprCodegen's integer arm answers the same way:
+    // both read the signedness of the type this reconciliation named
     auto wide = EchoTests::tests_make_parsed_bundle(
         "const uint64 HUGE = 18446744073709551615;\n"
         "if (HUGE > 1) { echo 1; }\n");

@@ -3,6 +3,7 @@
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
@@ -64,6 +65,12 @@ bool OperatorRewriter::run_round()
             }
         }
     }
+
+    // **once for the round, not once per discard** - see _detached. nothing between a rewrite and here
+    // reads NodeCollection::of_type: this walk goes through scope children, and the sweeps that do care -
+    // Monomorphizer::snapshot_calls and TypeLowering::build_function_maps - are the next round and
+    // codegen respectively. finalize() calls this, so the flush covers that pass too
+    _detached.flush(_bundle);
 
     return _changed;
 }
@@ -133,18 +140,40 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
         return;
     }
 
+    // **an address is never a width to reconcile.** pointer arithmetic and pointer comparison each have
+    // their own arm in BinaryExprNode::result_type(), and a cast inserted here would convert the address
+    // itself to an integer - which is what `string::view($this->bytes:$ + $from, $len)` turns into if this
+    // exits any later. Asked of the *raw* operand types, because this pass runs ahead of
+    // AST::PointerAdjuster and a borrow still reads as a pointer here
+    const ValueType raw_left = bin.lhs->result_type();
+    const ValueType raw_right = bin.rhs->result_type();
+
+    if (raw_left.is_pointer() || raw_right.is_pointer()) {
+        return;
+    }
+
     // asked before the operand types, because it is the cheap half and it is false for all but a
     // handful of nodes: already reconciled - by the parser, or by an earlier round of this.
     //
     // a void answer is what "not reconciled" looks like from the outside; anything else is either not
-    // ready yet or not this function's business, since a pointer, a class and a nullable all have their
-    // own arms in BinaryExprNode::result_type() and never reach a void answer through width alone
-    if (!bin.result_type().is_void()) {
+    // ready yet or not this function's business, since a class and a nullable both have their own arms
+    // in BinaryExprNode::result_type() and never reach a void answer through width alone
+    //
+    // **a comparison is the one shape that answer cannot speak for**, and it has to be asked separately:
+    // it is a `bool` whatever it compared, so a `usize` against an `int32` literal looks perfectly
+    // reconciled from the outside while codegen still gets two widths. That is the very case the header
+    // above describes - `$i == 0` over a `foreach` key - and it reached codegen's
+    // "Both operands to ICmp instruction are not of the same type" for as long as the gate was the
+    // result type alone
+    const bool is_comparison = bin.op_node != nullptr && bin.op_node->op != nullptr
+        && bin.op_node->op->is_comparison();
+
+    if (!is_comparison && !bin.result_type().is_void()) {
         return;
     }
 
-    const ValueType left = value_type_of(bin.lhs->result_type());
-    const ValueType right = value_type_of(bin.rhs->result_type());
+    const ValueType left = value_type_of(raw_left);
+    const ValueType right = value_type_of(raw_right);
 
     const auto common = common_numeric_type(left, right);
 
@@ -227,8 +256,30 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
         return;
     }
 
-    const std::string decorated_name =
-        operator_function_name(OperatorRegistry::bracket_spelling(), OpFixity::t_index);
+    // **the guard rail behind resolve_index_write.** that rewrite can only run from a scope's child list,
+    // because AST::RecursiveVisitor::statement_edge descends into a statement and never replaces one - so
+    // it depends on every AssignNode being a scope child, which every producer does satisfy today.
+    //
+    // where that stops being true this arm is what says so. reaching here with an `=` behind the bracket
+    // and a declared write contract means the rewrite never got its turn, and building the read call would
+    // compile the program into an insert that *asserts* instead - the exact shape of silent failure
+    // CLAUDE.md's "a transient node owes two arms" trap describes. reported as a compiler bug, the way
+    // TypeChecker::visit_addr_of_expr reports a temporary nothing gave a slot
+    if (index_expr.is_assignment_target
+        && declares_index_write(_collector, base_type, index_expr.indices.size())) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(index_expr.token_bracket),
+            fmt::format(
+                "compiler bug: '{}' declares an element-write contract and this bracket has an '=' behind "
+                "it, but the write was never rewritten - the assignment is not a scope's statement. See "
+                "AST::OperatorRewriter::resolve_index_write.",
+                base_type.get_type_desciption()));
+        return;
+    }
+
+    // asked of the one owner, the mirror of index_write_operator_name() above - so "which name does a
+    // bracket register under" has one answer per contract rather than one per asker
+    const std::string &decorated_name = index_operator_name();
 
     // **is there an element contract at all?** asked ahead of building the call, because "this type
     // has none" and "none of the ones it has fits" are different things to say and only the first is
@@ -266,6 +317,126 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
     // AST::PointerAdjuster rewrites edges in place - so each one would collect a second deref
     index_expr.base = nullptr;
     index_expr.indices.clear();
+}
+
+void OperatorRewriter::resolve_index_write(ScopeNode &scope, size_t index)
+{
+    Node *statement = scope.children[index].node();
+
+    if (statement == nullptr || statement->get_node_type() != NodeType::n_assign) {
+        return;
+    }
+
+    auto *assign = static_cast<AssignNode *>(statement);
+
+    if (assign->target == nullptr
+        || assign->target->get_node_type() != NodeType::n_expr_index
+        || assign->value_expr == nullptr) {
+        return;
+    }
+
+    auto *bracket = static_cast<IndexExprNode *>(assign->target);
+
+    // already decided - as a read by resolve_index, or as a write by an earlier round
+    if (bracket->resolution_decided || bracket->base == nullptr) {
+        return;
+    }
+
+    // the node owns this question, and asking it here is the *same* ask resolve_index makes one step
+    // later - see the header for why the two must not be split across a round
+    const ValueType base_type = bracket->indexed_base_type();
+
+    // nothing to decide yet: a type parameter a later round substitutes, an unsettled call. deliberately
+    // left unmarked, so resolve_index does not decide either and body_is_concrete keeps saying no
+    if (is_undetermined_type(base_type)) {
+        return;
+    }
+
+    // a pointer index and an unindexable type are resolve_index's arms, and its wordings. a second
+    // answer here would be a second message for one refusal
+    if (base_type.is_pointer() || !base_type.has_complex_type()) {
+        return;
+    }
+
+    if (!declares_index_write(_collector, base_type, bracket->indices.size())) {
+        return;
+    }
+
+    // **a `const` container has no write contract to reach**, and this is where that is said. left to the
+    // call, it would come back as "no overload of 'operator []=' accepts these arguments" with a candidate
+    // list - true, and useless beside the message every other const write gets. the wording is
+    // TypeChecker::check_const_target's, because it is the same refusal one pass earlier
+    if (base_type.is_const()) {
+        _collector.collect_issue<Issue::ConstViolation>(
+            code_ref_for(assign->token_assign),
+            fmt::format(
+                "cannot write to an element of '{}' - it is const, and the element contract that writes "
+                "takes the container as a mutable borrow",
+                base_type.get_type_desciption()));
+
+        bracket->resolution_decided = true;
+        return;
+    }
+
+    // **the container has to have storage the write can reach.** as an assignment target this was
+    // AST::OwnershipPass's MaterializationScope refusal; as a call operand a temporary would merely be
+    // bound for the statement, and the write would land in a container destroyed at the end of it.
+    //
+    // asked through the predicate OwnershipPass and TypeChecker already share, so there is no second
+    // reading of "does this operand need storage minted for it". deliberately *not*
+    // `!is_place_expression`: a call returning `map<K, V>&` is materializable too, and
+    // `$maps->at(0)[$k] = $v` writes through a borrow into storage somebody else owns
+    if (borrow_operand_needs_storage(*bracket->base)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(bracket->token_bracket),
+            fmt::format(
+                "'{}' has no storage of its own, so writing to one of its elements would be lost - the "
+                "value is destroyed at the end of this statement. Bind it to a variable first.",
+                base_type.get_type_desciption()));
+
+        bracket->resolution_decided = true;
+        return;
+    }
+
+    // the container, then the indices, then the value - the order the declaration writes its three
+    // operand lists in. the receiver is *not* addressed here: the parameter is a borrow, and
+    // AST::CallResolver inserts the address-of a borrow parameter wants, exactly as it does for the
+    // borrowing bracket and for every other call
+    std::vector<ExprNode *> operands;
+    operands.reserve(bracket->indices.size() + 2);
+    operands.push_back(bracket->base);
+    for (auto *bracket_index : bracket->indices) {
+        operands.push_back(bracket_index);
+    }
+    operands.push_back(assign->value_expr);
+
+    auto &call = build_operator_call(
+        OperatorRegistry::bracket_spelling(), OpFixity::t_index_write, bracket->token_bracket,
+        std::move(operands));
+
+    // **release what is kept, before collecting what is going.** every operand belongs to the call now,
+    // and AST::forget_subtree's collector is total by construction - so an operand still hanging off the
+    // assignment or the bracket would be forgotten with them, and forgetting a node the tree still holds
+    // is a symbol nothing declares. AST::ConstFolding::splice nulls the arm it keeps for the same reason
+    bracket->base = nullptr;
+    bracket->indices.clear();
+    assign->value_expr = nullptr;
+
+    // and decided, so nothing asks again about a node that is leaving
+    bracket->resolution_decided = true;
+
+    // **the old value's teardown cannot have been decided yet**, and the reason is the round order rather
+    // than luck: body_is_concrete answers false while this bracket is undecided, so AST::OwnershipPass
+    // has not walked this body. asserted rather than commented, because forgetting a `teardown_old` scope
+    // would silently un-emit the destructor calls inside it
+    assert(assign->teardown_old == nullptr && !assign->releases_old
+        && "an index write is rewritten before ownership has walked the body");
+
+    // `target` deliberately still points at the bracket: the bracket is what is going away, and the
+    // collecting walk has to reach it
+    _detached.collect(*assign);
+
+    scope.children[index] = make_ref(call);
 }
 
 void OperatorRewriter::report_unplaced_literal(ArrayLiteralExprNode &literal)
@@ -623,6 +794,12 @@ void OperatorRewriter::visitScope(ScopeNode &node)
     // child is rewritten - so the constructor and the appends it produces are walked by this same
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
     for (size_t i = 0; i < node.children.size(); i++) {
+        // **ahead of both the literal expansion and the descent**, and see resolve_index_write for why
+        // each of those orderings is the content rather than a preference: after the descent the bracket
+        // has already been decided a read, and after the expansion a literal right-hand side is reported
+        // against a destination this rewrite was about to remove
+        resolve_index_write(node, i);
+
         expand_array_literal(node, i);
 
         // **saved and restored around the descent**, because a nested block runs this very loop: a

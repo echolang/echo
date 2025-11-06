@@ -1,0 +1,71 @@
+// `hash::of` is an overload set rather than a `contract::`, because a primitive cannot declare a
+// conformance - so an interface constraint would refuse `map<int32, V>`, the first map anybody writes
+//
+// the three goldened string hashes are what pin the constants. they are canonical FNV-1a 64 values and can
+// be checked against any other implementation; note the compiler's own `fnv1a64`, which hashes module
+// cache keys, carries a basis one digit short of the real one - the two are unrelated uses that never
+// compare a value, so this file spells the canonical constants
+
+// **the property the whole design exists for**: the same text in two different buffers hashes the same.
+// byte-hashing a `string` would hash its heap pointer, and these two would land in different buckets while
+// `==` said they were equal - the one way a hash table breaks that nothing else catches
+string $literal = 'hello';
+string $built = '';
+$built->append('hello');
+
+echo hash::of($literal);
+echo hash::of($built);
+echo $literal == $built;
+
+// a substring hashes as its own text rather than as its parent's
+string $big = 'xxhelloxx';
+echo hash::of($big->sub(2, 5));
+
+// and a view agrees with the string that owns it
+echo hash::of($literal->window);
+
+// a different text, so a different hash
+echo hash::of('world');
+
+// ---- the integer overloads. usize and isize are their own primitives, not spellings of uint64/int64
+
+echo hash::of(1);
+
+int64 $i64 = 1;
+usize $u = 1;
+
+// both are eight bytes holding 1, so both agree
+echo hash::of($i64);
+echo hash::of($u);
+
+uint8 $b8 = 1;
+
+// one byte holding 1, so a different answer from the eight-byte ones. `of(int32 1)` and `of(int64 1)`
+// differing is deliberate and documented: this is a bucket index, never a serialization format
+echo hash::of($b8);
+echo hash::of(true);
+
+// ---- floats normalize zero, because +0.0 and -0.0 compare equal and do not share their bytes
+
+float64 $pz = 0.0;
+float64 $nz = -0.0;
+
+echo hash::of($pz) == hash::of($nz);
+
+float32 $pz32 = 0.0;
+float32 $nz32 = -0.0;
+
+echo hash::of($pz32) == hash::of($nz32);
+
+// ---- combine is not commutative, so a pair and its reverse do not collide
+
+echo hash::combine(hash::of(1), hash::of(2)) == hash::combine(hash::of(2), hash::of(1));
+
+// ---- of_bytes is the explicit spelling, for a type that *is* its bytes
+
+struct point { int32 $x; int32 $y; }
+
+point $p = point(3, 4);
+point $q = point(3, 4);
+
+echo hash::of_bytes<point>($p) == hash::of_bytes<point>($q);

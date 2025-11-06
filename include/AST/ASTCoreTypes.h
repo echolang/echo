@@ -41,6 +41,17 @@ namespace AST
         // conformance rather than by name
         t_array,
 
+        // `struct map<K, V>` - the owning, unordered hash map. bound for exactly `t_array`'s reason and
+        // with exactly its scope: so the compiler can **say** `map<K, V>` for a `["k" => "v"]` literal
+        // that has no destination to take a type from, and for nothing else. It knows no method, no
+        // property and no shape of it - not even that it has three buffers
+        //
+        // **`ordered_map<K, V>` deliberately gets none**, the way `slice<T>` gets none: nothing in the
+        // grammar spells an ordered-map literal, so no ordered map is ever *minted* by the compiler.
+        // `ordered_map<string, int32> $m = ["a" => 1];` reaches its type from the destination instead,
+        // which is a different path and needs no binding
+        t_map,
+
         // `interface contract::iterator<V>` - the loop protocol: `advance()` then `current()`. what
         // `foreach` lowers onto, and the one thing it requires
         t_iterator,

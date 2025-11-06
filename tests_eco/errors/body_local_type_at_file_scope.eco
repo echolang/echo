@@ -1,0 +1,13 @@
+// a type declared inside a `{ }` block is not reachable from outside it. an unresolved *unqualified*
+// type name is silent by design, so what reports this is the constructor call: `P(1)` finds no
+// overload set anywhere on the walk out of the file's namespace
+
+function outer() : int32
+{
+    struct P { int32 $x; }
+    P $p = P(41);
+    return $p->x;
+}
+
+P $q = P(1);
+echo $q->x;

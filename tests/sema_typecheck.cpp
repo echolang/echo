@@ -433,15 +433,39 @@ TEST_CASE("legal const programs are left alone", "[sema][pointer][const]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
-TEST_CASE("per-branch operator gaps are left to the codegen safety net", "[sema]")
+TEST_CASE("a per-branch operator gap over primitives is reported here", "[sema]")
 {
-    // the sema check is intentionally scoped to struct operands; a primitive operator/operand gap
-    // (modulo on two bools) is deliberately NOT flagged here and instead surfaces at the enriched
-    // codegen throw. this pins that boundary so the scope is not silently widened
+    // this used to pin the opposite: the sema check was scoped to *struct* operands, and a primitive
+    // operator/operand gap was deliberately left to the codegen throw. that throw carries no location,
+    // no source excerpt and no exit status a user can act on, and AST::binary_has_builtin_meaning was
+    // answering *true* for every one of these - which is a promise ExprCodegen::gen_binary_expr cannot
+    // keep. the predicate enumerates what that function lowers now, so each gap arrives here instead
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "echo true % false;\n");
 
-    REQUIRE_FALSE(has_issue_containing(*bundle, "operator '%'"));
+    REQUIRE(has_issue_containing(*bundle, "operator '%' is not supported on operands of type 'bool'"));
+}
+
+TEST_CASE("the gaps that are gone report nothing", "[sema]")
+{
+    // the negative control for the one above, and the two halves of the ticket that opened it: a bool
+    // equality and a weak handle asked whether it is there. both used to be accepted by the predicate
+    // and then abort codegen; both lower now, so neither may draw a diagnostic here
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class C { int32 $v; }\n"
+        "bool $a = true;\n"
+        "bool $b = false;\n"
+        "echo $a == $b;\n"
+        "echo $a != $b;\n"
+        "C $o = C(1);\n"
+        "weak<C> $w = &$o;\n"
+        "echo $w == null;\n"
+        "echo $w != null;\n");
+
+    for (const auto &issue : bundle->collector.issues) {
+        INFO("unexpected issue: " << issue->message());
+    }
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
 TEST_CASE("live_allocations is refused when nothing is counting", "[sema][memory]")

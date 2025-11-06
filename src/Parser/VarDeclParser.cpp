@@ -200,7 +200,13 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         // `$a[] = 5` legal where `echo $a[]` is not. see AST::IndexExprNode::slot_is_bound, whose
         // other setter is the `&` arm of Parser::parse_postfix_chain's caller
         if (target->get_node_type() == AST::NodeType::n_expr_index) {
-            static_cast<AST::IndexExprNode *>(target)->slot_is_bound = true;
+            auto *index = static_cast<AST::IndexExprNode *>(target);
+
+            index->slot_is_bound = true;
+
+            // and the narrower fact, which only this setter may record: there is an `=` behind this
+            // bracket. see AST::IndexExprNode::is_assignment_target for what turns on it
+            index->is_assignment_target = true;
         }
 
         // `$obj->push(5);` reaches here because the statement dispatch routes anything starting

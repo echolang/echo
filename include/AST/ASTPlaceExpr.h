@@ -5,6 +5,7 @@
 
 #include "AST/ASTNodeTypes.h"
 #include "AST/ExprNode.h"
+#include "AST/TypeCastNode.h"
 
 #include <optional>
 
@@ -108,6 +109,64 @@ namespace AST
         return storage_of(expr) == StorageClass::t_place;
     }
 
+    // **the expression the author wrote, under whatever the compiler wrapped around it.** an implicit
+    // cast is inserted to reconcile a type, never to change a value the program can observe, so every
+    // question about *what this expression is* has to be asked underneath one. an **explicit** cast
+    // stops the walk: the user wrote that one, and `(int32?)null` is a null they meant to give a type to
+    //
+    // one owner because it had already been written three times - in AST::written_null_of, in the type
+    // checker and inside AST::literal_string_value - and a fourth was about to be added below
+    inline ExprNode *strip_implicit_casts(ExprNode *expr)
+    {
+        while (expr != nullptr && expr->get_node_type() == NodeType::n_type_cast) {
+            auto *cast = static_cast<TypeCastNode *>(expr);
+
+            if (!cast->is_implcit) {
+                break;
+            }
+
+            expr = cast->expr;
+        }
+
+        return expr;
+    }
+
+    inline const ExprNode *strip_implicit_casts(const ExprNode *expr)
+    {
+        return strip_implicit_casts(const_cast<ExprNode *>(expr));
+    }
+
+    // **is there a place underneath the implicit casts, and which cast sits directly over it?**
+    //
+    // `storage_of` answers on the tag alone, deliberately, so a cast is `t_materializable` - it is a
+    // value the program computed. That is right for a cast the *user* wrote and wrong for one
+    // AST::CallResolver inserted to reconcile an argument with a parameter, which computes nothing:
+    // what is under it is still the caller's storage, still owned by whoever named it. reading such a
+    // cast as "not a place" is how a borrow read into a by-value parameter came to be handed over with
+    // no copy and no retain
+    //
+    // hands back the **innermost** cast rather than the place itself, because the caller's job is to
+    // rewrite the edge *under* it: a retain or a copy has to be typed as the value, not as whatever the
+    // cast widened it to
+    inline TypeCastNode *place_under_implicit_cast(ExprNode &expr)
+    {
+        if (expr.get_node_type() != NodeType::n_type_cast) {
+            return nullptr;
+        }
+
+        auto *cast = static_cast<TypeCastNode *>(&expr);
+
+        if (!cast->is_implcit || cast->expr == nullptr) {
+            return nullptr;
+        }
+
+        if (TypeCastNode *inner = place_under_implicit_cast(*cast->expr)) {
+            return inner;
+        }
+
+        return is_place_expression(*cast->expr) ? cast : nullptr;
+    }
+
     // **may this expression be *given* storage?** asked in the parser, which is where a receiver is
     // decided and no type is known yet, and in AST::argument_fit, which has the expression but not yet
     // a decision. AST::OwnershipPass asks the type question that goes with it
@@ -115,6 +174,38 @@ namespace AST
     inline bool can_bind_temporary(const ExprNode &expr)
     {
         return storage_of(expr) == StorageClass::t_materializable;
+    }
+
+    // **is this storage the compiler is not accounting for?**
+    //
+    // a *different* question from every other one in this header, which are all about whether an
+    // expression has an address. this one is about who owes that address's value an end. a local gets a
+    // scope-exit drop, a temporary gets one from the frame it was bound to, and a property gets one from
+    // its owner's teardown - so every one of those is storage some pass already walks. what is left is
+    // storage reached **through a pointer**, `$p:$` and `$p:$[$i]`, which nothing walks, because a
+    // pointer is not an owner.
+    //
+    // that is exactly the storage a container manages itself, and therefore exactly the storage the two
+    // unsafe seams in `mem::` are allowed to touch: `mem::take` empties one and `mem::init` fills one.
+    // Two readers, one rule - AST::TypeChecker refuses both the same way, so "which storage may I move
+    // through" cannot come to two answers. It used to be spelled inline in the `take` check alone, and
+    // `init` arriving is what made a second copy of it a question of when rather than whether
+    //
+    // the index arm asks AST::IndexExprNode::indexed_base_type rather than looking at the base's node
+    // kind, because that is the sole owner of "is this a pointer index": `$a[$i]` on an `array<T>`
+    // reaches the element operator and is a place the array accounts for, while `$p:$[$i]` is raw
+    // storage and is not
+    inline bool is_unaccounted_storage(const ExprNode &expr)
+    {
+        if (expr.get_node_type() == NodeType::n_expr_deref) {
+            return true;
+        }
+
+        if (expr.get_node_type() == NodeType::n_expr_index) {
+            return static_cast<const IndexExprNode &>(expr).indexed_base_type().is_pointer();
+        }
+
+        return false;
     }
 
     // **is there anything here to mint storage for at all?** the half the two requesting arms - a member

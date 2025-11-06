@@ -52,29 +52,6 @@ namespace AST
         // instead of being ambiguous
         t_promotion,
 
-        // any other primitive that reaches the parameter through TypeLowering::coerce_value - a
-        // narrowing, a sign change, int to float. always possible, never free
-        t_conversion,
-
-        // a class handle reaching a parameter of an interface it conforms to - the value keeps its
-        // object and loses its static type, gaining a vtable. **below every built-in conversion
-        // above**, so an overload taking the concrete class always beats one taking the interface: the
-        // widening is what lets a caller hand a `Circle` to a `Drawable` parameter without writing
-        // anything, never a way to hide a better-matching overload. that is `t_declared_conversion`'s
-        // reasoning one rank earlier, and above it because this one is the compiler's own rule while
-        // that one is something a type declared about itself
-        //
-        // deliberately **not** folded into is_implicitly_convertible, which would rank it t_widening
-        // and make erasing a static type look as free as `T&` -> `ptr<T>`
-        t_interface_widening,
-
-        // the argument's own type declared how to convert itself, `#[implicit]`. below every
-        // built-in conversion above rather than beside them, because that is what makes an
-        // overload taking the owning type always beat one taking the window: this is the
-        // fallback that lets a caller take the cheap view without writing anything, never a
-        // way to hide a better-matching overload. see AST::find_implicit_conversion
-        t_declared_conversion,
-
         // the parameter is a borrow and the argument is a value with no storage at all - a literal,
         // a call result, an arithmetic result - so a temporary is materialised to hold it and *its*
         // address is passed. AST::OwnershipPass binds the temporary and destroys it once the call has
@@ -82,22 +59,27 @@ namespace AST
         // t_borrow gets, because the difference between the two is a question about the operand's
         // shape and not one codegen should be able to see
         //
-        // **the last real rank, below even t_declared_conversion**, and for a reason none of the ranks
-        // above share: every one of them describes how a value that already exists is read or
-        // converted. this one adds a *declaration* to the program - an alloca, a lifetime, possibly a
-        // destructor call. so it is the fallback that lets a caller hand a value where a borrow is
-        // wanted, never a way to hide a better-matching overload - which is t_interface_widening's and
-        // t_declared_conversion's reasoning one and two ranks earlier
+        // **below every rank above and above every rank below**, and the two halves have different
+        // reasons. below, because this is the only rank that adds a *declaration* to the program - an
+        // alloca, a lifetime, possibly a destructor call - where all six above only read or widen a
+        // value that already exists: `w(int64)` beats `w(int32&)` for `w(42)`, so a free numeric
+        // promotion is not out-ranked by fabricating storage, and t_borrow three ranks up means a
+        // borrow of real storage always beats a borrow of a value the compiler had to invent.
         //
-        // concretely: `w(int64)` beats `w(int32&)` for `w(42)`, so a free integer promotion is not
-        // out-ranked by fabricating storage; and t_borrow, six ranks up, means a borrow of real storage
-        // always beats a borrow of a value the compiler had to invent
+        // above, because every rank below *changes the type*, and this one does not. binding a
+        // temporary of exactly the parameter's own type does less to a value than converting it to a
+        // different type does, so the cost argument that puts this under a promotion has nothing to
+        // say against a conversion - which pays that same materialisation cost anyway, its result
+        // needing somewhere to live too.
         //
-        // below t_declared_conversion specifically because the two *compose* on one argument -
-        // `f('hello')` against a view parameter converts first and then borrows the conversion's result
-        // - and CallResolver::coerce_arguments re-asks the fit after that wrapping. keeping this last
-        // makes the re-ask monotone: the coercion can only ever move the fit downward, never below what
-        // the matcher already scored the candidate at
+        // it used to sit last, below t_declared_conversion, and that made an ordinary overload pair
+        // unusable: `==` over `string` beside `==` over its `#[implicit]` view scored the string pair
+        // better on a place operand and the view pair better on a literal one, neither dominated, and
+        // `$s == 'hello'` - the comparison people actually write - was ambiguous.
+        //
+        // the arm order inside argument_fit is **not** this order: the declared-conversion arm is still
+        // asked first, so an argument that can convert is still scored a conversion. what moved is only
+        // what that score is worth against a competing candidate
         //
         // the compiler cannot tell a mutating callee from a reading one, so a write through a `T&`
         // bound to a literal lands in storage nobody will read again. Echo already has the spelling
@@ -105,10 +87,41 @@ namespace AST
         // against the stdlib, whose borrow parameters are written bare
         t_borrow_temporary,
 
-        // and the read-only form of that one, t_borrow_const's mirror at the bottom of the ranking.
-        // both borrow arms owe the distinction or const overloading works for a place and is
-        // ambiguous for a temporary - `$a[0]` resolving where `f()[0]` does not
+        // and the read-only form of that one, t_borrow_const's mirror. both borrow arms owe the
+        // distinction or const overloading works for a place and is ambiguous for a temporary -
+        // `$a[0]` resolving where `f()[0]` does not
         t_borrow_temporary_const,
+
+        // any other primitive that reaches the parameter through TypeLowering::coerce_value - a
+        // narrowing, a sign change, int to float. always possible, never free
+        t_conversion,
+
+        // a class handle reaching a parameter of an interface it conforms to - the value keeps its
+        // object and loses its static type, gaining a vtable. **below every rank above**, so an
+        // overload taking the concrete class always beats one taking the interface: the widening is
+        // what lets a caller hand a `Circle` to a `Drawable` parameter without writing anything, never
+        // a way to hide a better-matching overload. that is `t_declared_conversion`'s reasoning one
+        // rank earlier, and above it because this one is the compiler's own rule while that one is
+        // something a type declared about itself
+        //
+        // deliberately **not** folded into is_implicitly_convertible, which would rank it t_widening
+        // and make erasing a static type look as free as `T&` -> `ptr<T>`
+        t_interface_widening,
+
+        // the argument's own type declared how to convert itself, `#[implicit]`. **the last real
+        // rank**, below every reading, widening and converting form above it, because that is what
+        // makes an overload taking the owning type always beat one taking the window: this is the
+        // fallback that lets a caller take the cheap view without writing anything, never a way to
+        // hide a better-matching overload. see AST::find_implicit_conversion
+        //
+        // it out-ranked the two temporary-borrow ranks once, which had it beating a parameter of the
+        // argument's *own* type wherever that argument was a literal
+        //
+        // the two still **compose** on one argument - `f('hello')` against a view parameter converts
+        // first and then borrows the conversion's result - and CallResolver::coerce_arguments re-asks
+        // the fit after that wrapping. the re-ask feeds AST::fit_is_borrow and nothing else, so which
+        // way it moves the rank decides nothing; the matcher has already chosen the candidate by then
+        t_declared_conversion,
 
         // the argument's type says nothing yet: a string literal, an unbound `null`, a member of
         // an incomplete struct, a mixed-operand binary expression, or anything still mentioning a
@@ -368,7 +381,7 @@ namespace AST
         // an address - and a non-place argument gets one the same way every other borrow argument does,
         // from the temporary AST::OwnershipPass mints for the `&` CallResolver writes around it. so
         // `f('hello')` composes: the literal is bound, the conversion reads it, and the borrow of *that*
-        // takes the rank below (todo/A13c)
+        // is scored by the arm below when coerce_arguments re-asks (todo/A13c)
         if (expr != nullptr
             && find_implicit_conversion(from, implicit_conversion_target(to)) != nullptr) {
             return ArgumentFit::t_declared_conversion;
@@ -380,8 +393,10 @@ namespace AST
         // about which pointee a borrow accepts - only the expression test differs, is_place_expression
         // there and can_bind_temporary here, and AST::storage_of makes those two mutually exclusive
         //
-        // **last**, so that no arm above changes behaviour: a place reaches t_borrow twelve lines up and
-        // returns there, never seeing this one. that is the whole of why this is an additive change
+        // **the last arm**, which is not the same as the last rank - it out-ranks the three conversions
+        // above it and is still asked after them, so an argument that can convert is scored a
+        // conversion and never reaches here. that is what keeps the arm order free of the ranking: a
+        // place reaches t_borrow far above and returns there, never seeing this one either
         //
         // **`from` must not itself be a pointer.** a `ptr<ptr<T>>` parameter would otherwise take a
         // pointer-typed non-place and ask AST::OwnershipPass for a slot it refuses to hand out ("a

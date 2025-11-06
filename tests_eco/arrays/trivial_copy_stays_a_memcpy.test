@@ -7,7 +7,14 @@
 # a function that no longer exists is a check that quietly stops checking. what is pinned here is the
 # *choice*, which is made before any optimizer runs
 
+# the copy constructor itself is now written through `extend`, so what it contains is two calls and no
+# branch at all - the `const if` it used to hold is `extend`'s, checked below
 CHECK: define linkonce_odr %"array<int32>" @_arrayZZMRBCLC5arrayIMLPiEGMLPi(
+CHECK-NOT: br i1
+CHECK: call void @_M5array_reserve_exact
+CHECK: call void @_M5array_extend
+
+CHECK: define linkonce_odr void @_M5array_extendZZMRBMLC5arrayIMLPiEZMRBCLC5arrayIMLPiEGMLPi(
 
 # **the branch is not folded here, it is gone.** `const if (mem::is_trivially_copyable<T>())` is decided in
 # the *tree*: AST::ConstFolding replaced the statement with the arm the condition selected, so there is no
@@ -15,7 +22,9 @@ CHECK: define linkonce_odr %"array<int32>" @_arrayZZMRBCLC5arrayIMLPiEGMLPi(
 #
 # this used to check `br i1 true`, which was the weaker claim - it said the condition had folded while the
 # element loop's blocks were still materialized behind it, removed by LLVM under `-O` and shipped at `-O0`.
-# an absence is the stronger assertion, and it is the one the feature is about
+# an absence is the stronger assertion, and it is the one the feature is about.
+#
+# the `$n == 0` guard's own `br i1` is a real runtime branch and is deliberately not what this forbids
 CHECK-NOT: br i1 true
 CHECK-NOT: br i1 false
 

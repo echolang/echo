@@ -1,0 +1,7 @@
+// a file of its own, because a namespace is a file-level statement
+namespace hash;
+
+function of(const clash& $k) : uint64
+{
+    return 7;
+}

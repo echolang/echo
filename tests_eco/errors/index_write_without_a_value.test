@@ -1,0 +1,17 @@
+# the value operand is not optional, so the write form's arity range starts one above the borrowing form's
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 5:19
+an index-write operator takes the container, then its indices, then the value it is given, e.g. 'operator (map<K, V>& $m)[const K& $key] = (V $value) : void'. Two operands is the append write '$c[] = $v'.
+Begin: '['
+End: '['
+Code excerpt:
+ [4]> 
+ [5]> operator (bag& $b)[] = () : void
+                        ^
+ [6]> {
+
+Critical issues found, cannot compile.

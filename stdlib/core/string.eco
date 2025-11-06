@@ -575,3 +575,66 @@ struct string
         $this->reseat();
     }
 }
+
+/**
+ * Text equality, at file scope, for `string` and for `string::view`.
+ *
+ * `==` and not only `->equals()` because `==` is the one spelling that works for a **type parameter**. A
+ * generic body comparing two `K`s writes `$a == $b`, and that resolves to a built-in comparison when `K`
+ * is a primitive and to a declared operator when it is a struct - there is no `equals` on `int32` to call
+ * instead, and no interface a primitive could conform to. `map<string, V>` is what needs it.
+ *
+ * Written through `string::view::equals`, which is the same byte loop `string::equals` delegates to - so
+ * there is one implementation of "are these the same text" and nothing to drift.
+ *
+ * **Both operands are borrows**, so comparing two strings costs no reference count at all. By value it
+ * would be a retain and a release per comparison, and the place this exists for is the inside of a hash
+ * map's probe loop. `string::equals` keeps its by-value parameter: everything already calls it, and this
+ * is not that method's cost to fix.
+ *
+ * **Two pairs, and what keeps them apart is the rank ordering.** A `string` converts to a `string::view`
+ * by the `#[implicit]` method above, so every operand of the first pair can also reach the second - and
+ * which pair a comparison picks is decided per operand by AST::argument_fit. A `string` place scores
+ * `borrow-const` against `const string&` and `declared conversion` against `const string::view&`; a
+ * literal, which has no storage, scores `borrow-of-temporary-const` against the first and `declared
+ * conversion` against the second. Both borrow ranks beat a declared conversion, so the string pair
+ * dominates on both operands and `$s == 'hello'` resolves to it.
+ *
+ * That last part was not always true: the temporary borrow used to rank *below* a declared conversion,
+ * so the string pair won the place operand, the view pair won the literal one, neither dominated, and
+ * declaring both made `$s == 'hello'` ambiguous. The view pair could not exist while that held.
+ *
+ * A **literal** is a `string`, so `$s == 'x'` reaches the string pair directly. A `string::view` argument
+ * has no conversion back to `string`, so two views only ever reach the view pair.
+ *
+ * `!=` is a branch and two returns rather than `return !$a->equals($b)`: this file prefers the branch, and
+ * a `!` over a call is one more thing to be sure of.
+ */
+operator (const string& $a) == (const string& $b) : bool
+{
+    return $a->window->equals($b->window);
+}
+
+operator (const string& $a) != (const string& $b) : bool
+{
+    if ($a->window->equals($b->window)) {
+        return false;
+    }
+
+    return true;
+}
+
+operator (const string::view& $a) == (const string::view& $b) : bool
+{
+    return $a->equals($b);
+}
+
+operator (const string::view& $a) != (const string::view& $b) : bool
+{
+    if ($a->equals($b)) {
+        return false;
+    }
+
+    return true;
+}
+

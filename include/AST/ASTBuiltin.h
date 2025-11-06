@@ -58,6 +58,30 @@ namespace AST
         // local variable, which is what `mv` is for
         t_take,
 
+        // **move a value into a place that holds nothing**, which is the mirror of `take` above and the
+        // other half of what a container needs.
+        //
+        // `take` empties storage the compiler is not accounting for; this fills it. Writing to that
+        // storage with an ordinary `=` is a *re*-assignment, so AST::OwnershipPass ends whatever the
+        // destination held - and for a slot straight out of `mem::alloc` that is a destructor call over
+        // whatever bytes the allocator handed back. There is no other spelling: `array<T>` gets the rule
+        // from the *shape* of its append operator (AST::IndexExprNode::is_append, a syntactic question the
+        // parser answers), and a container whose slots are not appended to has no shape to get it from.
+        //
+        // deliberately **not** an ordinary library function. `function init<T>(T& $p, T $v) { $p = $v; }`
+        // is exactly the re-assignment it exists to avoid, one level further in - so the seam has to be a
+        // builtin, where the write is emitted rather than written
+        //
+        // its lowering is one store through the borrow, and what makes that correct is that the value
+        // *arrived by value*: the caller's copy already happened, so this hands over an owner rather than
+        // duplicating one, and nothing is owed a release
+        //
+        // it shares `take`'s place rule exactly - AST::is_unaccounted_storage, one predicate with two
+        // readers - and it is unsafe in the same direction and for the same reason: initializing a place
+        // that already holds a value leaks that value, as taking twice from one place duplicates
+        // ownership. squarely in `mem::` for that reason
+        t_init,
+
         // the two ways a program stops itself. unlike the two above they take arguments, return
         // void and are not generic - so they are the first builtins to rely on `is_builtin()`
         // rather than the `is_generic()` guard that happens to sit ahead of it in TypeLowering

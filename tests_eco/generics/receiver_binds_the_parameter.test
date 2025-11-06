@@ -1,0 +1,14 @@
+# `2 14` is the array - two pushes of int32 literals into an `array<int64>`, and their sum; `12` the same
+# widening through a keyed write; the first `1` is an integer literal reaching a `float64` element; the last
+# `1` is two arguments of equal standing still reconciling to the wider type
+#
+# every widening here used to be refused, with the *receiver* named as the operand that did not fit
+
+expect: ok
+
+--- OUT --->
+2
+14
+12
+1
+1

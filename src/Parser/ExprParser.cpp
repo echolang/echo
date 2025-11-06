@@ -781,6 +781,11 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_open_bracket) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0 ||
+           // `!`, which the test above cannot answer for: a prefix-only symbol carries no precedence
+           // tier, there being nothing to order it against - see AST::Operator::is_prefix_only. without
+           // this the loop below never enters for `if (!$b)`, expr_parts holds nothing but the `(` and
+           // parse_expr_ref's single-part reporter fires on an operator with no operand
+           cursor.is_type(Token::Type::t_exclamation) ||
            // a declared **prefix** operator, which may be spelled out of tokens nothing else in this
            // list admits - `!!` is two t_exclamation, and neither has a precedence. without this the
            // loop below never enters for `echo !!'hello';`, `expr_parts` stays empty, and the
@@ -1686,7 +1691,8 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
     const auto match = operator_match_at(payload, cursor);
 
     const bool builtin_prefix = match.has()
-        && (match.op->type == Token::Type::t_op_sub || match.op->type == Token::Type::t_op_add);
+        && (match.op->type == Token::Type::t_op_sub || match.op->type == Token::Type::t_op_add
+            || match.op->is_prefix_only());
     const bool declared_prefix = match.has() && match.op->has_fixity(AST::OpFixity::t_prefix);
 
     if (builtin_prefix || declared_prefix) {
@@ -1844,7 +1850,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         // infix - would be read as an operator with nothing on its left
         if (op != nullptr && expects_operand &&
             (op->type == Token::Type::t_op_sub || op->type == Token::Type::t_op_add
-                || op->has_fixity(AST::OpFixity::t_prefix)))
+                || op->is_prefix_only() || op->has_fixity(AST::OpFixity::t_prefix)))
         {
             auto node = parse_prefix_unary(payload, expected_type);
             if (!node.has()) {
@@ -1867,7 +1873,11 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         // declared infix, the ordinary call `avg(1.0, 2.0)` arrives here at offset 0, where reading it
         // as an operator leaves the yard popping two operands for something with no left operand at
         // all. falling through parses it as the operand it is
-        const bool usable_here = op != nullptr
+        //
+        // the one built-in exception is `!`, which has no infix meaning to be the language's - it is
+        // asked here only after the prefix arm above declined, so what is left is `$a ! $b`, and
+        // falling through reports it as two expressions with nothing between them
+        const bool usable_here = op != nullptr && !op->is_prefix_only()
             && (!op->is_custom() || (op->has_fixity(AST::OpFixity::t_infix) && !expects_operand));
 
         if (usable_here) {
@@ -1924,7 +1934,19 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 
     // if we have only one part, we can return it directly
     if (expr_parts.size() == 1) {
-        assert(expr_parts[0].opnode == nullptr && "expected no operator");
+        // **an operator with nothing to apply**, which the loop above reaches whenever it stops on a
+        // token `is_expr_token` declines: `if (` claims the paren as an operator part and the loop
+        // then breaks, leaving it alone. it used to be an assert, so the compiler aborted naming this
+        // function - which is how a missing production reads to whoever hit it, `!` having been one
+        if (expr_parts[0].opnode != nullptr) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(expr_parts[0].opnode->token_literal),
+                fmt::format("'{}' has no operand - an expression was expected after it.",
+                    expr_parts[0].opnode->op->spelling));
+
+            return AST::make_void_ref();
+        }
+
         return expr_parts[0].node;
     }
 

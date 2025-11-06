@@ -14,6 +14,7 @@ namespace
             { "is_trivially_copyable", AST::BuiltinKind::t_is_trivially_copyable },
             { "needs_destruction", AST::BuiltinKind::t_needs_destruction },
             { "take", AST::BuiltinKind::t_take },
+            { "init", AST::BuiltinKind::t_init },
             { "die", AST::BuiltinKind::t_die },
             { "assert", AST::BuiltinKind::t_assert },
             { "ref_count", AST::BuiltinKind::t_ref_count },
@@ -60,10 +61,12 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
             return AST::BuiltinFoldability::t_needs_layout;
 
         // everything else does something rather than answering something. `take` moves a value out of
-        // a place, `ref_count` and `weak_count` read a word of a live heap block, `dprint` prints, the
-        // raw-memory trio allocates, `live_allocations` reads a counter the program maintains, the
-        // three process accessors read globals `main` filled in, and `die`/`assert`/`exit` stop
+        // a place and `init` moves one in, `ref_count` and `weak_count` read a word of a live heap block,
+        // `dprint` prints, the raw-memory trio allocates, `live_allocations` reads a counter the program
+        // maintains, the three process accessors read globals `main` filled in, and `die`/`assert`/`exit`
+        // stop
         case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_ref_count:
@@ -98,6 +101,7 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:
@@ -127,7 +131,8 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
             return 1;
 
         // nothing to fold: size_of, align_of and the two ownership predicates take no arguments at all,
-        // `take`'s one argument is the place it is emptying, the two counts' one argument
+        // `take`'s one argument is the place it is emptying and `init`'s two are that place and the
+        // value going into it, the two counts' one argument
         // is a class handle rather than a message, and dprint's is the value being printed - it renders
         // whatever it is handed, so there is nothing about it that has to be a literal. the raw-memory
         // trio takes sizes and addresses, and live_allocations takes nothing. the three process
@@ -138,6 +143,7 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
         case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:

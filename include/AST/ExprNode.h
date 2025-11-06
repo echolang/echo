@@ -222,10 +222,7 @@ namespace AST
 
         ~UnaryExprNode() {}
 
-        // negation preserves the operand type
-        ValueType result_type() const override {
-            return expr->result_type();
-        }
+        ValueType result_type() const override;
 
         const std::string node_description() override {
             return "unexp(" + token_operator.value() + expr->node_description() + ")";
@@ -874,6 +871,20 @@ namespace AST
         // a syntactic question, so the parser is what answers it. it also decides that the write is
         // an *initialization*, since a slot that holds nothing owes no teardown
         bool slot_is_bound = false;
+
+        // **the left of an `=` specifically**, which is narrower than `slot_is_bound` above - that one is
+        // also true for the operand of `&`.
+        //
+        // a *syntactic* fact, and the parser is the only thing that can record it: by the time
+        // AST::OperatorRewriter has a bracket in hand it is looking at an expression edge, and nothing
+        // there says what statement the edge sits under. so this is what
+        // AST::OperatorRewriter::resolve_index's guard rail reads to catch an assignment its write rewrite
+        // never got its turn at - see resolve_index_write, which can only run from a scope's child list,
+        // and which would otherwise leave the bracket compiled as a *read* of a container that inserts.
+        //
+        // both flags stay: `slot_is_bound` answers "may this bracket be something other than a read",
+        // which the append form needs at both positions, and this answers "is there an `=` behind it"
+        bool is_assignment_target = false;
 
         // true for `$a[]`, which names the slot after the last one rather than an existing element
         bool is_append() const {

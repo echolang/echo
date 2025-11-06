@@ -1,5 +1,6 @@
 #include "AST/ASTOwnership.h"
 
+
 #include "AST/ConstRefExprNode.h"
 
 #include "AST/ASTArrayLiteral.h"
@@ -110,6 +111,27 @@ namespace
             }
 
             RecursiveVisitor::visit_array_literal_expr(node);
+        }
+
+        // **an assignment through an undecided bracket may not be a write to a place at all.**
+        // AST::OperatorRewriter::resolve_index_write replaces the whole statement with one call when the
+        // container declares an element-write contract, and this pass walks a body exactly once - so a walk
+        // now would decide the ownership of an assignment about to leave the tree, and push a teardown onto
+        // a node nothing will emit.
+        //
+        // the arm below already covers it through the target, since an undecided bracket is undecided
+        // wherever it sits. this one is here so the invariant is *stated where it is relied on* rather than
+        // inherited: it costs nothing, and it is what keeps the rewrite sound if a future node kind ever
+        // parents an AssignNode somewhere a scope's child list does not reach
+        void visit_assign(AssignNode &node) override
+        {
+            if (node.target != nullptr
+                && node.target->get_node_type() == NodeType::n_expr_index
+                && !static_cast<IndexExprNode *>(node.target)->resolution_decided) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visit_assign(node);
         }
 
         // an unresolved bracket has no element call yet, so there is nothing here for the arm below to
@@ -525,7 +547,7 @@ bool OwnershipPass::body_is_concrete(ScopeNode &scope) const
     return answerable.answerable;
 }
 
-void OwnershipPass::walk_scope(ScopeNode &scope)
+ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
 {
     // the function body's frame is pushed by resolve_function, which seeds it with the parameters
     // every other scope opens its own
@@ -569,7 +591,19 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
             // empty stack here is a compiler bug rather than a program error
             assert(!_loop_frames.empty() && "a loop exit reached the ownership pass with no enclosing loop");
 
-            collect_unwind(_loop_frames.back(), child.get_ptr<LoopControlNode>()->unwind);
+            auto *loop_exit = child.get_ptr<LoopControlNode>();
+
+            collect_unwind(_loop_frames.back().frame_floor, loop_exit->unwind);
+
+            // **the moved state travels with the branch.** where it goes is the loop's exit rather than
+            // the join after whatever `if` this sits in, so it is recorded on the loop frame and merged
+            // by the loop arm. the same edge as the unwind above and for the same reason: this is the
+            // point where what the branch carries out of here is known
+            auto &carried = loop_exit->kind == LoopControlKind::t_break
+                ? _loop_frames.back().break_moved
+                : _loop_frames.back().continue_moved;
+
+            carried.insert(_moved.begin(), _moved.end());
         }
 
         rebuilt.push_back(kept);
@@ -594,13 +628,20 @@ void OwnershipPass::walk_scope(ScopeNode &scope)
     // and any statement written after a `return` each appended a full duplicate. none of them ever reached
     // codegen - gen_scope stops at the first terminated block - so the tree was wrong and the binary was
     // not, which is the kind of divergence `-ar` exists to make visible
-    if (!scope_always_exits(scope)) {
+    //
+    // computed once and handed back, because the arms above this one want the same answer about the
+    // scope they asked for - and asking it a second time is a second walk of the whole subtree
+    const ExitKind exit = scope_exit_kind(scope);
+
+    if (exit == ExitKind::t_none) {
         collect_frame_drops(_frames.back(), scope.children);
     }
 
     if (own_frame) {
         _frames.pop_back();
     }
+
+    return exit;
 }
 
 NodeReference OwnershipPass::walk_statement(const NodeReference &child)
@@ -831,10 +872,17 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // (Parser::parse_guard refused one that could), so there is no path on which its moves are
             // visible afterwards. taking the union would mark things moved that this statement's
             // continuation can still legitimately read
+            //
+            // where they *are* visible is wherever the arm went, and nothing here has to arrange that: an
+            // arm leaving by `break` recorded them on the enclosing loop's frame as it was walked
             if (stmt->else_scope != nullptr) {
-                auto before = _moved;
+                const auto before = _moved;
+                const auto maybe_before = _maybe_moved;
+
                 walk_scope(*stmt->else_scope);
+
                 _moved = before;
+                _maybe_moved = maybe_before;
             }
 
             break;
@@ -845,27 +893,73 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             auto *stmt = static_cast<IfStatementNode *>(node);
             stmt->condition = walk_value_edge(stmt->condition);
 
-            // each arm moves out of its own copy of the state, and the two are merged by union: a
-            // variable moved on either side is unset afterwards. reading pessimism into that is the
-            // wrong way round - the alternative is a variable whose validity you can only determine
-            // by simulating the branch in your head
-            auto before = _moved;
+            // each arm moves out of its own copy of the state, and the arms that *reach the code after
+            // the `if`* are merged by union: a variable moved on either side is unset afterwards.
+            // reading pessimism into that is the wrong way round - the alternative is a variable whose
+            // validity you can only determine by simulating the branch in your head
+            const auto before = _moved;
+            const auto maybe_before = _maybe_moved;
 
-            std::unordered_set<const VarDeclNode *> after_if;
+            // an arm with no block falls through, moving nothing - which is what the snapshot it starts
+            // out as says. an arm that *has* a block hands its result over rather than being copied out
+            // of: the restore below overwrites `_moved` from the snapshot on the next line anyway, so the
+            // arm's set has no second reader
+            bool if_joins = true;
+            auto after_if = before;
+            auto maybe_after_if = maybe_before;
+
             if (stmt->if_scope != nullptr) {
-                walk_scope(*stmt->if_scope);
-                after_if = _moved;
+                if_joins = walk_scope(*stmt->if_scope) == ExitKind::t_none;
+                after_if = std::move(_moved);
+                maybe_after_if = std::move(_maybe_moved);
             }
 
             _moved = before;
+            _maybe_moved = maybe_before;
 
-            std::unordered_set<const VarDeclNode *> after_else = before;
+            bool else_joins = true;
+            auto after_else = before;
+            auto maybe_after_else = maybe_before;
+
             if (stmt->else_scope != nullptr) {
-                walk_scope(*stmt->else_scope);
-                after_else = _moved;
+                else_joins = walk_scope(*stmt->else_scope) == ExitKind::t_none;
+                after_else = std::move(_moved);
+                maybe_after_else = std::move(_maybe_moved);
             }
 
             _moved = before;
+            _maybe_moved = maybe_before;
+
+            // **neither arm comes back.** the code after the `if` is unreachable, so there is no state
+            // for it to be wrong about. what each arm moved has already gone where it belongs - onto a
+            // `return`'s unwind, or onto the enclosing loop's frame
+            if (!if_joins && !else_joins) {
+                break;
+            }
+
+            // **an arm that leaves contributes nothing to the join.** it does not reach the code after
+            // the `if`, so what it moved is not visible there - and it is not an "other branch" for the
+            // arm that does reach it to disagree with. a constructor whose `if` arm returns `$this`
+            // moves it on that path only, and merging that into the fall-through is what used to read
+            // as a conditional move
+            //
+            // spelled as the remaining arm standing in for the one that left: it is then both sides of
+            // the comparison below, so the union is its own state and there is nothing to report
+            if (!if_joins) {
+                after_if = after_else;
+                maybe_after_if = maybe_after_else;
+            }
+            else if (!else_joins) {
+                after_else = after_if;
+                maybe_after_else = maybe_after_if;
+            }
+
+            // a decl stays *definitely* moved only where no reaching arm was unsure about it, which is
+            // why this is the arms' own sets rather than the snapshot: an arm that moved outright what
+            // was merely maybe-moved before the `if` erased it, and that erase must survive the merge
+            _maybe_moved = maybe_after_if;
+            _maybe_moved.insert(maybe_after_else.begin(), maybe_after_else.end());
+
             for (const auto *decl : after_if) {
                 if (_moved.insert(decl).second && after_else.count(decl) == 0) {
                     _maybe_moved.insert(decl);
@@ -899,20 +993,35 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     outer.insert(frame.locals.begin(), frame.locals.end());
                 }
 
-                auto before = _moved;
+                const auto before = _moved;
 
                 // the frame walk_scope is about to push for the body, recorded here rather than inside
                 // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
                 // only tells it whether the frame it needs is already there
-                _loop_frames.push_back(_frames.size());
-                walk_scope(*stmt->loop_scope);
+                _loop_frames.push_back(LoopFrame{_frames.size(), {}, {}});
+                const ExitKind body_exit = walk_scope(*stmt->loop_scope);
+                const LoopFrame body = std::move(_loop_frames.back());
                 _loop_frames.pop_back();
 
-                // note _moved is deliberately *not* saved and restored around the body, and a break's
-                // moves must not be either: a break goes to the code after the loop, so what it moved is
-                // gone there. that is the opposite of the `guard` arm's treatment, whose else block
-                // cannot fall through at all
-                for (const auto *decl : _moved) {
+                // **the state that reaches the back edge**, which is what the diagnostic below is about:
+                // the body's fall-through where it has one, plus every `continue`. a body that always
+                // leaves has no fall-through, so the header is re-entered only by a `continue` - and by
+                // nothing at all if there is none
+                auto back_edge = body_exit == ExitKind::t_none ? _moved : before;
+                back_edge.insert(body.continue_moved.begin(), body.continue_moved.end());
+
+                // **and the state that reaches the code after the loop**: the back edge - the condition
+                // is what the loop is left by, and it is read from the header - plus every `break`
+                auto after_loop = back_edge;
+                after_loop.insert(body.break_moved.begin(), body.break_moved.end());
+
+                // judged over both, and that is the over-approximation this keeps. a `break` runs at
+                // most once, so moving an outer local on that path does not repeat - but the loop can
+                // also be left through its condition, where the value was never moved and the drop after
+                // the loop would run on it, and AST::scope_exit_kind deliberately answers nothing about
+                // a loop's trip count (`while (true)` included). so "moved anywhere inside the loop"
+                // stays the rule, and a break-only move is refused with the rest
+                for (const auto *decl : after_loop) {
                     if (before.count(decl) > 0 || outer.count(decl) == 0) {
                         continue;
                     }
@@ -925,6 +1034,16 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                             "inside one.",
                             decl->name_full()));
                 }
+
+                // a decl only a `break` moved is one the condition-exit path did not, so a read after
+                // the loop says *may* have been moved rather than claiming it was
+                for (const auto *decl : body.break_moved) {
+                    if (back_edge.count(decl) == 0) {
+                        _maybe_moved.insert(decl);
+                    }
+                }
+
+                _moved = std::move(after_loop);
             }
             break;
         }
@@ -1579,29 +1698,6 @@ ExprNode *OwnershipPass::arrive_value(
     }
 
     if (wanted.is_interface()) {
-        // **the widening usually arrives as an implicit cast**, inserted by AST::CallResolver to reconcile
-        // the argument with the parameter - and a cast is not a place, so the retain further down took the
-        // non-place early return and never fired. the callee still released its by-value parameter, so the
-        // caller gave away a reference it never added and the object was freed while still in use.
-        //
-        // the retain belongs *inside* the cast, around the class place: RetainExprNode has to be typed as
-        // the **class** for codegen to move the right count, and the cast then widens the retained value.
-        // idempotent across rounds by the same mechanism the direct case is - next round the operand is a
-        // RetainExprNode, which is not a place, so this cannot wrap twice
-        if (expr->get_node_type() == NodeType::n_type_cast) {
-            auto *cast = static_cast<TypeCastNode *>(expr);
-
-            if (cast->is_implcit && cast->expr != nullptr
-                && cast->expr->result_type().is_class()
-                && is_place_expression(*cast->expr)) {
-                ensure_class_deinit(cast->expr->result_type(), location_of_expression(cast->expr));
-
-                cast->expr = &_current_module->nodes.emplace_back<RetainExprNode>(cast->expr);
-                _changed = true;
-                return expr;
-            }
-        }
-
         // **wherever a class is about to be erased, its deinit has to exist** - and this is the last place
         // the concrete class is known. an erased value's release reaches the class's release thunk through
         // its vtable, and that thunk runs the deinit when the count hits zero; without one it frees the
@@ -1611,7 +1707,11 @@ ExprNode *OwnershipPass::arrive_value(
         // *call result* is already one reference nobody else holds and takes an early return further down,
         // so `Drawable $d = Circle(1.0);` - a program whose only handle is erased - skipped that arm and
         // silently tore the object down without its destructor
-        const ValueType source = expr->result_type();
+        //
+        // asked **under** the implicit casts, because the widening usually arrives as one and the cast's
+        // own type is the interface, which names no class to give a deinit to
+        const ExprNode *widened = strip_implicit_casts(expr);
+        const ValueType source = widened != nullptr ? widened->result_type() : expr->result_type();
 
         if (source.is_class()) {
             ensure_class_deinit(source, location_of_expression(expr));
@@ -1659,6 +1759,31 @@ ExprNode *OwnershipPass::arrive_value(
                 param->name_full()));
 
         return walk_expression(expr);
+    }
+
+    // **an implicit cast is transparent to value arrival**, and what is under it arrives as its own
+    // type. AST::CallResolver wraps an argument in one whenever `is_implicitly_convertible` declines,
+    // which for a borrow parameter read into a by-value parameter it always does: this pass runs
+    // *inside* the fixpoint, so the argument is still `ptr<const T>` where the parameter says `T` and
+    // AST::PointerAdjuster has not yet written the deref that reconciles them. a cast is
+    // `t_materializable`, so the place test below took the non-place early return and the value was
+    // handed over with no copy and no retain - two owners, one reference count, and the first teardown
+    // frees what the other still names
+    //
+    // the copy belongs *inside* the cast, around the place: a RetainExprNode has to be typed as the
+    // value for codegen to move the right count, and a copy constructor call has to be the value's
+    // rather than whatever the cast reconciled it to. that is also what makes the interface widening
+    // above a consequence of this rule rather than an arm of its own
+    //
+    // idempotent across rounds: next round the operand is a retain or a call, neither of which is a
+    // place, so this cannot wrap twice. `param` is not forwarded - the `mv` rule above has already been
+    // asked of the outer expression, and the parameter's own type is not what arrives under the cast
+    if (TypeCastNode *cast = place_under_implicit_cast(*expr)) {
+        cast->expr = arrive_value(
+            cast->expr, ValueType::make_mutable(value_type_of(cast->expr->result_type())),
+            nullptr, destination);
+
+        return expr;
     }
 
     expr = walk_expression(expr);

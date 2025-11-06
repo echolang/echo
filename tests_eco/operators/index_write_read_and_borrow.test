@@ -1,0 +1,10 @@
+# `5` is the write read back, `7` the write made through the borrow, and the second `7` the same element
+# read through the const overload. all three on a container whose bracket also inserts, which is what
+# a container whose bracket also inserts could not do before an element write became its own declaration
+
+expect: ok
+
+--- OUT --->
+5
+7
+7

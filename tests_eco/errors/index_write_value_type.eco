@@ -1,0 +1,9 @@
+// the value operand is an ordinary call argument now, so a wrong type is reported the way every other
+// argument mismatch is - against the one operator the container declares, and naming the **value**.
+//
+// which operand gets named is AST::can_instantiate's business: `V` is mentioned by the receiver and by the
+// value, and argument 0's bindings are authoritative - so `V` binds from the type the author declared and
+// the value is what has to fit. bound from the value instead, this blamed the receiver
+map<string, int32> $m = map<string, int32>();
+
+$m['a'] = 'not an int';

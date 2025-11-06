@@ -1,0 +1,10 @@
+// a `const` map has no write contract to reach. said here, at the write, rather than left to come back
+// from the call as "no overload of 'operator []=' accepts these arguments" with a candidate list - which
+// is true and useless beside the message every other const write gets
+map<string, int32> $m = map<string, int32>();
+
+$m['a'] = 1;
+
+const map<string, int32>& $ro = &$m;
+
+$ro['a'] = 2;

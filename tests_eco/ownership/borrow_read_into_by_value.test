@@ -1,0 +1,20 @@
+# the first of each pair is through a `const T&`, the second through a mutable `T&` - both take the
+# same implicit cast, so both have to copy. the third line of each block is the source afterwards:
+# unchanged, which is what says the copy was a copy and not a hand-over
+#
+# `11` is the declared copy constructor having run: it writes the source's value plus one, so a copy
+# that did not happen would read `10` here and `10` again below
+
+expect: ok
+
+--- OUT --->
+2
+2
+1
+11
+11
+10
+2
+2
+1
+0

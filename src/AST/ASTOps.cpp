@@ -101,6 +101,7 @@ const char *AST::op_fixity_name(AST::OpFixity fixity)
         case OpFixity::t_prefix: return "prefix";
         case OpFixity::t_suffix: return "suffix";
         case OpFixity::t_index: return "index";
+        case OpFixity::t_index_write: return "index write";
     }
 
     return "unknown";
@@ -139,6 +140,12 @@ AST::OperatorRegistry::OperatorRegistry()
     register_predefined_token_op(Token::Type::t_op_pow);
     register_predefined_token_op(Token::Type::t_op_inc);
     register_predefined_token_op(Token::Type::t_op_dec);
+    // **`!` carries no precedence tier**, deliberately: it is prefix-only, so it never enters the
+    // shunting yard as an operator part and there is nothing for a tier to order it against.
+    // registered all the same, because `get_operator(TokenReference)` is how AST::TypeChecker and
+    // AST::OperatorRewriter ask what a UnaryExprNode's symbol means - an unregistered `!` answers
+    // null there and every use of it is refused after it finally parses
+    register_predefined_token_op(Token::Type::t_exclamation);
 }
 
 void AST::OperatorRegistry::register_predefined_token_op(const Token::Type &type)

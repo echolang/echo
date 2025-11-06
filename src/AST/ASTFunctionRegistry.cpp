@@ -7,8 +7,6 @@
 
 #include <fmt/core.h>
 
-#include <cassert>
-
 // compared one parameter at a time so a mismatch stops at the first, rather than building a vector
 // per candidate - this runs for every declaration in the bundle
 bool AST::signatures_match(const AST::FunctionDeclNode *candidate, const std::vector<AST::ValueType> &parameter_types)
@@ -41,7 +39,8 @@ namespace
     }
 }
 
-bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
+bool AST::FunctionRegistry::claim_declaration_site(
+    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
 {
     if (decl == nullptr || decl->is_anonymous()) {
         return false;
@@ -58,7 +57,20 @@ bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
         // node at one site would mean the identity is wrong. the failure would otherwise be silent,
         // this path reading it as "the second pass came back around" and dropping the loser from
         // its overload set
-        assert(claimed->second == decl && "two declarations claim one declaration site");
+        //
+        // reported rather than asserted, because it is reachable from *malformed* input: the passes
+        // walk the same tokens, so anything that makes one of them read a different block structure
+        // than another lands here. an assert gives no location and, under NDEBUG, is exactly the
+        // silent path above. this is a defect in the compiler either way, and the location is the
+        // only thing anybody can act on
+        if (claimed->second != decl) {
+            collector.collect_issue<AST::Issue::GenericError>(
+                at,
+                fmt::format(
+                    "'{}' was parsed as two separate declarations at one declaration site - the parse "
+                    "passes disagree about the structure of this file. This is a defect in the compiler.",
+                    decl->func_name()));
+        }
 
         return false;
     }
@@ -72,7 +84,7 @@ bool AST::FunctionRegistry::claim_declaration_site(AST::FunctionDeclNode *decl)
 void AST::FunctionRegistry::register_function(
     AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
 {
-    if (!claim_declaration_site(decl)) {
+    if (!claim_declaration_site(collector, at, decl)) {
         return;
     }
 
@@ -106,7 +118,7 @@ void AST::FunctionRegistry::register_member_function(
 {
     // the declaration site is a real token here (a method is written where its name is written,
     // unlike a constructor), so the two passes reconcile without a virtual token
-    if (!claim_declaration_site(decl)) {
+    if (!claim_declaration_site(collector, at, decl)) {
         return;
     }
 
@@ -131,7 +143,7 @@ void AST::FunctionRegistry::register_destructor(
     // the `destructor` keyword is a real token at a fixed index, so the two passes reconcile on it
     // exactly as a method reconciles on its name token. an unclaimed site means the body pass coming
     // back around to the node the declaration pass registered - there is nothing left to do
-    if (!claim_declaration_site(decl)) {
+    if (!claim_declaration_site(collector, at, decl)) {
         return;
     }
 
@@ -164,9 +176,14 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     return nullptr;
 }
 
-std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
+const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::overloads(
     const std::string &name, const AST::Namespace &ns) const
 {
+    // the answer for a name nothing declares. one object rather than a fresh empty vector per ask, and
+    // what lets this hand back a reference at all
+    static const std::vector<FunctionDeclNode *> none;
+
+
     // innermost first. the first namespace that has *any* candidate for the name answers it
     // entirely - an outer namespace does not extend an inner one's overload set, it is hidden by
     // it, exactly as a local variable hides an outer one of the same name
@@ -184,7 +201,7 @@ std::vector<AST::FunctionDeclNode *> AST::FunctionRegistry::overloads(
         return candidates->second;
     }
 
-    return {};
+    return none;
 }
 
 AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &declaration_token) const

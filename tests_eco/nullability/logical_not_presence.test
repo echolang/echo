@@ -1,0 +1,25 @@
+# each pair of lines is one value asked twice, once with `!` and once with `== null`. they have to
+# read the same, which is the whole of what makes `!` a fourth spelling of the presence question
+# rather than a second answer to it
+
+expect: ok
+
+--- OUT --->
+1
+1
+0
+0
+1
+1
+0
+0
+1
+1
+0
+0
+1
+1
+0
+0
+0
+0

@@ -2,6 +2,8 @@
 1024
 27
 1
+1099511627776
+243
 --- IR --->
 CHECK: define i32 @main(
 
@@ -10,4 +12,15 @@ CHECK: define i32 @main(
 CHECK: call double @llvm.pow.f64(double
 CHECK: call double @llvm.pow.f64(double
 CHECK: call double @llvm.pow.f64(double
+
+# the int64 case: the result lands in the operation's own type, so nothing here narrows to i32.
+# spelled as the absence of `to i32` rather than a positive check on the width, because a directive
+# is a plain substring and the register numbers in `fptosi double %9 to i64` are not stable
+CHECK: call double @llvm.pow.f64(double
+CHECK-NOT: to i32
+CHECK: call double @llvm.pow.f64(double
+
+# the uint64 case, converted unsigned in both directions
+CHECK-NOT: fptosi
+CHECK: fptoui double
 CHECK-NOT: llvm.pow.f64.f64

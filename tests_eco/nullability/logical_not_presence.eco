@@ -1,0 +1,47 @@
+// `!$x` on a value that may be absent is a **presence test** - the same one `$x == null` is, and the
+// point of this case is that the two never disagree. AST::unary_has_builtin_meaning asks
+// AST::destination_admits_null, which is the identical predicate binary_has_builtin_meaning's
+// presence arm reads, and ExprCodegen emits the same TypeLowering::gen_has_value inverted
+//
+// every line prints the pair, so a divergence shows as two different digits beside each other
+
+struct P { int32 $v; }
+class C { int32 $v; }
+
+// a nullable struct - wrapped, so presence is a tag beside the value
+P? $ps = null;
+P? $pv = P(1);
+
+echo !$ps; echo $ps == null;
+echo !$pv; echo $pv == null;
+
+// a nullable class handle - free over the address
+C? $cn = null;
+C? $cv = C(2);
+
+echo !$cn; echo $cn == null;
+echo !$cv; echo $cv == null;
+
+// a wrapped primitive
+int32? $on = null;
+int32? $ov = 5;
+
+echo !$on; echo $on == null;
+echo !$ov; echo $ov == null;
+
+// a pointer, which is asked through `:$` - reading one auto-derefs, so `!$p` is a question about
+// the pointee and `!$p:$` is the question about the address. `!` inherits that rule rather than
+// carrying one of its own
+int32 $i = 7;
+ptr<int32> $pn = null;
+ptr<int32> $pp = &$i;
+
+echo !$pn:$; echo $pn:$ == null;
+echo !$pp:$; echo $pp:$ == null;
+
+// a weak handle, which is where the two spellings used to disagree: `!$w` read gen_has_value and
+// `$w == null` fell off the end of gen_binary_expr with no arm for a weak at all
+C $owner = C(3);
+weak<C> $w = &$owner;
+
+echo !$w; echo $w == null;

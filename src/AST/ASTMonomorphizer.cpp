@@ -17,6 +17,7 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <ranges>
 #include <cstdlib>
 #include <iostream>
 
@@ -414,6 +415,30 @@ namespace AST
             // exactly as determine_type_args is about it: the body is never emitted, and reporting it
             // would blame a declaration for going unused
             if (call->decl != nullptr && call->decl->is_generic()) {
+                continue;
+            }
+
+            // **an argument that still mentions a type parameter is a template's, not a program's.**
+            //
+            // the same silence report_unknown_name keeps for a receiver, and for the same reason one
+            // argument further out: this call sits in an un-instantiated body, the clones the fixpoint
+            // made are what carry concrete argument types, and reporting the template's would blame the
+            // one body that is never emitted. If nobody instantiated it there is nothing to report; if
+            // somebody did, the clone reports for itself with the types the author can actually see.
+            //
+            // what makes this load-bearing rather than tidy is an **overload set** over a type parameter.
+            // `hash::of($key)` inside `map<K, V>` is undecidable in the template - every concrete
+            // overload scores neutrally against a bare `K`, so match_function answers t_undecidable - and
+            // it becomes decidable in `map<string, int32>`'s clone. Without this, a standard library type
+            // could not call an overload set on its own key type at all, and the diagnostic named every
+            // overload in the set as though the author had written an ambiguous call
+            const bool argument_mentions_a_type_param = std::ranges::any_of(
+                call->arguments,
+                [](const ExprNode *argument) {
+                    return argument != nullptr && contains_type_param(argument->result_type());
+                });
+
+            if (argument_mentions_a_type_param) {
                 continue;
             }
 

@@ -1,0 +1,46 @@
+// **a non-nullable value passed to a nullable parameter.** `int32` reaches `int32?` legally, so
+// `is_implicitly_convertible` says yes and AST::CallResolver used to insert no conversion at all - but a `T?`
+// with no spare null value lowers to `{ i1 __has, T }`, so codegen was handed a bare `i32` for a
+// `{ i1, i32 }` parameter and the IR verifier caught it as an *internal* error rather than a diagnostic.
+//
+// `AST::ValueType::is_wrapped_optional` is the one place those two questions come apart, and the cast is asked
+// for there. no generics are needed to reach it - the first case below is the whole bug
+function take(int32? $v) : void
+{
+    echo $v ?? -1;
+}
+
+take(5);
+take(null);
+
+int32? $already = 7;
+take($already);
+
+// through a generic parameter, which is how a container reaches it
+array<int32?> $a = array<int32?>();
+
+$a->push(5);
+$a->push(null);
+
+echo $a[0] ?? -1;
+echo $a[1] ?? -1;
+
+// and through an element write, where the value crosses the same boundary
+map<string, int32?> $m = map<string, int32?>();
+
+$m['a'] = 5;
+$m['b'] = null;
+
+echo $m['a'] ?? -1;
+echo $m['b'] ?? -1;
+
+// a struct is wrapped the same way - two words rather than a tagged int, and nothing here knows that
+struct point { int32 $x; }
+
+function place(point? $p) : void
+{
+    echo $p == null;
+}
+
+place(point(1));
+place(null);

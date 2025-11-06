@@ -1,32 +1,12 @@
 #include "AST/ASTNullability.h"
 
 #include "AST/ASTModule.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
 #include "AST/NullNode.h"
 #include "AST/TypeCastNode.h"
 
 #include <fmt/format.h>
-
-namespace
-{
-    // looks through the implicit casts the parser and monomorphizer wrap around an argument, to the
-    // expression the user actually wrote. an explicit cast stops the walk: the user wrote that one, and
-    // `(int32?)null` is a null they meant to give a type to
-    AST::ExprNode *strip_implicit_casts(AST::ExprNode *expr)
-    {
-        while (expr != nullptr && expr->get_node_type() == AST::NodeType::n_type_cast) {
-            auto *cast = static_cast<AST::TypeCastNode *>(expr);
-
-            if (!cast->is_implcit) {
-                break;
-            }
-
-            expr = cast->expr;
-        }
-
-        return expr;
-    }
-}
 
 AST::NullNode *AST::written_null_of(AST::ExprNode *expr)
 {
@@ -130,4 +110,12 @@ AST::ValueType AST::unwrapped_type_of(const AST::ValueType &type)
     }
 
     return ValueType::make_non_nullable(type);
+}
+
+std::string AST::null_operand_refusal(const std::string &operator_spelling)
+{
+    return fmt::format(
+        "no overload of operator '{}' accepts a null operand. If the value may be absent, give it a "
+        "nullable type ('T?'); if it is always there, there is nothing to compare against null.",
+        operator_spelling);
 }

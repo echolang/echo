@@ -1,12 +1,31 @@
 #include "AST/ExprNode.h"
+#include "AST/ASTPlaceExpr.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/LiteralValueNode.h"
 #include <map>
 
+// **`!` answers bool whatever it was applied to, and `-` answers its operand.** the two are not one
+// rule, which is why this is a switch and not the one-liner it used to be: `!` over a nullable is a
+// presence test, so the operand's type is `T?` and the answer is `bool` - the same divergence
+// BinaryExprNode::result_type records below for a comparison
+AST::ValueType AST::UnaryExprNode::result_type() const
+{
+    if (token_operator.type() == Token::Type::t_exclamation) {
+        return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+    }
+
+    if (expr == nullptr) {
+        return AST::ValueType::make_void();
+    }
+
+    // negation preserves the operand type
+    return expr->result_type();
+}
+
 AST::ValueType AST::BinaryExprNode::result_type() const
-{   
+{
     if (lhs == nullptr || rhs == nullptr) {
         return AST::ValueType::make_void();
     }
@@ -53,6 +72,23 @@ AST::ValueType AST::BinaryExprNode::result_type() const
         && (raw_left.is_class() || raw_right.is_class()
             || raw_left.is_nullable() || raw_right.is_nullable()
             || raw_left.is_weak() || raw_right.is_weak())) {
+        return AST::ValueType(AST::ValueTypePrimitive::t_bool);
+    }
+
+    // **a comparison is a bool, whatever it compared.** the two arms above answer this for a pointer,
+    // a class, a nullable and a weak; every other operand pair used to fall through to the "same type on
+    // both sides" rule at the bottom, so `$a == $b` over two `int32`s answered **`int32`**.
+    //
+    // which mostly hid: `echo $a == $b` prints 1 or 0 either way, and a `bool` destination accepts the
+    // integer. what it did not survive is a comparison becoming an *operand*:
+    // `if ($a == 0 || $b > 3)` handed `gen_binary_expr` two `int32`s for the `||`, which took its
+    // integer arm, found no case for a logical operator and threw an internal compiler error - so
+    // `&&` and `||` over two comparisons could not be written at all. `const if` was unaffected, because
+    // AST::const_fold answers the two logical operators from the folded values rather than from a type
+    //
+    // asked of AST::Operator::is_comparison, which is the one owner of "which symbols are these" - the
+    // six of them, and deliberately not `&&`/`||`, whose bool-ness comes from their operands being bools
+    if (op_node != nullptr && op_node->op != nullptr && op_node->op->is_comparison()) {
         return AST::ValueType(AST::ValueTypePrimitive::t_bool);
     }
 
@@ -396,13 +432,7 @@ std::optional<std::string> AST::literal_string_value(const AST::ExprNode *expr)
     // through the implicit casts the resolver wraps an argument in to make it fit its parameter.
     // without this a nullability or const adjustment around an otherwise perfectly good literal
     // would read as "not a literal", and the message would silently lose its text
-    while (expr != nullptr && expr->get_node_type() == AST::NodeType::n_type_cast) {
-        const auto *cast = static_cast<const AST::TypeCastNode *>(expr);
-        if (!cast->is_implcit) {
-            break;
-        }
-        expr = cast->expr;
-    }
+    expr = AST::strip_implicit_casts(expr);
 
     if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_literal_string) {
         return std::nullopt;

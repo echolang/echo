@@ -143,6 +143,16 @@ usize $page = modlimits::PAGE;
 The clone lands in the *consuming* module, which is also what keeps the library's object independent of who
 consumes it — the invariant the module cache rests on.
 
+The standard library is a library module like any other, and this is how it publishes `std::math::PI`,
+`std::math::TAU`, `std::math::E` and the rest. Each one comes in two spellings — `PI` is a `float64` and
+`PI_F32` a `float` — because a constant *is* its literal and a float literal is double precision unless it
+ends in `f`, so the two are the ordinary overload-selecting types rather than a conversion:
+
+```echo
+echo std::math::cos(std::math::PI);       // the float64 overload
+echo std::math::cos(std::math::PI_F32);   // the float one
+```
+
 ## Typed and untyped
 
 An untyped constant is its initializer, exactly as written, so `const MAX = 100;` hands each use site an

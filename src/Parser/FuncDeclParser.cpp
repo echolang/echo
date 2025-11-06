@@ -8,6 +8,7 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/AttributeNode.h"
 #include "AST/ExprNode.h"
 #include "AST/MemberAccessNode.h"
@@ -172,8 +173,7 @@ void Parser::skip_declaration_body(Parser::Payload &payload)
     }
 }
 
-// recovery for a `function` this parser has decided not to read: past its signature and its whole body
-static void skip_refused_function(Parser::Payload &payload)
+void Parser::skip_refused_function(Parser::Payload &payload)
 {
     // the signature cannot contain either token, so the first one found opens the body or ends a
     // bodyless declaration - and from there skip_declaration_body knows how to consume it
@@ -284,9 +284,8 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // inside one block, which the enclosing lexical namespace cannot tell apart.
     //
     // the *position* rather than a counter, and this one carries a second reason beyond reproducibility:
-    // the environment type is minted as `<this name>.env` in declaring_namespace(), which skips lexical
-    // namespaces - so the env type's identity, its typeinfo global and its release thunk all rest on this
-    // string alone being unique
+    // the environment type is minted as `<this name>.env`, and its identity, its typeinfo global and its
+    // release thunk all rest on this string alone being unique
     auto name_token = payload.context.make_virtual_token(
         fmt::format("closure${}", payload.context.site_discriminator(function_token)),
         Token::Type::t_identifier,
@@ -308,7 +307,7 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
             payload.context.code_ref(function_token),
             "A closure cannot be written inside a generic function's body yet - it has no access to the "
             "enclosing type parameters.");
-        skip_refused_function(payload);
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -323,7 +322,7 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     AST::ComplexType *environment = payload.collector.type_registry.create_anonymous_type(
         closure_decl->func_name() + ".env",
         AST::ComplexTypeKind::t_class,
-        payload.context.declaring_namespace());
+        payload.context.current_namespace);
 
     // `args[0]`, ahead of everything the user wrote - which is where capture_variable reads it back from
     push_environment_param(payload, *closure_decl, closure_scope, environment, function_token);
@@ -583,7 +582,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // next token should be an identifier aka the function name
     if (!cursor.is_type(Token::Type::t_identifier)) {
         payload.collect_unexpected_token(Token::Type::t_identifier);
-        cursor.try_skip_to_next_statement();
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -603,7 +602,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
             if (!cursor.is_type(Token::Type::t_identifier)) {
                 payload.collect_unexpected_token(Token::Type::t_identifier);
-                cursor.try_skip_to_next_statement();
+                Parser::skip_refused_function(payload);
                 return nullptr;
             }
         }
@@ -619,7 +618,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // next token needs to be an open parenthesis
     if (!cursor.is_type(Token::Type::t_open_paren)) {
         payload.collect_unexpected_token(Token::Type::t_open_paren);
-        cursor.try_skip_to_next_statement();
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -654,7 +653,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
                 "'{}' cannot be declared inside a generic function's body - it has no access to the "
                 "enclosing type parameters. Declare it at file scope instead.",
                 nametoken.value()));
-        skip_refused_function(payload);
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -717,7 +716,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // next token should be ":" for the return type
     if (!cursor.is_type(Token::Type::t_colon)) {
         payload.collect_unexpected_token(Token::Type::t_colon);
-        cursor.try_skip_to_next_statement();
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -727,7 +726,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // parse the return type
     if (!can_parse_type(payload)) {
         payload.collect_unexpected_token(Token::Type::t_identifier);
-        cursor.try_skip_to_next_statement();
+        Parser::skip_refused_function(payload);
         return nullptr;
     }
 
@@ -779,7 +778,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(nametoken),
                 "An extern function cannot be generic - a single C symbol has no per-instantiation body");
-            cursor.try_skip_to_next_statement();
+            Parser::skip_refused_function(payload);
             return nullptr;
         }
 
@@ -789,7 +788,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(nametoken),
                 "An extern function declaration cannot have a body - it must end with ';'");
-            cursor.try_skip_to_next_statement();
+            Parser::skip_refused_function(payload);
             return nullptr;
         }
 

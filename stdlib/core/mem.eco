@@ -40,15 +40,20 @@ function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 function free_bytes(ptr<uint8> $p) : void;
 
 /**
- * The two byte-level operations that move memory around without ever asking for any.
+ * The three byte-level operations that move memory around without ever asking for any.
  *
  * Still bound straight to C, because there is nothing about them the compiler needs to know: they
  * neither take a block out of the allocator nor give one back, so they are invisible to the count.
+ *
+ * `move_bytes` is the one of the three whose regions may **overlap**, which is the whole reason it
+ * is here beside `copy_bytes` rather than folded into it: `copy_bytes` promises they do not, and a
+ * container shifting a tail down by one element is exactly the case that breaks the promise.
  *
  * `int32` stands in for C's `int`; it agrees on every target currently supported.
  */
 extern {
     function memcpy as copy_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
+    function memmove as move_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memset as set_bytes(ptr<uint8> $p, int32 $value, usize $bytes) : ptr<uint8>;
 }
 
@@ -126,6 +131,32 @@ function needs_destruction<T>() : bool;
 function take<T>(T& $place) : T;
 
 /**
+ * `$value`, stored into a place that **holds nothing**. The mirror of `take` above.
+ *
+ * An ordinary `$place = $value` ends whatever the destination held before storing the new value,
+ * which is right for storage that holds something and wrong for storage that does not: over a slot
+ * fresh out of `alloc` it runs a destructor over whatever bytes the allocator handed back. This is
+ * the write that makes no such assumption.
+ *
+ * There is no other spelling for it. `array<T>` gets the rule from the *shape* of its append
+ * operator - `$a[] = $value` names a slot that has just been grown into existence, and the parser
+ * reads that off the empty brackets - so a container whose slots are appended to never needs this.
+ * One that seats an element at an arbitrary index has no shape to get it from, and `map<K, V>` is
+ * written on this for exactly that reason: its keys and values go into slots a probe chose.
+ *
+ * **Nothing checks this for you**, and it is unsafe in the mirror direction to `take`: initialize a
+ * place that already holds a value and that value leaks, as taking twice from one place releases one
+ * value twice. Like `take` it is only sound over storage nothing else accounts for - a variable, a
+ * property and a temporary are all refused, because a scope or an owner already owes each of them a
+ * teardown.
+ *
+ * `$value` arrives **by value**, so the caller's copy has already happened: this hands that owner
+ * over rather than duplicating it, exactly as `take`'s result is handed to its caller.
+ */
+#[builtin: "init"]
+function init<T>(T& $place, T $value) : void;
+
+/**
  * Allocates room for `$count` elements of `T`, uninitialized.
  *
  * Returns `null` when the allocation fails. Because the result is `ptr<T>` and not `T&`, the type
@@ -161,6 +192,19 @@ function free<T>(ptr<T> $p) : void
 function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 {
     copy_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
+}
+
+/**
+ * Moves `$count` elements from `$src` to `$dst`. The two regions **may** overlap.
+ *
+ * The one of the pair that copes with a container shifting a run of elements along by a slot, which
+ * `copy` above does not promise and must not be used for. Nothing is duplicated and nothing is
+ * destroyed: each element ends up somewhere else, so the count of owners is unchanged - which is what
+ * makes it correct for an owning `T` with no branch on `T` at all.
+ */
+function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
+{
+    move_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
 }
 
 /**

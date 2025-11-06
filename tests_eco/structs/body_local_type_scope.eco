@@ -1,0 +1,79 @@
+// a `struct` declared inside a `{ }` block belongs to the block, exactly as a `function` does: two
+// bodies may each declare one of the same name with different layouts, a block-local name hides a
+// file-scope one, and neither is reachable from outside the block that declared it. the type half of
+// nested_function_scope.eco
+
+struct P { int32 $z; }
+
+// two unrelated bodies, each with its own P - and the layouts differ, so a shared node would not even
+// type-check here, never mind mangle to one symbol
+function one() : int32
+{
+    struct P { int32 $x; }
+    P $p = P(41);
+    return $p->x + 1;
+}
+
+function two() : int32
+{
+    struct P { int32 $a; int32 $b; }
+    P $p = P(2, 3);
+    return $p->a * $p->b;
+}
+
+// two sibling blocks of *one* function: both render as `outer` to a human, so only the mangling
+// discriminator keeps them apart
+function siblings() : int32
+{
+    int32 $total = 0;
+
+    {
+        struct P { int32 $x; }
+        P $p = P(10);
+        $total = $total + $p->x;
+    }
+
+    {
+        struct P { int32 $y; int32 $z; }
+        P $p = P(1, 2);
+        $total = $total + $p->y + $p->z;
+    }
+
+    return $total;
+}
+
+// a constructor, a method and a destructor, all three emitted for a type only one block can name
+function with_members() : int32
+{
+    struct Box {
+        int32 $v;
+
+        function doubled() : int32 { return $this->v * 2; }
+
+        destructor() { echo "box gone"; }
+    }
+
+    Box $b = Box(21);
+    return $b->doubled();
+}
+
+// the declaration is read by the declaration pass before the body pass reaches a statement, so a use
+// written above it in the same block still resolves
+function used_before_declared() : int32
+{
+    return make(5)->x;
+
+    struct Q { int32 $x; }
+
+    function make(int32 $v) : Q { return Q($v); }
+}
+
+echo one();
+echo two();
+echo siblings();
+echo with_members();
+echo used_before_declared();
+
+// the file-scope P is untouched by any of them
+P $outer = P(7);
+echo $outer->z;

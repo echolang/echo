@@ -1,0 +1,63 @@
+// **a container that seats an element on demand declares two contracts over one bracket**, and the
+// bracket - the write and the borrow - and the *position* chooses between them, so all three spellings work:
+//
+//     $s[0] = 5;              the write contract
+//     echo $s[0];             the borrowing one
+//     int32& $r = &$s[0];     the same one, addressed
+//
+// this file used to be tests_eco/errors/initializing_index_cannot_be_read: the last two were refused, and
+// what refused them was that one operator could not promise both "the old value is ended"
+// and "hand me what is there". Two declarations can
+struct slots
+{
+    ptr<int32> $d;
+    usize $n;
+
+    constructor() { $this->d:$ = mem::alloc<int32>(4); $this->n = 0; }
+    destructor() { mem::free<int32>($this->d); }
+
+    function seat(usize $i) : usize
+    {
+        if ($i >= $this->n) { $this->n = $i + 1; }
+
+        return $i;
+    }
+}
+
+operator (slots& $s)[usize $i] = (int32 $v) : void
+{
+    $s->d:$[$s->seat($i)] = $v;
+}
+
+operator (slots& $s)[usize $i] : int32&
+{
+    assert($i < $s->n, 'slot not written');
+
+    return &$s->d:$[$i];
+}
+
+operator (const slots& $s)[usize $i] : const int32&
+{
+    assert($i < $s->n, 'slot not written');
+
+    return &$s->d:$[$i];
+}
+
+slots $s = slots();
+
+$s[0] = 5;
+
+// the read, which used to be the refusal
+echo $s[0];
+
+// and the borrow, which used to be the other one - a mutable receiver takes the mutable overload, so what
+// comes back is writable
+int32& $slot = &$s[0];
+$slot = 7;
+
+echo $s[0];
+
+// a const receiver takes the const overload instead, with no rule anywhere but argument_fit's ranking
+const slots& $ro = &$s;
+
+echo $ro[0];

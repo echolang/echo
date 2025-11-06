@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTDetach.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTRecursiveVisitor.h"
@@ -39,13 +40,16 @@ namespace AST
     //    operands are `T`, which AST::binary_has_builtin_meaning is deliberately non-committal about,
     //    so the parser takes the built-in path and builds a BinaryExprNode the substituted body then
     //    keeps (todo/A32)
+    //  - **a write through a bracket.** `$c[$k] = $v` is either one call that owns the whole
+    //    insert-or-replace or an ordinary write through a place, and which one it is depends on whether
+    //    `$c`'s type declares an element-write contract - AST::declares_index_write
     //
     // so this is **the parser's own decision, re-asked with the types a round produced**, through the
     // very same predicates and the very same operand normalizer - AST::parse_time_operand, because
     // this runs before AST::PointerAdjuster and a place read of a borrow is still a pointer here.
     // there is no second rule anywhere in this file, only a second moment.
     //
-    // **one walk, four rules**, and the walk is not this file's. it used to be a second complete
+    // **one walk, five rules**, and the walk is not this file's. it used to be a second complete
     // expression-edge switch parallel to PointerAdjuster's, which is exactly where a forgotten arm is
     // a silent miss - and both of them had forgotten the same four (`guard`, `??`, `?->`, `strong`).
     // AST::RecursiveVisitor owns the descent now; this pass overrides rewrite_value_edge and inherits
@@ -116,6 +120,24 @@ namespace AST
         // marked so on the node, which is what stops a reported error being reported every round
         void resolve_index(IndexExprNode &index_expr);
 
+        // rule 6 - **`$c[...] = v` over a container that declares an element-*write* contract becomes one
+        // call that owns the whole write.** `scope.children[index]` is the statement to look at; anything
+        // that is not an assignment through a bracket is left alone, and so is one whose receiver declares
+        // no write contract - which is `array<T>`, whose brackets are places and whose append form gets
+        // its rule from arity.
+        //
+        // **asked here rather than in visit_assign, and ahead of statement_edge.** resolve_index would
+        // otherwise already have decided the bracket is a *read* and moved its operands into that call,
+        // which is unrecoverable. the two decisions read one indexed_base_type() at one moment on purpose:
+        // split across a round they can disagree, and AST::OwnershipPass walks a body exactly once, ever.
+        // an undetermined base is the ordinary "ask again next round" - nothing is marked, so
+        // IndexExprNode::resolution_decided keeps OwnershipPass::body_is_concrete answering false.
+        //
+        // ahead of expand_array_literal too, and that ordering is also load-bearing: after it,
+        // `$m[$k] = [1, 2, 3]` would be reported as a literal that names no storage *and then* rewritten
+        // anyway, leaving a decided-but-unexpanded literal as a call argument
+        void resolve_index_write(ScopeNode &scope, size_t index);
+
         // rule 3 - a binary or unary node whose operands are concrete now and whose symbol has no
         // built-in meaning for them becomes a call to the declared operator. answers the node itself
         // when nothing changes, and the replacement when it does, so every caller reseats its edge
@@ -172,6 +194,12 @@ namespace AST
         // saved and restored around a nested scope's own loop, so a literal in an inner block is
         // wrapped there rather than escaping to the outer one
         std::vector<NodeReference> _hoisted;
+
+        // **the statements rule 6 discarded, batched.** AST::forget_subtree hands its walk to
+        // NodeCollection::forget, which is an erase-remove over every bucket of every module - so one call
+        // per discarded assignment is one whole-arena sweep per keyed write, per instantiation, per round.
+        // AST::ConstFolding batches for exactly this reason, and run_round() is what flushes it
+        DetachBatch _detached;
 
         // how many literals this module has hoisted, so their names are distinct - a statement may
         // hold two (`f([1, 2], [3, 4])`), and a `RAST` golden has to be able to tell them apart

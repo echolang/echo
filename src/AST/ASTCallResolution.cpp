@@ -8,6 +8,7 @@
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/TypeNode.h"
@@ -15,12 +16,51 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <cassert>
 
 namespace AST
 {
     namespace
     {
+        // **is any of these candidates a near miss?** - which for an operator is the question "does any
+        // of them name a type the author actually wrote here". operators all share the root namespace,
+        // so an overload set is the whole program's rather than this use site's: `operator +(A, A)`
+        // beside `$p + $q` where `$q` is a `B` is worth showing, and the standard library's
+        // `operator ==(const string&, const string&)` beside two structs is not
+        //
+        // compared on the named type, through the borrow and the const a parameter is declared with,
+        // since ValueType equality is exact and a `const A&` parameter would otherwise not match an `A`
+        // operand. a primitive operand answers false and rightly: `int32` is in half the signatures a
+        // program links
+        bool candidates_mention_operands(
+            const std::vector<FunctionDeclNode *> &candidates,
+            const std::vector<ValueType> &operand_types)
+        {
+            const auto names_the_same_type = [](const ValueType &a, const ValueType &b) {
+                return a.has_complex_type() && b.has_complex_type()
+                    && a.get_complex_type() == b.get_complex_type();
+            };
+
+            for (const FunctionDeclNode *candidate : candidates) {
+                for (const VarDeclNode *param : candidate->args) {
+                    if (param == nullptr || !param->has_type()) {
+                        continue;
+                    }
+
+                    const ValueType declared = value_type_of(param->type());
+
+                    for (const ValueType &operand : operand_types) {
+                        if (names_the_same_type(declared, value_type_of(operand))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
         // when a parameter is a borrow and the argument is addressable, wrap it in an AddrOfExprNode
         // so its address is passed instead of a loaded value. this is the implicit form of the
         // address-of that `&$x` makes explicit
@@ -288,6 +328,94 @@ namespace AST
             // t_no_candidates here means generic instantiation filtered every candidate out, so
             // nothing reached the matcher for it to have tied - the declarations that were tried are
             // what the user needs to see either way
+            //
+            // **an operator with nothing to list says it in its own words**, which is the third place
+            // that rule is applied and the same reason as the two in AST::TypeChecker: every `operator`
+            // declaration in the program shares the root namespace, so a program carries every
+            // operator's overload set whether it uses those types or not. `$s[] = 2;` on a slice was
+            // answered with nine candidates naming `map<K,V>` and `ordered_map<K,V>`, and `$p == null`
+            // on a struct with a list naming `const string&`
+            //
+            // **gated on `match.tied` being empty**, which is the whole of the distinction: a tie is
+            // made of candidates that nearly matched, so those *are* worth naming - indexing an
+            // `array<int32>` with a string is best answered by showing that the parameter is a `usize`.
+            // an empty tie is the fallback below reaching for every declaration in the root namespace,
+            // and that list is the same in every program whatever it was written about
+            //
+            // it used to reach the type checker's wording by accident wherever the set held one
+            // declaration: match rule 2 takes a lone candidate without consulting types at all, so the
+            // refusal came from the coercion, which knows it is an operator. a second `==` pair in the
+            // stdlib turned that into a real choice and the message degraded with it
+            if (!candidates.empty() && candidates.front()->is_operator()) {
+                const std::string spelling = candidates.front()->operator_spelling();
+                const Operator *op = _collector.operators.get_operator(spelling);
+
+                // **what is wrong with the operands comes first**, and it is the same rule
+                // TypeChecker::visitBinaryExpr reads for a use site the parser kept as a
+                // BinaryExprNode. which of the two a program reaches is decided by whether *anybody*
+                // declared an infix form of the symbol, so the answer must not depend on it
+                //
+                // asked here rather than ahead of the matcher because it is a fallback: a declared
+                // `operator (P $a) == (P? $b)` makes `$p == null` resolve, and a pre-gate would refuse
+                // a call that had a perfectly good candidate. operands are `parse_time_operand`,
+                // AST::PointerAdjuster running long after the fixpoint this sits in
+                if (op != nullptr && call.arguments.size() == 2) {
+                    const auto refusal = binary_operand_refusal(op,
+                        parse_time_operand(call.arguments[0]),
+                        parse_time_operand(call.arguments[1]));
+
+                    if (refusal.has_value()) {
+                        _collector.collect_issue<Issue::NoMatchingOverload>(at, *refusal);
+                        return Result::t_failed;
+                    }
+                }
+
+                // **a written `null` is its own refusal, whatever the tie says.** an unbound null has no
+                // type, so argument_fit answers t_undetermined for it against every candidate - the tie
+                // it produces is an artifact of the operand nobody could rank rather than a set of near
+                // misses, and the list would be the whole root namespace either way. the wording is
+                // AST::null_operand_refusal's, shared with the type checker, which reaches this same
+                // refusal from the other direction: one overload, taken by the matcher without
+                // consulting types at all, and refused by the coercion afterwards
+                const bool has_null_operand = std::any_of(
+                    call.arguments.begin(), call.arguments.end(),
+                    [](const ExprNode *operand) { return is_written_null(operand); });
+
+                if (has_null_operand) {
+                    _collector.collect_issue<Issue::NoMatchingOverload>(at, null_operand_refusal(spelling));
+                    return Result::t_failed;
+                }
+
+                // **a candidate that names neither operand is somebody else's declaration.** every
+                // `operator` shares the root namespace, so a program carries every operator's overload
+                // set whether it uses those types or not - and `$a == $b` on a struct was answered by
+                // listing the standard library's `string` pair, a type no file of the author's
+                // mentions. where nothing in the set is a near miss the useful sentence is the one a
+                // use site had before any operator was declared anywhere: these operands have no
+                // meaning for this symbol
+                //
+                // the converse is the whole reason this is a question rather than "is it built-in":
+                // `operator +(A, A)` beside `$p + $q` where `$q` is a `B` *is* a near miss, and the
+                // candidate list is exactly what says so. so is every custom symbol, whose candidates
+                // are by definition the author's
+                if (op != nullptr && !op->is_custom() && call.arguments.size() == 2
+                    && !candidates_mention_operands(candidates, argument_types)) {
+                    _collector.collect_issue<Issue::NoMatchingOverload>(at,
+                        binary_unsupported_operands(op,
+                            parse_time_operand(call.arguments[0]),
+                            parse_time_operand(call.arguments[1])));
+                    return Result::t_failed;
+                }
+
+                if (match.tied.empty()) {
+                    _collector.collect_issue<Issue::NoMatchingOverload>(at, fmt::format(
+                        "no overload of operator '{}' accepts {}. Declare one for it, or convert the "
+                        "operands first.",
+                        spelling, describe_operands(argument_types)));
+                    return Result::t_failed;
+                }
+            }
+
             _collector.collect_issue<Issue::NoMatchingOverload>(at, fmt::format(
                 "No overload of '{}' accepts these arguments. Candidates are:{}",
                 name, describe_candidates(match.tied.empty() ? candidates : match.tied)));
@@ -347,7 +475,17 @@ namespace AST
 
             // is_implicitly_convertible rather than ==, so a borrow passed where a nullable pointer
             // is expected does not acquire a cast codegen has no lowering for
-            if (!is_implicitly_convertible(coerced, expected)) {
+            //
+            // **a wrapped optional is the one place those two questions come apart**, and it needs the
+            // cast the first test declines to ask for. `int32` reaches `int32?` perfectly legally, so
+            // "implicitly convertible" says yes and nothing wraps it - but a `T?` with no spare null
+            // value lowers to `{ i1 __has, T }`, a different machine value, so codegen was handed a bare
+            // `i32` for a `{ i1, i32 }` parameter and the IR verifier caught it as an internal error.
+            // asked of AST::ValueType::is_wrapped_optional, the owner of "which shape does a `T?` have",
+            // because that is the whole of what distinguishes this from the borrow case above
+            const bool wraps_into_optional = expected.is_wrapped_optional() && !coerced.is_nullable();
+
+            if (!is_implicitly_convertible(coerced, expected) || wraps_into_optional) {
                 call.arguments[i] = &nodes.emplace_back<TypeCastNode>(expected, call.arguments[i], true);
             }
         }

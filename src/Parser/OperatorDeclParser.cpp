@@ -216,6 +216,27 @@ Parser::OperatorHeader Parser::read_operator_header(Parser::Payload &payload)
 
         skip_bracket_group(cursor);
 
+        // **the write form**, `operator (map<K, V>& $m)[const K& $key] = (V $value) : void`. one token of
+        // lookahead tells it from the borrowing form, and one is enough: after the bracket group the only
+        // thing the borrowing form can have is its `:`, and an `=` cannot be part of the symbol because
+        // the symbol was synthesised as `[]` rather than read from the tokens
+        //
+        // the spelling stays `[]` and the symbol token stays the `[`. the *fixity* is what differs, which
+        // is what mints the second decorated name and therefore the second overload set - the position a
+        // bracket sits in is then the whole of what chooses between the two contracts
+        if (cursor.is_type(Token::Type::t_assign)) {
+            header.fixity = AST::OpFixity::t_index_write;
+            cursor.skip(); // `=`
+
+            if (!cursor.is_type(Token::Type::t_open_paren)) {
+                payload.collect_unexpected_token(Token::Type::t_open_paren);
+                return header;
+            }
+
+            header.value_params = cursor.snapshot();
+            skip_paren_group(cursor);
+        }
+
         header.valid = true;
         return header;
     }
@@ -303,7 +324,12 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
     // the bracket is minted through its own path, which registers the spelling and stops there. see
     // OperatorRegistry::find_or_declare_bracket: a trie entry for `[` `]` would match the append form
     // `$a[]` in the shunting yard, where the postfix chain has already claimed the token
-    AST::Operator *op = header.fixity == AST::OpFixity::t_index
+    //
+    // **one registry entry for both bracket forms**, carrying two fixity bits. a second entry keyed
+    // `[]=` would buy nothing - `[` is never matched from the trie in the first place - and the two
+    // *overload sets* are what keep the contracts apart, which is the decorated name's job rather than
+    // the registry's
+    AST::Operator *op = AST::is_index_fixity(header.fixity)
         ? payload.collector.operators.find_or_declare_bracket()
         : payload.collector.operators.find_or_declare(header.symbol_tokens);
 
@@ -335,7 +361,7 @@ void Parser::publish_operator_symbol(Parser::Payload &payload, const OperatorHea
         // which binds tighter than every binary operator by construction and never reaches the
         // shunting yard - so a number here would be stored, compared against nothing and silently do
         // nothing. refused where it is written, like every other unreachable spelling in this file
-        if (header.fixity == AST::OpFixity::t_index) {
+        if (AST::is_index_fixity(header.fixity)) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(*header.symbol_token),
                 "An index operator cannot declare a precedence - '[' binds like '->', tighter than "
@@ -509,12 +535,27 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // recorded position rather than from wherever the symbol ended. an empty `[]` is the append form
     // and parses to no parameters at all, which is the whole of how the two are told apart later:
     // one overload set, separated by arity, which is what match_function compares first
-    if (header.fixity == AST::OpFixity::t_index) {
+    if (AST::is_index_fixity(header.fixity)) {
         cursor.restore(*header.index_params);
         cursor.skip(); // `[`
 
         if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token,
                 Token::Type::t_close_bracket)) {
+            return nullptr;
+        }
+
+        cursor.restore(after_symbol);
+    }
+
+    // **the write form's value, parsed third**, which is what makes `args` read
+    // `[receiver, indices..., value]` - the order a use site writes them in and the order
+    // AST::OperatorRewriter builds the call's operands in. the three restores are what decide it, so
+    // moving one moves the operand a body reads
+    if (header.fixity == AST::OpFixity::t_index_write) {
+        cursor.restore(*header.value_params);
+        cursor.skip(); // `(`
+
+        if (!parse_parameter_list(payload, *funcdecl, funcscope, operator_token)) {
             return nullptr;
         }
 
@@ -558,12 +599,47 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
 
     // an operator is an expression, so a void one is a statement written as an operator. refused
     // rather than lowered, because `$a = $b avg $c` would then declare a void variable
-    if (funcdecl->get_return_type().is_void()) {
+    //
+    // **the index write is the exception, and its rule is the mirror rather than an exemption.** that
+    // form *is* a statement - `$m[$k] = $v` produces nothing, AST::OperatorRewriter replaces the whole
+    // assignment with the call - so void is not merely tolerated there but required. two refusals and
+    // not one escape, because the void-ness is the content of the form
+    if (header.fixity == AST::OpFixity::t_index_write) {
+        if (!funcdecl->get_return_type().is_void()) {
+            return refuse(*header.symbol_token,
+                fmt::format(
+                    "an index-write operator is a statement, not an expression - '$c[$k] = $v' produces "
+                    "no value, so it returns 'void' and not '{}'. Declare the borrowing form "
+                    "'operator (C& $c)[K $k] : V&' if you want a place a write goes through.",
+                    funcdecl->get_return_type().get_type_desciption()));
+        }
+    }
+    else if (funcdecl->get_return_type().is_void()) {
         return refuse(*header.symbol_token,
             fmt::format(
                 "operator '{}' returns void. An operator is an expression, so it has to return "
                 "something.",
                 header.spelling));
+    }
+
+    // **the write has to reach the caller's container.** by value it lands in a copy that dies with the
+    // call, and through a `const` borrow it does not land at all - both register, both are chosen, and
+    // both silently do nothing, which is what every other refusal in this file exists to prevent.
+    //
+    // the borrowing form needs no such rule: its whole product is the borrow it returns, which the
+    // return-type refusal below already judges - a `const C&` receiver there yields a `const V&`
+    // element and the ordinary const rules take it from there
+    if (header.fixity == AST::OpFixity::t_index_write && !funcdecl->args.empty()) {
+        const AST::ValueType receiver = funcdecl->parameter_type(0);
+
+        if (!receiver.is_pointer() || receiver.is_nullable() || receiver.pointee().is_const()) {
+            return refuse(*header.symbol_token,
+                fmt::format(
+                    "an index-write operator takes its container as a mutable borrow - 'C&', not '{}'. "
+                    "The write has to reach the caller's container: by value it would land in a copy "
+                    "that dies with the call, and through a 'const' borrow it would not land at all.",
+                    receiver.get_type_desciption()));
+        }
     }
 
     // **an index operator hands back the element itself**, and `$a[$i]` is a place unconditionally -
@@ -584,15 +660,27 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // otherwise register a declaration no use site can ever reach: `match_function` compares arity
     // first, so it would simply never match and the operator would silently do nothing
     //
-    // the index form is the one with a *range* rather than a count. one operand is the append slot,
-    // `$a[] = $v`; two or more is an element, `$a[$i]` and `$m[$row, $col]`. they share one overload
-    // set and one decorated name, and arity is what tells them apart - so the rule here is only that
-    // the receiver is present, and match_function does the rest with no new rule at all
-    if (header.fixity == AST::OpFixity::t_index) {
-        if (funcdecl->args.empty()) {
+    // the index forms are the ones with a *range* rather than a count. for the borrowing form one
+    // operand is the append slot, `&$a[]`; two or more is an element, `$a[$i]` and `$m[$row, $col]`.
+    // they share one overload set and one decorated name, and arity is what tells them apart - so the
+    // rule here is only that the receiver is present, and match_function does the rest with no new rule
+    //
+    // the write form's range starts one higher, because the value it is given is not optional: two
+    // operands is the append write `$c[] = $v`, three or more an element write
+    if (AST::is_index_fixity(header.fixity)) {
+        const size_t minimum = header.fixity == AST::OpFixity::t_index_write ? 2 : 1;
+
+        if (funcdecl->args.size() < minimum) {
             return refuse(*header.symbol_token,
-                "an index operator takes the container as its first operand, e.g. "
-                "'operator (array<int32>& $a)[usize $i] : int32&'.");
+                minimum == 1
+                    ? std::string(
+                        "an index operator takes the container as its first operand, e.g. "
+                        "'operator (array<int32>& $a)[usize $i] : int32&'.")
+                    : std::string(
+                        "an index-write operator takes the container, then its indices, then the value "
+                        "it is given, e.g. "
+                        "'operator (map<K, V>& $m)[const K& $key] = (V $value) : void'. Two operands is "
+                        "the append write '$c[] = $v'."));
         }
     } else {
         const size_t wanted_arity = header.fixity == AST::OpFixity::t_infix ? 2 : 1;
@@ -615,9 +703,15 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     //
     // `=` first: assignment is a statement, not an expression the shunting yard ever sees, so an
     // overload of it would register, mangle, be emitted, and never fire
+    //
+    // the index write does not reach here - its spelling is `[]`, synthesised by the header - and the
+    // message names it because it is the one assignment that *is* declarable: not `=` over two operands,
+    // but the bracket a container declares a write contract for
     if (header.spelling == "=") {
         return refuse(*header.symbol_token,
-            "'=' cannot be declared as an operator - assignment is a statement, not an expression.");
+            "'=' cannot be declared as an operator - assignment is a statement, not an expression. The "
+            "one assignment that is declarable is the index write, "
+            "'operator (C& $c)[K $k] = (V $v) : void'.");
     }
 
     // **a suffix `++` / `--` cannot be reached.** `$i++;` is a statement, dispatched straight to
@@ -646,9 +740,11 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     //
     // a custom symbol answers false for every operand, which is what keeps
     // `operator (int32 $a)mm : Distance` - the point of the whole feature, over a primitive - declarable
-    // the index form is exempt, and not by omission: `[` has no built-in meaning over a *complex*
+    // both index forms are exempt, and not by omission: `[` has no built-in meaning over a *complex*
     // base at all - the language spells one only for a pointer, which the rewriter keeps for itself -
-    // so there is nothing for a declaration to be shadowed by
+    // so there is nothing for a declaration to be shadowed by. the write form would also index
+    // `operands[1]` on a two-operand append write, where the second operand is the value rather than
+    // anything the predicate is about
     //
     // **not asked of a requirement.** both this and the bare-type-parameter refusal inside it are about a
     // declaration that would be *chosen* at a use site and then never fire. a requirement is chosen at no
@@ -656,7 +752,7 @@ AST::FunctionDeclNode *Parser::parse_operatordecl(Parser::Payload &payload)
     // declaration is the one these refusals judge. `interface Comparable<T> { operator (T $a) < (T $b); }`
     // is precisely the shape the bare-parameter arm exists to reject in a definition, and precisely the
     // shape a requirement is for
-    if (header.fixity != AST::OpFixity::t_index && interface_owner == nullptr) {
+    if (!AST::is_index_fixity(header.fixity) && interface_owner == nullptr) {
         const AST::Operator *op = payload.collector.operators.get_operator(header.spelling);
 
         // the declared operand types as the predicate wants them: value-position, which is what a

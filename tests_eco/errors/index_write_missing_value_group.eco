@@ -1,0 +1,6 @@
+// the `=` opens a third operand list, so what follows it has to be one
+struct bag { ptr<int32> $d; }
+
+operator (bag& $b)[usize $i] = : void
+{
+}

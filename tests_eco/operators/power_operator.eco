@@ -6,8 +6,10 @@
 // name LLVM never defines. the value happened to survive the JIT, so nothing pointed at it
 //
 // the operator's own semantics are unchanged and deliberately not asserted beyond this: both
-// operands are widened to double and the result truncated back to int32, which is what the
-// implementation has always done
+// operands are widened to double, the intrinsic is called, and the result converted back to the
+// **operation's own type**. that last part used to be a hardcoded i32 whatever the operands were, so
+// `int64 $wide = 2 ** 40;` lost its top bits - and the two conversions read the operand's signedness
+// now, for the same reason the comparisons do
 
 int32 $square = 2 ** 10;
 int32 $cube = 3 ** 3;
@@ -16,3 +18,14 @@ int32 $unit = 5 ** 0;
 echo $square;
 echo $cube;
 echo $unit;
+
+// wider than an i32 can hold, and exactly representable in a double, so the round trip is not what
+// is being tested here - the type the result lands in is
+int64 $wide = 2 ** 40;
+
+echo $wide;
+
+// an unsigned operand takes uitofp/fptoui rather than the signed pair
+uint64 $unsigned = 3 ** 5;
+
+echo $unsigned;

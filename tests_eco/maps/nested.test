@@ -1,0 +1,15 @@
+# `7 8 2` is the map of maps, `5 2` the map of arrays - one statement using the write contract and
+# `array<T>`'s place write together - and `9 2` the `->` through a read bracket. the trailing `0` is the
+# allocation balance
+
+expect: ok
+
+--- OUT --->
+7
+8
+2
+5
+2
+9
+2
+0

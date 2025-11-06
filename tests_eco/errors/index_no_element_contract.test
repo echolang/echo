@@ -1,14 +1,12 @@
 expect: fail
+# an operator says it in its own words - the candidate list this used to print named `array<T>`,
+# `map<K,V>` and `ordered_map<K,V>`, none of which this program has anything to do with. every
+# `operator` declaration shares the root namespace, so that list is the same nine lines in every program
 
 --- OUT --->
 ---- Issue ----
 Issue at 6:8
-No overload of 'operator []' accepts these arguments. Candidates are:
-  operator []<T>(array<T>&, usize)
-  operator []<T>(const array<T>&, usize)
-  operator []<T>(array<T>&)
-  operator []<T>(slice<T>&, usize)
-  operator []<T>(const slice<T>&, usize)
+no overload of operator '[]' accepts a 'Plain' and a 'int32'. Declare one for it, or convert the operands first.
 Begin: 'operator []'
 End: 'operator []'
 Code excerpt:

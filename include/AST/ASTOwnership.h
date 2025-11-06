@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTValueType.h"
 
 #include <string>
@@ -182,17 +183,32 @@ namespace AST
 
         std::vector<Frame> _frames;
 
-        // the index into _frames of each enclosing loop body's frame, innermost last.
+        // one enclosing loop body, and what its two exits carry out of it.
         //
-        // this is the *bound* on a break's unwind, and the whole difference between it and a return's: a
-        // `break` unwinds from the innermost frame down to **and including** _loop_frames.back() and no
-        // further, because the frames outside the loop are still live on the other side of the branch.
+        // `frame_floor` is the index into _frames of the body's own frame. this is the *bound* on a
+        // break's unwind, and the whole difference between it and a return's: a `break` unwinds from the
+        // innermost frame down to **and including** frame_floor and no further, because the frames
+        // outside the loop are still live on the other side of the branch.
         //
-        // a vector and not a single index, so a labelled `break N` is _loop_frames[size() - N] the day it
-        // is spelled, with the unwind loop unchanged. cleared in resolve_function *and* resolve_root: a
-        // stale index from a previous body either reads out of range or clips an unwind to the wrong
-        // depth, and _processed_functions means the wrong answer is never revisited
-        std::vector<size_t> _loop_frames;
+        // the two sets are the moved state each exit *reaches its destination with*. a branch that
+        // leaves does not reach the join after the statement it sits in - an `if` arm ending in `break`
+        // continues after the loop, not after the `if` - so its moves are recorded here and merged by
+        // whoever owns that destination. without them an exit-aware `if` merge would drop them, which is
+        // a use-after-move with no diagnostic rather than an over-approximation
+        struct LoopFrame
+        {
+            size_t frame_floor = 0;
+
+            std::unordered_set<const VarDeclNode *> break_moved;
+            std::unordered_set<const VarDeclNode *> continue_moved;
+        };
+
+        // the enclosing loop bodies, innermost last. a vector and not a single frame, so a labelled
+        // `break N` is _loop_frames[size() - N] the day it is spelled, with the unwind loop unchanged.
+        // cleared in resolve_function *and* resolve_root: a stale index from a previous body either reads
+        // out of range or clips an unwind to the wrong depth, and _processed_functions means the wrong
+        // answer is never revisited
+        std::vector<LoopFrame> _loop_frames;
 
         // declarations whose value has been moved out. a moved local is neither readable nor
         // dropped - "its destructor travelled with the value"
@@ -237,7 +253,13 @@ namespace AST
         // walks the scope's statements, then appends the drops its own frame owes. a function body's
         // frame is pushed by resolve_function, which seeds it with the owning parameters; every other
         // scope opens its own here
-        void walk_scope(ScopeNode &scope);
+        //
+        // **hands back how far control goes when it leaves**, which is the answer it already had to
+        // compute for the drops above. asked of AST::scope_exit_kind, which is an unmemoized walk that
+        // recurses into nested branches - so the arms that need it for a scope this walked (both `if`
+        // arms, a loop body) read it from here rather than asking again, and the pass keeps to one such
+        // walk per scope
+        ExitKind walk_scope(ScopeNode &scope);
 
         // answers the statement the scope should keep in place of `child`. that is `child` itself for
         // everything except a discarded owning temporary, which is replaced by the declaration that

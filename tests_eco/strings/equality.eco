@@ -1,0 +1,66 @@
+// `==` on `string`, at file scope in string.eco. it exists because `==` is the only equality spelling that
+// works for a **type parameter**: a generic body comparing two `K`s writes `$a == $b`, which is a built-in
+// comparison when `K` is a primitive and a declared operator when it is a struct. there is no `equals` on
+// `int32` to call instead, and no interface a primitive could conform to. `map<string, V>` needs it
+//
+// the operands are borrows, so a comparison costs no reference count at all - which is what the probe loop
+// inside a hash map needs
+
+string $a = 'hello';
+string $b = '';
+$b->append('hello');
+string $c = 'world';
+
+// two different buffers, one text
+echo $a == $b;
+echo $a != $b;
+
+// different text
+echo $a == $c;
+echo $a != $c;
+
+// a literal on either side, which is the comparison people actually write. a literal *is* a `string`, so
+// it reaches this pair directly
+echo $a == 'hello';
+echo 'hello' == $a;
+echo $a == 'world';
+echo $a != 'world';
+
+// a substring compares by text, not by buffer identity
+string $big = 'xxhelloxx';
+echo $big->sub(2, 5) == $a;
+
+// empty strings
+string $e1 = '';
+string $e2 = '';
+echo $e1 == $e2;
+echo $e1 == $a;
+
+// a prefix is not equal to the whole
+echo 'hell' == $a;
+
+// **and the same for two `string::view`s**, which is a second pair over a type the first pair's operands
+// can all convert to. which pair a comparison picks is decided per operand: a `string` place scores
+// borrow-const against `const string&` and a declared conversion against `const string::view&`, and a
+// literal scores borrow-of-temporary-const against the first and a declared conversion against the
+// second. both borrow ranks beat a declared conversion, so the string pair dominates on both operands
+// and every comparison above still resolves to it
+//
+// this pair could not be declared at all until the temporary borrow was moved above the declared
+// conversion: before that the string pair won the place operand, the view pair won the literal one,
+// neither dominated, and `$a == 'hello'` was ambiguous
+echo $a->window == $b->window;
+echo $a->window != $b->window;
+echo $a->window == $c->window;
+echo $a->window != $c->window;
+
+// a view over a substring, so the two views point into different buffers at different offsets and only
+// the text is the same - the view pair compares bytes, exactly as the string pair does
+echo $big->sub(2, 5)->window == $a->window;
+
+// and `equals` still says the same thing, being the one byte loop both pairs are written through
+echo $a->window->equals($b->window);
+echo $a->window->equals($c->window);
+
+assert(mem::live_allocations() == 2, "only the one built string allocated; comparing costs nothing");
+echo mem::live_allocations();

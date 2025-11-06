@@ -9,9 +9,13 @@
 
 namespace Parser
 {
-    // registers every type name a file declares as a namespace symbol, and nothing else. runs over
-    // every file of a module before parse_symbols does, so that a member's or a parameter's type
-    // resolves no matter which file - or which line - declares it
+    // registers every type name a file declares **at file or struct scope** as a namespace symbol, and
+    // nothing else. runs over every file of a module before parse_symbols does, so that a member's or a
+    // parameter's type resolves no matter which file - or which line - declares it
+    //
+    // a type written inside a `{ }` block is deliberately left alone: its name belongs to the block's
+    // lexical namespace, which only the two later passes can mint, and it is visible in one block of one
+    // file - so there is no order for this pass to make it independent of. parse_typedecl publishes it
     //
     // the declaration pass needs that: it reads property types, and an unresolved *unqualified* type
     // name is not a diagnostic, it silently becomes `unknown`. so a struct name arriving late would

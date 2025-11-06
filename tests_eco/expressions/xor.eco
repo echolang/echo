@@ -1,0 +1,45 @@
+// `^` is the one bitwise operator that lowers. `& | << >>` sit beside it in AST::op_precedence and
+// in the predefined operator set, so they parse - and AST::binary_has_builtin_meaning refuses them,
+// which is what makes each one a located diagnostic. errors/shift_not_lowered is that half
+//
+// the last two blocks are the point of the case: AST::const_fold and ExprCodegen::gen_binary_expr
+// have to agree, or a `const if` takes one arm and the `if` beside it takes the other
+
+uint64 $a = 14695981039346656037;
+uint64 $b = 104;
+echo $a ^ $b;
+
+int32 $c = 12;
+echo $c ^ 10;
+
+// unsigned and narrow, so a sign-extension bug would show
+uint8 $d = 255;
+echo $d ^ 15;
+
+// negative: the sign-extended bit pattern has to survive both the fold and the emit
+int32 $e = -1;
+echo $e ^ 0;
+echo $e ^ -1;
+
+// left associative, so this is `(6 ^ 3) ^ 1`
+echo 6 ^ 3 ^ 1;
+
+// folded at compile time
+const if ((12 ^ 10) == 6) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+// and emitted at runtime, from the same operands. one answer or the case fails
+if (($c ^ 10) == 6) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+// a `const` declaration folds through it too - `^` had no arm in fold_arithmetic before it lowered
+const int32 MASK = 0xF0 ^ 0x0F;
+echo MASK;

@@ -2,6 +2,8 @@
 
 #include "AST/FunctionDeclNode.h"
 
+#include <fmt/core.h>
+
 #include <algorithm>
 
 namespace
@@ -171,6 +173,25 @@ AST::FunctionMatch AST::match_function(
         : FunctionMatch::Outcome::t_ambiguous;
 
     return result;
+}
+
+std::string AST::describe_operands(const std::vector<AST::ValueType> &operand_types)
+{
+    if (operand_types.empty()) {
+        return "these operands";
+    }
+
+    std::string buffer;
+
+    for (size_t i = 0; i < operand_types.size(); i++) {
+        if (i > 0) {
+            buffer += i + 1 == operand_types.size() ? " and " : ", ";
+        }
+
+        buffer += fmt::format("a '{}'", operand_types[i].get_type_desciption());
+    }
+
+    return buffer;
 }
 
 std::string AST::describe_candidates(const std::vector<AST::FunctionDeclNode *> &candidates)

@@ -1,0 +1,279 @@
+// **a generic struct with two type parameters, exercised the way a container exercises one.** the only
+// two-parameter struct in the corpus before this was a bare POD with one free operator, so every hard
+// generic mechanism - a copy constructor recognised by shape, a destructor, `const if` over the compiler's
+// own answers about the parameters, `mem::take`, `mem::init`, an index operator, a cursor - was only ever
+// covered at arity one. `map<K, V>` is about to be built on all of it at arity two
+//
+// the `const if`s are the reason this is a struct with two parameters rather than two structs with one:
+// AST::const_fold's type-query guard is `is_type_param()` and is *not* transitive, so a query about a
+// generic *application* folds against unbound parameters and answers false on the template. every query
+// below is therefore over a bare `A` or a bare `B`, never over `pair_buffer<A, B>` itself - and the `||`
+// in the destructor is what pins that both operators fold
+
+struct pair_buffer<A, B> : contract::iterable<B>
+{
+    ptr<A> $ks;
+    ptr<B> $vs;
+    usize $n;
+
+    constructor(usize $n)
+    {
+        $this->ks:$ = mem::alloc<A>($n);
+        $this->vs:$ = mem::alloc<B>($n);
+        $this->n = 0;
+    }
+
+    // recognised by shape - one non-nullable borrow of its own type. `const pair_buffer<A, B>&` and not
+    // `pair_buffer&`, because inside a generic struct the bare name is the *template* and not a type
+    constructor(const pair_buffer<A, B>& $other)
+    {
+        $this->ks:$ = mem::alloc<A>($other->n);
+        $this->vs:$ = mem::alloc<B>($other->n);
+        $this->n = $other->n;
+
+        // one branch, four correct answers. both arms build the same buffer; what the condition buys is
+        // the bulk copy for the parameter pairs that can take one
+        const if (mem::is_trivially_copyable<A>() && mem::is_trivially_copyable<B>()) {
+            mem::copy<A>($this->ks, $other->ks, $other->n);
+            mem::copy<B>($this->vs, $other->vs, $other->n);
+        }
+        else {
+            usize $i = 0;
+
+            while ($i < $other->n) {
+                // mem::init and not an indexed write: these slots came out of mem::alloc, so `=` would
+                // be a re-assignment and would end whatever bytes the allocator handed back
+                mem::init<A>($this->ks:$[$i], $other->ks:$[$i]);
+                mem::init<B>($this->vs:$[$i], $other->vs:$[$i]);
+
+                $i = $i + 1;
+            }
+        }
+    }
+
+    destructor()
+    {
+        // the single outer question, over both parameters at once. `||` folds, so this is one `const if`
+        // rather than a nest - and for `<int32, int32>` there is no loop here at all
+        const if (mem::needs_destruction<A>() || mem::needs_destruction<B>()) {
+            usize $i = 0;
+
+            while ($i < $this->n) {
+                const if (mem::needs_destruction<A>()) {
+                    A $dead_a = mem::take<A>($this->ks:$[$i]);
+                }
+
+                const if (mem::needs_destruction<B>()) {
+                    B $dead_b = mem::take<B>($this->vs:$[$i]);
+                }
+
+                $i = $i + 1;
+            }
+        }
+
+        mem::free<A>($this->ks);
+        mem::free<B>($this->vs);
+    }
+
+    function push(A $a, B $b) : void
+    {
+        mem::init<A>($this->ks:$[$this->n], $a);
+        mem::init<B>($this->vs:$[$this->n], $b);
+
+        $this->n = $this->n + 1;
+    }
+
+    const function count() : usize
+    {
+        return $this->n;
+    }
+
+    function at(usize $i) : B&
+    {
+        return &$this->vs:$[$i];
+    }
+
+    // a borrow **forwarded from another call**, which nothing else in the corpus does - the shape a
+    // cursor over a composed container needs for `current()`
+    //
+    // forwarded *directly*, and that spelling is the whole point of the method. binding it first -
+    // `B& $b = $this->at(0); return $b;` - is refused with "cannot return the address of local '$b'":
+    // the borrow local is a slot holding an address, and its storage ends with the call, so returning
+    // the local reads as returning that slot rather than what it names. binding is fine, and
+    // bind-then-return is not
+    function first() : B&
+    {
+        return $this->at(0);
+    }
+
+    function iterate() : pair_cursor<A, B>
+    {
+        return pair_cursor<A, B>($this->ks, $this->vs, $this->n);
+    }
+}
+
+// `A` is bound only from the container operand, `B` from that and the return type
+operator<A, B> (pair_buffer<A, B>& $p)[usize $i] : B&
+{
+    return &$p->vs:$[$i];
+}
+
+operator<A, B> (const pair_buffer<A, B>& $p)[usize $i] : const B&
+{
+    return &$p->vs:$[$i];
+}
+
+// a two-parameter cursor whose key is the *first* parameter, so `foreach` binds a non-usize key out of a
+// generic owner - which only std::env::vars covers today, and not generically
+struct pair_cursor<A, B> : contract::iterator<B>, contract::keyed<A>
+{
+    ptr<A> $ks;
+    ptr<B> $vs;
+    usize $n;
+    usize $pos;
+
+    constructor(ptr<A> $ks, ptr<B> $vs, usize $n)
+    {
+        $this->ks:$ = $ks;
+        $this->vs:$ = $vs;
+        $this->n = $n;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->n) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : B&
+    {
+        return &$this->vs:$[$this->pos - 1];
+    }
+
+    function key() : A
+    {
+        return $this->ks:$[$this->pos - 1];
+    }
+}
+
+struct holder
+{
+    pair_buffer<int32, string> $inner;
+
+    constructor()
+    {
+        $this->inner = pair_buffer<int32, string>(4);
+    }
+}
+
+// ---- both parameters trivial: every `const if` above takes its bulk arm, and the destructor is two frees
+
+{
+    pair_buffer<int32, int32> $p = pair_buffer<int32, int32>(4);
+    $p->push(1, 10);
+    $p->push(2, 20);
+
+    echo $p->count();
+    echo $p[1];
+
+    // **bound to a name, not echoed directly.** a borrow-returning call hands back a `B&`, and reading
+    // one in a value position is refused - `echo $p->first()` is "cannot echo an address of type
+    // 'int32&'". binding it to a `B&` is the spelling, and writing through it reaches the buffer
+    int32& $slot = $p->first();
+    echo $slot;
+
+    $slot = 11;
+    echo $p[0];
+
+    $p[0] = 99;
+    echo $p[0];
+
+    pair_buffer<int32, int32> $q = $p;
+    echo $q[0];
+
+    foreach ($p as $k => $v) {
+        echo $k;
+        echo $v;
+    }
+}
+
+assert(mem::live_allocations() == 0, "two buffers each, both given back");
+
+// ---- a trivial key and an owning value: the two `const if`s must disagree with each other
+
+{
+    pair_buffer<int32, string> $p = pair_buffer<int32, string>(4);
+
+    string $s = '';
+    $s->append('hello');
+
+    $p->push(7, $s);
+
+    // 2 buffers + the written string's two allocations
+    assert(mem::live_allocations() == 4, "two buffers and one written string");
+    assert(mem::ref_count<str::buf>($s->owner) == 2, "the local and the slot");
+
+    echo $p[0];
+    echo $p->count();
+
+    // the copy takes the element loop, not the bulk arm, so the string is retained rather than bit-copied
+    pair_buffer<int32, string> $q = $p;
+
+    assert(mem::live_allocations() == 6, "two more buffers, and the element retained");
+    assert(mem::ref_count<str::buf>($s->owner) == 3, "the local and both slots");
+
+    echo $q[0];
+
+    foreach ($q as $k => $v) {
+        echo $k;
+        echo $v;
+    }
+}
+
+assert(mem::live_allocations() == 0, "both buffers' elements released and all four buffers freed");
+
+// ---- both parameters owning, so the key is destroyed too
+
+{
+    pair_buffer<string, string> $p = pair_buffer<string, string>(2);
+
+    string $k = '';
+    $k->append('key');
+
+    string $v = '';
+    $v->append('value');
+
+    $p->push($k, $v);
+
+    echo $p[0];
+
+    foreach ($p as $ky => $vl) {
+        echo $ky;
+        echo $vl;
+    }
+}
+
+assert(mem::live_allocations() == 0, "an owning key is torn down as well as an owning value");
+
+// ---- a two-parameter instantiation as a property of another struct
+
+{
+    holder $h = holder();
+
+    string $s = '';
+    $s->append('nested');
+
+    $h->inner->push(1, $s);
+
+    echo $h->inner[0];
+    echo $h->inner->count();
+}
+
+assert(mem::live_allocations() == 0, "the holder's synthesized teardown reached the inner buffer");
+echo mem::live_allocations();

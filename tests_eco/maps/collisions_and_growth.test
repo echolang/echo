@@ -1,0 +1,26 @@
+# the second `1` in each pair of trailing checks is an assertion written as output: the capacity did not
+# change when the tombstones were reused, and the load factor held over 1000 entries
+#
+# the final `8` is the point of the churn block - the floor. without the same-capacity re-seat in `grow`
+# a table churned by insert-and-remove reaches the load factor on *dead* slots and doubles for them,
+# leaving thousands of slots holding nothing
+
+modules: modules/lib_collide
+expect: ok
+
+--- OUT --->
+60
+60
+0
+118
+30
+30
+0
+60
+1
+1000
+500500
+1
+0
+8
+0

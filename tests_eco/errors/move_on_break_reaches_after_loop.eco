@@ -1,0 +1,31 @@
+// a `break` does not reach the code after the `if` it sits in - it reaches the code after the *loop*,
+// which is exactly where this read is. so what the branch moved has to be visible here: the value was
+// handed over on that path and the read is refused, "may have been" because the loop can also be left
+// through its condition
+//
+// `Tag` owns nothing, which is what keeps this to one diagnostic: an owning value moved inside a loop is
+// refused at the move, before anything gets as far as reading it
+
+struct Tag
+{
+    usize $id;
+}
+
+function consume(mv Tag $t) : void
+{
+    echo $t->id;
+}
+
+$a = Tag(7);
+$i = 0;
+
+while ($i < 3) {
+    if ($i == 1) {
+        consume(mv $a);
+        break;
+    }
+
+    $i++;
+}
+
+echo $a->id;

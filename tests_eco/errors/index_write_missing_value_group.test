@@ -1,0 +1,17 @@
+# the '=' opens a third operand list, so what follows it has to be one
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 4:32
+Unexpected token 'colon (:)' found. Expected 'open_paren '(''
+Begin: ':'
+End: ':'
+Code excerpt:
+ [3]> 
+ [4]> operator (bag& $b)[usize $i] = : void
+                                     ^
+ [5]> {
+
+Critical issues found, cannot compile.

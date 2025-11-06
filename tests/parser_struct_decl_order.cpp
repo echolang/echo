@@ -183,10 +183,27 @@ TEST_CASE("a constructor is one declaration across both parse passes", "[structd
 
 TEST_CASE("a constructor that never receives a body is reported", "[structdecl]")
 {
-    // the declaration pass skips a member body whole while the body pass parses it, so a malformed
-    // method can send the two to different places and leave a registered constructor without a body
-    // that has to be a located error: codegen *declares* every function in the module but emits a
-    // body only for the ones in the file root, so it would otherwise link against nothing
+    // a constructor is registered by the declaration pass and given its body by the body pass, so one
+    // the body pass never gives a body to is a registered declaration with nothing behind it. that has
+    // to be a located error: codegen *declares* every function in the module but emits a body only for
+    // the ones it walked, so it would otherwise link against nothing
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct P {\n"
+        "    int32 $x;\n"
+        "    constructor(int32 $v);\n"
+        "}\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "was declared but never given a body"));
+}
+
+TEST_CASE("a malformed method body does not cost the next member its body", "[structdecl]")
+{
+    // the shape the case above used to be written as, and it no longer produces a bodyless
+    // constructor - which is the point. the stray `)` used to send parse_scope's recovery through the
+    // method's closing brace, so the struct's member walk resumed one level shallow and never reached
+    // the `constructor` at all. recovery stops *at* a `}` now, so the two passes stay in step and the
+    // only thing reported is the token the author actually got wrong
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct P {\n"
         "    int32 $x;\n"
@@ -195,7 +212,7 @@ TEST_CASE("a constructor that never receives a body is reported", "[structdecl]"
         "}\n");
 
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "was declared but never given a body"));
+    REQUIRE_FALSE(has_issue_containing(*bundle, "was declared but never given a body"));
 }
 // two declarations of one type name. the parse passes reconcile on the declaration site, so a
 // same-named struct declared somewhere *else* is not this pass revisiting the same struct - it is a
@@ -331,17 +348,21 @@ TEST_CASE("the same struct name in two namespaces is not a duplicate", "[structd
     REQUIRE(structs_named(m, "Foo") == 2);
 }
 
-TEST_CASE("a struct declared inside a function body cannot redeclare a type", "[structdecl]")
+TEST_CASE("a struct declared inside a function body shadows a file-scope type", "[structdecl]")
 {
-    // passes 1 and 2 walk token by token, which is how a struct written inside a body is reached at
-    // all - so this is the case where the most passes see the duplicate
+    // the inverse of the case above, and for the same reason it is legal there: a *declaration* site
+    // asks the exact-namespace find_symbol, and a block's namespace is not the file's. so this is two
+    // types with one name, exactly as two written namespaces are, rather than a redeclaration
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Foo { int32 $x; }\n"
         "function f() : void { struct Foo { int32 $y; } }\n");
 
-    REQUIRE(redeclaration_issue_count(*bundle) == 1);
+    REQUIRE(redeclaration_issue_count(*bundle) == 0);
 
     auto &m = bundle->modules.find_module("test");
+    REQUIRE(structs_named(m, "Foo") == 2);
+
+    // the file-scope one is what the name denotes outside the body, unchanged by the body-local one
     REQUIRE(type_named(m, "Foo")->properties().size() == 1);
     REQUIRE(type_named(m, "Foo")->properties()[0]->name() == "x");
 }

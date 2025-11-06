@@ -1,0 +1,53 @@
+// `&&` and `||` whose operands are *comparisons*, which could not be written at all before
+// `BinaryExprNode::result_type()` learned that a comparison is a `bool` whatever it compared.
+//
+// it answered the *operand* type instead - so `$a == 0` over two `int32`s answered `int32`, which mostly
+// hid (echo prints 1 or 0 either way, and a bool destination accepts the integer) and did not survive the
+// comparison becoming an operand: `gen_binary_expr` took its integer arm for the `||`, found no case for a
+// logical operator, and threw an internal compiler error naming neither the loop nor the comparison
+//
+// `const if` was unaffected, because AST::const_fold answers the two logical operators from the folded
+// values rather than from a type - which is exactly the "two spellings held in step by nothing" split that
+// CLAUDE.md warns about, and why the fix is in result_type() rather than in codegen
+
+int32 $a = 0;
+int32 $b = 5;
+
+if ($a == 0 || $b > 3) { echo 1; } else { echo 2; }
+if ($a == 9 || $b > 3) { echo 1; } else { echo 2; }
+if ($a == 9 || $b > 9) { echo 1; } else { echo 2; }
+
+if ($a == 0 && $b > 3) { echo 1; } else { echo 2; }
+if ($a == 0 && $b > 9) { echo 1; } else { echo 2; }
+
+// three of them, and mixed
+if ($a == 0 && $b > 3 || $a == 9) { echo 1; } else { echo 2; }
+
+// over usize, which is where it was first hit - a foreach key compared to a literal
+usize $u = 0;
+usize $n = 4;
+
+if ($u == 0 || $n > 3) { echo 1; } else { echo 2; }
+
+// a comparison bound to a bool, and that bool joined with another comparison.
+//
+// note the right-hand sides are *variables* and not literals: `bool $b = $n > 9;` is a separate,
+// pre-existing defect (todo/B40, an integer literal at a `bool` destination), because the declared `bool`
+// types the literal `9` as `true` and the comparison is then over a usize and a bool. That is parse-time
+// literal typing and has nothing to do with what a comparison's result type is
+usize $nine = 9;
+usize $zero = 0;
+bool $first = $u == $zero;
+
+if ($first || $n > $nine) { echo 1; } else { echo 2; }
+
+// and a comparison as a whole condition, unchanged
+if ($a == 0) { echo 1; } else { echo 2; }
+
+// mixed widths inside a comparison still reconcile - the widening this pass owns is asked of the operands
+// now rather than inferred from a void result type, because a comparison never answers void
+int64 $wide = 5;
+
+if ($wide > $a) { echo 1; } else { echo 2; }
+if ($a < $wide) { echo 1; } else { echo 2; }
+if ($u == 0 || $wide > $a) { echo 1; } else { echo 2; }

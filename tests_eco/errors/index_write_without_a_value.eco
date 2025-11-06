@@ -1,0 +1,7 @@
+// the value is not optional: an index-write operator's arity starts at two, the container plus the value
+// it is given. two operands is the append write `$c[] = $v`, three or more an element write
+struct bag { ptr<int32> $d; }
+
+operator (bag& $b)[] = () : void
+{
+}

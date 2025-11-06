@@ -1,0 +1,7 @@
+// `**` round-trips through `llvm.pow` in the *integer* arm and the float arm has no case for it, so
+// a float base was accepted by the gate and then aborted codegen. `std::math::pow` is the spelling
+// that works
+
+float64 $base = 2.0;
+
+echo $base ** 3.0;

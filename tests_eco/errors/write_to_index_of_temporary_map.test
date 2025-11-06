@@ -1,0 +1,20 @@
+# the mirror of errors/write_to_index_of_temporary for a container that declares a *write* contract.
+# there the bracket is a place and the ownership pass refuses the temporary; here the write is a call,
+# so the refusal moved into AST::OperatorRewriter::resolve_index_write - asked through the same
+# AST::borrow_operand_needs_storage, so there is no second reading of the question
+
+expect: fail
+
+--- OUT --->
+---- Issue ----
+Issue at 11:7
+'map<string,int32>' has no storage of its own, so writing to one of its elements would be lost - the value is destroyed at the end of this statement. Bind it to a variable first.
+Begin: '['
+End: '['
+Code excerpt:
+ [10]> 
+ [11]> make()['a'] = 1;
+            ^
+ [12]> 
+
+Critical issues found, cannot compile.

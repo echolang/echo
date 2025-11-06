@@ -1,0 +1,8 @@
+// and its hash, in a file of its own - which is the extension point's real cost. a namespace is a
+// file-level statement, so this cannot share a file with the `struct sku` it is about
+namespace hash;
+
+function of(const sku& $k) : uint64
+{
+    return of($k->n);
+}

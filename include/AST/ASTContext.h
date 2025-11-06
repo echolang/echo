@@ -27,11 +27,12 @@ namespace AST
 
         const TokenizedFile &file;
 
-        // the namespace declarations here go into, which inside a `{ }` block is that block's *lexical*
-        // namespace rather than anything the user wrote. deliberately one field and not two: a
-        // `namespace a::b;` statement writes this one mid-file, and a parallel "the namespace I really
-        // meant" would desync from it silently - every function in a namespaced file would quietly lose
-        // its prefix. what wants the written namespace instead asks declaring_namespace()
+        // **the namespace every declaration here goes into**, which inside a `{ }` block is that block's
+        // *lexical* namespace rather than anything the user wrote - for a type exactly as for a function.
+        // deliberately one field and not two: a `namespace a::b;`
+        // statement writes this one mid-file, and a parallel "the namespace I really meant" would desync
+        // from it silently - every function in a namespaced file would quietly lose its prefix. there
+        // used to be such a second reading, `declaring_namespace()`, and every type site asked it
         Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
@@ -113,14 +114,6 @@ namespace AST
         // it asked for a const method - and so the null-outside-a-struct-body case is one answer
         inline TypeNode *receiver_type(bool is_const) const {
             return is_const ? self_const_type_ptr : self_type_ptr;
-        }
-
-        // the nearest namespace the user could have written. types live there rather than in a block's
-        // lexical namespace - the lexical half holds function declarations only, so far, and a struct
-        // declared in a body is still reached by its plain name from anywhere in the namespace
-        inline Namespace *declaring_namespace() const {
-            assert(current_namespace);
-            return current_namespace->declaring_namespace();
         }
 
         // the scope a *declaration* is emitted into: the file root, whatever block it was written in.
@@ -343,9 +336,9 @@ namespace AST
     };
 
     // opens a `{ }` block's lexical namespace, so a declaration written inside it belongs to the block
-    // rather than to the enclosing namespace - which is the whole of how a nested `function` gets a
-    // scope. the namespace is keyed on the block's opening brace, so the declaration pass and the body
-    // pass walking the same brace land on one object
+    // rather than to the enclosing namespace - which is the whole of how a nested `function` or a
+    // block-local `struct` gets a scope. the namespace is keyed on the block's opening brace, so the
+    // declaration pass and the body pass walking the same brace land on one object
     //
     // saves and restores like every guard here. it has to: `namespace a::b;` writes
     // `current_namespace` too, and a block must hand back whatever was current when it opened

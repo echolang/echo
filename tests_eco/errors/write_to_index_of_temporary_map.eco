@@ -1,0 +1,11 @@
+// the container has to have storage the write can reach. as an assignment target this was refused by the
+// ownership pass; as a call operand a temporary would merely be bound for the statement, and the write
+// would land in a map destroyed at the end of it - so the refusal moved with the rule
+function make() : map<string, int32>
+{
+    map<string, int32> $m = map<string, int32>();
+
+    return $m;
+}
+
+make()['a'] = 1;

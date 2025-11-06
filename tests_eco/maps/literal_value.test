@@ -1,0 +1,11 @@
+# `3 2 3` is the two literals' counts and one element; `1 9` is the replace, whose old array `seat` destroyed
+# rather than leaked - which the allocation balance in the sibling cases covers
+
+expect: ok
+
+--- OUT --->
+3
+2
+3
+1
+9

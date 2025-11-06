@@ -1,0 +1,20 @@
+--- OUT --->
+1
+1
+9223372036854775807
+5
+7
+-2
+--- IR --->
+CHECK: define i32 @main(
+
+# scoped between the entry and the comparison it is about: a CHECK-NOT covers the region between its
+# neighbouring CHECKs, and `icmp sgt` is legitimate further down the module over a signed body
+CHECK-NOT: icmp sgt
+CHECK: icmp ugt i64
+CHECK: udiv i64
+CHECK: urem i64
+
+# the signed half, which a fix reading the wrong side of the operation would break instead
+CHECK: icmp slt i64
+CHECK: sdiv i64

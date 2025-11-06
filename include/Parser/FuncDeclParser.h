@@ -80,6 +80,15 @@ namespace Parser
     // after it, or resuming *inside* a body full of semicolons and reporting a cascade of nonsense
     void skip_declaration_body(Payload &payload);
 
+    // recovery for a `function` this parser has decided not to read: past its signature and its whole
+    // body. **the recovery every declaration-level refusal owes**, because Cursor::try_skip_to_next_statement
+    // stops at the first `;` or `}` and a body is full of both - so it resumes *inside* the body it meant
+    // to skip, and leaves that body's closing brace to be reported against whatever comes next
+    //
+    // named here rather than kept private to FuncDeclParser.cpp because a refused closure is the same
+    // shape and the same problem, and a second copy of the skip is a second answer to where a body ends
+    void skip_refused_function(Payload &payload);
+
     // does a `function` *declaration* start here? the keyword alone no longer answers it: `function`
     // introduces three different things, told apart by the one token after it -
     //

@@ -97,6 +97,24 @@ namespace AST
                 return rejected(InstantiationBlame::t_argument_count);
             }
 
+            // **what argument 0 bound is authoritative.** `TypeSubstitution::bind` lets a later
+            // inference replace an earlier one, which is right between two arguments of equal standing
+            // - but argument 0 is not one of those. It is the receiver of a member-shaped call, and a
+            // receiver's type is *declared*: `map<string, int64> $m` says what V is, while the `5` in
+            // `$m[$k] = 5` is a literal whose type its destination decides.
+            //
+            // without this, a parameter mentioned by both binds from the later argument and the
+            // receiver becomes the operand that "does not fit" - so `$m[$k] = 5` on a
+            // `map<string, int64>` instantiates `V = int32` and is then refused, and so is
+            // `$a->push(5)` on an `array<int64>`. Every widening and every nullable wrap through a
+            // parameter the receiver also mentions was unreachable.
+            //
+            // narrow on purpose: two arguments that are *not* the receiver keep the old rule, so
+            // `f<T>(T $a, T $b)` over an int32 and an int64 still reconciles the way it did. What
+            // remains wrong is the general case of one parameter bound from several arguments, which
+            // is todo/B50
+            const size_t authoritative = tmpl->args.empty() ? 0 : 1;
+
             for (size_t i = 0; i < argument_types.size(); i++) {
                 // an argument with no type yet cannot contradict the template, and must not bind
                 // anything either: binding `T` to unknown would name the instance after
@@ -112,9 +130,19 @@ namespace AST
                     continue;
                 }
 
+                // what the receiver has already decided, kept across this argument's unification.
+                // taken as a copy rather than asked of `covers` afterwards, because a nested
+                // application binds several parameters in one descent
+                const TypeSubstitution decided =
+                    i >= authoritative ? result.bindings : TypeSubstitution();
+
                 if (!unify_type(tmpl->args[i]->type(), argument_types[i], result.bindings)
                     && !mismatched_argument.has_value()) {
                     mismatched_argument = i;
+                }
+
+                for (const auto &binding : decided.bindings) {
+                    result.bindings.bind(binding.first, binding.second);
                 }
             }
         }

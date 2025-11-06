@@ -84,6 +84,31 @@ namespace AST
         // casts the parser/monomorphizer inserts around mismatched arguments)
         const TokenReference *_context_token = nullptr;
 
+        // the declaration that token belongs to, when it is a call's. set beside `_context_token` and for
+        // one reason: an **operator** whose argument would not convert must be reported in the operator's
+        // own words, naming the operand types the author wrote rather than the parameter type of whichever
+        // overload happened to be in the root namespace.
+        //
+        // without it, one `operator ==` declared anywhere in the program degrades `==` everywhere: a
+        // struct with no equality of its own is told it "cannot implicitly convert 'P' to 'const string&'",
+        // naming a type nobody wrote and no file mentions. That is todo/B20's shape, narrowed to the one
+        // case a standard library makes unavoidable - operators all share the root namespace, so every
+        // program has every operator's overload set whether it uses the type or not
+        const FunctionDeclNode *_context_callee = nullptr;
+
+        // **and whether AST::binary_operand_refusal already had something to say about that call's
+        // operands**, decided once where the callee is and read wherever a refusal is about to be written.
+        // its sentence is the better one in every case where it answers at all - "cannot compare 'P'
+        // against null - it is always there" rather than a remark about the operand nobody could convert -
+        // so `_context_callee` above becomes the fallback for the refusals that really are about a
+        // parameter, and these two readers stay silent while this is set.
+        //
+        // a *bool* and not the sentence: the wording is reported by the one site that computes it, and what
+        // travels down the walk is only "has this call already been explained". carrying the string instead
+        // invited a second, vaguer report of it from one of the readers, which is the double-reporting this
+        // exists to prevent
+        bool _context_operands_refused = false;
+
         CodeRef code_ref_for(const TokenReference &token);
 
         // validates every `: SomeInterface` this declaration wrote, reporting the first requirement each
@@ -129,6 +154,11 @@ namespace AST
             const ValueType &param_type,
             size_t arg_number,
             const std::string &callee_name,
+            // an operator phrases its refusals in terms of the *operand* the author wrote rather than the
+            // parameter type of whichever overload lost, because every operator shares the root namespace
+            // and so a program has every operator's set whether it uses those types or not. see
+            // TypeChecker::_context_callee for the same rule at the conversion site
+            bool callee_is_operator,
             const TokenReference &at
         );
 
@@ -140,10 +170,11 @@ namespace AST
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);
 
-        // `mem::take<T>` ends its source's claim on a value without writing anything back, so the two
-        // ways of getting it wrong are a source that was never a place and a source something *else*
-        // already accounts for. refused here, where the call has a token to point at
-        void check_take_argument(FunctionCallExprNode &node);
+        // `mem::take<T>` ends its source's claim on a value without writing anything back and
+        // `mem::init<T>` starts one without ending what was there, so both are only sound over storage
+        // nothing else accounts for - AST::is_unaccounted_storage, asked once for the two of them.
+        // refused here, where the call has a token to point at
+        void check_raw_storage_argument(FunctionCallExprNode &node);
 
         // the one builtin whose *availability* is a question rather than its arguments: without
         // --track-allocations there is no counter for `mem::live_allocations()` to read

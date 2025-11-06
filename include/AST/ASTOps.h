@@ -33,9 +33,28 @@ namespace AST
         // expression position consumes by looking it up: `[` is claimed unconditionally by the
         // postfix chain, and which meaning it has is decided from the base's type afterwards
         t_index,
+
+        // `$m[$k] = $v` - the same bracket with the value it is given, and **the one fixity that is a
+        // statement rather than an expression**: it returns `void`, and AST::OperatorRewriter replaces
+        // the whole AssignNode with the call instead of writing through a borrow it handed back.
+        //
+        // a fixity of its own rather than an arity of t_index, because the two contracts a container
+        // declares over one bracket want opposite things of the slot - an assignment needs the value
+        // that was there **ended**, a borrow needs it **kept** - so they are two declarations and the
+        // *position* picks between them, unconditionally
+        t_index_write,
     };
 
     const char *op_fixity_name(OpFixity fixity);
+
+    // **is this fixity one of the two bracket forms?** the rules in Parser::parse_operatordecl that ask
+    // it are rules about *the bracket* - no precedence clause, the registry entry it mints, no built-in
+    // meaning to check - rather than about the contract behind it. one predicate, so a rule added there
+    // reaches both forms instead of silently applying to one
+    inline bool is_index_fixity(OpFixity fixity)
+    {
+        return fixity == OpFixity::t_index || fixity == OpFixity::t_index_write;
+    }
 
     struct OpPrecedence
     {
@@ -84,6 +103,17 @@ namespace AST
         // purely the discriminator that tells the two kinds of Operator apart
         inline bool is_custom() const {
             return type == Token::Type::t_op_custom;
+        }
+
+        // **a built-in symbol with no infix meaning at all.** `!` is the only one: every other
+        // predefined operator this language spells is usable between two operands, which is why the
+        // shunting yard's operator arm admits any non-custom symbol without asking. one fact with two
+        // readers - `is_expr_token`, which has to let `!` *begin* an expression even though it carries
+        // no precedence tier, and the yard, which must not take it as an infix part. without the second
+        // `$a ! $b` becomes a BinaryExprNode that binary_has_builtin_meaning accepts over two
+        // primitives and gen_binary_expr throws on, with no location
+        inline bool is_prefix_only() const {
+            return type == Token::Type::t_exclamation;
         }
 
         // the operators that ask a question about two operands rather than combining them

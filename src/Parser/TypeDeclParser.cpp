@@ -41,6 +41,32 @@ static AST::FunctionDeclNode *reconciled_member_decl(Parser::Payload &payload, c
     return decl;
 }
 
+bool Parser::publish_type_symbol(Parser::Payload &payload, AST::Namespace &ns, AST::TypeDeclNode &node)
+{
+    auto *existing = payload.collector.namespaces.find_symbol(node.type_name(), ns);
+
+    if (existing != nullptr) {
+        auto *existing_type = existing->node.get_ptr<AST::TypeDeclNode>();
+
+        // the same declaration reached by a later pass, which is the ordinary case: passes walk
+        // identical token indices, so the site is what says "this one again" rather than "a second one"
+        if (existing_type == &node) {
+            return true;
+        }
+
+        // a *different* type holds the name. the duplicate is left symbol-less deliberately: both later
+        // passes then find the first node, and parse_typedecl reports the redeclaration at the
+        // duplicate's own name token, which is also where the body-skip recovery lives
+        if (existing_type != nullptr) {
+            return false;
+        }
+    }
+
+    ns.push_symbol(std::make_unique<AST::Symbol>(&node));
+
+    return true;
+}
+
 // `type Iter : contract::iterator<V>;` in an interface body - an associated type: one the *implementor* chooses
 // and the interface only constrains.
 //
@@ -458,9 +484,9 @@ static void parse_constructor(
     // member_kind above is the whole of what publish_implicit_conversion needs to refuse it
     publish_member_attributes(payload, ctor_decl, struct_node, ctor_token);
 
-    // the declaring namespace, like the struct's own: `Foo(...)` has to resolve wherever the type name
-    // does, and a type is not block-scoped
-    ctor_decl->ast_namespace = payload.context.declaring_namespace();
+    // the struct's own namespace: `Foo(...)` has to resolve wherever the type name does, which for a
+    // block-local struct is that block and nowhere else
+    ctor_decl->ast_namespace = payload.context.current_namespace;
 
     // share the struct's parameter declarations rather than declaring its own: the ctor's return
     // type is the struct's self-application Foo<T>, so a substitution built from this list has to
@@ -584,7 +610,7 @@ static void parse_destructor(
     // refused attribute locates against too
     publish_member_attributes(payload, dtor_decl, struct_node, dtor_token);
 
-    dtor_decl->ast_namespace = payload.context.declaring_namespace();
+    dtor_decl->ast_namespace = payload.context.current_namespace;
     dtor_decl->owner_type = &struct_node->complex_type();
 
     // shares the struct's parameter declarations rather than declaring its own, exactly as a method
@@ -726,7 +752,7 @@ static void synthesize_field_wise_constructor(
 
     struct_node->set_field_wise_constructor(&default_ctor);
 
-    default_ctor.ast_namespace = payload.context.declaring_namespace();
+    default_ctor.ast_namespace = payload.context.current_namespace;
 
     // shares the struct's parameter declarations, same reason as the explicit constructor above
     default_ctor.type_parameters = struct_node->type_parameters();
@@ -900,7 +926,8 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // the struct this declaration is written inside, if any - which is what makes it a *member* type.
     // the same field that makes a `function` in this position a method, asked one line differently, so
     // the two can never disagree about where the walk is. a `struct` in a *method* body reads null
-    // here: AST::FunctionBodyScope clears the receiver, which is A30's separate question
+    // here - AST::FunctionBodyScope clears the receiver - so it is a block-local type of that body and
+    // not a member of the enclosing struct, which is what the lexical namespace below then scopes it to
     AST::TypeDeclNode *owner_node = payload.context.self_struct_ptr;
 
     // a `struct` written inside a `{ }` block where a type parameter is visible is refused, the third
@@ -955,8 +982,11 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     if (owner_node != nullptr) {
         struct_node = owner_node->complex_type().find_member_type_decl(name_token.value());
     }
+    // the *exact* namespace this declaration is written in, never an outward walk: a `struct P` in a
+    // block where a file-scope `P` exists shadows it rather than redeclaring it, exactly as two written
+    // namespaces may each hold a `Foo`
     else if (auto *structsymbol = payload.collector.namespaces.find_symbol(
-                 name_token.value(), *payload.context.declaring_namespace())) {
+                 name_token.value(), *payload.context.current_namespace)) {
         // we found a name matching symbol
         struct_node = structsymbol->node.get_ptr<AST::TypeDeclNode>();
     }
@@ -996,7 +1026,18 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     }
 
     // create the struct node
-    struct_node->set_namespace(payload.context.declaring_namespace());
+    struct_node->set_namespace(payload.context.current_namespace);
+
+    // **the declaration publishes its own name**, rather than relying on parse_type_names having done
+    // it. at file scope that pass got here first and this is the same node under the same name, so this
+    // is a no-op; a type written in a block is one it deliberately leaves alone, because only this pass
+    // knows the block's lexical namespace. not gated on which of the two it is: one unconditional call
+    // is a rule with one owner, where "unless the earlier pass did it" is two rules that can drift
+    //
+    // a nested type is in no namespace - it is reached through its owner - so it publishes nothing
+    if (owner_node == nullptr) {
+        Parser::publish_type_symbol(payload, *payload.context.current_namespace, *struct_node);
+    }
 
     // the attributes written ahead of the declaration, through the same drain a function uses - an
     // undrained attribute attaches itself to whatever declaration comes next, and this site is the

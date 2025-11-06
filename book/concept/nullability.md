@@ -167,6 +167,24 @@ The result of a `?->` is nullable, because the whole expression is absent whenev
 is why it pairs so naturally with `??`. A chain ending in a `void` call stays `void`: there is nothing
 for a statement to be absent.
 
+## Just asking
+
+Sometimes you only want to know. `== null` asks whether a value is absent and `!= null` whether it is
+there, and `!` is the short way to write the first:
+
+```echo
+if (!$maybeNode) {
+    echo 'nothing here';
+}
+```
+
+`!$x` and `$x == null` are the same question and compile to the same instruction, so pick whichever
+reads better where you are. What they are *not* is a way to use the value: neither one narrows the
+type, so `$maybeNode->tag` after either is still an error. That is what `guard` is for.
+
+Applied to a `bool`, `!` is ordinary negation. It is the one operator in the language that answers two
+different questions, and which one it is asking is decided by what you applied it to.
+
 ## What it costs
 
 Nothing, for most types. A pointer, a class handle and a weak reference already have a null value of

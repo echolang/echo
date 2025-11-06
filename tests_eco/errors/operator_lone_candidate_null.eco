@@ -1,0 +1,19 @@
+// the third way an operator use site is refused, and the one that reaches AST::TypeChecker: with a
+// single candidate the matcher takes it without consulting types at all, so nothing fails to resolve
+// and the refusal comes out of the argument coercion instead
+//
+// what it must not do is name `Point` - the parameter of the overload that happened to be chosen.
+// `stdlib: off` is what makes the set a single declaration; with the library's two `==` in it the
+// call never resolves and AST::CallResolver reports the same sentence from the other side
+
+struct Point { int32 $x; }
+struct P { int32 $v; }
+
+operator (Point $a) == (Point $b) : bool
+{
+    return $a->x == $b->x;
+}
+
+$p = P(1);
+
+echo $p == null;

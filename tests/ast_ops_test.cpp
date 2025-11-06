@@ -110,8 +110,13 @@ TEST_CASE( "a declared symbol is matched as a token sequence", "[AST Ops]" )
         REQUIRE( match_from(registry, tm, 0).has() );
         REQUIRE( match_from(registry, tm, 0).token_count == 2 );
 
-        // `! !` is two tokens with a gap, so it is not the symbol
-        REQUIRE_FALSE( match_from(registry, tm, 2).has() );
+        // `! !` is two tokens with a gap, so it is not the symbol. what it *is* is the built-in
+        // prefix `!`, one token - so the assertion is about which symbol was matched rather than
+        // about there being none
+        auto apart = match_from(registry, tm, 2);
+        REQUIRE( apart.has() );
+        REQUIRE( apart.token_count == 1 );
+        REQUIRE_FALSE( apart.op->is_custom() );
     }
 
     SECTION( "the longest declared symbol wins" ) {

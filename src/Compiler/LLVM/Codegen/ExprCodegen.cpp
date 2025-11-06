@@ -3,6 +3,7 @@
 
 #include "AST/ASTNullability.h"
 #include "AST/ASTConstFold.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTConformance.h"
@@ -156,6 +157,19 @@ void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
 
 void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 {
+    // **every refusal below is a compiler bug rather than the user's mistake**, and says so. the arms in
+    // this function and the arms of AST::binary_has_builtin_meaning are mirrors: that predicate's `true`
+    // *is* the claim that there is an arm here, and a false answer sends the use site looking for a
+    // declared `operator` and, failing that, to a located diagnostic in AST::TypeChecker. so a pair
+    // reaching one of these throws got past a gate that should have refused it
+    const auto unlowered = [&](const AST::ValueType &lhs, const AST::ValueType &rhs) {
+        return _ctx.error(fmt::format(
+            "compiler bug: operator '{}' has no lowering for operands '{}' and '{}', but "
+            "AST::binary_has_builtin_meaning accepted them {}",
+            node.op_node->token_literal.value(), lhs.get_type_desciption(),
+            rhs.get_type_desciption(), _ctx.function_context()));
+    };
+
     node.lhs->accept(*_ctx.visitor);
     node.rhs->accept(*_ctx.visitor);
 
@@ -169,14 +183,19 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     auto left = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    // **a wrapped `T?` against `null`**, which is a tag test rather than an address comparison - there is
-    // no address. ahead of every arm below because the operand's *kind* is still whatever `T` was: an
-    // `int32?` would otherwise fall into the numeric arm and compare a `{ i1, i32 }` aggregate as a number
+    // **a presence test against a written `null`** - over a wrapped `T?`, whose tag it reads, or over a
+    // weak handle, which lowers to an opaque address and so is present exactly when it is non-null. One
+    // arm and not two, because it is one question and `TypeLowering::gen_has_value` is the one primitive
+    // that answers it for either shape: two blocks computing the same `CreateNot` off the same predicate
+    // were two spellings of "is this reference absent" held in step by inspection.
     //
-    // only against a written `null`, never against another optional. `$a == $b` over two `int32?`s is a
-    // question about the values, and answering it here would silently compare presence instead - so it
-    // stays unhandled and the type checker's ordinary rules report it
-    if (lhsret.is_wrapped_optional() || rhsret.is_wrapped_optional()) {
+    // ahead of every arm below because the operand's *kind* is still whatever it was: an `int32?` would
+    // otherwise fall into the numeric arm and compare a `{ i1, i32 }` aggregate as a number, and a weak is
+    // its own kind rather than a `t_class`.
+    //
+    // `!$w` at gen_unary_expr's `!` arm reads gen_has_value and inverts it exactly this way, down to the
+    // value name, so those two emit the same instruction rather than agreeing by inspection either
+    if (lhsret.is_wrapped_optional() || rhsret.is_wrapped_optional() || lhsret.is_weak() || rhsret.is_weak()) {
         // through AST::is_written_null rather than the raw tag: an implicit cast reconciling the null
         // with the optional's type hides it, and this arm and AST::binary_has_builtin_meaning - which
         // decided this comparison *has* a built-in lowering at all - have to agree about which operand
@@ -185,14 +204,23 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         const bool rhs_is_null = AST::is_written_null(node.rhs);
 
         if ((lhs_is_null || rhs_is_null) && node.op_node->op->is_identity_comparison()) {
-            const AST::ValueType &optional_type = lhs_is_null ? rhsret : lhsret;
-            llvm::Value *present = _ctx.types->gen_has_value(lhs_is_null ? right : left, optional_type);
+            const AST::ValueType &present_of = lhs_is_null ? rhsret : lhsret;
+            llvm::Value *present = _ctx.types->gen_has_value(lhs_is_null ? right : left, present_of);
 
             // `$x == null` is *absent*, so the tag is inverted - and `!=` is the tag as it stands
             _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
                 ? _ctx.builder->CreateNot(present, "is_null")
                 : present);
             return;
+        }
+
+        // **the two shapes part company here.** an optional falls through: only against a written `null`,
+        // never against another optional - `$a == $b` over two `int32?`s is a question about the values,
+        // and answering it here would silently compare presence instead, so it stays unhandled and the
+        // type checker's ordinary rules report it. a weak has no arm below it at all, so anything else
+        // over one got past a gate that should have refused it
+        if (lhsret.is_weak() || rhsret.is_weak()) {
+            throw unlowered(lhsret, rhsret);
         }
     }
 
@@ -204,10 +232,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         // checker rejects the rest with - so the two passes read the rule off one function rather than
         // each enumerating it
         if (!node.op_node->op->is_identity_comparison()) {
-            throw _ctx.error(fmt::format(
-                "unsupported binary operator '{}' for operands '{}' and '{}' {}",
-                node.op_node->token_literal.value(), lhsret.get_type_desciption(),
-                rhsret.get_type_desciption(), _ctx.function_context()));
+            throw unlowered(lhsret, rhsret);
         }
 
         _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
@@ -246,8 +271,7 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             {
                 if (both_pointers) {
                     if (node.op_node->op->type != Token::Type::t_op_sub) {
-                        throw _ctx.error(fmt::format("two addresses cannot be added {}",
-                            _ctx.function_context()));
+                        throw unlowered(lhsret, rhsret);
                     }
 
                     // the distance between two addresses, counted in elements
@@ -270,13 +294,26 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             }
 
             default:
-                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
-                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
-                    rhsret.get_type_desciption(), _ctx.function_context()));
+                throw unlowered(lhsret, rhsret);
         }
     }
 
     if (lhsret.is_integer_type() && rhsret.is_integer_type()) {
+        // **the operation's own signedness, asked of the one owner.** `/ % ** < > <= >=` all mean
+        // something different over an unsigned operand, and this arm used to emit the signed spelling
+        // for every one of them - so `uint64 $big = 18446744073709551615; $big > 1` answered *false*.
+        //
+        // read off the *reconciled* type rather than either side, because AST::const_fold folds these
+        // same operators at that type: taking the lhs alone, or "either side is unsigned", would answer
+        // `int64 < uint32` differently from the folder and a `const if` would take the other arm.
+        //
+        // by the time codegen runs the two are the same type anyway - a mismatched integer pair makes
+        // BinaryExprNode::result_type() void, which is what Parser::parse_binary_expr and
+        // OperatorRewriter::widen_binary_operands each insert a cast for - so this reads the answer an
+        // earlier pass already wrote down, rather than choosing a winner here
+        const AST::ValueType op_type = AST::binary_operation_type(lhsret, rhsret);
+        const bool is_unsigned = op_type.is_unsigned_integer();
+
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
                 _ctx.value_stack.push(_ctx.builder->CreateAdd(left, right));
@@ -288,10 +325,14 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                 _ctx.value_stack.push(_ctx.builder->CreateMul(left, right));
                 break;
             case Token::Type::t_op_div:
-                _ctx.value_stack.push(_ctx.builder->CreateSDiv(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateUDiv(left, right)
+                    : _ctx.builder->CreateSDiv(left, right));
                 break;
             case Token::Type::t_op_mod:
-                _ctx.value_stack.push(_ctx.builder->CreateSRem(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateURem(left, right)
+                    : _ctx.builder->CreateSRem(left, right));
                 break;
             case Token::Type::t_op_pow:
                 {
@@ -313,13 +354,33 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                         throw _ctx.error(fmt::format("Cannot lower the '**' operator: {}", failure));
                     }
 
+                    // both conversions read the operation's signedness, and the result goes back to the
+                    // operation's *own* type. this used to widen signed unconditionally and truncate to
+                    // `i32` whatever the operands were, so `int64 $x = 2 ** 40;` lost the top bits
                     std::vector<llvm::Value *> args;
-                    args.push_back(_ctx.builder->CreateSIToFP(left, double_type));
-                    args.push_back(_ctx.builder->CreateSIToFP(right, double_type));
+                    args.push_back(is_unsigned
+                        ? _ctx.builder->CreateUIToFP(left, double_type)
+                        : _ctx.builder->CreateSIToFP(left, double_type));
+                    args.push_back(is_unsigned
+                        ? _ctx.builder->CreateUIToFP(right, double_type)
+                        : _ctx.builder->CreateSIToFP(right, double_type));
 
                     llvm::Value *result = _ctx.builder->CreateCall(fun, args);
-                    _ctx.value_stack.push(_ctx.builder->CreateFPToSI(result, llvm::Type::getInt32Ty(*_ctx.llvm_context)));
+                    llvm::Type *int_type = _ctx.types->get_llvm_type(op_type, *_ctx.current_cmp_unit);
+
+                    _ctx.value_stack.push(is_unsigned
+                        ? _ctx.builder->CreateFPToUI(result, int_type)
+                        : _ctx.builder->CreateFPToSI(result, int_type));
                 }
+                break;
+            // **the one bitwise operator that lowers.** `&  |  <<  >>` sit beside it in
+            // AST::op_precedence and in the predefined set, so they parse - and
+            // AST::binary_has_builtin_meaning refuses them, which is what makes each of them a located
+            // diagnostic rather than the `default:` throw below. `^` is here on its own because it is
+            // what FNV-1a needs and because `&` has a grammar problem the others do not: `&$x` lexes as
+            // an address-of, so infix `&` is a question about the lexer rather than a case label
+            case Token::Type::t_xor:
+                _ctx.value_stack.push(_ctx.builder->CreateXor(left, right));
                 break;
             case Token::Type::t_logical_eq:
                 _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
@@ -327,22 +388,30 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             case Token::Type::t_logical_neq:
                 _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
                 break;
+            // `==` and `!=` above need no arm of their own: they are sign-agnostic at equal width, which
+            // is why the four below are the whole of the exposure
             case Token::Type::t_close_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpSGT(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateICmpUGT(left, right)
+                    : _ctx.builder->CreateICmpSGT(left, right));
                 break;
             case Token::Type::t_open_angle:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpSLT(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateICmpULT(left, right)
+                    : _ctx.builder->CreateICmpSLT(left, right));
                 break;
             case Token::Type::t_logical_geq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpSGE(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateICmpUGE(left, right)
+                    : _ctx.builder->CreateICmpSGE(left, right));
                 break;
             case Token::Type::t_logical_leq:
-                _ctx.value_stack.push(_ctx.builder->CreateICmpSLE(left, right));
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateICmpULE(left, right)
+                    : _ctx.builder->CreateICmpSLE(left, right));
                 break;
             default:
-                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
-                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
-                    rhsret.get_type_desciption(), _ctx.function_context()));
+                throw unlowered(lhsret, rhsret);
         }
     }
     else if (lhsret.is_boolean_type() && rhsret.is_boolean_type()) {
@@ -353,10 +422,18 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             case Token::Type::t_logical_or:
                 _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
                 break;
+            // **whether two answers agree**, over the i1 they already are. the four *ordering*
+            // comparisons are deliberately absent: a bool is a yes/no rather than a small number, and
+            // `$a < $b` on two of them is a precedence mistake far more often than it is a question -
+            // refused the same way ordering two class handles is
+            case Token::Type::t_logical_eq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));
+                break;
+            case Token::Type::t_logical_neq:
+                _ctx.value_stack.push(_ctx.builder->CreateICmpNE(left, right));
+                break;
             default:
-                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
-                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
-                    rhsret.get_type_desciption(), _ctx.function_context()));
+                throw unlowered(lhsret, rhsret);
         }
     }
     else if (lhsret.is_floating_type() || rhsret.is_floating_type()) {
@@ -419,13 +496,11 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
 
 
             default:
-                throw _ctx.error(fmt::format("unsupported binary operator '{}' for operands '{}' and '{}' {}",
-                    node.op_node->token_literal.value(), lhsret.get_type_desciption(),
-                    rhsret.get_type_desciption(), _ctx.function_context()));
+                throw unlowered(lhsret, rhsret);
         }
     }
     else {
-        throw std::runtime_error("Unsupported binary operator");
+        throw unlowered(lhsret, rhsret);
     }
 }
 
@@ -451,6 +526,26 @@ void ExprCodegen::gen_unary_expr(AST::UnaryExprNode &node)
                     type.get_type_desciption(), _ctx.function_context()));
             }
             break;
+
+        // **`!` over a bool is the negation; over anything that may be absent it is the presence
+        // test, inverted.** the second arm emits nothing of its own - TypeLowering::gen_has_value is
+        // the one owner of the wrapped-optional / free-over-an-address split, and the `== null` arm
+        // of gen_binary_expr reads it and inverts it exactly this way. so `!$maybe` and
+        // `$maybe == null` are the same instruction by construction rather than by agreement
+        case Token::Type::t_exclamation:
+            if (type.is_boolean_type()) {
+                _ctx.value_stack.push(_ctx.builder->CreateNot(value, "not"));
+            }
+            else if (AST::destination_admits_null(type)) {
+                _ctx.value_stack.push(_ctx.builder->CreateNot(
+                    _ctx.types->gen_has_value(value, type), "is_null"));
+            }
+            else {
+                throw _ctx.error(fmt::format("unary '!' is not supported for operand type '{}' {}",
+                    type.get_type_desciption(), _ctx.function_context()));
+            }
+            break;
+
         default:
             throw _ctx.error(fmt::format("unsupported unary operator '{}' {}",
                 node.token_operator.value(), _ctx.function_context()));
@@ -800,6 +895,10 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             gen_take_builtin(node);
             return;
 
+        case AST::BuiltinKind::t_init:
+            gen_init_builtin(node);
+            return;
+
         case AST::BuiltinKind::t_die:
             gen_die_builtin(node);
             return;
@@ -1029,6 +1128,7 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:
@@ -1047,24 +1147,39 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
     _ctx.value_stack.push(llvm::ConstantInt::get(result_type, value));
 }
 
-void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
+LValue ExprCodegen::gen_raw_place(AST::FunctionCallExprNode &node, const char *name, size_t arity)
 {
-    // the shape is TypeChecker::check_take_argument's, not this arm's - what is left here is the
+    // the shape is TypeChecker::check_raw_storage_argument's, not this one's - what is left here is the
     // invariant a settled call already carries
-    if (node.arguments.size() != 1 || node.arguments[0] == nullptr) {
-        throw _ctx.error(fmt::format("'take' takes exactly one argument {}", _ctx.function_context()));
+    if (node.arguments.size() != arity) {
+        throw _ctx.error(fmt::format(
+            "'{}' takes exactly {} argument(s) {}", name, arity, _ctx.function_context()));
     }
 
-    const AST::ValueType argument_type = node.arguments[0]->result_type();
+    for (const auto &argument : node.arguments) {
+        if (argument == nullptr) {
+            throw _ctx.error(fmt::format("'{}' has a null argument {}", name, _ctx.function_context()));
+        }
+    }
 
-    if (!argument_type.is_pointer()) {
+    const AST::ValueType place_type = node.arguments[0]->result_type();
+
+    if (!place_type.is_pointer()) {
         throw _ctx.error(fmt::format(
-            "'take' expects the address of a place, got '{}' {}",
-            argument_type.get_type_desciption(), _ctx.function_context()));
+            "'{}' expects the address of a place, got '{}' {}",
+            name, place_type.get_type_desciption(), _ctx.function_context()));
     }
 
     node.arguments[0]->accept(*_ctx.visitor);
-    llvm::Value *address = _ctx.pop();
+
+    // the *pointee*, which is what both callers want: the address names a slot holding a `T`, and
+    // `place_type` is the borrow that reached it
+    return LValue{ _ctx.pop(), AST::value_type_of(place_type) };
+}
+
+void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
+{
+    const LValue place = gen_raw_place(node, "take", 1);
 
     // **the whole lowering: one load through the borrow.** the parameter is `T&`, so what arrives is the
     // address of the slot rather than what is in it, and the pointer adjuster inserts no deref because
@@ -1076,8 +1191,32 @@ void ExprCodegen::gen_take_builtin(AST::FunctionCallExprNode &node)
     //
     // nothing is written back. that *is* the move - the slot keeps its bits and stops being an owner,
     // which is a claim about the source that only its manager can make and is why this sits in `mem::`
-    _ctx.value_stack.push(_ctx.lvalues->gen_load(
-        LValue{ address, AST::value_type_of(argument_type) }, "take"));
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(place, "take"));
+}
+
+void ExprCodegen::gen_init_builtin(AST::FunctionCallExprNode &node)
+{
+    const LValue place = gen_raw_place(node, "init", 2);
+
+    node.arguments[1]->accept(*_ctx.visitor);
+    llvm::Value *value = _ctx.pop();
+
+    // **the whole lowering: one store through the borrow.** the mirror of `take`'s one load, and correct
+    // for the same reason read from the other end - the parameter is `T&`, so what arrives is the address
+    // of the slot rather than what is in it.
+    //
+    // **nothing is released first.** that is the point of the builtin rather than an omission: an
+    // ordinary `=` into this place would have AST::OwnershipPass end whatever the destination held, and
+    // over a slot straight out of `mem::alloc` that is a destructor over whatever bytes the allocator
+    // handed back. the claim that there is nothing there is the caller's to make, which is why this sits
+    // in `mem::` beside `take` and `free`
+    //
+    // and nothing is *retained* either: the value arrived by value, so the caller's copy already
+    // happened and this hands that owner over rather than duplicating it
+    _ctx.builder->CreateStore(
+        _ctx.types->coerce_value(
+            value, node.arguments[1]->result_type(), place.storage_type, *_ctx.current_cmp_unit),
+        place.address);
 }
 
 void ExprCodegen::gen_raw_memory_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)

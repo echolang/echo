@@ -88,6 +88,10 @@ namespace EchoTests
     // would show up too
     AST::TypeDeclNode *type_named(AST::Module &m, const std::string &name);
 
+    // every declaration of this type name, in arena order - because one name can denote more than one
+    // type: two written namespaces may each hold a `Foo`, and so may two `{ }` blocks
+    std::vector<AST::TypeDeclNode *> types_named(AST::Module &m, const std::string &name);
+
     // how many diagnostics mentioned this? a test asserting that one mistake is reported *once*
     // needs the count, not the yes/no below
     size_t count_issues_containing(const AST::Bundle &bundle, const std::string &needle);

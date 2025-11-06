@@ -1,0 +1,59 @@
+// `==` and `!=` over two bools. they had no lowering at all - AST::binary_has_builtin_meaning said
+// codegen handled them and the bool arm had cases for `&&` and `||` only, so the compiler aborted
+// with no location on `echo $a == $b;`
+//
+// the last two blocks are the point of the case, the same one `xor.eco` makes: AST::const_fold and
+// ExprCodegen::gen_binary_expr have to agree, or a `const if` takes one arm and the `if` beside it
+// takes the other
+
+bool $t = true;
+bool $f = false;
+
+echo $t == $t;
+echo $t == $f;
+echo $t != $f;
+echo $f != $f;
+
+// as a condition rather than a value
+if ($t == $f) { echo 'bad'; } else { echo 'a'; }
+if ($t != $f) { echo 'b'; } else { echo 'bad'; }
+
+// against a comparison's answer, which is where this shape is actually written
+int32 $n = 3;
+
+echo ($n > 2) == $t;
+echo ($n > 2) != ($n < 2);
+
+// folded at compile time
+const if (true == false) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+// and emitted at runtime, from the same operands. one answer or the case fails
+if ($t == $f) {
+    echo 100;
+}
+else {
+    echo 200;
+}
+
+const if (true != false) {
+    echo 300;
+}
+else {
+    echo 400;
+}
+
+if ($t != $f) {
+    echo 300;
+}
+else {
+    echo 400;
+}
+
+// a `const` declaration folds through it too
+const bool AGREES = true == true;
+echo AGREES;

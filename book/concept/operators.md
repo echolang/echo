@@ -46,6 +46,15 @@ No overload of 'operator +' accepts these arguments. Candidates are:
   operator +(A, int32)
 ```
 
+Those candidates are listed because one of them mentions a type you wrote. Where none of them does,
+naming them would be noise — every operator in the program shares one namespace, so the set behind a
+symbol includes declarations from libraries you never asked about. Then the message is about your
+operands instead:
+
+```
+operator '==' is not supported on operands of type 'P' and 'P'
+```
+
 Two consequences worth knowing:
 
 - **An operator is declared at file scope, not inside a type.** It is not a member of either of its
@@ -254,11 +263,11 @@ $g[1, 2] = 4.0;
 echo $g[1, 2];
 ```
 
-Four things about it are rules rather than details:
+Five things about it are rules rather than details:
 
-1. **It returns a borrow**, `T&`, and nothing else. `$a[$i]` is a *place* — it reads, writes, takes
-   `&` and chains with `->`, all through the address the operator hands back. An overload returning
-   by value would make whether it is a place depend on which overload won.
+1. **The borrowing form returns a borrow**, `T&`, and nothing else. `$a[$i]` is a *place* — it reads,
+   writes, takes `&` and chains with `->`, all through the address the operator hands back. An overload
+   returning by value would make whether it is a place depend on which overload won.
 2. **The container is the first operand**, and the indices follow in the order the brackets write
    them. Any number of them: `$m[$row, $col]` is a three-operand declaration, and `$map["key"]` is a
    two-operand one whose index is not a number at all.
@@ -267,6 +276,39 @@ Four things about it are rules rather than details:
    alone. This is what `$a[] = $v` calls — see [Arrays](arrays.md), "Appending".
 4. **No precedence.** `[` binds like `->`, tighter than every binary operator, and never reaches the
    precedence table — so there is no number to declare and writing one is an error.
+5. **A `=` after the bracket declares the *write* contract**, which is a second, separate declaration —
+   see below.
+
+### Declaring the write
+
+`Grid` above needs nothing more: `$g[1, 2] = 4.0` writes through the place its bracket handed back, which is
+what every ordinary container wants. But a container that *seats* an element on demand — a map, where writing
+a new key has to grow the table and writing an existing one has to destroy what was there — cannot hand back a
+place at all. There is nothing valid in the slot to hand back.
+
+So the write is declarable on its own:
+
+```echo
+operator<K, V> (map<K, V>& $m)[const K& $key] = (V $value): void {
+    usize $at = $m->seat($key);
+
+    mem::init<V>($m->values:$[$at], mv $value);
+}
+```
+
+`$m[$key] = $value` is then **one call** — the value comes in as the third operand, and the body owns the
+whole write. Three rules:
+
+- **It returns `void`**, because it is a statement and not an expression. `$m[$k] = $v` produces no value,
+  and this is the one operator in the language that is written that way.
+- **It is a separate overload set** from the borrowing bracket, so a type declares both and the *position*
+  chooses: an assignment picks the write, and reading, `&`, and `->` through it all pick the borrow. There is
+  no precedence between them and no fit rule in between — the position decides, full stop.
+- **A type that declares only the borrowing form is unaffected.** `$c[$i] = $v` is then the ordinary write
+  through a place it always was, which is what `array<T>` is.
+
+An empty `[]` before the `=` is the append write, `$c[] = $v` — told from the element write by arity, the same
+way the two borrowing forms are.
 
 `[` and `]` cannot appear in any other operator symbol, which is what keeps a bracket meaning exactly
 one thing: ask this collection for one of its elements. Indexing a raw address is

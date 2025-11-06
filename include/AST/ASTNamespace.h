@@ -19,8 +19,9 @@ namespace AST
 
     // a namespace, and - for a *lexical* one - the declaration scope of a `{ }` block.
     //
-    // that a lexical scope is a namespace is the whole of B18's fix: `{ function helper() {} }` puts
-    // helper in the block's lexical namespace, and every question about it is then already answered.
+    // that a lexical scope is a namespace is the whole of the fix: `{ function helper() {} }` puts helper
+    // in the block's lexical namespace and `{ struct P {} }` puts P there, and every question about
+    // either is then already answered.
     // FunctionRegistry::overloads walks parent() outward and lets the innermost non-empty set win, so
     // an inner helper hides an outer one and an unrelated name still resolves outward.
     // find_by_signature searches one namespace, so two blocks each declaring helper(int32) do not
@@ -28,6 +29,11 @@ namespace AST
     // and already survives a clone, so the monomorphizer's fixpoint re-derives candidates with no new
     // field. And mangle_function_name already prefixes the namespace path, so the two helpers get
     // distinct symbols. four reuses, no new rule
+    //
+    // a type is the same four over again with the other two lookups: find_symbol_in_scope from the block
+    // outward is what lets a block-local `P` hide a file-scope one while an unrelated name still
+    // resolves, the exact-namespace find_symbol at the declaration is what makes that shadowing rather
+    // than a redeclaration, and ComplexType::mangled_token already takes mangling_segments()
     //
     // a lexical namespace is deliberately unspellable: it lives in `_lexical_children`, keyed by the
     // declaration site of its opening brace rather than by a name, so NamespaceManager::retrieve/get
@@ -81,8 +87,9 @@ namespace AST
             return _parent;
         }
 
-        // the nearest namespace the user could have written - itself, unless it is lexical. types live
-        // here: a lexical scope holds function declarations only, so far
+        // the nearest namespace the user could have written - itself, unless it is lexical. a question
+        // *about* a namespace, and not where a declaration goes: everything a block declares belongs to
+        // the block, so nothing in the parser asks this on its way to publishing a name
         const Namespace *declaring_namespace() const;
         Namespace *declaring_namespace();
 
@@ -123,6 +130,12 @@ namespace AST
         // returns the namespace for the given name, creating it if it doesn't exist
         Namespace &retrieve(const std::string &name);
         Namespace &retrieve(const std::vector<std::string> &parts);
+
+        // **the one child-creation site**, which the two path forms above loop over. taking a parent
+        // rather than a path from the root is what lets a *lexical* namespace have a child: a lexical
+        // one is on no path from the root, so a member surface named by a path could not land under it -
+        // it would silently create a writable namespace beside it instead
+        Namespace &retrieve(Namespace &parent, const std::string &name);
 
         // the lexical namespace of the block whose opening brace is `site`, created on first ask.
         // create-or-reuse rather than create, because the declaration pass and the body pass both walk
@@ -166,9 +179,12 @@ namespace AST
         Namespace _root;
     };
 
-    // **the one owner of "which namespace holds a type's member surface"**: the owner's own path plus its
-    // name, created on first ask. Null for an anonymous owner - a closure environment is the only one, and
-    // it has nothing to publish.
+    // **the one owner of "which namespace holds a type's member surface"**: a child of the owner's own
+    // namespace, named after the owner, created on first ask. Null for an anonymous owner - a closure
+    // environment is the only one, and it has nothing to publish.
+    //
+    // a child of that *object* and never a path from the root, which is what lets a block-local type have
+    // a surface at all: its namespace is lexical, so it is on no path a user can write.
     //
     // two things live in there and they have to live in the *same* place: a nested type's constructors and
     // methods, so `A::Inner(1)` resolves through the ordinary namespace path, and a struct's compile-time
