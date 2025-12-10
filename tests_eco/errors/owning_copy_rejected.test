@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 15:6
-'Buffer' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, take a borrow ('Buffer&') if the value is only being read, or give 'Buffer' a copy constructor ('constructor(Buffer& $other)').
-Begin: '$a'
-End: '$a'
-Code excerpt:
- [14]> $a = Buffer(mem::alloc<uint8>(1));
- [15]> $b = $a;
-           ^
- [16]> 
+[error] owning_copy_rejected.eco:15:6
 
-Critical issues found, cannot compile.
+  'Buffer' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, take a borrow ('Buffer&') if the value is only being read, or give 'Buffer' a copy constructor ('constructor(Buffer& $other)').
+
+  14 | $a = Buffer(mem::alloc<uint8>(1));
+  15 | $b = $a;
+     :      ^^
+  16 | 
+
+1 error, nothing was compiled.

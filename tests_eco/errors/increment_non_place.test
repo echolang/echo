@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:7
-'++' needs an expression with storage to step
-Begin: '++'
-End: '++'
-Code excerpt:
- [4]> ptr<int> $p = &$a;
- [5]> $p:$:$++;
-            ^
- [6]> 
+[error] increment_non_place.eco:5:7
 
-Critical issues found, cannot compile.
+  '++' needs an expression with storage to step
+
+  4 | ptr<int> $p = &$a;
+  5 | $p:$:$++;
+    :       ^^
+  6 | 
+
+1 error, nothing was compiled.

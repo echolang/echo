@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 17:7
-Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
-Begin: '$p'
-End: '$p'
-Code excerpt:
- [16]> 
- [17]> Point $p = 42;
-            ^
- [18]> 
+[error] InvalidTypeConversion  literal_into_struct.eco:17:7
 
----- Issue ----
-Issue at 13:7
-Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
-Begin: '$x'
-End: '$x'
-Code excerpt:
- [12]> {
- [13]>     T $x = 42;
-            ^
- [14]>     return $x;
+  Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
 
-Critical issues found, cannot compile.
+  16 | 
+  17 | Point $p = 42;
+     :       ^^
+  18 | 
+
+[error] InvalidTypeConversion  literal_into_struct.eco:13:7
+
+  Invalid type conversion: cannot implicitly convert 'int32' to 'Point'
+
+  12 | {
+  13 |     T $x = 42;
+     :       ^^
+  14 |     return $x;
+
+2 errors, nothing was compiled.

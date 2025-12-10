@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:10
-'f(int32)' is already declared with these parameter types. Overloads must differ in their parameters.
-Begin: 'f'
-End: 'f'
-Code excerpt:
- [3]> function f(int32 $a) : int32 { return 1; }
- [4]> function f(int32 $b) : int32 { return 2; }
-               ^
- [5]> 
+[error] DuplicateFunctionSignature  duplicate_function_signature.eco:4:10
 
-Critical issues found, cannot compile.
+  'f(int32)' is already declared with these parameter types. Overloads must differ in their parameters.
+
+  3 | function f(int32 $a) : int32 { return 1; }
+  4 | function f(int32 $b) : int32 { return 2; }
+    :          ^
+  5 | 
+
+1 error, nothing was compiled.

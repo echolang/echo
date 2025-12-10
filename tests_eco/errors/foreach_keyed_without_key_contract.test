@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 28:19
-'Plain' iterates, but its cursor declares no key contract - so there is no '$k' to bind. Declare 'contract::keyed<...>' on it, or drop the '=>'.
-Begin: '=>'
-End: '=>'
-Code excerpt:
- [27]> 
- [28]> foreach ($p as $k => $v) {
-                        ^
- [29]>     echo $k;
+[error] foreach_keyed_without_key_contract.eco:28:19
 
-Critical issues found, cannot compile.
+  'Plain' iterates, but its cursor declares no key contract - so there is no '$k' to bind. Declare 'contract::keyed<...>' on it, or drop the '=>'.
+
+  27 | 
+  28 | foreach ($p as $k => $v) {
+     :                   ^^
+  29 |     echo $k;
+
+1 error, nothing was compiled.

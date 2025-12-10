@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:30
-'continue' is only meaningful inside a loop - there is no loop here to go back to. a closure or a nested function does not inherit the loop it was written in
-Begin: 'continue'
-End: 'continue'
-Code excerpt:
- [7]> while ($i < 3) {
- [8]>     $f = function() : void { continue; };
-                                   ^
- [9]>     $i = $i + 1;
+[error] break_in_closure_in_loop.eco:8:30
 
-Critical issues found, cannot compile.
+  'continue' is only meaningful inside a loop - there is no loop here to go back to. a closure or a nested function does not inherit the loop it was written in
+
+  7 | while ($i < 3) {
+  8 |     $f = function() : void { continue; };
+    :                              ^^^^^^^^
+  9 |     $i = $i + 1;
+
+1 error, nothing was compiled.

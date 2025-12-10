@@ -2,6 +2,6 @@ modules: modules/cycle_a
 expect: fail
 
 --- OUT --->
-Module Manifest Error
----------------------
-the module dependencies form a cycle: cyclea -> cycleb -> cyclea. A module is parsed completely before the next one starts, so it can only name symbols from modules parsed before it - which makes a cycle unsatisfiable rather than merely unsupported.
+[error] Module Manifest Error
+
+  the module dependencies form a cycle: cyclea -> cycleb -> cyclea. A module is parsed completely before the next one starts, so it can only name symbols from modules parsed before it - which makes a cycle unsatisfiable rather than merely unsupported.

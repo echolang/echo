@@ -19,13 +19,7 @@
 
 namespace AST
 {
-    // renders one issue - where it is, what it says, and the code it points at.
-    //
-    // the one owner of that shape, because it has two callers that are not on the same path:
-    // Collector::print_issues walks the accumulated ones, and main.cpp reports the single issue an
-    // ASTCompilerException carries. each keeps only its own header line above this, and the ~90
-    // `.test` goldens in tests_eco/errors pin the text either way
-    void print_issue(const IssueRecord &issue);
+    class DiagnosticRenderer;
 
     class Collector
     {
@@ -78,9 +72,25 @@ namespace AST
             issues.push_back(std::move(issue));
         }
 
-        void print_issues() const;
+        // **takes the renderer rather than reaching for a global one.** Which format a diagnostic is
+        // written in is a command-line answer, and this class is constructed long before one is parsed -
+        // so the renderer arrives here, and the same object serves the exception path and the banner
+        // errors. That is what makes drift between them impossible rather than merely discouraged
+        void print_issues(const DiagnosticRenderer &renderer) const;
 
         bool has_critical_issues() const;
+
+        // how many of the collected issues carry this severity. one counter rather than one per severity:
+        // the three loops it replaced were the same loop, and the summary line needs two of them
+        size_t count_of(IssueSeverity severity) const;
+
+        size_t error_count() const {
+            return count_of(IssueSeverity::Error);
+        }
+
+        size_t warning_count() const {
+            return count_of(IssueSeverity::Warning);
+        }
 
     private:
 

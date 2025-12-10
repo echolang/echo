@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:5
-An operator cannot be declared inside a block. Declare it at file scope - its symbol is visible to the whole program, so it cannot be scoped to one.
-Begin: 'operator'
-End: 'operator'
-Code excerpt:
- [5]> {
- [6]>     operator (S $a) + (S $b): S { return $a; }
-          ^
- [7]> }
+[error] operator_in_block.eco:6:5
 
-Critical issues found, cannot compile.
+  An operator cannot be declared inside a block. Declare it at file scope - its symbol is visible to the whole program, so it cannot be scoped to one.
+
+  5 | {
+  6 |     operator (S $a) + (S $b): S { return $a; }
+    :     ^^^^^^^^
+  7 | }
+
+1 error, nothing was compiled.

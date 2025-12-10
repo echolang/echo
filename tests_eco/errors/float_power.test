@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:12
-operator '**' is not supported on operands of type 'float64' and 'float64'
-Begin: '**'
-End: '**'
-Code excerpt:
- [6]> 
- [7]> echo $base ** 3.0;
-                 ^
- [8]> 
+[error] float_power.eco:7:12
 
-Critical issues found, cannot compile.
+  operator '**' is not supported on operands of type 'float64' and 'float64'
+
+  6 | 
+  7 | echo $base ** 3.0;
+    :            ^^
+  8 | 
+
+1 error, nothing was compiled.

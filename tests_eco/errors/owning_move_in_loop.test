@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 16:1
-'$a' is moved out of inside a loop, so the next iteration would move a value that is no longer there. Move it after the loop, or declare it inside one.
-Begin: '$a'
-End: '$a'
-Code excerpt:
- [15]> 
- [16]> $a = Buffer(mem::alloc<uint8>(1));
-      ^
- [17]> $i = 0;
+[error] owning_move_in_loop.eco:16:1
 
-Critical issues found, cannot compile.
+  '$a' is moved out of inside a loop, so the next iteration would move a value that is no longer there. Move it after the loop, or declare it inside one.
+
+  15 | 
+  16 | $a = Buffer(mem::alloc<uint8>(1));
+     : ^^
+  17 | $i = 0;
+
+1 error, nothing was compiled.

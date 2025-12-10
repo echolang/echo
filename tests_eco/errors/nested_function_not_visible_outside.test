@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:6
-The function 'helper' could not be found
-Begin: 'helper'
-End: 'helper'
-Code excerpt:
- [10]> 
- [11]> echo helper(5);
-           ^
- [12]> 
+[error] UnknownFunction  nested_function_not_visible_outside.eco:11:6
 
-Critical issues found, cannot compile.
+  The function 'helper' could not be found
+
+  10 | 
+  11 | echo helper(5);
+     :      ^^^^^^
+  12 | 
+
+1 error, nothing was compiled.

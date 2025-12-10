@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:17
-The type 'slice<int32>' has no member named 'nope'
-Begin: 'nope'
-End: 'nope'
-Code excerpt:
- [8]> 
- [9]> echo $views[0]->nope();
-                      ^
- [10]> 
+[error] UnknownMember  element_unknown_member.eco:9:17
 
-Critical issues found, cannot compile.
+  The type 'slice<int32>' has no member named 'nope'
+
+   8 | 
+   9 | echo $views[0]->nope();
+     :                 ^^^^
+  10 | 
+
+1 error, nothing was compiled.

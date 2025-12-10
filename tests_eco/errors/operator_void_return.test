@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:17
-operator 'sum' returns void. An operator is an expression, so it has to return something.
-Begin: 'sum'
-End: 'sum'
-Code excerpt:
- [3]> 
- [4]> operator (S $a) sum (S $b): void { return; }
-                      ^
- [5]> 
+[error] operator_void_return.eco:4:17
 
-Critical issues found, cannot compile.
+  operator 'sum' returns void. An operator is an expression, so it has to return something.
+
+  3 | 
+  4 | operator (S $a) sum (S $b): void { return; }
+    :                 ^^^
+  5 | 
+
+1 error, nothing was compiled.

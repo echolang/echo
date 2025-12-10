@@ -1,48 +1,40 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:19
-'function<int32()>' cannot be null - a callable has no empty value - write 'function<...>?' if it may be absent
-Begin: '$decl'
-End: '$decl'
-Code excerpt:
- [6]> 
- [7]> function<int32()> $decl = null;
-                        ^
- [8]> 
+[error] null_callable.eco:7:19
 
----- Issue ----
-Issue at 10:5
-cannot assign null to 'function<int32()>' - a callable has no empty value - write 'function<...>?' if it may be absent
-Begin: '='
-End: '='
-Code excerpt:
- [9]> function<int32()> $ok = function() : int32 { return 1; };
- [10]> $ok = null;
-          ^
- [11]> 
+  'function<int32()>' cannot be null - a callable has no empty value - write 'function<...>?' if it may be absent
 
----- Issue ----
-Issue at 13:6
-argument 1 of 'takes' is 'function<int32()>', which cannot be null - a callable has no empty value - write 'function<...>?' if it may be absent
-Begin: 'takes'
-End: 'takes'
-Code excerpt:
- [12]> function takes(function<int32()> $f) : int32 { return $f(); }
- [13]> echo takes(null);
-           ^
- [14]> 
+  6 | 
+  7 | function<int32()> $decl = null;
+    :                   ^^^^^
+  8 | 
 
----- Issue ----
-Issue at 15:40
-cannot return null as 'function<int32()>' - a callable has no empty value - write 'function<...>?' if it may be absent
-Begin: 'return'
-End: 'return'
-Code excerpt:
- [14]> 
- [15]> function gives() : function<int32()> { return null; }
-                                             ^
- [16]> 
+[error] null_callable.eco:10:5
 
-Critical issues found, cannot compile.
+  cannot assign null to 'function<int32()>' - a callable has no empty value - write 'function<...>?' if it may be absent
+
+   9 | function<int32()> $ok = function() : int32 { return 1; };
+  10 | $ok = null;
+     :     ^
+  11 | 
+
+[error] null_callable.eco:13:6
+
+  argument 1 of 'takes' is 'function<int32()>', which cannot be null - a callable has no empty value - write 'function<...>?' if it may be absent
+
+  12 | function takes(function<int32()> $f) : int32 { return $f(); }
+  13 | echo takes(null);
+     :      ^^^^^
+  14 | 
+
+[error] null_callable.eco:15:40
+
+  cannot return null as 'function<int32()>' - a callable has no empty value - write 'function<...>?' if it may be absent
+
+  14 | 
+  15 | function gives() : function<int32()> { return null; }
+     :                                        ^^^^^^
+  16 | 
+
+4 errors, nothing was compiled.

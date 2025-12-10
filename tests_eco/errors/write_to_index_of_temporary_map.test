@@ -6,15 +6,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:7
-'map<string,int32>' has no storage of its own, so writing to one of its elements would be lost - the value is destroyed at the end of this statement. Bind it to a variable first.
-Begin: '['
-End: '['
-Code excerpt:
- [10]> 
- [11]> make()['a'] = 1;
-            ^
- [12]> 
+[error] write_to_index_of_temporary_map.eco:11:7
 
-Critical issues found, cannot compile.
+  'map<string,int32>' has no storage of its own, so writing to one of its elements would be lost - the value is destroyed at the end of this statement. Bind it to a variable first.
+
+  10 | 
+  11 | make()['a'] = 1;
+     :       ^
+  12 | 
+
+1 error, nothing was compiled.

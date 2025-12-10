@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 21:16
-an array literal fills storage, so it has to name it - write it as a declaration's initializer or as an assignment to a variable.
-Begin: '['
-End: '['
-Code excerpt:
- [20]> 
- [21]> echo $h?->take([1, 2]) ?? 7;
-                     ^
- [22]> 
+[error] array_literal_in_optional_chain.eco:21:16
 
-Critical issues found, cannot compile.
+  an array literal fills storage, so it has to name it - write it as a declaration's initializer or as an assignment to a variable.
+
+  20 | 
+  21 | echo $h?->take([1, 2]) ?? 7;
+     :                ^
+  22 | 
+
+1 error, nothing was compiled.

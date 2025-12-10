@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 12:8
-The function 'P' could not be found
-Begin: 'P'
-End: 'P'
-Code excerpt:
- [11]> 
- [12]> P $q = P(1);
-             ^
- [13]> echo $q->x;
+[error] UnknownFunction  body_local_type_at_file_scope.eco:12:8
 
-Critical issues found, cannot compile.
+  The function 'P' could not be found
+
+  11 | 
+  12 | P $q = P(1);
+     :        ^
+  13 | echo $q->x;
+
+1 error, nothing was compiled.

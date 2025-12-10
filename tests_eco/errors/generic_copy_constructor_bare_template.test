@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 16:22
-'Box' names the template rather than a type, so this is not a copy constructor for 'Box<T>'. Write 'Box<T>&' to declare one.
-Begin: '$other'
-End: '$other'
-Code excerpt:
- [15]> 
- [16]>     constructor(Box& $other)
-                           ^
- [17]>     {
+[error] generic_copy_constructor_bare_template.eco:16:22
 
-Critical issues found, cannot compile.
+  'Box' names the template rather than a type, so this is not a copy constructor for 'Box<T>'. Write 'Box<T>&' to declare one.
+
+  15 | 
+  16 |     constructor(Box& $other)
+     :                      ^^^^^^
+  17 |     {
+
+1 error, nothing was compiled.

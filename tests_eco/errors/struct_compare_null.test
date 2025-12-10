@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:9
-cannot compare 'P' against null - it is always there, write 'P?' if it may be absent
-Begin: 'operator =='
-End: 'operator =='
-Code excerpt:
- [6]> $a = P(1);
- [7]> echo $a == null;
-              ^
- [8]> 
+[error] NoMatchingOverload  struct_compare_null.eco:7:9
 
-Critical issues found, cannot compile.
+  cannot compare 'P' against null - it is always there, write 'P?' if it may be absent
+
+  6 | $a = P(1);
+  7 | echo $a == null;
+    :         ^^^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

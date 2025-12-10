@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:5
-A destructor returns nothing - drop the ': type'.
-Begin: 'destructor'
-End: 'destructor'
-Code excerpt:
- [6]> 
- [7]>     destructor() : void
-          ^
- [8]>     {
+[error] destructor_with_return_type.eco:7:5
 
-Critical issues found, cannot compile.
+  A destructor returns nothing - drop the ': type'.
+
+  6 | 
+  7 |     destructor() : void
+    :     ^^^^^^^^^^
+  8 |     {
+
+1 error, nothing was compiled.

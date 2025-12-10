@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:8
-unexpected '2' - two expressions with no operator between them.
-Begin: '2'
-End: '2'
-Code excerpt:
- [2]> // the bottom of the shunting yard, which takes the compiler down instead of reporting
- [3]> echo 1 2;
-             ^
- [4]> 
+[error] expression_juxtaposition.eco:3:8
 
-Critical issues found, cannot compile.
+  unexpected '2' - two expressions with no operator between them.
+
+  2 | // the bottom of the shunting yard, which takes the compiler down instead of reporting
+  3 | echo 1 2;
+    :        ^
+  4 | 
+
+1 error, nothing was compiled.

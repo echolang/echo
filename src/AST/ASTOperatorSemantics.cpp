@@ -297,7 +297,7 @@ namespace AST
         // a float meeting another number, which codegen promotes both sides of. no `**` - that arm
         // round-trips through `llvm.pow` for integers only - and no `^`
         const auto numeric = [](const ValueType &type) {
-            return type.is_floating_type() || type.is_integer_type() || type.is_boolean_type();
+            return type.is_numeric_type() || type.is_boolean_type();
         };
 
         if ((lhs.type.is_floating_type() || rhs.type.is_floating_type())
@@ -380,7 +380,13 @@ namespace AST
             // a weak too: it answers whether the reference was ever taken. **not** whether its object is
             // still alive, which is `strong($w)` - so the refusal is worth keeping distinct from the
             // ones above rather than folded into a single "cannot compare"
-            if (!other.is_pointer() && !other.is_class() && !other.is_nullable() && !other.is_weak()) {
+            //
+            // asked of the two owners rather than enumerating them: a type that may be *absent* is
+            // AST::destination_admits_null's answer, and one that has a spare null value to be absent
+            // *as* is ValueType::has_null_representation's. a kind added to either reaches this refusal
+            // and binary_has_builtin_meaning's presence arm together, which is the whole point - one of
+            // them claiming a lowering the other refuses is a comparison with two meanings
+            if (!destination_admits_null(other) && !other.has_null_representation()) {
                 return other.is_struct()
                     ? fmt::format("cannot compare '{}' against null - it is always there, write "
                         "'{}?' if it may be absent",

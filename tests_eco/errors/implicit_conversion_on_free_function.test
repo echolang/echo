@@ -1,16 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:3
-Only a method can declare an implicit conversion - 'window' is a free function, and a conversion converts the type it is declared on.
-Begin: 'implicit'
-End: 'function'
-Code excerpt:
- [3]> 
- [4]> #[implicit]
-        ^
- [5]> function window() : Window { return Window(1); }
- [6]> 
+[error] implicit_conversion_on_free_function.eco:4:3
 
-Critical issues found, cannot compile.
+  Only a method can declare an implicit conversion - 'window' is a free function, and a conversion converts the type it is declared on.
+
+  3 | 
+  4 | #[implicit]
+    :   ^^^^^^^^^
+  5 | function window() : Window { return Window(1); }
+    : ^^^^^^^^
+  6 | 
+
+1 error, nothing was compiled.

@@ -5,15 +5,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:17
-operator '<' is not supported on operands of type 'Res' and 'Res'
-Begin: '<'
-End: '<'
-Code excerpt:
- [6]> $b = Res(2);
- [7]> bool $less = $a < $b;
-                      ^
- [8]> 
+[error] class_ordering_operator.eco:7:17
 
-Critical issues found, cannot compile.
+  operator '<' is not supported on operands of type 'Res' and 'Res'
+
+  6 | $b = Res(2);
+  7 | bool $less = $a < $b;
+    :                 ^
+  8 | 
+
+1 error, nothing was compiled.

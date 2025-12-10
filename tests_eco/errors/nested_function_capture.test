@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 12:37
-'$n' is declared in an enclosing function. A plain nested function captures nothing - pass it as a parameter, or write a closure.
-Begin: '$n'
-End: '$n'
-Code excerpt:
- [11]> 
- [12]>     function bad() : int32 { return $n; }
-                                          ^
- [13]> 
+[error] nested_function_capture.eco:12:37
 
-Critical issues found, cannot compile.
+  '$n' is declared in an enclosing function. A plain nested function captures nothing - pass it as a parameter, or write a closure.
+
+  11 | 
+  12 |     function bad() : int32 { return $n; }
+     :                                     ^^
+  13 | 
+
+1 error, nothing was compiled.

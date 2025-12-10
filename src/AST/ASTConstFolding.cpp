@@ -184,7 +184,7 @@ ExprNode *ConstFolding::literal_for(const ConstFoldResult &folded, const TokenRe
     // **the decimal text, not the bits**: LiteralIntExprNode reads its value back out of the token, so the
     // rendering has to be the one the accessors will parse. signed values are rendered signed, which is
     // exactly what ConstFoldResult's sign-extension invariant makes possible
-    const std::string text = get_integer_size(folded.type.get_primitive_type()).is_signed
+    const std::string text = folded.type.is_signed_integer()
         ? std::to_string(folded.as_signed())
         : std::to_string(folded.bits);
 

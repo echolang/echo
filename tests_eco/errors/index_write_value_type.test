@@ -9,15 +9,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:3
-Invalid type conversion: no overload of operator '[]=' accepts a 'string' here - declare one for it, or convert the operand first.
-Begin: 'operator []='
-End: 'operator []='
-Code excerpt:
- [8]> 
- [9]> $m['a'] = 'not an int';
-        ^
- [10]> 
+[error] InvalidTypeConversion  index_write_value_type.eco:9:3
 
-Critical issues found, cannot compile.
+  Invalid type conversion: no overload of operator '[]=' accepts a 'string' here - declare one for it, or convert the operand first.
+
+   8 | 
+   9 | $m['a'] = 'not an int';
+     :   ^^^^^^^^^^^^
+  10 | 
+
+1 error, nothing was compiled.

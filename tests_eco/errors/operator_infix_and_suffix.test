@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:17
-'blah' is already declared as an infix operator. One symbol cannot be both infix and suffix - '$a blah $b' would not say which.
-Begin: 'blah'
-End: 'blah'
-Code excerpt:
- [4]> operator (S $a) blah (S $b): int32 { return 1; }
- [5]> operator (S $a) blah : int32 { return 2; }
-                      ^
- [6]> 
+[error] operator_infix_and_suffix.eco:5:17
 
-Critical issues found, cannot compile.
+  'blah' is already declared as an infix operator. One symbol cannot be both infix and suffix - '$a blah $b' would not say which.
+
+  4 | operator (S $a) blah (S $b): int32 { return 1; }
+  5 | operator (S $a) blah : int32 { return 2; }
+    :                 ^^^^
+  6 | 
+
+1 error, nothing was compiled.

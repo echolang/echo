@@ -290,15 +290,11 @@ AST::ScopeNode & Parser::parse_scope(
             // in the hopes that there is    simply a typo in the code or something minor that we can recover from
             // we might have to skip till the end of the scope otherwise..
             cursor.skip(); // always skip the token causing the issue
-            cursor.skip_until({ Token::Type::t_semicolon, Token::Type::t_open_brace, Token::Type::t_close_brace });
 
-            // the terminator is consumed and neither brace is - Cursor::try_skip_to_next_statement's
-            // rule, spelled here too because this arm hand-rolls the same skip. a `}` ends the loop
-            // above rather than this scope's contents, and progress is already guaranteed by the
-            // skip of the offending token
-            if (cursor.is_type(Token::Type::t_semicolon)) {
-                cursor.skip();
-            }
+            // through the owner of "how far may recovery go", with `{` added to what it stops on: a `}`
+            // ends the loop above rather than this scope's contents, and a `{` opens a block this loop
+            // can parse. progress is already guaranteed by the skip of the offending token
+            cursor.try_skip_to_next_statement({ Token::Type::t_open_brace });
         }
     }
 

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:12
-cannot compare 'ptr<int32>' against 'int32' - an address only compares against another address
-Begin: '=='
-End: '=='
-Code excerpt:
- [5]> ptr<int> $p = &$a;
- [6]> echo ($p:$ == 0);
-                 ^
- [7]> 
+[error] compare_address_to_value.eco:6:12
 
-Critical issues found, cannot compile.
+  cannot compare 'ptr<int32>' against 'int32' - an address only compares against another address
+
+  5 | ptr<int> $p = &$a;
+  6 | echo ($p:$ == 0);
+    :            ^^
+  7 | 
+
+1 error, nothing was compiled.

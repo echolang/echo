@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:23
-type parameter 'T' is not mentioned by any operand of operator 'avg', so nothing could ever bind it - an operator use site has no spelling for explicit type arguments.
-Begin: 'avg'
-End: 'avg'
-Code excerpt:
- [4]> 
- [5]> operator<T> (Bag& $a) avg (Bag& $b) : int32
-                            ^
- [6]> {
+[error] operator_generic_unbound_param.eco:5:23
 
-Critical issues found, cannot compile.
+  type parameter 'T' is not mentioned by any operand of operator 'avg', so nothing could ever bind it - an operator use site has no spelling for explicit type arguments.
+
+  4 | 
+  5 | operator<T> (Bag& $a) avg (Bag& $b) : int32
+    :                       ^^^
+  6 | {
+
+1 error, nothing was compiled.

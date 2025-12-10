@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:9
-operator '==' is not supported on operands of type 'int32?' and 'int32?'
-Begin: 'operator =='
-End: 'operator =='
-Code excerpt:
- [8]> 
- [9]> echo $a == $b;
-              ^
- [10]> 
+[error] NoMatchingOverload  optional_arithmetic.eco:9:9
 
-Critical issues found, cannot compile.
+  operator '==' is not supported on operands of type 'int32?' and 'int32?'
+
+   8 | 
+   9 | echo $a == $b;
+     :         ^^^^^^
+  10 | 
+
+1 error, nothing was compiled.

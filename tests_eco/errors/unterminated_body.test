@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:13
-Unexpected token 'unknown' found. Expected 'close_brace '}''
-Begin: ';'
-End: ';'
-Code excerpt:
- [8]> function f() : int32 {
- [9]>     return 1;
-                  ^
- [10]> 
+[error] UnexpectedToken  unterminated_body.eco:9:13
 
-Critical issues found, cannot compile.
+  Unexpected token 'unknown' found. Expected 'close_brace '}''
+
+   8 | function f() : int32 {
+   9 |     return 1;
+     :             ^ expected close_brace '}'
+  10 | 
+
+1 error, nothing was compiled.

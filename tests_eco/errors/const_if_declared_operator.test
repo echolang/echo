@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 10:1
-'operator <' is an ordinary function, so its result is only known when it runs.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [9]> 
- [10]> const if (Point(1) < Point(2)) {
-      ^
- [11]>     echo 1;
+[error] const_if_declared_operator.eco:10:1
 
-Critical issues found, cannot compile.
+  'operator <' is an ordinary function, so its result is only known when it runs.
+
+   9 | 
+  10 | const if (Point(1) < Point(2)) {
+     : ^^^^^
+  11 |     echo 1;
+
+1 error, nothing was compiled.

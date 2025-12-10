@@ -5,26 +5,22 @@ expect: fail
 # anyway would be a compiler accepting what it just rejected
 
 --- OUT --->
----- Issue ----
-Issue at 5:13
-A constant's value cannot name a variable. '$x' does not exist where 'BAD' is used, because the value is copied to every use site rather than read from here. Write `const $x = ...;` for a variable that is const instead
-Begin: '$x'
-End: '$x'
-Code excerpt:
- [4]> 
- [5]> const BAD = $x + 1;
-                  ^
- [6]> 
+[error] const_names_a_variable.eco:5:13
 
----- Issue ----
-Issue at 7:6
-Unknown constant 'BAD'. A variable carries a '$' - did you mean '$BAD'? A constant is declared at file, namespace or struct scope, as `const BAD = ...;`
-Begin: 'BAD'
-End: 'BAD'
-Code excerpt:
- [6]> 
- [7]> echo BAD;
-           ^
- [8]> 
+  A constant's value cannot name a variable. '$x' does not exist where 'BAD' is used, because the value is copied to every use site rather than read from here. Write `const $x = ...;` for a variable that is const instead
 
-Critical issues found, cannot compile.
+  4 | 
+  5 | const BAD = $x + 1;
+    :             ^^
+  6 | 
+
+[error] UnknownConstant  const_names_a_variable.eco:7:6
+
+  Unknown constant 'BAD'. A variable carries a '$' - did you mean '$BAD'? A constant is declared at file, namespace or struct scope, as `const BAD = ...;`
+
+  6 | 
+  7 | echo BAD;
+    :      ^^^
+  8 | 
+
+2 errors, nothing was compiled.

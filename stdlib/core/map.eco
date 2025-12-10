@@ -503,13 +503,6 @@ struct map<K, V> : contract::iterable<V>
     // should call any of them.
 
     /**
-     * `$key`'s hash, with 0 and 1 reserved.
-     *
-     * `$hashes` carries the slot state as well as the hash, so those two values mean *empty* and
-     * *tombstone*. Two of 2^64 hashes are nudged up by two, which doubles the probability of exactly the
-     * values 2 and 3 and costs a whole allocation less than a state array beside this one would.
-     */
-    /**
      * True when the slot at `$at` holds a live entry.
      *
      * `$hashes` carries the slot state, so "is this one live" is `> 1` - the predicate every walk over the
@@ -568,6 +561,13 @@ struct map<K, V> : contract::iterable<V>
         return false;
     }
 
+    /**
+     * `$key`'s hash, with 0 and 1 reserved.
+     *
+     * `$hashes` carries the slot state as well as the hash, so those two values mean *empty* and
+     * *tombstone*. Two of 2^64 hashes are nudged up by two, which doubles the probability of exactly the
+     * values 2 and 3 and costs a whole allocation less than a state array beside this one would.
+     */
     const function slot_hash(const K& $key) : uint64
     {
         uint64 $h = hash::of($key);

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:19
-an index operator returns a borrow of the element - 'T&', not 'int32'. `$a[$i]` is a place, so what it names has to have an address.
-Begin: '['
-End: '['
-Code excerpt:
- [4]> 
- [5]> operator (Bag& $b)[usize $i] : int32
-                        ^
- [6]> {
+[error] operator_index_value_return.eco:5:19
 
-Critical issues found, cannot compile.
+  an index operator returns a borrow of the element - 'T&', not 'int32'. `$a[$i]` is a place, so what it names has to have an address.
+
+  4 | 
+  5 | operator (Bag& $b)[usize $i] : int32
+    :                   ^
+  6 | {
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:12
-Invalid type conversion: The boolean literal 'true' cannot be implicitly converted to the expected type 'float64'.
-Begin: 'true'
-End: 'true'
-Code excerpt:
- [5]> {
- [6]>     return true;
-                 ^
- [7]> }
+[error] InvalidTypeConversion  return_bool_into_float.eco:6:12
 
-Critical issues found, cannot compile.
+  Invalid type conversion: The boolean literal 'true' cannot be implicitly converted to the expected type 'float64'.
+
+  5 | {
+  6 |     return true;
+    :            ^^^^
+  7 | }
+
+1 error, nothing was compiled.

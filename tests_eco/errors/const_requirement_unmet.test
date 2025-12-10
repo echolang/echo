@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:8
-'Mutating' says it conforms to 'Readable' but does not satisfy 'const read() : int32' - the closest it declares is 'Mutating::read()'.
-Begin: 'Mutating'
-End: 'Mutating'
-Code excerpt:
- [6]> 
- [7]> struct Mutating : Readable {
-             ^
- [8]>     int32 $v;
+[error] UnmetInterfaceRequirement  const_requirement_unmet.eco:7:8
 
-Critical issues found, cannot compile.
+  'Mutating' says it conforms to 'Readable' but does not satisfy 'const read() : int32' - the closest it declares is 'Mutating::read()'.
+
+  6 | 
+  7 | struct Mutating : Readable {
+    :        ^^^^^^^^
+  8 |     int32 $v;
+
+1 error, nothing was compiled.

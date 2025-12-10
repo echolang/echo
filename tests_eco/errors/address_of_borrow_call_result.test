@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 19:14
-Cannot take the address of an expression that has no storage
-Begin: '$o'
-End: '$o'
-Code excerpt:
- [18]> $o = Outer(Inner(5));
- [19]> Inner& $r = &$o->get();
-                   ^
- [20]> 
+[error] address_of_borrow_call_result.eco:19:14
 
-Critical issues found, cannot compile.
+  Cannot take the address of an expression that has no storage
+
+  18 | $o = Outer(Inner(5));
+  19 | Inner& $r = &$o->get();
+     :              ^^
+  20 | 
+
+1 error, nothing was compiled.

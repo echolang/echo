@@ -5,21 +5,50 @@
 
 #include "ASTCodeRef.h"
 
-#define MAKE_ISSUE_DEF1(className, severity, arg1Type, arg1Name) \
+#include <optional>
+#include <vector>
+
+// **the class name is the diagnostic code.** a code has to be stable, unique and spelled once, and the
+// C++ name already is all three - so it is taken rather than invented, and there is no registry to keep in
+// step with the classes. `AST::Issue::GenericError` overrides it back to nothing, because "unclassified"
+// is what that kind means and a tool must not be told otherwise
+#define ISSUE_CODE_OF(className) \
+    std::optional<std::string> code() const override { return std::string(#className); }
+
+// the trailing `...` is where a kind declares the optional extras it answers - a `labels()` or a
+// `notes()` override, spelled as it would be in the class body. Empty for almost every kind, which is the
+// point: the two that carry a second location say so in one line instead of leaving the macro behind
+#define MAKE_ISSUE_DEF1(className, severity, arg1Type, arg1Name, ...) \
 class className : public IssueRecord { \
 public: \
     arg1Type arg1Name; \
     className(const CodeRef &code_ref, arg1Type arg1Name) : IssueRecord(severity, code_ref), arg1Name(arg1Name) {}; \
     ~className() {}; \
+    ISSUE_CODE_OF(className) \
     std::string message() const override; \
+    __VA_ARGS__ \
 };
 
-#define MAKE_ISSUE_DEF2(className, severity, arg1Type, arg1Name, arg2Type, arg2Name) \
+#define MAKE_ISSUE_DEF2(className, severity, arg1Type, arg1Name, arg2Type, arg2Name, ...) \
 class className : public IssueRecord { \
 public: \
     arg1Type arg1Name; \
     arg2Type arg2Name; \
     className(const CodeRef &code_ref, arg1Type arg1Name, arg2Type arg2Name) : IssueRecord(severity, code_ref), arg1Name(arg1Name), arg2Name(arg2Name) {}; \
+    ~className() {}; \
+    ISSUE_CODE_OF(className) \
+    std::string message() const override; \
+    __VA_ARGS__ \
+};
+
+// the same shape with no code, for a kind whose name is not a classification. **Not a variant of
+// MAKE_ISSUE_DEF1 with a flag**: the whole difference is that this one has nothing to tell a tool, and a
+// parameter reading `false` at three sites hides that behind punctuation
+#define MAKE_UNCODED_ISSUE_DEF(className, severity) \
+class className : public IssueRecord { \
+public: \
+    const std::string _message; \
+    className(const CodeRef &code_ref, const std::string _message) : IssueRecord(severity, code_ref), _message(_message) {}; \
     ~className() {}; \
     std::string message() const override; \
 };
@@ -36,6 +65,31 @@ namespace AST
         Error,
         Warning,
         Info
+    };
+
+    // a line under the message, after the source frame. `t_help` is a remedy the reader can act on,
+    // `t_note` is a fact that explains the refusal - the split every diagnostic renderer since gcc has
+    // made, and the one an editor uses to decide what to offer as a fix
+    enum class NoteKind
+    {
+        t_note,
+        t_help
+    };
+
+    struct IssueNote
+    {
+        NoteKind kind;
+        std::string message;
+    };
+
+    // a *second* place the reader has to look at - the previous declaration, the other candidate, the
+    // borrow that is still live. carried as a token slice rather than a CodeRef because the sites that
+    // have one to give are holding a token: `AST::to_diagnostic` resolves which file it came from through
+    // `Module::file_of`, which is a question the issue has no business answering
+    struct IssueLabel
+    {
+        TokenSlice span;
+        std::string message;
     };
 
     class IssueRecord
@@ -70,20 +124,44 @@ namespace AST
         }
 
         virtual std::string message() const = 0;
+
+        // **the four renderable extras, all optional.** a kind that overrides none of them renders exactly
+        // as it always did - a message and a frame - which is why 148 GenericError sites needed no edit to
+        // move onto the new renderer. They exist so that the information a kind already holds stops being
+        // formatted into English: a second location becomes a label instead of "on line 4 column 3", and a
+        // remedy becomes a `help` line instead of a third sentence.
+        //
+        // defaulted here rather than pure, deliberately: a diagnostic that says only what is wrong is a
+        // complete diagnostic, and forcing every kind to answer would get 148 empty overrides
+        virtual std::optional<std::string> code() const { return std::nullopt; }
+
+        // the few words that go beside the underline, in the frame. Short - it shares a line with the
+        // source - where `message()` is the sentence above it
+        virtual std::string primary_label() const { return {}; }
+
+        virtual std::vector<IssueNote> notes() const { return {}; }
+        virtual std::vector<IssueLabel> labels() const { return {}; }
     };
 
     namespace Issue
     {
-        MAKE_ISSUE_DEF1(GenericError, IssueSeverity::Error, const std::string, _message);
-        MAKE_ISSUE_DEF1(GenericWarning, IssueSeverity::Warning, const std::string, _message);
-        MAKE_ISSUE_DEF1(GenericInfo, IssueSeverity::Info, const std::string, _message);
+        // **the three that carry no code**, because their name is not a classification: 148 of the ~203
+        // reporting sites raise a GenericError, and telling an editor that they are all one diagnostic
+        // kind would be a fact it would act on. Absent says the true thing - this one has not been
+        // classified yet
+        MAKE_UNCODED_ISSUE_DEF(GenericError, IssueSeverity::Error);
+        MAKE_UNCODED_ISSUE_DEF(GenericWarning, IssueSeverity::Warning);
+        MAKE_UNCODED_ISSUE_DEF(GenericInfo, IssueSeverity::Info);
 
-        MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual);
-        MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration);
+        MAKE_ISSUE_DEF2(UnexpectedToken, IssueSeverity::Error, Token::Type, expected, Token::Type, actual,
+            std::string primary_label() const override;);
+        MAKE_ISSUE_DEF1(VariableRedeclaration, IssueSeverity::Error, const VarDeclNode *, previous_declaration,
+            std::vector<IssueLabel> labels() const override;);
         // a second declaration of a type name that is already declared in this namespace. carries a
         // name and the previous declaration's token rather than a TypeDeclNode *, so a `class` or
         // an `enum` can reuse the kind unchanged - hence the type-neutral name
-        MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token);
+        MAKE_ISSUE_DEF2(TypeRedeclaration, IssueSeverity::Error, const std::string, type_name, const TokenReference, previous_declaration_token,
+            std::vector<IssueLabel> labels() const override;);
         MAKE_ISSUE_DEF1(UnknownVariable, IssueSeverity::Error, const std::string, variable_name);
         MAKE_ISSUE_DEF1(UnknownFunction, IssueSeverity::Error, const std::string, function_name);
         // a bare identifier in an operand position that names no constant. its own kind rather than a

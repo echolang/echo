@@ -1,16 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:7
-Only a method can declare an implicit conversion - a constructor cannot be one.
-Begin: 'implicit'
-End: 'constructor'
-Code excerpt:
- [7]> 
- [8]>     #[implicit]
-            ^
- [9]>     constructor(usize $count) { $this->count = $count; }
- [10]> }
+[error] implicit_conversion_on_constructor.eco:8:7
 
-Critical issues found, cannot compile.
+  Only a method can declare an implicit conversion - a constructor cannot be one.
+
+   7 | 
+   8 |     #[implicit]
+     :       ^^^^^^^^^
+   9 |     constructor(usize $count) { $this->count = $count; }
+     : ^^^^^^^^^^^^^^^
+  10 | }
+
+1 error, nothing was compiled.

@@ -27,8 +27,13 @@ namespace AST
                 return;
             }
 
+            // which node kinds went away is a fact about `gone`, so it is derived once here rather than
+            // per module - the sweep below is otherwise one `typeid` pass over the whole batch per module,
+            // and both rewriting passes inside the fixpoint flush a batch every round
+            const auto kinds = NodeCollection::kinds_of(gone);
+
             for (auto &module_ptr : modules) {
-                module_ptr->nodes.forget(gone);
+                module_ptr->nodes.forget(gone, kinds);
             }
         }
 

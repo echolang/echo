@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 18:5
-'Box(Box&)' is already declared with these parameter types. Overloads must differ in their parameters.
-Begin: 'constructor'
-End: 'constructor'
-Code excerpt:
- [17]> 
- [18]>     constructor(Box& $another)
-          ^
- [19]>     {
+[error] DuplicateFunctionSignature  duplicate_copy_constructor.eco:18:5
 
-Critical issues found, cannot compile.
+  'Box(Box&)' is already declared with these parameter types. Overloads must differ in their parameters.
+
+  17 | 
+  18 |     constructor(Box& $another)
+     :     ^^^^^^^^^^^
+  19 |     {
+
+1 error, nothing was compiled.

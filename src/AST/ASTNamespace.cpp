@@ -111,12 +111,16 @@ AST::Namespace &AST::NamespaceManager::retrieve(const std::vector<std::string> &
 
 AST::Namespace &AST::NamespaceManager::retrieve(AST::Namespace &parent, const std::string &name)
 {
-    if (parent._children.find(name) == parent._children.end()) {
-        parent._children[name] = std::make_unique<Namespace>(name);
-        parent._children[name]->_parent = &parent;
+    // one lookup rather than the find-then-index-twice this was: create-or-reuse is what every caller
+    // wants, and try_emplace is that question asked once
+    const auto [entry, created] = parent._children.try_emplace(name, nullptr);
+
+    if (created) {
+        entry->second = std::make_unique<Namespace>(name);
+        entry->second->_parent = &parent;
     }
 
-    return *parent._children[name];
+    return *entry->second;
 }
 
 AST::Namespace &AST::NamespaceManager::retrieve_lexical(

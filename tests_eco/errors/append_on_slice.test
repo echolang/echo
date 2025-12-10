@@ -4,15 +4,13 @@ expect: fail
 # at a program that mentions neither. what it says instead is the operand the author wrote
 
 --- OUT --->
----- Issue ----
-Issue at 7:3
-no overload of operator '[]' accepts a 'slice<int32>'. Declare one for it, or convert the operands first.
-Begin: 'operator []'
-End: 'operator []'
-Code excerpt:
- [6]> $s = $a->sub();
- [7]> $s[] = 2;
-        ^
- [8]> 
+[error] NoMatchingOverload  append_on_slice.eco:7:3
 
-Critical issues found, cannot compile.
+  no overload of operator '[]' accepts a 'slice<int32>'. Declare one for it, or convert the operands first.
+
+  6 | $s = $a->sub();
+  7 | $s[] = 2;
+    :   ^^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

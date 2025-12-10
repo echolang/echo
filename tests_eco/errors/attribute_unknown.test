@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:3
-unknown attribute 'bultin', expected one of: inline, implicit, intrinsic, builtin, core, module, version, depends, sources
-Begin: 'bultin'
-End: 'bultin'
-Code excerpt:
- [6]> // here without a word, taking a whole platform's block with it.
- [7]> #[bultin: "size_of"]
-        ^
- [8]> function mistyped<T>() : usize;
+[error] attribute_unknown.eco:7:3
 
----- Issue ----
-Issue at 8:10
-'mistyped<T>()' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
-Begin: 'mistyped'
-End: 'mistyped'
-Code excerpt:
- [7]> #[bultin: "size_of"]
- [8]> function mistyped<T>() : usize;
-               ^
- [9]> 
+  unknown attribute 'bultin', expected one of: inline, implicit, intrinsic, builtin, core, module, version, depends, sources
 
-Critical issues found, cannot compile.
+  6 | // here without a word, taking a whole platform's block with it.
+  7 | #[bultin: "size_of"]
+    :   ^^^^^^
+  8 | function mistyped<T>() : usize;
+
+[error] attribute_unknown.eco:8:10
+
+  'mistyped<T>()' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
+
+  7 | #[bultin: "size_of"]
+  8 | function mistyped<T>() : usize;
+    :          ^^^^^^^^
+  9 | 
+
+2 errors, nothing was compiled.

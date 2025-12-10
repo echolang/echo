@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 15:12
-'Inner' has no storage of its own, so writing to its member 'tag' would be lost, because the value is destroyed at the end of this statement. Bind it to a variable first.
-Begin: 'tag'
-End: 'tag'
-Code excerpt:
- [14]> $o = Outer(Inner(5));
- [15]> $o->get()->tag = 9;
-                 ^
- [16]> 
+[error] write_to_member_of_temporary.eco:15:12
 
-Critical issues found, cannot compile.
+  'Inner' has no storage of its own, so writing to its member 'tag' would be lost, because the value is destroyed at the end of this statement. Bind it to a variable first.
+
+  14 | $o = Outer(Inner(5));
+  15 | $o->get()->tag = 9;
+     :            ^^^
+  16 | 
+
+1 error, nothing was compiled.

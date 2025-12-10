@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:12
-A closure cannot be written inside a generic function's body yet - it has no access to the enclosing type parameters.
-Begin: 'function'
-End: 'function'
-Code excerpt:
- [8]> {
- [9]>     return function() : int32 { return 1; };
-                 ^
- [10]> }
+[error] closure_in_generic_function.eco:9:12
 
-Critical issues found, cannot compile.
+  A closure cannot be written inside a generic function's body yet - it has no access to the enclosing type parameters.
+
+   8 | {
+   9 |     return function() : int32 { return 1; };
+     :            ^^^^^^^^
+  10 | }
+
+1 error, nothing was compiled.

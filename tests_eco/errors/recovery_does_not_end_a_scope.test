@@ -4,15 +4,13 @@ expect: fail
 # about the terminator reports a missing ';' against the next statement's first token
 
 --- OUT --->
----- Issue ----
-Issue at 16:33
-The variable '$x' is not declared in the current scope
-Begin: '$x'
-End: '$x'
-Code excerpt:
- [15]> 
- [16]> function f() : bar { return bar($x); }
-                                      ^
- [17]> 
+[error] UnknownVariable  recovery_does_not_end_a_scope.eco:16:33
 
-Critical issues found, cannot compile.
+  The variable '$x' is not declared in the current scope
+
+  15 | 
+  16 | function f() : bar { return bar($x); }
+     :                                 ^^
+  17 | 
+
+1 error, nothing was compiled.

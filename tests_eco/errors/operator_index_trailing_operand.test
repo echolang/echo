@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:21
-Unexpected token 'open_paren '('' found. Expected 'colon (:)'
-Begin: '('
-End: '('
-Code excerpt:
- [4]> 
- [5]> operator (Bag& $a)[](Bag& $b) : int32&
-                          ^
- [6]> {
+[error] UnexpectedToken  operator_index_trailing_operand.eco:5:21
 
-Critical issues found, cannot compile.
+  Unexpected token 'open_paren '('' found. Expected 'colon (:)'
+
+  4 | 
+  5 | operator (Bag& $a)[](Bag& $b) : int32&
+    :                     ^ expected colon (:)
+  6 | {
+
+1 error, nothing was compiled.

@@ -900,32 +900,38 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             const auto before = _moved;
             const auto maybe_before = _maybe_moved;
 
+            // **one arm's contribution to what follows the `if`**, so the two arms are walked by one
+            // piece of code rather than by two that have to be edited symmetrically
+            //
             // an arm with no block falls through, moving nothing - which is what the snapshot it starts
             // out as says. an arm that *has* a block hands its result over rather than being copied out
-            // of: the restore below overwrites `_moved` from the snapshot on the next line anyway, so the
-            // arm's set has no second reader
-            bool if_joins = true;
-            auto after_if = before;
-            auto maybe_after_if = maybe_before;
+            // of: the walk of the next arm re-seats `_moved` from the snapshot anyway, so the arm's set
+            // has no second reader
+            struct ArmState
+            {
+                bool joins = true;
+                std::unordered_set<const VarDeclNode *> moved;
+                std::unordered_set<const VarDeclNode *> maybe_moved;
+            };
 
-            if (stmt->if_scope != nullptr) {
-                if_joins = walk_scope(*stmt->if_scope) == ExitKind::t_none;
-                after_if = std::move(_moved);
-                maybe_after_if = std::move(_maybe_moved);
-            }
+            const auto walk_arm = [&](ScopeNode *arm) -> ArmState {
+                if (arm == nullptr) {
+                    return ArmState { true, before, maybe_before };
+                }
 
-            _moved = before;
-            _maybe_moved = maybe_before;
+                _moved = before;
+                _maybe_moved = maybe_before;
 
-            bool else_joins = true;
-            auto after_else = before;
-            auto maybe_after_else = maybe_before;
+                ArmState state;
+                state.joins = walk_scope(*arm) == ExitKind::t_none;
+                state.moved = std::move(_moved);
+                state.maybe_moved = std::move(_maybe_moved);
 
-            if (stmt->else_scope != nullptr) {
-                else_joins = walk_scope(*stmt->else_scope) == ExitKind::t_none;
-                after_else = std::move(_moved);
-                maybe_after_else = std::move(_maybe_moved);
-            }
+                return state;
+            };
+
+            auto if_arm = walk_arm(stmt->if_scope);
+            auto else_arm = walk_arm(stmt->else_scope);
 
             _moved = before;
             _maybe_moved = maybe_before;
@@ -933,7 +939,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // **neither arm comes back.** the code after the `if` is unreachable, so there is no state
             // for it to be wrong about. what each arm moved has already gone where it belongs - onto a
             // `return`'s unwind, or onto the enclosing loop's frame
-            if (!if_joins && !else_joins) {
+            if (!if_arm.joins && !else_arm.joins) {
                 break;
             }
 
@@ -945,33 +951,34 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             //
             // spelled as the remaining arm standing in for the one that left: it is then both sides of
             // the comparison below, so the union is its own state and there is nothing to report
-            if (!if_joins) {
-                after_if = after_else;
-                maybe_after_if = maybe_after_else;
+            if (!if_arm.joins) {
+                if_arm.moved = else_arm.moved;
+                if_arm.maybe_moved = else_arm.maybe_moved;
             }
-            else if (!else_joins) {
-                after_else = after_if;
-                maybe_after_else = maybe_after_if;
+            else if (!else_arm.joins) {
+                else_arm.moved = if_arm.moved;
+                else_arm.maybe_moved = if_arm.maybe_moved;
             }
 
             // a decl stays *definitely* moved only where no reaching arm was unsure about it, which is
             // why this is the arms' own sets rather than the snapshot: an arm that moved outright what
             // was merely maybe-moved before the `if` erased it, and that erase must survive the merge
-            _maybe_moved = maybe_after_if;
-            _maybe_moved.insert(maybe_after_else.begin(), maybe_after_else.end());
+            _maybe_moved = if_arm.maybe_moved;
+            _maybe_moved.insert(else_arm.maybe_moved.begin(), else_arm.maybe_moved.end());
 
-            for (const auto *decl : after_if) {
-                if (_moved.insert(decl).second && after_else.count(decl) == 0) {
-                    _maybe_moved.insert(decl);
-                    report_conditional_move(decl);
+            // moved on one side and not the other is a conditional move, whichever side that is - so the
+            // union runs twice over the same body rather than being written out per side
+            const auto join = [&](const auto &arm, const auto &other) {
+                for (const auto *decl : arm) {
+                    if (_moved.insert(decl).second && other.count(decl) == 0) {
+                        _maybe_moved.insert(decl);
+                        report_conditional_move(decl);
+                    }
                 }
-            }
-            for (const auto *decl : after_else) {
-                if (_moved.insert(decl).second && after_if.count(decl) == 0) {
-                    _maybe_moved.insert(decl);
-                    report_conditional_move(decl);
-                }
-            }
+            };
+
+            join(if_arm.moved, else_arm.moved);
+            join(else_arm.moved, if_arm.moved);
             break;
         }
 

@@ -2,15 +2,13 @@ stdlib: off
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 2:7
-The constant 'MISSING' has no value. A constant is the expression it is written as, so there is nothing to declare without one - write `const MISSING = <expression>;`
-Begin: 'MISSING'
-End: 'MISSING'
-Code excerpt:
- [1]> // a constant *is* its expression, so there is nothing to declare without one
- [2]> const MISSING;
-            ^
- [3]> 
+[error] const_without_a_value.eco:2:7
 
-Critical issues found, cannot compile.
+  The constant 'MISSING' has no value. A constant is the expression it is written as, so there is nothing to declare without one - write `const MISSING = <expression>;`
+
+  1 | // a constant *is* its expression, so there is nothing to declare without one
+  2 | const MISSING;
+    :       ^^^^^^^
+  3 | 
+
+1 error, nothing was compiled.

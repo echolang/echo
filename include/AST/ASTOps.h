@@ -113,6 +113,13 @@ namespace AST
         // `$a ! $b` becomes a BinaryExprNode that binary_has_builtin_meaning accepts over two
         // primitives and gen_binary_expr throws on, with no location
         inline bool is_prefix_only() const {
+            return is_prefix_only_token(type);
+        }
+
+        // the same fact for a reader that has a token and no Operator to ask - which `is_expr_token` is,
+        // since it runs ahead of every lookup. a static rather than a second comparison at that site: the
+        // symbol is named once, so a further prefix-only one cannot be added here and missed there
+        static inline bool is_prefix_only_token(Token::Type type) {
             return type == Token::Type::t_exclamation;
         }
 

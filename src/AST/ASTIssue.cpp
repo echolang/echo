@@ -30,24 +30,43 @@ ISSUE_MESSAGE_FNC(UnexpectedToken)
     return "Unexpected token '" + token_type_string(actual) + "' found. Expected '" + token_type_string(expected) + "'";
 }
 
+std::string AST::Issue::UnexpectedToken::primary_label() const
+{
+    if (expected == Token::Type::t_unknown) {
+        return "unexpected here";
+    }
+
+    return "expected " + token_type_string(expected);
+}
+
+// the line and column the message used to carry are a *label* now - the renderer shows the previous
+// declaration in its own frame, quoting the line. Same fact, and the reader no longer has to go and find
+// it. See AST::to_diagnostic for how the token is resolved back to a file
 ISSUE_MESSAGE_FNC(VariableRedeclaration)
 {
     return fmt::format(
-        "The variable '{}' is already declared on line {} column {} and cannot be redeclared with a different type",
-        previous_declaration->name(),
-        previous_declaration->token_varname.line(),
-        previous_declaration->token_varname.column());
+        "The variable '{}' is already declared and cannot be redeclared with a different type",
+        previous_declaration->name());
+}
+
+std::vector<AST::IssueLabel> AST::Issue::VariableRedeclaration::labels() const
+{
+    return { IssueLabel { previous_declaration->token_varname.make_slice(), "first declared here" } };
 }
 
 ISSUE_MESSAGE_FNC(TypeRedeclaration)
 {
+    return fmt::format("The type '{}' is already declared", type_name);
+}
+
+std::vector<AST::IssueLabel> AST::Issue::TypeRedeclaration::labels() const
+{
     // naming the surviving declaration matters: every follow-on error the user sees comes from the
     // first declaration's layout, not from the one they are looking at
-    return fmt::format(
-        "The type '{}' is already declared on line {} column {}. The first declaration is the one that is used",
-        type_name,
-        previous_declaration_token.line(),
-        previous_declaration_token.column());
+    return {
+        IssueLabel {
+            previous_declaration_token.make_slice(),
+            "first declared here, and this is the one that is used" } };
 }
 
 ISSUE_MESSAGE_FNC(UnknownVariable)

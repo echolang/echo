@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:20
-operator '+' cannot be declared over a bare type parameter - the language already spells a meaning for '+' over the primitives a parameter may be bound to. Declare it for the type itself, e.g. 'operator (Vec<T> $a) + (Vec<T> $b)'.
-Begin: '+'
-End: '+'
-Code excerpt:
- [2]> // to, so such a declaration would register and never fire. declare it for the type itself
- [3]> operator<T> (T $a) + (T $b) : T
-                         ^
- [4]> {
+[error] operator_over_type_parameter.eco:3:20
 
-Critical issues found, cannot compile.
+  operator '+' cannot be declared over a bare type parameter - the language already spells a meaning for '+' over the primitives a parameter may be bound to. Declare it for the type itself, e.g. 'operator (Vec<T> $a) + (Vec<T> $b)'.
+
+  2 | // to, so such a declaration would register and never fire. declare it for the type itself
+  3 | operator<T> (T $a) + (T $b) : T
+    :                    ^
+  4 | {
+
+1 error, nothing was compiled.

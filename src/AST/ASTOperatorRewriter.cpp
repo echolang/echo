@@ -285,7 +285,7 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
     // has none" and "none of the ones it has fits" are different things to say and only the first is
     // answerable without an overload set. the second is the ordinary NoMatchingOverload the
     // finalizing sweep reports, in the operator's own words
-    const auto candidates =
+    const auto &candidates =
         _collector.functions.overloads(decorated_name, _collector.namespaces.root());
 
     if (candidates.empty()) {
@@ -645,10 +645,15 @@ bool OperatorRewriter::build_literal_expansion(
         auto &slot_expr = _current_module->nodes.emplace_back<IndexExprNode>(
             &var_ref, std::vector<ExprNode *>{}, literal.token_bracket);
 
-        // the two facts the parser records for a hand-written `$a[] = v`, recorded here for the same
-        // reasons: the slot is bound rather than read, and the write into it initializes storage
-        // that holds nothing, so no teardown is owed
+        // the three facts the parser records for a hand-written `$a[] = v`, recorded here for the same
+        // reasons: the slot is bound rather than read, there is an `=` behind the bracket, and the write
+        // into it initializes storage that holds nothing, so no teardown is owed
+        //
+        // the middle one buys nothing for an `array<T>`, which declares no element-write contract - it is
+        // recorded because resolve_index's guard rail reads it, and a producer that leaves it unset is a
+        // producer that guard rail cannot speak for
         slot_expr.slot_is_bound = true;
+        slot_expr.is_assignment_target = true;
 
         auto &assign = _current_module->nodes.emplace_back<AssignNode>(
             &slot_expr, element, literal.token_bracket);

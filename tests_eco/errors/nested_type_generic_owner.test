@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:24
-'cursor' is declared inside the generic type 'Box', which is not supported yet - declare it alongside its owner instead.
-Begin: 'cursor'
-End: 'cursor'
-Code excerpt:
- [2]> // answer only while it cannot mention the owner's T, and nothing enforces that
- [3]> struct Box<T> { struct cursor { usize $i; } T $v; }
-                             ^
- [4]> 
+[error] nested_type_generic_owner.eco:3:24
 
-Critical issues found, cannot compile.
+  'cursor' is declared inside the generic type 'Box', which is not supported yet - declare it alongside its owner instead.
+
+  2 | // answer only while it cannot mention the owner's T, and nothing enforces that
+  3 | struct Box<T> { struct cursor { usize $i; } T $v; }
+    :                        ^^^^^^
+  4 | 
+
+1 error, nothing was compiled.

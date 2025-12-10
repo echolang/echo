@@ -4,15 +4,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:19
-an index-write operator is a statement, not an expression - '$c[$k] = $v' produces no value, so it returns 'void' and not 'int32&'. Declare the borrowing form 'operator (C& $c)[K $k] : V&' if you want a place a write goes through.
-Begin: '['
-End: '['
-Code excerpt:
- [4]> 
- [5]> operator (bag& $b)[usize $i] = (int32 $v) : int32&
-                        ^
- [6]> {
+[error] index_write_returns_a_value.eco:5:19
 
-Critical issues found, cannot compile.
+  an index-write operator is a statement, not an expression - '$c[$k] = $v' produces no value, so it returns 'void' and not 'int32&'. Declare the borrowing form 'operator (C& $c)[K $k] : V&' if you want a place a write goes through.
+
+  4 | 
+  5 | operator (bag& $b)[usize $i] = (int32 $v) : int32&
+    :                   ^
+  6 | {
+
+1 error, nothing was compiled.

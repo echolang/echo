@@ -3,15 +3,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:18
-an index-write operator takes its container as a mutable borrow - 'C&', not 'bag'. The write has to reach the caller's container: by value it would land in a copy that dies with the call, and through a 'const' borrow it would not land at all.
-Begin: '['
-End: '['
-Code excerpt:
- [4]> 
- [5]> operator (bag $b)[usize $i] = (int32 $v) : void
-                       ^
- [6]> {
+[error] index_write_by_value_receiver.eco:5:18
 
-Critical issues found, cannot compile.
+  an index-write operator takes its container as a mutable borrow - 'C&', not 'bag'. The write has to reach the caller's container: by value it would land in a copy that dies with the call, and through a 'const' borrow it would not land at all.
+
+  4 | 
+  5 | operator (bag $b)[usize $i] = (int32 $v) : void
+    :                  ^
+  6 | {
+
+1 error, nothing was compiled.

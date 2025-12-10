@@ -5,26 +5,22 @@ expect: fail
 # anyway would be a compiler accepting what it just rejected
 
 --- OUT --->
----- Issue ----
-Issue at 5:5
-A constant cannot be declared inside a body - its value is copied to every use site, so it belongs at file, namespace or struct scope. Write `const $name = ...;` for a block-local variable that is const.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [4]> {
- [5]>     const INNER = 1;
-          ^
- [6]>     echo INNER;
+[error] const_in_a_body.eco:5:5
 
----- Issue ----
-Issue at 6:10
-Unknown constant 'INNER'. A variable carries a '$' - did you mean '$INNER'? A constant is declared at file, namespace or struct scope, as `const INNER = ...;`
-Begin: 'INNER'
-End: 'INNER'
-Code excerpt:
- [5]>     const INNER = 1;
- [6]>     echo INNER;
-               ^
- [7]> }
+  A constant cannot be declared inside a body - its value is copied to every use site, so it belongs at file, namespace or struct scope. Write `const $name = ...;` for a block-local variable that is const.
 
-Critical issues found, cannot compile.
+  4 | {
+  5 |     const INNER = 1;
+    :     ^^^^^
+  6 |     echo INNER;
+
+[error] UnknownConstant  const_in_a_body.eco:6:10
+
+  Unknown constant 'INNER'. A variable carries a '$' - did you mean '$INNER'? A constant is declared at file, namespace or struct scope, as `const INNER = ...;`
+
+  5 |     const INNER = 1;
+  6 |     echo INNER;
+    :          ^^^^^
+  7 | }
+
+2 errors, nothing was compiled.

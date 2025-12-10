@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 17:9
-'$b' takes ownership of this argument - write 'mv' in front of it, or the value would be handed over without the call site saying so.
-Begin: '$a'
-End: '$a'
-Code excerpt:
- [16]> $a = Buffer(mem::alloc<uint8>(1));
- [17]> consume($a);
-              ^
- [18]> 
+[error] mv_parameter_needs_mv_at_call.eco:17:9
 
-Critical issues found, cannot compile.
+  '$b' takes ownership of this argument - write 'mv' in front of it, or the value would be handed over without the call site saying so.
+
+  16 | $a = Buffer(mem::alloc<uint8>(1));
+  17 | consume($a);
+     :         ^^
+  18 | 
+
+1 error, nothing was compiled.

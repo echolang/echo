@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:14
-Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
-Begin: '300'
-End: '300'
-Code excerpt:
- [7]> ptr<Small> $s = mem::alloc<Small>(1);
- [8]> $s:$[0]->b = 300;
-                   ^
- [9]> mem::free($s);
+[error] IntegerOverflow  literal_into_element_member.eco:8:14
 
-Critical issues found, cannot compile.
+  Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
+
+  7 | ptr<Small> $s = mem::alloc<Small>(1);
+  8 | $s:$[0]->b = 300;
+    :              ^^^
+  9 | mem::free($s);
+
+1 error, nothing was compiled.

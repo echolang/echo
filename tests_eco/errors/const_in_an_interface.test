@@ -2,15 +2,13 @@ stdlib: off
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:5
-'countable' is an interface, so it cannot declare a constant. An interface holds requirements only - a `function` or `operator` signature ending in ';'.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [4]> {
- [5]>     const usize N = 1;
-          ^
- [6]> 
+[error] const_in_an_interface.eco:5:5
 
-Critical issues found, cannot compile.
+  'countable' is an interface, so it cannot declare a constant. An interface holds requirements only - a `function` or `operator` signature ending in ';'.
+
+  4 | {
+  5 |     const usize N = 1;
+    :     ^^^^^
+  6 | 
+
+1 error, nothing was compiled.

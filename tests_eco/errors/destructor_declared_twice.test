@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 13:5
-'Buffer' already has a destructor.
-Begin: 'destructor'
-End: 'destructor'
-Code excerpt:
- [12]> 
- [13]>     destructor()
-          ^
- [14]>     {
+[error] destructor_declared_twice.eco:13:5
 
-Critical issues found, cannot compile.
+  'Buffer' already has a destructor.
+
+  12 | 
+  13 |     destructor()
+     :     ^^^^^^^^^^
+  14 |     {
+
+1 error, nothing was compiled.

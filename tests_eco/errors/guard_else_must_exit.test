@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:33
-the 'else' of a guard has to leave - end it with 'return', 'break', 'continue' or 'die'. otherwise '$v' would be read after the value it names turned out not to be there
-Begin: '{'
-End: '{'
-Code excerpt:
- [6]> 
- [7]> guard int32 $v = lookup(1) else { echo 0; }
-                                      ^
- [8]> 
+[error] guard_else_must_exit.eco:7:33
 
-Critical issues found, cannot compile.
+  the 'else' of a guard has to leave - end it with 'return', 'break', 'continue' or 'die'. otherwise '$v' would be read after the value it names turned out not to be there
+
+  6 | 
+  7 | guard int32 $v = lookup(1) else { echo 0; }
+    :                                 ^
+  8 | 
+
+1 error, nothing was compiled.

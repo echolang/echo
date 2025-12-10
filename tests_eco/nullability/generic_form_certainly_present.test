@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 12:5
-'guard' needs a value that may be absent, and 'int32' always is one - write 'int32?' if it may not be, or drop the guard
-Begin: 'guard'
-End: 'guard'
-Code excerpt:
- [11]> {
- [12]>     guard T $v = $maybe else { return $fallback; }
-          ^
- [13]>     return $v;
+[error] generic_form_certainly_present.eco:12:5
 
-Critical issues found, cannot compile.
+  'guard' needs a value that may be absent, and 'int32' always is one - write 'int32?' if it may not be, or drop the guard
+
+  11 | {
+  12 |     guard T $v = $maybe else { return $fallback; }
+     :     ^^^^^
+  13 |     return $v;
+
+1 error, nothing was compiled.

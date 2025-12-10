@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:10
-cannot compare 'int32' against null - null-check the address with ':$'
-Begin: '=='
-End: '=='
-Code excerpt:
- [3]> ptr<int> $p = null;
- [4]> echo ($p == null);
-               ^
- [5]> 
+[error] null_compare_value.eco:4:10
 
-Critical issues found, cannot compile.
+  cannot compare 'int32' against null - null-check the address with ':$'
+
+  3 | ptr<int> $p = null;
+  4 | echo ($p == null);
+    :          ^^
+  5 | 
+
+1 error, nothing was compiled.

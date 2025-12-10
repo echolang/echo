@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 19:5
-'Box' already has a copy constructor.
-Begin: 'constructor'
-End: 'constructor'
-Code excerpt:
- [18]> 
- [19]>     constructor(const Box& $another)
-          ^
- [20]>     {
+[error] duplicate_copy_constructor_const.eco:19:5
 
-Critical issues found, cannot compile.
+  'Box' already has a copy constructor.
+
+  18 | 
+  19 |     constructor(const Box& $another)
+     :     ^^^^^^^^^^^
+  20 |     {
+
+1 error, nothing was compiled.

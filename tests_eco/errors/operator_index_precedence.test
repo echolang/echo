@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:29
-An index operator cannot declare a precedence - '[' binds like '->', tighter than every binary operator, and never reaches the precedence table.
-Begin: '['
-End: '['
-Code excerpt:
- [5]> 
- [6]> operator(45, left) (Bag& $b)[usize $i] : int32&
-                                  ^
- [7]> {
+[error] operator_index_precedence.eco:6:29
 
-Critical issues found, cannot compile.
+  An index operator cannot declare a precedence - '[' binds like '->', tighter than every binary operator, and never reaches the precedence table.
+
+  5 | 
+  6 | operator(45, left) (Bag& $b)[usize $i] : int32&
+    :                             ^
+  7 | {
+
+1 error, nothing was compiled.

@@ -5,15 +5,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 10:10
-Const violation: cannot write to an element of 'const map<string,int32>' - it is const, and the element contract that writes takes the container as a mutable borrow
-Begin: '='
-End: '='
-Code excerpt:
- [9]> 
- [10]> $ro['a'] = 2;
-               ^
- [11]> 
+[error] ConstViolation  write_to_const_map.eco:10:10
 
-Critical issues found, cannot compile.
+  Const violation: cannot write to an element of 'const map<string,int32>' - it is const, and the element contract that writes takes the container as a mutable borrow
+
+   9 | 
+  10 | $ro['a'] = 2;
+     :          ^
+  11 | 
+
+1 error, nothing was compiled.

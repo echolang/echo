@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:8
-'ptr<int32>' is a pointer, and a pointer is indexed through ':$' - write '$p:$[...]'. An unqualified '[' asks a collection for one of its elements.
-Begin: '['
-End: '['
-Code excerpt:
- [6]> 
- [7]> echo $p[0];
-             ^
- [8]> 
+[error] index_pointer_without_peel.eco:7:8
 
-Critical issues found, cannot compile.
+  'ptr<int32>' is a pointer, and a pointer is indexed through ':$' - write '$p:$[...]'. An unqualified '[' asks a collection for one of its elements.
+
+  6 | 
+  7 | echo $p[0];
+    :        ^
+  8 | 
+
+1 error, nothing was compiled.

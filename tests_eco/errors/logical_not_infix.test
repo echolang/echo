@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:9
-unexpected '!' - two expressions with no operator between them.
-Begin: '!'
-End: '!'
-Code excerpt:
- [6]> 
- [7]> echo $a ! $b;
-              ^
- [8]> 
+[error] logical_not_infix.eco:7:9
 
-Critical issues found, cannot compile.
+  unexpected '!' - two expressions with no operator between them.
+
+  6 | 
+  7 | echo $a ! $b;
+    :         ^
+  8 | 
+
+1 error, nothing was compiled.

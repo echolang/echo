@@ -6,6 +6,7 @@
 #include <string>
 #include <algorithm>
 #include <initializer_list>
+#include <vector>
 #include <assert.h>
 #include "Token.h"
 
@@ -175,6 +176,7 @@ namespace Parser
         }
 
         void skip_until(std::initializer_list<Token::Type> types);
+        void skip_until(const std::vector<Token::Type> &types);
 
         // will skip to the end of the current scope / block, brace-depth aware, and *does* consume the
         // scope terminating "}" closing brace token - so the cursor lands on the token after the block
@@ -197,7 +199,12 @@ namespace Parser
         // consumes only the first: a closing brace belongs to whichever parser opened it, which is
         // sitting one frame up waiting for that very token. so this lands either *after* a
         // terminator or *on* a brace, and a caller's loop sees the block end where it really is
-        void try_skip_to_next_statement();
+        //
+        // `also_stop_at` adds tokens to stop *on* without consuming, for a caller that has more shapes it
+        // can resume from than a statement boundary - a scope's catch-all arm stops at `{` too, so the
+        // block it is about to open is parsed rather than skipped past. the consume-the-terminator rule
+        // stays here either way, which is what stopped that arm from hand-rolling it
+        void try_skip_to_next_statement(std::initializer_list<Token::Type> also_stop_at = {});
 
         // steps over a whole statement from its first token, landing after its `;` - stepping *over* any
         // braced group on the way, so a value that contains one (a closure literal) is not mistaken for

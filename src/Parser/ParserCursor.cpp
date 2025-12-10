@@ -1,6 +1,6 @@
 #include "Parser/ParserCursor.h"
 
-void Parser::Cursor::skip_until(std::initializer_list<Token::Type> types)
+void Parser::Cursor::skip_until(const std::vector<Token::Type> &types)
 {
     while (!is_done()) {
         for (auto type : types) {
@@ -10,6 +10,11 @@ void Parser::Cursor::skip_until(std::initializer_list<Token::Type> types)
         }
         skip();
     }
+}
+
+void Parser::Cursor::skip_until(std::initializer_list<Token::Type> types)
+{
+    skip_until(std::vector<Token::Type>(types));
 }
 
 TokenSlice Parser::Cursor::slice(const Snapshot &start, const Snapshot &end) const
@@ -61,9 +66,12 @@ void Parser::Cursor::skip_balanced_group(Token::Type open, Token::Type close)
     }
 }
 
-void Parser::Cursor::try_skip_to_next_statement()
+void Parser::Cursor::try_skip_to_next_statement(std::initializer_list<Token::Type> also_stop_at)
 {
-    skip_until({ Token::Type::t_semicolon, Token::Type::t_close_brace });
+    std::vector<Token::Type> stops { Token::Type::t_semicolon, Token::Type::t_close_brace };
+    stops.insert(stops.end(), also_stop_at.begin(), also_stop_at.end());
+
+    skip_until(stops);
 
     // **the terminator is consumed, the brace is not.** a `}` closes a scope this recovery did not
     // open, and the parser that opened it is waiting for exactly that token - so eating it here ends

@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 7:14
-'helper' cannot be declared inside a generic function's body - it has no access to the enclosing type parameters. Declare it at file scope instead.
-Begin: 'helper'
-End: 'helper'
-Code excerpt:
- [6]> {
- [7]>     function helper(int32 $a) : int32 { return $a; }
-                   ^
- [8]>     return helper(1);
+[error] nested_function_in_generic.eco:7:14
 
----- Issue ----
-Issue at 8:12
-The function 'helper' could not be found
-Begin: 'helper'
-End: 'helper'
-Code excerpt:
- [7]>     function helper(int32 $a) : int32 { return $a; }
- [8]>     return helper(1);
-                 ^
- [9]> }
+  'helper' cannot be declared inside a generic function's body - it has no access to the enclosing type parameters. Declare it at file scope instead.
 
-Critical issues found, cannot compile.
+  6 | {
+  7 |     function helper(int32 $a) : int32 { return $a; }
+    :              ^^^^^^
+  8 |     return helper(1);
+
+[error] UnknownFunction  nested_function_in_generic.eco:8:12
+
+  The function 'helper' could not be found
+
+  7 |     function helper(int32 $a) : int32 { return $a; }
+  8 |     return helper(1);
+    :            ^^^^^^
+  9 | }
+
+2 errors, nothing was compiled.

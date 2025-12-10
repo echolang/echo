@@ -75,6 +75,29 @@ namespace AST
             return tokenref.belongs_to(tokens);
         }
 
+        // which file did this token come from. the module-level half of the answer a token cannot give
+        // about itself: the files of a module share one TokenCollection and a TokenizedFile is a slice
+        // into it, so the mapping is a scan over those slices and nothing has to be stored per token.
+        //
+        // **null is a real answer, not a failure** - `make_virtual_token` appends past every slice, so a
+        // decorated operator name or a synthesized drop's callee belongs to no file at all. A caller
+        // rendering a location falls back to whatever file it was already talking about
+        const File *file_of(const TokenReference &tokenref) const {
+            if (!is_owner_of(tokenref)) {
+                return nullptr;
+            }
+
+            const size_t handle = tokenref.get_handle();
+
+            for (const auto &tokenized : _tokenized_files) {
+                if (handle >= tokenized.token_slice.start_index && handle <= tokenized.token_slice.end_index) {
+                    return tokenized.file;
+                }
+            }
+
+            return nullptr;
+        }
+
         // a token no source file spells, appended to this module's collection at the position of an
         // existing one - a decorated operator name, a closure's `closure$N`, a drop's callee
         //

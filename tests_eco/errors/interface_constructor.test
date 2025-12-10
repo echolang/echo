@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:5
-'Drawable' is an interface, so it cannot declare a constructor. An interface holds requirements only - a `function` or `operator` signature ending in ';'.
-Begin: 'constructor'
-End: 'constructor'
-Code excerpt:
- [2]> {
- [3]>     constructor() {}
-          ^
- [4]> }
+[error] interface_constructor.eco:3:5
 
-Critical issues found, cannot compile.
+  'Drawable' is an interface, so it cannot declare a constructor. An interface holds requirements only - a `function` or `operator` signature ending in ';'.
+
+  2 | {
+  3 |     constructor() {}
+    :     ^^^^^^^^^^^
+  4 | }
+
+1 error, nothing was compiled.

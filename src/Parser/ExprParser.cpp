@@ -781,11 +781,11 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_open_bracket) ||
            // if the token has a operator precendence, it is a valid expression token
            AST::Operator::get_precedence_for_token(cursor.current().type()).sequence > 0 ||
-           // `!`, which the test above cannot answer for: a prefix-only symbol carries no precedence
-           // tier, there being nothing to order it against - see AST::Operator::is_prefix_only. without
-           // this the loop below never enters for `if (!$b)`, expr_parts holds nothing but the `(` and
-           // parse_expr_ref's single-part reporter fires on an operator with no operand
-           cursor.is_type(Token::Type::t_exclamation) ||
+           // a prefix-only symbol, which the test above cannot answer for: it carries no precedence tier,
+           // there being nothing to order it against. without this the loop below never enters for
+           // `if (!$b)`, expr_parts holds nothing but the `(` and parse_expr_ref's single-part reporter
+           // fires on an operator with no operand
+           AST::Operator::is_prefix_only_token(cursor.current().type()) ||
            // a declared **prefix** operator, which may be spelled out of tokens nothing else in this
            // list admits - `!!` is two t_exclamation, and neither has a precedence. without this the
            // loop below never enters for `echo !!'hello';`, `expr_parts` stays empty, and the

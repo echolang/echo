@@ -141,11 +141,30 @@ is an error: it asserts nothing.
 contains `--->` but does not match exactly — `---OUT--->`, `--- out --->`, `  --- OUT --->` — is a
 located error rather than content.
 
-That precision is load-bearing rather than fussy. 74 of the goldens in this corpus **begin with
+That precision is load-bearing rather than fussy. Error goldens used to **begin with
 `---- Issue ----`**, so a `startswith("---")` test would truncate every error test's expectation at
-line 1 and leave all 74 passing against one line of diagnostic. Four dashes and no `--->` cannot match
-the grammar, and requiring `--->` in the near-miss test is exactly what keeps `---- Issue ----`
+line 1 and leave all of them passing against one line of diagnostic. Four dashes and no `--->` cannot
+match the grammar, and requiring `--->` in the near-miss test is exactly what kept `---- Issue ----`
 content.
+
+The banner is `[error]` now and the renderer is held to never emitting a line beginning `---`
+(`tests/diagnostics.cpp`), so the collision is closed from both ends. The exact-match rule stays anyway:
+a diagnostic is not the only thing a case can print.
+
+## Regenerating the goldens
+
+202 of the 544 cases assert a diagnostic byte for byte, so a deliberate change to how one reads is a
+change to all of them at once. [tools/regen_eco_goldens.py](../tools/regen_eco_goldens.py) re-runs each
+case exactly as `EchoTests::echoc_command` builds its command line and rewrites only the `OUT` body:
+
+```bash
+tools/regen_eco_goldens.py            # list what would change
+tools/regen_eco_goldens.py --write    # write it
+```
+
+**Run it over the whole corpus, never just `errors/`.** The ~340 cases whose `OUT` is program output must
+come back byte-identical, and one of them moving is a bug in the change rather than a golden to accept —
+which is the only reason to regenerate broadly.
 
 ## Exit status
 

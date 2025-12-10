@@ -1,16 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:7
-'Buffer' already declares an implicit conversion to 'Window'.
-Begin: 'implicit'
-End: 'function'
-Code excerpt:
- [10]> 
- [11]>     #[implicit]
-            ^
- [12]>     function whole() : Window { return Window($this->count); }
- [13]> }
+[error] implicit_conversion_duplicate_target.eco:11:7
 
-Critical issues found, cannot compile.
+  'Buffer' already declares an implicit conversion to 'Window'.
+
+  10 | 
+  11 |     #[implicit]
+     :       ^^^^^^^^^
+  12 |     function whole() : Window { return Window($this->count); }
+     : ^^^^^^^^^^^^
+  13 | }
+
+1 error, nothing was compiled.

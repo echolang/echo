@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:20
-'++' cannot be declared as an operator: `$i++` is a statement, and it always means `$i = $i + 1`.
-Begin: '++'
-End: '++'
-Code excerpt:
- [3]> // silently ignored at the only spelling of it that parses
- [4]> operator (int32 $a)++: int32 { return $a; }
-                         ^
- [5]> 
+[error] operator_suffix_increment.eco:4:20
 
-Critical issues found, cannot compile.
+  '++' cannot be declared as an operator: `$i++` is a statement, and it always means `$i = $i + 1`.
+
+  3 | // silently ignored at the only spelling of it that parses
+  4 | operator (int32 $a)++: int32 { return $a; }
+    :                    ^^
+  5 | 
+
+1 error, nothing was compiled.

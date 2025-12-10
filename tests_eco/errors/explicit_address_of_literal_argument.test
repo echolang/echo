@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:10
-Cannot take the address of an expression that has no storage
-Begin: '&'
-End: '&'
-Code excerpt:
- [10]> 
- [11]> echo inc(&5);
-               ^
- [12]> 
+[error] explicit_address_of_literal_argument.eco:11:10
 
-Critical issues found, cannot compile.
+  Cannot take the address of an expression that has no storage
+
+  10 | 
+  11 | echo inc(&5);
+     :          ^
+  12 | 
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 14:25
-'Inner' has no storage of its own, so the address of its member 'tag' would point into a value destroyed at the end of this statement. Bind it to a variable first.
-Begin: 'tag'
-End: 'tag'
-Code excerpt:
- [13]> $o = Outer(Inner(5));
- [14]> int32& $r = &$o->get()->tag;
-                              ^
- [15]> 
+[error] address_of_member_of_temporary.eco:14:25
 
-Critical issues found, cannot compile.
+  'Inner' has no storage of its own, so the address of its member 'tag' would point into a value destroyed at the end of this statement. Bind it to a variable first.
+
+  13 | $o = Outer(Inner(5));
+  14 | int32& $r = &$o->get()->tag;
+     :                         ^^^
+  15 | 
+
+1 error, nothing was compiled.

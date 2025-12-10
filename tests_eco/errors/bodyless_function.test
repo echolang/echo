@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:10
-'mystery(int32)' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
-Begin: 'mystery'
-End: 'mystery'
-Code excerpt:
- [4]> // declaration
- [5]> function mystery(int32 $x) : int32;
-               ^
- [6]> 
+[error] bodyless_function.eco:5:10
 
-Critical issues found, cannot compile.
+  'mystery(int32)' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
+
+  4 | // declaration
+  5 | function mystery(int32 $x) : int32;
+    :          ^^^^^^^
+  6 | 
+
+1 error, nothing was compiled.

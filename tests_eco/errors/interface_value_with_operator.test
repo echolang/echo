@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 21:19
-Invalid type conversion: 'Comparable<Money>' requires 'operator <', and an operator has no receiver to dispatch through - so 'Comparable<Money>' cannot be stored as a value. Use it as a constraint or with 'instanceof' instead.
-Begin: '$erased'
-End: '$erased'
-Code excerpt:
- [20]> $money = Money(100);
- [21]> Comparable<Money> $erased = $money;
-                        ^
- [22]> 
+[error] InvalidTypeConversion  interface_value_with_operator.eco:21:19
 
-Critical issues found, cannot compile.
+  Invalid type conversion: 'Comparable<Money>' requires 'operator <', and an operator has no receiver to dispatch through - so 'Comparable<Money>' cannot be stored as a value. Use it as a constraint or with 'instanceof' instead.
+
+  20 | $money = Money(100);
+  21 | Comparable<Money> $erased = $money;
+     :                   ^^^^^^^
+  22 | 
+
+1 error, nothing was compiled.

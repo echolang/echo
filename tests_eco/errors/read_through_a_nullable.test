@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:14
-'Node?' may not be there, so '->' cannot reach through it - use '?->' to skip when it is absent, '??' to supply a replacement, or 'guard' to bind it once and read it plainly
-Begin: 'tag'
-End: 'tag'
-Code excerpt:
- [8]> 
- [9]> echo $maybe->tag;
-                   ^
- [10]> 
+[error] read_through_a_nullable.eco:9:14
 
-Critical issues found, cannot compile.
+  'Node?' may not be there, so '->' cannot reach through it - use '?->' to skip when it is absent, '??' to supply a replacement, or 'guard' to bind it once and read it plainly
+
+   8 | 
+   9 | echo $maybe->tag;
+     :              ^^^
+  10 | 
+
+1 error, nothing was compiled.

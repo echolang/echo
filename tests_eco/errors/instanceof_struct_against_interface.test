@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 22:14
-'instanceof' needs a class or an interface on the left - a 'Square' carries no runtime type to check
-Begin: 'instanceof'
-End: 'instanceof'
-Code excerpt:
- [21]> // the conformance is real and usable through a constraint - it is only `instanceof` that cannot answer
- [22]> echo $square instanceof Drawable;
-                   ^
- [23]> 
+[error] instanceof_struct_against_interface.eco:22:14
 
-Critical issues found, cannot compile.
+  'instanceof' needs a class or an interface on the left - a 'Square' carries no runtime type to check
+
+  21 | // the conformance is real and usable through a constraint - it is only `instanceof` that cannot answer
+  22 | echo $square instanceof Drawable;
+     :              ^^^^^^^^^^
+  23 | 
+
+1 error, nothing was compiled.

@@ -1,16 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 12:7
-'Bag' is generic, and an implicit conversion on a generic type is not supported yet - the target type would have to be substituted per instantiation.
-Begin: 'implicit'
-End: 'function'
-Code excerpt:
- [11]> 
- [12]>     #[implicit]
-            ^
- [13]>     function window() : Window<T> { return Window<T>($this->at); }
- [14]> }
+[error] implicit_conversion_in_generic.eco:12:7
 
-Critical issues found, cannot compile.
+  'Bag' is generic, and an implicit conversion on a generic type is not supported yet - the target type would have to be substituted per instantiation.
+
+  11 | 
+  12 |     #[implicit]
+     :       ^^^^^^^^^
+  13 |     function window() : Window<T> { return Window<T>($this->at); }
+     : ^^^^^^^^^^^^
+  14 | }
+
+1 error, nothing was compiled.

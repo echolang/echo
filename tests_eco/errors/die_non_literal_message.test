@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:1
-the message of 'die' must be a string literal - it is folded into the binary along with the source location, so it has to be known at compile time
-Begin: 'die'
-End: 'die'
-Code excerpt:
- [5]> string $m = "not a literal at the call site";
- [6]> die($m);
-      ^
- [7]> 
+[error] die_non_literal_message.eco:6:1
 
-Critical issues found, cannot compile.
+  the message of 'die' must be a string literal - it is folded into the binary along with the source location, so it has to be known at compile time
+
+  5 | string $m = "not a literal at the call site";
+  6 | die($m);
+    : ^^^
+  7 | 
+
+1 error, nothing was compiled.

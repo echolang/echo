@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 18:18
-'int32' has no members - only a struct or a class has properties to reach with '->'
-Begin: 'x'
-End: 'x'
-Code excerpt:
- [17]> // through the borrow a call returned
- [18]> echo $h->slot()->x;
-                       ^
- [19]> 
+[error] member_of_non_layout_base.eco:18:18
 
----- Issue ----
-Issue at 22:10
-'int32' has no members - only a struct or a class has properties to reach with '->'
-Begin: 'y'
-End: 'y'
-Code excerpt:
- [21]> int32& $r = &$h->n;
- [22]> echo $r->y;
-               ^
- [23]> 
+  'int32' has no members - only a struct or a class has properties to reach with '->'
 
-Critical issues found, cannot compile.
+  17 | // through the borrow a call returned
+  18 | echo $h->slot()->x;
+     :                  ^
+  19 | 
+
+[error] member_of_non_layout_base.eco:22:10
+
+  'int32' has no members - only a struct or a class has properties to reach with '->'
+
+  21 | int32& $r = &$h->n;
+  22 | echo $r->y;
+     :          ^
+  23 | 
+
+2 errors, nothing was compiled.

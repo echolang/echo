@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 10:1
-'Bag' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'. Declare one, e.g. 'struct Bag : contract::iterable<...>'.
-Begin: 'foreach'
-End: 'foreach'
-Code excerpt:
- [9]> 
- [10]> foreach ($b as $e) {
-      ^
- [11]>     echo $e;
+[error] foreach_not_iterable.eco:10:1
 
-Critical issues found, cannot compile.
+  'Bag' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'. Declare one, e.g. 'struct Bag : contract::iterable<...>'.
+
+   9 | 
+  10 | foreach ($b as $e) {
+     : ^^^^^^^
+  11 |     echo $e;
+
+1 error, nothing was compiled.

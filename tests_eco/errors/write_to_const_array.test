@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:12
-Const violation: cannot assign to const storage of type 'const int32'
-Begin: '='
-End: '='
-Code excerpt:
- [8]> // const - refused as a const violation rather than as a failed conversion to `array<int32>&`
- [9]> $frozen[0] = 5;
-                 ^
- [10]> 
+[error] ConstViolation  write_to_const_array.eco:9:12
 
----- Issue ----
-Issue at 13:10
-Const violation: cannot call 'array::push(int32)' on a const 'array<int32>' - the method is not declared const, so it may write. Mark it `const function push(...)` if it only reads.
-Begin: 'push'
-End: 'push'
-Code excerpt:
- [12]> // would fix it
- [13]> $frozen->push(3);
-               ^
- [14]> 
+  Const violation: cannot assign to const storage of type 'const int32'
 
-Critical issues found, cannot compile.
+   8 | // const - refused as a const violation rather than as a failed conversion to `array<int32>&`
+   9 | $frozen[0] = 5;
+     :            ^
+  10 | 
+
+[error] ConstViolation  write_to_const_array.eco:13:10
+
+  Const violation: cannot call 'array::push(int32)' on a const 'array<int32>' - the method is not declared const, so it may write. Mark it `const function push(...)` if it only reads.
+
+  12 | // would fix it
+  13 | $frozen->push(3);
+     :          ^^^^
+  14 | 
+
+2 errors, nothing was compiled.

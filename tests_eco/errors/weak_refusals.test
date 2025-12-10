@@ -1,37 +1,31 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 13:1
-'weak<int32>' is not a weak reference to anything - only a class is reference counted, so only a class has a count to opt out of
-Begin: 'weak'
-End: 'weak'
-Code excerpt:
- [12]> 
- [13]> weak<int32> $bad = null;
-      ^
- [14]> weak<Point> $alsoBad = null;
+[error] weak_refusals.eco:13:1
 
----- Issue ----
-Issue at 14:1
-'weak<Point>' is not a weak reference to anything - only a class is reference counted, so only a class has a count to opt out of
-Begin: 'weak'
-End: 'weak'
-Code excerpt:
- [13]> weak<int32> $bad = null;
- [14]> weak<Point> $alsoBad = null;
-      ^
- [15]> 
+  'weak<int32>' is not a weak reference to anything - only a class is reference counted, so only a class has a count to opt out of
 
----- Issue ----
-Issue at 11:10
-'weak<Node>' cannot be read through - it does not keep its object alive, so the object may already be gone. upgrade it first with 'strong(...)', or reach through it with '?->'
-Begin: 'tag'
-End: 'tag'
-Code excerpt:
- [10]> 
- [11]> echo $w->tag;
-               ^
- [12]> 
+  12 | 
+  13 | weak<int32> $bad = null;
+     : ^^^^
+  14 | weak<Point> $alsoBad = null;
 
-Critical issues found, cannot compile.
+[error] weak_refusals.eco:14:1
+
+  'weak<Point>' is not a weak reference to anything - only a class is reference counted, so only a class has a count to opt out of
+
+  13 | weak<int32> $bad = null;
+  14 | weak<Point> $alsoBad = null;
+     : ^^^^
+  15 | 
+
+[error] weak_refusals.eco:11:10
+
+  'weak<Node>' cannot be read through - it does not keep its object alive, so the object may already be gone. upgrade it first with 'strong(...)', or reach through it with '?->'
+
+  10 | 
+  11 | echo $w->tag;
+     :          ^^^
+  12 | 
+
+3 errors, nothing was compiled.

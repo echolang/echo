@@ -2,15 +2,13 @@ stdlib: off
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 2:7
-The constant 'A' is defined in terms of itself. Its value is copied to each use site, so a cycle would expand forever.
-Begin: 'A'
-End: 'A'
-Code excerpt:
- [1]> // substitution has no fixed point to stop at, so a cycle is refused rather than unfolded
- [2]> const A = B;
-            ^
- [3]> const B = A;
+[error] const_cycle.eco:2:7
 
-Critical issues found, cannot compile.
+  The constant 'A' is defined in terms of itself. Its value is copied to each use site, so a cycle would expand forever.
+
+  1 | // substitution has no fixed point to stop at, so a cycle is refused rather than unfolded
+  2 | const A = B;
+    :       ^
+  3 | const B = A;
+
+1 error, nothing was compiled.

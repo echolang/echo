@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:1
-'size_of' is answered from the target's layout, which the compiler only knows once it is emitting code - so it cannot decide a 'const' expression.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [2]> // cannot decide a compile-time branch. a refusal rather than a not-yet: no round is going to answer it.
- [3]> const if (mem::size_of<int32>() > 2) {
-      ^
- [4]>     echo 1;
+[error] const_if_needs_a_layout.eco:3:1
 
-Critical issues found, cannot compile.
+  'size_of' is answered from the target's layout, which the compiler only knows once it is emitting code - so it cannot decide a 'const' expression.
+
+  2 | // cannot decide a compile-time branch. a refusal rather than a not-yet: no round is going to answer it.
+  3 | const if (mem::size_of<int32>() > 2) {
+    : ^^^^^
+  4 |     echo 1;
+
+1 error, nothing was compiled.

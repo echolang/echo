@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 12:53
-'$local' is declared in an enclosing function. A plain nested function captures nothing - pass it as a parameter, or write a closure.
-Begin: '$local'
-End: '$local'
-Code excerpt:
- [11]> 
- [12]>     function helper(int32 $b) : int32 { return $b + $local; }
-                                                          ^
- [13]> 
+[error] nested_function_capture_in_closure.eco:12:53
 
-Critical issues found, cannot compile.
+  '$local' is declared in an enclosing function. A plain nested function captures nothing - pass it as a parameter, or write a closure.
+
+  11 | 
+  12 |     function helper(int32 $b) : int32 { return $b + $local; }
+     :                                                     ^^^^^^
+  13 | 
+
+1 error, nothing was compiled.

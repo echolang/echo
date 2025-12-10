@@ -1,17 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:9
-No overload of 'operator +' accepts these arguments. Candidates are:
-  operator +(A, A)
-  operator +(A, int32)
-Begin: 'operator +'
-End: 'operator +'
-Code excerpt:
- [10]> $q = B(2);
- [11]> $r = $p + $q;
-              ^
- [12]> 
+[error] NoMatchingOverload  operator_no_match.eco:11:9
 
-Critical issues found, cannot compile.
+  No overload of 'operator +' accepts these arguments. Candidates are:
+    operator +(A, A)
+    operator +(A, int32)
+
+  10 | $q = B(2);
+  11 | $r = $p + $q;
+     :         ^^^^^
+  12 | 
+
+1 error, nothing was compiled.

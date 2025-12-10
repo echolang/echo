@@ -2,15 +2,13 @@ stdlib: off
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 19:9
-cannot compare 'P' against null - it is always there, write 'P?' if it may be absent
-Begin: 'operator =='
-End: 'operator =='
-Code excerpt:
- [18]> 
- [19]> echo $p == null;
-              ^
- [20]> 
+[error] operator_lone_candidate_null.eco:19:9
 
-Critical issues found, cannot compile.
+  cannot compare 'P' against null - it is always there, write 'P?' if it may be absent
+
+  18 | 
+  19 | echo $p == null;
+     :         ^^^^^^^^
+  20 | 
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:20
-'Seekable' is an interface, and an interface cannot conform to another one - declare the requirements it needs directly.
-Begin: ':'
-End: ':'
-Code excerpt:
- [5]> 
- [6]> interface Seekable : Readable
-                         ^
- [7]> {
+[error] interface_inheritance.eco:6:20
 
-Critical issues found, cannot compile.
+  'Seekable' is an interface, and an interface cannot conform to another one - declare the requirements it needs directly.
+
+  5 | 
+  6 | interface Seekable : Readable
+    :                    ^
+  7 | {
+
+1 error, nothing was compiled.

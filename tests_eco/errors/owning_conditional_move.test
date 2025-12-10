@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 17:1
-'$a' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it on every branch, or after the 'if'.
-Begin: '$a'
-End: '$a'
-Code excerpt:
- [16]> 
- [17]> $a = Buffer(mem::alloc<uint8>(1));
-      ^
- [18]> 
+[error] owning_conditional_move.eco:17:1
 
-Critical issues found, cannot compile.
+  '$a' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it on every branch, or after the 'if'.
+
+  16 | 
+  17 | $a = Buffer(mem::alloc<uint8>(1));
+     : ^^
+  18 | 
+
+1 error, nothing was compiled.

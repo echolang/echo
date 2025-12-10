@@ -1,17 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 10:8
-No overload of 'operator []' accepts these arguments. Candidates are:
-  operator []<T>(array<T>&, usize)
-  operator []<T>(const array<T>&, usize)
-Begin: 'operator []'
-End: 'operator []'
-Code excerpt:
- [9]> 
- [10]> echo $a["nope"];
-             ^
- [11]> 
+[error] NoMatchingOverload  index_wrong_index_type.eco:10:8
 
-Critical issues found, cannot compile.
+  No overload of 'operator []' accepts these arguments. Candidates are:
+    operator []<T>(array<T>&, usize)
+    operator []<T>(const array<T>&, usize)
+
+   9 | 
+  10 | echo $a["nope"];
+     :        ^^^^^^^^^
+  11 | 
+
+1 error, nothing was compiled.

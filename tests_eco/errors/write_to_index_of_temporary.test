@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 11:1
-'array<int32>' has no storage of its own, so writing to it would be lost, because the value is destroyed at the end of this statement. Bind it to a variable first.
-Begin: 'make'
-End: 'make'
-Code excerpt:
- [10]> 
- [11]> make()[0] = 5;
-      ^
- [12]> 
+[error] write_to_index_of_temporary.eco:11:1
 
-Critical issues found, cannot compile.
+  'array<int32>' has no storage of its own, so writing to it would be lost, because the value is destroyed at the end of this statement. Bind it to a variable first.
+
+  10 | 
+  11 | make()[0] = 5;
+     : ^^^^
+  12 | 
+
+1 error, nothing was compiled.

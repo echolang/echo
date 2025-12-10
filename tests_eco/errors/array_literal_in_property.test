@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:18
-Invalid type conversion: cannot implicitly convert '[unknown]' to 'array<int32>'
-Begin: '$body'
-End: '$body'
-Code excerpt:
- [7]> {
- [8]>     array<int32> $body = [1, 2];
-                       ^
- [9]> }
+[error] InvalidTypeConversion  array_literal_in_property.eco:8:18
 
-Critical issues found, cannot compile.
+  Invalid type conversion: cannot implicitly convert '[unknown]' to 'array<int32>'
+
+  7 | {
+  8 |     array<int32> $body = [1, 2];
+    :                  ^^^^^
+  9 | }
+
+1 error, nothing was compiled.

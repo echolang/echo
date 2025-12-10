@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:8
-'int32' cannot be indexed.
-Begin: '['
-End: '['
-Code excerpt:
- [2]> int32 $n = 5;
- [3]> echo $n[0];
-             ^
- [4]> 
+[error] index_primitive.eco:3:8
 
-Critical issues found, cannot compile.
+  'int32' cannot be indexed.
+
+  2 | int32 $n = 5;
+  3 | echo $n[0];
+    :        ^
+  4 | 
+
+1 error, nothing was compiled.

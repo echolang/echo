@@ -8,7 +8,14 @@
 #include <tuple>
 
 namespace AST
-{  
+{
+    // where a diagnostic points: a module, the file it was written in, and the tokens it is about.
+    //
+    // **it does not render itself.** It used to - `get_referenced_code_excerpt()` drew the source frame
+    // here, inline in this header, with a caret indented by a hardcoded five spaces against a gutter whose
+    // width grew with the line number, so every two-digit line was off by one. Drawing is
+    // AST::DiagnosticRenderer's question now, and turning a token slice into a character range is
+    // AST::span_of's; what is left here is the reference itself
     struct CodeRef
     {
         const Module *module;
@@ -33,36 +40,6 @@ namespace AST
         bool is_single_token() const
         {
             return token_slice.startt().char_offset == token_slice.endt().char_offset;
-        }
-
-        const std::string get_referenced_code_excerpt() const
-        {
-            if (!file->content.has_value()) {
-                return "[No content available]";
-            }
-
-            // const auto &content = file->file->content.value();
-
-            auto lines = line_range();
-
-            std::string excerpt;
-            excerpt += "Begin: '" + token_slice.start_ref().value() + "'\n";
-            excerpt += "End: '" + token_slice.end_ref().value() + "'\n";
-            excerpt += "Code excerpt:\n";
-
-            for (uint32_t i = std::get<0>(lines) - 1; i <= std::get<1>(lines) + 1; i++) {
-                excerpt += " [" + std::to_string(i) + "]> " + file->get_content_of_line(i) + "\n";
-                if (i == std::get<0>(lines)) {
-                    excerpt += "     ";
-                    for (uint32_t j = 0; j < token_slice.startt().char_offset; j++) {
-                        excerpt += " ";
-                    }
-                    excerpt += "^";
-                    excerpt += "\n";
-                }
-            }
-
-            return excerpt;
         }
     };
 };

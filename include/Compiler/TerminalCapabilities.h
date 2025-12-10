@@ -1,0 +1,82 @@
+#ifndef TERMINALCAPABILITIES_H
+#define TERMINALCAPABILITIES_H
+
+#pragma once
+
+#include <string>
+
+namespace Compiler
+{
+    // what the invocation asked for, ahead of anything the environment says. `t_auto` on both axes is
+    // "work it out", which is the default and the only value that ever consults a terminal
+    enum class ColorChoice
+    {
+        t_auto,
+        t_always,
+        t_never
+    };
+
+    // how a diagnostic is drawn. `t_auto` resolves to `t_pretty` or `t_ascii` by what the stream can
+    // render; `t_json` is not a theme at all and is carried here because it is the same one flag to a
+    // user - `--diagnostics=<auto|pretty|ascii|json>`
+    enum class DiagnosticFormat
+    {
+        t_auto,
+        t_pretty,
+        t_ascii,
+        t_json
+    };
+
+    // **the sole answer to "what can this terminal do".**
+    //
+    // three facts - colour, unicode, width - resolved once from the command line and the environment, and
+    // read by everything that writes to a terminal. Shaped like Compiler::TargetFacts on purpose: a small
+    // struct of settled facts rather than a helper each caller asks its own way, because the failure mode
+    // is the same one. Two places deciding independently whether to emit an escape sequence is how a
+    // redirected stream ends up with half of them in it.
+    //
+    // it replaced exactly that: a cached `isatty(fileno(stdout))` in main.cpp read by one function, beside
+    // a set of `SH_COLOR_*` token-pasting macros that only worked on string literals, beside a renderer
+    // that emitted no colour at all because reaching those macros from src/AST/ was not possible.
+    //
+    // **stderr is the stream that matters**, because that is where diagnostics go. stdout under `run`
+    // belongs to the program being executed, and asking whether *it* is a terminal answers a question
+    // nobody here has.
+    struct TerminalCapabilities
+    {
+        // may an escape sequence be written. false whenever the answer is in doubt - a stray `\x1b[31m` in
+        // a log or a golden is noise somebody has to filter back out, and a missing colour is not
+        bool color = false;
+
+        // may a glyph outside ASCII be written. Separate from `color` because they fail apart: a Windows
+        // console with virtual-terminal processing on renders colour perfectly and turns `━` into mojibake,
+        // and a UTF-8 xterm piped into a file is the reverse
+        bool unicode = false;
+
+        // how wide the terminal is, for wrapping. 0 means "unknown, do not wrap" - which is what a pipe
+        // reports, and is deliberately the same answer as "narrow enough that wrapping would not help"
+        unsigned int width = 0;
+
+        // resolves the facts for the diagnostic stream (stderr), applying the two flags over what the
+        // environment says. The flags win outright: `--color=always` into a pipe is a user asking for
+        // escape sequences on purpose, which is what a CI job that renders them wants.
+        //
+        // `NO_COLOR` (any value) and `TERM=dumb` suppress; `CLICOLOR_FORCE` (non-empty, not "0") forces.
+        // unicode is decided by the locale saying UTF-8, or by `WT_SESSION` - Windows Terminal, as opposed
+        // to the legacy console the same binary may be run from
+        static TerminalCapabilities resolve(ColorChoice color_choice, DiagnosticFormat format);
+
+        // no colour, no unicode, no width. What every non-terminal gets, and what the unit tests assert
+        // against so a suite's output does not depend on where it was run from
+        static TerminalCapabilities plain();
+    };
+
+    // `auto` / `always` / `never` and `auto` / `pretty` / `ascii` / `json`, refused rather than defaulted
+    // on anything else - a mistyped `--color=alwyas` that silently means `auto` is a flag the user
+    // believes they set. False with a sentence in `out_error`, which is how TargetFacts::resolve reports
+    // the same class of mistake
+    bool parse_color_choice(const std::string &value, ColorChoice &out_choice, std::string &out_error);
+    bool parse_diagnostic_format(const std::string &value, DiagnosticFormat &out_format, std::string &out_error);
+};
+
+#endif

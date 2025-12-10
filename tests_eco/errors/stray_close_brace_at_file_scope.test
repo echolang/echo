@@ -2,15 +2,13 @@ expect: fail
 # one diagnostic and a refusal, where this file used to compile to nothing at all and exit 0
 
 --- OUT --->
----- Issue ----
-Issue at 8:1
-Unexpected token 'close_brace '}'' found
-Begin: '}'
-End: '}'
-Code excerpt:
- [7]> 
- [8]> }
-      ^
- [9]> 
+[error] UnexpectedToken  stray_close_brace_at_file_scope.eco:8:1
 
-Critical issues found, cannot compile.
+  Unexpected token 'close_brace '}'' found
+
+  7 | 
+  8 | }
+    : ^ unexpected here
+  9 | 
+
+1 error, nothing was compiled.

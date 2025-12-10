@@ -2,6 +2,6 @@ modules: modules/bad_attribute
 expect: fail
 
 --- OUT --->
-Module Manifest Error
----------------------
-module.eco:4: unknown manifest attribute 'source', expected one of: module, version, depends, sources
+[error] Module Manifest Error
+
+  module.eco:4: unknown manifest attribute 'source', expected one of: module, version, depends, sources

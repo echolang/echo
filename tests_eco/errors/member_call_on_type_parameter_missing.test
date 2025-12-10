@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:24
-The type 'Point' has no member named 'count'
-Begin: 'count'
-End: 'count'
-Code excerpt:
- [7]> {
- [8]>     return $container->count();
-                             ^
- [9]> }
+[error] UnknownMember  member_call_on_type_parameter_missing.eco:8:24
 
-Critical issues found, cannot compile.
+  The type 'Point' has no member named 'count'
+
+  7 | {
+  8 |     return $container->count();
+    :                        ^^^^^
+  9 | }
+
+1 error, nothing was compiled.

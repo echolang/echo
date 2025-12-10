@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 5:1
-'reads' is not a method, so it cannot be declared const - only a receiver is what `const` would qualify. Write `const` on the parameters that are read-only instead.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [4]> // unrelated "unknown function"
- [5]> const function reads(int32 $n) : int32
-      ^
- [6]> {
+[error] const_on_a_free_function.eco:5:1
 
-Critical issues found, cannot compile.
+  'reads' is not a method, so it cannot be declared const - only a receiver is what `const` would qualify. Write `const` on the parameters that are read-only instead.
+
+  4 | // unrelated "unknown function"
+  5 | const function reads(int32 $n) : int32
+    : ^^^^^
+  6 | {
+
+1 error, nothing was compiled.

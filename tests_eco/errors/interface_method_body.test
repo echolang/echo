@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:14
-'Drawable::draw()' is a requirement of the interface 'Drawable', so it cannot have a body - end it with ';' and let each implementor write one.
-Begin: 'draw'
-End: 'draw'
-Code excerpt:
- [2]> {
- [3]>     function draw() : void { echo 1; }
-                   ^
- [4]> }
+[error] interface_method_body.eco:3:14
 
-Critical issues found, cannot compile.
+  'Drawable::draw()' is a requirement of the interface 'Drawable', so it cannot have a body - end it with ';' and let each implementor write one.
+
+  2 | {
+  3 |     function draw() : void { echo 1; }
+    :              ^^^^
+  4 | }
+
+1 error, nothing was compiled.

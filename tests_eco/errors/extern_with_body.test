@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:14
-An extern function declaration cannot have a body - it must end with ';'
-Begin: 'some_symbol'
-End: 'some_symbol'
-Code excerpt:
- [3]> extern {
- [4]>     function some_symbol() : void {
-                   ^
- [5]>         echo 1;
+[error] extern_with_body.eco:4:14
 
-Critical issues found, cannot compile.
+  An extern function declaration cannot have a body - it must end with ';'
+
+  3 | extern {
+  4 |     function some_symbol() : void {
+    :              ^^^^^^^^^^^
+  5 |         echo 1;
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:1
-Invalid type conversion: cannot implicitly convert 'int32' to 'ptr<int32>'
-Begin: 'maybe_inc'
-End: 'maybe_inc'
-Code excerpt:
- [8]> $a = 5;
- [9]> maybe_inc($a);
-      ^
- [10]> 
+[error] InvalidTypeConversion  ptr_param_no_autoborrow.eco:9:1
 
-Critical issues found, cannot compile.
+  Invalid type conversion: cannot implicitly convert 'int32' to 'ptr<int32>'
+
+   8 | $a = 5;
+   9 | maybe_inc($a);
+     : ^^^^^^^^^
+  10 | 
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:11
-Cannot take the address of an expression that has no storage
-Begin: '&'
-End: '&'
-Code excerpt:
- [3]> $a = 1;
- [4]> int& $r = &5;
-                ^
- [5]> 
+[error] address_of_literal.eco:4:11
 
-Critical issues found, cannot compile.
+  Cannot take the address of an expression that has no storage
+
+  3 | $a = 1;
+  4 | int& $r = &5;
+    :           ^
+  5 | 
+
+1 error, nothing was compiled.

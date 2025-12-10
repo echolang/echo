@@ -1,16 +1,15 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:7
-An implicit conversion takes no parameters - 'Buffer::window' declares 1.
-Begin: 'implicit'
-End: 'function'
-Code excerpt:
- [8]> 
- [9]>     #[implicit]
-            ^
- [10]>     function window(usize $from) : Window { return Window($this->count); }
- [11]> }
+[error] implicit_conversion_with_parameters.eco:9:7
 
-Critical issues found, cannot compile.
+  An implicit conversion takes no parameters - 'Buffer::window' declares 1.
+
+   8 | 
+   9 |     #[implicit]
+     :       ^^^^^^^^^
+  10 |     function window(usize $from) : Window { return Window($this->count); }
+     : ^^^^^^^^^^^^
+  11 | }
+
+1 error, nothing was compiled.

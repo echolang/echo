@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:12
-Invalid type conversion: The integer literal '-1' cannot be implicitly converted to an unsigned integer because it is negative.
-Begin: '-1'
-End: '-1'
-Code excerpt:
- [5]> {
- [6]>     return -1;
-                 ^
- [7]> }
+[error] InvalidTypeConversion  return_negative_into_unsigned.eco:6:12
 
-Critical issues found, cannot compile.
+  Invalid type conversion: The integer literal '-1' cannot be implicitly converted to an unsigned integer because it is negative.
+
+  5 | {
+  6 |     return -1;
+    :            ^^
+  7 | }
+
+1 error, nothing was compiled.

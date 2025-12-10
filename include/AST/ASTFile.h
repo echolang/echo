@@ -85,8 +85,15 @@ namespace AST
         bool read_from_disk(std::string &out_error);
 
         std::string debug_description() const;
-        
+
         std::string get_content_of_line(uint32_t line) const;
+
+        // how many lines the content has. `get_content_of_line` answers "" for an empty line and for one
+        // past the end, so a renderer drawing context rows around a span needs this to tell the two apart
+        // - without it a diagnostic on the last line grows a blank row that is not in the file
+        size_t line_count() const {
+            return _line_offsets.size();
+        }
     };
 
     struct TokenizedFile

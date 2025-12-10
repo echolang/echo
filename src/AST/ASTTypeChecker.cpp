@@ -843,10 +843,23 @@ void TypeChecker::check_call_argument(
     ExprNode *argument,
     const ValueType &param_type,
     size_t arg_number,
-    const std::string &callee_name,
-    bool callee_is_operator,
+    const FunctionDeclNode *callee,
+    const std::string &indirect_name,
     const TokenReference &at)
 {
+    const bool callee_is_operator = callee != nullptr && callee->is_operator();
+
+    // **built where a refusal is written and not before.** an operator's spelling is recovered from its
+    // decorated name, so asking every argument of every operator call in the program for it allocates
+    // twice over for a string that only a diagnostic reads
+    const auto callee_name = [&]() -> std::string {
+        if (callee == nullptr) {
+            return indirect_name;
+        }
+
+        return callee_is_operator ? callee->operator_spelling() : callee->func_name();
+    };
+
     // the declaration site already refuses to seed a non-nullable parameter with null - the call site
     // has to refuse too, or the promise only holds for locals. this was a segfault the moment the
     // callee read through it
@@ -863,14 +876,14 @@ void TypeChecker::check_call_argument(
             if (callee_is_operator) {
                 if (!_context_operands_refused) {
                     _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(at), null_operand_refusal(callee_name));
+                        code_ref_for(at), null_operand_refusal(callee_name()));
                 }
             }
             else {
                 _collector.collect_issue<Issue::GenericError>(
                     code_ref_for(at),
                     fmt::format("argument {} of '{}' is '{}', which cannot be null - {}",
-                        arg_number, callee_name, param_type.get_type_desciption(), reason));
+                        arg_number, callee_name(), param_type.get_type_desciption(), reason));
             }
         }
         return;
@@ -896,7 +909,7 @@ void TypeChecker::check_call_argument(
             fmt::format(
                 "Argument {} of '{}' expects type '{}' but got '{}'",
                 arg_number,
-                callee_name,
+                callee_name(),
                 param_type.get_type_desciption(),
                 arg_type.get_type_desciption()));
     }
@@ -973,8 +986,8 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     node.arguments[i],
                     params[i]->type(),
                     node.decl->user_arg_number(i),
-                    node.decl->is_operator() ? node.decl->operator_spelling() : node.decl->func_name(),
-                    node.decl->is_operator(),
+                    node.decl,
+                    std::string(),
                     node.token_function_name);
             }
         }
@@ -1077,9 +1090,10 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
                     node.arguments[i],
                     signature.parameter_types[i],
                     i + 1,
+                    // no declaration: an indirect call is through a callable value, which is never an
+                    // operator and has no name of its own beyond the one the call site wrote
+                    nullptr,
                     callee_name,
-                    // an indirect call is through a callable value, which is never an operator
-                    /*callee_is_operator=*/false,
                     node.token);
             }
         }

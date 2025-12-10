@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:6
-'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own
-Begin: 'mv'
-End: 'mv'
-Code excerpt:
- [8]> 
- [9]> $a = mv make();
-           ^
- [10]> 
+[error] mv_on_temporary.eco:9:6
 
----- Issue ----
-Issue at 9:15
-cannot infer type of variable without an initializer
-Begin: ';'
-End: ';'
-Code excerpt:
- [8]> 
- [9]> $a = mv make();
-                    ^
- [10]> 
+  'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own
 
-Critical issues found, cannot compile.
+   8 | 
+   9 | $a = mv make();
+     :      ^^
+  10 | 
+
+[error] mv_on_temporary.eco:9:15
+
+  cannot infer type of variable without an initializer
+
+   8 | 
+   9 | $a = mv make();
+     :               ^
+  10 | 
+
+2 errors, nothing was compiled.

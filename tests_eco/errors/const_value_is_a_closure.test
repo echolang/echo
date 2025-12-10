@@ -2,15 +2,13 @@ stdlib: off
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:17
-A constant's value cannot be a closure. A closure captures where it is written and a constant is copied to where it is used, so 'HANDLER' would have no environment to capture
-Begin: 'function'
-End: 'function'
-Code excerpt:
- [2]> // cannot both be true of one expression
- [3]> const HANDLER = function() : int32 { return 1; };
-                      ^
- [4]> 
+[error] const_value_is_a_closure.eco:3:17
 
-Critical issues found, cannot compile.
+  A constant's value cannot be a closure. A closure captures where it is written and a constant is copied to where it is used, so 'HANDLER' would have no environment to capture
+
+  2 | // cannot both be true of one expression
+  3 | const HANDLER = function() : int32 { return 1; };
+    :                 ^^^^^^^^
+  4 | 
+
+1 error, nothing was compiled.

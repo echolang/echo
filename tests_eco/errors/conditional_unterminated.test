@@ -1,6 +1,6 @@
 expect: fail
 
 --- OUT --->
-Conditional Compilation Failed
-------------------------------
-line 2: '#[if: ...]' is never closed - add '#[end]'
+[error] Conditional Compilation Failed
+
+  line 2: '#[if: ...]' is never closed - add '#[end]'

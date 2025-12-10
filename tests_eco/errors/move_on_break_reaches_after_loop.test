@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 31:6
-'$a' may have been moved out of.
-Begin: '$a'
-End: '$a'
-Code excerpt:
- [30]> 
- [31]> echo $a->id;
-           ^
- [32]> 
+[error] move_on_break_reaches_after_loop.eco:31:6
 
-Critical issues found, cannot compile.
+  '$a' may have been moved out of.
+
+  30 | 
+  31 | echo $a->id;
+     :      ^^
+  32 | 
+
+1 error, nothing was compiled.

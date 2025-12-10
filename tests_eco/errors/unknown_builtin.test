@@ -1,26 +1,22 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:3
-Unknown compiler builtin 'sizeof_but_misspelled'.
-Begin: 'builtin'
-End: ']'
-Code excerpt:
- [2]> // than failing later as an unresolved symbol
- [3]> #[builtin: "sizeof_but_misspelled"]
-        ^
- [4]> function bogus<T>() : usize;
+[error] unknown_builtin.eco:3:3
 
----- Issue ----
-Issue at 4:10
-'bogus<T>()' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
-Begin: 'bogus'
-End: 'bogus'
-Code excerpt:
- [3]> #[builtin: "sizeof_but_misspelled"]
- [4]> function bogus<T>() : usize;
-               ^
- [5]> 
+  Unknown compiler builtin 'sizeof_but_misspelled'.
 
-Critical issues found, cannot compile.
+  2 | // than failing later as an unresolved symbol
+  3 | #[builtin: "sizeof_but_misspelled"]
+    :   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  4 | function bogus<T>() : usize;
+
+[error] unknown_builtin.eco:4:10
+
+  'bogus<T>()' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
+
+  3 | #[builtin: "sizeof_but_misspelled"]
+  4 | function bogus<T>() : usize;
+    :          ^^^^^
+  5 | 
+
+2 errors, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 27:22
-'$this->inner' is initialized twice, and 'Inner' owns a resource - the value the first write built would never be destroyed. Build it once, or assign the whole variable instead so the old value is torn down.
-Begin: '='
-End: '='
-Code excerpt:
- [26]>         $this->inner = Inner($t);
- [27]>         $this->inner = Inner($t + 1);
-                           ^
- [28]>     }
+[error] field_initialized_twice.eco:27:22
 
-Critical issues found, cannot compile.
+  '$this->inner' is initialized twice, and 'Inner' owns a resource - the value the first write built would never be destroyed. Build it once, or assign the whole variable instead so the old value is torn down.
+
+  26 |         $this->inner = Inner($t);
+  27 |         $this->inner = Inner($t + 1);
+     :                      ^
+  28 |     }
+
+1 error, nothing was compiled.

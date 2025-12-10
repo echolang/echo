@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:21
-operator '+' is built in for these operand types, so this declaration would never be used - where the language spells a meaning, the built-in one wins.
-Begin: '+'
-End: '+'
-Code excerpt:
- [2]> // never fire. refused at the declaration rather than left as a silent no-op
- [3]> operator (int32 $a) + (int32 $b): int32 { return 1; }
-                          ^
- [4]> 
+[error] operator_builtin_primitives.eco:3:21
 
-Critical issues found, cannot compile.
+  operator '+' is built in for these operand types, so this declaration would never be used - where the language spells a meaning, the built-in one wins.
+
+  2 | // never fire. refused at the declaration rather than left as a silent no-op
+  3 | operator (int32 $a) + (int32 $b): int32 { return 1; }
+    :                     ^
+  4 | 
+
+1 error, nothing was compiled.

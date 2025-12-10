@@ -9,6 +9,7 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTDiagnosticRenderer.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTConstantExpander.h"
 #include "AST/ASTMonomorphizer.h"
@@ -31,27 +32,6 @@
 #include <map>
 #include <set>
 #include <chrono>
-
-#define SH_COLOR_RST  "\x1B[0m"
-#define SH_COLOR_KRED  "\x1B[31m"
-#define SH_COLOR_KGRN  "\x1B[32m"
-#define SH_COLOR_KYEL  "\x1B[33m"
-#define SH_COLOR_KBLU  "\x1B[34m"
-#define SH_COLOR_KMAG  "\x1B[35m"
-#define SH_COLOR_KCYN  "\x1B[36m"
-#define SH_COLOR_KWHT  "\x1B[37m"
-
-#define SH_COLOR_FRED(x) SH_COLOR_KRED x SH_COLOR_RST
-#define SH_COLOR_FGRN(x) SH_COLOR_KGRN x SH_COLOR_RST
-#define SH_COLOR_FYEL(x) SH_COLOR_KYEL x SH_COLOR_RST
-#define SH_COLOR_FBLU(x) SH_COLOR_KBLU x SH_COLOR_RST
-#define SH_COLOR_FMAG(x) SH_COLOR_KMAG x SH_COLOR_RST
-#define SH_COLOR_FCYN(x) SH_COLOR_KCYN x SH_COLOR_RST
-#define SH_COLOR_FWHT(x) SH_COLOR_KWHT x SH_COLOR_RST
-
-#define SH_COLOR_BOLD(x) "\x1B[1m" x SH_COLOR_RST
-#define SH_COLOR_UNDL(x) "\x1B[4m" x SH_COLOR_RST
-
 
 // the files an argument names, expanding wildcards. `missing` counts the paths that were named
 // literally and are not there - a caller has to refuse those rather than compile what is left, since
@@ -97,32 +77,10 @@ std::vector<std::filesystem::path> get_file_list_from_args(
     return files;
 }
 
-// colour only when somebody is watching. A redirected stream is being read by a program - a golden test,
-// a log, a pipe into `grep` - and an escape sequence in it is noise that has to be filtered back out
-static bool stdout_is_a_terminal()
-{
-    static const bool answer = isatty(fileno(stdout)) != 0;
-    return answer;
-}
-
-void print_critical_error(std::string title, std::string message)
-{
-    if (stdout_is_a_terminal()) {
-        std::cout << SH_COLOR_BOLD(SH_COLOR_FRED( << title <<) ) << std::endl;
-    }
-    else {
-        std::cout << title << std::endl;
-    }
-
-    for (size_t i = 0; i < title.size(); i++) {
-        std::cout << "-";
-    }
-
-    std::cout << std::endl;
-    std::cout << message << std::endl;
-}
-
-int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayload &input)
+int handle_parse(
+    const AST::DiagnosticRenderer &diagnostics,
+    Parser::ModuleParser &parser,
+    Parser::ModuleParser::InputPayload &input)
 {
     // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, unlike the tokenization error inside. That macro
     // exists to let a *compiler bug* crash with a stack trace, and a malformed `#[if: ...]` is not one - it
@@ -131,12 +89,12 @@ int handle_parse(Parser::ModuleParser &parser, Parser::ModuleParser::InputPayloa
         parser.parse_input(input);
     }
     catch (AST::Module::TokenFilterException &e) {
-        print_critical_error("Conditional Compilation Failed", e.what());
+        diagnostics.render_untyped("Conditional Compilation Failed", e.what());
         return 1;
     }
 #if !ECO_DONT_CATCH_EXCEPTIONS
     catch (Parser::ModuleParser::TokenizationException &e) {
-        print_critical_error("Tokenization Failed", e.what());
+        diagnostics.render_untyped("Tokenization Failed", e.what());
         return 1;
     }
 #endif
@@ -189,6 +147,7 @@ static std::optional<std::filesystem::path> discover_project_manifest()
 // library that depends on another pulls the other in, once, in the right order
 static bool resolve_manifests(
     argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
     const Compiler::TargetFacts &facts,
     std::vector<Parser::ModuleManifest> &out,
     std::vector<std::filesystem::path> &out_roots)
@@ -224,7 +183,7 @@ static bool resolve_manifests(
 
     std::string error;
     if (!Parser::resolve_module_graph(roots, facts, out, error)) {
-        print_critical_error("Module Manifest Error", error);
+        diagnostics.render_untyped("Module Manifest Error", error);
         return false;
     }
 
@@ -234,6 +193,7 @@ static bool resolve_manifests(
 // one AST::Module per manifest, parsed completely before the next one starts - which is what the
 // topological order above exists for
 static int parse_manifest_modules(
+    const AST::DiagnosticRenderer &diagnostics,
     const std::vector<Parser::ModuleManifest> &manifests,
     AST::Bundle &bundle,
     Parser::ModuleParser &parser)
@@ -252,7 +212,7 @@ static int parse_manifest_modules(
             input.files.push_back(Parser::ModuleParser::InputFile(source));
         }
 
-        if (handle_parse(parser, input)) {
+        if (handle_parse(diagnostics, parser, input)) {
             return 1;
         }
     }
@@ -266,6 +226,7 @@ static int parse_manifest_modules(
 // compiled under `run` and failed under `build`
 static int build_bundle(
     argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
     Parser::ModuleParser &parser,
     std::vector<Parser::ModuleManifest> &out_manifests,
@@ -287,12 +248,12 @@ static int build_bundle(
 
         // the parser's own facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
         // list of files and the conditions inside those files have to be decided by the same answer
-        if (!resolve_manifests(cli, parser.target_facts, manifests, roots)) {
+        if (!resolve_manifests(cli, diagnostics, parser.target_facts, manifests, roots)) {
             return 1;
         }
     }
 
-    if (parse_manifest_modules(manifests, bundle, parser) != 0) {
+    if (parse_manifest_modules(diagnostics, manifests, bundle, parser) != 0) {
         return 1;
     }
 
@@ -372,7 +333,7 @@ static int build_bundle(
             input.files.push_back(Parser::ModuleParser::InputFile(source_file));
         }
 
-        if (handle_parse(parser, input)) {
+        if (handle_parse(diagnostics, parser, input)) {
             return 1;
         }
     }
@@ -429,7 +390,10 @@ static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundl
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference
 // tests/helpers.cpp mirrors this list and has to be updated alongside it
 static int run_semantic_passes(
-    argparse::ArgumentParser &cli, AST::Bundle &bundle, const Compiler::CompilerOptions &options)
+    argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
+    AST::Bundle &bundle,
+    const Compiler::CompilerOptions &options)
 {
     // **before the monomorphizer, not inside its fixpoint.** every reference to a compile-time constant
     // becomes a clone of that constant's value here, and AST::OwnershipPass - which runs inside that
@@ -458,13 +422,18 @@ static int run_semantic_passes(
 
     print_resolved_ast(cli, bundle);
 
-    bundle.collector.print_issues();
-    if (bundle.collector.has_critical_issues()) {
-        std::cout << "Critical issues found, cannot compile." << std::endl;
-        return 1;
-    }
+    // **stdout is flushed first, always.** Diagnostics go to stderr and a JIT'd program's output goes to
+    // stdout; the two are unbuffered and buffered respectively, so a reader that merged them would see
+    // them out of order without this
+    std::cout.flush();
 
-    return 0;
+    bundle.collector.print_issues(diagnostics);
+
+    const bool compiled = !bundle.collector.has_critical_issues();
+    diagnostics.render_summary(
+        bundle.collector.error_count(), bundle.collector.warning_count(), compiled);
+
+    return compiled ? 0 : 1;
 }
 
 // resolves every option that describes *the program being compiled* against the subcommand's
@@ -592,6 +561,7 @@ static bool wants_whole_program_module(argparse::ArgumentParser &cli)
 // build and a whole-program build reuses nothing
 static bool compute_cache_keys(
     argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
     const std::vector<Parser::ModuleManifest> &manifests,
     const Compiler::CompilerOptions &options,
     const Compiler::TargetFacts &facts,
@@ -602,7 +572,7 @@ static bool compute_cache_keys(
     std::string error;
     if (!Compiler::compute_module_keys(
             manifests, options, facts, cli.get<bool>("--optimize"), out_keys, error)) {
-        print_critical_error("Module Cache Error", error);
+        diagnostics.render_untyped("Module Cache Error", error);
         return false;
     }
 
@@ -729,12 +699,14 @@ static void store_module_records(
 // printing the diagnostic and then carrying on is how both paths used to report success on a failed
 // compile: the exit code said 0 while MCJIT ran over a half-built module, or make_exec emitted
 // objects for one that may be null or only partly linked. the e2e corpus' `expect:` now asserts it
-static int report_compiler_exception(const Compiler::ASTCompilerException &e)
+static int report_compiler_exception(
+    const AST::DiagnosticRenderer &diagnostics, const Compiler::ASTCompilerException &e)
 {
-    std::cout << "Compiler Exception: " << e.what() << std::endl;
+    std::cout.flush();
 
     // the same renderer Collector::print_issues uses, so the two cannot drift on how an issue reads
-    AST::print_issue(e.issue());
+    diagnostics.render_issue(e.issue());
+    diagnostics.render_summary(1, 0, /*compiled=*/false);
 
     return 1;
 }
@@ -768,6 +740,7 @@ static bool needs_cache_keys(argparse::ArgumentParser &cli, bool whole_program)
 
 static bool run_front_end(
     argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
     Compiler::BuildMode fallback,
     bool whole_program,
@@ -785,7 +758,7 @@ static bool run_front_end(
                 cli.get<std::vector<std::string>>("--define"),
                 out.target_facts,
                 error)) {
-            print_critical_error("Invalid Target", error);
+            diagnostics.render_untyped("Invalid Target", error);
             return false;
         }
     }
@@ -797,7 +770,7 @@ static bool run_front_end(
 
     {
         Compiler::ScopedPhase phase("parse");
-        if (build_bundle(cli, bundle, parser, out.manifests, out.entry_module) != 0) {
+        if (build_bundle(cli, diagnostics, bundle, parser, out.manifests, out.entry_module) != 0) {
             return false;
         }
     }
@@ -809,13 +782,14 @@ static bool run_front_end(
 
     {
         Compiler::ScopedPhase phase("semantic passes");
-        if (run_semantic_passes(cli, bundle, out.options) != 0) {
+        if (run_semantic_passes(cli, diagnostics, bundle, out.options) != 0) {
             return false;
         }
     }
 
     if (needs_cache_keys(cli, whole_program)
-        && !compute_cache_keys(cli, out.manifests, out.options, out.target_facts, out.cache_keys)) {
+        && !compute_cache_keys(
+            cli, diagnostics, out.manifests, out.options, out.target_facts, out.cache_keys)) {
         return false;
     }
 
@@ -846,6 +820,7 @@ std::string program_name(argparse::ArgumentParser &cli, const std::string &fallb
 
 int main_run(
     argparse::ArgumentParser &cli,
+    const AST::DiagnosticRenderer &diagnostics,
     const std::vector<std::string> &program_arguments,
     const char *const *environment)
 {
@@ -855,7 +830,7 @@ int main_run(
     // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
     // module beside main's, which is a question about duplicate weak symbols rather than about caching
     FrontEnd front;
-    if (!run_front_end(cli, bundle, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
+    if (!run_front_end(cli, diagnostics, bundle, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
         return 1;
     }
 
@@ -874,7 +849,7 @@ int main_run(
         // the JIT can only be handed one module, so `run` always merges
         compiler.link_into_main();
     } catch (Compiler::ASTCompilerException &e) {
-        return report_compiler_exception(e);
+        return report_compiler_exception(diagnostics, e);
     }
 
     if (cli.get<bool>("--optimize")) {
@@ -915,7 +890,7 @@ int main_run(
     return status;
 }
 
-int main_build(argparse::ArgumentParser &cli)
+int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &diagnostics)
 {
     auto bundle = AST::Bundle();
 
@@ -930,7 +905,7 @@ int main_build(argparse::ArgumentParser &cli)
     const bool whole_program = wants_whole_program_module(cli);
 
     FrontEnd front;
-    if (!run_front_end(cli, bundle, Compiler::BuildMode::t_release, whole_program, front)) {
+    if (!run_front_end(cli, diagnostics, bundle, Compiler::BuildMode::t_release, whole_program, front)) {
         return 1;
     }
 
@@ -955,7 +930,7 @@ int main_build(argparse::ArgumentParser &cli)
             compiler.link_into_main();
         }
     } catch (Compiler::ASTCompilerException &e) {
-        return report_compiler_exception(e);
+        return report_compiler_exception(diagnostics, e);
     }
 
     // read off the flag, exactly as `run` does. this used to be unconditional, which made `-O` a
@@ -1127,6 +1102,22 @@ int main(int argc, char *argv[], char *envp[])
             .default_value(false)
             .implicit_value(true);
 
+        // **how a diagnostic is drawn, and the one flag an editor sets.** `auto` picks the drawn form
+        // when stderr can render it and the plain one otherwise, which is what makes a CI log, a Windows
+        // console and a golden test all get the same ASCII without anybody configuring it.
+        //
+        // `json` is here rather than under a flag of its own because a user choosing it is choosing what
+        // comes out of the same stream, and a second flag would let `--json --diagnostics=pretty` be
+        // asked. Deliberately **not** in the module cache key - it changes nothing about an emitted
+        // object, and a key that reacted to it would go cold for no reason
+        command.get().add_argument("--diagnostics")
+            .help("How diagnostics are rendered: auto, pretty, ascii or json (one object per line).")
+            .default_value(std::string("auto"));
+
+        command.get().add_argument("--color", "--colour")
+            .help("Colourise diagnostics: auto, always or never. NO_COLOR and CLICOLOR_FORCE are honoured.")
+            .default_value(std::string("auto"));
+
         // and the fourth, which is unlike the other three in one way worth knowing before you reach for
         // it: `-ec`, `-t` and `-ep` print something echoc worked out, and this one **changes the program
         // that is emitted**. It maintains a counter beside every allocation and has `main` print what is
@@ -1239,14 +1230,38 @@ int main(int argc, char *argv[], char *envp[])
         }
     }
 
-    if (cli.is_subcommand_used(run_command)) {
-        return main_run(run_command, program_arguments, envp);
-    }
-    else if (cli.is_subcommand_used(build_command)) {
-        return main_build(build_command);
-    }
-    else {
+    if (!cli.is_subcommand_used(run_command) && !cli.is_subcommand_used(build_command)) {
         std::cerr << cli;
         return 1;
     }
+
+    auto &command = cli.is_subcommand_used(run_command) ? run_command : build_command;
+
+    // **one renderer, built here and passed down.** Everything that reports takes a reference to it, so
+    // there is exactly one answer to what a diagnostic looks like - which is the whole point: this
+    // replaced three printers that had each grown their own idea of it
+    Compiler::ColorChoice color_choice = Compiler::ColorChoice::t_auto;
+    Compiler::DiagnosticFormat format = Compiler::DiagnosticFormat::t_auto;
+    std::string flag_error;
+
+    if (!Compiler::parse_color_choice(command.get<std::string>("--color"), color_choice, flag_error)
+        || !Compiler::parse_diagnostic_format(
+            command.get<std::string>("--diagnostics"), format, flag_error)) {
+        std::cerr << flag_error << std::endl;
+        return 1;
+    }
+
+    const Compiler::TerminalCapabilities capabilities
+        = Compiler::TerminalCapabilities::resolve(color_choice, format);
+
+    // **stderr, whatever the format.** stdout under `run` belongs to the program being executed, so a
+    // compiler writing into it is a compiler whose output cannot be piped - and an editor reading the
+    // json form wants one stream that carries diagnostics and nothing else
+    const AST::DiagnosticRenderer diagnostics(std::cerr, format, capabilities);
+
+    if (cli.is_subcommand_used(run_command)) {
+        return main_run(run_command, diagnostics, program_arguments, envp);
+    }
+
+    return main_build(build_command, diagnostics);
 }

@@ -4,15 +4,13 @@ expect: fail
 # `operator` declaration shares the root namespace, so that list is the same nine lines in every program
 
 --- OUT --->
----- Issue ----
-Issue at 6:8
-no overload of operator '[]' accepts a 'Plain' and a 'int32'. Declare one for it, or convert the operands first.
-Begin: 'operator []'
-End: 'operator []'
-Code excerpt:
- [5]> $s = Plain(1);
- [6]> echo $s[0];
-             ^
- [7]> 
+[error] NoMatchingOverload  index_no_element_contract.eco:6:8
 
-Critical issues found, cannot compile.
+  no overload of operator '[]' accepts a 'Plain' and a 'int32'. Declare one for it, or convert the operands first.
+
+  5 | $s = Plain(1);
+  6 | echo $s[0];
+    :        ^^^^
+  7 | 
+
+1 error, nothing was compiled.

@@ -149,16 +149,19 @@ namespace AST
         // non-nullable parameter is refused before the fit is scored, because the promise the
         // declaration site makes only holds if the call site keeps it - and reading through it was a
         // segfault, not a mismatch
+        // the callee itself rather than a name and a flag off it: an operator phrases its refusals in
+        // terms of the *operand* the author wrote rather than the parameter type of whichever overload
+        // lost - because every operator shares the root namespace, so a program has every operator's set
+        // whether it uses those types or not (see TypeChecker::_context_callee for the same rule at the
+        // conversion site) - and both the wording and the name it blames come off one declaration, so
+        // they cannot be passed disagreeing. nullptr for an indirect call through a callable value, whose
+        // `indirect_name` is then all there is to blame
         void check_call_argument(
             ExprNode *argument,
             const ValueType &param_type,
             size_t arg_number,
-            const std::string &callee_name,
-            // an operator phrases its refusals in terms of the *operand* the author wrote rather than the
-            // parameter type of whichever overload lost, because every operator shares the root namespace
-            // and so a program has every operator's set whether it uses those types or not. see
-            // TypeChecker::_context_callee for the same rule at the conversion site
-            bool callee_is_operator,
+            const FunctionDeclNode *callee,
+            const std::string &indirect_name,
             const TokenReference &at
         );
 

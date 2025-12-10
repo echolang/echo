@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:15
-this does not fit in a 'uint8' - a 'const' value is refused rather than wrapped.
-Begin: 'const'
-End: 'const'
-Code excerpt:
- [2]> // is exactly what asking the compiler to stand behind the value is for.
- [3]> uint8 $full = const(255 + 1);
-                    ^
- [4]> echo $full;
+[error] const_expr_overflow.eco:3:15
 
-Critical issues found, cannot compile.
+  this does not fit in a 'uint8' - a 'const' value is refused rather than wrapped.
+
+  2 | // is exactly what asking the compiler to stand behind the value is for.
+  3 | uint8 $full = const(255 + 1);
+    :               ^^^^^
+  4 | echo $full;
+
+1 error, nothing was compiled.

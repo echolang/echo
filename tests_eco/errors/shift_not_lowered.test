@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:9
-operator '<<' is not supported on operands of type 'int32' and 'int32'
-Begin: '<<'
-End: '<<'
-Code excerpt:
- [7]> 
- [8]> echo $a << 1;
-              ^
- [9]> 
+[error] shift_not_lowered.eco:8:9
 
-Critical issues found, cannot compile.
+  operator '<<' is not supported on operands of type 'int32' and 'int32'
+
+  7 | 
+  8 | echo $a << 1;
+    :         ^^
+  9 | 
+
+1 error, nothing was compiled.

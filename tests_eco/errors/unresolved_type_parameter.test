@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:6
-Cannot infer type parameter 'U' of generic 'pick' from the call arguments; specify it explicitly, e.g. pick<...>(...)
-Begin: 'pick'
-End: 'pick'
-Code excerpt:
- [7]> 
- [8]> echo pick(1);
-           ^
- [9]> 
+[error] UnresolvedTypeParameter  unresolved_type_parameter.eco:8:6
 
-Critical issues found, cannot compile.
+  Cannot infer type parameter 'U' of generic 'pick' from the call arguments; specify it explicitly, e.g. pick<...>(...)
+
+  7 | 
+  8 | echo pick(1);
+    :      ^^^^
+  9 | 
+
+1 error, nothing was compiled.

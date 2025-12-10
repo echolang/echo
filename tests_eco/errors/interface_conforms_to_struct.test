@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:18
-'Base' is not an interface, so 'Derived' cannot conform to it. Only an `interface` may appear after ':'.
-Begin: 'Base'
-End: 'Base'
-Code excerpt:
- [5]> 
- [6]> struct Derived : Base
-                       ^
- [7]> {
+[error] interface_conforms_to_struct.eco:6:18
 
-Critical issues found, cannot compile.
+  'Base' is not an interface, so 'Derived' cannot conform to it. Only an `interface` may appear after ':'.
+
+  5 | 
+  6 | struct Derived : Base
+    :                  ^^^^
+  7 | {
+
+1 error, nothing was compiled.

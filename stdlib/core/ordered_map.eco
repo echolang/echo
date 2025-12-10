@@ -163,6 +163,11 @@ struct ordered_map<K, V> : contract::iterable<V>
         // answers, and the loop would otherwise pay a call per entry on the `run` path
         usize $n = $other->order->count();
 
+        // both properties sized up front, the way `map::extend` and `array::extend` do it: one rehash of
+        // the table and one reallocation of the order rather than a run of each as the loop below grows
+        // past every power of two on the way
+        $this->reserve($this->count() + $n);
+
         usize $i = 0;
 
         while ($i < $n) {

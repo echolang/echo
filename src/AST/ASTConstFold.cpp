@@ -53,14 +53,18 @@ namespace
     // **an integer type this can compute in at all.** a nullable one is refused rather than unwrapped:
     // a `T?` value carries a presence flag beside the number, so there is no single set of bits to fold,
     // and AST::optional_operand_of is the owner of what unwraps one
+    //
+    // "carries a presence flag beside the value" *is* ValueType::is_wrapped_optional, which is what
+    // binary_has_builtin_meaning's arithmetic gate reads - so the folder and the lowering refuse the
+    // same operand rather than two hand-spelled versions of it
     bool is_foldable_integer(const AST::ValueType &type)
     {
-        return type.is_integer_type() && !type.is_nullable() && !type.is_pointer();
+        return type.is_integer_type() && !type.is_wrapped_optional();
     }
 
     bool is_foldable_bool(const AST::ValueType &type)
     {
-        return type.is_boolean_type() && !type.is_nullable();
+        return type.is_boolean_type() && !type.is_wrapped_optional();
     }
 
     // does `value`, read through `type`, fit in `type`'s width? the invariant ConstFoldResult::bits
@@ -297,12 +301,12 @@ namespace
                 "'{}' has no order over a '{}'.", spelling, type.get_type_desciption()));
         }
 
-        // **read through the type's own signedness**, which is the same thing
+        // **read through the type's own signedness**, and through the same accessor
         // ExprCodegen::gen_binary_expr reads to pick between `icmp ult` and `icmp slt`. the type is the
         // reconciled one both sides get from AST::binary_operation_type, so a `const if` and the `if`
         // beside it cannot take different arms - which they did, for any unsigned value above the
         // signed maximum, while that arm emitted CreateICmpS* unconditionally
-        const bool is_signed = AST::get_integer_size(type.get_primitive_type()).is_signed;
+        const bool is_signed = type.is_signed_integer();
 
         const auto ordered = [&](auto a, auto b) {
             switch (op) {

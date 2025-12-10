@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 9:6
-Invalid type conversion: cannot implicitly convert 'Node?' to 'Node'
-Begin: '$narrowed'
-End: '$narrowed'
-Code excerpt:
- [8]> 
- [9]> Node $narrowed = $some;
-           ^
- [10]> 
+[error] InvalidTypeConversion  nullable_does_not_narrow.eco:9:6
 
-Critical issues found, cannot compile.
+  Invalid type conversion: cannot implicitly convert 'Node?' to 'Node'
+
+   8 | 
+   9 | Node $narrowed = $some;
+     :      ^^^^^^^^^
+  10 | 
+
+1 error, nothing was compiled.

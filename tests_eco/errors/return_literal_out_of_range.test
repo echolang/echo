@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 6:12
-Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
-Begin: '300'
-End: '300'
-Code excerpt:
- [5]> {
- [6]>     return 300;
-                 ^
- [7]> }
+[error] IntegerOverflow  return_literal_out_of_range.eco:6:12
 
-Critical issues found, cannot compile.
+  Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
+
+  5 | {
+  6 |     return 300;
+    :            ^^^
+  7 | }
+
+1 error, nothing was compiled.

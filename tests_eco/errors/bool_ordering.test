@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 8:9
-operator '<' is not supported on operands of type 'bool' and 'bool'
-Begin: '<'
-End: '<'
-Code excerpt:
- [7]> 
- [8]> echo $a < $b;
-              ^
- [9]> 
+[error] bool_ordering.eco:8:9
 
-Critical issues found, cannot compile.
+  operator '<' is not supported on operands of type 'bool' and 'bool'
+
+  7 | 
+  8 | echo $a < $b;
+    :         ^
+  9 | 
+
+1 error, nothing was compiled.

@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 3:23
-Invalid type conversion: cannot assign 'string' to 'int32'
-Begin: '['
-End: '['
-Code excerpt:
- [2]> // produces, not by a rule of the literal's own
- [3]> array<int32> $mixed = [1, 2, "three"];
-                            ^
- [4]> 
+[error] InvalidTypeConversion  array_literal_element_mismatch.eco:3:23
 
-Critical issues found, cannot compile.
+  Invalid type conversion: cannot assign 'string' to 'int32'
+
+  2 | // produces, not by a rule of the literal's own
+  3 | array<int32> $mixed = [1, 2, "three"];
+    :                       ^
+  4 | 
+
+1 error, nothing was compiled.

@@ -252,7 +252,9 @@ TEST_CASE("a second struct of the same name is reported", "[structdecl]")
     EchoTests::assert_code_emits_issue(
         "struct Foo { int32 $x; }\n"
         "struct Foo { int32 $y; }\n",
-        "The type 'Foo' is already declared on line 1 column 8. The first declaration is the one that is used");
+        // where the *first* declaration is is a secondary label now, not a clause in the sentence - the
+        // renderer quotes that line in a frame of its own. See AST::Issue::TypeRedeclaration::labels
+        "The type 'Foo' is already declared");
 }
 
 TEST_CASE("the first declaration of a duplicated struct wins", "[structdecl]")

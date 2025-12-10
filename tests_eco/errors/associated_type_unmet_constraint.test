@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 23:8
-'Bag' says it conforms to 'Walkable<int32>', but 'Iter' would be 'NotACursor', which does not satisfy 'Stepper<int32>'.
-Begin: 'Bag'
-End: 'Bag'
-Code excerpt:
- [22]> 
- [23]> struct Bag : Walkable<int32>
-             ^
- [24]> {
+[error] UnmetInterfaceRequirement  associated_type_unmet_constraint.eco:23:8
 
-Critical issues found, cannot compile.
+  'Bag' says it conforms to 'Walkable<int32>', but 'Iter' would be 'NotACursor', which does not satisfy 'Stepper<int32>'.
+
+  22 | 
+  23 | struct Bag : Walkable<int32>
+     :        ^^^
+  24 | {
+
+1 error, nothing was compiled.

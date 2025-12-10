@@ -1,15 +1,13 @@
 expect: fail
 
 --- OUT --->
----- Issue ----
-Issue at 4:8
-':$' expects a pointer, got 'int32'
-Begin: ':$'
-End: ':$'
-Code excerpt:
- [3]> $x = 5;
- [4]> $y = $x:$;
-             ^
- [5]> 
+[error] peel_non_pointer.eco:4:8
 
-Critical issues found, cannot compile.
+  ':$' expects a pointer, got 'int32'
+
+  3 | $x = 5;
+  4 | $y = $x:$;
+    :        ^^
+  5 | 
+
+1 error, nothing was compiled.
