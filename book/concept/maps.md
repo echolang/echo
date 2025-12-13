@@ -250,7 +250,7 @@ borrows and there's no read-only cursor type yet.
 
 ## What it costs
 
-- **A lookup** is one hash, one integer divide, and then a walk that reads a single dense array. `==` only
+- **A lookup** is one hash, one mask, and then a walk that reads a single dense array. `==` only
   runs on a slot whose stored hash already matched, so a `string` key costs a byte comparison only on a real
   candidate.
 - **An insert** may rehash. Amortised that's fine; individually it's O(n).

@@ -1,0 +1,34 @@
+// **A42's measured loop, fixed.**
+//
+// the indexed write reloaded both data pointers and the length every turn,  because a store into an
+// element might have clobbered the other borrow's header. nothing could *promise* otherwise -
+// `kernel(&$a, &$a)` is a legal call - so the answer is not a promise: an `int32` element store and
+// an `i64` length field are accesses at two different types, and TBAA says an access at one type does
+// not reach storage last written at another.
+//
+// the header loads become loop-invariant, LICM hoists them, and the loop vectorizes.
+
+function kernel(array<int32>& $dst, const array<int32>& $src) : void
+{
+    usize $i = 0;
+
+    while ($i < $src->count()) {
+        $dst[$i] = $src[$i] + 1;
+        $i = $i + 1;
+    }
+}
+
+array<int32> $a = array<int32>();
+array<int32> $b = array<int32>();
+
+usize $n = 0;
+while ($n < 64) {
+    $a[] = 41;
+    $b[] = 0;
+    $n = $n + 1;
+}
+
+kernel(&$b, &$a);
+
+echo $b->get(0);
+echo $b->get(63);

@@ -1,0 +1,35 @@
+// A42's measured problem, and the half of it that has an answer today.
+//
+// the indexed loop over an `array<T>&` reloads both data pointers and the length every turn, because
+// a store might have clobbered the other borrow's header - and nothing may promise otherwise, since
+// `kernel(&$a, &$a)` is a legal call. the by-value window is the fix, and it is a *shape* rather than
+// a promise: the pointer and the count become ordinary locals, so there is nothing left to reload and
+// LLVM's own runtime guard is enough to version the loop.
+//
+// this is the same argument stdlib/core/slice.eco makes for slice_iterator holding its window by
+// value, asserted rather than described.
+
+function scale(read slice<int32> $src, inout slice<int32> $dst) : void
+{
+    usize $i = 0;
+
+    while ($i < $src->count()) {
+        $dst[$i] = $src[$i] * 2;
+        $i = $i + 1;
+    }
+}
+
+array<int32> $a = array<int32>();
+array<int32> $b = array<int32>();
+
+usize $n = 0;
+while ($n < 64) {
+    $a[] = 3;
+    $b[] = 0;
+    $n = $n + 1;
+}
+
+scale($a->sub(), $b->sub());
+
+echo $b->get(0);
+echo $b->get(63);

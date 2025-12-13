@@ -1,0 +1,33 @@
+// an access effect is part of how a call has to be written, so it belongs in the signature a
+// diagnostic renders - exactly as `mv` does, and through the same branch, so a parameter carrying
+// both cannot print two words
+
+function widen(read int32& $src, inout int32& $dst) : void
+{
+    $dst = $src + 1;
+}
+
+function widen(read float64& $src, inout float64& $dst) : void
+{
+    $dst = $src + 1.0;
+}
+
+struct Bag { int32 $v; }
+
+function consume(mv Bag $b) : void
+{
+    echo $b->v;
+}
+
+function consume(mv Bag $b, int32 $n) : void
+{
+    echo $b->v + $n;
+}
+
+function main() : void
+{
+    string $s = "neither";
+
+    widen($s, $s);
+    consume($s);
+}

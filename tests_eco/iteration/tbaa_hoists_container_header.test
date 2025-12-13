@@ -1,0 +1,9 @@
+flags: -O
+
+--- OUT --->
+42
+42
+--- IR --->
+// `vector.body:` **by name** - a check directive is a plain substring, so a looser `body:` would
+// match the scalar loop and quietly assert nothing
+CHECK: vector.body:

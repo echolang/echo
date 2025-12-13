@@ -1,0 +1,10 @@
+// refused at the *declaration*, so the flag only ever holds a claim that means something and nothing
+// downstream needs an arm for one that does not
+
+#[unique]
+class Node { int32 $v; }
+
+#[unique]
+interface Thing { function f() : void; }
+
+echo 1;

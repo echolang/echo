@@ -1,0 +1,27 @@
+// **the program A43 was opened about.** `#[unique]` refuses the *copy*, so a buffer cannot be
+// accidentally duplicated - but until its fields were private this built a second owner of one
+// allocation by hand, in ordinary safe code, with no cast and no `unsafe` anywhere. "two live
+// buffers are two allocations" was a convention stdlib/core/ kept rather than something the compiler
+// knew, and every aliasing conclusion rested on it.
+//
+// three doors, all shut:
+
+array<int32> $a = array<int32>();
+$a[] = 1;
+
+mem::buffer<int32> $b = mem::buffer<int32>();
+
+// one: reading the address out
+$b->resize(1);
+ptr<int32> $stolen = $a->storage->data;
+
+// two: writing one in
+$b->data:$ = $a->storage->data;
+
+// three: the field-wise constructor, which would take both fields at once
+mem::buffer<int32> $forged = mem::buffer<int32>($stolen, 1);
+
+// four: duplicating the owner as a value. **its own case, because "unforgeable" and "uncopyable" are
+// two invariants** - privacy stops a second owner being *assembled*, `#[unique]` stops one being
+// *duplicated*, and a type could easily have one without the other
+mem::buffer<int32> $duplicate = $a->storage;

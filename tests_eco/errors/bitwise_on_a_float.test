@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] bitwise_on_a_float.eco:12:9
+
+  operator '&' is not supported on operands of type 'float64' and 'float64'
+
+  11 | 
+  12 | echo $f & 2;
+     :         ^
+  13 | 
+
+1 error, nothing was compiled.

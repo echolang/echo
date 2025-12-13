@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] ConflictingAccess  conflicting_access_self_extend.eco:17:5
+
+  This names the same storage as another argument of the same call. '$this' takes 'inout' access, which is exclusive, so nothing else may reach that storage while the call runs - and '$other' takes 'read' access to it too
+
+  16 | 
+  17 | $a->extend($a);
+     :     ^^^^^^
+  18 | 
+
+  help: a value cannot be both written and read by one call. copy the source first, or use an operation of 'array<int32>' that names the part of the receiver to read instead of taking a second one
+
+1 error, nothing was compiled.

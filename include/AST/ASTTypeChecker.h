@@ -39,6 +39,20 @@ namespace AST
         void run();
 
         void visitFunctionDecl(FunctionDeclNode &node) override;
+        void visitScope(ScopeNode &node) override;
+
+        // refuses a raw-to-borrow promotion written outside an `unsafe` block. shared by the explicit
+        // cast and by every implicit borrow, which all arrive as an address-of
+        void check_unsafe_promotion(const ValueType &to, ExprNode *operand, const TokenReference &at);
+
+        // the `unsafe` gate and the issue itself, for both refusal predicates - the place one above
+        // and the narrowing cast, which is a value conversion and so has no place to ask about
+        void report_unsafe_promotion(const ValueType &to, const TokenReference &at);
+
+        // refuses a read of a `private` property from outside the type that declared it. takes the
+        // property the caller already resolved, so the name is looked up once per member access
+        void check_private_member(MemberAccessNode &node, const ComplexType &complex,
+            const ComplexType::Property &property);
         void visit_type_decl(TypeDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
@@ -74,6 +88,16 @@ namespace AST
         // the function whose body is being walked, so a return knows what it has to fit and
         // which variables are the caller's. null at file scope
         FunctionDeclNode *_current_function = nullptr;
+
+        // how many `unsafe { }` blocks enclose the statement being checked. a *depth* and not a flag,
+        // because blocks nest and an inner ordinary block inside an unsafe one is still unsafe -
+        // which is right: the promise is about a region of source, and a `{ }` written inside it is
+        // part of that region
+        //
+        // **saved and cleared across a function boundary** by visitFunctionDecl, so a body declared
+        // inside an unsafe block does not silently inherit the promise. an author looking at that
+        // body sees no `unsafe` anywhere in it
+        size_t _unsafe_depth = 0;
 
         // the module/file currently being walked, used to build located code references
         Module *_current_module = nullptr;

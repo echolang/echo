@@ -1,0 +1,52 @@
+// what the exclusivity rule deliberately leaves alone. only a *proven* overlap is refused: a path
+// the compiler cannot see through is exactly the case where refusing would cost a working program
+// for a suspicion
+
+struct Pair
+{
+    int32 $left;
+    int32 $right;
+}
+
+// a plain `T&` says nothing, so two of them over one variable is not a conflict - exclusivity is
+// never inferred from a parameter's type
+function swap(int32& $a, int32& $b) : void
+{
+    int32 $t = $a;
+    $a = $b;
+    $b = $t;
+}
+
+function widen(inout int32& $dst, read int32& $src) : void
+{
+    $dst = $src + 1;
+}
+
+int32 $x = 5;
+swap(&$x, &$x);
+echo $x;
+
+// two fields of one struct are two regions
+Pair $p = Pair(1, 2);
+widen(&$p->left, &$p->right);
+echo $p->left;
+
+// two distinct arrays
+array<int32> $a = array<int32>();
+$a[] = 10;
+$a[] = 30;
+array<int32> $b = array<int32>();
+$b[] = 20;
+
+widen(&$a[0], &$b[0]);
+echo $a->get(0);
+
+// two slots of one array that AST::const_fold can tell apart
+widen(&$a[0], &$a[1]);
+echo $a->get(0);
+
+// and one it cannot: a dynamic index is neither the same slot nor a different one, so it is left
+// alone rather than refused
+usize $i = 1;
+widen(&$a[0], &$a[$i]);
+echo $a->get(0);

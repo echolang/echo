@@ -1,0 +1,10 @@
+flags: -O
+
+--- OUT --->
+6
+6
+--- IR --->
+// the window is held by value, so the pointer and the count are ordinary locals and there is
+// nothing left in the loop to reload. `vector.body:` **by name** - the check directives are plain
+// substrings, so a looser `body:` would silently match the scalar loop instead
+CHECK: vector.body:

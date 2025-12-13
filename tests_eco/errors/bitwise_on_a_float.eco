@@ -1,0 +1,12 @@
+// the bitwise five - `& | ^ << >>` - are integer-only, and this is the half that says so. they carry a
+// tier in AST::op_precedence and sit in the predefined operator set, so a float operand parses and
+// resolves and then falls through AST::binary_has_builtin_meaning's integer arm to `is_comparison()`,
+// which refuses it by naming both types.
+//
+// worth a case of its own because the refusal is *structural* rather than an enumerated denial: nothing
+// lists the operators a float may not have. So an operator added to the integer arm without thinking is
+// automatically refused here, which is the direction that fails safe
+
+float64 $f = 1.5;
+
+echo $f & 2;

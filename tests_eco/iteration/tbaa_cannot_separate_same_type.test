@@ -1,0 +1,12 @@
+flags: -O
+
+--- OUT --->
+42
+--- IR --->
+// the two data pointers *do* hoist - an address-typed field and a uint64 store are different types.
+// the **length** does not: it is a uint64 like the elements, so a store into an element may, as far
+// as any type-based rule can tell, be a store into the length. so the loop keeps this reload and
+// cannot vectorize, where tbaa_hoists_container_header shows int32 doing both.
+//
+// when regions land, this directive is what has to change
+CHECK: %len.i = load i64

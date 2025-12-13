@@ -5,7 +5,7 @@ struct Bag { ptr<int32> $at; }
 
 operator(45, left) (Bag& $b)[usize $i] : int32&
 {
-    return &$b->at:$[$i];
+    unsafe { return &$b->at:$[$i]; }
 }
 
 echo 1;

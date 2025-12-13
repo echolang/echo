@@ -1,0 +1,48 @@
+expect: fail
+
+--- OUT --->
+[error] UnsafePromotion  promotion_needs_unsafe.eco:21:20
+
+  cannot form 'uint8&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'uint8&' - so establishing one over raw storage is a promise only you can make.
+
+  20 | // one: the explicit narrowing
+  21 | uint8& $r = uint8&($bytes:$);
+     :                    ^^^^^^
+  22 | 
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+[error] UnsafePromotion  promotion_needs_unsafe.eco:24:12
+
+  cannot form 'uint8&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'uint8&' - so establishing one over raw storage is a promise only you can make.
+
+  23 | // two: the address of a raw element
+  24 | ptr<uint8> $e = &$bytes:$[1];
+     :            ^^
+  25 | 
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+[error] UnsafePromotion  promotion_needs_unsafe.eco:28:1
+
+  cannot form 'uint8&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'uint8&' - so establishing one over raw storage is a promise only you can make.
+
+  27 | function takes(uint8& $b) : void { $b = 1; }
+  28 | takes($bytes:$[2]);
+     : ^^^^^
+  29 | 
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+[error] UnsafePromotion  promotion_needs_unsafe.eco:34:5
+
+  cannot form 'Counter&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'Counter&' - so establishing one over raw storage is a promise only you can make.
+
+  33 | ptr<Counter> $p = &$c;
+  34 | $p->bump();
+     :     ^^^^
+  35 | 
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+4 errors, nothing was compiled.

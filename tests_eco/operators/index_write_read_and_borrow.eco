@@ -33,14 +33,14 @@ operator (slots& $s)[usize $i] : int32&
 {
     assert($i < $s->n, 'slot not written');
 
-    return &$s->d:$[$i];
+    unsafe { return &$s->d:$[$i]; }
 }
 
 operator (const slots& $s)[usize $i] : const int32&
 {
     assert($i < $s->n, 'slot not written');
 
-    return &$s->d:$[$i];
+    unsafe { return &$s->d:$[$i]; }
 }
 
 slots $s = slots();

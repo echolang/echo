@@ -164,6 +164,9 @@ function init<T>(T& $place, T $value) : void;
  */
 function alloc<T>(usize $count) : ptr<T>
 {
+    // **the raw seam.** the allocator hands back bytes and this is what says they are `T`s - but it
+    // needs no `unsafe`, and that is the boundary working as intended: this produces a `ptr<T>`, and
+    // a raw pointer promises nothing. the word is owed by whoever turns one of these into a `T&`
     return ptr<T>(alloc_bytes($count * size_of<T>()));
 }
 
@@ -213,6 +216,42 @@ function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 function zero<T>(ptr<T> $p, usize $count) : void
 {
     set_bytes(ptr<uint8>($p:$), 0, $count * size_of<T>());
+}
+
+/**
+ * The bits of `$value`, read as a `To`.
+ *
+ * The **safe** way to reinterpret. `ptr<uint32>(&$f)` gives you a second typed path to a live
+ * `float32`, and every access through it is a promise you have to make with `unsafe`; this gives you a
+ * *value* instead. Nothing else names that storage, so there is nothing to promise:
+ *  
+ *     uint32 $bits = mem::bit_cast<uint32, float32>($x);
+ *     $bits = 0;
+ *     $x = mem::bit_cast<float32, uint32>($bits);
+ *
+ * Both parameters are spelled because Echo binds a generic's type arguments all or none, and `To` is
+ * the one the caller has to name - it is the only thing the call does not otherwise say.
+ *
+ * The two types must be the same size, which is asserted rather than refused at the declaration
+ * because a layout query is not something `const if` can answer (see array.eco's `reserve`). Both
+ * should be trivially copyable: a `To` built out of arbitrary bytes has whatever validity those bytes
+ * give it, and for a type that owns something that is a second owner with no rule attached.
+ *
+ * **It needs no `unsafe` and could not, honestly, be written to.** Every address it forms is `&place`
+ * over one of its own locals, every pointer it makes is raw, and it hands back a value - so there is
+ * no step at which it asserts anything about somebody else's storage.
+ */
+function bit_cast<To, From>(From $value) : To
+{
+    assert(size_of<From>() == size_of<To>(), "bit_cast needs two types of the same size");
+
+    // zero-filled by the ordinary declaration rule, so a `To` wider than the bytes written would still
+    // be a defined value rather than whatever the frame held
+    To $out;
+
+    copy_bytes(ptr<uint8>(&$out), ptr<uint8>(&$value), size_of<To>());
+
+    return $out;
 }
 
 /**

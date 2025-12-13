@@ -104,6 +104,10 @@ TEST_CASE("a pointer receiver is dereferenced to the struct before its address i
 {
     // `->` reaches through every pointer level. a `ptr<Point>` receiver has to become `Point&`, not
     // `ptr<ptr<Point>>`, so the parser spells out one deref per level under the address-of
+    //
+    // and that address-of is the promotion: borrowing a raw pointee is the step `unsafe` marks, which
+    // is why the call is written inside a block. the shape it takes here is what the borrow is *made
+    // of*, and the word changes none of it
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Point {\n"
         "    int32 $x;\n"
@@ -111,7 +115,7 @@ TEST_CASE("a pointer receiver is dereferenced to the struct before its address i
         "}\n"
         "$p = Point(1);\n"
         "ptr<Point> $q = &$p;\n"
-        "echo $q->sum();\n");
+        "unsafe { echo $q->sum(); }\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 

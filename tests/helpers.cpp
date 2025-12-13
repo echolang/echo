@@ -2,6 +2,7 @@
 
 #include <AST/ASTConstantExpander.h>
 #include <AST/ASTMonomorphizer.h>
+#include <AST/ASTAccessPass.h>
 #include <AST/ASTPointerAdjuster.h>
 #include <AST/ASTTypeChecker.h>
 #include <AST/FunctionDeclNode.h>
@@ -56,6 +57,7 @@ void EchoTests::run_test_semantic_passes(AST::Bundle &bundle, Compiler::Compiler
     AST::ConstantExpander(bundle).run();
     AST::Monomorphizer(bundle).run();
     AST::PointerAdjuster(bundle).run();
+    AST::AccessPass(bundle).run();
     AST::TypeChecker(bundle, options).run();
 }
 

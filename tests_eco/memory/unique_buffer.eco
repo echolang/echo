@@ -1,0 +1,42 @@
+// `mem::buffer<T>` is the allocation, owned by exactly one value. `array<T>` is built on one, so this
+// exercises the split the restructure introduced: an array's destructor destroys *values*, the
+// buffer's destructor releases the *storage*, and neither knows the other's half
+
+{
+    mem::buffer<int32> $b = mem::buffer<int32>();
+    echo $b->capacity();
+
+    $b->resize(4);
+    echo $b->capacity();
+
+    // every way in and out is a method: the address and the capacity are `private`, so nothing
+    // outside the type can build a second value around one allocation
+    mem::init<int32>($b->at(0), 42);
+
+    slice<int32> $window = $b->sub(0, 1);
+    echo $window->get(0);
+
+    // two live buffers are two allocations
+    mem::buffer<int32> $c = mem::buffer<int32>();
+    $c->resize(2);
+    echo mem::live_allocations();
+}
+
+echo mem::live_allocations();
+
+// and the array built on one leaks nothing either, for an element type that owns and one that does not
+{
+    array<int32> $a = array<int32>();
+    $a[] = 1;
+    $a[] = 2;
+
+    array<int32> $copy = $a;
+    echo $copy->count();
+
+    array<string> $s = array<string>();
+    $s[] = "hello";
+    array<string> $s2 = $s;
+    echo $s2->get(0);
+}
+
+echo mem::live_allocations();

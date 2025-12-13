@@ -725,6 +725,17 @@ static void synthesize_field_wise_constructor(
         default_ctor_params.push_back(prop->type_node()->type);
     }
 
+    // **a private property suppresses it outright, and that is the whole point of the modifier.**
+    // the field-wise constructor writes every property from outside the type, so for a type with a
+    // hidden one it is a public door into the invariant the modifier exists to keep -
+    // `mem::buffer<int32>($stolen, 8)` would be a second owner of one allocation, built with no cast
+    // and no `unsafe` anywhere. such a type builds itself through the constructors it wrote
+    for (const auto &prop : struct_node->properties()) {
+        if (prop->is_private) {
+            return;
+        }
+    }
+
     // it is *not* suppressed merely because the user wrote a constructor of their own. Echo has no
     // other syntax for building a struct, so taking it away the moment a convenience constructor
     // appears would silently break every `Foo(...)` elsewhere in the program. It is suppressed only
@@ -872,6 +883,43 @@ static void bind_core_type_attribute(Parser::Payload &payload, AST::TypeDeclNode
     }
 
     payload.collector.core_types.bind(kind.value(), struct_node);
+}
+
+// `#[unique]` - exactly one value may name this type's storage, so it is moved and never copied.
+//
+// shaped like bind_core_type_attribute above, and refusing at the *declaration* for the reason
+// Parser::publish_implicit_conversion refuses seven shapes there: the flag only ever holds a claim
+// that means something, so nothing downstream needs an arm for a claim that does not
+static void bind_unique_attribute(Parser::Payload &payload, AST::TypeDeclNode *struct_node)
+{
+    auto *unique_attr = struct_node->attributes.get_first("unique");
+    if (unique_attr == nullptr) {
+        return;
+    }
+
+    auto &complex = struct_node->complex_type();
+
+    // a class is already exactly one object however many handles name it, and a copy of a handle is
+    // one more reference rather than one more object - so there is nothing here for uniqueness to
+    // add, and a refusal to copy would refuse the retain that makes classes work at all
+    if (complex.is_class_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(unique_attr->attribute_tokens),
+            "'#[unique]' cannot be written on a class. A class is already one object, and copying a "
+            "handle to it is one more reference rather than a second object.");
+        return;
+    }
+
+    // an interface stores nothing and never has a layout, so it owns nothing to be unique about
+    if (complex.is_interface_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(unique_attr->attribute_tokens),
+            "'#[unique]' cannot be written on an interface. An interface declares requirements and "
+            "stores nothing, so there is no storage for one value to own.");
+        return;
+    }
+
+    complex.is_unique = true;
 }
 
 AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
@@ -1045,6 +1093,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     Parser::drain_attributes(payload, struct_node->attributes);
 
     bind_core_type_attribute(payload, struct_node);
+    bind_unique_attribute(payload, struct_node);
 
     if (owner_node != nullptr) {
         // part of the nested type's identity - see ComplexType::owner_type. set here rather than at
@@ -1278,8 +1327,20 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 cursor.try_skip_to_next_statement();
             }
         }
-        else if (starts_vardecl(payload)) {
+        else if (cursor.is_type(Token::Type::t_private) || starts_vardecl(payload)) {
+            // `private ptr<T> $data;` - read here rather than in parse_varexpr, because it is a
+            // property of a *property*: a local has no outside to be hidden from, and there is no
+            // `private` on one
+            const bool is_private = cursor.is_type(Token::Type::t_private);
+            if (is_private) {
+                cursor.skip();
+            }
+
             auto var = parse_varexpr(payload, &structscope);
+
+            if (var != nullptr) {
+                var->is_private = is_private;
+            }
 
             // a requirement is behaviour, not storage. a required *property* would fix the layout of
             // every implementor and mean nothing without a stored offset, so it is refused - which also

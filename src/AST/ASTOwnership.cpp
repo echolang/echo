@@ -1942,6 +1942,26 @@ ExprNode *OwnershipPass::arrive_value(
 void OwnershipPass::reject_uncopyable(
     ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination)
 {
+    // **a `#[unique]` type gets its own wording, and it is the opposite advice.** the general
+    // refusal below ends in "give it a copy constructor", which for a type whose whole claim is that
+    // one value names its storage is the one thing its author must never do
+    if (wanted.is_struct() && wanted.get_complex_type()->is_unique) {
+        const std::string transfer = source != nullptr
+            ? fmt::format("Write 'mv {}' to transfer it", source->name_full())
+            : std::string("Move the whole value rather than a part of it");
+
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(location_of_expression(expr)),
+            fmt::format(
+                "'{}' is unique: exactly one value may name its storage, so it is moved and never "
+                "copied. {}, or take a borrow ('{}&') if it is only being read.",
+                wanted.get_type_desciption(),
+                transfer,
+                wanted.get_type_desciption()));
+
+        return;
+    }
+
     // a *part* of a value arriving somewhere by copy, which no wording about `mv` would help with:
     // `mv $doc->body` is rejected too, so there is nothing to suggest. reported at the assignment's
     // own token when the source names no variable at all

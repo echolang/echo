@@ -11,11 +11,25 @@ CHECK: entry:
 CHECK: load i64
 CHECK: load ptr
 
-// and the body holds no calls at all: `iterate`, `advance` and `current` are inlined away, the cursor
-// struct is SROA'd to a single register, and the bounds assert is gone with the release build. what is
-// left is the indexed load and the loop's own compare - the same loop a hand-written cursor produces
-CHECK: body:
+// **the loop vectorises, and that is the assertion.** it is a strictly stronger statement than "the body
+// holds no calls": a loop LoopVectorize widened is one it could prove has no calls, no aliasing hazard and
+// a computable trip count - so `iterate`, `advance` and `current` are inlined away and the cursor struct is
+// SROA'd to a register, or none of this would be here.
+//
+// worth knowing why it is spelled this way. it used to read `CHECK: body:` / `CHECK-NOT: call`, and it kept
+// passing after vectorisation was switched on - but for the wrong reason: the directives are plain
+// substrings, so `body:` matched `vector.body:` and the test silently moved from describing the scalar loop
+// to describing the vector one. Asking for the vector body by name is what makes that deliberate
+CHECK: vector.body:
 CHECK-NOT: call
+CHECK-NOT: alloca
+CHECK: load <4 x i32>
+CHECK: add <4 x i32>
+
+// and the scalar tail - the elements past the last full vector - is still the indexed load and the loop's
+// own compare, with nothing else in it. the `llvm.vector.reduce.add` that folds the accumulators sits in
+// `middle.block` between the two, outside either loop, which is why neither CHECK-NOT region covers it
 CHECK: getelementptr i32
 CHECK-NOT: call
+CHECK-NOT: alloca
 CHECK: br i1

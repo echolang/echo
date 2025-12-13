@@ -150,3 +150,58 @@ ISSUE_MESSAGE_FNC(AmbiguousCall)
 {
     return _message;
 }
+
+ISSUE_MESSAGE_FNC(UnsafePromotion)
+{
+    return fmt::format(
+        "cannot form '{}' from a raw address outside an 'unsafe' block. A borrow is a trusted typed "
+        "view: every access through it, here and in everything it is passed to, is optimized as '{}' "
+        "- so establishing one over raw storage is a promise only you can make.",
+        borrow_type, borrow_type);
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnsafePromotion::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid "
+        "value of that type, stays valid for as long as the borrow is used, and that reading it at "
+        "that type is compatible with every other typed access to the same storage. It does not "
+        "assert that the borrow is the only one" } };
+}
+
+ISSUE_MESSAGE_FNC(PrivateMember)
+{
+    return fmt::format(
+        "'${}' is private to '{}' and cannot be reached from here. Its type keeps an invariant that "
+        "depends on nothing outside it writing that field - go through a method of '{}' instead.",
+        member_name, type_name, type_name);
+}
+
+ISSUE_MESSAGE_FNC(ConflictingAccess)
+{
+    return _message;
+}
+
+std::vector<AST::IssueLabel> AST::Issue::ConflictingAccess::labels() const
+{
+    // a label is a *second place to look at*, and a span on a line the primary frame already draws is
+    // not one - the renderer gives every label a frame of its own, so it would come out as the same
+    // source line printed twice. the common shape, `$a->extend($a)`, is exactly that case
+    const auto [primary_line, primary_end] = code_ref.line_range();
+    const uint32_t label_line = other_argument_token.line();
+
+    if (label_line >= primary_line && label_line <= primary_end) {
+        return {};
+    }
+
+    return { IssueLabel { other_argument_token.make_slice(), "the other access is here" } };
+}
+
+std::vector<AST::IssueNote> AST::Issue::ConflictingAccess::notes() const
+{
+    if (remedy.empty()) {
+        return {};
+    }
+
+    return { IssueNote { NoteKind::t_help, remedy } };
+}

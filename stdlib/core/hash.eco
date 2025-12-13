@@ -51,11 +51,31 @@ namespace hash;
  * is bound. That diagnostic points into `map.eco` rather than at your own code, which is the ordinary
  * shape of every generic library body and not something particular to this one.
  *
+ * ## Two algorithms, chosen by shape
+ *
+ * A **byte run** - a string, a view, or anything reaching `of_bytes<T>` - is FNV-1a, 64 bit. It is the right
+ * shape for a variable-length sequence: one pass, one accumulator, no length to know in advance.
+ *
+ * An **integer** goes through `mix` instead, and the reason is latency rather than quality. FNV-1a folds one
+ * byte at a time, and each step depends on the one before it - so an `int64` key is eight dependent
+ * multiplies before the table can even be indexed, on the critical path of every lookup and every insert.
+ * A key that is already one machine word does not need to be walked; it needs to be *stirred*, which is two
+ * multiplies with no loop at all.
+ *
+ * An integer is therefore hashed **by value rather than by width**: `of(int32 1)` and `of(int64 1)` are the
+ * same number, so they are the same hash. That is a property worth having rather than one to work around -
+ * a map has one key type, so nothing inside one can tell the difference, and the alternative was an
+ * artefact of walking bytes rather than anything anybody chose. Signedness still separates what it should:
+ * `of(int32 -1)` and `of(uint32 4294967295)` are the same bits read as two different numbers, and they
+ * differ, because the widening to `uint64` sign-extends one and not the other.
+ *
  * ## What these numbers are not
  *
- * FNV-1a, 64 bit. Not cryptographic, not stable across architectures, and not a serialization format:
- * `of(int32 1)` and `of(int64 1)` differ, and both differ between a big- and a little-endian target.
- * This is an in-memory bucket index and nothing else. Do not write one to a file.
+ * Not cryptographic, not stable across architectures, and not a serialization format: `of(string "1")`
+ * differs from `of(int32 1)`, and the byte-run values differ between a big- and a little-endian target.
+ * This is an in-memory bucket index and nothing else. Do not write one to a file, and do not expect the
+ * integer values to match another implementation of anything - only the `of_bytes`/string side is
+ * canonical FNV-1a.
  */
 
 /**
@@ -67,6 +87,45 @@ namespace hash;
  */
 const uint64 OFFSET_BASIS = 14695981039346656037;
 const uint64 PRIME = 1099511628211;
+
+/**
+ * The two multipliers `mix` stirs with - SplitMix64's finalizer, in Stafford's variant 13.
+ *
+ * Odd, which is the whole of what makes each multiply a bijection on 64 bits: an odd multiplier has an
+ * inverse modulo 2^64, so no two keys are ever merged by one. Everything `mix` promises rests on that,
+ * and on nothing about the particular digits.
+ */
+const uint64 MIX_A = 13787848793156543929;
+const uint64 MIX_B = 10723151780598845931;
+
+/**
+ * One machine word, stirred so that every output bit depends on every input bit.
+ *
+ * **This is what an integer key gets instead of a byte walk.** `of_bytes<T>` would fold an `int64` one byte
+ * at a time - eight multiplies, each waiting on the one before it - to produce a number from a value that
+ * was already a number. This is two multiplies and no loop.
+ *
+ * It is a **bijection**, so it invents no collisions: each multiplier is odd, and `x ^ (x >> k)` is its own
+ * kind of reversible. Two distinct keys stay distinct, which a lossy "hash" of a machine word would not
+ * guarantee and which matters more here than any distribution statistic.
+ *
+ * **The shifts are the point, not the multiplies.** A multiply pushes entropy *upward*: the low bit of a
+ * product depends only on the low bits of its operands, so `$k * ODD` alone leaves the bottom of the word
+ * almost as structured as it found it. `map<K, V>` indexes with `$h & ($cap - 1)` - the low bits and
+ * nothing else - so a hash that mixes only upward would collide there while looking perfectly random in
+ * any test that read the whole word. Each `>>` folds the high half back down; the final one is what the
+ * table actually reads.
+ */
+#[inline]
+function mix(uint64 $key) : uint64
+{
+    uint64 $h = $key;
+
+    $h = ($h ^ ($h >> 30)) * MIX_A;
+    $h = ($h ^ ($h >> 27)) * MIX_B;
+
+    return $h ^ ($h >> 31);
+}
 
 /**
  * One FNV-1a step: folds `$byte` into `$seed`.
@@ -115,10 +174,22 @@ function bytes(ptr<const uint8> $data, usize $size, uint64 $seed) : uint64
  * The composition primitive, and the one a hand-written `of` reaches for. Not commutative on purpose:
  * `combine(of($x), of($y))` and `combine(of($y), of($x))` differ, so a pair and its reverse do not
  * collide.
+ *
+ * **The rotate is what buys that**, and it is the whole trick: `^` is commutative, so folding two words
+ * together with it alone would hash a point `(1, 2)` exactly like `(2, 1)`. Turning one side and not the
+ * other breaks the symmetry before the two ever meet.
+ *
+ * It used to run its operand through `bytes` as an eight-byte FNV run - eight dependent multiplies to fold
+ * one word that was already a hash. `mix` is the same job in two, and the same one the integer overloads
+ * take, so a composite key and a primitive one are stirred by one function rather than two.
+ *
+ * `#[inline]` for `step`'s reason: a hand-written `of` folds one of these per field, and without the
+ * attribute each is a call across the unit boundary around four instructions.
  */
+#[inline]
 function combine(uint64 $seed, uint64 $value) : uint64
 {
-    return bytes(ptr<const uint8>(&$value), 8, $seed);
+    return mix((($seed << 5) | ($seed >> 59)) ^ $value);
 }
 
 /**
@@ -136,35 +207,53 @@ function combine(uint64 $seed, uint64 $value) : uint64
  */
 function of_bytes<T>(const T& $value) : uint64
 {
+    // a `ptr<const uint8>` over the value's bytes, walked by value. no borrow is formed, so nothing
+    // is promised and no `unsafe` is owed - the doc above is the whole of the argument about when
+    // this is the wrong thing to do, and it stays advice rather than a compiler rule
     return bytes(ptr<const uint8>($value:$), mem::size_of<T>(), OFFSET_BASIS);
 }
 
 /**
  * The integer overloads.
  *
- * Written out one per type rather than as one generic, for the reason `of_bytes` gives. `usize` and
- * `isize` are their own primitives rather than spellings of `uint64` and `int64`, so they are their own
- * signatures and are not redundant. `int`, `uint` and `float` are aliases and need nothing.
+ * Written out one per type rather than as one generic, and the reason is the widening below: it is what
+ * separates a signed value from an unsigned one, and one generic body would have nothing to widen *from*.
+ * `usize` and `isize` are their own primitives rather than spellings of `uint64` and `int64`, so they are
+ * their own signatures and are not redundant. `int`, `uint` and `float` are aliases and need nothing.
  *
  * Every one takes `const T&`: a lookup must not touch a reference count, and a map's probe loop is the
  * hot path that rule exists for.
+ *
+ * **The widening to `uint64` is the ordinary implicit conversion**, so a narrow type reaches `mix` with the
+ * value it holds and a negative one arrives sign-extended. That is why `of(int32 -1)` and `of(int64 -1)`
+ * agree while `of(int32 -1)` and `of(uint32 4294967295)` do not - the same bits, read as two different
+ * numbers, which is exactly the distinction a key type is asking to be kept.
+ *
+ * **`#[inline]` on every one of them, for `step`'s reason and one level further out.** `map<K, V>`'s methods
+ * are instantiations emitted into the *consuming* unit while these are ordinary stdlib symbols, so without
+ * the attribute every lookup and every insert pays an opaque cross-unit call around six instructions - and
+ * an opaque call is also a memory barrier, so the probe loop reloads the capacity and the key across it.
  */
-function of(const int8& $value) : uint64 { return of_bytes<int8>($value); }
-function of(const int16& $value) : uint64 { return of_bytes<int16>($value); }
-function of(const int32& $value) : uint64 { return of_bytes<int32>($value); }
-function of(const int64& $value) : uint64 { return of_bytes<int64>($value); }
-function of(const isize& $value) : uint64 { return of_bytes<isize>($value); }
+#[inline] function of(const int8& $value) : uint64 { return mix($value); }
+#[inline] function of(const int16& $value) : uint64 { return mix($value); }
+#[inline] function of(const int32& $value) : uint64 { return mix($value); }
+#[inline] function of(const int64& $value) : uint64 { return mix($value); }
+#[inline] function of(const isize& $value) : uint64 { return mix($value); }
 
-function of(const uint8& $value) : uint64 { return of_bytes<uint8>($value); }
-function of(const uint16& $value) : uint64 { return of_bytes<uint16>($value); }
-function of(const uint32& $value) : uint64 { return of_bytes<uint32>($value); }
-function of(const uint64& $value) : uint64 { return of_bytes<uint64>($value); }
-function of(const usize& $value) : uint64 { return of_bytes<usize>($value); }
-
-function of(const bool& $value) : uint64 { return of_bytes<bool>($value); }
+#[inline] function of(const uint8& $value) : uint64 { return mix($value); }
+#[inline] function of(const uint16& $value) : uint64 { return mix($value); }
+#[inline] function of(const uint32& $value) : uint64 { return mix($value); }
+#[inline] function of(const uint64& $value) : uint64 { return mix($value); }
+#[inline] function of(const usize& $value) : uint64 { return mix($value); }
 
 /**
- * The float overloads, which are **not** a plain byte hash.
+ * A bool has two values, so the only thing its hash owes anybody is that they differ - but they should
+ * differ *everywhere*, not just in the bottom bit, or a `map<bool, V>` puts both in adjacent slots.
+ */
+#[inline] function of(const bool& $value) : uint64 { return mix($value); }
+
+/**
+ * The float overloads, which are **not** a byte hash.
  *
  * `+0.0` and `-0.0` compare equal and do not share their bytes, so byte-hashing them puts one key in
  * two buckets: `$m[0.0]` would miss an entry stored under `-0.0`. Normalized here, once, where the hash
@@ -173,7 +262,17 @@ function of(const bool& $value) : uint64 { return of_bytes<bool>($value); }
  * The other half of IEEE-754 has no fix and is worth knowing: **a NaN is never equal to itself**, so a
  * NaN key can be stored and then never found, whatever its hash. That is arithmetic arriving rather than
  * a defect here, and it is the reason a float makes a poor key.
+ *
+ * **The bit pattern is read through a pointer and then stirred like any other word**, rather than walked a
+ * byte at a time. A float is one machine word, so it belongs on `mix`'s side of this file's split for the
+ * same reason an integer does - and going through `of_bytes` would leave the bottom of the hash carrying
+ * the exponent's structure, which is precisely the half `map<K, V>` indexes with.
+ *
+ * The reinterpret is a read of storage this function owns, one word wide, at its own alignment - so it
+ * needs `mem::` nothing and asserts nothing. `$normal` is a local rather than the parameter because a
+ * `const` borrow has no address to take, and because the zero above has to be written somewhere.
  */
+#[inline]
 function of(const float32& $value) : uint64
 {
     float32 $normal = $value;
@@ -183,9 +282,14 @@ function of(const float32& $value) : uint64
         $normal = 0.0;
     }
 
-    return of_bytes<float32>($normal);
+    // **a value, not a second typed path to `$normal`.** the old spelling took `ptr<uint32>(&$normal)`
+    // and read through it, which meant one live object readable as both a float and an integer - the
+    // exact shape that needs a promise. `bit_cast` copies the bytes out instead, so there is nothing
+    // to promise and no `unsafe` here at all
+    return mix(mem::bit_cast<uint32, float32>($normal));
 }
 
+#[inline]
 function of(const float64& $value) : uint64
 {
     float64 $normal = $value;
@@ -194,7 +298,11 @@ function of(const float64& $value) : uint64
         $normal = 0.0;
     }
 
-    return of_bytes<float64>($normal);
+    // **a value, not a second typed path to `$normal`.** the old spelling took `ptr<uint64>(&$normal)`
+    // and read through it, which meant one live object readable as both a float and an integer - the
+    // exact shape that needs a promise. `bit_cast` copies the bytes out instead, so there is nothing
+    // to promise and no `unsafe` here at all
+    return mix(mem::bit_cast<uint64, float64>($normal));
 }
 
 /**
@@ -209,11 +317,13 @@ function of(const float64& $value) : uint64
  * beats the `#[implicit]` view conversion outright - a declared conversion ranks below every built-in
  * one - so neither ever surprises the other.
  */
+#[inline]
 function of(const string& $value) : uint64
 {
     return of($value->window);
 }
 
+#[inline]
 function of(const string::view& $value) : uint64
 {
     return bytes($value->bytes, $value->size, OFFSET_BASIS);

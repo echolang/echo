@@ -13,6 +13,7 @@
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTConstantExpander.h"
 #include "AST/ASTMonomorphizer.h"
+#include "AST/ASTAccessPass.h"
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTTypeChecker.h"
 #include "Parser/ManifestParser.h"
@@ -20,7 +21,10 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/ModuleCache.h"
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/TargetSubtarget.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
+
+#include <llvm/TargetParser/Host.h>
 
 #if ECO_USE_EMBEDDED_STDLIB
 #include "stdlib_embedded.h"
@@ -416,6 +420,11 @@ static int run_semantic_passes(
     // read in a value position gains a deref node, so from here on result_type() is honest
     AST::PointerAdjuster(bundle).run();
 
+    // addresses may alias, accesses may not conflict: refuse a call that hands one region to two
+    // parameters when either of them takes it exclusively. after the adjuster because a path walk
+    // wants the tree with every deref in it, and outside the fixpoint because it mints no calls
+    AST::AccessPass(bundle).run();
+
     // the one pass that reads the options: a builtin can be unavailable, and only the command line
     // knows whether this one is
     AST::TypeChecker(bundle, options).run();
@@ -464,9 +473,15 @@ static Compiler::CompilerOptions resolve_options(
     }
 
     options.no_optimize = cli.get<bool>("--no-optimize");
+    options.no_tbaa = cli.get<bool>("--no-tbaa");
 
     options.report_allocations = cli.get<bool>("--explain-memory");
     options.track_allocations = options.report_allocations || cli.get<bool>("--track-allocations");
+
+    // the request as written, resolved by Compiler::resolve_subtarget wherever it is needed. Validated
+    // in run_front_end beside --target-os, which is where a mistyped flag value is reported
+    options.target_cpu = cli.get<std::string>("--target-cpu");
+    options.target_features = cli.get<std::string>("--target-features");
 
     return options;
 }
@@ -757,6 +772,26 @@ static bool run_front_end(
                 cli.present("--target-arch") ? cli.get<std::string>("--target-arch") : std::string(),
                 cli.get<std::vector<std::string>>("--define"),
                 out.target_facts,
+                error)) {
+            diagnostics.render_untyped("Invalid Target", error);
+            return false;
+        }
+    }
+
+    // **the subtarget, checked here and used much later.** it changes nothing the parse can see, so it
+    // has no reason to be before it - except that a mistyped `--target-cpu` is a command line mistake,
+    // and every other one of those is reported by the driver rather than by whatever stage first trips
+    // over it. The answer itself is not carried: Compiler::resolve_subtarget is pure, so the backend
+    // and the cache key each ask it and cannot disagree
+    {
+        Compiler::Subtarget subtarget;
+        std::string error;
+
+        if (!Compiler::resolve_subtarget(
+                llvm::sys::getDefaultTargetTriple(),
+                cli.get<std::string>("--target-cpu"),
+                cli.get<std::string>("--target-features"),
+                subtarget,
                 error)) {
             diagnostics.render_untyped("Invalid Target", error);
             return false;
@@ -1083,6 +1118,15 @@ int main(int argc, char *argv[], char *envp[])
             .default_value(false)
             .implicit_value(true);
 
+        // **not a tuning knob.** a *defined* program must answer the same with it and without it, so
+        // this is how the corpus's adversarial cases are run both ways - and how a miscompile is
+        // bisected against the aliasing model rather than against the optimizer
+        command.get().add_argument("--no-tbaa")
+            .help("Emit no type-based alias metadata. A defined program must produce the same result "
+                  "with and without it; a difference is a bug in the family table or a false 'unsafe'.")
+            .default_value(false)
+            .implicit_value(true);
+
         command.get().add_argument("--cache-dir")
             .help("Where compiled module artifacts are stored. Defaults to '.echo' beside each manifest.")
             .default_value(std::string(""));
@@ -1157,6 +1201,25 @@ int main(int argc, char *argv[], char *envp[])
 
         command.get().add_argument("--target-arch")
             .help("Evaluate conditions as if targeting this architecture. Does not cross-compile.");
+
+        // **the other kind of target flag entirely**, and the two are neighbours here only because they
+        // start with the same word. The pair above changes what a `#[if:]` condition sees; this pair
+        // changes what is emitted - every cost model in the optimizer and instruction selection itself
+        // are downstream of it.
+        //
+        // the default is the *platform baseline for the triple*, never the host: `native` produces an
+        // object that may not run on the machine next to it, with an illegal instruction rather than a
+        // diagnostic, and `echoc build` hands somebody a binary. So the host is reachable and has to be
+        // asked for by name
+        command.get().add_argument("--target-cpu")
+            .help("Which CPU to optimize and select instructions for. Defaults to the platform "
+                  "baseline for this target; 'native' means this machine, whose output may not run "
+                  "elsewhere.")
+            .default_value(std::string(""));
+
+        command.get().add_argument("--target-features")
+            .help("Target features to enable or disable, as '+sve,-crc'. Empty unless asked for.")
+            .default_value(std::string(""));
 
         // repeatable, and the graph is resolved as a whole - so naming a library that depends on another
         // pulls the other in too, once, ahead of it. A dependency does not have to be spelled here

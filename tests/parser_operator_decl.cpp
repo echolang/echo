@@ -379,8 +379,8 @@ TEST_CASE("an index operator is registered by spelling, never in the symbol trie
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bag { ptr<int32> $at; }\n"
-        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
-        "operator (Bag& $b)[] : int32& { return &$b->at:$[0]; }\n");
+        "operator (Bag& $b)[usize $i] : int32& { unsafe { return &$b->at:$[$i]; } }\n"
+        "operator (Bag& $b)[] : int32& { unsafe { return &$b->at:$[0]; } }\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
@@ -461,8 +461,8 @@ TEST_CASE("an index-write operator is a separate overload set from the borrowing
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bag { ptr<int32> $at; }\n"
-        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
-        "operator (Bag& $b)[] : int32& { return &$b->at:$[0]; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { unsafe { return &$b->at:$[$i]; } }\n"
+        "operator (Bag& $b)[] : int32& { unsafe { return &$b->at:$[0]; } }\n"
         "operator (Bag& $b)[usize $i] = (int32 $v) : void { $b->at:$[$i] = $v; }\n");
 
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
@@ -607,7 +607,7 @@ TEST_CASE("an index operator's arity range", "[operator_decl]")
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "struct Grid { ptr<int32> $at; usize $cols; }\n"
             "operator (Grid& $g)[usize $r, usize $c] : int32&\n"
-            "{ return &$g->at:$[$r * $g->cols + $c]; }\n");
+            "{ unsafe { return &$g->at:$[$r * $g->cols + $c]; } }\n");
 
         REQUIRE_FALSE(bundle->collector.has_critical_issues());
 

@@ -1,0 +1,171 @@
+namespace mem;
+
+/**
+ * One raw allocation, owned by exactly one value.
+ *
+ * `mem::alloc<T>(n)` hands back an address and no claim on it: nothing says who frees it, and nothing
+ * says whether a second value is already holding the same one. This says both. A `mem::buffer<T>` is the
+ * allocation - it is created with it, it is moved with it, and when the value goes the memory goes.
+ *
+ * **`#[unique]` is the whole point.** It refuses the copy, so `mem::buffer<T> $b = $a;` is a located error
+ * rather than two owners of one block. That refusal is what lets the compiler conclude something no
+ * type-based rule ever could: **two live `mem::buffer<T>` values are two allocations.** Not "probably", and
+ * not "unless the element type happens to differ" - it holds when both are `mem::buffer<usize>`, when the
+ * elements are themselves pointers, and when the two containers have exactly the same type. That is
+ * the fact `array<T>` is built on and the one an optimised kernel eventually rests on.
+ *
+ * It is deliberately not a container. It has no length, no bounds check and no iteration: how many of its slots are
+ * live is its *owner's* business, and a buffer that tried to answer would be a second answer to the
+ * question `array<T>::count()` already owns. Every slot it hands back is uninitialized storage - what
+ * goes in one, and when, belongs to whoever holds the buffer.
+ *
+ * A null buffer is a legitimate empty state, exactly as it is for the array above it: `mem::realloc`
+ * over a null pointer allocates, and `mem::free` over one is a no-op. So there is no "uninitialized"
+ * case separate from "empty", and `mem::buffer<T>()` allocates nothing.
+ *
+ * **The uniqueness is structural, not a convention.** `#[unique]` closes the accidental half - the
+ * implicit copy - and `private` closes the deliberate one: the address and the capacity cannot be
+ * read out, cannot be written in, and cannot be taken together by a field-wise constructor, because
+ * a private property suppresses that constructor outright. So the only ways to obtain a buffer are
+ * `mem::buffer<T>()` and `resize`, one of which produces a fresh region and the other of which
+ * consumes the old one. See notes/aliasing.md.
+ */
+#[core: "buffer"]
+#[unique]
+struct buffer<T>
+{
+    // **private, and that is what turns the claim above into a fact.** while these were reachable,
+    // `$b->data:$ = $a->data;` built a second owner of one allocation in ordinary safe code - so
+    // "two live buffers are two allocations" was a convention this file kept rather than something
+    // the compiler knew. a private property also suppresses the field-wise constructor, which was the
+    // other door: `mem::buffer<int32>($stolen, 8)` no longer exists to be written
+    private ptr<T> $data;
+    private usize $cap;
+
+    /**
+     * An empty buffer, holding no allocation.
+     */
+    constructor()
+    {
+        $this->data:$ = null;
+        $this->cap = 0;
+    }
+
+    /**
+     * Frees the allocation. What is *in* it is the owner's business and has already been dealt with by
+     * the time this runs - a buffer destroys storage, never values.
+     */
+    destructor()
+    {
+        mem::free<T>($this->data);
+    }
+
+    /**
+     * How many elements it has room for.
+     */
+    const function capacity() : usize
+    {
+        return $this->cap;
+    }
+
+    /**
+     * Resizes the allocation to exactly `$count` elements, keeping what is already in it.
+     *
+     * **This consumes the old region and produces its replacement**, which is the one operation on a
+     * unique owner that is neither a create nor a destroy: the block may move, the elements are
+     * relocated bitwise, and the count of owners is unchanged. Nothing is duplicated, so there is no
+     * copy to run and none to skip - which is what makes it correct for an owning `T` with no branch
+     * on `T` at all.
+     *
+     * Every borrow into the buffer is stale afterwards. That is the owner's rule to keep; this cannot
+     * see the borrows.
+     *
+     * Re-seated through `:$`, because realloc hands back an address rather than writing through the
+     * old one.
+     */
+    function resize(usize $count) : void
+    {
+        $this->data:$ = mem::realloc<T>($this->data, $count);
+        $this->cap = $count;
+    }
+
+    /**
+     * A window over `$count` slots starting at `$from`, **unchecked**.
+     *
+     * The one way out of a buffer that is not a single slot, and the reason there is no accessor for
+     * the raw address: a `slice<T>` is an address and a count together, so a caller cannot walk off
+     * the end by arithmetic the buffer never saw.
+     */
+    function sub(usize $from, usize $count) : slice<T>
+    {
+        return slice<T>($this->data:$ + $from, $count);
+    }
+
+    /**
+     * Copies `$count` slots from `$from` to `$to` within this buffer. **The two ranges must not
+     * overlap** - `move` below is the one that copes when they do.
+     *
+     * Named for the precondition rather than for the destination, deliberately: `copy_within` would
+     * read as the opposite of what it means, since that is the *overlap-tolerant* name everywhere
+     * else it appears. A name should make the dangerous precondition impossible to infer backwards.
+     *
+     * Bytes and nothing else: no value is duplicated in the sense that matters to an owning `T`, so
+     * the caller owns the question of what the two ranges mean afterwards. `array<T>` uses it to
+     * repeat a range it is about to declare live.
+     */
+    function copy_nonoverlapping(usize $to, usize $from, usize $count) : void
+    {
+        mem::copy<T>($this->data:$ + $to, $this->data:$ + $from, $count);
+    }
+
+    /**
+     * The same, for two ranges that **may** overlap - a container closing a gap by shifting a run of
+     * elements down by one slot, which is exactly what `copy_nonoverlapping` promises does not happen.
+     *
+     * Nothing is duplicated and nothing is destroyed: each element ends up somewhere else, so the
+     * count of owners is unchanged.
+     */
+    function move(usize $to, usize $from, usize $count) : void
+    {
+        mem::move<T>($this->data:$ + $to, $this->data:$ + $from, $count);
+    }
+
+    /**
+     * Copies `$count` slots out of **another** buffer, starting at `$from`, into this one at `$to`.
+     *
+     * Two buffers are two allocations - that is the whole of what `#[unique]` and the private fields
+     * above buy - so the two ranges cannot overlap and `mem::copy` is the right one. Handing this
+     * buffer to itself is refused before it gets here: the receiver takes `inout` access and `$src`
+     * takes `read`, and one value cannot be both.
+     */
+    function copy_from(usize $to, const buffer<T>& $src, usize $from, usize $count) : void
+    {
+        mem::copy<T>($this->data:$ + $to, $src->data:$ + $from, $count);
+    }
+
+    /**
+     * A borrow of the slot at `$index`, **unchecked**.
+     *
+     * A buffer has a capacity and no length, so the only bound it could test is the one that says
+     * nothing about whether the slot holds a value. The owner knows which slots are live and is the
+     * one that can check; testing capacity here would be a bounds check that passes for exactly the
+     * reads that are wrong.
+     */
+    function at(usize $index) : T&
+    {
+        // **the promotion, discharged here.** the caller gets an ordinary `T&` and inherits nothing:
+        // what is asserted is that `$data` addresses `$cap` live, aligned, `T`-shaped slots, and that
+        // is exactly the invariant the private fields above exist to keep. nothing outside this file
+        // can have made it false
+        unsafe {
+            return &$this->data:$[$index];
+        }
+    }
+
+    const function at(usize $index) : const T&
+    {
+        unsafe {
+            return &$this->data:$[$index];
+        }
+    }
+}

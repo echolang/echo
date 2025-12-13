@@ -1,0 +1,39 @@
+// **the adversarial case, and the one that decides whether the tagging is honest.**
+//
+// bytes written over a typed object through a reinterpreted pointer must still be observed, at every
+// optimization level. that holds because an access reached through a `ptr<T>` is emitted with *no*
+// `!tbaa` at all, and an untagged instruction may alias anything - so the byte store below is opaque
+// to the optimizer rather than merely differently typed.
+//
+// this is the whole reason Echo does not get C's strict aliasing: there, the same program would be
+// undefined and the write could vanish.
+
+struct Header
+{
+    int32 $tag;
+    int32 $flags;
+}
+
+Header $h = Header(1, 2);
+
+unsafe {
+    ptr<uint8> $bytes = ptr<uint8>(&$h);
+
+    // stomp the first byte of `$tag`
+    $bytes:$[0] = 255;
+}
+
+// read back through the typed field - the byte write must be visible
+echo $h->tag;
+echo $h->flags;
+
+// and the classic: an int32 viewed as bytes
+$n = 0;
+ptr<int> $ints = &$n;
+
+unsafe {
+    ptr<uint8> $view = ptr<uint8>($ints:$);
+    $view:$[0] = 7;
+}
+
+echo $n;

@@ -315,8 +315,9 @@ TEST_CASE("legal pointer programs are left alone", "[sema][pointer]")
         // null into a nullable pointer, and the address-side null check
         "ptr<int> $empty = null;\n"
         "echo ($empty:$ == null);\n"
-        // the explicit narrowing back
-        "int& $back = int&($p:$);\n"
+        // the explicit narrowing back - still permitted, and it is the one line here that costs the
+        // word: turning a raw address into a trusted borrow is the promotion, not the conversion
+        "unsafe { int& $back = int&($p:$); }\n"
         // a read-only borrow parameter accepting a mutable argument
         "function show(const int& $v) : void { echo $v; }\n"
         "show($a);\n"

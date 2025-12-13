@@ -1,4 +1,5 @@
 #include "AST/ExprNode.h"
+#include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarRefNode.h"
@@ -103,6 +104,15 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     // as a value"
     auto left = ValueType::make_mutable(value_type_of(raw_left));
     auto right = ValueType::make_mutable(value_type_of(raw_right));
+
+    // **a shift is its left operand's type, whatever the count is written as.** every arm below this
+    // one is about two operands meeting, and a count is not an operand - see
+    // AST::binary_reconciles_operands. Without this arm `$byte << $wide_count` answered *void*, which
+    // is the "not reconciled yet" signal, and OperatorRewriter::widen_binary_operands duly reconciled
+    // it - so a `uint8` shifted by an `int64` became an `int64` shift and left the type it was held in
+    if (op_node != nullptr && op_node->op != nullptr && !binary_reconciles_operands(op_node->op)) {
+        return left;
+    }
 
     // if both left and right have the same type then the result type is the same
     if (left == right) {

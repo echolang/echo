@@ -12,6 +12,8 @@ namespace AST
 
 namespace llvm
 {
+    class Instruction;
+    class StoreInst;
     class Value;
 };
 
@@ -24,6 +26,22 @@ namespace Compiler::LLVM
     // the type has to travel with the address. under llvm's opaque pointers every pointer is
     // the same `ptr`, so an llvm::Value alone says nothing about what it points at - and every
     // load needs its element type spelled out
+    // **where an address came from, which decides whether an access through it may be tagged.**
+    //
+    // a *typed* place was reached without ever leaving the compiler's own accounting: a local, a
+    // field of one, an element a container handed back. its storage is the type it says it is,
+    // because the only way to make that false is a reinterpretation, and that now needs `unsafe`.
+    //
+    // a *raw* place went through a `ptr<T>` - the pointer that a reinterpretation produces, the one
+    // `mem::copy` walks bytes through, the one an FFI call hands back. an access through it is
+    // emitted with no `!tbaa` at all, and an untagged instruction may alias anything: the
+    // conservative answer, said by omission
+    enum class Provenance
+    {
+        t_typed,
+        t_raw,
+    };
+
     struct LValue
     {
         llvm::Value *address = nullptr;
@@ -31,6 +49,11 @@ namespace Compiler::LLVM
         // st(E) in the model: the type of the thing *at* `address`, before any auto-deref
         // for `ptr<int32> $p` this is ptr<int32>, and the address is $p's own slot
         AST::ValueType storage_type;
+
+        // **it travels with the address for storage_type's reason.** by the time a load is emitted
+        // the expression is long gone, and "was there a raw pointer anywhere on the way here" is not
+        // a question an `llvm::Value *` can be asked
+        Provenance provenance = Provenance::t_typed;
     };
 
     // the one place that turns an expression into an address
@@ -51,6 +74,12 @@ namespace Compiler::LLVM
         // "which llvm type do I load" question - the one opaque pointers make unanswerable from
         // the address alone - is answered from storage_type in exactly one place
         llvm::Value *gen_load(const LValue &place, const char *name);
+
+        // **the store half of the seam, and the mirror of gen_load above.** it existed only as
+        // fifteen scattered `CreateStore` calls, which was survivable while a store was just a
+        // store - and stopped being once an access had to carry metadata, because a fact attached
+        // at one of fifteen sites is a fact missing from fourteen
+        llvm::StoreInst *gen_store(const LValue &place, llvm::Value *value);
 
         // gen_lvalue followed by gen_load: the ordinary "read this expression" path
         llvm::Value *gen_load(AST::ExprNode &expr, const char *name);
@@ -83,6 +112,10 @@ namespace Compiler::LLVM
         // the address of the struct that a member access is reaching into, with any pointer
         // base already dereferenced
         LValue gen_member_lvalue(AST::ExprNode &expr);
+
+        // attaches the type tag, or deliberately nothing. one place, so a load and a store cannot
+        // come to disagree about what an access at a type may reach
+        void tag_access(llvm::Instruction *access, const LValue &place);
     };
 };
 

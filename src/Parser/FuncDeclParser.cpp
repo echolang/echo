@@ -102,6 +102,35 @@ bool Parser::parse_function_body(
     return true;
 }
 
+bool Parser::starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &effect)
+{
+    if (!cursor.is_type(Token::Type::t_identifier)) {
+        return false;
+    }
+
+    // an identifier followed by `$name` is that parameter's type, whatever it spells
+    if (cursor.peek_is_type(1, Token::Type::t_varname)) {
+        return false;
+    }
+
+    const std::string &word = cursor.current().value();
+
+    if (word == "read") {
+        effect = AST::AccessEffect::t_read;
+    }
+    else if (word == "inout") {
+        effect = AST::AccessEffect::t_inout;
+    }
+    else if (word == "out") {
+        effect = AST::AccessEffect::t_out;
+    }
+    else {
+        return false;
+    }
+
+    return true;
+}
+
 bool Parser::parse_parameter_list(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
@@ -127,10 +156,19 @@ bool Parser::parse_parameter_list(
             cursor.skip();
         }
 
+        // `read slice<T> $src` - what this parameter does to the storage its argument names. read
+        // here for takes_ownership's reason and asked after it, so `mv` keeps being the one spelling
+        // of a consuming parameter rather than becoming a fourth effect keyword beside it
+        AST::AccessEffect access_effect = AST::AccessEffect::t_none;
+        if (starts_access_effect(cursor, access_effect)) {
+            cursor.skip();
+        }
+
         auto *param = parse_varexpr(payload, &into);
 
         if (param != nullptr) {
             param->takes_ownership = takes_ownership;
+            param->access_effect = access_effect;
         }
 
         decl.args.push_back(param);

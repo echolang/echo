@@ -149,12 +149,17 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         // integers
         { Token::Type::t_op_add, value(s.i32), value(s.i32), true, "integers add" },
         { Token::Type::t_op_pow, value(s.i32), value(s.i32), true, "and raise" },
-        { Token::Type::t_xor, value(s.i32), value(s.u32), true, "and xor, the one bitwise operator that lowers" },
         { Token::Type::t_open_angle, value(s.i32), value(s.u32), true, "and order" },
-        { Token::Type::t_op_shl, value(s.i32), value(s.i32), false, "`<<` parses and has no lowering" },
-        { Token::Type::t_op_shr, value(s.i32), value(s.i32), false, "and `>>`" },
-        { Token::Type::t_and, value(s.i32), value(s.i32), false, "and `&`" },
-        { Token::Type::t_or, value(s.i32), value(s.i32), false, "and `|`" },
+
+        // **the bitwise five, all of which lower.** `>>` is the only one that is not sign-agnostic - it
+        // reads AST::binary_operation_type in codegen and folds the same way - but that is a question
+        // about *which instruction*, not about whether there is one, so every row here is the same answer
+        { Token::Type::t_and, value(s.i32), value(s.i32), true, "integers mask" },
+        { Token::Type::t_or, value(s.i32), value(s.i32), true, "and or" },
+        { Token::Type::t_xor, value(s.i32), value(s.u32), true, "and xor, across signedness" },
+        { Token::Type::t_op_shl, value(s.i32), value(s.i32), true, "and shift left" },
+        { Token::Type::t_op_shr, value(s.i32), value(s.i32), true, "and right" },
+        { Token::Type::t_op_shr, value(s.u32), value(s.u32), true, "unsigned too, where the shift is logical" },
         { Token::Type::t_logical_and, value(s.i32), value(s.i32), false, "`&&` joins two bools, not two numbers" },
 
         // bools - a yes/no rather than a small number
@@ -172,7 +177,14 @@ TEST_CASE("binary_has_builtin_meaning promises exactly what codegen lowers", "[A
         { Token::Type::t_op_div, value(s.f64), value(s.f64), true, "and divides" },
         { Token::Type::t_logical_leq, value(s.f64), value(s.f64), true, "and orders" },
         { Token::Type::t_op_pow, value(s.f64), value(s.f64), false, "`**` round-trips through llvm.pow for integers only" },
+
+        // **the bitwise five are integer-only, and structurally so**: a float falls out of the integer arm
+        // and lands on `is_comparison()`, so nothing enumerates which symbols it may not have and an
+        // operator added to that arm is refused here without anyone remembering to say so
         { Token::Type::t_xor, value(s.f64), value(s.f64), false, "and there is no bitwise arm" },
+        { Token::Type::t_and, value(s.f64), value(s.f64), false, "nor a mask" },
+        { Token::Type::t_op_shl, value(s.f64), value(s.i32), false, "nor a shift" },
+        { Token::Type::t_op_shr, value(s.boolean), value(s.i32), false, "and a bool is not a small number either" },
 
         // named types have no built-in meaning at all, which is what sends a use site looking for a
         // declared `operator` - `string == string` is the standard library's, not the language's
@@ -229,4 +241,96 @@ TEST_CASE("unary_has_builtin_meaning covers negation and both meanings of '!'", 
     REQUIRE(unary_has_builtin_meaning(bang, value(s.weak_handle)));
     REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(s.i32)));
     REQUIRE_FALSE(unary_has_builtin_meaning(bang, value(s.structure)));
+}
+
+// AST::binary_reconciles_operands and AST::binary_operation_type - "do these two operands meet at one
+// type, and which type is the operation performed at?"
+//
+// asked here rather than through a parsed program for the table above's reason, and pinned because the
+// four readers are spread across three passes: the parser and AST::OperatorRewriter insert the cast, the
+// node answers its own result_type, and ExprCodegen picks an instruction. A disagreement between any two
+// of them is silent - it is a program that means one thing folded and another emitted
+TEST_CASE("a shift is performed at its left operand's type, whatever the count is", "[AST][operators]")
+{
+    OperatorRegistry registry;
+    Shapes s = shapes();
+
+    const ValueType i64 = ValueType(ValueTypePrimitive::t_int64);
+    const ValueType u8 = ValueType(ValueTypePrimitive::t_uint8);
+
+    const Operator *add = op_for(registry, Token::Type::t_op_add);
+    const Operator *shl = op_for(registry, Token::Type::t_op_shl);
+    const Operator *shr = op_for(registry, Token::Type::t_op_shr);
+
+    REQUIRE(add != nullptr);
+    REQUIRE(shl != nullptr);
+    REQUIRE(shr != nullptr);
+
+    // the two shifts and nothing else, which is what Operator::is_shift says and what every reader
+    // reaches this rule through
+    REQUIRE(shl->is_shift());
+    REQUIRE(shr->is_shift());
+    REQUIRE_FALSE(add->is_shift());
+
+    REQUIRE_FALSE(binary_reconciles_operands(shl));
+    REQUIRE_FALSE(binary_reconciles_operands(shr));
+    REQUIRE(binary_reconciles_operands(add));
+
+    // a caller with no operator to ask reconciles, because that is what every symbol but two does
+    REQUIRE(binary_reconciles_operands(nullptr));
+
+    // **the signedness case.** an ordinary operator meets an int32 and a uint32 at the wider signed type
+    // and `<` over the pair is therefore signed; the same pair under `>>` is an int32 shift, so it stays
+    // arithmetic. Reconciled, the *count* made it logical and `-16 >> uint32 2` answered 1073741820
+    REQUIRE(binary_operation_type(add, s.i32, s.u32) == s.u32);
+    REQUIRE(binary_operation_type(shr, s.i32, s.u32) == s.i32);
+    REQUIRE_FALSE(binary_operation_type(shr, s.i32, s.u32).is_unsigned_integer());
+
+    // **the width case**, and the one that left the type altogether: a uint8 shifted by an int64 count
+    // is a uint8 shift. Reconciled, `uint8 200 << int64 40` was an int64 shift answering 219902325555200
+    REQUIRE(binary_operation_type(add, u8, i64) == i64);
+    REQUIRE(binary_operation_type(shl, u8, i64) == u8);
+
+    // and the count still cannot pull an unsigned operand signed
+    REQUIRE(binary_operation_type(shr, s.u32, s.i32) == s.u32);
+    REQUIRE(binary_operation_type(shr, s.u32, s.i32).is_unsigned_integer());
+}
+
+// AST::shift_count_refusal - "is this count answerable at all?"
+//
+// two readers, and the split is the whole point of pinning it: AST::const_fold refuses `const(1 << 32)`
+// and AST::TypeChecker refuses the plain `1 << 32` beside it. one sentence, so the two cannot drift
+TEST_CASE("a shift count at or above the operand's width has no answer", "[AST][operators]")
+{
+    Shapes s = shapes();
+
+    const ValueType u8 = ValueType(ValueTypePrimitive::t_uint8);
+
+    // in range, right up to the last count that means something
+    REQUIRE_FALSE(shift_count_refusal(s.i32, 0).has_value());
+    REQUIRE_FALSE(shift_count_refusal(s.i32, 31).has_value());
+    REQUIRE_FALSE(shift_count_refusal(u8, 7).has_value());
+
+    // at the width and above it, where the emitted shift is poison rather than a value
+    REQUIRE(shift_count_refusal(s.i32, 32).has_value());
+    REQUIRE(shift_count_refusal(s.i32, 64).has_value());
+    REQUIRE(shift_count_refusal(u8, 8).has_value());
+
+    // **the width is the operand's, not a machine word's** - a count of 8 is fine on an int32 and is not
+    // on a uint8, which is the whole reason this is a question about a type rather than a constant
+    REQUIRE_FALSE(shift_count_refusal(s.i32, 8).has_value());
+
+    // a negative count is this same case arriving sign-extended, which is why one comparison covers both
+    REQUIRE(shift_count_refusal(s.i32, static_cast<uint64_t>(-1)).has_value());
+
+    // the message names the type the user wrote and the width they overran
+    const auto refusal = shift_count_refusal(u8, 8);
+
+    REQUIRE(refusal.has_value());
+    REQUIRE(refusal->find("uint8") != std::string::npos);
+    REQUIRE(refusal->find("8 or more bits") != std::string::npos);
+
+    // a non-integer operand is somebody else's refusal - binary_has_builtin_meaning already turned a
+    // float or a bool beside a shift into a located diagnostic, and answering here would be a second one
+    REQUIRE_FALSE(shift_count_refusal(s.f64, 999).has_value());
 }

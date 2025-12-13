@@ -44,6 +44,29 @@ llvm::Function *MemoryCodegen::declare_thunk(
     return thunk;
 }
 
+// **what we know about a thunk that hands back a block, said out loud.**
+//
+// `noalias` on the return is the claim that the block does not overlap anything the caller already holds,
+// which is what an allocator *is* - and it is the one attribute in this compiler that is unambiguously
+// sound to write by hand, because it is a property of `malloc`/`realloc` rather than of any Echo type. A
+// borrow parameter gets nothing of the kind: the language has no exclusivity rule, and `$a->extend($a)` is
+// a legal program in which two borrows name one object.
+//
+// LLVM already infers this whenever a pipeline runs - `malloc` is known to TargetLibraryInfo and
+// FunctionAttrs propagates through the thunk. But **`echoc run` runs no such pass**: the JIT path is
+// InternalizePass and GlobalDCEPass and nothing else, so without this the interpreter's memory has no
+// aliasing information at all. Stating it is what makes the two paths agree.
+//
+// `allocsize` says which argument is the byte count, so the optimizer can fold a `size_of` query about the
+// block. It is a *hint* with no soundness weight - a wrong index would mislead rather than miscompile -
+// which is why it sits here beside `noalias` rather than needing an argument of its own
+void MemoryCodegen::mark_allocating_thunk(llvm::Function *thunk, unsigned size_argument)
+{
+    thunk->addRetAttr(llvm::Attribute::NoAlias);
+    thunk->addFnAttr(llvm::Attribute::getWithAllocSizeArgs(
+        thunk->getContext(), size_argument, std::nullopt));
+}
+
 llvm::GlobalVariable *MemoryCodegen::get_or_create_live_counter()
 {
     return _ctx.get_or_create_odr_global(
@@ -75,6 +98,9 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
     llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
 
     llvm::Function *thunk = declare_thunk(k_alloc_symbol, opaque_ptr, { i64 }, { "size" });
+
+    // the byte count is the only argument
+    mark_allocating_thunk(thunk, 0);
 
     llvm::Value *block = _ctx.builder->CreateCall(
         _ctx.libc_callee("malloc", opaque_ptr, { i64 }), { thunk->getArg(0) }, "block");
@@ -147,6 +173,12 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
 
     llvm::Function *thunk =
         declare_thunk(k_realloc_symbol, opaque_ptr, { opaque_ptr, i64 }, { "block", "size" });
+
+    // **`noalias` holds for a reseat too**, which is worth a sentence because `realloc` may hand back the
+    // pointer it was given: the contract is that the old one is *dead* from that moment, so nothing the
+    // caller may still legitimately hold overlaps the result. LLVM models the libc function itself the same
+    // way. The byte count is argument 1 here, the block being argument 0
+    mark_allocating_thunk(thunk, 1);
 
     llvm::Value *old_block = thunk->getArg(0);
     llvm::Value *size = thunk->getArg(1);

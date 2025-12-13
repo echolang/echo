@@ -10,7 +10,11 @@ $s = Pair(10, 20);
 ptr<int> $p = &$s->a;
 
 // the address of element 1 is the address of the second field
-ptr<int> $e = &$p:$[1];
+ptr<int> $e = null;
+// offsetting a raw address and taking a borrow of the result is a promotion
+unsafe {
+    $e:$ = &$p:$[1];
+}
 
 echo $e;
 
@@ -19,7 +23,9 @@ $e = 77;
 echo $s->b;
 
 // element 0 is the same storage as $p itself, so its address is $p's address
-echo (&$p:$[0] == $p:$);
+unsafe {
+    echo (&$p:$[0] == $p:$);
+}
 
 // and the element address sits one int32 along, counted in elements rather than bytes
 echo ($e:$ - $p:$);
@@ -29,5 +35,9 @@ function bump(int &$v) : void {
     $v = $v + 1;
 }
 
-bump($p:$[1]);
+// the implicit borrow at an argument position is a promotion too - it is the same address-of, minted
+// by the resolver instead of written
+unsafe {
+    bump($p:$[1]);
+}
 echo $s->b;

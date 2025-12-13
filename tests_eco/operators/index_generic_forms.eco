@@ -4,7 +4,7 @@ struct Bag<T> { ptr<T> $at; }
 // a constrained parameter - the ordinary type-parameter grammar, nothing operator-specific
 operator<T: numeric> (Bag<T>& $b)[usize $i] : T&
 {
-    return &$b->at:$[$i];
+    unsafe { return &$b->at:$[$i]; }
 }
 
 // **a concrete overload beats the template.** the ordinary matching rule (a concrete candidate wins
@@ -12,7 +12,7 @@ operator<T: numeric> (Bag<T>& $b)[usize $i] : T&
 operator (Bag<int32>& $b)[usize $i] : int32&
 {
     echo 111;
-    return &$b->at:$[$i];
+    unsafe { return &$b->at:$[$i]; }
 }
 
 // two parameters, both bound from operands
@@ -20,7 +20,7 @@ struct Table<K, V> { ptr<K> $keys; ptr<V> $values; }
 
 operator<K, V> (Table<K, V>& $t)[usize $i] : V&
 {
-    return &$t->values:$[$i];
+    unsafe { return &$t->values:$[$i]; }
 }
 
 int32 $x = 5;

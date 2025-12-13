@@ -1,10 +1,13 @@
 // `hash::of` is an overload set rather than a `contract::`, because a primitive cannot declare a
 // conformance - so an interface constraint would refuse `map<int32, V>`, the first map anybody writes
 //
-// the three goldened string hashes are what pin the constants. they are canonical FNV-1a 64 values and can
-// be checked against any other implementation; note the compiler's own `fnv1a64`, which hashes module
+// the goldened **string** hashes are what pin the FNV constants. they are canonical FNV-1a 64 values and
+// can be checked against any other implementation; note the compiler's own `fnv1a64`, which hashes module
 // cache keys, carries a basis one digit short of the real one - the two are unrelated uses that never
 // compare a value, so this file spells the canonical constants
+//
+// the **integer** values are not canonical anything - they are `hash::mix`, a SplitMix64 finalizer, and the
+// only claims made about them are the ones asserted below: equal numbers agree, unequal ones do not
 
 // **the property the whole design exists for**: the same text in two different buffers hashes the same.
 // byte-hashing a `string` would hash its heap pointer, and these two would land in different buckets while
@@ -33,17 +36,26 @@ echo hash::of(1);
 
 int64 $i64 = 1;
 usize $u = 1;
-
-// both are eight bytes holding 1, so both agree
-echo hash::of($i64);
-echo hash::of($u);
-
 uint8 $b8 = 1;
 
-// one byte holding 1, so a different answer from the eight-byte ones. `of(int32 1)` and `of(int64 1)`
-// differing is deliberate and documented: this is a bucket index, never a serialization format
+// **an integer is hashed by value, not by width.** all five of these hold the number 1, so all five agree -
+// they widen to one `uint64` before `mix` ever sees them. A map has one key type, so nothing inside one can
+// observe the difference either way; what this pins is that the rule is *value*, deliberately, rather than
+// the byte-count artefact walking bytes used to produce
+echo hash::of($i64);
+echo hash::of($u);
 echo hash::of($b8);
 echo hash::of(true);
+
+// and signedness still separates what it should: the same 32 bits, read as two different numbers. the
+// widening sign-extends one and not the other, so these must not collide
+int32 $minus_one = -1;
+uint32 $all_ones = 4294967295;
+
+echo hash::of($minus_one) == hash::of($all_ones);
+
+// two different numbers of the same width, which is the only thing a map actually needs
+echo hash::of(1) == hash::of(2);
 
 // ---- floats normalize zero, because +0.0 and -0.0 compare equal and do not share their bytes
 

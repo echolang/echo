@@ -79,14 +79,14 @@ operator (slots& $s)[usize $i] : string&
 {
     assert($i < $s->n, 'slot not written');
 
-    return &$s->d:$[$i];
+    unsafe { return &$s->d:$[$i]; }
 }
 
 operator (const slots& $s)[usize $i] : const string&
 {
     assert($i < $s->n, 'slot not written');
 
-    return &$s->d:$[$i];
+    unsafe { return &$s->d:$[$i]; }
 }
 
 {

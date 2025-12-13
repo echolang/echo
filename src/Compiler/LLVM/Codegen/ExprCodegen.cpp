@@ -68,7 +68,11 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
 
     // narrowing a nullable pointer to a borrow asserts the thing a borrow promises. under
     // opaque pointers the reinterpretation itself is free, so the check is all there is to emit
-    if (to.is_pointer() && !to.is_nullable() && from.is_pointer() && from.is_nullable()) {
+    //
+    // which casts those are is AST::narrowing_promotes_raw_storage's question, not this arm's: the
+    // same conjunction decides whether the author is asked to write `unsafe`, and a copy here lets a
+    // cast emit the assert and hand back a trusted borrow that nobody was asked to promise
+    if (AST::narrowing_promotes_raw_storage(from, to)) {
         gen_null_assert(value);
     }
 
@@ -310,9 +314,22 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         // by the time codegen runs the two are the same type anyway - a mismatched integer pair makes
         // BinaryExprNode::result_type() void, which is what Parser::parse_binary_expr and
         // OperatorRewriter::widen_binary_operands each insert a cast for - so this reads the answer an
-        // earlier pass already wrote down, rather than choosing a winner here
-        const AST::ValueType op_type = AST::binary_operation_type(lhsret, rhsret);
+        // earlier pass already wrote down, rather than choosing a winner here.
+        //
+        // **the operator is part of the question**, and `>>` is why: a shift is performed at its left
+        // operand's type whatever the count is written as, so `int32 -16 >> uint32 2` is `ashr`. read
+        // without the operator this reconciled to `uint32`, took `lshr`, and answered 1073741820
+        const AST::ValueType op_type =
+            AST::binary_operation_type(node.op_node->op, lhsret, rhsret);
         const bool is_unsigned = op_type.is_unsigned_integer();
+
+        // the count, in the operand's type - see the two shift arms below. routed through
+        // TypeLowering::coerce_value rather than a CreateIntCast here, because that is the one owner of
+        // "this value, at that type" and it is the half that knows a narrowing count is a truncation
+        const auto shift_count = [&]() {
+            return _ctx.types->coerce_value(
+                right, AST::value_type_of(rhsret), op_type, *_ctx.current_cmp_unit);
+        };
 
         switch (node.op_node->op->type) {
             case Token::Type::t_op_add:
@@ -373,14 +390,41 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
                         : _ctx.builder->CreateFPToSI(result, int_type));
                 }
                 break;
-            // **the one bitwise operator that lowers.** `&  |  <<  >>` sit beside it in
-            // AST::op_precedence and in the predefined set, so they parse - and
-            // AST::binary_has_builtin_meaning refuses them, which is what makes each of them a located
-            // diagnostic rather than the `default:` throw below. `^` is here on its own because it is
-            // what FNV-1a needs and because `&` has a grammar problem the others do not: `&$x` lexes as
-            // an address-of, so infix `&` is a question about the lexer rather than a case label
+            // **the bitwise five.** four of them are sign-agnostic and lower to one instruction each.
+            //
+            // `&` is the one with a grammar note attached: `&$x` lexes as an address-of and `& $x` as
+            // this operator, because LexerFunction::ReferenceFrom wins only when the `&` is glued to what
+            // follows it. So `$h & $mask` is this and `$h &$mask` is an address-of - a real wart, left
+            // alone deliberately, since unpicking it would change what `&$a[$i]` means everywhere
+            case Token::Type::t_and:
+                _ctx.value_stack.push(_ctx.builder->CreateAnd(left, right));
+                break;
+            case Token::Type::t_or:
+                _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
+                break;
             case Token::Type::t_xor:
                 _ctx.value_stack.push(_ctx.builder->CreateXor(left, right));
+                break;
+            // **the two shifts, and the only arms in this function that convert an operand themselves.**
+            // every other pair arrives already reconciled, because AST::common_numeric_type widened one
+            // side at parse time - but a count is not an operand and nothing widened it
+            // (AST::binary_reconciles_operands), while `shl`/`lshr`/`ashr` still require one LLVM type
+            // for both. So the count is brought to the *operand's* type here, which is the direction
+            // that leaves the operation where the user wrote it: `uint8 200 << int64 40` is a `uint8`
+            // shift by 40, refused by AST::shift_count_refusal, rather than an int64 one that answers
+            case Token::Type::t_op_shl:
+                _ctx.value_stack.push(_ctx.builder->CreateShl(left, shift_count()));
+                break;
+            // **the one bitwise operator that is not sign-agnostic**, and it reads the same `is_unsigned`
+            // `/ % **` and the comparisons above already read rather than asking a second time: a right
+            // shift over a signed operand keeps the sign bit (`ashr`) and over an unsigned one brings in
+            // zeroes (`lshr`). `op_type` is the *left* operand's for a shift, so the count's declared
+            // type cannot pick the instruction - which it did, and `int32 -16 >> uint32 2` answered
+            // 1073741820 where the same shift by an `int32 2` answered -4
+            case Token::Type::t_op_shr:
+                _ctx.value_stack.push(is_unsigned
+                    ? _ctx.builder->CreateLShr(left, shift_count())
+                    : _ctx.builder->CreateAShr(left, shift_count()));
                 break;
             case Token::Type::t_logical_eq:
                 _ctx.value_stack.push(_ctx.builder->CreateICmpEQ(left, right));

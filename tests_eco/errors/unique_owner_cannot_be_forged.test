@@ -1,0 +1,50 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  unique_owner_cannot_be_forged.eco:22:35
+
+  No overload of 'buffer' accepts these arguments. Candidates are:
+    mem::buffer<T>()
+
+  21 | // three: the field-wise constructor, which would take both fields at once
+  22 | mem::buffer<int32> $forged = mem::buffer<int32>($stolen, 1);
+     :                                   ^^^^^^
+  23 | 
+
+[error] unique_owner_cannot_be_forged.eco:27:37
+
+  'mem::buffer<int32>' is unique: exactly one value may name its storage, so it is moved and never copied. Move the whole value rather than a part of it, or take a borrow ('mem::buffer<int32>&') if it is only being read.
+
+  26 | // *duplicated*, and a type could easily have one without the other
+  27 | mem::buffer<int32> $duplicate = $a->storage;
+     :                                     ^^^^^^^
+  28 | 
+
+[error] PrivateMember  unique_owner_cannot_be_forged.eco:16:35
+
+  '$data' is private to 'mem::buffer<int32>' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'mem::buffer<int32>' instead.
+
+  15 | $b->resize(1);
+  16 | ptr<int32> $stolen = $a->storage->data;
+     :                                   ^^^^
+  17 | 
+
+[error] PrivateMember  unique_owner_cannot_be_forged.eco:19:5
+
+  '$data' is private to 'mem::buffer<int32>' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'mem::buffer<int32>' instead.
+
+  18 | // two: writing one in
+  19 | $b->data:$ = $a->storage->data;
+     :     ^^^^
+  20 | 
+
+[error] PrivateMember  unique_owner_cannot_be_forged.eco:19:27
+
+  '$data' is private to 'mem::buffer<int32>' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'mem::buffer<int32>' instead.
+
+  18 | // two: writing one in
+  19 | $b->data:$ = $a->storage->data;
+     :                           ^^^^
+  20 | 
+
+5 errors, nothing was compiled.

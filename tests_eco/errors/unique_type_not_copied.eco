@@ -1,0 +1,19 @@
+// the refusal, and the two wordings it has. a unique type's own advice is the opposite of the
+// general one: its author must never write the copy constructor the general message asks for
+
+#[unique]
+struct Handle { int32 $id; }
+
+// a struct holding a unique member is uncopyable too, transitively - but *it* could legitimately
+// declare a copy constructor, so it gets the general wording
+struct Holder
+{
+    Handle $h;
+    int32 $tag;
+}
+
+Handle $a = Handle(1);
+Handle $b = $a;
+
+Holder $x = Holder(Handle(2), 3);
+Holder $y = $x;

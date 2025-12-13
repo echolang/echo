@@ -11,15 +11,19 @@
 # first, because a module prints its globals ahead of its definitions
 CHECK: @__eco_alloc_live = linkonce_odr global i64 0
 
-# the seam's own symbols, defined here rather than linked - the whole runtime is emitted
-CHECK: define linkonce_odr ptr @__eco_alloc(i64 %size)
+# the seam's own symbols, defined here rather than linked - the whole runtime is emitted.
+#
+# `noalias` on the return is written by MemoryCodegen rather than inferred, and this is the one place in
+# the corpus that pins it: it is a fact about the allocator, not about any Echo type, and the JIT path -
+# which is what this case runs - performs no pass that would derive it
+CHECK: define linkonce_odr noalias ptr @__eco_alloc(i64 %size)
 
 # a failed allocation is not an allocation, so the count sits behind a null check on the *result*
 CHECK: alloc.count:
 CHECK: store i64 %live.next, ptr @__eco_alloc_live
 
 # and the four-way split that keeps a refused realloc from reading as a free
-CHECK: define linkonce_odr ptr @__eco_realloc(ptr %block, i64 %size)
+CHECK: define linkonce_odr noalias ptr @__eco_realloc(ptr %block, i64 %size)
 CHECK: realloc.grew:
 CHECK: realloc.shrank:
 CHECK: realloc.gave_back

@@ -1,0 +1,30 @@
+// `read` is a promise the body is held to, in both directions it can be broken. without both checks
+// the LLVM `readonly` the parameter earns would simply be false - `const` is a per-level flag, so it
+// has never stopped a write through a member pointer
+
+struct Box
+{
+    ptr<int32> $cells;
+}
+
+function mutate(Box& $b) : void
+{
+    $b->cells:$[0] = 9;
+}
+
+// writing through the region directly - `const` would not have stopped this, because it is a
+// per-level flag and never reached the pointee
+function writes(read Box& $src) : void
+{
+    $src->cells:$[0] = 999;
+}
+
+// and handing it to something that does not promise the same
+function leaks(read Box& $src) : void
+{
+    mutate($src);
+}
+
+Box $b = Box(mem::alloc<int32>(4));
+writes(&$b);
+leaks(&$b);

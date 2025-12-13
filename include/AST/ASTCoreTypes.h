@@ -52,6 +52,16 @@ namespace AST
         // which is a different path and needs no binding
         t_map,
 
+        // `struct buffer<T>` - the `#[unique]` owner of one raw allocation, which `array<T>` is built
+        // on. bound for a different reason from the two above: nothing ever *mints* a buffer, and the
+        // compiler still knows no method and no property of it - what the binding buys is the ability
+        // to **recognise** one, so a path through a buffer's storage can keep its provenance and a
+        // proven-disjoint kernel can be lowered with an aliasing fact behind it
+        //
+        // the claim is structural: `#[unique]` refuses the copy and `private` on both properties
+        // refuses the forge, which together are what let anything downstream act on it
+        t_buffer,
+
         // `interface contract::iterator<V>` - the loop protocol: `advance()` then `current()`. what
         // `foreach` lowers onto, and the one thing it requires
         t_iterator,

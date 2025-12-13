@@ -7,7 +7,7 @@ struct Grid { ptr<float64> $cells; usize $cols; }
 // match_function compares it first - so a two-index bracket needs no rule of its own
 operator (Grid& $g)[usize $row, usize $col] : float64&
 {
-    return &$g->cells:$[$row * $g->cols + $col];
+    unsafe { return &$g->cells:$[$row * $g->cols + $col]; }
 }
 
 // a **generic** operator, `operator<T>`. the list sits where a function writes one, and `T` is

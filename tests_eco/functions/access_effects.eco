@@ -1,0 +1,50 @@
+// `read`, `inout` and `out` are access effects only at the head of a parameter, and ordinary
+// identifiers everywhere else - so a program that used one of those names before they meant anything
+// still means exactly what it meant. that is what buys them: an Echo keyword is global and
+// word-boundary checked, so a lexed `read` would make `$file->read()` unspellable forever
+
+struct out
+{
+    int32 $v;
+}
+
+function read() : int32 {
+    return 3;
+}
+
+function inout(int32 $n) : int32 {
+    return $n * 2;
+}
+
+// the effects themselves
+function widen(read int32& $src, inout int32& $dst) : void
+{
+    $dst = $src + 1;
+}
+
+function fill(out int32& $slot) : void
+{
+    $slot = 9;
+}
+
+// a parameter whose *type* is spelled `out` - the second token is a `$name`, so the first one is
+// what it has always been
+function unwrap(out $o) : int32
+{
+    return $o->v;
+}
+
+echo read();
+echo inout(5);
+
+int32 $a = 41;
+int32 $b = 0;
+widen(&$a, &$b);
+echo $b;
+
+int32 $c = 0;
+fill(&$c);
+echo $c;
+
+out $o = out(7);
+echo unwrap($o);

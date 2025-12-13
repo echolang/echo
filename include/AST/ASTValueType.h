@@ -120,6 +120,11 @@ namespace AST
 
         IntegerSize(uint8_t size, bool is_signed) : size(size), is_signed(is_signed) {}
 
+        // how wide this type is, in bits. the one place that turns the byte count into a bit
+        // count - both bounds below rest on it, and so does the shift-count refusal in
+        // AST::const_fold, which is a fact about the same width and not a second question
+        unsigned bit_width() const { return static_cast<unsigned>(size) * 8; }
+
         // the bounds are built by shifting a full mask *down* rather than shifting 1 *up* by the
         // width. `1ULL << 64` is undefined behaviour, and because `size` arrives from a
         // non-inlined switch it was a runtime shift: arm64 and x86 mask the count to 6 bits, so
@@ -127,7 +132,7 @@ namespace AST
         // to a uint64. shifting down never reaches a width-sized shift count
         int64_t get_max_negative_value() const {
             if (!is_signed) return 0;
-            const unsigned bits = static_cast<unsigned>(size) * 8;
+            const unsigned bits = bit_width();
             // -2^(bits-1), negated in unsigned space because negating the int64 minimum is
             // itself signed overflow. unsigned wrap-around is defined, and so is the conversion
             const uint64_t magnitude = 1ULL << (bits - 1);
@@ -135,7 +140,7 @@ namespace AST
         }
 
         uint64_t get_max_positive_value() const {
-            const unsigned bits = static_cast<unsigned>(size) * 8;
+            const unsigned bits = bit_width();
             const unsigned value_bits = is_signed ? bits - 1 : bits;
             return ~0ULL >> (64 - value_bits);
         }
@@ -645,6 +650,11 @@ namespace AST
             size_t index;
             std::string name;
             ValueType type;
+
+            // reachable only from inside the declaring type. here as well as on the VarDeclNode for
+            // `kind`'s reason: an *instantiation* has properties and no declaration nodes, so this is
+            // the only thing that can answer for `mem::buffer<int32>` what `mem::buffer` said
+            bool is_private = false;
         };
 
         std::optional<std::string> name;
@@ -655,6 +665,18 @@ namespace AST
         // `Box<int32>` what kind `Box` was declared as. ValueType::make_complex reads it, which is
         // what makes a mismatched (kind, ComplexType) pair unconstructible
         ComplexTypeKind kind = ComplexTypeKind::t_struct;
+
+        // written `#[unique]`: **exactly one value may name this storage.** copying is refused, moving
+        // transfers it, destruction ends it - which is what makes two live values of the type provably
+        // two regions, the one fact AST::path_overlap cannot get any other way.
+        //
+        // here beside `kind` and for its reason: an *instantiation* has a ComplexType and no
+        // declaration node, so this is the only thing that can answer for `buffer<int32>` what
+        // `buffer` was declared as. AST::TypeRegistry::get_or_create_instantiation carries it across
+        //
+        // deliberately not on ValueType: it is a property of the declared type, identical for every
+        // spelling of it, and a flag on the interning identity would fork `buffer<T>` in two
+        bool is_unique = false;
 
         bool is_class_kind() const {
             return kind == ComplexTypeKind::t_class;
@@ -733,7 +755,7 @@ namespace AST
         // knows how a t_generic ValueType maps back to a declaration
         bool declares_type_param(const ValueType &type) const;
 
-        void add_property(const std::string &name, ValueType type) {
+        void add_property(const std::string &name, ValueType type, bool is_private = false) {
             // on a template, a `T`-typed property must reference one of this type's own declared
             // parameters. instantiations carry no type_parameters of their own, so the check only
             // applies while a template is being built
@@ -741,7 +763,7 @@ namespace AST
                 assert(declares_type_param(type));
             }
             _property_map[name] = _properties.size();
-            _properties.push_back(Property { _properties.size(), name, type });
+            _properties.push_back(Property { _properties.size(), name, type, is_private });
         }
 
         // retypes a property that is already there. the *layout* is fixed by the order properties were

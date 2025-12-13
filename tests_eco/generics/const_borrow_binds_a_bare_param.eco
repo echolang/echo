@@ -57,8 +57,11 @@ struct box<K, V>
         usize $i = 0;
 
         while ($i < $this->n) {
-            if ($this->ks:$[$i] == $key) {
-                return $i;
+            // comparing against a raw slot borrows it - discharged by `$i < $this->n`
+            unsafe {
+                if ($this->ks:$[$i] == $key) {
+                    return $i;
+                }
             }
 
             $i = $i + 1;
@@ -87,7 +90,7 @@ operator<K, V> (const box<K, V>& $b)[const K& $key] : const V&
 
     assert($at < $b->n, 'key not found');
 
-    return &$b->vs:$[$at];
+    unsafe { return &$b->vs:$[$at]; }
 }
 
 {

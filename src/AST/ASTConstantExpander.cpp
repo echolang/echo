@@ -2,6 +2,7 @@
 
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ConstRefExprNode.h"
@@ -34,28 +35,6 @@ ConstDeclNode *find_constant(
     // constant. answered by asking the node, which is what every other reader of a symbol does
     return symbol->node.get_ptr<ConstDeclNode>();
 }
-
-namespace
-{
-    // which type a declaration belongs to. a method carries it on `owner_type`; a constructor deliberately
-    // does not - it resolves as a free function named after its struct - so its return type answers instead,
-    // which is the struct's own interned self type and set once rather than per pass
-    ComplexType *owning_type_of(FunctionDeclNode &decl)
-    {
-        if (decl.owner_type != nullptr) {
-            return decl.owner_type;
-        }
-
-        if (decl.is_constructor()) {
-            const ValueType returned = decl.get_return_type();
-            if (returned.is_struct() || returned.is_class()) {
-                return returned.get_complex_type();
-            }
-        }
-
-        return nullptr;
-    }
-};
 
 ConstantExpander::ConstantExpander(Bundle &bundle)
     : _bundle(bundle), _collector(bundle.collector)
@@ -281,9 +260,11 @@ void ConstantExpander::visitFunctionDecl(FunctionDeclNode &node)
 {
     ComplexType *previous_self = _current_self;
 
-    // a member's body may write `self::MAX`; a free function's may not, and gets the null owning_type_of
-    // already answers with rather than whatever type happened to be walked before it
-    _current_self = owning_type_of(node);
+    // a member's body may write `self::MAX`; a free function's may not, and gets the null
+    // AST::enclosing_type_of already answers with rather than whatever type happened to be walked
+    // before it. that is the one owner of "which type is this body inside", shared with the `private`
+    // rule - this file used to keep its own copy, and the two disagreed about a constructor
+    _current_self = enclosing_type_of(node);
 
     RecursiveVisitor::visitFunctionDecl(node);
 

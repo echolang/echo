@@ -215,17 +215,16 @@ struct string
         }
 
         /**
-         * The number of UTF-8 codepoints, in one pass and without a single bitwise operator.
+         * The number of UTF-8 codepoints, in one pass.
          *
-         * A continuation byte is `10xxxxxx`, which is 128..191, which is exactly the bytes whose
-         * quotient by 64 is 2. Every other byte begins a character. `& 0xC0` would say the same
-         * thing and cannot be written: `& | ^ << >>` have precedence entries but no codegen, and a
-         * `&` before a name lexes as address-of anyway.
+         * A continuation byte is `10xxxxxx`, so masking off the low six bits leaves `0x80` on exactly
+         * those and something else on every byte that begins a character. This used to divide by 64 and
+         * compare to 2 - the same statement, made the only way it could be while `&` had a precedence
+         * entry and no codegen - and it carried a paragraph about literal widening that only existed to
+         * keep that divide unsigned. The mask needs none of it.
          *
-         * Dividing by a **literal** is load-bearing. The byte widens to int32 against it and the
-         * widening follows the *source's* signedness, so a `uint8` zero-extends and `0xff` arrives
-         * as 255. Divided by another `uint8` this would stay i8 and reach a signed divide, which is
-         * wrong for every byte over 127.
+         * **Spaces around the `&` are load-bearing**: `&$x` lexes as an address-of and `& $x` as this
+         * operator, which is the one place in the language where whitespace changes meaning.
          *
          * Invalid UTF-8 is counted, not rejected. This is a count, not a validator.
          */
@@ -235,7 +234,7 @@ struct string
             usize $i = 0;
 
             while ($i < $this->size) {
-                if ($this->bytes:$[$i] / 64 != 2) {
+                if (($this->bytes:$[$i] & 192) != 128) {
                     $count = $count + 1;
                 }
 

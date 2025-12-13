@@ -1,6 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
 
+#include "AST/ASTConstFold.h"
 #include "AST/ASTOperatorSemantics.h"
 
 #include "AST/ASTModule.h"
@@ -24,6 +25,7 @@
 #include "AST/ASTDestruction.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTNullability.h"
+#include "AST/ASTAccess.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/LiteralValueNode.h"
 
@@ -183,8 +185,55 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
 
     FunctionDeclNode *prev = _current_function;
     _current_function = &node;
+
+    // a body is its own region of source, so it starts outside every `unsafe` block - see the field's
+    // comment. without this, a function declared inside one would carry the promise into code that
+    // shows no sign of it
+    const size_t prev_unsafe = _unsafe_depth;
+    _unsafe_depth = 0;
+
     RecursiveVisitor::visitFunctionDecl(node);
+
+    _unsafe_depth = prev_unsafe;
     _current_function = prev;
+}
+
+void TypeChecker::visitScope(ScopeNode &node)
+{
+    _unsafe_depth += node.is_unsafe ? 1 : 0;
+
+    RecursiveVisitor::visitScope(node);
+
+    _unsafe_depth -= node.is_unsafe ? 1 : 0;
+}
+
+// **a private property is reachable from inside its own type and nowhere else.**
+//
+// the modifier is what turns an invariant from something a library keeps into something the compiler
+// knows. `mem::buffer<T>` says exactly one value names its allocation; without this,
+// `$b->data:$ = $a->data;` builds a second owner by hand, in ordinary safe code, and the claim every
+// aliasing conclusion rests on is a convention. see notes/aliasing.md
+//
+// reported here rather than at the layout, because privacy is about the *site* and the layout has no
+// idea where it is being read from
+void TypeChecker::check_private_member(
+    MemberAccessNode &node, const ComplexType &complex, const ComplexType::Property &property)
+{
+    if (!property.is_private) {
+        return;
+    }
+
+    const ComplexType *from =
+        _current_function != nullptr ? enclosing_type_of(*_current_function) : nullptr;
+
+    if (can_reach_private_member(from, &complex)) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::PrivateMember>(
+        code_ref_for(node.get_member_name()),
+        property.name,
+        complex.namespaced_name());
 }
 
 void TypeChecker::check_has_implementation(FunctionDeclNode &node)
@@ -369,12 +418,21 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     ValueType base_type = node.base_target_type();
     if (base_type.has_complex_type()) {
         ComplexType *complex = base_type.get_complex_type();
-        const std::string member = node.get_member_name().value();
-        if (complex && !complex->has_property(member)) {
-            _collector.collect_issue<Issue::UnknownMember>(
-                code_ref_for(node.get_member_name()),
-                member,
-                complex->name.value_or("<anonymous>"));
+        if (complex != nullptr) {
+            // one lookup for both questions - whether the name denotes a property at all, and
+            // whether the one it denotes is reachable from here
+            const std::string member = node.get_member_name().value();
+            const ComplexType::Property *property = complex->find_property(member);
+
+            if (property == nullptr) {
+                _collector.collect_issue<Issue::UnknownMember>(
+                    code_ref_for(node.get_member_name()),
+                    member,
+                    complex->name.value_or("<anonymous>"));
+            }
+            else {
+                check_private_member(node, *complex, *property);
+            }
         }
     }
 
@@ -587,6 +645,33 @@ void TypeChecker::visit_addr_of_expr(AddrOfExprNode &node)
                 node.operand->result_type().get_type_desciption()));
     }
 
+    // **every implicit promotion arrives here**, which is why there are two call sites and not six.
+    // the explicit `T&($p:$)` is a cast; `&$p:$[0]`, the borrow a call argument gets, a receiver's
+    // auto-borrow and a `return &...` are all this node, minted by the parser or by CallResolver
+    //
+    // `mem::init` and `mem::take` are exempt, and it is not a convenience: they are the two seams that
+    // deliberately name storage nothing is accounting for, and a promotion promises the storage holds
+    // a valid `T` - which for the slot `mem::init` is about to fill is *false at the moment it would
+    // be made*. AST::is_unaccounted_storage is the same boundary said from the other side
+    //
+    // asked of AST::builtin_owns_raw_storage and not of `is_builtin()`: `dprint`, `mem::ref_count` and
+    // `mem::weak_count` are builtins taking an ordinary `T&`, and exempting those let `dprint($p:$[0])`
+    // mint a trusted borrow out of a raw address with nothing asked of the author
+    const bool callee_owns_raw_storage = _context_callee != nullptr
+        && _context_callee->is_builtin()
+        && builtin_owns_raw_storage(builtin_kind_for(_context_callee->builtin.value()));
+
+    if (!callee_owns_raw_storage) {
+        // **the call's token when there is one.** a *synthesized* borrow - a receiver's auto-borrow,
+        // the one CallResolver wraps an argument in - has no token of its own, and its operand's
+        // varref carries the *declaration's*, so a diagnostic pointed there lands on a line that has
+        // nothing to do with the promotion. `$p->bump()` reported at `ptr<Counter> $p = &$c;`
+        const TokenReference &at =
+            _context_token != nullptr ? *_context_token : location_of_expression(node.operand);
+
+        check_unsafe_promotion(node.result_type(), node.operand, at);
+    }
+
     RecursiveVisitor::visit_addr_of_expr(node);
 }
 
@@ -689,7 +774,7 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
 
     const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
 
-    if (kind != BuiltinKind::t_take && kind != BuiltinKind::t_init) {
+    if (!builtin_owns_raw_storage(kind)) {
         return;
     }
 
@@ -1187,7 +1272,55 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         }
     }
 
+    // an *implicit* cast never promotes: nothing the compiler inserts turns raw storage into a
+    // trusted borrow on its own, and reporting against one would blame the author for a node they
+    // did not write. the implicit borrow at an argument position is an AddrOf, and it is checked there
+    if (!node.is_implcit && node.expr != nullptr
+        && narrowing_promotes_raw_storage(node.expr->result_type(), node.cast_to)) {
+        report_unsafe_promotion(node.cast_to, location_of_expression(node.expr));
+    }
+
     RecursiveVisitor::visitTypeCast(node);
+}
+
+// **forming a trusted borrow out of raw storage is the operation `unsafe` marks.**
+//
+// deliberately *not* pointer casting. `ptr<uint32>(&$f)` only computes another raw address - reads and
+// writes through a `ptr<T>` carry no type tag, so the optimizer stays conservative around all of them
+// and nothing has been promised. what licenses a promise is the step that turns a raw address into a
+// `T&`: from there the type is the contract, every later access carries that family, and it keeps
+// carrying it through however many function boundaries the borrow travels.
+//
+// so this fires on every way a borrow can be minted, not only the explicit cast - the address of a raw
+// element, the implicit borrow a call argument gets, a receiver's auto-borrow, a `return &...`. All of
+// them arrive here as one of the two nodes below, which is why there are two call sites and not six.
+//
+// a `#[builtin:]` callee is exempt: `mem::init` and `mem::take` are the two seams that deliberately
+// name storage the compiler is not accounting for, and requiring them to manufacture an ordinary
+// readable `T&` over uninitialized bytes would be asking for a promise that is *false* at the moment
+// it is made
+void TypeChecker::check_unsafe_promotion(
+    const ValueType &to, ExprNode *operand, const TokenReference &at)
+{
+    if (operand == nullptr || !borrow_promotes_raw_storage(to, operand)) {
+        return;
+    }
+
+    report_unsafe_promotion(to, at);
+}
+
+// **the `unsafe` gate and the issue, said once.** the two refusal predicates are different questions -
+// one is about a place a borrow is taken of, the other about a value conversion - but what happens
+// once either answers yes is the same, and a depth rule that grows a condition in one of two copies
+// is a rule the other silently keeps the old version of
+void TypeChecker::report_unsafe_promotion(const ValueType &to, const TokenReference &at)
+{
+    if (_unsafe_depth > 0) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::UnsafePromotion>(
+        code_ref_for(at), to.get_type_desciption());
 }
 
 void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
@@ -1217,6 +1350,27 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
         if (auto refusal = binary_operand_refusal(node.op_node->op, lhs_facts, rhs_facts)) {
             _collector.collect_issue<Issue::GenericError>(
                 code_ref_for(node.op_node->token_literal), *refusal);
+        }
+
+        // **a shift count the compiler can see, checked here as well as in the folder.** at or above the
+        // operand's width the emitted `shl`/`lshr`/`ashr` is poison, and the value that reaches it is
+        // poison whether or not anybody asked for the expression to be folded - so `const(1 << 32)` being
+        // a located error while the plain `1 << 32` beside it compiled to a number nobody chose was one
+        // fact with one diagnostic and one silence. AST::shift_count_refusal is the shared sentence.
+        //
+        // asked of AST::const_fold rather than of a literal, so `1 << (16 * 2)` is caught too, and only
+        // when it answers: a count that is not a constant is a runtime value this cannot speak about, and
+        // a refused one is somebody else's diagnostic. The fixpoint has converged by the time this pass
+        // runs, so `t_pending` here is already "no round will answer it"
+        if (node.op_node->op != nullptr && node.op_node->op->is_shift()) {
+            const ConstFoldResult count = const_fold(node.rhs);
+
+            if (count.is_folded()) {
+                if (auto refusal = shift_count_refusal(lhs, count.bits)) {
+                    _collector.collect_issue<Issue::GenericError>(
+                        code_ref_for(node.op_node->token_literal), *refusal);
+                }
+            }
         }
 
         // **the one predicate**, AST::binary_has_builtin_meaning, which the parser reads to decide

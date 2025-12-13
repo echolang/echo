@@ -118,6 +118,41 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
     return false;
 }
 
+bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
+{
+    // no tail, for builtin_message_index's reason - and here the silent answer would be the unsafe
+    // one: a builtin added without an arm would keep the `unsafe` rule rather than escape it
+    switch (kind) {
+        case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
+            return true;
+
+        // these three take an ordinary `T&`, which is exactly why they are named: as "every builtin"
+        // they were exempt from the promotion rule and had no business being
+        case AST::BuiltinKind::t_ref_count:
+        case AST::BuiltinKind::t_weak_count:
+        case AST::BuiltinKind::t_dprint:
+
+        case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_size_of:
+        case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_alloc_bytes:
+        case AST::BuiltinKind::t_realloc_bytes:
+        case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_live_allocations:
+        case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_process_argv:
+        case AST::BuiltinKind::t_process_envp:
+            return false;
+    }
+
+    return false;
+}
+
 std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
 {
     // no tail, deliberately: a builtin added without an arm here is a compile error rather than one

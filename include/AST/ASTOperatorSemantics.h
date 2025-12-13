@@ -191,6 +191,22 @@ namespace AST
     // asserting on "Both operands to ICmp instruction are not of the same type"
     std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs);
 
+    // **do these two operands meet at one type at all?** the gate every reconciliation site asks before
+    // it reaches for the rule above, and false for exactly the two shifts.
+    //
+    // `<<` and `>>` take a value and a *count*. The count is not a second operand, so there is nothing
+    // for it to meet - and reconciling anyway hands it a vote it must not have: `int32 -16 >> uint32 2`
+    // reconciled to `uint32` and came out **1073741820**, because the *count's* type made an arithmetic
+    // shift logical, while the same shift by an `int32 2` answered -4. `uint8 200 << int64 40` left
+    // `uint8` entirely and answered 219902325555200. The operand's type is the operation's type, whole,
+    // and the count only says how far.
+    //
+    // four readers, and they have to agree or the answer depends on which pass typed an operand first:
+    // Parser::parse_binary_expr and OperatorRewriter::widen_binary_operands, which insert the cast that
+    // must not be inserted here; BinaryExprNode::result_type, which would otherwise answer void for a
+    // mismatched pair and invite one; and AST::const_fold, which folds at the type this names
+    bool binary_reconciles_operands(const Operator *op);
+
     // **the type a binary numeric operation is performed at** - what the two operands were reconciled
     // to. the rule above's, read the other way round: a nullopt there means there was nothing to
     // reconcile, and for this question that is the operands already agreeing, so the lhs is the answer.
@@ -198,12 +214,31 @@ namespace AST
     // what needs it is signedness, which cannot be taken from one side alone: `int64 < uint32`
     // reconciles to int64 and is therefore a *signed* comparison, so "either operand is unsigned" is a
     // second answer that differs from this one in exactly that case. ExprCodegen::gen_binary_expr reads
-    // it for `/ % ** < > <= >=`, and AST::const_fold folds the same operators at the same type - two
+    // it for `/ % ** >> < > <= >=`, and AST::const_fold folds the same operators at the same type - two
     // answers there is a program whose `const if` takes one arm and whose `if` takes the other.
+    //
+    // **the operator is part of the question**, for binary_reconciles_operands' reason: a shift is
+    // performed at its left operand's type whatever the count is written as. It was `(lhs, rhs)` for as
+    // long as every operator was symmetric, and `>>` is the one that reads this to pick between two
+    // *instructions* rather than between two spellings of one.
     //
     // AST::ConstFold still calls common_numeric_type itself, because it has to tell "no common type"
     // from "already agree" to report the first. one rule, and only one of its callers needs the failure
-    ValueType binary_operation_type(const ValueType &lhs, const ValueType &rhs);
+    ValueType binary_operation_type(const Operator *op, const ValueType &lhs, const ValueType &rhs);
+
+    // **why this shift count has no answer**, or nullopt when it has one.
+    //
+    // at or above the shifted type's width LLVM's `shl`/`lshr`/`ashr` are **poison** rather than a
+    // defined value, so there is nothing for a fold to agree with and nothing for a program to mean. A
+    // *negative* count is the same case arriving differently: a ConstFoldResult is sign-extended, so it
+    // reaches here as a huge unsigned and the one comparison catches both.
+    //
+    // two readers, and the split is the point. AST::const_fold refuses `const(1 << 32)` because it was
+    // asked to produce a value; TypeChecker::visitBinaryExpr refuses the plain `1 << 32` beside it,
+    // which used to compile to poison in silence. Refusing in one place only is the shape this file
+    // warns about everywhere else - a `const if` and the `if` beside it disagreeing - and here it was
+    // worse than a disagreement, because the runtime half had no diagnostic at all
+    std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count);
 };
 
 #endif

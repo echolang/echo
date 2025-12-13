@@ -41,6 +41,13 @@
  * Linear probing over a power-of-two capacity, tombstones on removal, and a rehash whenever the live
  * entries plus the tombstones pass three quarters of the slots.
  *
+ * **The power of two is load-bearing rather than tidy.** It is what lets the three probe entry points bring
+ * a 64-bit hash into range with `$h & ($cap - 1)` instead of `$h % $cap`, which is a hardware divide on the
+ * critical path of every lookup and every insert. `rehash` is the one place that ever sets a nonzero
+ * capacity and `slots_for` is the one place that computes one, so the invariant has a single owner. The
+ * cost is that only the *low* bits of a hash choose a slot, which is why `hash::of` ends on a fold that
+ * brings entropy down from the top.
+ *
  * `capacity()` is **slots, not entries**, so you cannot read off how much room is left - which means the
  * only safe assumption is that **every insert re-seats the table**. A `V&` from `->at($k)` or from a
  * `foreach` binding is valid until the next insert and no further. `->remove()` and `->take()` only write a
@@ -151,8 +158,14 @@ struct map<K, V> : contract::iterable<V>
                     // wherever the properties allow - so a `K` whose author wrote a *mutable* copy
                     // constructor is one this map cannot copy, which is that author's decision arriving
                     // here rather than a limitation of this file
-                    mem::init<K>($this->keys:$[$i], $other->keys:$[$i]);
-                    mem::init<V>($this->values:$[$i], $other->values:$[$i]);
+                    // the *reads* are promotions - `$other`'s slot is raw storage this loop has
+                    // just proved live through `slot_is_live`. the writes are not: `mem::init` names
+                    // storage that deliberately holds nothing yet, which is the one thing a borrow
+                    // must never promise
+                    unsafe {
+                        mem::init<K>($this->keys:$[$i], $other->keys:$[$i]);
+                        mem::init<V>($this->values:$[$i], $other->values:$[$i]);
+                    }
                 }
 
                 $i = $i + 1;
@@ -320,7 +333,10 @@ struct map<K, V> : contract::iterable<V>
 
         while ($i < $other->cap) {
             if ($other->slot_is_live($i)) {
-                $this[$other->keys:$[$i]] = $other->values:$[$i];
+                // discharged by the test above it: a live slot holds a whole `K` and a whole `V`
+                unsafe {
+                    $this[$other->keys:$[$i]] = $other->values:$[$i];
+                }
             }
 
             $i = $i + 1;
@@ -450,7 +466,9 @@ struct map<K, V> : contract::iterable<V>
 
         while ($i < $this->cap) {
             if ($this->slot_is_live($i)) {
-                $out[] = $this->keys:$[$i];
+                unsafe {
+                    $out[] = $this->keys:$[$i];
+                }
             }
 
             $i = $i + 1;
@@ -523,11 +541,34 @@ struct map<K, V> : contract::iterable<V>
     }
 
     /**
+     * Where a hash starts its probe path.
+     *
+     * **Masked, not divided**, which is the whole of what the power-of-two capacity buys: `%` reads more
+     * plainly and costs a hardware divide on the critical path of every lookup and every insert, roughly
+     * the whole of the rest of those functions. All three entry points - the lookup, the insert and
+     * `rehash`'s placement - start here, so the encoding lives in one place rather than at each of them.
+     *
+     * **Only sound on a nonzero capacity.** `$cap - 1` is the low bits of a slot index for a power of two
+     * and *every bit set* for zero, which would index a null buffer at an arbitrary offset rather than
+     * fault - so each caller establishes a nonzero capacity before it gets here: `find` returns early,
+     * `seat` grows, and `free_slot_for` runs past `rehash`'s fresh allocation.
+     *
+     * This is also the reason `hash::of` ends on a high-to-low fold: only the low bits reach this, so a
+     * hasher whose entropy sits at the top would collide here and nowhere a test would look.
+     */
+    #[inline]
+    const function first_slot(uint64 $h) : usize
+    {
+        return $h & ($this->cap - 1);
+    }
+
+    /**
      * The next slot on a probe path, wrapping at the end of the table.
      *
-     * **Wrapped with a compare, not with `% $this->cap`**, which would be a hardware divide per probe step;
-     * the one in `find` and `seat` is the whole of it. All three walks - the lookup, the insert and
-     * `rehash`'s placement - step this way, and the step itself is not what differs between them.
+     * **Wrapped with a compare rather than with arithmetic**, which is a different choice from the one
+     * `first_slot` makes: that one starts from a 64-bit hash that has to be brought into range at all,
+     * while this one already holds a valid slot and only has to notice the end. All three walks step this
+     * way, and the step itself is not what differs between them.
      */
     #[inline]
     const function next_slot(usize $at) : usize
@@ -613,9 +654,8 @@ struct map<K, V> : contract::iterable<V>
 
         uint64 $h = $this->slot_hash($key);
 
-        // the one divide. `$h` is a uint64 and `$cap` a usize; the operation reconciles at uint64 and the
-        // assignment narrows, which is an ordinary conversion
-        usize $at = $h % $this->cap;
+        // the empty-table return above is what establishes `first_slot`'s nonzero capacity here
+        usize $at = $this->first_slot($h);
         usize $steps = 0;
 
         // bounded by the capacity rather than `while (true)`: a table with no empty slot left has nothing
@@ -635,8 +675,12 @@ struct map<K, V> : contract::iterable<V>
             // ever runs on a slot that could actually match. a tombstone's 1 never equals a sealed hash,
             // so it needs no case of its own here
             if ($slot == $h) {
-                if ($this->keys:$[$at] == $key) {
-                    return $at;
+                // the hash word *is* the proof: a slot whose hash matches is a live slot, and a live
+                // slot holds a whole `K`. that is what the sealed-hash encoding buys
+                unsafe {
+                    if ($this->keys:$[$at] == $key) {
+                        return $at;
+                    }
                 }
             }
 
@@ -682,12 +726,19 @@ struct map<K, V> : contract::iterable<V>
         // grown **before** the probe, so the slot handed back is a slot in the table the entry will
         // actually live in. probing first and growing after would return an index into a block `rehash` has
         // already freed
-        if ($this->over_load($this->len + $this->tombs + 1, $this->cap)) {
+        //
+        // **`$this->cap == 0` is stated rather than derived.** it is already implied by the load test beside
+        // it - the left operand is at least 1, so `over_load(>=1, 0)` is `4 > 0` and an empty table always
+        // grows - but that is an accident of the threshold rather than something this function says, and it
+        // is `first_slot`'s precondition that rests on it. This is where `seat` establishes it
+        if ($this->cap == 0 || $this->over_load($this->len + $this->tombs + 1, $this->cap)) {
             $this->grow();
         }
 
         uint64 $h = $this->slot_hash($key);
-        usize $at = $h % $this->cap;
+
+        // the grow above is what establishes `first_slot`'s nonzero capacity here
+        usize $at = $this->first_slot($h);
 
         // the first tombstone walked past, so an insert reuses a dead slot instead of adding a live one
         // beyond it. `$this->cap` is "none seen", for `find`'s reason
@@ -726,20 +777,24 @@ struct map<K, V> : contract::iterable<V>
             }
             else {
                 if ($slot == $h) {
-                    if ($this->keys:$[$at] == $key) {
-                        // a **replace**. the stored key stays: it compares equal to the one handed in, so
-                        // swapping it is work with no observable result and one more copy of a `K`
-                        //
-                        // and the value is destroyed *here*, because nothing else will: the write is one
-                        // call, so there is no assignment behind it for the compiler to push a teardown
-                        // onto. `$doomed` is a local of this `const if` arm, so the ordinary scope rule
-                        // destroys it at the end of the arm - which is before this function returns, and
-                        // therefore before `mem::init` fills the slot
-                        const if (mem::needs_destruction<V>()) {
-                            V $doomed = mem::take<V>($this->values:$[$at]);
-                        }
+                    // the hash word is the proof, exactly as in `find_slot`
+                    unsafe {
+                        if ($this->keys:$[$at] == $key) {
+                            // a **replace**. the stored key stays: it compares equal to the one handed
+                            // in, so swapping it is work with no observable result and one more copy
+                            // of a `K`
+                            //
+                            // and the value is destroyed *here*, because nothing else will: the write
+                            // is one call, so there is no assignment behind it for the compiler to
+                            // push a teardown onto. `$doomed` is a local of this `const if` arm, so
+                            // the ordinary scope rule destroys it at the end of the arm - which is
+                            // before this function returns, and therefore before `mem::init` fills it
+                            const if (mem::needs_destruction<V>()) {
+                                V $doomed = mem::take<V>($this->values:$[$at]);
+                            }
 
-                        return $at;
+                            return $at;
+                        }
                     }
                 }
             }
@@ -837,11 +892,12 @@ struct map<K, V> : contract::iterable<V>
      * The first empty slot on `$h`'s probe path.
      *
      * **Only sound on a table with no tombstones**, which is the one `rehash` has just built - which is why
-     * this is not `find` with a different comparison.
+     * this is not `find` with a different comparison. Its one caller is inside `rehash`, past the fresh
+     * allocation, which is what establishes `first_slot`'s nonzero capacity here.
      */
     const function free_slot_for(uint64 $h) : usize
     {
-        usize $at = $h % $this->cap;
+        usize $at = $this->first_slot($h);
 
         while ($this->hashes:$[$at] != 0) {
             $at = $this->next_slot($at);
@@ -893,7 +949,11 @@ operator<K, V> (map<K, V>& $m)[const K& $key] : V&
 
     assert($at < $m->cap, 'map key not found');
 
-    return &$m->values:$[$at];
+    // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
+    // above turns "not found" into a stop rather than a borrow of nothing
+    unsafe {
+        return &$m->values:$[$at];
+    }
 }
 
 /**
@@ -908,7 +968,11 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
 
     assert($at < $m->cap, 'map key not found');
 
-    return &$m->values:$[$at];
+    // discharged by the probe: `find_slot` only answers an index whose slot is live, and the assert
+    // above turns "not found" into a stop rather than a borrow of nothing
+    unsafe {
+        return &$m->values:$[$at];
+    }
 }
 
 /**
@@ -976,7 +1040,11 @@ struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
      */
     function current() : V&
     {
-        return &$this->values:$[$this->pos - 1];
+        // discharged by the protocol: `advance()` has already walked to a live slot and left `$pos`
+        // one past it, which is the whole content of "valid after a true advance"
+        unsafe {
+            return &$this->values:$[$this->pos - 1];
+        }
     }
 
     /**
@@ -985,6 +1053,8 @@ struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
      */
     function key() : K
     {
-        return $this->keys:$[$this->pos - 1];
+        unsafe {
+            return $this->keys:$[$this->pos - 1];
+        }
     }
 }

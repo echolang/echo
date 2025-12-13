@@ -1,0 +1,34 @@
+// **the semantic boundary is the promotion, not the cast.**
+//
+// reinterpreting one pointer type as another only computes another raw address: reads and writes
+// through a `ptr<T>` carry no type tag, so the optimizer stays conservative around every one of them
+// and nothing has been promised. what licenses a promise is turning that address into a `T&` - from
+// there the type is the contract, and every access through the borrow is optimized as `T` in this
+// function and in everything the borrow is passed to.
+
+$n = 0;
+ptr<int32> $ints = &$n;
+
+// no word needed: still a raw address
+ptr<uint8> $bytes = ptr<uint8>($ints:$);
+
+// and reading through it is untagged, so still no word
+echo $bytes:$[0];
+
+// **this** is the promotion, in every form it can be written
+
+// one: the explicit narrowing
+uint8& $r = uint8&($bytes:$);
+
+// two: the address of a raw element
+ptr<uint8> $e = &$bytes:$[1];
+
+// three: the implicit borrow at an argument position
+function takes(uint8& $b) : void { $b = 1; }
+takes($bytes:$[2]);
+
+// four: a receiver's auto-borrow
+struct Counter { int32 $n; function bump() : void { $this->n = $this->n + 1; } }
+Counter $c = Counter(0);
+ptr<Counter> $p = &$c;
+$p->bump();

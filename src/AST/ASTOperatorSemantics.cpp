@@ -276,10 +276,18 @@ namespace AST
                 case Token::Type::t_op_div:
                 case Token::Type::t_op_mod:
                 case Token::Type::t_op_pow:
-                // the one bitwise operator that lowers. `& | << >>` sit beside it in the predefined set
-                // and in AST::op_precedence, so they parse - and are refused here, which is what makes
-                // them a located diagnostic instead of the codegen throw they used to reach
+                // **the bitwise five, and they are integer-only by construction.** each sits in the
+                // predefined set and carries a tier in AST::op_precedence following C's ordering - shift
+                // tighter than `&`, `&` tighter than `^`, `^` tighter than `|` - so nothing here decides
+                // how they group. The arm below is what makes them mean anything: a float, a bool and a
+                // pointer all fall through to `is_comparison()` and are refused, which is right for every
+                // one of them. `>>` reads the operation's signedness in codegen, so it is arithmetic over
+                // a signed operand and logical over an unsigned one
+                case Token::Type::t_and:
+                case Token::Type::t_or:
                 case Token::Type::t_xor:
+                case Token::Type::t_op_shl:
+                case Token::Type::t_op_shr:
                     return true;
                 default:
                     return op->is_comparison();
@@ -447,8 +455,37 @@ namespace AST
             : rhs;
     }
 
-    ValueType binary_operation_type(const ValueType &lhs, const ValueType &rhs)
+    bool binary_reconciles_operands(const Operator *op)
     {
+        // a null operator is every symbol this language spells but two, so the safe answer is the
+        // common one: a caller with nothing to ask reconciles, exactly as it did before there was
+        // anything to ask
+        return op == nullptr || !op->is_shift();
+    }
+
+    ValueType binary_operation_type(const Operator *op, const ValueType &lhs, const ValueType &rhs)
+    {
+        if (!binary_reconciles_operands(op)) {
+            return lhs;
+        }
+
         return common_numeric_type(lhs, rhs).value_or(lhs);
+    }
+
+    std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count)
+    {
+        if (!shifted.is_integer_type()) {
+            return std::nullopt;
+        }
+
+        const unsigned bits = get_integer_size(shifted.get_primitive_type()).bit_width();
+
+        if (count < bits) {
+            return std::nullopt;
+        }
+
+        return fmt::format(
+            "this shifts a '{}' by {} or more bits, which at runtime is undefined; here it is simply "
+            "refused.", shifted.get_type_desciption(), bits);
     }
 };

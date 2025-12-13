@@ -1,0 +1,21 @@
+// a shift count at or above the operand's width is **poison** in LLVM rather than a defined value, so
+// there is nothing for a fold to agree with and nothing for a program to mean - the same bargain the
+// overflow arms make, and the same wording.
+//
+// **both spellings, deliberately.** the check lives in AST::shift_count_refusal and has two readers:
+// AST::const_fold, which was asked to produce a value, and AST::TypeChecker, which sees the ordinary
+// expression beside it. it used to be the folder alone, so `const(1 << 32)` was a located error while
+// the plain `1 << 32` under it compiled to a number nobody chose, with no diagnostic at all
+//
+// a *negative* count arrives at that test as a sign-extended huge unsigned, so the one comparison covers
+// both - and the count is const-folded rather than read as a literal, so `16 * 2` is caught too
+
+int32 $folded = const(1 << 32);
+
+int32 $plain = 1 << 32;
+
+int32 $computed = 1 << (16 * 2);
+
+int32 $negative = 1 << -1;
+
+echo $folded;

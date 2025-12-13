@@ -346,7 +346,13 @@ struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
      */
     function current() : V&
     {
-        return $this->table->at($this->order[$this->pos - 1]);
+        // **a receiver auto-borrow is a promotion too**, and this is the one in this file: `$table` is
+        // a raw `ptr<>` the cursor holds, so calling a method on it establishes a trusted borrow of
+        // the table. discharged by the cursor's own contract - it is created from a live map and does
+        // not outlive it, which is the rule every borrow into a container already keeps
+        unsafe {
+            return $this->table->at($this->order[$this->pos - 1]);
+        }
     }
 
     function key() : K

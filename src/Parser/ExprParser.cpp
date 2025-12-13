@@ -670,12 +670,19 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     // asks again for the operands only a later pass gives a type to. the rule is shared; the insertion
     // is not, and this is the moment that can do better than a cast: try_implicit_cast retypes a literal
     // outright where the rewriter has nothing left but a TypeCastNode to wrap the operand in
-    if (const auto common = AST::common_numeric_type(lhs_type, rhs_type)) {
-        // exactly one side differs: the common type is always one of the two
-        if (lhs_type.get_primitive_type() != common->get_primitive_type()) {
-            lhs = try_implicit_cast(payload, lhs, *common);
-        } else {
-            rhs = try_implicit_cast(payload, rhs, *common);
+    //
+    // gated on AST::binary_reconciles_operands, because a shift's rhs is a count rather than a second
+    // operand: widening `$byte` to meet an `int64` count is the shift leaving the type it was written at
+    const AST::Operator *reconcile_op = op_node != nullptr ? op_node->op : nullptr;
+
+    if (AST::binary_reconciles_operands(reconcile_op)) {
+        if (const auto common = AST::common_numeric_type(lhs_type, rhs_type)) {
+            // exactly one side differs: the common type is always one of the two
+            if (lhs_type.get_primitive_type() != common->get_primitive_type()) {
+                lhs = try_implicit_cast(payload, lhs, *common);
+            } else {
+                rhs = try_implicit_cast(payload, rhs, *common);
+            }
         }
     }
 

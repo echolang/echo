@@ -134,6 +134,19 @@ namespace AST
                 || type == Token::Type::t_logical_geq;
         }
 
+        // **the two operators whose right operand is not an operand.** `<<` and `>>` take a value and a
+        // *count*, which is why they are the only asymmetric symbols this language spells: every other
+        // binary operator combines two values of one type, so a narrower side is widened to meet the
+        // other and the answer is that type.
+        //
+        // one fact rather than a case label at each site, because the sites that must know are spread
+        // across three passes and getting one of them wrong is silent - see
+        // AST::binary_reconciles_operands, which is the question they actually ask
+        inline bool is_shift() const {
+            return type == Token::Type::t_op_shl
+                || type == Token::Type::t_op_shr;
+        }
+
         // the two comparisons that ask "is this the same thing", rather than ordering it. the only
         // operators a class handle answers: two handles compare as addresses, and a handle compares
         // against null. every ordering operator on a class stays a type error

@@ -46,7 +46,12 @@ echo $c->scaled(0.5);
 
 // `->` reaches through every pointer level to find the receiver, exactly as a member read does
 ptr<Counter> $p = &$c;
-$p->bump();
+
+// calling a method on a raw pointer borrows its pointee, which is the promotion - the same step
+// `(*p).method()` needs `unsafe` for in Rust, and for the same reason
+unsafe {
+    $p->bump();
+}
 echo $c->count;
 
 // and a receiver reached through a member chain

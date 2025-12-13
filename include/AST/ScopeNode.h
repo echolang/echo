@@ -62,6 +62,22 @@ namespace AST
         // set on a function's, constructor's and destructor's argument scope
         bool is_function_boundary = false;
 
+        // written `unsafe { ... }`: inside this block the author has taken responsibility for the
+        // operations that can manufacture a *typed place over untyped storage*, which is currently
+        // exactly one - reinterpreting one pointer type as another.
+        //
+        // **a flag on the scope and not a node kind**, for AST::ForeachNode's reason read backwards:
+        // a new node owes an arm to every visitor, a clone, a `result_type`, an ownership rule and a
+        // codegen case, and this needs none of them. an unsafe block *is* an ordinary block - it
+        // opens a lexical namespace, drops its locals and lowers identically. the only thing that
+        // differs is what AST::TypeChecker will accept inside it, and a bool is the whole of that
+        //
+        // deliberately **not** inherited by a nested function declared inside the block: the promise
+        // is about a region of source the author is looking at, and a body written elsewhere is not
+        // one. AST::TypeChecker's depth counter is what enforces that, by being saved and cleared
+        // across a function boundary
+        bool is_unsafe = false;
+
         NodeReferenceList children;
 
         ScopeNode() {};

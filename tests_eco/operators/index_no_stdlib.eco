@@ -9,7 +9,7 @@ struct Ring
 
 operator (Ring& $r)[usize $i] : int32&
 {
-    return &$r->slots:$[$i];
+    unsafe { return &$r->slots:$[$i]; }
 }
 
 int32 $a = 0;

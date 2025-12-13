@@ -455,6 +455,12 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // the storage class is the template's: `Box<int32>` is a class exactly when `Box` is one. without
     // this an instantiation would answer t_struct and lower as a stack aggregate
     instantiated->kind = tmpl->kind;
+
+    // and so is uniqueness: `buffer<int32>` owns an allocation exactly when `buffer` says it does.
+    // without this every instantiation of a unique template would be copyable, which is silent - the
+    // copy is a byte copy, so two values end up naming one allocation and both free it
+    instantiated->is_unique = tmpl->is_unique;
+
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = args;
 
@@ -485,7 +491,12 @@ void AST::TypeRegistry::derive_instantiation(
     inst->_properties.clear();
     inst->_property_map.clear();
     for (const auto &prop : tmpl->_properties) {
-        inst->add_property(prop.name, substitute_type(prop.type, subst, *this));
+        // **privacy travels with the property**, for `kind`'s and `is_unique`'s reason: an
+        // instantiation has properties and no declaration nodes, so this line is the only thing that
+        // can answer for `mem::buffer<int32>` what `mem::buffer<T>` declared. without it privacy held
+        // for a template and evaporated for every instance - which is to say, for every value anyone
+        // actually builds
+        inst->add_property(prop.name, substitute_type(prop.type, subst, *this), prop.is_private);
     }
 
     // the conformances, at the same moment and through the same substitution as the properties, because

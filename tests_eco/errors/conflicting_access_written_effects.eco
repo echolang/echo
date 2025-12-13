@@ -1,0 +1,28 @@
+// the written half of the rule: `inout` and `out` are exclusive wherever they are declared, not only
+// on a method's receiver. and when the second access is on another line it is a second place to look
+// at, so it becomes a label rather than a repeat of the frame
+
+struct Pair
+{
+    int32 $left;
+    int32 $right;
+}
+
+function widen(inout int32& $dst, read int32& $src) : void
+{
+    $dst = $src + 1;
+}
+
+function fill(out int32& $slot, read int32& $from) : void
+{
+    $slot = $from;
+}
+
+Pair $p = Pair(1, 2);
+
+widen(
+    &$p->left,
+    &$p->left
+);
+
+fill(&$p->right, &$p->right);

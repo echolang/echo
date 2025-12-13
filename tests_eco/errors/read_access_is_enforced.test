@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] read_access_is_enforced.eco:19:22
+
+  '$src' takes 'read' access, so this writes to storage the parameter promised only to read. Declare it 'inout' if the body is meant to write through it.
+
+  18 | {
+  19 |     $src->cells:$[0] = 999;
+     :                      ^
+  20 | }
+
+[error] read_access_is_enforced.eco:25:12
+
+  '$src' takes 'read' access, so its storage cannot be handed to '$b', which does not. Declare '$b' 'read' as well, or take '$src' as 'inout' if it is meant to be written.
+
+  24 | {
+  25 |     mutate($src);
+     :            ^^^^
+  26 | }
+
+2 errors, nothing was compiled.

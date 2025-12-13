@@ -43,8 +43,12 @@ struct pair_buffer<A, B> : contract::iterable<B>
             while ($i < $other->n) {
                 // mem::init and not an indexed write: these slots came out of mem::alloc, so `=` would
                 // be a re-assignment and would end whatever bytes the allocator handed back
-                mem::init<A>($this->ks:$[$i], $other->ks:$[$i]);
-                mem::init<B>($this->vs:$[$i], $other->vs:$[$i]);
+                // `mem::init`'s destination is exempt - it names storage that deliberately holds
+                // nothing yet - but *reading* the source slot borrows it, and that is a promotion
+                unsafe {
+                    mem::init<A>($this->ks:$[$i], $other->ks:$[$i]);
+                    mem::init<B>($this->vs:$[$i], $other->vs:$[$i]);
+                }
 
                 $i = $i + 1;
             }
@@ -90,7 +94,7 @@ struct pair_buffer<A, B> : contract::iterable<B>
 
     function at(usize $i) : B&
     {
-        return &$this->vs:$[$i];
+        unsafe { return &$this->vs:$[$i]; }
     }
 
     // a borrow **forwarded from another call**, which nothing else in the corpus does - the shape a
@@ -115,12 +119,12 @@ struct pair_buffer<A, B> : contract::iterable<B>
 // `A` is bound only from the container operand, `B` from that and the return type
 operator<A, B> (pair_buffer<A, B>& $p)[usize $i] : B&
 {
-    return &$p->vs:$[$i];
+    unsafe { return &$p->vs:$[$i]; }
 }
 
 operator<A, B> (const pair_buffer<A, B>& $p)[usize $i] : const B&
 {
-    return &$p->vs:$[$i];
+    unsafe { return &$p->vs:$[$i]; }
 }
 
 // a two-parameter cursor whose key is the *first* parameter, so `foreach` binds a non-usize key out of a
@@ -153,12 +157,12 @@ struct pair_cursor<A, B> : contract::iterator<B>, contract::keyed<A>
 
     function current() : B&
     {
-        return &$this->vs:$[$this->pos - 1];
+        unsafe { return &$this->vs:$[$this->pos - 1]; }
     }
 
     function key() : A
     {
-        return $this->ks:$[$this->pos - 1];
+        unsafe { return $this->ks:$[$this->pos - 1]; }
     }
 }
 

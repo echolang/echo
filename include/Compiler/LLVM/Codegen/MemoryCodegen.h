@@ -93,6 +93,12 @@ namespace Compiler::LLVM
             const std::string &name, llvm::Type *return_type,
             const std::vector<llvm::Type *> &parameter_types,
             const std::vector<const char *> &parameter_names);
+
+        // `noalias` on the return and `allocsize` on the function, for the two thunks that hand back a
+        // block. the only place in this compiler where an aliasing claim is written by hand rather than
+        // left to LLVM to infer - because it is a fact about the allocator and not about an Echo type,
+        // and because the JIT path runs no pass that would infer it
+        void mark_allocating_thunk(llvm::Function *thunk, unsigned size_argument);
     };
 };
 

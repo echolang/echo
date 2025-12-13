@@ -1,0 +1,34 @@
+// **where TBAA runs out, pinned deliberately.**
+//
+// `array<int32>` hoists its header out of the loop because an `int32` element store and an `i64`
+// length field are different types. `array<usize>` does not: the elements and the length share one
+// leaf, so a store into an element may - as far as any *type* based rule can tell - be a store into
+// the length.
+//
+// this is not a gap to be closed by a better hierarchy. it is the case allocation identity answers
+// and type identity cannot, and it is why todo/A43 is the ticket that matters next. the golden is
+// here so that the day regions land, this file is what changes.
+
+function kernel(array<usize>& $dst, const array<usize>& $src) : void
+{
+    usize $i = 0;
+
+    while ($i < $src->count()) {
+        $dst[$i] = $src[$i] + 1;
+        $i = $i + 1;
+    }
+}
+
+array<usize> $a = array<usize>();
+array<usize> $b = array<usize>();
+
+usize $n = 0;
+while ($n < 64) {
+    $a[] = 41;
+    $b[] = 0;
+    $n = $n + 1;
+}
+
+kernel(&$b, &$a);
+
+echo $b->get(0);

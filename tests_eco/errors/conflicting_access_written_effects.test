@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] ConflictingAccess  conflicting_access_written_effects.eco:23:1
+
+  This names the same storage as another argument of the same call. '$dst' takes 'inout' access, which is exclusive, so nothing else may reach that storage while the call runs - and '$src' takes 'read' access to it too
+
+  22 | 
+  23 | widen(
+     : ^^^^^
+  24 |     &$p->left,
+
+  24 |     &$p->left,
+  25 |     &$p->left
+     :          ---- the other access is here
+  26 | );
+
+  help: a value cannot be both written and read by one call - read the source into a separate value first
+
+[error] ConflictingAccess  conflicting_access_written_effects.eco:28:1
+
+  This names the same storage as another argument of the same call. '$slot' takes 'out' access, which is exclusive, so nothing else may reach that storage while the call runs - and '$from' takes 'read' access to it too
+
+  27 | 
+  28 | fill(&$p->right, &$p->right);
+     : ^^^^
+  29 | 
+
+  help: a value cannot be both written and read by one call - read the source into a separate value first
+
+2 errors, nothing was compiled.

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Compiler/TargetSubtarget.h"
+
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -37,6 +39,12 @@ namespace Compiler::LLVM
         // LLVM's default layout (which aligns i64 to 4, unlike any real 64-bit target) and the
         // optimizer ran over layout-less modules
         void init_target();
+
+        // which CPU everything downstream compiles for, resolved off the options rather than held: the
+        // two callers are init_target, which builds the one TargetMachine, and run_code, whose JIT
+        // builds a second one it will not take from us. See Compiler::resolve_subtarget for why this
+        // is asked twice rather than stored once
+        Compiler::Subtarget subtarget() const;
 
         void optimize();
 

@@ -215,17 +215,20 @@ TEST_CASE( "A borrow cast accepts both '&' spellings", "[parser][pointer]" )
     // the narrowing `ptr<T>` -> `T&` asserts non-nullness, so it has to be written out. the cast
     // production keys on `identifier & (`, and the lexer's t_ref/t_and split means both spacings
     // have to be accepted or the spaced one parses as a bitwise and
+    //
+    // it is also the promotion AST::narrowing_promotes_raw_storage names, hence the block - which is
+    // orthogonal to the spelling question and has to be written the same way on both sides of it
     auto tight = EchoTests::tests_make_parsed_bundle(R"(
         $a = 5;
         ptr<int> $p = &$a;
-        int& $r = int&($p:$);
+        unsafe { int& $r = int&($p:$); }
     )");
     REQUIRE_FALSE(tight->collector.has_critical_issues());
 
     auto loose = EchoTests::tests_make_parsed_bundle(R"(
         $a = 5;
         ptr<int> $p = &$a;
-        int& $r = int & ($p:$);
+        unsafe { int& $r = int & ($p:$); }
     )");
     REQUIRE_FALSE(loose->collector.has_critical_issues());
 

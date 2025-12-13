@@ -353,7 +353,7 @@ TEST_CASE("A container index is a place, before and after the rewrite", "[AST][p
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bag { ptr<int32> $at; }\n"
-        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { unsafe { return &$b->at:$[$i]; } }\n"
         "int32 $x = 1;\n"
         "$g = Bag(&$x);\n"
         "$g[0] = 5;\n"
@@ -409,7 +409,7 @@ TEST_CASE("A cloned index carries exactly one owner of its operands", "[AST][poi
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bag<T> { ptr<T> $at; }\n"
-        "operator<T> (Bag<T>& $b)[usize $i] : T& { return &$b->at:$[$i]; }\n"
+        "operator<T> (Bag<T>& $b)[usize $i] : T& { unsafe { return &$b->at:$[$i]; } }\n"
         "function first<T>(Bag<T>& $b) : T { return $b[0]; }\n"
         "int32 $x = 1;\n"
         "float64 $y = 2.0;\n"
@@ -450,7 +450,7 @@ TEST_CASE("indexed_base_type peels borrows but stops at a nullable pointer", "[A
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Bag { ptr<int32> $at; }\n"
-        "operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { unsafe { return &$b->at:$[$i]; } }\n"
         "function through(Bag& $b) : int32 { return $b[0]; }\n"
         "int32 $x = 1;\n"
         "$g = Bag(&$x);\n"

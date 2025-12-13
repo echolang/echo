@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] shift_count_too_wide.eco:13:17
+
+  this shifts a 'int32' by 32 or more bits, which at runtime is undefined; here it is simply refused.
+
+  12 | 
+  13 | int32 $folded = const(1 << 32);
+     :                 ^^^^^
+  14 | 
+
+[error] shift_count_too_wide.eco:15:18
+
+  this shifts a 'int32' by 32 or more bits, which at runtime is undefined; here it is simply refused.
+
+  14 | 
+  15 | int32 $plain = 1 << 32;
+     :                  ^^
+  16 | 
+
+[error] shift_count_too_wide.eco:17:21
+
+  this shifts a 'int32' by 32 or more bits, which at runtime is undefined; here it is simply refused.
+
+  16 | 
+  17 | int32 $computed = 1 << (16 * 2);
+     :                     ^^
+  18 | 
+
+[error] shift_count_too_wide.eco:19:21
+
+  this shifts a 'int32' by 32 or more bits, which at runtime is undefined; here it is simply refused.
+
+  18 | 
+  19 | int32 $negative = 1 << -1;
+     :                     ^^
+  20 | 
+
+4 errors, nothing was compiled.

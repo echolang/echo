@@ -1,0 +1,34 @@
+// `private` on a property is what turns an invariant from something a library keeps into something
+// the compiler knows. it closes two doors, and the second one is the one that is easy to miss
+
+struct Sealed
+{
+    private int32 $hidden;
+    int32 $open;
+
+    constructor(int32 $v)
+    {
+        // inside the type, both are ordinary - a constructor is registered as a *free* declaration
+        // and carries no owner, so the check reads its return type instead
+        $this->hidden = $v;
+        $this->open = $v * 2;
+    }
+
+    const function peek() : int32
+    {
+        return $this->hidden;
+    }
+}
+
+Sealed $s = Sealed(5);
+
+// the public half, and the method that reads the private one, are both fine
+echo $s->peek();
+echo $s->open;
+
+// door one: reaching the field
+echo $s->hidden;
+
+// door two: the field-wise constructor, which would write every property from outside. it is not
+// suppressed by the user's own constructor - it is suppressed by the private property
+Sealed $forged = Sealed(1, 2);

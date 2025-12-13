@@ -560,9 +560,12 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
         node.teardown_old->accept(*_ctx.visitor);
     }
 
-    _ctx.builder->CreateStore(
-        _ctx.types->coerce_value(new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit),
-        place.address);
+    // through the seam and not a bare CreateStore: the place carries the provenance that decides
+    // whether this write may be tagged, and it is the one store in the compiler that a user program's
+    // `=` reaches
+    _ctx.lvalues->gen_store(
+        place,
+        _ctx.types->coerce_value(new_value, node.value_expr->result_type(), place.storage_type, *_ctx.current_cmp_unit));
 
     if (old_handle != nullptr) {
         _ctx.classes->gen_release_value(old_handle, place.storage_type);

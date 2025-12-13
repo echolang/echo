@@ -49,3 +49,30 @@ std::string AST::const_receiver_refusal(const AST::FunctionDeclNode &callee, con
         "Mark it `const function {}(...)` if it only reads.",
         callee.signature_description(), owner, callee.func_name());
 }
+
+
+AST::ComplexType *AST::enclosing_type_of(const AST::FunctionDeclNode &decl)
+{
+    // a constructor is registered as a *free* declaration - `Foo(...)` builds a value, it is not
+    // reached through a receiver - so `owner_type` is null on one and the type it belongs to is the
+    // thing it returns. that is the body that most needs to reach a private property, so getting this
+    // arm wrong would put every constructor outside its own type
+    if (decl.is_constructor()) {
+        AST::ValueType returned = decl.get_return_type();
+        return returned.has_property_layout() ? returned.get_complex_type() : nullptr;
+    }
+
+    return decl.owner_type;
+}
+
+bool AST::can_reach_private_member(const AST::ComplexType *from, const AST::ComplexType *owner)
+{
+    if (from == nullptr || owner == nullptr) {
+        return false;
+    }
+
+    // through the template on both sides: a method of `mem::buffer<int32>` and a property declared on
+    // `mem::buffer<T>` are the same declaration seen from two instantiations, and comparing the
+    // instances would make privacy a property of which one you happened to be looking at
+    return from->template_or_self() == owner->template_or_self();
+}

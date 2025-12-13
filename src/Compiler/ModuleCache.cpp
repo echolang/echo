@@ -1,5 +1,6 @@
 #include "Compiler/ModuleCache.h"
 
+#include "Compiler/TargetSubtarget.h"
 #include "eco.h"
 
 #include <llvm/Config/llvm-config.h>
@@ -100,6 +101,26 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), environment);
     environment = fnv1a64(std::string(LLVM_VERSION_STRING), environment);
     environment = fnv1a64(llvm::sys::getDefaultTargetTriple(), environment);
+
+    // **and which CPU inside that triple**, which the triple does not say. Two builds differing only in
+    // `--target-cpu` produce different instructions in every module that has a loop, so without this
+    // one of them is served the other's object - the unsound-cache case rather than the ineffective one.
+    // The *resolved* pair and not the request, because the platform baseline changing is the same
+    // difference wearing no flag at all
+    {
+        Subtarget subtarget;
+        std::string subtarget_error;
+
+        if (!resolve_subtarget(
+                llvm::sys::getDefaultTargetTriple(), options.target_cpu, options.target_features,
+                subtarget, subtarget_error)) {
+            out_error = subtarget_error;
+            return false;
+        }
+
+        environment = fnv1a64(subtarget_signature(subtarget), environment);
+    }
+
     environment = fnv1a64(options.assertions_enabled() ? std::string("debug") : std::string("release"), environment);
     environment = fnv1a64(optimize ? std::string("O") : std::string("noO"), environment);
 

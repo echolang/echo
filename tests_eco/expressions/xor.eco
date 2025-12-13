@@ -1,6 +1,6 @@
-// `^` is the one bitwise operator that lowers. `& | << >>` sit beside it in AST::op_precedence and
-// in the predefined operator set, so they parse - and AST::binary_has_builtin_meaning refuses them,
-// which is what makes each one a located diagnostic. errors/shift_not_lowered is that half
+// `^` is one of the bitwise five; `& | << >>` are in expressions/bitwise, and this case stays separate
+// because `^` is the one the standard library leans on - hash::step is `($seed ^ $byte) * PRIME`, so a
+// regression here is every map lookup in every program.
 //
 // the last two blocks are the point of the case: AST::const_fold and ExprCodegen::gen_binary_expr
 // have to agree, or a `const if` takes one arm and the `if` beside it takes the other

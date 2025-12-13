@@ -140,6 +140,15 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
         return;
     }
 
+    // **a shift has nothing to reconcile**, and this is the site where getting that wrong was invisible:
+    // BinaryExprNode::result_type() answers the left operand for one now, so the void gate below no
+    // longer invites this - but the gate is the *symptom*, and the rule belongs where the rule is asked.
+    // A count widened to meet the value, or the value widened to meet the count, is a shift performed at
+    // a type nobody wrote
+    if (bin.op_node != nullptr && !binary_reconciles_operands(bin.op_node->op)) {
+        return;
+    }
+
     // **an address is never a width to reconcile.** pointer arithmetic and pointer comparison each have
     // their own arm in BinaryExprNode::result_type(), and a cast inserted here would convert the address
     // itself to an integer - which is what `string::view($this->bytes:$ + $from, $len)` turns into if this

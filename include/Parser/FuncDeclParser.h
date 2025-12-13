@@ -137,6 +137,22 @@ namespace Parser
         AST::ScopeNode &scope,
         AST::ClosureExprNode *closure = nullptr);
 
+    // **does an access effect start here, and which one?** `read` / `inout` / `out` at the head of a
+    // parameter, answered in two tokens.
+    //
+    // these are *contextual* - matched as identifiers, with no entry in the lexer - and that is the
+    // whole of why they cost nothing. an Echo keyword is global and word-boundary checked, so a real
+    // `t_read` would make `$file->read()` unspellable in every program ever written, to buy a
+    // distinction only a parameter list has ever needed.
+    //
+    // the second token is what disambiguates: a parameter is `<type> $name`, so an identifier
+    // followed by a `$name` is the *type* of that parameter and never an effect. `read $x` therefore
+    // stays a parameter of type `read`, and `read slice<T> $src` is a read access over a slice
+    //
+    // `mv` is deliberately not here: it is a real keyword already, it is read one line away, and
+    // giving it a second reader would be two answers to which token said `take`
+    bool starts_access_effect(Parser::Cursor &cursor, AST::AccessEffect &effect);
+
     // reads a parameter list up to and *including* its closing token, appending each parameter to
     // `decl` and declaring it in `into`. the cursor must already be past the opening one
     //

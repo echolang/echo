@@ -17,6 +17,15 @@ AST::VarDeclNode &AST::declare_constructor_this(
     auto &decl = module.nodes.emplace_back<AST::VarDeclNode>(
         module.make_virtual_token("$this", Token::Type::t_varname, at), &self_type);
 
+    // **the one place a `$this` is `out`.** the storage arrives holding nothing and the body owes it
+    // an initialized value, which is the whole of why a constructor may write every property without
+    // first destroying what was there.
+    //
+    // it goes on the declaration and not on a parameter because this `$this` *is* a local - a
+    // constructor has no receiver argument, so AST::access_effect_of has nothing to answer for at
+    // args[0] and deliberately does not pretend to
+    decl.access_effect = AST::AccessEffect::t_out;
+
     // the one fork between the two storage classes, and the only thing this function decides. a
     // struct's slot is already there when the frame is entered; a class's handle names a block that
     // has to be made, so the declaration carries the allocation as its initializer

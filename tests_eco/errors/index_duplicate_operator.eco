@@ -2,7 +2,7 @@
 // ordinary duplicate - the parameter *names* differ and that changes nothing
 struct Bag { ptr<int32> $at; }
 
-operator (Bag& $b)[usize $i] : int32& { return &$b->at:$[$i]; }
-operator (Bag& $b)[usize $j] : int32& { return &$b->at:$[$j]; }
+operator (Bag& $b)[usize $i] : int32& { unsafe { return &$b->at:$[$i]; } }
+operator (Bag& $b)[usize $j] : int32& { unsafe { return &$b->at:$[$j]; } }
 
 echo 1;

@@ -9,6 +9,7 @@
 
 namespace AST
 {
+    class ComplexType;
     class FunctionDeclNode;
 
     // **a method's const-ness is the type of its receiver, and nothing else.**
@@ -62,6 +63,29 @@ namespace AST
     // the same rule, worded - located and collected by AST::TypeChecker. empty when there is nothing to
     // refuse, so a caller that only wants the question asks the predicate above instead
     std::string const_receiver_refusal(const FunctionDeclNode &callee, const ValueType &receiver);
+
+    // **the type a body is written inside**, or null at file scope.
+    //
+    // not `owner_type`, close as that reads: a *constructor* is registered as a free declaration and
+    // carries a null owner, so asking that one would put every constructor outside its own type - and
+    // a constructor is exactly the body that has to reach a private property. this reads the return
+    // type for one and the owner for everything else, which is the same question asked of the two
+    // shapes a member declaration has.
+    //
+    // two readers, and they are why this is one function: AST::TypeChecker asks it to decide whether a
+    // site may reach a `private` property, and AST::ConstantExpander asks it for what `self::` denotes.
+    // held apart they answered "inside the type" differently - one accepted an interface, the other did
+    // not - so a body could be inside its type for one rule and outside it for the other
+    ComplexType *enclosing_type_of(const FunctionDeclNode &decl);
+
+    // **may a body written inside `from` reach a property declared private on `owner`?**
+    //
+    // one function so the rule has one home, and deliberately the whole rule: privacy is per *type*
+    // and not per file or per namespace, so a nested type does not see its owner's privates and a
+    // second declaration in the same namespace does not either. an instantiation is asked through
+    // `declaration_type()`, so `mem::buffer<int32>`'s own method reaches what `mem::buffer<T>`
+    // declared - without that, privacy would hold for a template and evaporate for every instance
+    bool can_reach_private_member(const ComplexType *from, const ComplexType *owner);
 };
 
 #endif

@@ -19,12 +19,23 @@ CHECK: define i32 @_totalZZMRBCLC5arrayIMLPiE(ptr nocapture nonnull readonly
 CHECK: entry:
 CHECK: load i64
 
-# and the body holds no calls at all: `count()` and the element operator are inlined away, the cursor
-# arithmetic is SSA, and the bounds `assert` was dropped by the release build. bounded by the branch below
-# rather than run to the end of the module
-CHECK: body:
+# **the loop vectorises on this path too**, which is the part that makes it worth asserting here as well as
+# in iteration/lowered_cost: this is the *per unit* O2 pipeline rather than the whole-program O3 one, so it
+# pins that an ordinary `echoc build` gets the same treatment a `-O` build does. A widened loop is also the
+# strongest available statement that `count()` and the element operator were inlined away and the bounds
+# `assert` was dropped - a loop with a call left in it cannot be vectorised at all.
+#
+# spelled `vector.body:` rather than `body:` deliberately; iteration/lowered_cost carries why
+CHECK: vector.body:
 CHECK-NOT: call
 CHECK-NOT: alloca
+CHECK: load <4 x i32>
+CHECK: add <4 x i32>
+
+# and the scalar tail is the indexed load and the loop's own compare, with nothing else. the
+# `llvm.vector.reduce.add` folding the accumulators is in `middle.block` between the two, outside either
+# loop, so neither CHECK-NOT region covers it
 CHECK: getelementptr i32
 CHECK-NOT: call
+CHECK-NOT: alloca
 CHECK: br i1

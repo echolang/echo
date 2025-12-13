@@ -1,0 +1,34 @@
+# the three `100`s are the case. the first is AST::const_fold's answer over four operators, the second is
+# ExprCodegen::gen_binary_expr's over the same operands, and the third is the signed right shift folded -
+# a symbol folded in one and lowered differently in the other is how a `const if` and the `if` beside it
+# come to disagree
+#
+# and the pair `-4` / `1073741820` is `>>` reading its operands' signedness: the same shift, the same count,
+# two answers, because one operand is signed and the other is not
+#
+# the **second** `-4` / `-4` pair below them is the count having no vote: the same shift by a `uint32 2` and
+# by an `int32 2`, which must agree. reconciled through common_numeric_type the way every other operator is,
+# the first of the two was 1073741820 - an unsigned count silently turning an arithmetic shift logical. the
+# `64` under them is the same rule about width: a `uint8` shifted by an `int64` stays a `uint8` shift, so
+# `200 << 3` wraps to 64 rather than answering 219902325555200 in a type nobody wrote
+
+expect: ok
+
+--- OUT --->
+8
+14
+48
+3
+-4
+1073741820
+15
+15
+-4
+-4
+64
+7
+8
+100
+100
+100
+124

@@ -1,4 +1,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
+#include <llvm/IR/Metadata.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Instructions.h>
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -58,7 +61,11 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
                 llvm::Value *address = _ctx.value_stack.top();
                 _ctx.value_stack.pop();
 
-                return LValue{ address, index_expr.result_type() };
+                // **typed.** the container handed back a borrow of one of its own elements, and
+                // what that element *is* is the element type - the only way to make that false is a
+                // reinterpretation, which now needs `unsafe`. this is the arm that matters: `$a[$i]`
+                // on an `array<int32>` is where a user program touches an element at all
+                return LValue{ address, index_expr.result_type(), Provenance::t_typed };
             }
 
             // GEP over the pointee type scales the offset by the element size, so `+ 1` on a
@@ -77,7 +84,11 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
                 { offset },
                 "elem");
 
-            return LValue{ address, element_type };
+            // **raw**, and this is the arm that keeps the whole scheme honest. `$p:$[3]` walks an
+            // address the compiler is not accounting for - inside `mem::copy`, inside a container's
+            // own body, through anything an FFI call handed back - so nothing about the storage's
+            // type is knowable and nothing is claimed
+            return LValue{ address, element_type, Provenance::t_raw };
         }
 
         case AST::NodeType::n_expr_deref:
@@ -111,10 +122,38 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 
 llvm::Value *LValueCodegen::gen_load(const LValue &place, const char *name)
 {
-    return _ctx.builder->CreateLoad(
+    llvm::LoadInst *load = _ctx.builder->CreateLoad(
         _ctx.types->get_llvm_type(place.storage_type, *_ctx.current_cmp_unit),
         place.address,
         name);
+
+    tag_access(load, place);
+
+    return load;
+}
+
+llvm::StoreInst *LValueCodegen::gen_store(const LValue &place, llvm::Value *value)
+{
+    llvm::StoreInst *store = _ctx.builder->CreateStore(value, place.address);
+
+    tag_access(store, place);
+
+    return store;
+}
+
+void LValueCodegen::tag_access(llvm::Instruction *access, const LValue &place)
+{
+    // **a raw place is left untagged, and that is the answer rather than a gap.** an instruction with
+    // no `!tbaa` may alias anything, which is exactly what an address that came through a `ptr<T>`
+    // deserves in a language whose reinterpretations are only a promise
+    if (place.provenance != Provenance::t_typed || _ctx.tbaa == nullptr
+        || _ctx.options.no_tbaa) {
+        return;
+    }
+
+    if (llvm::MDNode *tag = _ctx.tbaa->scalar_tag(place.storage_type)) {
+        access->setMetadata(llvm::LLVMContext::MD_tbaa, tag);
+    }
 }
 
 llvm::Value *LValueCodegen::gen_load(AST::ExprNode &expr, const char *name)
@@ -128,9 +167,18 @@ LValue LValueCodegen::deref_once(const LValue &place)
         return place;
     }
 
+    // **a nullable `ptr<T>` loses the provenance; a borrow keeps it.**
+    //
+    // the difference between the two is exactly one bit - whether null is allowed - and it happens to
+    // be the bit that separates the two ways an address is obtained. a borrow comes from `&place` or
+    // from a checked narrowing of one, so what it points at is what it says. a `ptr<T>` is what a
+    // reinterpretation produces and what an FFI call hands back, and a program that writes `unsafe`
+    // is a program where the pointee type is a claim rather than a fact
+    const Provenance through = place.storage_type.is_nullable() ? Provenance::t_raw : place.provenance;
+
     // exactly one level: load the address out of the slot, and the result addresses the
     // pointee. `ptr<ptr<uint8>>` still lands on a `ptr<uint8>`, never on the uint8
-    return LValue{ gen_load(place, "deref"), AST::value_type_of(place.storage_type) };
+    return LValue{ gen_load(place, "deref"), AST::value_type_of(place.storage_type), through };
 }
 
 LValue LValueCodegen::gen_place(AST::ExprNode &expr)
@@ -153,7 +201,12 @@ LValue LValueCodegen::gen_place(AST::ExprNode &expr)
     // AST::is_place_expression stays as it is: a call is still not a place, so `&$o->get()` is still
     // refused in the parser. reading *through* the address a call returned is a different question
     if (!AST::is_place_expression(expr) && expr.result_type().is_pointer()) {
-        return LValue{ gen_address_value(expr), AST::value_type_of(expr.result_type()) };
+        // a *borrow* a call returned is typed for the element arm's reason; a nullable `ptr<T>` it
+        // returned is not, and `mem::alloc` is exactly that
+        const Provenance from_call =
+            expr.result_type().is_nullable() ? Provenance::t_raw : Provenance::t_typed;
+
+        return LValue{ gen_address_value(expr), AST::value_type_of(expr.result_type()), from_call };
     }
 
     return deref_once(gen_lvalue(expr));
@@ -238,7 +291,10 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
     llvm::Value *address = _ctx.builder->CreateGEP(
         structure.llvm_struct, base_place.address, indices, member_name + "_ptr");
 
-    return LValue{ address, member->type };
+    // **inherited from the base, never assumed.** a field of a local is typed; the same field
+    // reached through a `ptr<Point>` that a reinterpretation produced is not, and the peel loop above
+    // is where that was decided. a field is only ever as knowable as the thing holding it
+    return LValue{ address, member->type, base_place.provenance };
 }
 
 llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)

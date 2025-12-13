@@ -9,6 +9,64 @@ $a = 1 + 2; // 3
 That's the boring half. The interesting half is that operators in Echo are just functions, which means you can
 overload them for your own types, and you can invent entirely new ones.
 
+## Bitwise operators
+
+`&` `|` `^` `<<` `>>`, on integers only. A float, a bool or a pointer beside one is an error naming both
+types — a bool is a yes/no rather than a one-bit number, so `$flag << 1` is refused rather than reinterpreted.
+
+```echo
+int32 $flags = 12;
+
+echo $flags & 10;   // 8
+echo $flags | 10;   // 14
+echo $flags ^ 10;   // 6
+echo $flags << 2;   // 48
+echo $flags >> 2;   // 3
+```
+
+**`>>` follows the operand's signedness.** Over a signed integer it keeps the sign bit, over an unsigned one
+it brings in zeroes — so the same bit pattern shifts to two different answers depending on the type it is
+held in, which is what you want and is worth seeing once:
+
+```echo
+int32 $negative = -16;
+echo $negative >> 2;      // -4, the sign bit is replicated
+
+uint32 $same_bits = 4294967280;
+echo $same_bits >> 2;     // 1073741820, zeroes come in
+```
+
+**The count is a count, not a second operand.** Every other binary operator meets its two sides at one
+type — `int32 + int64` is an `int64` addition — but a shift is performed at the *left* operand's type
+whatever the count happens to be declared as, and only the value being shifted has a say in the width or
+the signedness:
+
+```echo
+int32 $negative = -16;
+uint32 $count = 2;
+
+echo $negative >> $count; // still -4. an unsigned count does not make it an unsigned shift
+
+uint8 $byte = 200;
+int64 $three = 3;
+
+echo $byte << $three;     // 64 - a uint8 shift that wrapped, not an int64 one that did not
+```
+
+All five fold at compile time, so they work inside `const if` and `const(...)`. A shift count at or above
+the operand's width is refused rather than answered — at runtime that shift is undefined, so there is no
+answer to agree with, and it is refused the same way whether or not you asked for the fold:
+
+```echo
+int32 $x = 1 << 32;        // error: shifts a 'int32' by 32 or more bits
+int32 $y = const(1 << 32); // the same error
+```
+
+> **Watch the space before `&`.** `&$x` means *the address of `$x`* and `& $x` means the bitwise operator,
+> because `&` glued to what follows it lexes as an address-of. So `$h & $mask` is a mask and `$h &$mask`
+> is not — write spaces on both sides of an infix `&` and the question never comes up. This is the one
+> place in the language where whitespace changes meaning, and it is the price of spelling both with `&`.
+
 ## Operator overloading
 
 Echo lets you override operators for your own types. So yes, a `Point` can know how to add another `Point`,

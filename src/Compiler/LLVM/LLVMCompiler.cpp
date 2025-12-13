@@ -53,6 +53,10 @@ void LLVMCompiler::set_entry_module(const std::string &module_name)
 void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std::string> &cached_modules)
 {
     _ctx.llvm_context = std::make_unique<llvm::LLVMContext>();
+
+    // beside the context and not per unit: the leaves have to be the *same* MDNode across units, or
+    // LLVM's pointer comparison of two equal-looking trees answers "unrelated"
+    _ctx.tbaa = std::make_unique<Compiler::LLVM::TbaaTree>(*_ctx.llvm_context);
     _ctx.builder = std::make_unique<llvm::IRBuilder<>>(*_ctx.llvm_context);
 
     // which declared type is `string`, published before anything is lowered: gen_literal_string builds a

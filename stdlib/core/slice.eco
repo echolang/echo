@@ -118,7 +118,11 @@ operator<T> (slice<T>& $s)[usize $index] : T&
 {
     assert($index < $s->len, "slice index out of range");
 
-    return &$s->data:$[$index];
+    // the promotion, discharged by the bound check above it: the window's own contract is that
+    // `$data` addresses `$len` live `T`s, and the assert is what turns that into this index
+    unsafe {
+        return &$s->data:$[$index];
+    }
 }
 
 /**
@@ -132,7 +136,9 @@ operator<T> (const slice<T>& $s)[usize $index] : const T&
 {
     assert($index < $s->len, "slice index out of range");
 
-    return &$s->data:$[$index];
+    unsafe {
+        return &$s->data:$[$index];
+    }
 }
 
 /**
@@ -184,7 +190,11 @@ struct slice_iterator<T> : contract::iterator<T>, contract::keyed<usize>
      */
     function current() : T&
     {
-        return &$this->window->data:$[$this->pos - 1];
+        // unchecked on purpose, and the promotion says so out loud: `advance()` already established
+        // that this element is there, which is the entire content of "valid after a true advance"
+        unsafe {
+            return &$this->window->data:$[$this->pos - 1];
+        }
     }
 
     function key() : usize

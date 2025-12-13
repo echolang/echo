@@ -64,12 +64,24 @@ with no special case. The one place to be careful is attribute values, where a s
 
 ## Two pointer types
 
-Echo has two spellings, and they differ in exactly one respect: whether `null` is allowed.
+Echo has two spellings, and they differ in two respects — one you'll notice immediately and one that
+matters more than it looks.
 
-| Type | Nullable | Written |
+| | `ptr<T>` | `T&` |
 |---|---|---|
-| `T&` | no | `int32& $r` — in parameters also `int32 &$r` |
-| `ptr<T>` | yes | `ptr<int32> $p` |
+| May be null | yes | no |
+| May alias another address | yes | yes |
+| Carries trusted typed-access semantics | no | **yes** |
+| Getting one from a raw address | ordinary | **`unsafe`** |
+
+The first row is the obvious one. The third is the real difference: **a `T&` is a promise that the
+storage it points at is genuinely a `T`**, and the compiler optimizes every access through it on that
+basis — here, and in everything the borrow gets passed to. A `ptr<T>` promises nothing, so reads and
+writes through one are treated as though they could touch anything.
+
+One thing that is *not* on this list, and is worth saying out loud because other languages do it
+differently: **typed does not mean exclusive.** Two `int32&` values may point at the same `int32`, and
+that stays perfectly legal. See "Addresses may alias, accesses may not conflict" below.
 
 Both are one machine address at runtime. Both auto-deref. The difference is what the compiler will let
 you put in them:
@@ -90,11 +102,11 @@ Don't throw it away.
 
 Converting between them:
 
-- `T&` → `ptr<T>` happens implicitly. It's always safe.
-- `ptr<T>` → `T&` needs an explicit cast, because it asserts non-nullness:
-  `int32& $r = int32&($p:$);`. In a debug build this stops the program on null, with a message naming the
-  file and the enclosing function. In a release build (`echoc build`, or `echoc run --release`) it's
-  unchecked.
+- `T&` → `ptr<T>` happens implicitly. It's always safe — you're only giving up the non-null guarantee.
+- `ptr<T>` → `T&` needs an explicit cast *and* an `unsafe` block:
+  `unsafe { int32& $r = int32&($p:$); }`. Going this way establishes the promise, so it's the direction
+  you have to sign for. In a debug build the cast also stops the program on null; in a release build
+  (`echoc build`, or `echoc run --release`) that check is gone.
 
 ## Binding, writing, and re-seating
 
@@ -569,3 +581,187 @@ Echo doesn't track lifetimes. There's no borrow checker. Three rules keep you ou
    memory.
 3. **Heap memory is yours.** Every `mem::alloc` needs a matching `mem::free`, and using memory after
    freeing it is undefined.
+
+## Addresses may alias, accesses may not conflict
+
+That's the fourth rule, and it's the one that says what two borrows of one object promise.
+
+An **address** — a `T&`, a `ptr<T>` — promises nothing. You can copy it, store it, return it and compare
+it, and two of them may name the same storage. Nothing stops you, and nothing has to: an address is a
+place to look, not a claim about who else is looking.
+
+An **access** is the other thing. It's temporary permission to reach a region of storage, it begins and
+ends inside one call, and it comes in four kinds:
+
+| | on entry | on exit | may overlap |
+|---|---|---|---|
+| `read` | initialized | initialized | other reads |
+| `inout` | initialized | initialized | nothing |
+| `out` | uninitialized | initialized | nothing |
+| `mv` | initialized | consumed | nothing |
+
+Three of the four are **exclusive**: while one is live, nothing else may reach the storage it covers —
+not even a read.
+
+Most of the time you don't write any of this down, because most of it is already in what you wrote:
+
+```echo
+function extend(const array<T>& $other) : void   // $other is a read
+const function count() : usize                    // $this is a read
+function push(T $value) : void                    // $this is an inout
+constructor()                                     // $this is an out
+destructor()                                      // $this is a take
+```
+
+A `const T&` is a read. An ordinary method's `$this` is an `inout`. A `const function`'s is a read. A
+constructor's is an `out` — which is exactly why it may write every property without first destroying
+what was there. So the rule reaches ordinary code without a single new keyword:
+
+```echo
+$a->extend($a);   // refused: $this takes inout, $other takes read, one array
+```
+
+You can also say it out loud, on a parameter, when the function isn't a method:
+
+```echo
+function axpy(read slice<float64> $x, inout slice<float64> $y, float64 $a) : void
+```
+
+`read`, `inout` and `out` are only keywords in that one position — a function called `read()` or a
+struct named `out` still means what it always did.
+
+**Exclusivity is never inferred from a type.** A plain `T&` parameter stays an ordinary address, so
+`swap(&$x, &$x)` is as legal as it ever was. Only a mutating method's receiver, or a word you wrote,
+makes an access exclusive. `read` is the one that *is* inferred, and that's safe precisely because a
+read on its own can never refuse anything.
+
+And the compiler only refuses what it can **prove** overlaps. Two different variables, two different
+fields, two indices it can work out — those are disjoint and it says nothing. An index it can't work
+out, or storage reached through a raw pointer, is unknown, and unknown is left alone:
+
+```echo
+widen(&$p->left, &$p->right);   // two fields, disjoint
+widen(&$a[0], &$a[1]);          // two slots it can tell apart
+widen(&$a[0], &$a[$i]);         // can't tell - left alone
+```
+
+## `unsafe`, and the one thing it is for
+
+Playing with raw addresses needs no ceremony at all:
+
+```echo
+$n = 0;
+ptr<int32> $ints = &$n;
+
+ptr<uint8> $bytes = ptr<uint8>($ints:$);   // reinterpret - fine
+$bytes:$[0] = 255;                          // write through it - fine
+
+echo $n;   // 255
+```
+
+None of that needs a word, because none of it promises anything. Access through a `ptr<T>` is treated
+as if it could touch any memory at all, so the compiler stays out of your way and your bytes mean
+exactly what you wrote.
+
+What *does* need the word is the moment you turn a raw address into a `T&`:
+
+```echo
+unsafe {
+    uint8& $r = uint8&($bytes:$);
+}
+```
+
+That's the step that hands the optimizer a promise. From there the type is the contract — every access
+through `$r`, and through anything `$r` is passed to, however many functions away, is optimized as a
+`uint8`. No compiler can check that; you can. So you write it down.
+
+It's easy to miss that a borrow can appear without you spelling one, so all of these need the block too
+— they're the same step wearing different clothes:
+
+```echo
+ptr<uint8> $e = &$bytes:$[1];   // the address of a raw element
+takes_a_borrow($bytes:$[2]);    // the implicit borrow at an argument
+$p->method();                   // a receiver borrows its pointee
+return uint8&($bytes:$);        // handing one back
+```
+
+### What you're signing for
+
+Inside `unsafe { }`, forming a `T&` from a raw address asserts all of this:
+
+1. the address isn't null;
+2. it's aligned for `T`;
+3. a whole `T` fits inside live, reachable storage there;
+4. that storage is initialized, if the borrow will be read;
+5. what's stored is a valid value of `T`;
+6. reading it as `T` is compatible with every other typed access that might reach the same storage;
+7. and all of that stays true for as long as the borrow is used, wherever it travels.
+
+It does **not** assert that the borrow is the only one. Aliasing borrows are fine.
+
+Break any of those and the program has no defined meaning — not "a surprising answer", no meaning. The
+compiler goes on believing you, which is the entire point of having said it.
+
+### Doing it safely instead
+
+Most of the time you want a *value*, not a second way to reach a live object. Copy the bytes:
+
+```echo
+float32 $x = 2.0;
+
+// read the bits, change them, put them back - three values, no aliasing
+uint32 $bits = mem::bit_cast<uint32>($x);
+$bits = 0;
+$x = mem::bit_cast<float32>($bits);
+```
+
+Nothing here creates a second typed view of `$x`, so there's nothing to promise.
+
+And when a library has proved the invariant itself, its callers never see the word. `array<T>` hands
+you `T&` all day; the `unsafe` lives once, inside, next to the bound check that discharges it:
+
+```echo
+function at(usize $index) : T&
+{
+    assert($index < $this->len, "index out of range");
+
+    unsafe {
+        return &$this->data:$[$index];
+    }
+}
+```
+
+That's the shape to copy. `unsafe` marks where a promise is made, not where danger lives.
+
+### `private`, and why it's about more than tidiness
+
+A property marked `private` is reachable only from inside the type that declared it:
+
+```echo
+struct Sealed
+{
+    private int32 $hidden;
+    int32 $open;
+
+    constructor(int32 $v) { $this->hidden = $v; $this->open = $v * 2; }
+    const function peek() : int32 { return $this->hidden; }
+}
+```
+
+The interesting part is the second door it shuts. Every struct normally gets a field-wise constructor
+— `Sealed(1, 2)` — which writes *every* property from outside. A private property removes it, because
+a type whose fields you can't reach individually shouldn't have a constructor that takes them all at
+once. Such a type builds itself through the constructors it wrote.
+
+That's what makes `mem::buffer<T>` — the allocation `array<T>` is built on — actually own its memory
+rather than merely claim to. Without it you could write `$b->data:$ = $a->data;` and have two values
+believing they own one allocation, and both would free it.
+
+`unsafe` is a block, so a declaration that needs one is written in two steps:
+
+```echo
+ptr<uint8> $raw = null;
+unsafe {
+    $raw:$ = ptr<uint8>(&$value);
+}
+```

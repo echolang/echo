@@ -41,6 +41,19 @@ public: \
     __VA_ARGS__ \
 };
 
+#define MAKE_ISSUE_DEF3(className, severity, arg1Type, arg1Name, arg2Type, arg2Name, arg3Type, arg3Name, ...) \
+class className : public IssueRecord { \
+public: \
+    arg1Type arg1Name; \
+    arg2Type arg2Name; \
+    arg3Type arg3Name; \
+    className(const CodeRef &code_ref, arg1Type arg1Name, arg2Type arg2Name, arg3Type arg3Name) : IssueRecord(severity, code_ref), arg1Name(arg1Name), arg2Name(arg2Name), arg3Name(arg3Name) {}; \
+    ~className() {}; \
+    ISSUE_CODE_OF(className) \
+    std::string message() const override; \
+    __VA_ARGS__ \
+};
+
 // the same shape with no code, for a kind whose name is not a classification. **Not a variant of
 // MAKE_ISSUE_DEF1 with a flag**: the whole difference is that this one has nothing to tell a tool, and a
 // parameter reading `false` at three sites hides that behind punctuation
@@ -195,6 +208,30 @@ namespace AST
         MAKE_ISSUE_DEF1(DuplicateFunctionSignature, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
+
+        // a `T&` formed from a raw address outside an `unsafe` block. its own kind because it is *the*
+        // semantic boundary of the type model: a borrow's type is a contract every later access is
+        // optimized against, and this is the one place a program can assert that contract over storage
+        // the compiler cannot check
+        MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type,
+            std::vector<IssueNote> notes() const override;);
+
+        // a `private` property reached from outside the type that declared it. its own kind because it
+        // is the diagnostic that makes an invariant enforceable rather than merely documented - every
+        // aliasing conclusion `mem::buffer<T>` licenses rests on this refusal existing
+        MAKE_ISSUE_DEF2(PrivateMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+
+        // two arguments of one call name overlapping storage, and at least one of them is written
+        // through. its own kind rather than a GenericError because it is the diagnostic that makes an
+        // access effect mean anything - every optimisation the effect eventually licenses rests on
+        // this refusal, so it is where the promise is paid for
+        //
+        // the second argument's token is a *label* and the remedy a *note*: the sentence says what is
+        // wrong once, and the collector's dedup key is that sentence - so a second location folded
+        // into the English would make two conflicts at one line read as one
+        MAKE_ISSUE_DEF3(ConflictingAccess, IssueSeverity::Error, const std::string, _message, const TokenReference, other_argument_token, const std::string, remedy,
+            std::vector<IssueLabel> labels() const override;
+            std::vector<IssueNote> notes() const override;);
 
     };
 };

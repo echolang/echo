@@ -1,5 +1,6 @@
 #include "AST/FunctionDeclNode.h"
 
+#include "AST/ASTAccess.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTMangler.h"
 #include "AST/ASTNamespace.h"
@@ -65,9 +66,14 @@ const std::string AST::FunctionDeclNode::signature_description() const
         buffer += (i > implicit_arg_count() ? ", " : "");
 
         // `mv` is part of how a call has to be written, so it belongs in the signature a diagnostic
-        // shows even though it is not part of the type and not something a call resolves on
-        if (args[i]->takes_ownership) {
-            buffer += "mv ";
+        // shows even though it is not part of the type and not something a call resolves on. an
+        // access effect is the same case and renders through the same branch - and through
+        // AST::declared_access_effect rather than access_effect_of, because a `const T&` already
+        // says `read` in its type and printing both would be one fact twice
+        const AST::AccessEffect effect = AST::declared_access_effect(*args[i]);
+        if (effect != AST::AccessEffect::t_none) {
+            buffer += AST::access_effect_spelling(effect);
+            buffer += " ";
         }
 
         buffer += args[i]->type().get_type_desciption();

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <string>
+
 namespace Compiler
 {
     // how much the compiler owes the running program in checks it could skip
@@ -42,6 +44,28 @@ namespace Compiler
         // both emitters read it from here rather than from the flag - Backend::print_unit_ir dumps what
         // LLVMCompiler::emit_objects is about to write, so a second reader is a way for the two to disagree
         bool no_optimize = false;
+
+        // **turns off type-based alias metadata**, for differential testing and for bisecting a
+        // miscompile against the aliasing model rather than against the optimizer.
+        //
+        // it is not a tuning knob: a *defined* program must produce the same answer with it and
+        // without it, and any program where the two disagree has either found a bug in
+        // AST::access_family_of or made a false `unsafe` promotion. that equivalence is the whole
+        // reason the flag exists, so the e2e corpus runs its adversarial cases both ways
+        bool no_tbaa = false;
+
+        // **what was asked for, never what it resolved to.**
+        //
+        // `--target-cpu` and `--target-features`, both empty meaning "the platform baseline for this
+        // triple". Compiler::resolve_subtarget is what turns them into the CPU and feature string the
+        // backend gets, and it is a pure function - so Backend::init_target and
+        // Compiler::compute_module_keys reach the identical answer without either of them storing it.
+        //
+        // storing the *resolved* pair here instead would make a default-constructed CompilerOptions -
+        // every unit test, EchoTests::tests_compiler_options() - mean something different from an
+        // invocation with no flag, which is the shape of gap that reads right until a golden moves
+        std::string target_cpu;
+        std::string target_features;
 
         // one predicate, because more than one emitter asks it - the `assert` builtin and the
         // `ptr<T>` -> `T&` narrowing today, whatever check comes next tomorrow. never compare the

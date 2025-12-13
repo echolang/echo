@@ -69,6 +69,17 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
         return AST::CopyKind::t_retain;
     }
 
+    // **`#[unique]` is the one refusal that outranks a declared constructor**, and the order is the
+    // content: the whole claim is that exactly one value names this storage, so a copy constructor
+    // written on such a type is a contradiction rather than an answer to it. every other arm below
+    // decides *how* to copy; this one decides that there is no such thing
+    //
+    // asked before is_struct() too, because the flag lives on the ComplexType and a class or an
+    // interface can never carry it - bind_unique_attribute refuses both at the declaration
+    if (type.is_struct() && type.get_complex_type()->is_unique) {
+        return AST::CopyKind::t_none;
+    }
+
     // the declared answer, deliberately not gated on ownership: a type that says how it is copied is
     // copied that way, so the explicit `Foo($a)` and the implicit `$b = $a` cannot diverge. and ahead
     // of the destructor arm below, so a type declaring both is copied the way it says

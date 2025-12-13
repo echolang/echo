@@ -1,0 +1,23 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  private_property.eco:34:18
+
+  No overload of 'Sealed' accepts these arguments. Candidates are:
+    Sealed(int32)
+
+  33 | // suppressed by the user's own constructor - it is suppressed by the private property
+  34 | Sealed $forged = Sealed(1, 2);
+     :                  ^^^^^^
+  35 | 
+
+[error] PrivateMember  private_property.eco:30:10
+
+  '$hidden' is private to 'Sealed' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'Sealed' instead.
+
+  29 | // door one: reaching the field
+  30 | echo $s->hidden;
+     :          ^^^^^^
+  31 | 
+
+2 errors, nothing was compiled.

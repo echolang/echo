@@ -1,0 +1,24 @@
+// `#[unique]`: exactly one value may name this type's storage. moving transfers it, copying is
+// refused, and a struct holding one inherits the refusal - which is what makes two live values of a
+// unique type provably two regions
+
+#[unique]
+struct Handle
+{
+    int32 $id;
+}
+
+Handle $a = Handle(7);
+echo $a->id;
+
+// a move transfers the storage rather than duplicating it
+Handle $b = mv $a;
+echo $b->id;
+
+// a borrow reads it without claiming it
+function read_id(const Handle& $h) : int32
+{
+    return $h->id;
+}
+
+echo read_id($b);

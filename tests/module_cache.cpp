@@ -255,6 +255,28 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         REQUIRE(cache_line(debug.output, "cachelib") != cache_line(release.output, "cachelib"));
     }
 
+    SECTION("two subtargets are different builds of the same source")
+    {
+        // the mirror of the section above, and it exists for the same reason: `--target-cpu` changes
+        // the instructions in every module that has a loop, so a key that ignored it would serve one
+        // subtarget's object to the other - unsound rather than merely ineffective.
+        //
+        // `generic` against `native` and not against the baseline: the baseline *is* what an unflagged
+        // build resolves to, so comparing against it would pass with the CPU folded in and pass just as
+        // happily with it left out
+        const ProcessResult generic = project.echoc(args + " --target-cpu=generic", app_dir);
+        const ProcessResult native = project.echoc(args + " --target-cpu=native", app_dir);
+
+        REQUIRE_FALSE(cache_line(generic.output, "cachelib").empty());
+        REQUIRE(cache_line(generic.output, "cachelib") != cache_line(native.output, "cachelib"));
+
+        // and the feature string is a second input, not a spelling of the first
+        const ProcessResult featured =
+            project.echoc(args + " --target-cpu=generic --target-features=+crc", app_dir);
+
+        REQUIRE(cache_line(featured.output, "cachelib") != cache_line(generic.output, "cachelib"));
+    }
+
     SECTION("a miss names the file that changed rather than reporting a digest")
     {
         // the record is written by a build, so there is nothing to compare against on the very first run -

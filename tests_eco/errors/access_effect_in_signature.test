@@ -1,0 +1,24 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  access_effect_in_signature.eco:31:5
+
+  No overload of 'widen' accepts these arguments. Candidates are:
+    widen(read int32&, inout int32&)
+    widen(read float64&, inout float64&)
+
+  30 | 
+  31 |     widen($s, $s);
+     :     ^^^^^
+  32 |     consume($s);
+
+[error] UnexpectedToken  access_effect_in_signature.eco:31:18
+
+  Unexpected token 'semicolon (;)' found
+
+  30 | 
+  31 |     widen($s, $s);
+     :                  ^ unexpected here
+  32 |     consume($s);
+
+2 errors, nothing was compiled.

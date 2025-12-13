@@ -1,11 +1,16 @@
 // `ptr<U>(addr)` reinterprets an address as pointing at a different type. it takes an address,
-// so its argument is almost always a `:$` expression. no alignment or size checking is done -
-// this is the sharpest tool in the chapter
+// so its argument is almost always a `:$` expression. no alignment or size checking is done.
+//
+// it needs **no** `unsafe` block, and that placement is the design rather than an oversight: a
+// `ptr<T>` promises nothing, so computing another raw address out of one - and writing through it -
+// asserts nothing either. the word is owed one step later, where a raw address becomes a `T&`.
+// the two halves are written out below, in that order
 
 $n = 0;
 ptr<int> $ints = &$n;
 
-// the same memory, viewed as bytes
+// the same memory, viewed as bytes. no word: still a raw address, and access through one is treated
+// as if it could touch any memory at all
 ptr<uint8> $bytes = ptr<uint8>($ints:$);
 $bytes:$[0] = 255;
 
@@ -18,7 +23,11 @@ ptr<int> $p = $r:$;
 $p = 8;
 echo $a;
 
-// the narrowing back asserts non-nullness, so it has to be written out
-int& $back = int&($p:$);
-$back = 12;
+// the narrowing back is the **promotion**: it turns a raw address into a trusted typed borrow, and
+// from there every access through `$back` is optimized as an `int32`. that is the assertion `unsafe`
+// marks - not the reinterpretation above, which only computed another raw address
+unsafe {
+    int& $back = int&($p:$);
+    $back = 12;
+}
 echo $a;

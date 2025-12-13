@@ -453,6 +453,12 @@ Node *ScopeNode::clone(CloneContext &cc) const
     c->parent_ptr = cc.rebind(parent_ptr);
     c->is_function_boundary = is_function_boundary;
 
+    // **not a shallow copy, so every flag is copied by hand and a new one is silent if forgotten.**
+    // this one is `unsafe { }`: a generic body is cloned per instantiation, so without this line
+    // `mem::alloc<T>` keeps its promise in the template and loses it in every instance - which reads
+    // as the standard library refusing to compile against its own rule
+    c->is_unsafe = is_unsafe;
+
     // the declarations **first**, ahead of the statements that read them. a read reaches its declaration
     // through cc.rebind, and rebind answers with the *original* for anything the map does not hold yet -
     // so cloning in child order alone, a declaration that sits after a statement reading it leaves that

@@ -115,11 +115,22 @@ AST::ScopeNode & Parser::parse_scope(
     AST::LexicalScope lexical_scope(context, payload.collector.namespaces, block_token);
 
     while (!cursor.is_done()) {
-        // deep scope
-        if (cursor.is_type(Token::Type::t_open_brace)) {
+        // deep scope, optionally marked `unsafe`. one arm for both, because an unsafe block *is* a
+        // block: it opens a lexical namespace, drops its locals and lowers identically, and the
+        // marker changes only what AST::TypeChecker accepts inside it
+        if (cursor.is_type(Token::Type::t_open_brace)
+            || cursor.is_type_sequence(0, { Token::Type::t_unsafe, Token::Type::t_open_brace })) {
+            const bool unsafe_block = cursor.is_type(Token::Type::t_unsafe);
+            if (unsafe_block) {
+                cursor.skip();
+            }
+
             auto nested_brace = cursor.current();
             cursor.skip();
-            context.scope().add_child_scope(parse_scope(payload, nested_brace));
+
+            AST::ScopeNode &nested = parse_scope(payload, nested_brace);
+            nested.is_unsafe = unsafe_block;
+            context.scope().add_child_scope(nested);
 
             // next token needs to be a closing brace
             if (!cursor.is_type(Token::Type::t_close_brace)) {

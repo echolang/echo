@@ -260,12 +260,50 @@ namespace
                 return checked(op == Token::Type::t_op_div ? lhs / rhs : lhs % rhs);
             }
 
-            // **`^` cannot leave the type it folds at**, which is the whole of why it needs none of the
-            // overflow machinery above: both operands already fit, and every bit of the answer comes from
-            // one of them. `checked` stays anyway rather than returning `folded` directly, so the arm
-            // makes no claim of its own about what fits - one answer to that question, in one lambda
+            // **the three that cannot leave the type they fold at**, which is the whole of why they need
+            // none of the overflow machinery above: both operands already fit, and every bit of the answer
+            // comes from one of them. That holds for a signed operand too, because a ConstFoldResult is
+            // sign-extended to 64 bits - so `&`, `|` and `^` over two sign-extended values produce the
+            // sign-extended answer with nothing to correct.
+            //
+            // `checked` stays anyway rather than returning `folded` directly, so the arm makes no claim of
+            // its own about what fits - one answer to that question, in one lambda
+            case Token::Type::t_and:
+                return checked(lhs & rhs);
+            case Token::Type::t_or:
+                return checked(lhs | rhs);
             case Token::Type::t_xor:
                 return checked(lhs ^ rhs);
+
+            // **the two shifts, and a shift count is a refusal before it is an answer** - asked of
+            // AST::shift_count_refusal, which TypeChecker asks too so that `const(1 << 32)` and the
+            // plain `1 << 32` beside it get the same sentence rather than an error and a silence.
+            //
+            // `type` is the *left* operand's here whatever the count was written as, because
+            // AST::binary_reconciles_operands kept the reconciliation above from touching a shift
+            case Token::Type::t_op_shl:
+            case Token::Type::t_op_shr: {
+                if (auto refusal = shift_count_refusal(type, rhs)) {
+                    return ConstFoldResult::refused(*refusal);
+                }
+
+                if (op == Token::Type::t_op_shl) {
+                    // computed in unsigned space, where the wrap is *defined* - a signed left shift past
+                    // the sign bit is C++ undefined behaviour, and this file must not have any. `checked`
+                    // is then what refuses the ones that left the type, so `1 << 7` on an int8 is a
+                    // located error exactly as `1 * 128` already is
+                    return checked(lhs << rhs);
+                }
+
+                // **the one bitwise arm that is not sign-agnostic**, mirroring ExprCodegen's `ashr`/`lshr`
+                // split and reading the same reconciled signedness it does. an arithmetic shift of a
+                // sign-extended value stays sign-extended, so nothing has to be repaired afterwards
+                if (size.is_signed) {
+                    return checked(static_cast<uint64_t>(static_cast<int64_t>(lhs) >> rhs));
+                }
+
+                return checked(lhs >> rhs);
+            }
 
             // **`**` is deliberately not folded.** ExprCodegen lowers it by casting both operands to
             // double, calling llvm.pow and casting back to the operand type - so an integer answer worked
@@ -273,14 +311,13 @@ namespace
             // precision, and it would differ *silently*. the round trip is the reason, not the width it
             // lands in.
             //
-            // `& | << >>` are not folded because codegen lowers none of them: they reach its `default:`
-            // throw, so there is no emitted behaviour to agree with. that is the same reason `^` was not
-            // folded until it *was* lowered, and the two halves have to move together - a symbol folded
-            // here and thrown on there makes a `const if` and the `if` beside it take different arms
+            // the bitwise five above are folded because codegen lowers all five. that pairing is the rule
+            // rather than a coincidence: a symbol folded here and thrown on there makes a `const if` and
+            // the `if` beside it take different arms, so the two halves move together or not at all
             default:
                 return ConstFoldResult::refused(fmt::format(
-                    "'{}' is not something the compiler folds. `+ - * / % ^`, the comparisons and "
-                    "`&&`/`||` are.", spelling));
+                    "'{}' is not something the compiler folds. `+ - * / % & | ^ << >>`, the comparisons "
+                    "and `&&`/`||` are.", spelling));
         }
     }
 
@@ -500,9 +537,14 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             // asked directly rather than through AST::binary_operation_type, which is the same rule and
             // what ExprCodegen reads: that spelling folds "no common type" into "they already agree",
             // and this is the one caller that has to tell those apart to report the first
+            // **a shift folds at its left operand's type and asks nothing of the count's**, which is the
+            // same rule AST::binary_reconciles_operands gives the parser, the rewriter and codegen. This
+            // is the reader where a second answer would be loudest: reconciling here would fold
+            // `-16 >> 2` at the *count's* type where the count was written wider, and the emitted shift
+            // would keep the sign bit the fold had already dropped
             ValueType folded_at = lhs.type;
 
-            if (!(lhs.type == rhs.type)) {
+            if (binary_reconciles_operands(binary.op_node->op) && !(lhs.type == rhs.type)) {
                 const std::optional<ValueType> common = common_numeric_type(lhs.type, rhs.type);
 
                 if (!common.has_value()) {

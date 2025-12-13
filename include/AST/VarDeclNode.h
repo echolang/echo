@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ASTAccess.h"
 #include "ASTNode.h"
 #include "ASTValueType.h"
 #include "Lexer.h"
@@ -41,6 +42,31 @@ namespace AST
         // DuplicateFunctionSignature - which is correct: `mv` is a contract about the argument, not
         // a distinction a call can be resolved on
         bool takes_ownership = false;
+
+        // written `read slice<T> $src`, `inout array<T>& $dst`, `out T& $slot`: what this *parameter*
+        // does to the storage its argument names, for the duration of the call.
+        //
+        // an ordinary local leaves it `t_none` - it accesses its own storage and has nothing to
+        // promise anyone about it. the one local that does not is a constructor's `$this`, which
+        // arrives holding nothing and owes the body an initialized value: `t_out` said about a
+        // declaration rather than about an argument, because a constructor has no receiver parameter
+        //
+        // here rather than on the ValueType for takes_ownership's reason above, and read through
+        // AST::access_effect_of rather than directly - a receiver's effect is not written on it, so
+        // the field alone is only half the answer
+        AccessEffect access_effect = AccessEffect::t_none;
+
+        // written `private ptr<T> $data;` on a struct property: the name is reachable only from
+        // inside the type that declared it.
+        //
+        // **it is not decoration and not a style rule - it is what makes an invariant an invariant.**
+        // `mem::buffer<T>` claims that exactly one value names its allocation, and until this existed
+        // that claim was a convention: `$b->data:$ = $a->data;` built a second owner by hand, so
+        // "two live buffers are two allocations" was something the standard library kept rather than
+        // something the compiler knew. see notes/aliasing.md
+        //
+        // only ever true of a *property*. a local has no outside to be hidden from
+        bool is_private = false;
 
         // written `guard T $x = <nullable> else {...}`: this declaration's initializer is one level more
         // *nullable* than the declaration is, because the statement around it tests the value and only

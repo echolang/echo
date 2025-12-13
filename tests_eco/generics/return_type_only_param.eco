@@ -3,11 +3,19 @@
 // the mangled name has to fold in the instantiation arguments to keep them apart
 function reinterpret<T>(ptr<uint8> $p) : ptr<T>
 {
-    return ptr<T>($p:$);
+    unsafe {
+        return ptr<T>($p:$);
+    }
 }
 
 int32 $value = 424242;
-ptr<uint8> $raw = ptr<uint8>(&$value);
+
+// `unsafe` is a block, so a declaration whose initializer needs it is written in two steps: declare
+// the pointer null, then re-seat it through `:$` inside the block
+ptr<uint8> $raw = null;
+unsafe {
+    $raw:$ = ptr<uint8>(&$value);
+}
 
 ptr<int32> $as_int = reinterpret<int32>($raw);
 ptr<uint8> $as_byte = reinterpret<uint8>($raw);

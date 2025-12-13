@@ -235,6 +235,18 @@ namespace AST
     // "control continues", which would cost a spurious missing-return diagnostic or a block codegen leaves
     // unterminated
     bool builtin_never_returns(BuiltinKind kind);
+
+    // **does this builtin deliberately name storage the compiler is not accounting for?** `mem::take`
+    // empties such a slot and `mem::init` fills one, and they are the only two - every other builtin
+    // takes an ordinary value or an ordinary borrow.
+    //
+    // one owner because the two readers are opposite halves of one boundary and a disagreement is
+    // silent in the dangerous direction: AST::TypeChecker::check_raw_storage_argument refuses these two
+    // over *accounted* storage, and check_unsafe_promotion exempts the borrow they are handed from the
+    // `unsafe` rule. spelled as `is_builtin()` the exemption covered every builtin, so `dprint`,
+    // `mem::ref_count` and `mem::weak_count` - which take a plain `T&` - laundered a raw address into a
+    // trusted borrow with nothing asked of the author
+    bool builtin_owns_raw_storage(BuiltinKind kind);
 };
 
 #endif

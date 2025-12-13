@@ -12,5 +12,5 @@ echo $b[0];
 // ...declared here, below every use above
 operator (Bag& $b)[usize $i] : int32&
 {
-    return &$b->at:$[$i];
+    unsafe { return &$b->at:$[$i]; }
 }

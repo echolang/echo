@@ -1,6 +1,12 @@
-# the three repeated `11831194018420276491`s are the point of the case: a literal, a string built by
-# appending, and a substring of a larger buffer all hash the same text to the same number. that is
+# the four repeated `11831194018420276491`s are the point of the string half: a literal, a string built by
+# appending, a substring of a larger buffer and a view all hash the same text to the same number. that is
 # canonical FNV-1a 64 of "hello" and can be checked against any other implementation
+#
+# the five repeated `6238072747940578789`s are the point of the integer half, and they are **not** canonical
+# anything - they are hash::mix of the number 1. an integer is hashed by value rather than by width, so an
+# int32, an int64, a usize, a uint8 and a `true` all holding 1 agree. the two `0`s under them are what keeps
+# that from being sloppiness: a signed -1 and an unsigned 4294967295 are the same bits and must not collide,
+# and neither must 1 and 2
 
 expect: ok
 
@@ -11,11 +17,13 @@ expect: ok
 11831194018420276491
 11831194018420276491
 5717881983045765875
-12478008331234465636
-9929646806074584996
-9929646806074584996
-12638152016183539244
-12638152016183539244
+6238072747940578789
+6238072747940578789
+6238072747940578789
+6238072747940578789
+6238072747940578789
+0
+0
 1
 1
 0

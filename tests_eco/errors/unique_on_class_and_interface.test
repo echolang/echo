@@ -1,0 +1,26 @@
+expect: fail
+
+--- OUT --->
+[error] unique_on_class_and_interface.eco:4:3
+
+  '#[unique]' cannot be written on a class. A class is already one object, and copying a handle to it is one more reference rather than a second object.
+
+  3 | 
+  4 | #[unique]
+    :   ^^^^^^^
+  5 | class Node { int32 $v; }
+    : ^^^^^
+  6 | 
+
+[error] unique_on_class_and_interface.eco:7:3
+
+  '#[unique]' cannot be written on an interface. An interface declares requirements and stores nothing, so there is no storage for one value to own.
+
+  6 | 
+  7 | #[unique]
+    :   ^^^^^^^
+  8 | interface Thing { function f() : void; }
+    : ^^^^^^^^^
+  9 | 
+
+2 errors, nothing was compiled.

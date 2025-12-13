@@ -7,6 +7,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/LLVM/Codegen/TbaaTree.h"
 #include "AST/ASTCoreTypes.h"
 
 #include <llvm/IR/DataLayout.h>
@@ -191,6 +192,14 @@ namespace Compiler::LLVM
         // the type-lowering subsystem, reachable from any subsystem that needs to map an
         // AST::ValueType to an llvm::Type.
         TypeLowering *types = nullptr;
+
+        // **the type-based alias tree**, minted once beside the llvm context it hangs its nodes off.
+        // one tree and not one per unit, deliberately: MDNodes are owned by the context, so two units
+        // sharing it must share the leaves too or an `int32` access in one would carry a node that
+        // is merely *equal* to the other's rather than the same, and LLVM compares them by pointer
+        //
+        // see TbaaTree.h for what may be tagged and, more importantly, what may not
+        std::unique_ptr<TbaaTree> tbaa;
 
         // the lvalue subsystem: the single place that turns an expression into an address
         // every read, write and address-of goes through it, so they cannot drift apart

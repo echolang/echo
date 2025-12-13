@@ -3,6 +3,7 @@
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
+#include "Compiler/TargetSubtarget.h"
 
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
@@ -77,9 +78,7 @@ void Backend::print_unit_ir()
 
 int Backend::run_code(const std::vector<std::string> &arguments, const char *const *environment)
 {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    llvm::InitializeNativeTargetAsmParser();
+    Compiler::ensure_native_target_registered();
 
     auto main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
@@ -94,12 +93,23 @@ int Backend::run_code(const std::vector<std::string> &arguments, const char *con
         prune_to_entry();
     }
 
+    // **the JIT builds its own target machine, so it has to be told the same thing.** MCJIT does not
+    // take `_target_machine` - it selects one out of the EngineBuilder - and left alone it defaults to
+    // an empty CPU string. So `run` optimized the IR for one subtarget and then selected instructions
+    // for another, and `--target-cpu` would have been a flag that quietly did nothing on this path.
+    // The answer is the same call the pipelines above make, which is the whole point of it being a
+    // function rather than state on the machine
+    const Compiler::Subtarget sub = subtarget();
+    const std::vector<std::string> attributes = split_target_features(sub.features);
+
     std::string errorStr;
     const llvm::TargetOptions opts;
     llvm::ExecutionEngine *EE = llvm::EngineBuilder(std::move(_ctx.main_cmp_unit()->llvm_module))
         .setErrorStr(&errorStr)
         .setEngineKind(llvm::EngineKind::JIT)
         .setTargetOptions(opts)
+        .setMCPU(sub.cpu)
+        .setMAttrs(attributes)
         .create();
 
     _ctx.main_cmp_unit()->llvm_module = nullptr;
@@ -131,11 +141,29 @@ int Backend::run_code(const std::vector<std::string> &arguments, const char *con
     return status;
 }
 
+Compiler::Subtarget Backend::subtarget() const
+{
+    // **asked, never stored.** Compiler::resolve_subtarget is a pure function of the triple and the two
+    // requests, so this answer is the same one Compiler::compute_module_keys folded into the cache key
+    // long before the backend existed. Keeping a copy here would be a second place for the two to drift,
+    // and the drift is precisely the unsound-cache case: two subtargets served each other's objects
+    Compiler::Subtarget subtarget;
+    std::string error;
+
+    if (!Compiler::resolve_subtarget(
+            _ctx.target_triple, _ctx.options.target_cpu, _ctx.options.target_features,
+            subtarget, error)) {
+        // the driver validated these off the same function before a single file was parsed, so a
+        // refusal here is a disagreement between two calls that cannot disagree
+        throw Compiler::InternalCompilerException(error);
+    }
+
+    return subtarget;
+}
+
 void Backend::init_target()
 {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    llvm::InitializeNativeTargetAsmParser();
+    Compiler::ensure_native_target_registered();
 
     _ctx.target_triple = llvm::sys::getDefaultTargetTriple();
 
@@ -146,9 +174,16 @@ void Backend::init_target()
             "Could not resolve the host target '{}': {}", _ctx.target_triple, error));
     }
 
+    // **the subtarget is not a detail of this line.** every cost model in the compiler reads the machine
+    // built here - both PassBuilder pipelines through their TargetTransformInfo, and instruction
+    // selection in emit_object - so `generic` was the vectorizer answering for a CPU nobody runs on, at
+    // about 1.8x on any loop whose throughput it decides. Compiler::baseline_subtarget_for owns what the
+    // default is, and it is a table rather than a policy in here
+    const Compiler::Subtarget sub = subtarget();
+
     llvm::TargetOptions opt;
     _target_machine.reset(
-        target->createTargetMachine(_ctx.target_triple, "generic", "", opt, llvm::Reloc::PIC_));
+        target->createTargetMachine(_ctx.target_triple, sub.cpu, sub.features, opt, llvm::Reloc::PIC_));
     if (!_target_machine) {
         throw Compiler::InternalCompilerException(fmt::format(
             "Could not create a target machine for '{}'", _ctx.target_triple));
@@ -361,12 +396,21 @@ bool Backend::make_exec(std::string executable_name)
 // asks for an analysis nobody registered aborts inside LLVM rather than here.
 //
 // file-local rather than a member: llvm::ModulePassManager is a template alias, so a declaration in
-// Backend.h would drag the whole pass infrastructure into every translation unit that includes it
+// Backend.h would drag the whole pass infrastructure into every translation unit that includes it -
+// which is also why the TargetMachine arrives as a parameter rather than being read off `this`
+//
+// **the machine is what makes the pipeline know what it is compiling for.** a default-constructed
+// PassBuilder gets a no-op TargetTransformInfo, whose answer to "how wide is a vector register" is
+// *one* - so LoopVectorize and SLPVectorize are in every pipeline below and can never fire, and the
+// inliner and unroller cost models are generic guesses rather than this target's. It is not a
+// tuning knob: without it an `int32` reduction over an `array<int32>` emits a four-instruction
+// scalar loop at `-O`, which is what `entry_alloca`'s careful slot placement was buying nothing for
 static void run_module_passes(
     llvm::Module &module,
+    llvm::TargetMachine *target_machine,
     const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build)
 {
-    llvm::PassBuilder passBuilder;
+    llvm::PassBuilder passBuilder(target_machine);
     llvm::LoopAnalysisManager loopAM;
     llvm::FunctionAnalysisManager functionAM;
     llvm::CGSCCAnalysisManager cgsccAM;
@@ -391,7 +435,7 @@ void Backend::optimize()
         return;
     }
 
-    run_module_passes(*_ctx.current_module(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+    run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         // **the O3 pipeline and nothing after it.** this used to append a second ModuleInlinerPass once
         // the pipeline had already finished, which is a shape worth naming so it is not added back:
         // whatever that pass inlined was never simplified again. the O3 pipeline interleaves its inliner
@@ -429,7 +473,7 @@ void Backend::optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit)
     // dependencies' keys - which is what Compiler::compute_module_keys promises and tests/module_cache.cpp
     // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
     // are no longer all or nothing, which is the actual change here
-    run_module_passes(*cmp_unit.llvm_module, [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+    run_module_passes(*cmp_unit.llvm_module, _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
     });
 }
@@ -481,7 +525,9 @@ void Backend::prune_to_entry()
         return;
     }
 
-    run_module_passes(*_ctx.current_module(), [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+    // the machine is inert for these two - neither Internalize nor GlobalDCE consults a cost model - and
+    // is passed anyway so there is one spelling of "how a pipeline is built" rather than two
+    run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
         //

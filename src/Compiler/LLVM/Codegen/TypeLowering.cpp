@@ -6,6 +6,7 @@
 
 #include "eco.h"
 
+#include "AST/ASTAccess.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTFunctionEmission.h"
@@ -139,6 +140,27 @@ void TypeLowering::apply_function_attributes(
         }
 
         const AST::ValueType type = arg->type();
+
+        // **`readonly` is the one aliasing-adjacent attribute this function may write today, and it is
+        // written only for a parameter whose author *declared* `read`.**
+        //
+        // it says the function writes nothing through this argument or anything based on it, and that
+        // is a claim AST::AccessPass now checks in both directions it can be broken: a write through
+        // the parameter's own region, and a call handing that region somewhere that does not promise
+        // the same. before those two checks existed the claim was simply false - `const` is a
+        // per-level flag, so `$src->storage->data:$[0] = 999` through a `const array<T>&` writes the
+        // caller's elements.
+        //
+        // an *inferred* read - a bare `const T&` - deliberately gets nothing. the checks are scoped to
+        // the declared form precisely so that the promise is opt-in, so inferring the attribute here
+        // would be asserting the half of the rule nobody opted into.
+        //
+        // **and no `noalias`, from here or from anywhere.** a call-site conflict check does not
+        // license one: a callee can reach the same storage through a class handle it holds or a
+        // pointer it stored, neither of which appears at the call. see notes/aliasing.md and todo/A43
+        if (AST::declared_access_effect(*arg) == AST::AccessEffect::t_read && type.is_pointer()) {
+            func->getArg(static_cast<unsigned>(i))->addAttr(llvm::Attribute::ReadOnly);
+        }
 
         // **`t_pointer` only, and deliberately not a class handle.** a class also lowers to a bare `ptr`,
         // but it points at a payload inside a heap block whose header sits *before* it - so a size taken

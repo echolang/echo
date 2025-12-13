@@ -1,0 +1,17 @@
+// addresses may alias, accesses may not conflict. `extend` is an ordinary method, so its receiver
+// takes `inout` access by being a method's receiver, and `const array<T>& $other` takes `read` by
+// being a const borrow - neither word is written anywhere, and the two of them over one array is
+// the conflict this rule exists to name
+
+array<int32> $a = array<int32>();
+$a[] = 1;
+$a[] = 2;
+
+array<int32> $b = array<int32>();
+$b[] = 9;
+
+// two distinct arrays: disjoint, and untouched
+$a->extend($b);
+echo $a->count();
+
+$a->extend($a);
