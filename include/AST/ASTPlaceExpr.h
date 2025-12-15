@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTNodeTypes.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 
@@ -297,19 +298,11 @@ namespace AST
     // walk behind - and the walk fails silently, by simply not finding the variable
     VarDeclNode *place_root_of(ExprNode *expr);
 
-    // **where does a diagnostic about this expression point?** every shape carries a token somewhere, so
-    // this walks to whichever is nearest the surface rather than falling back to the file's first token -
-    // a diagnostic at line 1 is worse than none
-    //
-    // beside place_root_of because it encodes the same taxonomy over the same node set, and shared for the
-    // reason the predicates above it are: two passes now report about an expression that names no variable.
-    // AST::OwnershipPass, about a temporary it bound or refused, and AST::TypeChecker, about a borrow
-    // whose operand nothing gave storage to. a second copy would answer the same question differently the
-    // first time either grew an arm
-    //
-    // the shapes that carry no token of their own - `&`, a deref, an implicit cast, none of which the
-    // author ever wrote - borrow their operand's
-    const TokenReference &location_of_expression(ExprNode *expr);
+    // **where does a diagnostic about this expression point?** re-exported here, where its four callers
+    // already look, but owned by AST::source_token_of ([ASTSourceToken.h]) - which answers the same
+    // question over *every* node kind rather than over expressions only, because a DILocation is asked
+    // about whatever a walk is standing on. Keeping a second copy here would answer it differently the
+    // first time either grew an arm, which is the whole reason the arms moved
 
     // the type an expression yields when it is *read*, which is what an inferred declaration
     // and an assignment target both want

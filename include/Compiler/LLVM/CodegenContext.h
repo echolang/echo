@@ -42,6 +42,7 @@ namespace Compiler::LLVM
     class MemoryCodegen;
     class ProcessCodegen;
     class DebugPrintCodegen;
+    class DebugInfoCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
     // builder, the per-module compilation units, and the transient value/variable bookkeeping the
@@ -151,6 +152,52 @@ namespace Compiler::LLVM
             return found != function_file_map.end() ? found->second : current_file;
         }
 
+        // **every module in the bundle, for the one question a single module cannot answer about a
+        // token.** A TokenCollection belongs to one module, and AST::Module::file_of says so - it
+        // answers null both for a token this compiler minted *and* for one belonging to somebody else's
+        // collection. Asked of the unit being lowered, those two are indistinguishable, and a generic
+        // instantiated out of the stdlib into a user module hits the second case every time.
+        //
+        // that is not a cosmetic gap: it made a t_odr_shared body's debug info depend on which unit was
+        // emitting it - the same `map<K,V>` method described as living in `arr.eco` in one object and in
+        // the user's file in the next - which is exactly what verify_odr_consistency refuses
+        std::vector<AST::Module *> token_modules;
+
+        // which file this token was lexed from, or null if no source spells it
+        AST::File *file_of_token(const TokenReference &token) const;
+
+        // did this compiler mint the token rather than lex it - a synthesized drop's callee, a `$__it`,
+        // a decorated operator name. **Asked of the bundle**, so a token another module's collection
+        // owns still answers with the file it was lexed from rather than reading as minted
+        bool is_virtual_token(const TokenReference &token) const;
+
+        // **and where each declared type was written**, for the map above's reason rather than as a
+        // convenience: a type's description is emitted into every unit that mentions it, so anything in
+        // it taken from the ambient unit makes two descriptions of one type. That is not hypothetical -
+        // a struct's DIType named the first file of whichever module was being lowered, so `map<K,V>`
+        // was declared in `arr.eco` in one object and in the user's file in the next, and
+        // verify_odr_consistency refused the build.
+        //
+        // an instantiation has no declaration node of its own, so a caller reads through
+        // ComplexType::template_or_self() exactly as the function map's third sweep does
+        struct TypeSite
+        {
+            AST::File *file = nullptr;
+            uint32_t line = 0;
+        };
+
+        std::unordered_map<const AST::ComplexType *, TypeSite> type_site_map;
+
+        std::optional<TypeSite> site_of(const AST::ComplexType *type) const {
+            if (type == nullptr) {
+                return std::nullopt;
+            }
+
+            auto found = type_site_map.find(type->template_or_self());
+
+            return found != type_site_map.end() ? std::optional<TypeSite>(found->second) : std::nullopt;
+        }
+
         // the function declaration currently being generated, set/restored around each function
         // body so codegen errors can name their enclosing function. null at global scope
         AST::FunctionDeclNode *current_function = nullptr;
@@ -230,6 +277,12 @@ namespace Compiler::LLVM
         // expression arm may do
         DebugPrintCodegen *debug_print = nullptr;
 
+        // the debug-info subsystem: the whole of what a debugger is told. every entry point on it is a
+        // no-op with `-g` off, which is what keeps the call sites free of a flag check - and it is its
+        // own subsystem for AbortCodegen's reason, being state carried across a whole function body
+        // rather than a fact about the node in hand
+        DebugInfoCodegen *debug_info = nullptr;
+
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();
         }
@@ -275,6 +328,25 @@ namespace Compiler::LLVM
                 llvm::Constant::getNullValue(type),
                 symbol);
         }
+
+        // **where the builder goes, and the one place it goes there.**
+        //
+        // an IRBuilder's debug location is *sticky* across SetInsertPoint. Inside a statement that is
+        // exactly right - every block an `if` or a `while` creates belongs to the statement that wrote
+        // it - but a **merge block created after one carries a location from inside an arm**, and the
+        // block a following statement lands in carries the previous statement's until something sets
+        // it. Neither is a verifier error and neither shows up in a dump: the failure is a debugger
+        // stepping to a line the program is not on.
+        //
+        // so the location travels with the move, and there is no second spelling of moving the builder.
+        // beside entry_alloca for its reason - the alternative is a rule that fourteen call sites have
+        // to remember, which is the shape gen_load and gen_store already exist to avoid
+        void set_insert_point(llvm::BasicBlock *block);
+
+        // the restoring form, for an emitter that stepped out of a body to build a thunk and is putting
+        // the builder back where it found it. Two spellings of the move would be two answers to whether
+        // the location travels with it, which is the one thing this exists to settle
+        void set_insert_point(llvm::BasicBlock *block, llvm::BasicBlock::iterator point);
 
         // **has the block being emitted into already ended?** one question with many askers, and
         // the answer to all of them is "then emit nothing more here": gen_scope stops walking a

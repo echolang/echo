@@ -4,7 +4,9 @@
 #pragma once
 
 #include "ASTNode.h"
+#include "Token.h"
 
+#include <optional>
 #include <unordered_map>
 
 namespace AST 
@@ -77,6 +79,15 @@ namespace AST
         // one. AST::TypeChecker's depth counter is what enforces that, by being saved and cleared
         // across a function boundary
         bool is_unsafe = false;
+
+        // **the opening brace**, which is what a DILexicalBlock is placed at - so two locals of the same
+        // name in sibling blocks resolve to the right one in a debugger. optional because most scopes
+        // are minted rather than written: a function body's own, a lowered `foreach`'s, the arms
+        // AST::ConstFolding splices in.
+        //
+        // ScopeNode::clone is a hand-written field-by-field copy rather than a shallow one, so this owes
+        // it a line - a flag or a token dropped there is silent on every generic instantiation
+        std::optional<TokenReference> token_brace;
 
         NodeReferenceList children;
 

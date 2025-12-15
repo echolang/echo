@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include <llvm/IR/BasicBlock.h>
@@ -39,7 +40,7 @@ llvm::Function *MemoryCodegen::declare_thunk(
         thunk->getArg(static_cast<unsigned>(index))->setName(parameter_names[index]);
     }
 
-    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk));
+    _ctx.set_insert_point(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk));
 
     return thunk;
 }
@@ -115,11 +116,11 @@ llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()
 
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(block), done_block, count_block);
 
-    _ctx.builder->SetInsertPoint(count_block);
+    _ctx.set_insert_point(count_block);
     gen_counter_delta(1);
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
     _ctx.builder->CreateRet(block);
 
     return thunk;
@@ -149,12 +150,12 @@ llvm::Function *MemoryCodegen::get_or_create_free_thunk()
 
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(block), done_block, count_block);
 
-    _ctx.builder->SetInsertPoint(count_block);
+    _ctx.set_insert_point(count_block);
     gen_counter_delta(-1);
     _ctx.builder->CreateCall(_ctx.libc_callee("free", void_type, { opaque_ptr }), { block });
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
     _ctx.builder->CreateRetVoid();
 
     return thunk;
@@ -212,16 +213,16 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(old_block), grew_block, shrank_block);
 
     // nothing came in. an allocation, if it produced anything
-    _ctx.builder->SetInsertPoint(grew_block);
+    _ctx.set_insert_point(grew_block);
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(new_block), done_block, seated_block);
 
-    _ctx.builder->SetInsertPoint(seated_block);
+    _ctx.set_insert_point(seated_block);
     gen_counter_delta(1);
     _ctx.builder->CreateBr(done_block);
 
     // something came in and nothing came back. a free only if a zero size asked for one - otherwise the
     // allocator refused and the caller still holds what it had
-    _ctx.builder->SetInsertPoint(shrank_block);
+    _ctx.set_insert_point(shrank_block);
     _ctx.builder->CreateCondBr(
         _ctx.builder->CreateAnd(
             _ctx.builder->CreateIsNull(new_block),
@@ -230,11 +231,11 @@ llvm::Function *MemoryCodegen::get_or_create_realloc_thunk()
         released_block,
         done_block);
 
-    _ctx.builder->SetInsertPoint(released_block);
+    _ctx.set_insert_point(released_block);
     gen_counter_delta(-1);
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
     _ctx.builder->CreateRet(new_block);
 
     return thunk;

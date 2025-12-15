@@ -2,6 +2,7 @@
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "eco.h"
@@ -11,6 +12,7 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTMangler.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
@@ -57,6 +59,11 @@ void TypeLowering::create_cmp_units(
         cmp_unit->llvm_module->setDataLayout(_ctx.layout());
         cmp_unit->llvm_module->setTargetTriple(_ctx.target_triple);
 
+        // and its compile unit and debug module flags, for the same reason and at the same moment: all
+        // three are things a module carries from the instant it exists rather than acquires later. a
+        // no-op with `-g` off
+        _ctx.debug_info->create_unit(*cmp_unit);
+
         _ctx.cmp_unit_map[module->name] = cmp_unit.get();
     }
 
@@ -74,6 +81,23 @@ void TypeLowering::create_cmp_units(
     // two units may both emit. It read right for as long as the generic type happened to be declared in the
     // stdlib file the walk reached first, which is luck rather than a rule, and adding one file ahead of it
     // alphabetically was enough to make every `array<T>` bounds message name the wrong source file
+
+    // where each declared type was written. Two readers, and neither could derive it: the third sweep
+    // below reaches declarations that have no file root above them and no template to read through and
+    // carry only an owner, and DebugInfoCodegen needs a type's description to be the same in every unit
+    // that mentions it. Built here because a ComplexType has no back-pointer to its TypeDeclNode
+    _ctx.type_site_map.clear();
+
+    // every module, so a token can be resolved to its file regardless of which unit is being lowered -
+    // see CodegenContext::token_modules. Recorded here beside the maps below, and over *every* module
+    // including the cached ones, because a cached module still owns the tokens a live one's
+    // instantiations point at
+    _ctx.token_modules.clear();
+
+    for (auto &module : bundle.modules) {
+        _ctx.token_modules.push_back(module.get());
+    }
+
     for (auto &module : bundle.modules) {
         for (auto &file : module->files()) {
             if (file.root == nullptr) {
@@ -85,7 +109,13 @@ void TypeLowering::create_cmp_units(
                     _ctx.function_file_map[child.get_ptr<AST::FunctionDeclNode>()] = &file;
                 }
                 else if (child.has_type<AST::TypeDeclNode>()) {
-                    for (AST::FunctionDeclNode *method : child.get_ptr<AST::TypeDeclNode>()->methods()) {
+                    AST::TypeDeclNode *type_decl = child.get_ptr<AST::TypeDeclNode>();
+                    const TokenReference *at = AST::source_token_of(*type_decl);
+
+                    _ctx.type_site_map[&type_decl->complex_type()] = CodegenContext::TypeSite{
+                        &file, at != nullptr ? at->line() : 0 };
+
+                    for (AST::FunctionDeclNode *method : type_decl->methods()) {
                         _ctx.function_file_map[method] = &file;
                     }
                 }
@@ -105,6 +135,47 @@ void TypeLowering::create_cmp_units(
 
             if (found != _ctx.function_file_map.end()) {
                 _ctx.function_file_map[decl] = found->second;
+            }
+        }
+    }
+
+    // **and the declarations no walk above reaches at all.** Two shapes, both t_odr_shared, so a miss
+    // here is not a cosmetically wrong file name in an abort message - it is two units emitting
+    // different bytes for one symbol, which verify_odr_consistency now throws on:
+    //
+    //   - a **closure**, which is nested inside an expression rather than being a file-root child. It
+    //     was written in a file though, and its `declaration_token` is the real `function` keyword, so
+    //     the token answers directly.
+    //   - a **synthesized deinit, copy constructor or field-wise constructor**, appended to the module
+    //     by AST::OwnershipPass or the struct parser with no template_ref and only a virtual name
+    //     token. Nothing about it was written anywhere, so the honest answer is the file its *owner*
+    //     was declared in - which is also where a person reading a backtrace expects to land.
+    //
+    // asking the token first and the owner second is the order that matters: a hand-written method has
+    // both and the token is the more specific of the two
+    for (auto &module : bundle.modules) {
+        for (AST::FunctionDeclNode *decl : module->nodes.of_type<AST::FunctionDeclNode>()) {
+            if (_ctx.function_file_map.find(decl) != _ctx.function_file_map.end()) {
+                continue;
+            }
+
+            // a token belongs to exactly one module's collection, and a clone appended to another
+            // module still carries its template's - so this asks the bundle rather than this module
+            if (const TokenReference *token = AST::source_token_of(*decl)) {
+                if (AST::File *written_in = _ctx.file_of_token(*token)) {
+                    _ctx.function_file_map[decl] = written_in;
+                    continue;
+                }
+            }
+
+            if (decl->owner_type == nullptr) {
+                continue;
+            }
+
+            // through template_or_self, or an instantiation's synthesized deinit finds no declaration
+            // node at all - only the template it was derived from ever had one
+            if (auto owner_site = _ctx.site_of(decl->owner_type)) {
+                _ctx.function_file_map[decl] = owner_site->file;
             }
         }
     }

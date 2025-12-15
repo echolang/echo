@@ -3,6 +3,7 @@
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ASTNullability.h"
@@ -246,7 +247,7 @@ void DebugPrintCodegen::render_class(
     close_arm(join);
 
     // the payload arm
-    _ctx.builder->SetInsertPoint(value_block);
+    _ctx.set_insert_point(value_block);
     _pending_block = nullptr;
 
     llvm::Value *payload = _ctx.builder->CreateStructGEP(
@@ -255,7 +256,7 @@ void DebugPrintCodegen::render_class(
     render_properties(payload, layout.payload, *complex, type_name, label, depth);
     close_arm(join);
 
-    _ctx.builder->SetInsertPoint(join);
+    _ctx.set_insert_point(join);
     _pending_block = nullptr;
 }
 
@@ -282,7 +283,7 @@ void DebugPrintCodegen::render_optional(
     // the present arm reads the payload as a plain `T` - the tag is stripped and the value GEP'd out -
     // but prints under the optional's own name, or nothing in the output would distinguish an `int32?`
     // holding 12 from an `int32` holding 12
-    _ctx.builder->SetInsertPoint(some_block);
+    _ctx.set_insert_point(some_block);
     _pending_block = nullptr;
 
     llvm::Value *value_address = _ctx.builder->CreateStructGEP(
@@ -291,7 +292,7 @@ void DebugPrintCodegen::render_optional(
     render(LValue{value_address, AST::unwrapped_type_of(type)}, label, depth, &type);
     close_arm(join);
 
-    _ctx.builder->SetInsertPoint(join);
+    _ctx.set_insert_point(join);
     _pending_block = nullptr;
 }
 
@@ -424,7 +425,7 @@ llvm::BasicBlock *DebugPrintCodegen::open_branch(
 
     _ctx.builder->CreateCondBr(condition, on_true, on_false_out);
 
-    _ctx.builder->SetInsertPoint(on_true);
+    _ctx.set_insert_point(on_true);
     _pending_block = nullptr;
 
     return join;

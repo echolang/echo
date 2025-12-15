@@ -143,6 +143,10 @@ AST::IfStatementNode *Parser::parse_ifstatement(Parser::Payload &payload)
 {
     auto &ifstatement = payload.context.emplace_node<AST::IfStatementNode>();
 
+    // the `if` itself, read before the arms consume it - so a breakpoint on the line the branch was
+    // written on lands on the branch rather than on whatever its condition happens to name
+    ifstatement.token_if.emplace(payload.cursor.current());
+
     BranchArms arms;
 
     if (!parse_branch_arms(payload, arms)) {

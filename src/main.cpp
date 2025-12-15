@@ -472,7 +472,19 @@ static Compiler::CompilerOptions resolve_options(
         options.mode = Compiler::BuildMode::t_release;
     }
 
-    options.no_optimize = cli.get<bool>("--no-optimize");
+    options.debug_info = cli.get<bool>("--debug-info");
+
+    // **`-g` alone also means `--no-optimize`**, settled here rather than at the reader for the reason
+    // `--explain-memory` implying `--track-allocations` is: the un-implied combination is not what
+    // anybody asking for it wanted. Backend::optimize_unit's O2 pipeline reorders, folds and inlines
+    // until stepping through the line table walks a program nobody wrote and every local reads
+    // <optimized out> - which is a debug build in name only.
+    //
+    // `-O` is the opposite request said out loud, so it wins: `-g -O` is "debug info over the optimized
+    // program", which is a real thing to want and is what DISPFlagOptimized will be there to label
+    options.no_optimize = cli.get<bool>("--no-optimize")
+        || (options.debug_info && !cli.get<bool>("--optimize"));
+
     options.no_tbaa = cli.get<bool>("--no-tbaa");
 
     options.report_allocations = cli.get<bool>("--explain-memory");
@@ -859,6 +871,24 @@ int main_run(
     const std::vector<std::string> &program_arguments,
     const char *const *environment)
 {
+    // **said rather than ignored, and said before anything else.** `-g` is declared on both subcommands so
+    // that resolve_options stays one reader of one flag set, but only `build` writes an object a debugger
+    // can open - the JIT keeps its module in memory and MCJIT registers nothing a debugger reads. A flag
+    // that silently does nothing is the worse failure here: the metadata really is emitted, so nothing
+    // downstream is wrong, and the person is left concluding the feature is broken.
+    //
+    // read off the CLI rather than off the resolved options, for two reasons that agree: this is a
+    // question about the *invocation* rather than about the program being compiled, and the options are
+    // not resolved until run_front_end has already printed the summary - under json a diagnostic after
+    // that one breaks the "diagnostics, then one summary" shape of the stream
+    if (cli.get<bool>("--debug-info")) {
+        diagnostics.render_untyped(
+            "Debug Info Ignored",
+            "'-g' produces no artifact a debugger can open on 'run': the JIT emits no object file. "
+            "Use 'echoc build -g' and open the resulting executable instead.",
+            AST::IssueSeverity::Warning);
+    }
+
     auto bundle = AST::Bundle();
 
     // `run` reuses nothing: the JIT is handed one module, so every unit is merged and there are no per-module
@@ -1115,6 +1145,17 @@ int main(int argc, char *argv[], char *envp[])
         command.get().add_argument("--no-optimize")
             .help("Emit unoptimized IR: skip the per-unit pipeline an ordinary build runs. Not the inverse "
                   "of -O, which merges every unit and optimizes the whole program.")
+            .default_value(false)
+            .implicit_value(true);
+
+        // **orthogonal to --debug/--release**, and the help text has to say so: that pair decides which
+        // checks the program carries, this decides what the object tells a debugger. On its own it also
+        // turns the per-unit pipeline off - see resolve_options - because a line table over O2 output
+        // describes a program nobody wrote
+        command.get().add_argument("-g", "--debug-info")
+            .help("Emit DWARF, so the program can be stepped through in a debugger. Orthogonal to "
+                  "--debug/--release, which decides which checks the program carries. Implies "
+                  "--no-optimize unless -O is given.")
             .default_value(false)
             .implicit_value(true);
 

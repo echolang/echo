@@ -7,6 +7,8 @@
 #include "ExprNode.h"
 #include "ScopeNode.h"
 
+#include <optional>
+
 namespace AST 
 {
     class IfStatementNode : public Node
@@ -17,6 +19,10 @@ namespace AST
         ExprNode *condition;
         ScopeNode *if_scope;
         ScopeNode *else_scope;
+
+        // the `if` keyword, so a breakpoint set on the line the branch was written on lands on the
+        // branch. optional because AST::ConstFolding and the foreach lowering both mint one
+        std::optional<TokenReference> token_if;
 
         IfStatementNode() = default;
         IfStatementNode(

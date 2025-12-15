@@ -174,10 +174,11 @@ What invalidates a module:
 - its own sources or manifest
 - any dependency
 - any module compiled before it
-- the build mode, the target, or the compiler version
+- the build mode, whether it carries debug information, the target, or the compiler version
 
 That last line matters more than it looks. An object built with assertions is not an object built without them,
-so `--debug` and `--release` artifacts coexist rather than overwrite each other.
+so `--debug` and `--release` artifacts coexist rather than overwrite each other — and the same is true of `-g`
+(see [debugging.md](debugging.md)), which puts a whole DWARF description into every object it touches.
 
 The rule about preceding modules is stricter than a dependency list, and deliberately so. Because a module can
 name anything declared before it, a module you didn't declare a dependency on can still change what your code

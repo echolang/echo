@@ -1,0 +1,22 @@
+mode: build
+
+--- OUT --->
+42
+--- UNIT_IR --->
+# **the same program as line_table.eco, built without `-g`.** every entry point on DebugInfoCodegen is
+# a no-op with the flag off, so a call site that forgot to route through one shows up here as metadata
+# nobody asked for.
+#
+# the anchor is the unit header rather than a function, deliberately: without `-g` the per-unit O2
+# pipeline runs, `twice` is inlined into its one caller and the symbol is gone. That is the other half
+# of what this case says - `-g` implies --no-optimize, and this build is the one that shows what was
+# implied
+CHECK: [unit main]
+
+CHECK-NOT: !DICompileUnit
+CHECK-NOT: !DISubprogram
+CHECK-NOT: !DILocation
+CHECK-NOT: !DILocalVariable
+CHECK-NOT: #dbg_declare
+CHECK-NOT: Debug Info Version
+CHECK-NOT: Dwarf Version

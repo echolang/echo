@@ -70,10 +70,19 @@ namespace AST
         // tells a reader the stream ended rather than was cut off
         void render_summary(size_t errors, size_t warnings, bool compiled) const;
 
-        // an error with no source behind it: a broken manifest, a failed tokenization, an unusable
+        // an issue with no source behind it: a broken manifest, a failed tokenization, an unusable
         // target. It gets the badge and the same stream, and deliberately **not** an invented location -
         // making these carry one is todo/M9's job, and faking it here would remove the reason to do it
-        void render_untyped(const std::string &title, const std::string &message) const;
+        //
+        // **the severity is a parameter and defaults to Error** because not every locationless issue
+        // stops the compile: `-g` on `run` is a flag that cannot be honoured by a subcommand that still
+        // succeeds, and rendering that as an error puts an Error object in the json stream of a build
+        // that worked. A non-Error caller is therefore *not* the last thing printed, so the "no blank
+        // line after" note below is the terminal callers' property rather than this function's
+        void render_untyped(
+            const std::string &title,
+            const std::string &message,
+            IssueSeverity severity = IssueSeverity::Error) const;
 
         bool is_machine_readable() const {
             return _format == Compiler::DiagnosticFormat::t_json;

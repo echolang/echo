@@ -1,0 +1,31 @@
+// two rules that are invisible in a dump and wrong in a debugger.
+//
+// **a name this compiler minted is artificial, not hidden.** a `foreach` lowers to a `$__it` cursor and
+// a method's `$this` is a parameter nobody typed; both are real storage and both are worth looking at
+// when the thing being chased is in the library. DIFlagArtificial is what keeps them out of
+// `frame variable` until somebody asks, where dropping the declaration would be the debugger not
+// knowing the storage exists
+//
+// **a block gets its own scope**, so the two `$v` below resolve to the one that is actually in scope
+// rather than to whichever the walk recorded last
+function pick(int32 $n) : int32
+{
+    int32 $v = 100;
+
+    if ($n > 0) {
+        int32 $v = 7;
+        return $v + $n;
+    }
+
+    return $v;
+}
+
+array<int32> $xs = [1, 2, 3];
+int32 $total = 0;
+
+foreach ($xs as $x) {
+    $total = $total + $x;
+}
+
+echo pick(5);
+echo $total;

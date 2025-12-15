@@ -1,0 +1,32 @@
+mode: build
+flags: -g
+
+--- OUT --->
+42
+--- UNIT_IR --->
+# the compile unit, one per llvm module. `isOptimized: false` is truthful rather than decorative -
+# `-g` implies --no-optimize, and a false claim here is what stops lldb warning about a value that
+# really was optimized away
+CHECK: distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file:
+CHECK: producer: "echoc"
+CHECK: isOptimized: false
+CHECK: emissionKind: FullDebug
+
+# **the filename alone, never the directory.** the e2e runner is given an absolute source directory,
+# so a CHECK on `directory:` would be machine-specific - the same reason
+# CodegenContext::current_file_name answers a file name rather than a path
+CHECK: !DIFile(filename: "line_table.eco"
+
+# a user function carries its Echo name and its mangled symbol, so a backtrace reads as Echo while
+# `image lookup` still resolves the symbol. an instantiation shares its template's line, so the
+# linkage name is the only thing that tells two of them apart
+CHECK: !DISubprogram(name: "twice", linkageName: "_twiceZZMLPi"
+
+# and the statement locations themselves. the trailing `, column:` is not decoration - the directives
+# are plain substrings, so `line: 6` on its own would also match `line: 61`
+CHECK: !DILocation(line: 6, column:
+
+# the entry point is built by LLVMCompiler::compile_bundle with a bare Function::Create rather than
+# through gen_function_decl, so it needs a subprogram of its own or every module-scope statement is
+# unattributed
+CHECK: !DISubprogram(name: "main", linkageName: "main"

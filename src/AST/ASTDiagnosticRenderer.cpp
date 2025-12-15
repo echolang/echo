@@ -469,17 +469,18 @@ void AST::DiagnosticRenderer::render_summary(size_t errors, size_t warnings, boo
     _out << line << ".\n";
 }
 
-void AST::DiagnosticRenderer::render_untyped(const std::string &title, const std::string &message) const
+void AST::DiagnosticRenderer::render_untyped(
+    const std::string &title, const std::string &message, IssueSeverity severity) const
 {
     if (is_machine_readable()) {
         Diagnostic diagnostic;
-        diagnostic.severity = IssueSeverity::Error;
+        diagnostic.severity = severity;
         diagnostic.message = title + ": " + message;
         render_json(diagnostic);
         return;
     }
 
-    _out << badge(IssueSeverity::Error) << " " << styled(title, SGR_BOLD) << "\n\n";
+    _out << badge(severity) << " " << styled(title, SGR_BOLD) << "\n\n";
 
     // the message may already be several lines - a manifest reader hands over one line per refusal - and
     // each of them belongs at the same indent as a diagnostic's message.

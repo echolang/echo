@@ -7,6 +7,8 @@
 #include "ExprNode.h"
 #include "ScopeNode.h"
 
+#include <optional>
+
 namespace AST 
 {
     class WhileStatementNode : public Node
@@ -16,6 +18,10 @@ namespace AST
 
         ExprNode *condition;
         ScopeNode *loop_scope;
+
+        // the `while` keyword - see IfStatementNode::token_if. AST::ForeachLowering mints one of these
+        // with no keyword behind it, which is why it is optional
+        std::optional<TokenReference> token_while;
 
         WhileStatementNode() = default;
         WhileStatementNode(

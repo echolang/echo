@@ -1,0 +1,28 @@
+mode: build
+flags: -g
+
+--- OUT --->
+12
+6
+--- UNIT_IR --->
+CHECK: !DILocalVariable(name: "v", scope:
+# **a block gets its own scope.** the two `$v` are two DILocalVariables under two different scopes, so
+# a debugger stopped inside the `if` resolves the name to the inner one rather than to whichever the
+# walk happened to record last. the block is placed at its opening brace, which is why ScopeNode
+# carries one at all
+CHECK: !DILexicalBlock(scope:
+
+# **a name this compiler minted is artificial, not absent.** a method's `$this` is a parameter nobody
+# typed and a `foreach` cursor is storage nobody named; both are real and both are worth looking at.
+# DIFlagArtificial keeps them out of `frame variable` until asked, where dropping the declaration
+# would be the debugger not knowing the storage exists at all
+#
+# the flag is decided by CodegenContext::is_virtual_token, which asks the *bundle* - a stdlib `$this`
+# seen from a user unit belongs to a collection this module does not own, and the per-module reading
+# answers "not virtual" for it. that made one object say artificial and the next not
+CHECK: flags: DIFlagArtificial
+
+# the `foreach` cursor survives lowering with a position of its own: AST::Module::make_virtual_token
+# copies the line and column of the site it was minted at, so only the *file* is unanswerable - and a
+# DILocation takes its file from its scope rather than from itself
+CHECK: !DILocalVariable(name: "__it"

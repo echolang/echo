@@ -18,6 +18,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/VarDeclNode.h"
@@ -1503,7 +1504,7 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // the present path unwraps and fits the result type. that second step matters when the two sides
     // differ - `lookup($k) ?? 0` over an `int32?` and an untyped literal, or a nullable result the right
     // side made non-nullable
-    _ctx.builder->SetInsertPoint(present_block);
+    _ctx.set_insert_point(present_block);
     llvm::Value *present = _ctx.types->coerce_value(
         _ctx.types->gen_unwrapped(left, lhs_type),
         AST::unwrapped_type_of(lhs_type),
@@ -1515,7 +1516,7 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // **the right side is evaluated here and nowhere else**, which is the reason this is a branch rather
     // than a select: it may be a call, and calling it on the path where the left was there would be a
     // side effect the program did not ask for
-    _ctx.builder->SetInsertPoint(absent_block);
+    _ctx.set_insert_point(absent_block);
     node.rhs->accept(*_ctx.visitor);
     llvm::Value *right = _ctx.types->coerce_value(
         _ctx.pop(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
@@ -1525,7 +1526,7 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // the blocks the phi takes its incoming values from are the ones the builder *ended* in, not the ones
     // it started in: either arm may have branched internally - a call with its own control flow, a nested
     // `??` - and a phi naming the wrong predecessor is an llvm verifier failure with no source location
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
     llvm::PHINode *phi = _ctx.builder->CreatePHI(
         _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit), 2, "coalesce");
     phi->addIncoming(present, present_end);
@@ -1571,7 +1572,7 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
     _ctx.builder->CreateCondBr(
         _ctx.types->gen_has_value(base, base_type), reach_block, absent_block);
 
-    _ctx.builder->SetInsertPoint(reach_block);
+    _ctx.set_insert_point(reach_block);
 
     // spilled to a slot rather than kept as a value: the continuation may call a method, and a receiver
     // is an address. two instructions to keep one receiver convention, the same trade the class release
@@ -1602,7 +1603,7 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
 
     // the absent arm runs **nothing at all** - that is the whole difference from `??`, which evaluates a
     // replacement. it only supplies the result type's empty value, and for a void chain not even that
-    _ctx.builder->SetInsertPoint(absent_block);
+    _ctx.set_insert_point(absent_block);
 
     // lowered once and used by both the empty value and the phi below
     llvm::Type *llvm_result = has_value
@@ -1615,7 +1616,7 @@ void ExprCodegen::gen_optional_chain(AST::OptionalChainExprNode &node)
     llvm::BasicBlock *absent_end = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
 
     // a void chain is a statement and pushes nothing, exactly as a void call does - so gen_scope's
     // stack-depth assertion stays true rather than being special-cased for this node

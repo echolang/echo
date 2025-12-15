@@ -3,6 +3,7 @@
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ASTMangler.h"
@@ -176,7 +177,7 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
     // **the load this whole feature is for.** the block is readable because this weak reference is holding
     // it, and the strong count in it says whether the payload is still there. a program with no weak count
     // could not ask - it would have to read the payload to find out, which is the dangle
-    _ctx.builder->SetInsertPoint(read_block);
+    _ctx.set_insert_point(read_block);
     llvm::Value *strong = _ctx.builder->CreateLoad(
         i64,
         gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"),
@@ -188,13 +189,13 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
 
     // one more owner, and it is this one that makes the handed-back handle safe to read through: the
     // count cannot reach zero while the caller holds it
-    _ctx.builder->SetInsertPoint(live_block);
+    _ctx.set_insert_point(live_block);
     _ctx.builder->CreateStore(
         _ctx.builder->CreateAdd(strong, llvm::ConstantInt::get(i64, 1), "strong.inc"),
         gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"));
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
 
     // two ways to be absent and one to be there, so the result is `T?` - null for a weak that held nothing
     // and for one whose object is gone, which are the same answer to the only question a caller can ask
@@ -352,7 +353,7 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
     // load has to be guarded rather than merely answered false afterwards
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), done_block, read_block);
 
-    _ctx.builder->SetInsertPoint(read_block);
+    _ctx.set_insert_point(read_block);
 
     // the interface arm walks a table and so ends in a block of its own, which the PHI below has to take
     // its incoming value from rather than from `read_block`
@@ -380,7 +381,7 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
     llvm::BasicBlock *answer_block = _ctx.builder->GetInsertBlock();
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
     llvm::PHINode *result = _ctx.builder->CreatePHI(i1, 2, "instanceof.result");
     result->addIncoming(llvm::ConstantInt::get(i1, 0), entry_block);
     result->addIncoming(answer, answer_block);
@@ -432,7 +433,7 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
         _ctx.builder->CreateICmpEQ(count, llvm::ConstantInt::get(i64, 0), "conforms.empty"),
         exit_block, loop_block);
 
-    _ctx.builder->SetInsertPoint(loop_block);
+    _ctx.set_insert_point(loop_block);
     llvm::PHINode *index = _ctx.builder->CreatePHI(i64, 2, "conforms.i");
     index->addIncoming(llvm::ConstantInt::get(i64, 0), read_block);
 
@@ -441,7 +442,7 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
     llvm::Value *hit = _ctx.builder->CreateICmpEQ(found, wanted, "conforms.hit");
     _ctx.builder->CreateCondBr(hit, exit_block, next_block);
 
-    _ctx.builder->SetInsertPoint(next_block);
+    _ctx.set_insert_point(next_block);
     llvm::Value *stepped = _ctx.builder->CreateAdd(index, llvm::ConstantInt::get(i64, 1), "conforms.i.next");
     index->addIncoming(stepped, next_block);
     _ctx.builder->CreateCondBr(
@@ -449,7 +450,7 @@ llvm::Value *ClassCodegen::gen_conformance_scan(
 
     // three ways in and only one of them is a yes: the table was empty, the whole table was walked, or an
     // entry matched. a PHI rather than a mutable flag, so the answer is an SSA value like every other
-    _ctx.builder->SetInsertPoint(exit_block);
+    _ctx.set_insert_point(exit_block);
     llvm::PHINode *result = _ctx.builder->CreatePHI(i1, 3, "conforms.result");
     result->addIncoming(llvm::ConstantInt::get(i1, 0), read_block);
     result->addIncoming(llvm::ConstantInt::get(i1, 1), loop_block);
@@ -485,7 +486,7 @@ void ClassCodegen::gen_count_inc(
     // which is the whole reason a callable is a fat pointer
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(block), done_block, bump_block);
 
-    _ctx.builder->SetInsertPoint(bump_block);
+    _ctx.set_insert_point(bump_block);
 
     // the count's address is only well defined once the block is known non-null, so it is taken here
     const std::string name = count_name(index);
@@ -496,7 +497,7 @@ void ClassCodegen::gen_count_inc(
         _ctx.builder->CreateAdd(count, llvm::ConstantInt::get(i64, 1), name + ".inc"), count_ptr);
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
 }
 
 llvm::Value *ClassCodegen::gen_count(
@@ -522,7 +523,7 @@ llvm::Value *ClassCodegen::gen_count(
     // mutating, exactly as a shared one does. answering 1 would have it scribble on the binary
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), done_block, load_block);
 
-    _ctx.builder->SetInsertPoint(load_block);
+    _ctx.set_insert_point(load_block);
 
     // the count's address is only well defined once the handle is known non-null, as above
     const std::string name = count_name(index);
@@ -530,7 +531,7 @@ llvm::Value *ClassCodegen::gen_count(
         i64, gen_header_ptr(handle, layout.box, index, name + "_ptr"), name);
     _ctx.builder->CreateBr(done_block);
 
-    _ctx.builder->SetInsertPoint(done_block);
+    _ctx.set_insert_point(done_block);
 
     llvm::PHINode *result = _ctx.builder->CreatePHI(i64, 2, label);
     result->addIncoming(llvm::ConstantInt::get(i64, 0), null_block);
@@ -658,10 +659,10 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
     llvm::BasicBlock *zero_block = llvm::BasicBlock::Create(*_ctx.llvm_context, zero_block_name, thunk);
     llvm::BasicBlock *return_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", thunk);
 
-    _ctx.builder->SetInsertPoint(entry);
+    _ctx.set_insert_point(entry);
     _ctx.builder->CreateCondBr(_ctx.builder->CreateIsNull(handle), return_block, dec_block);
 
-    _ctx.builder->SetInsertPoint(dec_block);
+    _ctx.set_insert_point(dec_block);
 
     // the labels come off the index, so an arm cannot name one word while the GEP reaches another
     const std::string count = count_name(count_index);
@@ -675,15 +676,15 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
         zero_block,
         return_block);
 
-    _ctx.builder->SetInsertPoint(zero_block);
+    _ctx.set_insert_point(zero_block);
     on_zero(handle);
     _ctx.builder->CreateBr(return_block);
 
-    _ctx.builder->SetInsertPoint(return_block);
+    _ctx.set_insert_point(return_block);
     _ctx.builder->CreateRetVoid();
 
     if (saved_block != nullptr) {
-        _ctx.builder->SetInsertPoint(saved_block, saved_point);
+        _ctx.set_insert_point(saved_block, saved_point);
     }
 
     return thunk;

@@ -459,6 +459,14 @@ Node *ScopeNode::clone(CloneContext &cc) const
     // as the standard library refusing to compile against its own rule
     c->is_unsafe = is_unsafe;
 
+    // and the opening brace, for the same reason: a DILexicalBlock is placed at it, so an instantiation
+    // that lost it would describe every block of its body as starting at the function's own line
+    // emplace rather than assign: TokenReference holds a reference, so optional's copy assignment is
+    // deleted and only in-place construction is available
+    if (token_brace.has_value()) {
+        c->token_brace.emplace(token_brace.value());
+    }
+
     // the declarations **first**, ahead of the statements that read them. a read reaches its declaration
     // through cc.rebind, and rebind answers with the *original* for anything the map does not hold yet -
     // so cloning in child order alone, a declaration that sits after a statement reading it leaves that

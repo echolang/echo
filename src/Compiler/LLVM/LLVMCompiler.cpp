@@ -11,6 +11,7 @@
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Verifier.h>
@@ -24,7 +25,8 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _memory(_ctx), _process(_ctx), _debug_print(_ctx), _backend(_ctx)
+      _abort(_ctx), _memory(_ctx), _process(_ctx), _debug_print(_ctx), _debug_info(_ctx),
+      _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -39,6 +41,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.memory = &_memory;
     _ctx.process = &_process;
     _ctx.debug_print = &_debug_print;
+    _ctx.debug_info = &_debug_info;
 }
 
 LLVMCompiler::~LLVMCompiler()
@@ -172,9 +175,16 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     function->getArg(1)->setName("argv");
     function->getArg(2)->setName("envp");
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", function);
-    _ctx.builder->SetInsertPoint(entry);
+    _ctx.set_insert_point(entry);
 
     _ctx.current_cmp_unit = main_cmp_unit;
+
+    // the entry point is built here with a bare Function::Create rather than through gen_function_decl,
+    // so it needs its own subprogram - and its own prologue location, because gen_capture below emits
+    // stores and gen_report emits calls, and a call inside a subprogram-carrying function with no !dbg
+    // is a verifier error rather than a missing line
+    _debug_info.begin_entry_point(function);
+    _debug_info.set_function_scope_location();
 
     // before the file-root walk below, because a module-scope `env::arg(1)` is one of the statements it
     // emits and would otherwise read a global nothing had filled in yet
@@ -194,7 +204,16 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         }
 
         _ctx.current_file = &file;
+
+        // **`main`'s body is the concatenation of every file root of the entry module**, so a location
+        // from the second file would otherwise sit inside a subprogram whose file is the first - which
+        // is not describable with a plain scope and fails the verifier. This is the shape that does
+        // describe it, and the same one a C compiler emits for an #included body
+        _debug_info.push_file_scope(&file);
+
         file.root->accept(*this);
+
+        _debug_info.pop_file_scope();
     }
 
     // terminate the function, unless the program already stopped itself
@@ -205,9 +224,15 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     // the file-root walk above emitted every module-scope release, which `-ar` shows as the last
     // statements inside the root scope
     if (!_ctx.block_is_terminated()) {
+        // the epilogue is the function's own, not the last file-root statement's - and gen_report emits
+        // `printf` calls, which must carry a location like every other call here
+        _debug_info.set_function_scope_location();
+
         _memory.gen_report();
         _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
     }
+
+    _debug_info.end_function();
     }
 
     {
@@ -217,6 +242,13 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         Compiler::ScopedPhase phase("drain");
         drain_pending_definitions();
     }
+
+    // **after the drain and before the ODR check.** The drain is the last thing that can add a body to
+    // any unit, and verify_odr_consistency compares final metadata - everything downstream of here (the
+    // merge, both pipelines, the object writer) is then strictly later, which is why there is one moment
+    // rather than an ordering rule per consumer. A builder left unfinalized leaves temporary MDNodes
+    // behind and the verifier rejects the module with a message that does not name the cause
+    _debug_info.finalize_all();
 
     {
         // before the merge, because afterwards there is only one copy left to look at
@@ -373,11 +405,12 @@ namespace
             const bool digits_follow =
                 i + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[i + 1]));
 
-            // `#0` an attribute group reference, `@4` an unnamed global's slot. Both are positions in a
-            // per-module numbering, so the digits are dropped and the sigil kept - which leaves a body
-            // that says "some private constant here" and is why the constants themselves are compared
-            // separately below. A *named* global is untouched: `@__eco_abort` starts with a letter
-            if ((text[i] == '#' || text[i] == '@') && digits_follow) {
+            // `#0` an attribute group reference, `@4` an unnamed global's slot, `!42` a metadata node.
+            // All three are positions in a per-module numbering, so the digits are dropped and the sigil
+            // kept - which leaves a body that says "some private constant here" and "some debug location
+            // here", and is why both are compared separately below. A *named* global is untouched:
+            // `@__eco_abort` starts with a letter, and so does every metadata *kind*, `!dbg` and `!tbaa`
+            if ((text[i] == '#' || text[i] == '@' || text[i] == '!') && digits_follow) {
                 while (i + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[i + 1]))) {
                     i++;
                 }
@@ -471,6 +504,129 @@ namespace
         return out;
     }
 
+    // **the compile unit is a fact about the module, not about the body.** Every scope chain ends at one -
+    // a DILocation names a subprogram, which names its unit, which names the module's first file - so a
+    // printed tree drags in something that is *supposed* to differ between two units and would make every
+    // ODR-shared body compare unequal. The types beneath it are deduplicated by the linker on their
+    // `identifier:`, exactly as C++ does across translation units.
+    //
+    // printTree indents by depth, so dropping the line and everything below it is the subtree
+    std::string strip_compile_unit(const std::string &text)
+    {
+        std::string out;
+        out.reserve(text.size());
+
+        size_t cut_at_indent = std::string::npos;
+
+        for (size_t i = 0; i < text.size();) {
+            const size_t end = text.find('\n', i);
+            const size_t stop = end == std::string::npos ? text.size() : end;
+            const std::string_view line(text.data() + i, stop - i);
+
+            const size_t indent = line.find_first_not_of(' ');
+            const size_t depth = indent == std::string_view::npos ? 0 : indent;
+
+            if (cut_at_indent != std::string::npos) {
+                if (depth > cut_at_indent) {
+                    i = stop + 1;
+                    continue;
+                }
+
+                cut_at_indent = std::string::npos;
+            }
+
+            if (line.find("!DICompileUnit(") != std::string_view::npos) {
+                cut_at_indent = depth;
+                i = stop + 1;
+                continue;
+            }
+
+            out += line;
+            out += '\n';
+
+            if (end == std::string::npos) {
+                break;
+            }
+
+            i = end + 1;
+        }
+
+        return out;
+    }
+
+    // **the other half of what the body text cannot see**, and the exact mirror of the function above.
+    //
+    // a metadata reference renders as `!42`, a per-module slot, so `strip_module_local_numbering` drops
+    // the digits for `@0`'s reason - and once they are gone two bodies carrying *different* metadata
+    // render identically. Which is precisely the divergence this check exists for: a t_odr_shared body
+    // is emitted into every unit that references it, and a `!dbg` derived from the ambient walk rather
+    // than from the declaration is two descriptions of one symbol, of which the linker keeps an
+    // arbitrary one.
+    //
+    // **every kind, not just `!dbg`.** `!tbaa` is the other one a body carries today, and singling out
+    // debug info would leave exactly the hole this function was written to close - one that only opens
+    // the day some access family stops being a pure function of the declaration. getAllMetadata is
+    // ordered by kind id, so the walk is deterministic without sorting.
+    //
+    // **in instruction order, not a set.** A private constant is a thing a body *reaches*, and the order
+    // says nothing; metadata describes each instruction, so the sequence is the content.
+    std::string referenced_metadata(llvm::Function *fn)
+    {
+        std::string out;
+        llvm::SmallVector<std::pair<unsigned, llvm::MDNode *>, 4> attached;
+
+        // **one render per distinct node, not per attachment.** MDNodes are uniqued and heavily shared -
+        // one `!tbaa` leaf hangs off nearly every load and store in a body, and a `!dbg` drags its whole
+        // reachable type graph along - so rendering at the attachment made this quadratic in the size of
+        // the metadata graph for a check whose distinct content is linear
+        std::unordered_map<const llvm::MDNode *, std::string> rendered_nodes;
+
+        for (llvm::BasicBlock &block : *fn) {
+            for (llvm::Instruction &inst : block) {
+                attached.clear();
+                inst.getAllMetadata(attached);
+
+                // an instruction carrying none is a fact about this body as much as one carrying some -
+                // the prologue and the emitted runtime deliberately have no position, and a copy that
+                // grew one is what this is watching for
+                if (attached.empty()) {
+                    out += "-\n";
+                    continue;
+                }
+
+                for (const auto &[kind, node] : attached) {
+                    auto known = rendered_nodes.find(node);
+
+                    if (known == rendered_nodes.end()) {
+                        std::string rendered;
+                        llvm::raw_string_ostream stream(rendered);
+
+                        // the whole tree, so a DILocation brings its scope, its subprogram and its file
+                        // with it rather than one more slot number. run through the same normalizer as
+                        // the body above, because a tree prints its own shared subnodes by slot too -
+                        // what survives is the content: the file names, the lines, the type names.
+                        //
+                        // **with the module, which is not optional.** Handed no module, printTree
+                        // numbers the nodes it reaches by *address* - `<0x13bf09128>` - and an address
+                        // differs between two units by construction, so every ODR-shared body compared
+                        // unequal the moment it carried any metadata at all
+                        node->printTree(stream, fn->getParent());
+                        stream.flush();
+
+                        std::string normalized =
+                            strip_module_local_numbering(strip_compile_unit(rendered));
+
+                        known = rendered_nodes.emplace(node, std::move(normalized)).first;
+                    }
+
+                    out += fmt::format("{}: {}\n", kind, known->second);
+                }
+            }
+        }
+
+        return out;
+    }
+
 };
 #endif
 
@@ -510,6 +666,7 @@ void LLVMCompiler::verify_odr_consistency()
         bool have_first = false;
         std::string first_body;
         std::string first_constants;
+        std::string first_metadata;
         llvm::AttributeList first_attributes;
 
         for (Compiler::LLVM::CmpUnit *unit : units) {
@@ -522,23 +679,25 @@ void LLVMCompiler::verify_odr_consistency()
 
             const std::string body = strip_module_local_numbering(rendered);
             const std::string constants = referenced_private_constants(fn);
+            const std::string metadata = referenced_metadata(fn);
 
             if (!have_first) {
                 have_first = true;
                 first_body = body;
                 first_constants = constants;
+                first_metadata = metadata;
                 first_attributes = fn->getAttributes();
                 continue;
             }
 
-            if (body != first_body || constants != first_constants
+            if (body != first_body || constants != first_constants || metadata != first_metadata
                 || fn->getAttributes() != first_attributes) {
                 throw Compiler::InternalCompilerException(fmt::format(
                     "'{}' is defined with linkonce_odr linkage in more than one module and the "
                     "definitions differ, so the linker would keep an arbitrary one. A generated "
                     "definition must be a pure function of the declaration and its substitution - "
-                    "something in this body read ambient compiler state instead.\n\n{}{}\n--- vs ---\n\n{}{}",
-                    name, first_body, first_constants, body, constants
+                    "something in this body read ambient compiler state instead.\n\n{}{}{}\n--- vs ---\n\n{}{}{}",
+                    name, first_body, first_constants, first_metadata, body, constants, metadata
                 ), nullptr);
             }
         }

@@ -13,6 +13,9 @@ AST::WhileStatementNode *Parser::parse_whilestatement(Parser::Payload &payload)
 
     auto &whilestmt = payload.context.emplace_node<AST::WhileStatementNode>();
 
+    // the `while` itself - see IfStatementNode::token_if. read before the skip below consumes it
+    whilestmt.token_while.emplace(payload.cursor.current());
+
     // parse the condition
     payload.cursor.skip(); // skip the "while" token
 

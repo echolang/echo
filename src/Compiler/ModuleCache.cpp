@@ -133,6 +133,13 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.tracking_allocations() ? std::string("track") : std::string("notrack"), environment);
 
+    // **and whether the object carries DWARF**, which none of the three above covers. Every module that
+    // declares a function emits different bytes with `-g`, so without this entry a debug session is
+    // served a stripped artifact for every cached module and its breakpoints simply never resolve -
+    // with nothing anywhere saying why, since a stripped object is a perfectly valid one
+    environment = fnv1a64(
+        options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
+
     // **what the conditional filter saw**, which decides which declarations a module even has. The triple
     // above is not enough on its own: `--target-os` and `--define` change the answer without changing the
     // host, so two builds differing only in a define would otherwise share one object. The signature is

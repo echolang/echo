@@ -22,52 +22,19 @@ namespace fs = std::filesystem;
 namespace
 {
 
-// the shared process primitive - see subprocess.h
+// the shared process primitives - see subprocess.h
 using EchoTests::ProcessResult;
 using EchoTests::quoted;
 using EchoTests::run_capturing;
+using EchoTests::write_file;
 
-void write_file(const fs::path &path, const std::string &content)
-{
-    fs::create_directories(path.parent_path());
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << content;
-}
-
-// a scratch project directory, removed when the test leaves. Named after the case so a failure leaves
-// something identifiable behind when the removal is commented out to inspect it
-class ScopedProject
+// the scratch project, under this suite's own directory
+class ScopedProject : public EchoTests::ScopedProject
 {
 public:
-    explicit ScopedProject(const std::string &name)
-        : _root(fs::path(ECO_E2E_TMP_DIR) / "module_cache" / name)
-    {
-        std::error_code ec;
-        fs::remove_all(_root, ec);
-        fs::create_directories(_root, ec);
-    }
-
-    ~ScopedProject()
-    {
-        std::error_code ec;
-        fs::remove_all(_root, ec);
-    }
-
-    ScopedProject(const ScopedProject &) = delete;
-    ScopedProject &operator=(const ScopedProject &) = delete;
-
-    const fs::path &root() const { return _root; }
-    fs::path cache_dir() const { return _root / "cache"; }
-
-    // `cd <dir> && echoc <args>`, because the working directory is what project discovery reads
-    ProcessResult echoc(const std::string &args, const fs::path &working_directory) const
-    {
-        return run_capturing(
-            "cd " + quoted(working_directory) + " && " + quoted(ECHOC_BINARY) + " " + args + " 2>&1");
-    }
-
-private:
-    fs::path _root;
+    explicit ScopedProject(const std::string &name) :
+        EchoTests::ScopedProject("module_cache", name)
+    {};
 };
 
 // the `--explain-cache` line for one module: "<name>  <key>  <hit|miss>[  (why)]"

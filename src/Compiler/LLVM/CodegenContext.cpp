@@ -1,4 +1,5 @@
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 
 #include "AST/ASTFile.h"
 #include "AST/FunctionDeclNode.h"
@@ -24,6 +25,45 @@ namespace Compiler::LLVM
             builder->CreateExtractValue(
                 window, { static_cast<unsigned>(layout.size_index) }, fmt::format("{}size", prefix)),
         };
+    }
+
+    void CodegenContext::set_insert_point(llvm::BasicBlock *block)
+    {
+        builder->SetInsertPoint(block);
+
+        // the location does not travel with the builder on its own - see the header. decided rather
+        // than saved and restored per caller, because the statement seam owns which one is current and
+        // a caller holding its own copy is a second answer to that
+        if (debug_info != nullptr) {
+            debug_info->relocate(block);
+        }
+    }
+
+    void CodegenContext::set_insert_point(llvm::BasicBlock *block, llvm::BasicBlock::iterator point)
+    {
+        builder->SetInsertPoint(block, point);
+
+        if (debug_info != nullptr) {
+            debug_info->relocate(block);
+        }
+    }
+
+    AST::File *CodegenContext::file_of_token(const TokenReference &token) const
+    {
+        // one module owns the collection this token is in, and every other answers null for it - so the
+        // first non-null is the answer and there is nothing to disambiguate
+        for (AST::Module *module : token_modules) {
+            if (const AST::File *file = module->file_of(token)) {
+                return const_cast<AST::File *>(file);
+            }
+        }
+
+        return nullptr;
+    }
+
+    bool CodegenContext::is_virtual_token(const TokenReference &token) const
+    {
+        return file_of_token(token) == nullptr;
     }
 
     CmpUnit *CodegenContext::main_cmp_unit()

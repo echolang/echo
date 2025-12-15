@@ -1,0 +1,37 @@
+mode: build
+flags: -g
+
+--- OUT --->
+34
+--- UNIT_IR --->
+# **`#dbg_declare`, not `call void @llvm.dbg.declare`.** LLVM 19 made debug *records* the default, so
+# the intrinsic spelling matches nothing here - a CHECK written from memory against it would pass
+# forever while asserting nothing at all
+CHECK: #dbg_declare(
+
+CHECK: !DIBasicType(name: "int32", size: 32, encoding: DW_ATE_signed)
+
+# a borrow is described as a pointer to the struct, which is what makes `p *$p` show the fields.
+# get_llvm_type deliberately answers a bare `ptr` for every pointer level; the DIType deliberately
+# does not, because a pointer to nothing is the difference between that command working and not
+CHECK: !DIDerivedType(tag: DW_TAG_pointer_type, baseType:
+
+# the struct, named after the Echo type and carrying an `identifier:` - which is what lets the linker
+# fold two units' descriptions of one type, the debug-info analogue of the linkonce_odr its methods
+# already carry
+CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "Point"
+CHECK: identifier: "5Point"
+
+# and its members at their real offsets. the second one at 32 bits is the assertion that matters: an
+# offset invented from the member types rather than read off the DataLayout would agree here and stop
+# agreeing the moment a struct needs padding
+CHECK: !DIDerivedType(tag: DW_TAG_member, name: "x"
+CHECK: !DIDerivedType(tag: DW_TAG_member, name: "y"
+CHECK: offset: 32)
+
+# a parameter is a local with an `arg:` index, which is the whole of what separates the two in DWARF.
+# **no `$` on the name**: lldb reads a leading `$` as one of its own convenience variables, so `p by`
+# works and `p $by` could never have
+CHECK: !DILocalVariable(name: "p", arg: 1
+CHECK: !DILocalVariable(name: "by", arg: 2
+CHECK: !DILocalVariable(name: "sum", scope:

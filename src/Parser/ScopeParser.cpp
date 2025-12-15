@@ -98,6 +98,12 @@ AST::ScopeNode & Parser::parse_scope(
 
     auto &scope_node = context.emplace_node<AST::ScopeNode>();
 
+    // the opening brace, where this block's DILexicalBlock is placed. the same token the lexical
+    // namespace below is keyed on - one block, one position, said once
+    if (block_token.has_value()) {
+        scope_node.token_brace.emplace(block_token.value());
+    }
+
     // before the first statement, so the names are resolvable while the statements that read them are
     // parsed. in the order given, which is the order they are declared in
     for (AST::VarDeclNode *seed : seed_declarations) {

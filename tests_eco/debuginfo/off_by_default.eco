@@ -1,0 +1,10 @@
+// the same program as line_table.eco, built **without** `-g`. debug info costs nothing when it was
+// not asked for, and this is the case that catches it starting to: every entry point on
+// DebugInfoCodegen is a no-op with the flag off, so a call site that forgot to route through one
+// would show up here as metadata nobody asked for
+function twice(int32 $n) : int32
+{
+    return $n + $n;
+}
+
+echo twice(21);

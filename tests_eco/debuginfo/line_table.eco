@@ -1,0 +1,9 @@
+// `-g` puts a DWARF line table in the object: a compile unit, a subprogram per function, and a
+// location on every instruction a statement emitted. that is what a debugger reads to turn an address
+// back into a file and a line, and it is the whole of what makes a breakpoint on an `.eco` line resolve
+function twice(int32 $n) : int32
+{
+    return $n + $n;
+}
+
+echo twice(21);

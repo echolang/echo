@@ -181,9 +181,23 @@ void Backend::init_target()
     // default is, and it is a table rather than a policy in here
     const Compiler::Subtarget sub = subtarget();
 
+    // **and the machine's own optimization level, which is not the IR pipeline's.** createTargetMachine
+    // defaults to CodeGenOptLevel::Default - O2 - so instruction selection, machine scheduling, stack
+    // slot colouring and the peephole passes all ran even under `--no-optimize`, which turns off only
+    // Backend::optimize_unit. That is invisible in an IR dump and fatal to a debugger: an unoptimized
+    // body still came out with its stores merged and its frame folded into a post-indexed `stp`, so
+    // every local's DWARF location named a stack slot the function had already given back, and
+    // `frame variable` printed whatever was there.
+    //
+    // read off no_optimize rather than off debug_info, because "do not optimize" is what the flag says
+    // and a machine level that contradicts it is a second answer. `-g` reaches it by implying that flag,
+    // which is settled once in resolve_options
+    const llvm::CodeGenOptLevel opt_level =
+        _ctx.options.no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
+
     llvm::TargetOptions opt;
-    _target_machine.reset(
-        target->createTargetMachine(_ctx.target_triple, sub.cpu, sub.features, opt, llvm::Reloc::PIC_));
+    _target_machine.reset(target->createTargetMachine(
+        _ctx.target_triple, sub.cpu, sub.features, opt, llvm::Reloc::PIC_, std::nullopt, opt_level));
     if (!_target_machine) {
         throw Compiler::InternalCompilerException(fmt::format(
             "Could not create a target machine for '{}'", _ctx.target_triple));
@@ -354,6 +368,7 @@ bool Backend::link_executable(
 
     if (const auto command = host_linker_command(executable_name, objects)) {
         if (run_command(command.value())) {
+            gen_debug_symbols(executable_name);
             return true;
         }
 
@@ -370,7 +385,39 @@ bool Backend::link_executable(
         return false;
     }
 
+    gen_debug_symbols(executable_name);
+
     return true;
+}
+
+void Backend::gen_debug_symbols(const std::string &executable_name)
+{
+#if defined(__APPLE__)
+    if (!_ctx.options.emitting_debug_info()) {
+        return;
+    }
+
+    // **the debug info is not in the executable on Mach-O.** `ld` writes a *debug map* instead - one
+    // N_OSO stab per object, naming it by absolute path and mtime - and lldb reads the DWARF back out of
+    // those objects at debug time. Which works right up until the module cache is cleaned, the tree is
+    // moved or the binary is copied to another machine, and then reports "no debug symbols" with nothing
+    // saying why. dsymutil is what folds them into a self-contained <exe>.dSYM.
+    //
+    // here rather than in make_exec, so the whole-program and per-module paths both get it - and
+    // explicitly rather than left to the clang driver, because the preferred path is a direct `ld`
+    // invocation that will never run it, which would make debuggability depend on whether
+    // `xcrun --show-sdk-path` happened to answer
+    //
+    // **best effort**, exactly as host_linker_command is: a toolchain without dsymutil still produces a
+    // binary that runs, and one that is debuggable for as long as its objects stay put
+    if (!run_command({ "dsymutil", executable_name })) {
+        llvm::errs() << "Note: dsymutil failed or is unavailable - the executable is debuggable only "
+                        "while its object files remain where they were linked from\n";
+    }
+#else
+    // ELF links DWARF straight into the executable, so there is nothing to collect
+    (void)executable_name;
+#endif
 }
 
 bool Backend::make_exec(std::string executable_name)

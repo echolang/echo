@@ -3,6 +3,7 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include <llvm/IR/Constants.h>
@@ -64,7 +65,7 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
     // case, which a hand-rolled save/restore had to special-case
     llvm::IRBuilderBase::InsertPointGuard guard(*_ctx.builder);
 
-    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk));
+    _ctx.set_insert_point(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", thunk));
 
     // stdout first. without this a program that echoes and then dies prints the two in the wrong
     // order, because stdout is buffered and the write below is not
@@ -121,11 +122,11 @@ void AbortCodegen::gen_abort_if(llvm::Value *condition,
 
     _ctx.builder->CreateCondBr(condition, abort_block, ok_block);
 
-    _ctx.builder->SetInsertPoint(abort_block);
+    _ctx.set_insert_point(abort_block);
     gen_abort(headline, detail, location);
 
     // the caller carries on where the program did not stop
-    _ctx.builder->SetInsertPoint(ok_block);
+    _ctx.set_insert_point(ok_block);
 }
 
 std::string AbortCodegen::location_of(const AST::FunctionCallExprNode &node) const

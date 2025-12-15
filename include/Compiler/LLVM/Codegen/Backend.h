@@ -101,6 +101,13 @@ namespace Compiler::LLVM
             const std::string &executable_name, const std::vector<std::filesystem::path> &objects);
 
     private:
+        // **Mach-O only, and only under `-g`.** `ld` leaves the DWARF in the objects and writes only a
+        // debug map into the binary, so a debug session depends on those objects still being where they
+        // were linked from. dsymutil is what folds them into a self-contained `<exe>.dSYM`. Best effort:
+        // a toolchain without it still produces a binary that runs. On ELF this is a no-op, because the
+        // linker puts the DWARF in the executable itself
+        void gen_debug_symbols(const std::string &executable_name);
+
         // drops everything the entry point cannot reach, by internalizing the module and running
         // GlobalDCE over what is left. The root set is ECO_ENTRY_SYMBOL_NAME and nothing else, so it
         // is not a parameter: there is exactly one legal answer and it is the same one run_code looks up.

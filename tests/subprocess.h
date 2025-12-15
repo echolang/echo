@@ -6,7 +6,9 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <sys/wait.h>
 
 // the suites' process primitive. Two of them - the e2e corpus and the module cache - drive real `echoc`
@@ -60,6 +62,54 @@ namespace EchoTests
     {
         return "\"" + path.string() + "\"";
     }
+
+    inline void write_file(const std::filesystem::path &path, const std::string &content)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << content;
+    }
+
+    // a scratch project directory, removed when the test leaves. Named after the *suite* and then the
+    // case, so a failure leaves something identifiable behind when the removal is commented out to
+    // inspect it - and so two suites cannot collide on a case name
+    class ScopedProject
+    {
+    public:
+        ScopedProject(const std::string &suite, const std::string &name) :
+            _root(std::filesystem::path(ECO_E2E_TMP_DIR) / suite / name)
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(_root, ec);
+            std::filesystem::create_directories(_root, ec);
+        }
+
+        ~ScopedProject()
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(_root, ec);
+        }
+
+        ScopedProject(const ScopedProject &) = delete;
+        ScopedProject &operator=(const ScopedProject &) = delete;
+
+        const std::filesystem::path &root() const { return _root; }
+        std::filesystem::path cache_dir() const { return _root / "cache"; }
+
+        // `cd <dir> && echoc <args>`, because the working directory is what project discovery and
+        // manifest resolution both read. The root is the default, which is what every case but the
+        // ones testing discovery itself wants
+        ProcessResult echoc(const std::string &args, const std::filesystem::path &working_directory) const
+        {
+            return run_capturing(
+                "cd " + quoted(working_directory) + " && " + quoted(ECHOC_BINARY) + " " + args + " 2>&1");
+        }
+
+        ProcessResult echoc(const std::string &args) const { return echoc(args, _root); }
+
+    private:
+        std::filesystem::path _root;
+    };
 };
 
 #endif

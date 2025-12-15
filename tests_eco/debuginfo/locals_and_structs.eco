@@ -1,0 +1,21 @@
+// what `frame variable` reads: a DILocalVariable per parameter and per local, each with a
+// #dbg_declare naming the slot that holds it, and a DIType describing how to read those bytes.
+//
+// a struct's members are described at their **real** offsets, taken off the same DataLayout the
+// lowering used - AST::ComplexType::Property::index is the LLVM element index, so there is nothing to
+// recompute and nothing that can drift
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+function scale(Point& $p, int32 $by) : int32
+{
+    int32 $sum = $p->x * $by;
+    return $sum + $p->y;
+}
+
+Point $origin = Point(3, 4);
+
+echo scale(&$origin, 10);

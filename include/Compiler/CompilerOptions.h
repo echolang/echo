@@ -45,6 +45,20 @@ namespace Compiler
         // LLVMCompiler::emit_objects is about to write, so a second reader is a way for the two to disagree
         bool no_optimize = false;
 
+        // **does the emitted object carry DWARF**, so a debugger can name a source line, a function and
+        // a local.
+        //
+        // a third axis and not a consequence of the build mode, for track_allocations' reason: `--debug`
+        // is about the checks the *program* owes itself, and this is what the *object* tells a debugger.
+        // folding them would make an assertion-free build undebuggable by construction, which is exactly
+        // the build a person reaches for a debugger over
+        //
+        // it does settle one thing at the CLI rather than here - see resolve_options - because the O2
+        // pipeline Backend::optimize_unit runs on every ordinary build reorders and folds until a line
+        // table describes a program nobody wrote. `-g` alone therefore also sets no_optimize, and `-O`
+        // said out loud overrides it
+        bool debug_info = false;
+
         // **turns off type-based alias metadata**, for differential testing and for bisecting a
         // miscompile against the aliasing model rather than against the optimizer.
         //
@@ -83,6 +97,13 @@ namespace Compiler
 
         bool reporting_allocations() const {
             return report_allocations;
+        }
+
+        // and the same rule again. four emitters will ask - the unit's compile unit, the subprogram, the
+        // location seam and the local declares - and Compiler::compute_module_keys is a fifth, because an
+        // object carrying DWARF is not the object beside it that does not
+        bool emitting_debug_info() const {
+            return debug_info;
         }
     };
 };

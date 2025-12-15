@@ -2,6 +2,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ASTFunctionEmission.h"
@@ -57,6 +58,13 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
     //
     // direct children only, for that same reason. a declaration nested in an `if` arm or a loop body
     // belongs to that scope's sweep, and clearing it from here would clear it once instead of per turn
+
+    // the block's own debug scope, opened before the slots below because that is where their variables
+    // are declared - two locals of one name in sibling blocks resolve apart only if each is recorded
+    // under the block it was written in. a no-op for a scope nobody wrote a brace for, which is what
+    // the answer here records for the matching pop
+    const bool debug_block = _ctx.debug_info->push_lexical_block(node);
+
     for (auto &child : node.children) {
         if (child.has_type<AST::VarDeclNode>()) {
             ensure_var_slot(*child.get_ptr<AST::VarDeclNode>());
@@ -74,6 +82,13 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
         // a subexpression belongs to the parent that asked for it, so anything still on the
         // stack here is a leak - and a leak silently feeds the wrong value to a later pop
         const size_t depth_before = _ctx.value_stack.size();
+
+        // **the statement seam.** set once here and inherited by every load, call and branch the
+        // subtree below emits, which is the whole of how a line table falls out of a walk that knows
+        // nothing about lines. Per statement rather than per expression deliberately: that is the
+        // granularity a `step` command means, and a location per expression node triples the metadata
+        // for no debugger benefit
+        _ctx.debug_info->set_location(*child.node());
 
         child.node()->accept(*_ctx.visitor);
 
@@ -100,6 +115,10 @@ void StmtCodegen::gen_scope(AST::ScopeNode &node)
             break;
         }
     }
+
+    // the `break` above falls through to here, so this is the one exit and the stack stays balanced.
+    // the early return at the top of this function is *ahead* of the push, deliberately
+    _ctx.debug_info->pop_lexical_block(debug_block);
 }
 
 llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
@@ -130,6 +149,11 @@ llvm::AllocaInst *StmtCodegen::ensure_var_slot(AST::VarDeclNode &node)
 
     // store the variable in the map
     _ctx.var_map[&node] = alloca;
+
+    // **once per slot per function**, which the guard above is already what guarantees: a second
+    // declare record for one variable is what a re-entry here would produce. The record goes at the
+    // alloca rather than at the written position, so it dominates every use - see declare_local
+    _ctx.debug_info->declare_local(alloca, node, std::nullopt);
 
     // an aggregate with no initializer used to be left holding `undef`, which a constructor that
     // writes only some of its fields then read back as garbage. it is a prerequisite of scope-exit
@@ -265,7 +289,16 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     }
 
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", func);
-    _ctx.builder->SetInsertPoint(entry);
+    _ctx.set_insert_point(entry);
+
+    // the subprogram, once the body is certain to be emitted here - a declaration may carry no !dbg,
+    // so this cannot move up to Function::Create. Same place and same reason as the linkage flip above
+    _ctx.debug_info->begin_function(node, func);
+
+    // **the prologue sits at the subprogram's own line**, which is what makes LLVM place `prologue_end`
+    // at the first statement of the body rather than on the declaration. The allocas themselves stay
+    // unlocated: entry_alloca builds with its own IRBuilder, which starts with no location
+    _ctx.debug_info->set_function_scope_location();
 
     // create the arguments
     // the parameter slots. through entry_alloca like every other slot even though the builder is already
@@ -277,12 +310,20 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
         llvm::AllocaInst *alloca = _ctx.entry_alloca(arg.getType(), arg.getName());
         _ctx.builder->CreateStore(&arg, alloca);
         _ctx.var_map[node.args[arg.getArgNo()]] = alloca;
+
+        // 1-based, which is the whole of what distinguishes a parameter from a local in DWARF
+        _ctx.debug_info->declare_local(alloca, *node.args[arg.getArgNo()], arg.getArgNo() + 1);
     }
 
     // a synthesized constructor arrives here like any other function - the struct parser builds its
     // body out of the same nodes a user would write, which is what keeps one implementation of the
     // member write and of the pointer re-seat
     node.body->accept(*_ctx.visitor);
+
+    // the synthesized terminator belongs to the function rather than to any statement, so it takes the
+    // subprogram's line - left where the last statement stood, an epilogue reports a line control
+    // already left
+    _ctx.debug_info->set_function_scope_location();
 
     // add a terminator if the block doesn't already have one
     if (!_ctx.block_is_terminated()) {
@@ -296,6 +337,8 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
             _ctx.builder->CreateRet(dummy_ret);
         }
     }
+
+    _ctx.debug_info->end_function();
 
     _ctx.current_function = prev_function;
     _ctx.current_file = prev_file;
@@ -378,7 +421,7 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
 
     // the bound path: unwrap and store. `coerce_value` is still asked, because the declared type may be a
     // widening of the payload - `guard int64 $v = lookup($k)` over an `int32?`
-    _ctx.builder->SetInsertPoint(bound_block);
+    _ctx.set_insert_point(bound_block);
 
     llvm::Value *value = _ctx.types->gen_unwrapped(optional, optional_type);
     _ctx.builder->CreateStore(
@@ -397,14 +440,14 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // the absent path. it never rejoins - AST::scope_always_exits refused an else arm that could fall
     // through - but the branch is emitted defensively rather than assumed: an unterminated block is an
     // llvm verifier failure with no source location, and this is cheap insurance against one
-    _ctx.builder->SetInsertPoint(else_block);
+    _ctx.set_insert_point(else_block);
     node.else_scope->accept(*_ctx.visitor);
 
     if (!_ctx.block_is_terminated()) {
         _ctx.builder->CreateBr(continue_block);
     }
 
-    _ctx.builder->SetInsertPoint(continue_block);
+    _ctx.set_insert_point(continue_block);
 }
 
 void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
@@ -423,7 +466,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         _ctx.builder->CreateCondBr(condition, if_block, merge_block);
 
         // if block
-        _ctx.builder->SetInsertPoint(if_block);
+        _ctx.set_insert_point(if_block);
         node.if_scope->accept(*_ctx.visitor);
 
         // if last instruction is not a terminator we need to add a branch to the merge block
@@ -438,7 +481,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         _ctx.builder->CreateCondBr(condition, if_block, else_block);
 
         // if block
-        _ctx.builder->SetInsertPoint(if_block);
+        _ctx.set_insert_point(if_block);
         node.if_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
@@ -448,7 +491,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
         }
 
         // else block
-        _ctx.builder->SetInsertPoint(else_block);
+        _ctx.set_insert_point(else_block);
         node.else_scope->accept(*_ctx.visitor);
         // _ctx.builder->CreateBr(merge_block);
 
@@ -461,7 +504,7 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
     }
 
     if (merge_block) {
-        _ctx.builder->SetInsertPoint(merge_block);
+        _ctx.set_insert_point(merge_block);
     }
 }
 
@@ -474,7 +517,7 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     _ctx.builder->CreateBr(loop_block);
 
     // loop block
-    _ctx.builder->SetInsertPoint(loop_block);
+    _ctx.set_insert_point(loop_block);
     node.condition->accept(*_ctx.visitor);
     llvm::Value *condition = _ctx.value_stack.top();
     _ctx.value_stack.pop();
@@ -484,7 +527,7 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     // body block. the back edge is only emitted when the body can actually fall out of its end -
     // a body whose every path returns already terminated its block, and a second terminator there
     // fails the verifier
-    _ctx.builder->SetInsertPoint(body_block);
+    _ctx.set_insert_point(body_block);
     {
         // **the body only**, and the continue target is the *condition* block: for a `while` the
         // condition is the step, so `continue` and the natural back edge below are the same edge. that is
@@ -499,7 +542,7 @@ void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
     }
 
     // merge block
-    _ctx.builder->SetInsertPoint(merge_block);
+    _ctx.set_insert_point(merge_block);
 }
 
 void StmtCodegen::gen_loop_control(AST::LoopControlNode &node)
