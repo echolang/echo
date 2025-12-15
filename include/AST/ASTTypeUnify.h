@@ -9,6 +9,26 @@
 
 namespace AST
 {
+    // **where in the parameter's shape a match sits, which is what decides what a `const` on the
+    // argument means.** the two answers are not degrees of one thing:
+    //
+    //  - on a **level** - the parameter itself, or one reached through a pointer or a weak - a `const`
+    //    describes the *place* the value was read from. `f(const K& $key)` passing `$key` on binds
+    //    K=string, because the value is a string and only the borrow was read-only.
+    //
+    //  - inside a generic application's **argument list**, a `const` is part of the instantiation's
+    //    identity. `slice<const int32>` is a window over storage it may not write, and that is a fact
+    //    about the type rather than about the place it was found in - stripping it makes the
+    //    substituted parameter `slice<int32>`, a different type from the argument that produced it.
+    //
+    // **sticky once set**, so `slice<ptr<T>>` against `slice<ptr<const int32>>` binds T=const int32:
+    // every level below a type argument is still describing that type
+    enum class UnifyPosition
+    {
+        t_level,
+        t_type_argument,
+    };
+
     // binds the type parameters `param` mentions to the matching parts of `arg`, returning false
     // when the two shapes cannot be reconciled at all
     //
@@ -25,7 +45,7 @@ namespace AST
     // parameter has matched a pointer argument structurally the caller has opted out of both, so the
     // descent below it binds exactly - otherwise `ptr<T>` against `ptr<ptr<int32>>` would bind
     // T=int32 and hand the instance an argument one level off
-    bool unify_type(const ValueType &param, const ValueType &arg, TypeSubstitution &out, bool allow_decay = true);
+    bool unify_type(const ValueType &param, const ValueType &arg, TypeSubstitution &out, bool allow_decay = true, UnifyPosition position = UnifyPosition::t_level);
 };
 
 #endif

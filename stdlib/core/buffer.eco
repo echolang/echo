@@ -102,6 +102,18 @@ struct buffer<T>
     }
 
     /**
+     * The same window, read-only, for when the buffer is reached through a `const` - which is what
+     * `array<T>`'s own const `sub()` is written over.
+     *
+     * `slice<const T>` rather than a `const slice<T>`: the const belongs to the *elements* here, and a
+     * window carries what it may do with them in its own type. See slice.eco's const `iterate()`.
+     */
+    const function sub(usize $from, usize $count) : slice<const T>
+    {
+        return slice<const T>($this->data:$ + $from, $count);
+    }
+
+    /**
      * Copies `$count` slots from `$from` to `$to` within this buffer. **The two ranges must not
      * overlap** - `move` below is the one that copes when they do.
      *

@@ -3,7 +3,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTTypeParam.h"
 
-bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST::TypeSubstitution &out, bool allow_decay)
+bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST::TypeSubstitution &out, bool allow_decay, AST::UnifyPosition position)
 {
     // generic inference decays a pointer argument to its pointee unless the parameter asks
     // for a pointer explicitly, so `box($p)` yields Box<int32> rather than Box<ptr<int32>>
@@ -14,7 +14,7 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // only at the top level though: asking for `ptr<T>` is how the doc says to opt out of
     // the decay, so everything below that match binds exactly
     if (allow_decay && !param.is_pointer() && arg.is_pointer()) {
-        return unify_type(param, value_type_of(arg), out, allow_decay);
+        return unify_type(param, value_type_of(arg), out, allow_decay, position);
     }
 
     // the mirror of that rule, and the reason a generic mutator can be written at all: a
@@ -30,12 +30,12 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // top level only, like the decay it mirrors, and for the same reason: below a structural match
     // `allow_decay` is false, or `ptr<T>` against a `ptr<int32>` argument would bind T by two routes
     if (allow_decay && parameter_auto_borrows(param) && !arg.is_pointer()) {
-        return unify_type(param.pointee(), arg, out, false);
+        return unify_type(param.pointee(), arg, out, false, position);
     }
 
     // pointer against pointer binds structurally, one level down
     if (param.is_pointer() && arg.is_pointer()) {
-        return unify_type(param.pointee(), arg.pointee(), out, false);
+        return unify_type(param.pointee(), arg.pointee(), out, false, position);
     }
 
     // and weak against weak, the same way: `cache<T>(weak<T> $w)` called with a `weak<Node>` binds
@@ -47,14 +47,16 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // weak is not: reading it is refused, and binding T=Foo would name an instance whose body cannot be
     // handed what the call site actually has
     if (param.is_weak() && arg.is_weak()) {
-        return unify_type(param.weak_target(), arg.weak_target(), out, false);
+        return unify_type(param.weak_target(), arg.weak_target(), out, false, position);
     }
 
-    // a bare type parameter binds directly to the argument type, **with the top-level `const` stripped**
+    // a bare type parameter binds directly to the argument type, with the argument's `const` stripped
+    // wherever that `const` describes a **place** rather than a type - AST::UnifyPosition owns which of
+    // the two this is, and the two cases are worth keeping apart here because both are load-bearing
     //
-    // `const` is a property of the *place* a value was read from, not of the value: `$key` inside
-    // `f(const K& $key)` reads as a `const K`, and passing it on must bind `K` and not `const K`. Without
-    // the strip one intent mints two instantiations - `map<const string, int32>` beside
+    // on a level, `const` is a property of the *place* a value was read from, not of the value: `$key`
+    // inside `f(const K& $key)` reads as a `const K`, and passing it on must bind `K` and not `const K`.
+    // Without the strip one intent mints two instantiations - `map<const string, int32>` beside
     // `map<string, int32>` - and because ValueType equality is exact they are unrelated types, so the
     // receiver of the second call no longer converts to the first. Which is how it surfaced: a container
     // whose accessors take `const K&` could not call one from another
@@ -63,11 +65,19 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // so `const float` still matches `float`") and the same one AST::array_literal_type_for applies when it
     // mints from an element. stated here so inference agrees with both rather than being a third answer
     //
-    // **top level only**, which is what make_mutable does: `const` is a per-level bit, so a `ptr<const T>`
-    // argument still binds `ptr<const T>` and only the outermost qualifier - the one belonging to the place
-    // rather than to the type - is dropped
+    // inside a type argument the strip is the opposite of harmless: `slice<T>` against a
+    // `slice<const int32>` argument bound T=int32, so the substituted parameter came back `slice<int32>`
+    // and AST::argument_fit scored t_none against the very argument that produced the binding - a refusal
+    // whose diagnostic never says the word const. a read-only window is a *type*, and a parameter written
+    // over it has to be able to name it
+    //
+    // a `const` the parameter's own level already states is consumed either way, so `slice<const T>`
+    // against `slice<const int32>` still binds T=int32: the parameter said const, and what it is matching
+    // is what is left
     if (param.is_type_param()) {
-        out.bind(param.get_type_param(), ValueType::make_mutable(arg));
+        const bool consumes_const = param.is_const() || position == UnifyPosition::t_level;
+
+        out.bind(param.get_type_param(), consumes_const ? ValueType::make_mutable(arg) : arg);
         return true;
     }
 
@@ -93,8 +103,13 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         // exact, like the pointer descent above: `Box<int32&>` is a different layout
         // from `Box<int32>`, so binding T by reading the borrow away would pick the
         // wrong instance rather than a compatible one
+        //
+        // and t_type_argument for the same reason one level up: `Box<const int32>` is a different
+        // layout too, so a `const` reached from here belongs to the instantiation and not to a place
         for (size_t i = 0; i < pct->instantiation_args.size(); i++) {
-            if (!unify_type(pct->instantiation_args[i], act->instantiation_args[i], out, false)) {
+            if (!unify_type(
+                    pct->instantiation_args[i], act->instantiation_args[i], out, false,
+                    UnifyPosition::t_type_argument)) {
                 return false;
             }
         }

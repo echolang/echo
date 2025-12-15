@@ -1,0 +1,41 @@
+// **a `const` inside a type argument is part of the instantiation's identity**, so inference keeps it
+// where inference on a *level* strips it. AST::UnifyPosition is the one owner of which of the two a
+// match is in, and const_borrow_binds_a_bare_param.eco is the other half - the level rule that stays.
+//
+// without this, `slice<T>` against a `slice<const int32>` argument bound T=int32, so the substituted
+// parameter came back `slice<int32>` and scored no fit at all against the very argument that produced
+// the binding - a refusal whose message never said the word const
+
+struct box<T>
+{
+    T $v;
+}
+
+// a bare `T` parameter: the level rule, unchanged. a `const int32` place still binds T=int32
+function level<T>(T $value) : T
+{
+    return $value;
+}
+
+// `T` reached through a type argument: the const is the type's, and is kept
+function unwrap<T>(box<T> $b) : T
+{
+    return $b->v;
+}
+
+// a parameter that spells the const itself consumes it, so this binds T=int32 either way and refuses a
+// mutable `box<int32>` - the substituted parameter is `box<const int32>`, which is a different type
+function unwrap_const<T>(box<const T> $b) : T
+{
+    return $b->v;
+}
+
+const int32 $frozen = 5;
+
+box<const int32> $sealed = box<const int32>(1);
+box<int32> $open = box<int32>(2);
+
+echo level($frozen);
+echo unwrap($sealed);
+echo unwrap($open);
+echo unwrap_const($sealed);

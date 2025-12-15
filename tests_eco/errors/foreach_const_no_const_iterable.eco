@@ -1,0 +1,48 @@
+// a type that declares only the writable half of the protocol, iterated through a const.
+//
+// its own sentence rather than "declares neither": the type *is* iterable and the author can see that,
+// so the refusal has to name what is actually missing - the read-only contract, and the fact that a
+// const receiver can only be handed a cursor over storage it may not write
+
+struct cursor : contract::iterator<int32>
+{
+    int32 $pos;
+
+    constructor()
+    {
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= 3) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : int32&
+    {
+        return &$this->pos;
+    }
+}
+
+struct counter : contract::iterable<int32>
+{
+    int32 $unused;
+
+    function iterate() : cursor
+    {
+        return cursor();
+    }
+}
+
+counter $c = counter(0);
+const $frozen = $c;
+
+foreach ($frozen as $x) {
+    echo $x;
+}

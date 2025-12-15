@@ -63,6 +63,32 @@ interface iterable<V>
 }
 
 /**
+ * The same thing, from a value you promised only to read.
+ *
+ * A second interface and not a second `iterate()` overload, because **a requirement's receiver is part of
+ * the requirement**: an interface is answered by a method that makes exactly the promise it asked for, in
+ * both directions, so a `const function iterate()` cannot answer the one above and a plain one cannot
+ * answer this. Which is the rule working rather than a limitation to route around - a holder of an
+ * `iterable<V>` may call `iterate()` on a mutable value, and that is a different capability from being
+ * able to call it on a value nobody may write.
+ *
+ * `V` means what it means above - **what the loop yields** - so a container declares this one over its
+ * const element type: `array<T> : contract::const_iterable<const T>`. A const receiver can only hand out
+ * a cursor over storage it may not write, so a container's two `iterate()` overloads return two different
+ * cursors, and `foreach` picks between them by whether the value it was given is const.
+ */
+#[core: "const_iterable"]
+interface const_iterable<V>
+{
+    type Iter : iterator<V>;
+
+    /**
+     * A cursor positioned before the first element, over elements it may only read.
+     */
+    const function iterate() : Iter;
+}
+
+/**
  * The orthogonal capability that makes `foreach ($a as $k => $v)` spellable.
  *
  * Deliberately apart from `iterator<V>` rather than a second interface repeating `advance` and

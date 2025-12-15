@@ -1,0 +1,8 @@
+--- OUT --->
+1
+2
+--- RAST --->
+CHECK: vardecl<type<slice_iterator<const int32>>>($__it) = call iterate
+CHECK: while (call advance
+CHECK: vardecl<type<const int32&>>($reader) = call current
+CHECK-NOT: foreach

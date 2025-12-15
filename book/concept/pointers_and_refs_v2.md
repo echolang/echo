@@ -368,6 +368,25 @@ const ptr<const int32> $c;  // neither
 The same applies to references: `const int32& $r` is a read-only borrow, which is the form you want for
 most function parameters that only need to look at their argument.
 
+And it applies to a *type argument*, which is how a borrowing type says the same thing about what it points
+at:
+
+```echo
+slice<const int32> $w;      // elements are const — the window may be re-seated, they cannot be written
+const slice<int32> $v;      // by the rule above: the window is const
+```
+
+The first one is a real type you can write down and hand around, and the const travels with it — a
+`slice<const int32>` is read-only inside every function it reaches, where a `const slice<int32>` parameter
+only says it about that one call. It's what a `const` collection hands out; see
+[Iteration](iteration.md#looping-over-something-you-may-not-change).
+
+The second one is **the deliberate exception in the language**: read strictly, `const slice<int32>` promises
+only not to re-seat the window, and says nothing about the elements. Slices don't take that reading — a
+`const slice<T>` gives you `const` elements, matching `const array<T>`. An array and a slice over it get used
+interchangeably at call sites, and having the two disagree about what `const` protects would cost more than
+the inconsistency does.
+
 ### Const methods
 
 A method's receiver is an ordinary first parameter, so it takes a `const` the same way any other borrow

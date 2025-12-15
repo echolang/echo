@@ -1,0 +1,10 @@
+// a cursor is spent by being read, so there is no read-only form of one to select: `advance()` moves
+// the cursor itself. refused where the loop is written, rather than at an `advance()` call the lowering
+// synthesized against a token the author never typed
+array<int32> $source = [1, 2, 3];
+
+const $cursor = $source->iterate();
+
+foreach ($cursor as $x) {
+    echo $x;
+}

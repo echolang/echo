@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  const_type_argument_mismatch.eco:18:6
+
+  Invalid type conversion: cannot implicitly convert 'box<int32>' to 'box<const int32>'
+
+  17 | 
+  18 | echo unwrap_const($open);
+     :      ^^^^^^^^^^^^
+  19 | 
+
+1 error, nothing was compiled.

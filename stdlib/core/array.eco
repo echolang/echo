@@ -39,7 +39,7 @@
  * your own code is.
  */
 #[core: "array"]
-struct array<T> : contract::iterable<T>
+struct array<T> : contract::iterable<T>, contract::const_iterable<const T>
 {
     // **the allocation, and the length that says how much of it is live.** two fields and not three,
     // because the address and the capacity are one thing - they are created together, they move
@@ -609,12 +609,31 @@ struct array<T> : contract::iterable<T>
     }
 
     /**
+     * The same window over a `const` array: read-only, and said in the window's own type.
+     */
+    const function sub() : slice<const T>
+    {
+        return $this->sub(0, $this->len);
+    }
+
+    /**
      * A borrowed window over `$count` elements from `$from`.
      *
      * Named `sub` rather than `slice` to match `slice<T>::sub` and `string::view::sub` - one word for
      * "a narrower window over the same bytes", wherever you ask for one.
      */
     function sub(usize $from, usize $count) : slice<T>
+    {
+        assert($from <= $this->len, "slice start out of range");
+        assert($count <= $this->len - $from, "slice length out of range");
+
+        return $this->storage->sub($from, $count);
+    }
+
+    /**
+     * The same narrower window, read-only - `at`'s pairing, one level down.
+     */
+    const function sub(usize $from, usize $count) : slice<const T>
     {
         assert($from <= $this->len, "slice start out of range");
         assert($count <= $this->len - $from, "slice length out of range");
@@ -631,6 +650,19 @@ struct array<T> : contract::iterable<T>
     function iterate() : slice_iterator<T>
     {
         return slice_iterator<T>($this->sub());
+    }
+
+    /**
+     * A cursor over the elements of an array nobody may write.
+     *
+     * The read-only half of the protocol - `contract::const_iterable<const T>` above - and it is what
+     * makes `foreach` over a `const` array work. Written through the const `sub()` for the mutable
+     * one's reason, and needing no cursor of its own: `slice_iterator<const T>` falls out of
+     * substitution, and its `current()` hands back `const T&`.
+     */
+    const function iterate() : slice_iterator<const T>
+    {
+        return slice_iterator<const T>($this->sub());
     }
 
     /**

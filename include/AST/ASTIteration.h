@@ -16,7 +16,10 @@ namespace AST
     // where the cursor a loop drives comes from
     enum class IterationSource
     {
-        // the source conforms to `contract::iterable<V>`: call its `iterate()`
+        // the source conforms to `contract::iterable<V>` - or, when the loop was handed a const value,
+        // to `contract::const_iterable<V>`: call its `iterate()`. **one kind and not two**, because
+        // which contract was read changes nothing after the plan is built: the callee is named through
+        // whichever conformance answered, and V arrives already carrying the const the const one spells
         t_iterable,
 
         // the source *is* a `contract::iterator<V>`: drive it directly. this is what makes an adaptor - a
@@ -42,7 +45,11 @@ namespace AST
         // iterator kinds it is the source itself
         ValueType iterator_type;
 
-        // V - the element type, carrying its own const
+        // V - the element type, **carrying its own const**, which is load-bearing rather than incidental:
+        // it is the entire difference a const source makes to the loop. a container declares
+        // `const_iterable<const T>`, V is read off that application, and both binding rules downstream
+        // fall out of it with no arm of their own - `&$el` over a const V is AST::ForeachLowering's
+        // refusal, `const &$el` and the elided by-value form are its `const V&` declaration
         ValueType element_type;
 
         // K, when the cursor declares `contract::keyed<K>`. absent is not an error until a `=>` asks for it

@@ -37,7 +37,7 @@
  *
  * If any of those ever stops being worth it the swap is internal: the surface below is identical either way.
  */
-struct ordered_map<K, V> : contract::iterable<V>
+struct ordered_map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     map<K, V> $table;
 
@@ -222,6 +222,14 @@ struct ordered_map<K, V> : contract::iterable<V>
     }
 
     /**
+     * The same cursor over an ordered map nobody may write, yielding `const V&`.
+     */
+    const function iterate() : ordered_map_const_iterator<K, V>
+    {
+        return ordered_map_const_iterator<K, V>(&$this->table, $this->order->sub());
+    }
+
+    /**
      * An explicit deep copy, for where `$b = $a` would not read as one.
      *
      * Written as a declaration and a `return` rather than `ordered_map<K, V>($this)`: the copy this type
@@ -350,6 +358,65 @@ struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
         // a raw `ptr<>` the cursor holds, so calling a method on it establishes a trusted borrow of
         // the table. discharged by the cursor's own contract - it is created from a live map and does
         // not outlive it, which is the rule every borrow into a container already keeps
+        unsafe {
+            return $this->table->at($this->order[$this->pos - 1]);
+        }
+    }
+
+    function key() : K
+    {
+        return $this->order[$this->pos - 1];
+    }
+}
+
+/**
+ * The same cursor over an ordered map nobody may write. Yields `const V&`, with the key beside it.
+ *
+ * **A declaration of its own, where `map<K, V>`'s cursor needed none**, and the reason is worth stating
+ * because it is the only place in the standard library where substitution could not do the work. A
+ * `map_iterator<K, V>` mentions `V` in one property, `ptr<V> $values`, so `map_iterator<K, const V>` is
+ * that cursor over `ptr<const V>` and every body is unchanged. This one mentions `V` *nested inside
+ * another generic* - `ptr<map<K, V>>` - so substituting `V := const V` asks for a `map<K, const V>`,
+ * which is a different table from the one it was handed. There is no spelling for "const the yield and
+ * not the table", so the const the table is reached through goes on the pointer instead.
+ */
+struct ordered_map_const_iterator<K, V> : contract::iterator<const V>, contract::keyed<K>
+{
+    ptr<const map<K, V>> $table;
+    slice<const K> $order;
+
+    // one *past* the entry `current()` names, slice_iterator's convention
+    usize $pos;
+
+    constructor(ptr<const map<K, V>> $table, slice<const K> $order)
+    {
+        $this->table:$ = $table;
+        $this->order = $order;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->order->count()) {
+            return false;
+        }
+
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    /**
+     * The value under the key at this position, borrowed read-only out of the table.
+     *
+     * Reaches the const `at`, because the table is reached through a `ptr<const map<K, V>>` - so the
+     * borrow this hands back is the one the receiver already promised, rather than one this cursor
+     * decided to weaken.
+     */
+    function current() : const V&
+    {
+        // the promotion the mutable cursor makes, unchanged and for its reason: `$table` is a raw
+        // pointer, so calling a method on it establishes a trusted borrow of the table
         unsafe {
             return $this->table->at($this->order[$this->pos - 1]);
         }

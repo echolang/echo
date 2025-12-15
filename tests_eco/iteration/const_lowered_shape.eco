@@ -1,0 +1,12 @@
+// the const path in the resolved tree. `foreach` is transient either way, and what a const source
+// changes is exactly two things: which `iterate()` the plan named, and that V arrives const - so the
+// cursor is a `slice_iterator<const int32>` and the element declaration is a `const int32&`
+//
+// the copy elision reads the same as it does over a mutable array (see copy_elision), because it is the
+// same rule: a by-value binding nothing writes is bound `const V&`
+array<int32> $source = [1, 2];
+const $frozen = $source;
+
+foreach ($frozen as $reader) {
+    echo $reader;
+}

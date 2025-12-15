@@ -1,0 +1,36 @@
+// `foreach` over a container nobody may write. the const receiver reaches
+// `contract::const_iterable<const T>` rather than `contract::iterable<T>`, so the cursor it is handed
+// is a `slice_iterator<const T>` and every element arrives as a `const int32` - which is what makes
+// the two read-only bindings below legal and the writable one refused (see errors/foreach_const_by_ref)
+array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+// by value. the element is copied out of a place the loop may only read, so writing the copy is fine
+// and leaves the array alone
+foreach ($frozen as $x) {
+    $x = $x * 10;
+    echo $x;
+}
+
+echo "--";
+
+// the read-only borrow, said out loud. no copy, and `const` is already what the element type says
+foreach ($frozen as const &$y) {
+    echo $y;
+}
+
+echo "--";
+
+// keys work unchanged: `contract::keyed<usize>` is on the *cursor*, and the const cursor declares it
+// by being the same `slice_iterator<T>` under substitution
+foreach ($frozen as $i => $v) {
+    echo $i;
+    echo $v;
+}
+
+echo "--";
+
+// the array itself was never touched
+foreach ($source as $z) {
+    echo $z;
+}

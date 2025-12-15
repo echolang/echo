@@ -70,6 +70,12 @@ namespace AST
         // `contract::iterator<V>` from `iterate()`
         t_iterable,
 
+        // `interface contract::const_iterable<V>` - the same, from a `const` receiver. a second kind
+        // rather than a second overload because a requirement's receiver const-ness is compared exactly
+        // (AST::candidate_shape_answers), so the two `iterate()`s answer two different interfaces -
+        // which is also the only way a container can hand back two different cursors
+        t_const_iterable,
+
         // `interface contract::keyed<K>` - the orthogonal capability that makes `$k => $v` spellable. an
         // iterator that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
         t_keyed,

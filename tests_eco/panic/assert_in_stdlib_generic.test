@@ -11,6 +11,6 @@ expect: fail
 --- OUT --->
 1
 assertion failed: array index out of range
-  at array.eco:671
+  at array.eco:703
 --- IR --->
 CHECK: at array.eco:

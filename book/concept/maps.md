@@ -245,8 +245,9 @@ foreach ($m as $k => $v) { echo $k; }   // c, a
 
 Don't insert while iterating — see the invalidation section. Removing is fine.
 
-A `const` map reads but does not iterate, exactly as a `const` array doesn't: the cursor hands out mutable
-borrows and there's no read-only cursor type yet.
+A `const` map iterates, exactly as a `const` array does — the values arrive as `const V&`, the keys by value
+as always, and `foreach ($m as &$v)` is refused by name. See
+[Looping over something you may not change](iteration.md#looping-over-something-you-may-not-change).
 
 ## What it costs
 

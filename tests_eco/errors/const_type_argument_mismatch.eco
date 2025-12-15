@@ -1,0 +1,18 @@
+// the other direction of the same rule: a parameter spelling `box<const T>` substitutes to
+// `box<const int32>`, which is a different type from the `box<int32>` handed to it. refused, and the
+// two types are named - which is the whole reason the const is kept in a type argument rather than
+// stripped into a binding that then fails to fit its own argument
+
+struct box<T>
+{
+    T $v;
+}
+
+function unwrap_const<T>(box<const T> $b) : T
+{
+    return $b->v;
+}
+
+box<int32> $open = box<int32>(2);
+
+echo unwrap_const($open);

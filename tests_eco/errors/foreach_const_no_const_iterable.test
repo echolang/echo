@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] foreach_const_no_const_iterable.eco:46:1
+
+  'const counter' cannot be iterated through a 'const' - it declares 'contract::iterable' but not 'contract::const_iterable', so the only cursor it can hand back is one that may write. Declare 'contract::const_iterable' beside it over the const element, or iterate a value nobody promised to leave alone.
+
+  45 | 
+  46 | foreach ($frozen as $x) {
+     : ^^^^^^^
+  47 |     echo $x;
+
+1 error, nothing was compiled.

@@ -270,12 +270,16 @@ namespace
         return wanted;
     }
 
-    // does `candidate` answer the requirement?
+    // **the half of "does this candidate answer" that is settled before a single type is compared** -
+    // arity, the candidate's own generic parameters, and the receiver's const-ness.
     //
-    // the comparison is ValueType::operator==, which is exact. deliberately not argument_fit's looser
-    // ranking: a requirement is a contract, and a method that merely *accepts* what the requirement
-    // promises is not the same method a dispatch through a vtable would land on
-    bool candidate_answers(const AST::FunctionDeclNode *candidate, const WantedSignature &wanted)
+    // one predicate because it has two readers that cannot compare types the same way. candidate_answers
+    // below compares them exactly; conformance_bindings' trial loop *unifies* them instead, because it is
+    // the thing discovering what the associated types are and has nothing to compare against yet. gated
+    // on arity alone, that loop bound `Iter` off whichever half of an `iterate()` overload set came first
+    // - the mutable one - and `contract::const_iterable` was then reported unmet against a cursor it had
+    // never asked for, at the declaration, naming a type the author had written correctly
+    bool candidate_shape_answers(const AST::FunctionDeclNode *candidate, const WantedSignature &wanted)
     {
         if (candidate->args.size() != wanted.arg_count) {
             return false;
@@ -288,11 +292,22 @@ namespace
             return false;
         }
 
-        // exact, like every comparison here, and in both directions: a `const` requirement is not
-        // answered by a method that may write, and a plain one is not answered by a const method
-        // either - the vtable holds one declaration, and a caller through the interface has to be
-        // able to read which promise it got off the requirement alone
-        if (AST::receiver_is_const(*candidate) != wanted.receiver_is_const) {
+        // exact, and in both directions: a `const` requirement is not answered by a method that may
+        // write, and a plain one is not answered by a const method either - the vtable holds one
+        // declaration, and a caller through the interface has to be able to read which promise it got
+        // off the requirement alone. it is also what makes a receiver-split overload set answer *two*
+        // interfaces, which is the whole of how a container offers a writable cursor and a read-only one
+        return AST::receiver_is_const(*candidate) == wanted.receiver_is_const;
+    }
+
+    // does `candidate` answer the requirement?
+    //
+    // the comparison is ValueType::operator==, which is exact. deliberately not argument_fit's looser
+    // ranking: a requirement is a contract, and a method that merely *accepts* what the requirement
+    // promises is not the same method a dispatch through a vtable would land on
+    bool candidate_answers(const AST::FunctionDeclNode *candidate, const WantedSignature &wanted)
+    {
+        if (!candidate_shape_answers(candidate, wanted)) {
             return false;
         }
 
@@ -387,8 +402,7 @@ AST::ConformanceBinding AST::conformance_bindings(
 
         for (const AST::FunctionDeclNode *candidate :
              AST::find_member_functions(ct, requirement->func_name())) {
-            if (candidate->args.size() != wanted.arg_count
-                || candidate->own_type_param_count() != requirement->own_type_param_count()) {
+            if (!candidate_shape_answers(candidate, wanted)) {
                 continue;
             }
 

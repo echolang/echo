@@ -1,0 +1,50 @@
+// both maps iterate through a const, and they get there two different ways.
+//
+// `map<K, V>` needed no new cursor: `V` appears in exactly one of `map_iterator`'s properties, so
+// `map_iterator<K, const V>` is that cursor with `ptr<V>` substituted to `ptr<const V>`. `ordered_map`
+// could not do that - its cursor holds a `ptr<map<K, V>>`, so substituting `V := const V` would ask for
+// a different table - and declares `ordered_map_const_iterator<K, V>` instead. Neither difference is
+// visible from here, which is the point
+//
+// the `map` half is a sum and a count rather than a sequence, because a map's iteration order is
+// unspecified - the same rule maps/iterate.eco keeps
+map<string, int32> $counts = map<string, int32>();
+$counts["a"] = 1;
+$counts["b"] = 2;
+$counts["c"] = 3;
+
+const $frozen = $counts;
+
+int32 $sum = 0;
+int32 $visits = 0;
+
+// the key still arrives by value, unaffected: `contract::keyed<K>` is untouched by the const path
+foreach ($frozen as $k => $v) {
+    $sum = $sum + $v + $k->size();
+    $visits = $visits + 1;
+}
+
+echo $sum;
+echo $visits;
+
+echo "--";
+
+ordered_map<string, int32> $ordered = ordered_map<string, int32>();
+$ordered["x"] = 10;
+$ordered["y"] = 20;
+$ordered["z"] = 30;
+
+const $sealed = $ordered;
+
+// insertion order, which *is* this type's contract, so it is pinned as a sequence
+foreach ($sealed as $key => $value) {
+    echo $key;
+    echo $value;
+}
+
+echo "--";
+
+// a read-only borrow of the value binds without a copy
+foreach ($sealed as const &$borrowed) {
+    echo $borrowed;
+}

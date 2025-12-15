@@ -53,11 +53,12 @@
  * `foreach` binding is valid until the next insert and no further. `->remove()` and `->take()` only write a
  * state word and are safe. `->reserve($n)` up front is how a run of inserts leaves your borrows alone.
  *
- * A `const map` reads but does not iterate, exactly as a `const array` does not: `iterate()` hands back a
- * cursor holding mutable borrows and there is no read-only cursor type yet (todo/A39).
+ * A `const map` iterates through the read-only half of the protocol, `contract::const_iterable<const V>`,
+ * whose cursor is `map_iterator<K, const V>` - the same cursor, with the one property that names `V`
+ * substituted to `ptr<const V>`. `$k` still arrives by value and is unaffected.
  */
 #[core: "map"]
-struct map<K, V> : contract::iterable<V>
+struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     ptr<uint64> $hashes;
     ptr<K> $keys;
@@ -505,6 +506,19 @@ struct map<K, V> : contract::iterable<V>
     function iterate() : map_iterator<K, V>
     {
         return map_iterator<K, V>($this->hashes, $this->keys, $this->values, $this->cap);
+    }
+
+    /**
+     * The same cursor over a map nobody may write, yielding `const V&`.
+     *
+     * `map_iterator<K, const V>` needs no declaration of its own: `V` appears in exactly one of the
+     * cursor's properties, so substitution turns `ptr<V> $values` into `ptr<const V>` and `current()`
+     * into `const V&` with every body unchanged. `ordered_map` is the one that could not do this - see
+     * the comment on its cursor.
+     */
+    const function iterate() : map_iterator<K, const V>
+    {
+        return map_iterator<K, const V>($this->hashes, $this->keys, $this->values, $this->cap);
     }
 
     /**

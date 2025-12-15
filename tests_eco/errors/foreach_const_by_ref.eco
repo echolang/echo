@@ -1,0 +1,11 @@
+// a mutable borrow over a const container's elements, refused at the `&` the author wrote.
+//
+// located here rather than surfacing as a conversion failure inside the lowering: this is the first
+// moment V is known, the parser could not have known it, and by the time the type checker sees a `V&`
+// declaration there is no `&` token left to point at
+array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+foreach ($frozen as &$x) {
+    $x = 9;
+}

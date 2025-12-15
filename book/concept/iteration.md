@@ -120,6 +120,71 @@ The loop *spends* that assumption, which is why it's worth stating plainly: it's
 borrow are indistinguishable. For one that breaks it they differ — and so does every other borrow that
 program is holding.
 
+## Looping over something you may not change
+
+A `const` collection loops. It hands you elements you may read and not write, and that shows up in which of
+the three bindings you're allowed:
+
+```echo
+array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+foreach ($frozen as $x) {          // fine - $x is your own copy
+    $x = $x * 10;
+}
+
+foreach ($frozen as const &$x) {   // fine - a read-only borrow, and no copy
+    echo $x;
+}
+
+foreach ($frozen as &$x) { }
+// error: '$x' asks for a borrow it could write through, but 'const array<int32>' hands out
+//        'const int32' elements. Write 'const &$x' to borrow it read-only, or drop the '&' for a copy.
+```
+
+Which is the same three spellings meaning the same three things — a copy is a copy whatever it came from, and
+a borrow that could write through is exactly what a `const` collection has none of. Keys are unaffected:
+`foreach ($frozen as $k => $v)` works, because the key arrives by value either way.
+
+The window you get handed is a **`slice<const T>`**, and it's worth knowing the name because you can write it
+down:
+
+```echo
+slice<const int32> $window = $frozen->sub();
+```
+
+The `const` is on the *elements*, and it's carried by the window's own type — so it stays true through every
+function you hand it to. That's the difference from a `const` receiver, which only says it about one call.
+`->sub()` and `->at()` are overloaded on the receiver in the usual way: a mutable array hands back
+`slice<int32>`, a `const` one hands back `slice<const int32>`.
+
+A generic written over `slice<T>` takes both, so you rarely need a second spelling:
+
+```echo
+function count_of<T>(slice<T> $w) : usize { ... }
+
+count_of($frozen->sub());          // T = const int32
+count_of($source->sub());          // T = int32
+```
+
+One asymmetry to know about: **a `const slice<T>` also yields `const` elements.** Read strictly, `const` on a
+borrowing type would mean "you may not re-seat this window" and say nothing about what it points at — that's
+what [`const` means everywhere else](pointers_and_refs_v2.md#const). Slices are the deliberate exception,
+because a slice and the array behind it get used interchangeably at call sites and having them disagree about
+what `const` protects would be worse than the inconsistency.
+
+Cursors are the one thing that can't be looped over through a `const`, and it isn't a gap:
+
+```echo
+const $cursor = $source->iterate();
+
+foreach ($cursor as $x) { }
+// error: 'const slice_iterator<int32>' cannot be iterated - stepping a cursor writes to the cursor,
+//        and 'contract::iterator::advance()' is not declared const.
+```
+
+A cursor is spent by being read. There is no weaker thing to hand back, so there's nothing to select.
+
 ## Keys
 
 Some collections have something to say about *where* an element sits. Ask for it with `=>`, the same way you
@@ -150,7 +215,8 @@ A `slice<T>` gives you indices; something like a linked list has no honest answe
 
 ## Writing something you can loop over
 
-`foreach` has no idea what an `array<T>` is. It knows two interfaces, and that's the whole extent of it.
+`foreach` has no idea what an `array<T>` is. It knows a small handful of interfaces, and that's the whole
+extent of it.
 
 An **iterator** is a cursor. It knows how to step, and it knows what it's looking at:
 
@@ -239,6 +305,48 @@ foreach ($b as $i => $v) {
     echo $i; echo ":"; echo $v; echo " ";   // 0:7 1:9
 }
 ```
+
+### Letting a `const` one be looped over
+
+`Bag` above loops from a mutable value and not from a `const` one, and the diagnostic tells you exactly
+that. Making it work is one more conformance:
+
+```echo
+interface contract::const_iterable<V>
+{
+    type Iter : contract::iterator<V>;
+    const function iterate() : Iter;      // the whole difference is here
+}
+```
+
+The only thing that changed is the receiver — and that's why it's a second interface rather than a second
+`iterate()` overload. An interface is answered by a method making *exactly* the promise it asked for, so a
+`const function iterate()` cannot answer `contract::iterable<V>` and a plain one cannot answer this. Which is
+the rule doing its job: being able to call `iterate()` on a mutable value and being able to call it on a value
+nobody may write are two different capabilities, and something holding the interface has to be able to tell
+which one it got.
+
+`V` means what it means above — **what the loop yields** — so you declare it over your const element type,
+and the cursor you hand back is one whose `current()` returns a `const V&`:
+
+```echo
+struct Bag : contract::iterable<int32>, contract::const_iterable<const int32>
+{
+    // ...
+
+    function iterate() : bag_cursor {
+        return bag_cursor($this->items->sub());
+    }
+
+    const function iterate() : const_bag_cursor {
+        return const_bag_cursor($this->items->sub());   // a slice<const int32>, from a const receiver
+    }
+}
+```
+
+`foreach` picks between the two by whether the value it was handed is `const`. A mutable value prefers the
+writable contract, falling back to the read-only one — so declaring only `const_iterable` is a perfectly good
+way to say "this can be looped over and never written through".
 
 `contract::keyed<K>` is the third interface, and I kept it deliberately separate:
 

@@ -19,6 +19,7 @@ namespace
             { "buffer", AST::CoreTypeKind::t_buffer },
             { "iterator", AST::CoreTypeKind::t_iterator },
             { "iterable", AST::CoreTypeKind::t_iterable },
+            { "const_iterable", AST::CoreTypeKind::t_const_iterable },
             { "keyed", AST::CoreTypeKind::t_keyed },
         };
 

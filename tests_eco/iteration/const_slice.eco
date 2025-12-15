@@ -1,0 +1,43 @@
+// the two read-only windows, and they are one type. `slice<const T>` is what a const container hands
+// out, and a `const slice<T>` is treated as the same thing rather than as a const *window* over mutable
+// elements - the deliberate exception to the per-level rule that slice.eco's const element operator
+// already made, stated here as a loop
+array<int32> $source = [1, 2, 3];
+const $frozen = $source;
+
+// a read-only window comes from a read-only place: `sub()` is overloaded on the receiver exactly as
+// `at()` is, so a const array hands back `slice<const int32>` and a mutable one `slice<int32>`
+slice<const int32> $window = $frozen->sub();
+
+// the window's own type says the elements are read-only, so it stays read-only through every function
+// it is handed to - which is the whole difference from a const receiver, which says it about one call
+foreach ($window as $x) {
+    echo $x;
+}
+
+echo "--";
+
+// a mutable window through a const borrow of it: reaches `const_iterable` by the receiver instead
+const slice<int32> $borrowed = $source->sub();
+
+foreach ($borrowed as const &$y) {
+    echo $y;
+}
+
+echo "--";
+
+// a generic written over `slice<T>` takes both, because a `const` inside a type argument is part of the
+// type's identity and inference keeps it: this instantiates twice, T = const int32 and T = int32
+echo count_of($window);
+echo count_of($source->sub());
+
+function count_of<T>(slice<T> $w) : usize
+{
+    usize $n = 0;
+
+    foreach ($w as $ignored) {
+        $n = $n + 1;
+    }
+
+    return $n;
+}
