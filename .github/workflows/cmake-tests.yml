@@ -17,8 +17,6 @@ jobs:
 
     env:
       BUILD_TYPE: ${{ matrix.build_type }}
-      CC: clang-18
-      CXX: clang++-18
       # CXX_FLAGS: "-stdlib=libc++ -std=c++20"
       USE_CLANG: 1
 
@@ -29,17 +27,17 @@ jobs:
     - name: Setup LLVM
       uses: ZhongRuoyu/setup-llvm@v0
       with:
-        llvm-version: 18
+        llvm-version: 20
 
-    # `clang` unversioned, not just clang-18: Backend::make_exec links the emitted object by
-    # shelling out to bare `clang`, so the e2e suite's `mode: build` cases need it on PATH. they
-    # fail loudly rather than skipping when it is missing
+    # bare `clang` comes from the LLVM install above, whose bin/ the setup step puts on PATH:
+    # Backend::make_exec links the emitted object by shelling out to unqualified `clang`, so the
+    # e2e suite's `mode: build` cases need one. installing the distro `clang` package here instead
+    # would put a different major version ahead of it
     - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y cmake \
           ninja-build \
-          clang \
           libc++-dev \
           libc++abi-dev \
           zlib1g-dev
@@ -48,8 +46,9 @@ jobs:
       run: |
         cmake -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-          -DCMAKE_C_COMPILER=clang-18 \
-          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
+          -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
+          -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --target tests
@@ -63,19 +62,17 @@ jobs:
     needs: build_and_test
     env:
       BUILD_TYPE: Release
-      CC: clang-18
-      CXX: clang++-18
       USE_CLANG: 1
       BIN_NAME: echo-linux-x86_64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-  
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:
-          llvm-version: 18
+          llvm-version: 20
   
       - name: Install dependencies
         run: |
@@ -90,9 +87,10 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-            -DCMAKE_C_COMPILER=clang-18 \
-            -DCMAKE_CXX_COMPILER=clang++-18
-  
+            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
+            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
+
       - name: Build release
         run: |
           cmake --build ${{github.workspace}}/build --config Release --target echoc
