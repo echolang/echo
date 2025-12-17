@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
 #include "Lexer.h"
 
-namespace AST 
+namespace AST
 {
     class LiteralPrimitiveExprNode : public ExprNode
     {
@@ -49,7 +49,7 @@ namespace AST
     {
     public:
         ECO_AST_NODE_TYPE(n_literal_float);
-        
+
         LiteralFloatExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
         {};
@@ -107,7 +107,7 @@ namespace AST
             return std::stod(get_fvalue_string());
         }
     };
-    
+
     class LiteralIntExprNode : public LiteralPrimitiveExprNode
     {
     public:
@@ -181,7 +181,7 @@ namespace AST
     {
     public:
         ECO_AST_NODE_TYPE(n_literal_bool);
-    
+
         LiteralBoolExprNode(TokenReference token) :
             LiteralPrimitiveExprNode(token)
         {};

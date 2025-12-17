@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "VarDeclNode.h"
+#include "AST/ASTNode.h"
+#include "AST/VarDeclNode.h"
 
-namespace AST 
-{   
+namespace AST
+{
     /**
      * A var is basically just a reference to a declaration and a token
      * But do not confuse this with the "VarRefNode", which wraps a "VarNode"
@@ -30,7 +30,7 @@ namespace AST
             assert(decl != nullptr && "You must provide a var declaration for a var node");
         };
         ~VarNode() {};
-        
+
         const std::string node_description() override {
             return "var(" + _decl->name_full() + ")";
         }

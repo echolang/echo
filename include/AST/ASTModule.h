@@ -4,10 +4,10 @@
 #pragma once
 
 #include "Token.h"
-#include "ASTNode.h"
-#include "ASTFile.h"
-#include "ASTNodeReference.h"
-#include "ScopeNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ScopeNode.h"
 
 #include <filesystem>
 #include <functional>
@@ -18,7 +18,7 @@
 class Lexer;
 
 namespace AST
-{   
+{
     typedef size_t module_handle_t;
 
     class Module
@@ -30,8 +30,8 @@ namespace AST
         const std::string name;
         const module_handle_t handle;
 
-        Module(const std::string &name, module_handle_t handle) : 
-            name(name), handle(handle) 
+        Module(const std::string &name, module_handle_t handle) :
+            name(name), handle(handle)
         {}
         ~Module() {}
 
@@ -42,7 +42,7 @@ namespace AST
         std::string debug_description() const;
 
         File &add_file(const std::filesystem::path &path);
-        
+
         // a TokenFilter refused the file. Thrown rather than collected, for the reason a lexer error is:
         // this happens before any AST exists, so there is no node to hang an issue off - and a file whose
         // conditional structure is broken has no meaningful parse to continue into
@@ -151,7 +151,7 @@ namespace AST
         const_iterator cbegin() const { return _modules.cbegin(); }
         const_iterator cend() const { return _modules.cend(); }
 
-        private: 
+        private:
             std::vector<std::unique_ptr<Module>> _modules;
             std::unordered_map<std::string, module_handle_t> _module_map;
     };

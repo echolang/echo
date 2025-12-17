@@ -51,7 +51,9 @@ bool AST::is_certainly_present(const AST::ValueType &type)
 }
 
 std::string AST::certainly_present_refusal(
-    AST::OptionalForm form, const AST::ValueType &operand_type)
+    AST::OptionalForm form,
+    const AST::ValueType &operand_type
+)
 {
     if (!is_certainly_present(operand_type)) {
         return {};
@@ -87,7 +89,10 @@ std::string AST::certainly_present_refusal(
 }
 
 AST::ExprNode *AST::optional_operand_of(
-    AST::ExprNode *expr, AST::Module &module, const TokenReference &at)
+    AST::ExprNode *expr,
+    AST::Module &module,
+    const TokenReference &at
+)
 {
     if (expr == nullptr) {
         return nullptr;

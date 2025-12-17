@@ -23,9 +23,11 @@ namespace
 };
 
 llvm::Function *MemoryCodegen::declare_thunk(
-    const std::string &name, llvm::Type *return_type,
+    const std::string &name,
+    llvm::Type *return_type,
     const std::vector<llvm::Type *> &parameter_types,
-    const std::vector<const char *> &parameter_names)
+    const std::vector<const char *> &parameter_names
+)
 {
     assert(parameter_types.size() == parameter_names.size()
         && "a thunk parameter without a name would leave the IR unreadable");

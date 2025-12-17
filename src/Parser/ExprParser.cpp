@@ -41,9 +41,9 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
 
     if (value > int_size.get_max_positive_value()) {
         payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-            payload.context.code_ref(literal_token), 
+            payload.context.code_ref(literal_token),
             fmt::format(
-                "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
+                "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
                 literal,
                 AST::get_primitive_name(type.get_primitive_type()),
                 int_size.get_max_positive_value()
@@ -55,9 +55,9 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
 
     if (value < int_size.get_max_negative_value()) {
         payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
-            payload.context.code_ref(literal_token), 
+            payload.context.code_ref(literal_token),
             fmt::format(
-                "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
+                "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
                 literal,
                 AST::get_primitive_name(type.get_primitive_type()),
                 int_size.get_max_negative_value()
@@ -115,7 +115,7 @@ std::string get_fstring_literal(std::string value)
     if (value.back() == '.') {
         value += '0';
     }
-    
+
     return value;
 }
 
@@ -132,9 +132,9 @@ std::string get_f32_string_literal(float value)
 /**
  * AUTOCAST FLOAT
  * ----------------------------------------------------------------------------
- * 
+ *
  * Autocast a "float" literal to the expected type.
- * 
+ *
  * Float literals can be implicitly converted to:
  *  - to larger float types (float32 to float64)
  *  - smaller float types (float64 to float32) can throw a warning if the value is not representable
@@ -159,7 +159,7 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 
             // if the actual type is a float32 and the expected type is a float64, emit an warning
             if (node.result_type().will_fit_into(*expected_type) == false) {
-                
+
                 // we do a quick check if the literal would actually loose precision
                 // I personally see no point in annyoing the user with a warning if the literal is 1.0
                 // so if we can cast the double to float and back to double and the value is the same, we dont emit a warning
@@ -169,9 +169,9 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 
                 if (dliteral != dliteral2) {
                     payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
-                        payload.context.code_ref(literal_token), 
+                        payload.context.code_ref(literal_token),
                         fmt::format(
-                            "The literal '{}' is stored in 32bit float which will result in the effctive value {}", 
+                            "The literal '{}' is stored in 32bit float which will result in the effctive value {}",
                             node.get_fvalue_string(),
                             fliteral
                         )
@@ -188,7 +188,7 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
             // if the exptected type is a float64, we define the override literal value without the "f" suffix
             // at least if there is one in the first place
             if (
-                expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64 && 
+                expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64 &&
                 node.effective_token_literal_value().back() == 'f'
             ) {
                 casted_node.override_literal_value.emplace(node.get_fvalue_string());
@@ -207,9 +207,9 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 
             if (dliteral != dliteral_cmp) {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token), 
+                    payload.context.code_ref(literal_token),
                     fmt::format(
-                        "The floating point number literal '{}' cannot be implicitly converted to an integer type due to non zero decimal values.", 
+                        "The floating point number literal '{}' cannot be implicitly converted to an integer type due to non zero decimal values.",
                         node.get_fvalue_string()
                     )
                 );
@@ -218,8 +218,8 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
             }
 
             // if we end up here our floating point number is a whole number
-            // so we can safely convert it to an integer, but we still have to check 
-            // if the integer type will fit the literal 
+            // so we can safely convert it to an integer, but we still have to check
+            // if the integer type will fit the literal
 
             // the int literal is simply the fvalue string with everything after the dot removed
             std::string int_literal = node.get_fvalue_string().substr(0, node.get_fvalue_string().find('.'));
@@ -233,11 +233,11 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 
             return AST::make_ref(casted_node);
         }
-        
+
         // cannot cast
         else {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(literal_token), 
+                payload.context.code_ref(literal_token),
                 Token::Type::t_unknown,
                 literal_token.type()
             );
@@ -251,7 +251,7 @@ const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::L
 /**
  * AUTOCAST INT
  * ----------------------------------------------------------------------------
- * 
+ *
  * Autocast a "int" literal to the expected type.
  *
  * Integer literals can be implicitly converted to:
@@ -280,16 +280,16 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float32) {
                 float val = casted_node.float_value();
                 casted_node.override_literal_value.emplace(get_f32_string_literal(val));
-            } 
+            }
             else if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64) {
                 double val = casted_node.double_value();
                 casted_node.override_literal_value.emplace(get_f64_string_literal(val));
-            } 
+            }
             else {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token), 
+                    payload.context.code_ref(literal_token),
                     fmt::format(
-                        "The integer literal '{}' cannot be implicitly converted to the expected type '{}'.", 
+                        "The integer literal '{}' cannot be implicitly converted to the expected type '{}'.",
                         literal_token.value(),
                         expected_type->get_type_desciption()
                     )
@@ -311,9 +311,9 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
             // which should throw an error
             if (expected_type->is_unsigned_integer() && intvalue < 0) {
                 payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token), 
+                    payload.context.code_ref(literal_token),
                     fmt::format(
-                        "The integer literal '{}' cannot be implicitly converted to an unsigned integer because it is negative.", 
+                        "The integer literal '{}' cannot be implicitly converted to an unsigned integer because it is negative.",
                         literal_token.value()
                     )
                 );
@@ -328,9 +328,9 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
 
             if (intvalue < lower_bound) {
                 payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
-                    payload.context.code_ref(literal_token), 
+                    payload.context.code_ref(literal_token),
                     fmt::format(
-                        "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.", 
+                        "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
                         literal_token.value(),
                         AST::get_primitive_name(expected_type->get_primitive_type()),
                         lower_bound
@@ -342,9 +342,9 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
 
             if (intvalue > upper_bound) {
                 payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-                    payload.context.code_ref(literal_token), 
+                    payload.context.code_ref(literal_token),
                     fmt::format(
-                        "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.", 
+                        "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
                         literal_token.value(),
                         AST::get_primitive_name(expected_type->get_primitive_type()),
                         upper_bound
@@ -369,7 +369,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
         // cannot cast
         else {
             payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(literal_token), 
+                payload.context.code_ref(literal_token),
                 Token::Type::t_unknown,
                 literal_token.type()
             );
@@ -384,7 +384,7 @@ const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::Lit
 /**
  * FLOAT LITERAL
  * ----------------------------------------------------------------------------
- * 
+ *
  * Parse a float literal and return a node reference to it.
  */
 const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -397,14 +397,14 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
 
     auto expected_type_ptr = expected_type ? &expected_type->type : nullptr;
 
-    // handle autocasting 
+    // handle autocasting
     return autocast_literal_float(payload, node, expected_type_ptr);
 }
 
 /**
  * INTEGER LITERAL
  * ----------------------------------------------------------------------------
- * 
+ *
  * Parse a integer literal and return a node reference to it.
  */
 const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -432,7 +432,7 @@ const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNo
 /**
  * HEX LITERAL
  * ----------------------------------------------------------------------------
- * 
+ *
  * Parse a hex literal and return a node reference to it.
  */
 const AST::NodeReference parse_literal_hex(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -476,7 +476,7 @@ const AST::NodeReference parse_literal_hex(Parser::Payload &payload, AST::TypeNo
 /**
  * BINARY LITERAL
  * ----------------------------------------------------------------------------
- * 
+ *
  * Parse a binary literal and return a node reference to it.
  */
 const AST::NodeReference parse_literal_binary(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -487,8 +487,8 @@ const AST::NodeReference parse_literal_binary(Parser::Payload &payload, AST::Typ
 
 /**
  * BOOLEAN LITERAL
- * ---------------------------------------------------------------------------- 
- * 
+ * ----------------------------------------------------------------------------
+ *
  * Parse a boolean literal and return a node reference to it.
  */
 const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -527,9 +527,9 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
         }
         else {
             payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                payload.context.code_ref(current_token), 
+                payload.context.code_ref(current_token),
                 fmt::format(
-                    "The boolean literal '{}' cannot be implicitly converted to the expected type '{}'.", 
+                    "The boolean literal '{}' cannot be implicitly converted to the expected type '{}'.",
                     current_token.value(),
                     expected_type->type.get_type_desciption()
                 )
@@ -571,9 +571,9 @@ AST::NodeReference try_implicit_cast(Parser::Payload &payload, AST::NodeReferenc
     }
     else {
         // payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-        //     payload.context.code_ref(source.token_reference()), 
+        //     payload.context.code_ref(source.token_reference()),
         //     fmt::format(
-        //         "Cannot implicitly cast the expression of type '{}' to the expected type '{}'.", 
+        //         "Cannot implicitly cast the expression of type '{}' to the expected type '{}'.",
         //         source.result_type().get_type_desciption(),
         //         expected_type.get_type_desciption()
         //     )
@@ -587,9 +587,9 @@ AST::NodeReference try_implicit_cast(Parser::Payload &payload, AST::NodeReferenc
 /**
  * BINARY EXPRESSION
  * ----------------------------------------------------------------------------
- * 
+ *
  * Parse a binary expression, handles special cases like implicit casting
- * and returns a node reference to the resulting expression node.  
+ * and returns a node reference to the resulting expression node.
  */
 const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::OperatorNode *op_node, AST::NodeReference lhs, AST::NodeReference rhs)
 {
@@ -756,9 +756,9 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_hex_literal) ||
            cursor.is_type(Token::Type::t_binary_literal) ||
            cursor.is_type(Token::Type::t_bool_literal) ||
-           cursor.is_type(Token::Type::t_varname) || 
-           cursor.is_type(Token::Type::t_open_paren) || 
-           cursor.is_type(Token::Type::t_close_paren) || 
+           cursor.is_type(Token::Type::t_varname) ||
+           cursor.is_type(Token::Type::t_open_paren) ||
+           cursor.is_type(Token::Type::t_close_paren) ||
            cursor.is_type(Token::Type::t_identifier) ||
            cursor.is_type(Token::Type::t_namespace_sep) ||
            cursor.is_type(Token::Type::t_string_literal) ||
@@ -1363,7 +1363,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     }
 
     else if (
-        cursor.is_type(Token::Type::t_varname) || 
+        cursor.is_type(Token::Type::t_varname) ||
         cursor.is_type_sequence(0, { Token::Type::t_ref, Token::Type::t_varname })
     ) {
         // if the token is a reference operator we have to handle it
@@ -1432,7 +1432,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             auto &varnode = payload.context.emplace_node<AST::VarNode>(vardecl, var_token);
             current_ref = AST::make_ref(payload.context.emplace_node<AST::VarRefNode>(&varnode));
         }
-        
+
         // wrap the base in a MemberAccessNode for each `->member` in the chain
         current_ref = Parser::parse_postfix_chain(payload, current_ref);
         if (!current_ref.has()) {
@@ -1774,7 +1774,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
     auto output = std::vector<ExprPart>();
     auto operator_stack = std::stack<AST::OperatorNode *>();
 
-    for(auto part : expr_parts) {
+    for (auto part : expr_parts) {
         // if its a literal, variable etc. (not an operator)
         if (part.opnode == nullptr) {
             output.push_back(part);
@@ -1810,7 +1810,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
             }
 
             operator_stack.push(part.opnode);
-        }        
+        }
     }
 
     while (!operator_stack.empty()) {
@@ -1832,7 +1832,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     auto token = cursor.current();
     auto tvalue = token.value();
 
-    while(is_expr_token(payload, cursor)) {
+    while (is_expr_token(payload, cursor)) {
         // if we have a closing parenthesis and the depth is 0, we can break the loop
         // because we have reached the end of the expression
         if (cursor.is_type(Token::Type::t_close_paren) && depth == 0) {

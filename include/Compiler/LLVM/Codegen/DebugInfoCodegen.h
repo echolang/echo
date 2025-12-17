@@ -165,7 +165,9 @@ namespace Compiler::LLVM
         llvm::DIFile *file_for(UnitDebug &unit, const AST::File *file);
 
         llvm::DISubroutineType *subroutine_type_of(
-            const AST::FunctionDeclNode &node, CmpUnit &cmp_unit);
+            const AST::FunctionDeclNode &node,
+            CmpUnit &cmp_unit
+        );
 
         // the composite shapes, each interned through a replaceable temporary *before* its members are
         // built - a struct holding a pointer to itself is otherwise an infinite recursion rather than a

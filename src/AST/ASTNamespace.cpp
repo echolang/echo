@@ -124,8 +124,11 @@ AST::Namespace &AST::NamespaceManager::retrieve(AST::Namespace &parent, const st
 }
 
 AST::Namespace &AST::NamespaceManager::retrieve_lexical(
-    AST::Namespace &parent, const AST::DeclarationSite &site, const std::string &display_name,
-    const std::string &discriminator)
+    AST::Namespace &parent,
+    const AST::DeclarationSite &site,
+    const std::string &display_name,
+    const std::string &discriminator
+)
 {
     if (const auto existing = parent._lexical_children.find(site); existing != parent._lexical_children.end()) {
         return *existing->second;
@@ -185,7 +188,7 @@ const AST::Namespace *AST::NamespaceManager::get(const std::vector<std::string> 
     return current;
 }
 
-bool AST::NamespaceManager::exists(const std::vector<std::string> &parts) const 
+bool AST::NamespaceManager::exists(const std::vector<std::string> &parts) const
 {
     return get(parts) != nullptr;
 }
@@ -197,7 +200,7 @@ bool AST::NamespaceManager::exists(const std::string &name) const
 
 AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &fullname) const
 {
-    // split the string by the last namespace separator 
+    // split the string by the last namespace separator
     // this is how we differentiate between the symbol name and the namespace
     size_t last_separator = fullname.find_last_of(ECO_NAMESPACE_SEPARATOR);
 
@@ -239,7 +242,9 @@ AST::Symbol *AST::NamespaceManager::find_symbol(const std::string &symbol_name, 
 }
 
 AST::Symbol *AST::NamespaceManager::find_symbol_in_scope(
-    const std::string &symbol_name, const AST::Namespace &from) const
+    const std::string &symbol_name,
+    const AST::Namespace &from
+) const
 {
     // innermost first, exactly as FunctionRegistry::overloads walks - the nearest namespace that
     // declares the name answers, and an outer one is hidden by it rather than consulted as well.

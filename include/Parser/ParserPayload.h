@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ParserCursor.h"
+#include "Parser/ParserCursor.h"
 #include "AST/ASTContext.h"
 #include "AST/ASTCollector.h"
 

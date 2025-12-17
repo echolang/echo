@@ -27,7 +27,10 @@ namespace Parser
     // one function because the alternative was two, which is how the day one of them grows a rule the
     // other wants it ends with only one of them having it
     AST::ExprNode *parse_assigned_value(
-        Payload &payload, AST::ExprNode *target, const TokenReference &assign_token);
+        Payload &payload,
+        AST::ExprNode *target,
+        const TokenReference &assign_token
+    );
 };
 
 #endif

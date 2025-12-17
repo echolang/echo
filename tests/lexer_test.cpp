@@ -22,13 +22,13 @@ TEST_CASE( "Token References", "[lexer]" ) {
     REQUIRE( bar.type() == Token::Type::t_identifier );
 }
 
-TEST_CASE( "Numeric Literals", "[lexer]" ) 
+TEST_CASE( "Numeric Literals", "[lexer]" )
 {
     Lexer lexer;
     TokenCollection tokens;
 
     lexer.tokenize(
-        tokens, 
+        tokens,
         "42 " // decimal
         "-42 " // negative decimal
 
@@ -156,7 +156,7 @@ TEST_CASE( "Unterminated String", "[lexer]" ) {
     REQUIRE_THROWS_AS( lexer.tokenize(tokens, "'foo"), Lexer::UnterminatedStringException );
 }
 
-TEST_CASE( "Variable Names", "[lexer]" ) 
+TEST_CASE( "Variable Names", "[lexer]" )
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -172,7 +172,7 @@ TEST_CASE( "Variable Names", "[lexer]" )
     REQUIRE( tokens.token_values[2] == "$bar" );
 }
 
-TEST_CASE( "Variable Names Incomplete", "[lexer]" ) 
+TEST_CASE( "Variable Names Incomplete", "[lexer]" )
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -251,7 +251,7 @@ TEST_CASE("Multi Line Comments Unterminated", "[lexer]") {
     REQUIRE_THROWS_AS( lexer.tokenize(tokens, "hey /* this\nis\na\ncomment ronon"), Lexer::UnterminatedCommentException );
 }
 
-TEST_CASE("Predefined Operatos", "[lexer]") 
+TEST_CASE("Predefined Operatos", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
@@ -287,14 +287,14 @@ TEST_CASE("Predefined Operatos", "[lexer]")
     REQUIRE( tokens[1].type() == Token::Type::t_logical_or );
 }
 
-TEST_CASE("Predefined Keywords", "[lexer]") 
+TEST_CASE("Predefined Keywords", "[lexer]")
 {
     Lexer lexer;
     TokenCollection tokens;
 
     lexer.tokenize(
-        tokens, 
-        "const " 
+        tokens,
+        "const "
         "echo "
         "true "
         "false "

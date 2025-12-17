@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
-#include "ScopeNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
+#include "AST/ScopeNode.h"
 
 #include <optional>
 
-namespace AST 
+namespace AST
 {
     class WhileStatementNode : public Node
     {

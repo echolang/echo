@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
-#include "ScopeNode.h"
-#include "VarDeclNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
+#include "AST/ScopeNode.h"
+#include "AST/VarDeclNode.h"
 #include "Token.h"
 
 #include <optional>

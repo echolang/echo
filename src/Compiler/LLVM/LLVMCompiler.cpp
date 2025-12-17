@@ -151,7 +151,7 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     }
 
     // search for the main module
-    Compiler::LLVM::CmpUnit *main_cmp_unit = _ctx.main_cmp_unit();   
+    Compiler::LLVM::CmpUnit *main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
         throw Compiler::InternalCompilerException(fmt::format(
             "no entry module '{}' in the bundle", _ctx.entry_module_name), nullptr);
@@ -306,7 +306,7 @@ void LLVMCompiler::link_into_main()
 
         if (linker.linkInModule(std::move(cmpu->llvm_module))) {
             throw Compiler::InternalCompilerException(fmt::format(
-                "Failed to link module '{}'.\n{}", 
+                "Failed to link module '{}'.\n{}",
                 cmpu->ast_module->name,
                 _ctx.llvm_err_str()
             ));
@@ -824,7 +824,8 @@ void LLVMCompiler::visitAttribute(AST::AttributeNode &node) {}
 // cache supplied its object - has nothing to emit, and asking is how you find out
 bool LLVMCompiler::emit_objects(
     const std::function<std::filesystem::path(const std::string &)> &object_for,
-    std::vector<std::filesystem::path> &out_objects)
+    std::vector<std::filesystem::path> &out_objects
+)
 {
     Compiler::ScopedPhase phase("emit objects");
 
@@ -854,7 +855,9 @@ bool LLVMCompiler::emit_objects(
 }
 
 bool LLVMCompiler::link_executable(
-    const std::string &executable_name, const std::vector<std::filesystem::path> &objects)
+    const std::string &executable_name,
+    const std::vector<std::filesystem::path> &objects
+)
 {
     Compiler::ScopedPhase phase("link");
     return _backend.link_executable(executable_name, objects);

@@ -122,7 +122,11 @@ namespace AST
     // the instance. fitting the receiver to the borrow parameter stays AST::CallResolver's, in a later
     // round, which is why both callers run inside that fixpoint
     FunctionCallExprNode &make_resolved_member_call(
-        Module &module, FunctionDeclNode *callee, const TokenReference &at, ExprNode *place);
+        Module &module,
+        FunctionDeclNode *callee,
+        const TokenReference &at,
+        ExprNode *place
+    );
 };
 
 #endif

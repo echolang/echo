@@ -95,8 +95,12 @@ namespace AST
         // `at` locates the resulting call at the *caller*, not at the stdlib declaration, so anything
         // reported inside it points where the user wrote something
         ExprNode *convert_if_wanted(
-            NodeCollection &nodes, ExprNode *arg, ArgumentFit fit, const ValueType &expected,
-            const TokenReference &at)
+            NodeCollection &nodes,
+            ExprNode *arg,
+            ArgumentFit fit,
+            const ValueType &expected,
+            const TokenReference &at
+        )
         {
             if (fit != ArgumentFit::t_declared_conversion) {
                 return arg;
@@ -225,7 +229,8 @@ namespace AST
         FunctionCallExprNode &call,
         const std::vector<FunctionDeclNode *> &candidates,
         const CodeRef &at,
-        bool report)
+        bool report
+    )
     {
         const std::string &name = call.token_function_name.value();
 
@@ -494,7 +499,11 @@ namespace AST
     }
 
     CallResolver::Result CallResolver::settle(
-        FunctionCallExprNode &call, NodeCollection &nodes, const CodeRef &at, bool report)
+        FunctionCallExprNode &call,
+        NodeCollection &nodes,
+        const CodeRef &at,
+        bool report
+    )
     {
         // both terminal states answer from the node, so asking again costs nothing and reports
         // nothing - which is what lets the fixpoint ask about every call every round

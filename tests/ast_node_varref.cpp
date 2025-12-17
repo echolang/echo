@@ -7,7 +7,7 @@
 #include "helpers.h"
 
 
-TEST_CASE( "int value extraction", "[AST VarRef]" ) 
+TEST_CASE( "int value extraction", "[AST VarRef]" )
 {
     auto tm = EchoTests::tests_make_tokenized_module(
         "$foo"

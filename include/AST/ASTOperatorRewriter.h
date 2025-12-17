@@ -270,7 +270,8 @@ namespace AST
             const std::string &spelling,
             OpFixity fixity,
             const TokenReference &at,
-            std::vector<ExprNode *> operands);
+            std::vector<ExprNode *> operands
+        );
 
         // a pending call that is *not* an operator's - the destination type's constructor, which the
         // array literal expansion names. its own function rather than a flag on the one above,
@@ -280,7 +281,8 @@ namespace AST
             const std::string &name,
             const TokenReference &at,
             std::vector<ExprNode *> operands,
-            const Namespace *lookup);
+            const Namespace *lookup
+        );
 
         CodeRef code_ref_for(const TokenReference &token);
     };

@@ -187,8 +187,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_unsafe: return "unsafe";
         case Token::Type::t_private: return "private";
         case Token::Type::t_operator: return "operator";
-    
-        default: 
+
+        default:
             assert(false && "undefined operator type");
             return "";
     }

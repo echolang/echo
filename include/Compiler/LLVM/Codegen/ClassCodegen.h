@@ -105,7 +105,10 @@ namespace Compiler::LLVM
         // corpus can pin what a weak reference does to the block without a leak checker. see the
         // implementation for why null answers zero
         llvm::Value *gen_count(
-            llvm::Value *handle, const AST::ValueType &class_type, unsigned index);
+            llvm::Value *handle,
+            const AST::ValueType &class_type,
+            unsigned index
+        );
 
     private:
         CodegenContext &_ctx;
@@ -154,7 +157,10 @@ namespace Compiler::LLVM
         // an erased operand has no layout to fill the rest of - handing over a default-constructed
         // ClassLayout with one field set makes a half-valid value the callee has to be trusted not to read
         llvm::Value *gen_conformance_scan(
-            llvm::Value *handle, llvm::Type *box_type, const AST::ComplexType &interface);
+            llvm::Value *handle,
+            llvm::Type *box_type,
+            const AST::ComplexType &interface
+        );
 
         // the environment counterpart, one per compilation unit rather than one per type:
         //
@@ -180,7 +186,10 @@ namespace Compiler::LLVM
         //
         // `layout` and `complex` are both null for an environment, which has neither
         llvm::Function *build_release_thunk(
-            const std::string &name, const ClassLayout *layout, const AST::ComplexType *complex);
+            const std::string &name,
+            const ClassLayout *layout,
+            const AST::ComplexType *complex
+        );
 
         // `complex`'s deinit, called on a handle spilled to a slot so it can be addressed the way every
         // other receiver is. does nothing when the type declares none, which is the common case
@@ -206,7 +215,8 @@ namespace Compiler::LLVM
             llvm::Type *box_type,
             unsigned count_index,
             const char *zero_block_name,
-            llvm::function_ref<void(llvm::Value *handle)> on_zero);
+            llvm::function_ref<void(llvm::Value *handle)> on_zero
+        );
 
         // the address of one header word inside `handle`'s block. takes the box type rather than a layout,
         // because half its callers do not have one: an erased operand and a closure environment know only
@@ -217,7 +227,11 @@ namespace Compiler::LLVM
         // used to let an environment treat the handle *as* the count's address, and the two callers that
         // did so would have silently decremented the wrong word
         llvm::Value *gen_header_ptr(
-            llvm::Value *handle, llvm::Type *box_type, unsigned index, const llvm::Twine &name);
+            llvm::Value *handle,
+            llvm::Type *box_type,
+            unsigned index,
+            const llvm::Twine &name
+        );
 
         // the box type to GEP through: the layout's when there is one, the shared header otherwise
         llvm::Type *header_box_type(const ClassLayout *layout);

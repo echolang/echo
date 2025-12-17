@@ -55,7 +55,11 @@ void DebugPrintCodegen::gen_dprint(const LValue &value)
 }
 
 void DebugPrintCodegen::render(
-    const LValue &place, std::string_view label, size_t depth, const AST::ValueType *display_type)
+    const LValue &place,
+    std::string_view label,
+    size_t depth,
+    const AST::ValueType *display_type
+)
 {
     const AST::ValueType &type = place.storage_type;
 
@@ -89,7 +93,7 @@ void DebugPrintCodegen::render(
     // be anything at all - unmapped, freed, or the middle of something
     if (type.is_pointer()) {
         text(fmt::format("[{}] {}", type_name, label));
-        arg("%p", _ctx.lvalues->gen_load(place, "dprint.ptr"));
+        address(_ctx.lvalues->gen_load(place, "dprint.ptr"));
         return;
     }
 
@@ -97,7 +101,7 @@ void DebugPrintCodegen::render(
     // not change what it is observing. an empty weak prints its null address for free
     if (type.is_weak()) {
         text(fmt::format("[{}] {}weak(", type_name, label));
-        arg("%p", _ctx.lvalues->gen_load(place, "dprint.weak"));
+        address(_ctx.lvalues->gen_load(place, "dprint.weak"));
         text(")");
         return;
     }
@@ -106,9 +110,9 @@ void DebugPrintCodegen::render(
         llvm::Value *callable = _ctx.lvalues->gen_load(place, "dprint.fn");
 
         text(fmt::format("[{}] {}fn=", type_name, label));
-        arg("%p", _ctx.builder->CreateExtractValue(callable, 0, "dprint.fn.code"));
+        address(_ctx.builder->CreateExtractValue(callable, 0, "dprint.fn.code"));
         text(" env=");
-        arg("%p", _ctx.builder->CreateExtractValue(callable, 1, "dprint.fn.env"));
+        address(_ctx.builder->CreateExtractValue(callable, 1, "dprint.fn.env"));
         return;
     }
 
@@ -147,7 +151,9 @@ void DebugPrintCodegen::render(
 }
 
 llvm::StructType *DebugPrintCodegen::property_layout_of(
-    const AST::ValueType &type, const AST::ComplexType &complex)
+    const AST::ValueType &type,
+    const AST::ComplexType &complex
+)
 {
     // a class value's own llvm type is an opaque handle, so the layout comes from the block - which is
     // also the one call that lowers a class on first use in this unit
@@ -172,8 +178,13 @@ const char *DebugPrintCodegen::cut_reason(const AST::ComplexType &complex, size_
 }
 
 void DebugPrintCodegen::render_properties(
-    llvm::Value *address, llvm::StructType *layout, const AST::ComplexType &complex,
-    std::string_view type_name, std::string_view label, size_t depth)
+    llvm::Value *address,
+    llvm::StructType *layout,
+    const AST::ComplexType &complex,
+    std::string_view type_name,
+    std::string_view label,
+    size_t depth
+)
 {
     if (const char *cut = cut_reason(complex, depth)) {
         text(fmt::format("[{}] {}{}", type_name, label, cut));
@@ -199,8 +210,12 @@ void DebugPrintCodegen::render_properties(
 }
 
 void DebugPrintCodegen::render_property(
-    llvm::Value *address, llvm::StructType *layout, const AST::ComplexType &complex,
-    size_t index, size_t depth)
+    llvm::Value *address,
+    llvm::StructType *layout,
+    const AST::ComplexType &complex,
+    size_t index,
+    size_t depth
+)
 {
     const AST::ComplexType::Property &property = complex.get_property(index);
 
@@ -214,8 +229,12 @@ void DebugPrintCodegen::render_property(
 }
 
 void DebugPrintCodegen::render_class(
-    const LValue &place, const AST::ValueType &type, std::string_view type_name,
-    std::string_view label, size_t depth)
+    const LValue &place,
+    const AST::ValueType &type,
+    std::string_view type_name,
+    std::string_view label,
+    size_t depth
+)
 {
     AST::ComplexType *complex = type.get_complex_type();
 
@@ -261,8 +280,12 @@ void DebugPrintCodegen::render_class(
 }
 
 void DebugPrintCodegen::render_optional(
-    const LValue &place, const AST::ValueType &type, std::string_view type_name,
-    std::string_view label, size_t depth)
+    const LValue &place,
+    const AST::ValueType &type,
+    std::string_view type_name,
+    std::string_view label,
+    size_t depth
+)
 {
     llvm::Type *box = _ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit);
 
@@ -393,6 +416,14 @@ void DebugPrintCodegen::arg(std::string_view conversion, llvm::Value *value)
     }
 }
 
+void DebugPrintCodegen::address(llvm::Value *pointer)
+{
+    // `%llx` and an i64 rather than `%p` and the pointer: the width is then the compiler's to state
+    // rather than the varargs ABI's to guess, and every host this targets has a 64-bit address
+    arg("0x%llx", _ctx.builder->CreatePtrToInt(
+        pointer, llvm::Type::getInt64Ty(*_ctx.llvm_context), "dprint.addr"));
+}
+
 void DebugPrintCodegen::flush()
 {
     if (_pending_format.empty() && _pending_args.empty()) {
@@ -412,7 +443,10 @@ void DebugPrintCodegen::flush()
 }
 
 llvm::BasicBlock *DebugPrintCodegen::open_branch(
-    llvm::Value *condition, const char *label, llvm::BasicBlock *&on_false_out)
+    llvm::Value *condition,
+    const char *label,
+    llvm::BasicBlock *&on_false_out
+)
 {
     // whatever is buffered belongs to the block we are still in, and a printf cannot straddle a branch
     flush();

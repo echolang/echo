@@ -1,0 +1,6 @@
+flags: --target-os linux
+
+--- OUT --->
+--- IR --->
+CHECK: c"/proc/self/exe\00"
+CHECK: declare i64 @readlink(

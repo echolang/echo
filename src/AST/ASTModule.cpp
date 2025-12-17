@@ -30,7 +30,10 @@ AST::File &AST::Module::add_file(const std::filesystem::path &path)
 }
 
 AST::TokenizedFile AST::Module::tokenize(
-    Lexer &lexer, const AST::File &file, const AST::Module::TokenFilter &filter)
+    Lexer &lexer,
+    const AST::File &file,
+    const AST::Module::TokenFilter &filter
+)
 {
     // throw an error if the file content is not available
     if (!file.content.has_value()) {

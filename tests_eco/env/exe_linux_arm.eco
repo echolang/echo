@@ -1,0 +1,19 @@
+// **the cross-check, and the reason `--target-os` exists.**
+//
+// this lowers the *Linux* arm of `std::env::exe()` on whatever machine runs the suite: the arm parses,
+// resolves, type-checks and reaches codegen, which is the only check a platform-specific region ever gets
+// from a machine that is not that platform. Its Darwin twin sits in exe_darwin_arm.eco, and between them
+// both arms are checked on every host.
+//
+// the program calls nothing, deliberately. A stdlib function is lowered whether or not anybody calls it,
+// so `--target-os` alone is what selects the arm - and leaving `exe()` unreached is also what keeps the
+// case runnable on a host the arm is not for: the JIT prunes what the entry point cannot reach, so its
+// `readlink` is never a symbol anything has to resolve. The `-p` module is the *unpruned* one, which is
+// why the arm is still there to assert on.
+//
+// running it is not available here in any case - on Linux the readlink succeeds and prints a path only
+// that machine knows, and on Darwin it dies - so the arm is asserted against the IR rather than OUT.
+//
+// without this, half of every `#[if: os == ...]` in the stdlib would be verified only by CI on a host the
+// author does not have. It caught a real error in this very function the first time it ran: a `->` on a
+// string literal, which has no storage to be a receiver.

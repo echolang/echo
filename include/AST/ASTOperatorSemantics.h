@@ -104,7 +104,8 @@ namespace AST
         const std::string &spelling,
         OpFixity fixity,
         const TokenReference &at,
-        std::vector<ExprNode *> operands);
+        std::vector<ExprNode *> operands
+    );
 
     // one operand as the rules below see it: the type a **value-position** read of it yields, plus
     // whether the user wrote `null` there - which has no type of its own, so it cannot be read back

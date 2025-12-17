@@ -10,7 +10,7 @@
         REQUIRE(op->type == lit_type); \
     }
 
-TEST_CASE( "predefined token operators", "[AST Ops]" ) 
+TEST_CASE( "predefined token operators", "[AST Ops]" )
 {
     auto registry = AST::OperatorRegistry();
 
@@ -34,7 +34,7 @@ TEST_CASE( "predefined token operators", "[AST Ops]" )
         "-- " // t_op_dec
         "this is not an operator"
     );
-    
+
     TEST_ASSERT_OP_LIT_TYPE(0, Token::Type::t_assign);
     TEST_ASSERT_OP_LIT_TYPE(1, Token::Type::t_logical_or);
     TEST_ASSERT_OP_LIT_TYPE(2, Token::Type::t_logical_and);

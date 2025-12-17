@@ -170,7 +170,9 @@ llvm::DIScope *DebugInfoCodegen::current_scope() const
 }
 
 llvm::DISubroutineType *DebugInfoCodegen::subroutine_type_of(
-    const AST::FunctionDeclNode &node, CmpUnit &cmp_unit)
+    const AST::FunctionDeclNode &node,
+    CmpUnit &cmp_unit
+)
 {
     UnitDebug *unit = unit_debug(cmp_unit);
 
@@ -399,7 +401,10 @@ void DebugInfoCodegen::relocate(llvm::BasicBlock *block)
 }
 
 void DebugInfoCodegen::declare_local(
-    llvm::AllocaInst *alloca, const AST::VarDeclNode &decl, std::optional<unsigned> arg_no)
+    llvm::AllocaInst *alloca,
+    const AST::VarDeclNode &decl,
+    std::optional<unsigned> arg_no
+)
 {
     UnitDebug *unit = unit_debug();
 

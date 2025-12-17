@@ -312,4 +312,4 @@ void ConstFolding::discard(ScopeNode &scope, size_t index, ConstIfNode &branch)
     splice(scope, index, branch, _current_module->nodes.emplace_back<ScopeNode>());
 }
 
-}
+};

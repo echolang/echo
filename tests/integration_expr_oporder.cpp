@@ -8,7 +8,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "math operations", "[Integration][Expr][OpOrder]" ) 
+TEST_CASE( "math operations", "[Integration][Expr][OpOrder]" )
 {
     // * > +
     REQUIRE_NODE_DESC_EXPR(

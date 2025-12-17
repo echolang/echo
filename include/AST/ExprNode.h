@@ -1,13 +1,13 @@
-#ifndef EXPRESSIONNODE_H
-#define EXPRESSIONNODE_H
+#ifndef EXPRNODE_H
+#define EXPRNODE_H
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Token.h"
 
-#include "OperatorNode.h"
+#include "AST/OperatorNode.h"
 
 #include <optional>
 

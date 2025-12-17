@@ -359,7 +359,9 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
 }
 
 bool Backend::link_executable(
-    const std::string &executable_name, const std::vector<std::filesystem::path> &objects)
+    const std::string &executable_name,
+    const std::vector<std::filesystem::path> &objects
+)
 {
     if (objects.empty()) {
         llvm::errs() << "Error: nothing to link\n";
@@ -455,7 +457,8 @@ bool Backend::make_exec(std::string executable_name)
 static void run_module_passes(
     llvm::Module &module,
     llvm::TargetMachine *target_machine,
-    const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build)
+    const std::function<void(llvm::PassBuilder &, llvm::ModulePassManager &)> &build
+)
 {
     llvm::PassBuilder passBuilder(target_machine);
     llvm::LoopAnalysisManager loopAM;

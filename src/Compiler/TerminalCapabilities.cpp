@@ -114,7 +114,9 @@ namespace
 };
 
 Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
-    ColorChoice color_choice, DiagnosticFormat format)
+    ColorChoice color_choice,
+    DiagnosticFormat format
+)
 {
     TerminalCapabilities caps;
 
@@ -202,7 +204,10 @@ bool Compiler::parse_color_choice(const std::string &value, ColorChoice &out_cho
 }
 
 bool Compiler::parse_diagnostic_format(
-    const std::string &value, DiagnosticFormat &out_format, std::string &out_error)
+    const std::string &value,
+    DiagnosticFormat &out_format,
+    std::string &out_error
+)
 {
     return parse_choice<DiagnosticFormat>(value, "--diagnostics", {
         { "auto", DiagnosticFormat::t_auto },

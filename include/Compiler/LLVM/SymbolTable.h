@@ -10,11 +10,11 @@
 #include <llvm/IR/Function.h>
 
 namespace Compiler::LLVM
-{   
+{
     typedef size_t function_id_t;
     typedef size_t structure_id_t;
 
-    struct Function 
+    struct Function
     {
         const AST::FunctionDeclNode *ast_funcdecl;
         llvm::Function *llvm_func;

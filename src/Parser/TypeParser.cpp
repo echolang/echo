@@ -540,8 +540,11 @@ static bool constraint_atom_is_bare_generic(const AST::ValueType &type)
 }
 
 static void collect_bare_generic_refusal(
-    Parser::Payload &payload, const TokenReference &atom_token,
-    const std::string &spelling, const std::string &param_name)
+    Parser::Payload &payload,
+    const TokenReference &atom_token,
+    const std::string &spelling,
+    const std::string &param_name
+)
 {
     payload.collector.collect_issue<AST::Issue::GenericError>(
         payload.context.code_ref(atom_token),
@@ -755,7 +758,8 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
 static std::vector<AST::TypeParamDecl *> declare_params(
     Parser::Payload &payload,
     const std::vector<AST::TypeParamDecl *> &existing,
-    const std::vector<Parser::ParsedTypeParam> &parsed)
+    const std::vector<Parser::ParsedTypeParam> &parsed
+)
 {
     bool reusable = existing.size() == parsed.size();
     for (size_t i = 0; reusable && i < parsed.size(); i++) {
@@ -794,7 +798,8 @@ void Parser::declare_type_parameters(
     Payload &payload,
     AST::FunctionDeclNode &owner,
     const std::vector<ParsedTypeParam> &parsed,
-    const std::vector<AST::TypeParamDecl *> &inherited)
+    const std::vector<AST::TypeParamDecl *> &inherited
+)
 {
     // the function's *own* parameters, with any inherited prefix taken off first. it has to come off:
     // declare_params decides whether it can reuse the existing declarations by comparing list
@@ -803,7 +808,8 @@ void Parser::declare_type_parameters(
     // passes distinct declarations, which is exactly what the reuse rule exists to prevent
     std::vector<AST::TypeParamDecl *> own(
         owner.type_parameters.begin() + owner.inherited_type_param_count,
-        owner.type_parameters.end());
+        owner.type_parameters.end()
+    );
 
     own = declare_params(payload, own, parsed);
     for (auto *decl : own) {

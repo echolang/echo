@@ -3,7 +3,7 @@
 
 #pragma once
 
-namespace AST 
+namespace AST
 {
     class ScopeNode;
     class TypeNode;

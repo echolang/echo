@@ -154,7 +154,8 @@ static bool resolve_manifests(
     const AST::DiagnosticRenderer &diagnostics,
     const Compiler::TargetFacts &facts,
     std::vector<Parser::ModuleManifest> &out,
-    std::vector<std::filesystem::path> &out_roots)
+    std::vector<std::filesystem::path> &out_roots
+)
 {
     std::vector<std::filesystem::path> roots;
 
@@ -200,7 +201,8 @@ static int parse_manifest_modules(
     const AST::DiagnosticRenderer &diagnostics,
     const std::vector<Parser::ModuleManifest> &manifests,
     AST::Bundle &bundle,
-    Parser::ModuleParser &parser)
+    Parser::ModuleParser &parser
+)
 {
     for (const Parser::ModuleManifest &manifest : manifests) {
         AST::module_handle_t handle = bundle.modules.add_module(manifest.name);
@@ -234,7 +236,8 @@ static int build_bundle(
     AST::Bundle &bundle,
     Parser::ModuleParser &parser,
     std::vector<Parser::ModuleManifest> &out_manifests,
-    std::string &out_entry_module)
+    std::string &out_entry_module
+)
 {
 #if ECO_USE_EMBEDDED_STDLIB
     if (!cli.get<bool>("--no-stdlib")) {
@@ -397,7 +400,8 @@ static int run_semantic_passes(
     argparse::ArgumentParser &cli,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
-    const Compiler::CompilerOptions &options)
+    const Compiler::CompilerOptions &options
+)
 {
     // **before the monomorphizer, not inside its fixpoint.** every reference to a compile-time constant
     // becomes a clone of that constant's value here, and AST::OwnershipPass - which runs inside that
@@ -459,7 +463,9 @@ static int run_semantic_passes(
 //
 // cannot fail: the mutually exclusive group refuses --debug with --release at parse time
 static Compiler::CompilerOptions resolve_options(
-    argparse::ArgumentParser &cli, Compiler::BuildMode fallback)
+    argparse::ArgumentParser &cli,
+    Compiler::BuildMode fallback
+)
 {
     Compiler::CompilerOptions options;
 
@@ -534,7 +540,8 @@ static ModulePlan plan_module_artifacts(
     argparse::ArgumentParser &cli,
     const std::vector<Parser::ModuleManifest> &manifests,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
-    const std::string &entry_module)
+    const std::string &entry_module
+)
 {
     ModulePlan plan;
 
@@ -592,7 +599,8 @@ static bool compute_cache_keys(
     const std::vector<Parser::ModuleManifest> &manifests,
     const Compiler::CompilerOptions &options,
     const Compiler::TargetFacts &facts,
-    std::map<std::string, Compiler::ModuleCacheKey> &out_keys)
+    std::map<std::string, Compiler::ModuleCacheKey> &out_keys
+)
 {
     Compiler::ScopedPhase phase("cache keys");
 
@@ -617,7 +625,8 @@ static void report_cache_plan(
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
     const ModulePlan &plan,
     const std::string &entry_module_name,
-    bool bypassed)
+    bool bypassed
+)
 {
     if (!cli.get<bool>("--explain-cache")) {
         return;
@@ -679,7 +688,10 @@ static void report_cache_plan(
 // the store is by definition one this compiler just produced for that exact key, and a copy step is one more
 // thing that can half-succeed.
 static bool emit_and_link_modules(
-    LLVMCompiler &compiler, const std::string &output, const ModulePlan &plan)
+    LLVMCompiler &compiler,
+    const std::string &output,
+    const ModulePlan &plan
+)
 {
     std::vector<std::filesystem::path> objects = plan.reused;
 
@@ -706,7 +718,9 @@ static bool emit_and_link_modules(
 // best effort: a store that cannot be written is a cache that will miss next time, which is slow rather than
 // wrong. Refusing the build over it would make an unwritable directory fatal to compiling
 static void store_module_records(
-    const ModulePlan &plan, const std::map<std::string, Compiler::ModuleCacheKey> &keys)
+    const ModulePlan &plan,
+    const std::map<std::string, Compiler::ModuleCacheKey> &keys
+)
 {
     for (const auto &[module_name, artifact] : plan.emit_to) {
         auto found = keys.find(module_name);
@@ -727,7 +741,9 @@ static void store_module_records(
 // compile: the exit code said 0 while MCJIT ran over a half-built module, or make_exec emitted
 // objects for one that may be null or only partly linked. the e2e corpus' `expect:` now asserts it
 static int report_compiler_exception(
-    const AST::DiagnosticRenderer &diagnostics, const Compiler::ASTCompilerException &e)
+    const AST::DiagnosticRenderer &diagnostics,
+    const Compiler::ASTCompilerException &e
+)
 {
     std::cout.flush();
 
@@ -771,7 +787,8 @@ static bool run_front_end(
     AST::Bundle &bundle,
     Compiler::BuildMode fallback,
     bool whole_program,
-    FrontEnd &out)
+    FrontEnd &out
+)
 {
     // **before the parse**, and that is not a preference: the conditional filter runs between lexing and
     // pass 1, so what a condition sees has to be settled before a single file is read. Everything here
@@ -1075,14 +1092,14 @@ int main(int argc, char *argv[], char *envp[])
         .default_value(std::vector<std::string>{})
         .help(".eco source files to be parsed, compiled and run.")
         .remaining();
-    
+
     argparse::ArgumentParser build_command("build");
     build_command.add_description("Builds the given source files.");
     build_command.add_argument("source")
         .default_value(std::vector<std::string>{})
         .help(".eco source files to be parsed and compiled.")
         .remaining();
-    
+
     build_command.add_argument("-o", "--output")
         .help("Output file name.");
 

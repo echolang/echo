@@ -94,4 +94,3 @@ AST::ScopeNode::VariableLookup AST::ScopeNode::lookup_variable(const std::string
 
     return outer;
 }
-

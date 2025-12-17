@@ -176,6 +176,14 @@ namespace Compiler::LLVM
         // the conversion rather than a step after it - see PrintfConversion.h
         void arg(std::string_view conversion, llvm::Value *value);
 
+        // appends one raw address, as `0x` and the hex of the pointer read as an integer.
+        //
+        // **deliberately not `%p`**, whose rendering C leaves to the implementation: glibc prints a null
+        // one as `(nil)` where the BSDs print `0x0`, so a program's own output differed by the libc it
+        // happened to be linked against. that is a fact about the *emitted program*, not about a test -
+        // the goldens that caught it are only what made it visible
+        void address(llvm::Value *pointer);
+
         // emits the pending printf and empties the buffer. a no-op when nothing is pending, so every
         // branch site can flush unconditionally
         void flush();
@@ -185,7 +193,10 @@ namespace Compiler::LLVM
         // from wherever the arm actually ended, which need not be where it started - an arm may itself
         // have branched
         llvm::BasicBlock *open_branch(
-            llvm::Value *condition, const char *label, llvm::BasicBlock *&on_false_out);
+            llvm::Value *condition,
+            const char *label,
+            llvm::BasicBlock *&on_false_out
+        );
         void close_arm(llvm::BasicBlock *join);
 
         // `"  " * depth`. the nesting level is a compile-time constant, so an indent is literal text like

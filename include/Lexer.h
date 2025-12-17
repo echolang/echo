@@ -26,7 +26,7 @@ struct LexerCursor
 
     const std::string &input;
 
-    LexerCursor(const std::string &input) : 
+    LexerCursor(const std::string &input) :
         line(1), char_offset(1), input(input), it(input.begin())
     {
         determine_end_of_line();
@@ -80,7 +80,7 @@ struct LexerCursor
         } else {
             char_offset += offset;
         }
-    
+
         if (it + offset > input.end()) {
             it = input.end();
         } else {
@@ -140,7 +140,7 @@ struct LexerCursor
         return peek() == MHP_VOCAB_SPACE || peek() == MHP_VOCAB_TAB || peek() == MHP_VOCAB_LB;
     }
 
-    // returns a string giving the user some context 
+    // returns a string giving the user some context
     // of where in the code the iterator currently is, will never go beyond its current line
     std::string get_code_sample(const std::string::const_iterator it, const uint32_t start_offset = 0, const uint32_t end_offset = 20) const;
 
@@ -150,7 +150,7 @@ private:
 
 namespace LexerFunction
 {
-    class Base 
+    class Base
     {
     public:
         virtual ~Base() {};
@@ -313,7 +313,7 @@ namespace LexerFunction
     };
 };
 
-class Lexer 
+class Lexer
 {
     typedef std::vector<std::unique_ptr<LexerFunction::Base>> FunctionList;
 
@@ -323,8 +323,8 @@ public:
     struct TokenException : public std::exception
     {
         TokenException(const std::string &message, const std::string &snippet, size_t line, size_t char_offset) :
-            snippet(snippet), 
-            line(line), 
+            snippet(snippet),
+            line(line),
             char_offset(char_offset),
             error_message(message)
         {}

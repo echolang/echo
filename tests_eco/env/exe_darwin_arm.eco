@@ -1,0 +1,7 @@
+// the mirror of exe_linux_arm.eco: the *Darwin* arm of `std::env::exe()`, lowered on whatever machine
+// runs the suite. A separate file rather than a second `.test` beside the first, because the corpus pairs
+// one `.eco` with one `.test` - the same split conditional/os_branches_linux.eco makes.
+//
+// this half is the one that could only ever be lowered. `_NSGetExecutablePath` is a symbol no Linux host
+// has, so reaching the arm there would not be a failing assertion, it would be a symbol nothing resolves -
+// which is exactly why neither case calls `exe()`.

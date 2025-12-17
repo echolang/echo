@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
 
 namespace AST
 {

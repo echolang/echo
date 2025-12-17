@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ASTNode.h"
+#include "AST/ASTNode.h"
 #include "Token.h"
 
 namespace AST

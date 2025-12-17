@@ -86,7 +86,10 @@ void ForeachLowering::visitFunctionDecl(FunctionDeclNode &node)
 }
 
 FunctionCallExprNode &ForeachLowering::iterator_call(
-    VarDeclNode &iterator, const std::string &name, const TokenReference &at)
+    VarDeclNode &iterator,
+    const std::string &name,
+    const TokenReference &at
+)
 {
     auto &var = _current_module->nodes.emplace_back<VarNode>(&iterator, iterator.token_varname);
     auto &var_ref = _current_module->nodes.emplace_back<VarRefNode>(&var);
@@ -112,7 +115,12 @@ FunctionCallExprNode &ForeachLowering::iterator_call(
 }
 
 void ForeachLowering::refuse(
-    ScopeNode &scope, size_t index, ForeachNode &loop, const TokenReference &at, std::string why)
+    ScopeNode &scope,
+    size_t index,
+    ForeachNode &loop,
+    const TokenReference &at,
+    std::string why
+)
 {
     _collector.collect_issue<Issue::GenericError>(code_ref_for(at), std::move(why));
     discard(scope, index, loop);

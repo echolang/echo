@@ -64,7 +64,9 @@ const std::vector<AST::TypeParamDecl *> &AST::interface_associated_types(const A
 }
 
 std::vector<AST::ValueType> AST::conformances_matching_template(
-    const AST::ComplexType *ct, const AST::ComplexType *interface_template)
+    const AST::ComplexType *ct,
+    const AST::ComplexType *interface_template
+)
 {
     std::vector<AST::ValueType> found;
 
@@ -84,7 +86,9 @@ std::vector<AST::ValueType> AST::conformances_matching_template(
 }
 
 std::optional<AST::ValueType> AST::conformance_matching_template(
-    const AST::ComplexType *ct, const AST::ComplexType *interface_template)
+    const AST::ComplexType *ct,
+    const AST::ComplexType *interface_template
+)
 {
     if (ct == nullptr || interface_template == nullptr) {
         return std::nullopt;
@@ -115,7 +119,9 @@ std::optional<AST::ValueType> AST::conformance_matching_template(
 }
 
 std::optional<AST::TemplateConformance> AST::template_conformance_for(
-    AST::ComplexType *ct, const AST::ValueType &applied)
+    AST::ComplexType *ct,
+    const AST::ValueType &applied
+)
 {
     if (ct == nullptr) {
         return std::nullopt;
@@ -158,7 +164,9 @@ std::optional<AST::TemplateConformance> AST::template_conformance_for(
 }
 
 std::optional<size_t> AST::interface_method_slot(
-    const AST::ComplexType *interface, const AST::FunctionDeclNode *requirement)
+    const AST::ComplexType *interface,
+    const AST::FunctionDeclNode *requirement
+)
 {
     const std::vector<AST::FunctionDeclNode *> &requirements = AST::interface_requirements(interface);
 
@@ -364,7 +372,10 @@ namespace
 };
 
 AST::ConformanceBinding AST::conformance_bindings(
-    const AST::ComplexType *ct, const AST::ValueType &interface, AST::TypeRegistry &types)
+    const AST::ComplexType *ct,
+    const AST::ValueType &interface,
+    AST::TypeRegistry &types
+)
 {
     AST::ConformanceBinding result;
 
@@ -491,7 +502,8 @@ std::optional<AST::UnmetRequirement> AST::first_unmet_requirement(
     const AST::ComplexType *ct,
     const AST::ValueType &interface,
     AST::TypeRegistry &types,
-    const AST::FunctionRegistry *functions)
+    const AST::FunctionRegistry *functions
+)
 {
     if (ct == nullptr || !interface.is_interface()) {
         return std::nullopt;
@@ -624,7 +636,10 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
 }
 
 std::vector<AST::FunctionDeclNode *> AST::interface_implementations(
-    const AST::ComplexType *ct, const AST::ValueType &interface, AST::TypeRegistry &types)
+    const AST::ComplexType *ct,
+    const AST::ValueType &interface,
+    AST::TypeRegistry &types
+)
 {
     if (ct == nullptr || !interface.is_interface()) {
         return {};

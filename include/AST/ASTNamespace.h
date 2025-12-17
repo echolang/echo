@@ -8,8 +8,8 @@
 #include <memory>
 #include <vector>
 
-#include "ASTDeclarationSite.h"
-#include "ASTSymbol.h"
+#include "AST/ASTDeclarationSite.h"
+#include "AST/ASTSymbol.h"
 
 #define ECO_NAMESPACE_SEPARATOR "::"
 
@@ -148,8 +148,11 @@ namespace AST
         // supplied rather than generated here because only the caller knows the *position* it is derived
         // from - see AST::Context::site_discriminator, which is the one producer
         Namespace &retrieve_lexical(
-            Namespace &parent, const DeclarationSite &site, const std::string &display_name,
-            const std::string &discriminator);
+            Namespace &parent,
+            const DeclarationSite &site,
+            const std::string &display_name,
+            const std::string &discriminator
+        );
 
         // returns the namespace for the given name, or nullptr if it doesn't exist
         const Namespace *get(const std::string &name) const;

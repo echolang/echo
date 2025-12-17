@@ -14,7 +14,7 @@
     };
 
 namespace AST
-{  
+{
     struct ASTException : public std::exception {};
     struct ASTLogicException : public ASTException {};
 

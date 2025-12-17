@@ -358,12 +358,20 @@ namespace AST
         // arrive_value sees a place and wraps it in a RetainExprNode through the ordinary copy rule,
         // and only then does the temporary that owns the storage close over it
         ExprNode *resolve_value_arrival(
-            ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination);
+            ExprNode *expr,
+            const ValueType &wanted,
+            const VarDeclNode *param,
+            ValueDestination destination
+        );
 
         // resolve_value_arrival's own body, without the flush. split out rather than inlined because it
         // has eight early returns and every one of them has to be flushed
         ExprNode *arrive_value(
-            ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination);
+            ExprNode *expr,
+            const ValueType &wanted,
+            const VarDeclNode *param,
+            ValueDestination destination
+        );
 
         // --- drops ----------------------------------------------------------------------------
 
@@ -416,7 +424,10 @@ namespace AST
         // shared by the two things this pass inserts that call a member: a drop and a copy. they
         // differ only in which declaration they name and where the place comes from
         FunctionCallExprNode &emit_resolved_member_call(
-            FunctionDeclNode *callee, const TokenReference &at, ExprNode *place);
+            FunctionDeclNode *callee,
+            const TokenReference &at,
+            ExprNode *place
+        );
 
         // **a teardown reaches a const value.** `const` is a promise about what the *program* writes,
         // and a drop is not one of its writes: the storage is going away, and nothing that happens to
@@ -463,7 +474,11 @@ namespace AST
         // a deinit's `$this` and a copy constructor's `$other`. `Foo&` rather than `Foo`: a by-value
         // parameter of an owning type is an owner, and neither of them may own its argument
         VarDeclNode &add_borrow_parameter(
-            FunctionDeclNode &decl, const std::string &name, const ValueType &borrowed, const TokenReference &site);
+            FunctionDeclNode &decl,
+            const std::string &name,
+            const ValueType &borrowed,
+            const TokenReference &site
+        );
 
         // hands a finished declaration to the file root, and marks the round changed so the next one
         // walks its body

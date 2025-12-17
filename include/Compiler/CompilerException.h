@@ -38,7 +38,7 @@ namespace Compiler
         const AST::IssueRecord &_issue;
 
     public:
-        ASTCompilerException(const AST::IssueRecord &issue) : 
+        ASTCompilerException(const AST::IssueRecord &issue) :
             CompilerException(issue.message(), issue.code_ref.file),
             _issue(issue)
         {}
@@ -47,7 +47,7 @@ namespace Compiler
             return _issue;
         }
 
-        virtual const char *what() const noexcept override {   
+        virtual const char *what() const noexcept override {
             return _message.c_str();
         }
     };

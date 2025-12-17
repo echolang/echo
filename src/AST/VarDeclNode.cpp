@@ -18,5 +18,5 @@ const std::string AST::VarDeclNode::node_description()
     }
 
     return desc;
-        
+
 }

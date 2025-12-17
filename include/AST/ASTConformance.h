@@ -228,7 +228,8 @@ namespace AST
     std::vector<FunctionDeclNode *> interface_implementations(
         const ComplexType *ct,
         const ValueType &interface,
-        TypeRegistry &types);
+        TypeRegistry &types
+    );
 
     // **why a value of `from` cannot be *stored* as `interface`**, or an empty string when it can.
     //

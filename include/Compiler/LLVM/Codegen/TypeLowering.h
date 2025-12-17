@@ -89,7 +89,9 @@ namespace Compiler::LLVM
         // public for the reason the layout above is: the two readers are the conformance table built here
         // and the `instanceof` scan in ClassCodegen, and both need the same global
         llvm::GlobalVariable *get_or_create_interface_identity(
-            const AST::ComplexType &interface, const Compiler::LLVM::CmpUnit &cmp_unit);
+            const AST::ComplexType &interface,
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);
@@ -176,13 +178,16 @@ namespace Compiler::LLVM
         llvm::Constant *get_or_create_vtable(
             const AST::ValueType &class_type,
             const AST::ValueType &interface,
-            const Compiler::LLVM::CmpUnit &cmp_unit);
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         // the llvm::FunctionType a callable's `fn` slot points at. the environment is parameter 0,
         // always, exactly the way a method's `$this` is - a capturing closure has nowhere else to read
         // its captures from, and a uniform shape is what lets one indirect call site invoke either kind
         llvm::FunctionType *get_llvm_function_type(
-            const AST::CallableSignature &signature, const Compiler::LLVM::CmpUnit &cmp_unit);
+            const AST::CallableSignature &signature,
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         // converts `value` from one echo type to another, emitting the widening, narrowing or
         // int/float conversion the pair calls for. returns the value unchanged when no
@@ -211,7 +216,9 @@ namespace Compiler::LLVM
         // the `[N x ptr]` of interface identities a class conforms to, or null when it conforms to none.
         // what a typeinfo's `conformances` slot points at, and what `instanceof <interface>` scans
         llvm::Constant *build_conformance_table(
-            const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
+            const AST::ComplexType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         // the one way this file mints a runtime structure: a `linkonce_odr constant` looked up by name
         // first, so a unit that already emitted it reuses the definition rather than colliding with it.
@@ -226,7 +233,8 @@ namespace Compiler::LLVM
         llvm::GlobalVariable *get_or_create_odr_constant(
             const std::string &name,
             const std::function<llvm::Constant *()> &build,
-            const Compiler::LLVM::CmpUnit &cmp_unit);
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
 
         // the wrapped optionals this compiler has already lowered. the named-type lookup in
         // optional_llvm_type is the interning, and this is only what keeps it from re-mangling the

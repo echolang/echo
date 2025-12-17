@@ -43,7 +43,7 @@ namespace AST
         CoreTypes core_types = CoreTypes();
 
         // create a registry for the native scalar cast types
-        
+
         Collector();
         ~Collector();
 

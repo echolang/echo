@@ -214,7 +214,8 @@ void AccessPass::report_conflict(
     size_t first,
     size_t second,
     AccessEffect first_effect,
-    AccessEffect second_effect)
+    AccessEffect second_effect
+)
 {
     // the exclusive one is named first: it is the access that cannot be shared, so it is the one the
     // reader has to move. when both are exclusive the order is the argument order, which is the order

@@ -206,7 +206,11 @@ namespace
 
         out << fmt::format(
             ",\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}}",
-            span.start.line, span.start.column, span.end.line, span.end.column);
+            span.start.line,
+            span.start.column,
+            span.end.line,
+            span.end.column
+        );
     }
 };
 
@@ -223,7 +227,8 @@ AST::DiagnosticTheme AST::DiagnosticTheme::ascii()
 AST::DiagnosticRenderer::DiagnosticRenderer(
     std::ostream &out,
     Compiler::DiagnosticFormat format,
-    Compiler::TerminalCapabilities capabilities) :
+    Compiler::TerminalCapabilities capabilities
+) :
     _out(out),
     _format(format),
     _capabilities(capabilities),
@@ -282,7 +287,11 @@ void AST::DiagnosticRenderer::render_header(const Diagnostic &diagnostic) const
 }
 
 void AST::DiagnosticRenderer::render_frame(
-    const Span &span, const std::string &label, IssueSeverity severity, bool is_primary) const
+    const Span &span,
+    const std::string &label,
+    IssueSeverity severity,
+    bool is_primary
+) const
 {
     const File *file = span.file;
     if (file == nullptr || !file->content.has_value()) {
@@ -433,7 +442,10 @@ void AST::DiagnosticRenderer::render_summary(size_t errors, size_t warnings, boo
     if (is_machine_readable()) {
         _out << fmt::format(
             "{{\"type\":\"summary\",\"errors\":{},\"warnings\":{},\"compiled\":{}}}\n",
-            errors, warnings, compiled ? "true" : "false");
+            errors,
+            warnings,
+            compiled ? "true" : "false"
+        );
         return;
     }
 
@@ -470,7 +482,10 @@ void AST::DiagnosticRenderer::render_summary(size_t errors, size_t warnings, boo
 }
 
 void AST::DiagnosticRenderer::render_untyped(
-    const std::string &title, const std::string &message, IssueSeverity severity) const
+    const std::string &title,
+    const std::string &message,
+    IssueSeverity severity
+) const
 {
     if (is_machine_readable()) {
         Diagnostic diagnostic;

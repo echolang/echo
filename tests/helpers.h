@@ -45,7 +45,7 @@ namespace EchoTests
     }
 
     ParserEnv tests_make_parser_env(std::string content);
-    
+
     AST::Module tests_make_tokenized_module(std::string content);
 
     // **mirrors run_semantic_passes in src/main.cpp**, and is the only place these tests spell the sequence -

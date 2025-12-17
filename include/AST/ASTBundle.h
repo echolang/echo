@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "ASTModule.h"
-#include "ASTCollector.h"
+#include "AST/ASTModule.h"
+#include "AST/ASTCollector.h"
 
 namespace AST
-{  
+{
     class Bundle
     {
     public:

@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ASTAccess.h"
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTAccess.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Lexer.h"
-#include "TypeNode.h"
+#include "AST/TypeNode.h"
 
-namespace AST 
+namespace AST
 {
     class ExprNode;
 
@@ -21,7 +21,7 @@ namespace AST
         VarDeclNode *points_to = nullptr;
 
     public:
-    
+
         TokenReference token_varname;
 
 
@@ -122,7 +122,7 @@ namespace AST
         void set_type_node(TypeNode *type) {
             _type_node = type;
         }
-        
+
         const std::string node_description() override;
 
         void accept(Visitor &visitor) override {

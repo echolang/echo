@@ -1,13 +1,13 @@
-#ifndef ASTREFERENCE_H
-#define ASTREFERENCE_H
+#ifndef ASTNODEREFERENCE_H
+#define ASTNODEREFERENCE_H
 
 #pragma once
 
 #include <assert.h>
 #include <vector>
-#include "ASTNodeTypes.h"
+#include "AST/ASTNodeTypes.h"
 
-namespace AST 
+namespace AST
 {
     class Node;
 
@@ -18,8 +18,8 @@ namespace AST
 
     public:
         NodeReference() = default;
-        NodeReference(NodeType type, Node *ptr) : 
-            parent_ptr(ptr), parent_type(type) 
+        NodeReference(NodeType type, Node *ptr) :
+            parent_ptr(ptr), parent_type(type)
         {}
 
         ~NodeReference() {}
@@ -35,7 +35,7 @@ namespace AST
         inline bool has() const {
             return parent_ptr != nullptr;
         }
-        
+
         template <typename T>
             requires NodeTypeProvider<T>
         inline bool has_type() const {
@@ -102,7 +102,7 @@ namespace AST
     };
 
     typedef std::vector<NodeReference> NodeReferenceList;
-    
+
     template <NodeTypeProvider T>
     const NodeReference make_ref(T *node) {
         static_assert(std::is_base_of_v<Node, T>, "T must be derived from Node");

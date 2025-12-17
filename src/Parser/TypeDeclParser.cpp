@@ -77,7 +77,8 @@ static void parse_associated_type(
     Parser::Payload &payload,
     AST::TypeDeclNode &struct_node,
     bool is_interface_body,
-    bool collect_members)
+    bool collect_members
+)
 {
     auto &cursor = payload.cursor;
 
@@ -215,7 +216,8 @@ static void parse_conformance_clause(
     Parser::Payload &payload,
     AST::TypeDeclNode &struct_node,
     const Parser::Cursor::Snapshot &clause_start,
-    const TokenReference &colon_token)
+    const TokenReference &colon_token
+)
 {
     auto &cursor = payload.cursor;
     const auto resume = cursor.snapshot();
@@ -362,7 +364,8 @@ static void publish_member_attributes(
     Parser::Payload &payload,
     AST::FunctionDeclNode *decl,
     AST::TypeDeclNode *struct_node,
-    const TokenReference &nametoken)
+    const TokenReference &nametoken
+)
 {
     Parser::drain_attributes(payload, decl->attributes);
     Parser::publish_declaration_markers(payload, decl, struct_node, nametoken);
@@ -386,7 +389,8 @@ static void publish_copy_constructor(
     AST::TypeDeclNode *struct_node,
     const AST::ValueType &self_value_type,
     AST::FunctionDeclNode *ctor_decl,
-    const TokenReference &ctor_token)
+    const TokenReference &ctor_token
+)
 {
     if (AST::is_copy_constructor(ctor_decl, self_value_type)) {
         AST::FunctionDeclNode *existing = struct_node->complex_type().copy_constructor();
@@ -455,7 +459,8 @@ static void publish_copy_constructor(
 static void parse_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
-    const AST::ValueType &self_value_type)
+    const AST::ValueType &self_value_type
+)
 {
     auto &cursor = payload.cursor;
     auto name_token = struct_node->name_token.value();
@@ -585,7 +590,8 @@ static void parse_constructor(
 static void parse_destructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
-    AST::TypeNode *self_type_node)
+    AST::TypeNode *self_type_node
+)
 {
     auto &cursor = payload.cursor;
 
@@ -715,7 +721,8 @@ static void parse_destructor(
 static void synthesize_field_wise_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
-    const AST::ValueType &self_value_type)
+    const AST::ValueType &self_value_type
+)
 {
     auto name_token = struct_node->name_token.value();
 

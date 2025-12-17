@@ -1,0 +1,6 @@
+flags: --target-os darwin
+
+--- OUT --->
+--- IR --->
+CHECK: _NSGetExecutablePath refused a buffer it asked for
+CHECK: declare i32 @_NSGetExecutablePath(

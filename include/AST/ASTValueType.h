@@ -18,7 +18,7 @@
 #include <iostream>
 
 namespace AST
-{   
+{
     class ComplexType;
     class TypeRegistry;
     class Namespace;
@@ -263,8 +263,8 @@ namespace AST
 
         ValueType() = default;
         ValueType(ValueTypePrimitive primitive) :
-            kind(ValueTypeKind::t_primitive), 
-            primitive(primitive) 
+            kind(ValueTypeKind::t_primitive),
+            primitive(primitive)
         {}
 
         inline ComplexType *get_complex_type() const {
@@ -438,7 +438,7 @@ namespace AST
             case ValueTypePrimitive::t_float32:
             case ValueTypePrimitive::t_float64:
                 return true;
-            
+
             default:
                 return false;
             }
@@ -491,7 +491,7 @@ namespace AST
         bool will_fit_into(ValueType other) const;
 
         bool is_same_size(ValueType other) const;
-        
+
         // a pointer has no primitive of its own - reaching here with one means a caller wanted
         // the pointee and forgot to say so. assert rather than silently answering t_void, which
         // used to reach LLVM as PointerType::get(voidTy) and assert far from the actual mistake
@@ -602,7 +602,7 @@ namespace AST
         ValueType(ValueTypeKind kind, const TypeParamDecl *param) :
             kind(kind), primitive(ValueTypePrimitive::t_void), _type_param(param) {}
     };
-    
+
     // held by shared_ptr off a ValueType and compared *structurally*, for the reason the pointee is:
     // it carries no mutable state and no identity of its own, so two independently written
     // `function<void(int32)>`s have to be one type or a callback could never be passed anywhere. that

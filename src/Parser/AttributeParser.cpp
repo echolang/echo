@@ -9,7 +9,10 @@
 #include <fmt/core.h>
 
 std::optional<std::string> Parser::attribute_string_value(
-    Parser::Payload &payload, AST::AttributeNode *attribute, const std::string &attribute_name)
+    Parser::Payload &payload,
+    AST::AttributeNode *attribute,
+    const std::string &attribute_name
+)
 {
     if (attribute->attribute_exprs.size() != 1) {
         payload.collector.collect_issue<AST::Issue::GenericError>(

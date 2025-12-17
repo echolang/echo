@@ -90,9 +90,11 @@ namespace Compiler::LLVM
         // builder positioned in a fresh entry block. the insert point is restored by the guard the
         // caller holds, because a thunk is created from the middle of whatever body first allocated
         llvm::Function *declare_thunk(
-            const std::string &name, llvm::Type *return_type,
+            const std::string &name,
+            llvm::Type *return_type,
             const std::vector<llvm::Type *> &parameter_types,
-            const std::vector<const char *> &parameter_names);
+            const std::vector<const char *> &parameter_names
+        );
 
         // `noalias` on the return and `allocsize` on the function, for the two thunks that hand back a
         // block. the only place in this compiler where an aliasing claim is written by hand rather than

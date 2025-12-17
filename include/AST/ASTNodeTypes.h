@@ -7,7 +7,7 @@
 #include <type_traits>
 
 namespace AST
-{   
+{
     class Node;
 
     // node type enum

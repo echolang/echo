@@ -441,7 +441,8 @@ bool Parser::read_module_manifest(
     const std::filesystem::path &path,
     const Compiler::TargetFacts &facts,
     Parser::ModuleManifest &out,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     ManifestScratch scratch(facts);
     return read_manifest_with(scratch, path, out, out_error);
@@ -451,7 +452,8 @@ bool Parser::resolve_module_graph(
     const std::vector<std::filesystem::path> &roots,
     const Compiler::TargetFacts &facts,
     std::vector<Parser::ModuleManifest> &out,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     out.clear();
 

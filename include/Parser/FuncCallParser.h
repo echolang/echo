@@ -22,7 +22,8 @@ namespace Parser
     AST::FunctionCallExprNode *parse_funccall(
         Parser::Payload &payload,
         const AST::Namespace *requested_namespace = nullptr,
-        bool *out_is_call = nullptr);
+        bool *out_is_call = nullptr
+    );
 
     // the call a user operator lowers to: an ordinary FunctionCallExprNode over the root namespace's
     // overload set for `op` at `fixity`, with the operands as its arguments. `at` is the operator's
@@ -49,14 +50,18 @@ namespace Parser
         const AST::Operator &op,
         AST::OpFixity fixity,
         const TokenReference &at,
-        std::vector<AST::ExprNode *> operands);
+        std::vector<AST::ExprNode *> operands
+    );
 
     // the argument list of a call through a *value*: `$f(1, 2)`. the cursor sits on the `(`.
     //
     // no overload set and nothing to look up, so unlike parse_funccall there is no settlement to drive -
     // the callee's type says what the parameters are, and the type checker validates against it
     AST::IndirectCallExprNode *parse_indirect_call(
-        Parser::Payload &payload, AST::ExprNode *callee, const TokenReference &at);
+        Parser::Payload &payload,
+        AST::ExprNode *callee,
+        const TokenReference &at
+    );
 
     // parses `->name(...)` / `->name<...>(...)` into an ordinary call whose first argument is the
     // receiver's address. the cursor must sit on the `(` or `<` that follows the member name
@@ -74,7 +79,8 @@ namespace Parser
         Parser::Payload &payload,
         AST::ExprNode *receiver,
         const TokenReference &member_token,
-        bool &is_call);
+        bool &is_call
+    );
 
     // true when the cursor sits on a call used as a statement: an optionally namespace-qualified
     // name followed by `(` or by explicit type arguments. `mem::free($p);` and `box<int32>(1);`

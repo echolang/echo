@@ -29,7 +29,8 @@ namespace Parser
     AST::ScopeNode &parse_scope(
         Payload &payload,
         std::optional<TokenReference> block_token = std::nullopt,
-        std::vector<AST::VarDeclNode *> seed_declarations = {});
+        std::vector<AST::VarDeclNode *> seed_declarations = {}
+    );
 
     // the tail of a call used as a statement: appends it to `scope` and consumes the semicolon that
     // has to follow. shared by the free-call branch of parse_scope and the `$obj->m();` branch of

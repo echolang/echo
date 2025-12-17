@@ -10,7 +10,10 @@
 namespace Compiler::LLVM
 {
     CodegenContext::StringWindow CodegenContext::gen_string_window(
-        llvm::Value *value, const AST::ValueType &type, const char *prefix)
+        llvm::Value *value,
+        const AST::ValueType &type,
+        const char *prefix
+    )
     {
         const AST::CoreStringLayout &layout = core_string_layout();
 

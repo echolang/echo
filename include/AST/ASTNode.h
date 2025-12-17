@@ -11,9 +11,9 @@
 #include <unordered_set>
 #include <algorithm>
 
-#include "ASTNodeTypes.h"
-#include "ASTNodeReference.h"
-#include "ASTVisitor.h"
+#include "AST/ASTNodeTypes.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ASTVisitor.h"
 
 namespace AST
 {
@@ -63,7 +63,7 @@ namespace AST
         std::unordered_map<std::type_index, std::vector<Node *>> node_map;
     public:
 
-        // emplace back 
+        // emplace back
         template <typename T, typename... Args>
             requires NodeTypeProvider<T>
         inline T &emplace_back(Args&&... args) {

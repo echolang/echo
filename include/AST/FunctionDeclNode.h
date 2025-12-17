@@ -1,18 +1,18 @@
-#ifndef FUNCTIONNODE_H
-#define FUNCTIONNODE_H
+#ifndef FUNCTIONDECLNODE_H
+#define FUNCTIONDECLNODE_H
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 
-#include "ScopeNode.h"
-#include "VarDeclNode.h"
-#include "AttributeNode.h"
+#include "AST/ScopeNode.h"
+#include "AST/VarDeclNode.h"
+#include "AST/AttributeNode.h"
 
 #include <optional>
 
-namespace AST 
+namespace AST
 {
     class Namespace;
     class AttributeNode;
@@ -42,7 +42,7 @@ namespace AST
     {
     public:
         ECO_AST_NODE_TYPE(n_func_decl);
-            
+
         std::optional<TokenReference> name_token;
 
         // where this declaration is *written*, which is what a module's parse passes reconcile on
@@ -232,7 +232,7 @@ namespace AST
         TypeNode *return_type = nullptr;
         Namespace *ast_namespace = nullptr;
         ScopeNode *body = nullptr;
-        
+
         // the list of attributes that are attached to this function
         AttributeList attributes;
 
@@ -330,7 +330,7 @@ namespace AST
         // returns the decorated function name as it would appear in the symbol table
         // this is the name that is used to uniquely identify the function aka the mangled name
         const std::string decorated_func_name() const;
-        
+
         const std::string namespaced_func_name() const;
 
         const std::string get_return_type_description() {

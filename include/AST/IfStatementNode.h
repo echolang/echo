@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ExprNode.h"
-#include "ScopeNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ExprNode.h"
+#include "AST/ScopeNode.h"
 
 #include <optional>
 
-namespace AST 
+namespace AST
 {
     class IfStatementNode : public Node
     {
@@ -29,7 +29,7 @@ namespace AST
             ExprNode *condition,
             ScopeNode *if_scope,
             ScopeNode *else_scope
-        ) : condition(condition), if_scope(if_scope), else_scope(else_scope) 
+        ) : condition(condition), if_scope(if_scope), else_scope(else_scope)
         {}
         ~IfStatementNode() {}
 

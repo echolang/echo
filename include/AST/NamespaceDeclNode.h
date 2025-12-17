@@ -3,28 +3,28 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTNamespace.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNamespace.h"
 #include "Lexer.h"
 
-namespace AST 
+namespace AST
 {
     class NamespaceDeclNode : public Node
     {
     public:
         ECO_AST_NODE_TYPE(n_namespace_decl);
-        
+
         TokenSlice namespace_tokens;
         const Namespace *namespace_decl;
 
         NamespaceDeclNode(const TokenSlice &token_slice, const Namespace *ns) :
             namespace_tokens(token_slice),
-            namespace_decl(ns) 
+            namespace_decl(ns)
         {};
 
         ~NamespaceDeclNode() {};
 
-        const std::string node_description() override { 
+        const std::string node_description() override {
             return "namespace " + namespace_decl->name();
         }
 

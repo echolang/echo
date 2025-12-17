@@ -58,7 +58,10 @@ bool AST::bind_array_literal_to(AST::ExprNode *expr, const AST::ValueType &desti
 }
 
 AST::ArrayLiteralLookup AST::array_literal_type_for(
-    const AST::ArrayLiteralExprNode &literal, const AST::CoreTypes &core, AST::TypeRegistry &types)
+    const AST::ArrayLiteralExprNode &literal,
+    const AST::CoreTypes &core,
+    AST::TypeRegistry &types
+)
 {
     // **the unbound case comes first**, AST::iteration_plan_for's reason: `--no-stdlib` is a legitimate
     // program, and stdlib/core/array.eco is itself parsed by the compiler that would otherwise be

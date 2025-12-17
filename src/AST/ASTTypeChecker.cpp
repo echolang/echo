@@ -217,7 +217,10 @@ void TypeChecker::visitScope(ScopeNode &node)
 // reported here rather than at the layout, because privacy is about the *site* and the layout has no
 // idea where it is being read from
 void TypeChecker::check_private_member(
-    MemberAccessNode &node, const ComplexType &complex, const ComplexType::Property &property)
+    MemberAccessNode &node,
+    const ComplexType &complex,
+    const ComplexType::Property &property
+)
 {
     if (!property.is_private) {
         return;
@@ -568,7 +571,10 @@ void TypeChecker::visit_strong_expr(StrongExprNode &node)
 // where waiting for this pass would be a worse message. what is shared is the *wording*, through
 // AST::certainly_present_refusal - two askers per form is exactly how three strings become six
 void TypeChecker::check_optional_operand(
-    OptionalForm form, const ExprNode *operand, const TokenReference &at)
+    OptionalForm form,
+    const ExprNode *operand,
+    const TokenReference &at
+)
 {
     if (operand == nullptr) {
         return;
@@ -930,7 +936,8 @@ void TypeChecker::check_call_argument(
     size_t arg_number,
     const FunctionDeclNode *callee,
     const std::string &indirect_name,
-    const TokenReference &at)
+    const TokenReference &at
+)
 {
     const bool callee_is_operator = callee != nullptr && callee->is_operator();
 
@@ -1300,7 +1307,10 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
 // readable `T&` over uninitialized bytes would be asking for a promise that is *false* at the moment
 // it is made
 void TypeChecker::check_unsafe_promotion(
-    const ValueType &to, ExprNode *operand, const TokenReference &at)
+    const ValueType &to,
+    ExprNode *operand,
+    const TokenReference &at
+)
 {
     if (operand == nullptr || !borrow_promotes_raw_storage(to, operand)) {
         return;

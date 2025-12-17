@@ -163,7 +163,7 @@ bool AST::ValueType::will_fit_into(ValueType other) const
     // for floating types we can just check if the size is smaller
     if (is_floating_type() && other.is_floating_type()) {
         return get_primitive_size(primitive) <= get_primitive_size(other.primitive);
-    }            
+    }
 
     // for integers we need to check if the size is smaller and if the sign is compatible
     else if (is_numeric_type() && other.is_numeric_type()) {
@@ -409,7 +409,10 @@ std::string AST::ValueType::get_type_desciption() const
 }
 
 AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
-    const std::string &name, AST::ComplexTypeKind kind, AST::Namespace *ns)
+    const std::string &name,
+    AST::ComplexTypeKind kind,
+    AST::Namespace *ns
+)
 {
     auto owned = std::make_unique<ComplexType>();
     ComplexType *type = owned.get();
@@ -475,7 +478,10 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
 }
 
 void AST::TypeRegistry::derive_instantiation(
-    ComplexType *inst, ComplexType *tmpl, const std::vector<ValueType> &args)
+    ComplexType *inst,
+    ComplexType *tmpl,
+    const std::vector<ValueType> &args
+)
 {
     // a self-referential argument comes back through get_or_create_instantiation, finds this instance
     // in the cache mid-build and reads it as stale. without this the pair would recurse until the stack

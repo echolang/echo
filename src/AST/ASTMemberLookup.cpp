@@ -124,7 +124,11 @@ AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode 
 }
 
 AST::FunctionCallExprNode &AST::make_resolved_member_call(
-    AST::Module &module, AST::FunctionDeclNode *callee, const TokenReference &at, AST::ExprNode *place)
+    AST::Module &module,
+    AST::FunctionDeclNode *callee,
+    const TokenReference &at,
+    AST::ExprNode *place
+)
 {
     auto &call = module.nodes.emplace_back<AST::FunctionCallExprNode>(
         at, std::vector<AST::ExprNode *>{ receiver_for_member_call(module, place) });

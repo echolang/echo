@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ASTNode.h"
+#include "AST/ASTNode.h"
 #include "Token.h"
 
 #include <optional>
 #include <unordered_map>
 
-namespace AST 
+namespace AST
 {
     class VarDeclNode;
     class FunctionDeclNode;
@@ -170,7 +170,7 @@ namespace AST
     private:
 
         // a list of attributes currently collected in the scope
-        // its in the responsibilty of other parsers to detect if the attributes in the current scope apply 
+        // its in the responsibilty of other parsers to detect if the attributes in the current scope apply
         // to their context and to consume them from the scope
         std::vector<AttributeNode *> _attribute_stack;
 

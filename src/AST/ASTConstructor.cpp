@@ -12,7 +12,10 @@
 #include "AST/VarRefNode.h"
 
 AST::VarDeclNode &AST::declare_constructor_this(
-    AST::Module &module, AST::TypeNode &self_type, const TokenReference &at)
+    AST::Module &module,
+    AST::TypeNode &self_type,
+    const TokenReference &at
+)
 {
     auto &decl = module.nodes.emplace_back<AST::VarDeclNode>(
         module.make_virtual_token("$this", Token::Type::t_varname, at), &self_type);
@@ -37,7 +40,10 @@ AST::VarDeclNode &AST::declare_constructor_this(
 }
 
 void AST::close_constructor_body(
-    AST::Module &module, AST::FunctionDeclNode &decl, AST::VarDeclNode &this_decl)
+    AST::Module &module,
+    AST::FunctionDeclNode &decl,
+    AST::VarDeclNode &this_decl
+)
 {
     if (decl.body == nullptr || AST::scope_always_leaves_function(*decl.body)) {
         return;

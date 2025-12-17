@@ -19,7 +19,11 @@ Parser::ModuleParser::ModuleParser(Compiler::TargetFacts facts) :
 }
 
 Parser::Payload Parser::ModuleParser::make_parser_payload(
-    const AST::TokenizedFile &tfile, AST::Module &module, AST::Collector &collector, Parser::Pass pass) const
+    const AST::TokenizedFile &tfile,
+    AST::Module &module,
+    AST::Collector &collector,
+    Parser::Pass pass
+) const
 {
     auto cursor = Cursor(module.tokens, tfile.token_slice.start_index, tfile.token_slice.end_index);
 
@@ -51,14 +55,14 @@ void Parser::ModuleParser::parse_file_from_disk(std::filesystem::path path, AST:
     // auto payload = make_parser_payload(tfile, module, collector);
 
     // // begin parsing the file root
-    // file.root = &Parser::parse_scope(payload);   
+    // file.root = &Parser::parse_scope(payload);
 }
 
 void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const std::string &content, AST::Module &module, AST::Collector &collector) const
 {
     // create a file entry in the module
     auto &file = module.add_file(path);
-    
+
     // set the content of the file
     file.set_content(content);
 
@@ -70,7 +74,7 @@ void Parser::ModuleParser::parse_file_from_mem(std::filesystem::path path, const
     // auto payload = make_parser_payload(tfile, module, collector);
 
     // // begin parsing the file root
-    // file.root = &Parser::parse_scope(payload);   
+    // file.root = &Parser::parse_scope(payload);
 }
 
 AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module, AST::File &file) const
@@ -90,7 +94,7 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
     {
     Compiler::ScopedPhase phase("lex");
     for (auto &file : module.files()) {
-#if ECO_DONT_CATCH_EXCEPTIONS 
+#if ECO_DONT_CATCH_EXCEPTIONS
         auto tfile = make_tokenized_file(module, file);
         file_payloads.push_back(std::make_tuple(&file, tfile));
 #else
@@ -162,6 +166,6 @@ void Parser::ModuleParser::parse_input(const InputPayload &payload) const
         }
     }
 
-    
+
     parse_module(payload.module, payload.collector);
 }

@@ -6,12 +6,12 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "ASTModule.h"
-#include "ASTFile.h"
-#include "ASTCodeRef.h"
-#include "ASTDeclarationSite.h"
-#include "ASTNamespace.h"
-#include "ASTValueType.h"
+#include "AST/ASTModule.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTCodeRef.h"
+#include "AST/ASTDeclarationSite.h"
+#include "AST/ASTNamespace.h"
+#include "AST/ASTValueType.h"
 
 namespace AST
 {

@@ -35,12 +35,16 @@ namespace
             at,
             fmt::format(
                 "'{}' is already declared with these parameter types. Overloads must differ in their parameters.",
-                previous->signature_description()));
+                previous->signature_description()
+            ));
     }
 }
 
 bool AST::FunctionRegistry::claim_declaration_site(
-    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl
+)
 {
     if (decl == nullptr || decl->is_anonymous()) {
         return false;
@@ -82,7 +86,10 @@ bool AST::FunctionRegistry::claim_declaration_site(
 }
 
 void AST::FunctionRegistry::register_function(
-    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl)
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl
+)
 {
     if (!claim_declaration_site(collector, at, decl)) {
         return;
@@ -114,7 +121,11 @@ void AST::FunctionRegistry::register_function(
 }
 
 void AST::FunctionRegistry::register_member_function(
-    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl, AST::ComplexType &owner)
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl,
+    AST::ComplexType &owner
+)
 {
     // the declaration site is a real token here (a method is written where its name is written,
     // unlike a constructor), so the two passes reconcile without a virtual token
@@ -138,7 +149,11 @@ void AST::FunctionRegistry::register_member_function(
 }
 
 void AST::FunctionRegistry::register_destructor(
-    AST::Collector &collector, const AST::CodeRef &at, AST::FunctionDeclNode *decl, AST::ComplexType &owner)
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl,
+    AST::ComplexType &owner
+)
 {
     // the `destructor` keyword is a real token at a fixed index, so the two passes reconcile on it
     // exactly as a method reconciles on its name token. an unclaimed site means the body pass coming
@@ -157,7 +172,8 @@ void AST::FunctionRegistry::register_destructor(
 AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     const AST::ComplexType &owner,
     const AST::FunctionDeclNode *decl,
-    const AST::FunctionDeclNode *ignore) const
+    const AST::FunctionDeclNode *ignore
+) const
 {
     // materialized once for the whole search rather than per candidate, which is what keeps
     // signatures_match's parameter-at-a-time comparison worth having
@@ -177,7 +193,9 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
 }
 
 const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::overloads(
-    const std::string &name, const AST::Namespace &ns) const
+    const std::string &name,
+    const AST::Namespace &ns
+) const
 {
     // the answer for a name nothing declares. one object rather than a fresh empty vector per ask, and
     // what lets this hand back a reference at all
@@ -214,7 +232,8 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_by_signature(
     const std::string &name,
     const AST::Namespace &ns,
     const std::vector<AST::ValueType> &parameter_types,
-    const AST::FunctionDeclNode *ignore) const
+    const AST::FunctionDeclNode *ignore
+) const
 {
     // this namespace only - hiding is a lookup rule, and a declaration in an inner namespace does
     // not collide with one of the same shape further out

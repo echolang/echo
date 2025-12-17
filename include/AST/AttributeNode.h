@@ -6,7 +6,7 @@
 #include "AST/ASTNode.h"
 #include "Token.h"
 
-namespace AST 
+namespace AST
 {
     class ExprNode;
 
@@ -14,22 +14,22 @@ namespace AST
     {
     public:
         ECO_AST_NODE_TYPE(n_attribute);
-        
+
         TokenSlice attribute_tokens;
         TokenReference attribute_id;
         TokenList attribute_values;
 
         NodeReferenceList attribute_exprs;
 
-        AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) : 
-            attribute_tokens(attribute_tokens), 
+        AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) :
+            attribute_tokens(attribute_tokens),
             attribute_id(attribute_id),
             attribute_values(TokenList(attribute_tokens.tokens))
         {
         };
         ~AttributeNode() {};
 
-        const std::string node_description() override { 
+        const std::string node_description() override {
             return "attr<" + attribute_id.value() + ">";
         }
 
@@ -70,7 +70,7 @@ namespace AST
 
     private:
         std::unordered_map<std::string, std::vector<AttributeNode *>> _attributes;
-        
+
     };
 };
 

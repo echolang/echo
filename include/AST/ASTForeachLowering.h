@@ -105,7 +105,10 @@ namespace AST
         // receiver subtree per call: PointerAdjuster rewrites edges in place, so a shared one would
         // collect a deref per use
         FunctionCallExprNode &iterator_call(
-            VarDeclNode &iterator, const std::string &name, const TokenReference &at);
+            VarDeclNode &iterator,
+            const std::string &name,
+            const TokenReference &at
+        );
 
         Bundle &_bundle;
         Collector &_collector;

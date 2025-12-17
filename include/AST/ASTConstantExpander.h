@@ -29,7 +29,11 @@ namespace AST
     //
     // null when nothing of that name is a constant, which includes the name being a type
     ConstDeclNode *find_constant(
-        NamespaceManager &namespaces, const std::string &name, const Namespace *from, bool qualified);
+        NamespaceManager &namespaces,
+        const std::string &name,
+        const Namespace *from,
+        bool qualified
+    );
 
     // replaces every reference to a compile-time constant with **a clone of the constant's value**.
     //

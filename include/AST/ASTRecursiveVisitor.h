@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "ASTVisitor.h"
-#include "ASTNodeReference.h"
+#include "AST/ASTVisitor.h"
+#include "AST/ASTNodeReference.h"
 
 #include <vector>
 

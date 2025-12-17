@@ -1,4 +1,4 @@
 --- OUT --->
 --- IR --->
-CHECK: [weak<Obj>] weak(%p)
-CHECK: [function<int32(int32)>] fn=%p env=%p
+CHECK: [weak<Obj>] weak(0x%llx)
+CHECK: [function<int32(int32)>] fn=0x%llx env=0x%llx

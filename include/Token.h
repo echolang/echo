@@ -15,12 +15,12 @@ struct Token
 public:
     enum class Type
     {
-        t_identifier, 
+        t_identifier,
         t_semicolon,                // ;
         t_colon,                    // :
         t_ptr_of,                   // :$ - the address of a pointer expression
         t_comma,                    // ,
-        t_dot,                      // 
+        t_dot,                      //
         t_logical_and,              // &&
         t_logical_or,               // ||
         t_logical_eq,               // ==
@@ -38,7 +38,7 @@ public:
         t_op_shr,                   // >>
         t_op_inc,                   // ++
         t_op_dec,                   // --
-        t_op_add,                   // +       
+        t_op_add,                   // +
         t_op_sub,                   // -
         t_op_mul,                   // *
         t_op_div,                   // /
@@ -125,7 +125,7 @@ public:
 // mostly used for debugging purposes
 const std::string token_type_string(Token::Type type);
 
-// returns a string representation of the literal symbol 
+// returns a string representation of the literal symbol
 // used for lexing and parsing, only available for literals
 const std::string token_lit_symbol_string(const Token::Type type);
 
@@ -165,11 +165,11 @@ class TokenReference
 public:
 
     TokenReference(const TokenCollection &tokens, size_t index)
-        : tokens(tokens), index(index) 
+        : tokens(tokens), index(index)
     {}
 
     TokenReference(TokenCollection *tokens, size_t index)
-        : tokens(*tokens), index(index) 
+        : tokens(*tokens), index(index)
     {}
 
     inline bool belongs_to(const TokenCollection &tokens) const {
@@ -258,7 +258,7 @@ struct TokenSlice
         return tokens.tokens[end_index];
     }
 
-    // returns the N'th token inside of the slice 
+    // returns the N'th token inside of the slice
     TokenReference operator[](size_t index) const {
         assert(start_index + index <= end_index);
         return TokenReference(tokens, start_index + index);

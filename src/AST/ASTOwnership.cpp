@@ -1196,7 +1196,10 @@ OwnershipPass::MaterializationScope::MaterializationScope(OwnershipPass &pass) :
 }
 
 OwnershipPass::MaterializationScope::MaterializationScope(
-    OwnershipPass &pass, const char *action, const char *outcome) :
+    OwnershipPass &pass,
+    const char *action,
+    const char *outcome
+) :
     _pass(pass), _mark(pass._pending_temporaries.size()), _action(action), _outcome(outcome)
 {
     assert(action != nullptr && outcome != nullptr && "a refusal has to say why");
@@ -1652,7 +1655,11 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
 }
 
 ExprNode *OwnershipPass::resolve_value_arrival(
-    ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination)
+    ExprNode *expr,
+    const ValueType &wanted,
+    const VarDeclNode *param,
+    ValueDestination destination
+)
 {
     // **a borrow destination does not read the value, it keeps the address** - so this edge is the
     // wrong place to destroy the temporary, and which of the three answers that means depends on how
@@ -1698,7 +1705,11 @@ ExprNode *OwnershipPass::resolve_value_arrival(
 }
 
 ExprNode *OwnershipPass::arrive_value(
-    ExprNode *expr, const ValueType &wanted, const VarDeclNode *param, ValueDestination destination)
+    ExprNode *expr,
+    const ValueType &wanted,
+    const VarDeclNode *param,
+    ValueDestination destination
+)
 {
     if (expr == nullptr) {
         return nullptr;
@@ -1940,7 +1951,11 @@ ExprNode *OwnershipPass::arrive_value(
 }
 
 void OwnershipPass::reject_uncopyable(
-    ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination)
+    ExprNode *expr,
+    const ValueType &wanted,
+    const VarDeclNode *source,
+    ValueDestination destination
+)
 {
     // **a `#[unique]` type gets its own wording, and it is the opposite advice.** the general
     // refusal below ends in "give it a copy constructor", which for a type whose whole claim is that
@@ -2023,7 +2038,8 @@ void OwnershipPass::emit_drop(
     VarDeclNode *root,
     std::vector<std::string> &path,
     const ValueType &type,
-    std::vector<NodeReference> &out)
+    std::vector<NodeReference> &out
+)
 {
     // a callable owes one release of its environment and has no properties to walk - so it answers here,
     // before the ComplexType it does not have is asked for. no deinit to ensure either: the environment's
@@ -2090,7 +2106,10 @@ void OwnershipPass::emit_drop(
 }
 
 FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
-    FunctionDeclNode *callee, const TokenReference &at, ExprNode *place)
+    FunctionDeclNode *callee,
+    const TokenReference &at,
+    ExprNode *place
+)
 {
     // the node, the receiver's addressing and the settlement are all AST::make_resolved_member_call's -
     // this pass is one of its two callers and adds only the round's progress flag. the place that is
@@ -2123,7 +2142,8 @@ void OwnershipPass::emit_destructor_call(
     VarDeclNode *root,
     const std::vector<std::string> &path,
     const ComplexType *ct,
-    std::vector<NodeReference> &out)
+    std::vector<NodeReference> &out
+)
 {
     FunctionDeclNode *dtor = find_destructor(ct);
 
@@ -2142,7 +2162,8 @@ void OwnershipPass::emit_property_drops(
     VarDeclNode *root,
     std::vector<std::string> &path,
     const ComplexType *ct,
-    std::vector<NodeReference> &out)
+    std::vector<NodeReference> &out
+)
 {
     // a struct that contains an owner is itself an owner, and nothing had to be declared for it
     // inlined here rather than emitted as a synthesized destructor because whether a property needs
@@ -2179,7 +2200,11 @@ FunctionDeclNode &OwnershipPass::begin_synthesized_decl(const std::string &name,
 }
 
 VarDeclNode &OwnershipPass::add_borrow_parameter(
-    FunctionDeclNode &decl, const std::string &name, const ValueType &borrowed, const TokenReference &site)
+    FunctionDeclNode &decl,
+    const std::string &name,
+    const ValueType &borrowed,
+    const TokenReference &site
+)
 {
     auto &param_type = _current_module->nodes.emplace_back<TypeNode>(
         ValueType::make_pointer(borrowed, /*nullable=*/false));

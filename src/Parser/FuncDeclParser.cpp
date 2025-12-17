@@ -32,7 +32,8 @@ void Parser::push_implicit_param(
     AST::ScopeNode &into,
     const std::string &name,
     AST::TypeNode *type_node,
-    const TokenReference &at)
+    const TokenReference &at
+)
 {
     auto token = payload.context.make_virtual_token(name, Token::Type::t_varname, at);
     auto *vardecl = payload.context.emplace_nodep<AST::VarDeclNode>(token, type_node);
@@ -53,7 +54,8 @@ bool Parser::parse_function_body(
     Parser::Payload &payload,
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &scope,
-    AST::ClosureExprNode *closure)
+    AST::ClosureExprNode *closure
+)
 {
     auto &cursor = payload.cursor;
 
@@ -136,7 +138,8 @@ bool Parser::parse_parameter_list(
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &into,
     const TokenReference &report_at,
-    Token::Type closing)
+    Token::Type closing
+)
 {
     auto &cursor = payload.cursor;
 
@@ -233,7 +236,8 @@ static void push_environment_param(
     AST::FunctionDeclNode &decl,
     AST::ScopeNode &into,
     AST::ComplexType *environment,
-    const TokenReference &at)
+    const TokenReference &at
+)
 {
     auto &env_type = payload.context.emplace_node<AST::TypeNode>(AST::ValueType::make_class(environment));
 
@@ -244,7 +248,8 @@ AST::ExprNode *Parser::capture_variable(
     Parser::Payload &payload,
     AST::VarDeclNode *vardecl,
     const TokenReference &at,
-    size_t boundaries_crossed)
+    size_t boundaries_crossed
+)
 {
     AST::ClosureExprNode *closure = payload.context.current_closure_ptr;
 
@@ -420,7 +425,8 @@ void Parser::publish_declaration_markers(
     Parser::Payload &payload,
     AST::FunctionDeclNode *funcdecl,
     AST::TypeDeclNode *owner_struct,
-    const TokenReference &nametoken)
+    const TokenReference &nametoken
+)
 {
     publish_implicit_conversion(payload, funcdecl, owner_struct, nametoken);
 
@@ -447,7 +453,8 @@ void Parser::publish_implicit_conversion(
     Parser::Payload &payload,
     AST::FunctionDeclNode *funcdecl,
     AST::TypeDeclNode *owner_struct,
-    const TokenReference &nametoken)
+    const TokenReference &nametoken
+)
 {
     AST::AttributeNode *implicit_attr = funcdecl->attributes.get_first("implicit");
 

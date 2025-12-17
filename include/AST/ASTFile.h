@@ -8,10 +8,10 @@
 #include <optional>
 
 #include "Token.h"
-#include "ScopeNode.h"
+#include "AST/ScopeNode.h"
 
 namespace AST
-{  
+{
     class Module;
     class File;
 
@@ -58,10 +58,10 @@ namespace AST
         // the plain text content of the file
         std::optional<std::string> content;
 
-        
+
         File(
             const std::filesystem::path &path
-        ) : 
+        ) :
             _path(path)
         {};
         ~File() {};

@@ -44,7 +44,8 @@ namespace
 AST::FunctionMatch AST::match_function(
     const std::vector<AST::FunctionCandidate> &candidates,
     const std::vector<AST::ValueType> &argument_types,
-    const std::vector<AST::ExprNode *> &arguments)
+    const std::vector<AST::ExprNode *> &arguments
+)
 {
     FunctionMatch result;
 

@@ -254,14 +254,18 @@ const AST::Operator *AST::OperatorRegistry::get_operator(const TokenReference &t
 }
 
 bool AST::OperatorRegistry::tokens_are_adjacent(
-    const TokenReference &first, const TokenReference &second)
+    const TokenReference &first,
+    const TokenReference &second
+)
 {
     return first.line() == second.line()
         && second.char_offset() == first.char_offset() + first.value().length();
 }
 
 AST::OperatorRegistry::Match AST::OperatorRegistry::match_custom_at(
-    const TokenReference &start, size_t available) const
+    const TokenReference &start,
+    size_t available
+) const
 {
     const TokenCollection &collection = start.get_collection_ref();
     const size_t handle = start.get_handle();
@@ -299,7 +303,9 @@ AST::OperatorRegistry::Match AST::OperatorRegistry::match_custom_at(
 }
 
 AST::OperatorRegistry::Match AST::OperatorRegistry::match_at(
-    const TokenReference &start, size_t available) const
+    const TokenReference &start,
+    size_t available
+) const
 {
     if (!start.is_valid() || available == 0) {
         return {};

@@ -211,7 +211,11 @@ namespace AST
     // verbatim mirrors and this is exactly the kind of rule that drifts between two copies - one of
     // them ranking and the other not is how `$a[0]` and `f()[0]` come to resolve differently
     inline ArgumentFit borrow_rank(
-        const ValueType &from, const ValueType &to, ArgumentFit matched, ArgumentFit promised)
+        const ValueType &from,
+        const ValueType &to,
+        ArgumentFit matched,
+        ArgumentFit promised
+    )
     {
         return from.is_const() == to.pointee().is_const() ? matched : promised;
     }

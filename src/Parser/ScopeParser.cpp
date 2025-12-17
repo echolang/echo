@@ -91,7 +91,8 @@ void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &sc
 AST::ScopeNode & Parser::parse_scope(
     Parser::Payload &payload,
     std::optional<TokenReference> block_token,
-    std::vector<AST::VarDeclNode *> seed_declarations)
+    std::vector<AST::VarDeclNode *> seed_declarations
+)
 {
     auto &cursor = payload.cursor;
     auto &context = payload.context;
@@ -221,7 +222,7 @@ AST::ScopeNode & Parser::parse_scope(
         }
         // print statement aka "echo $something"
         else if (cursor.is_type(Token::Type::t_echo)) {
-            if (auto *echo_node = parse_echo(payload)) { 
+            if (auto *echo_node = parse_echo(payload)) {
                 scope_node.children.push_back(AST::make_ref(echo_node));
             }
         }
@@ -244,10 +245,10 @@ AST::ScopeNode & Parser::parse_scope(
             cursor.skip_statement();
         }
 
-        // var declaration 
+        // var declaration
         // can be:
         //   int $foo =
-        //   $bar = 
+        //   $bar =
         //   const $ey
         else if (
             starts_vardecl(payload) ||

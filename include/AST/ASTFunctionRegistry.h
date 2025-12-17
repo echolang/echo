@@ -87,7 +87,8 @@ namespace AST
             const std::string &name,
             const Namespace &ns,
             const std::vector<ValueType> &parameter_types,
-            const FunctionDeclNode *ignore = nullptr) const;
+            const FunctionDeclNode *ignore = nullptr
+        ) const;
 
         // the member counterpart: does `owner` already declare a method with `decl`'s name and
         // exactly its parameter types (the receiver included)? `ignore` is skipped so a declaration
@@ -98,7 +99,8 @@ namespace AST
         FunctionDeclNode *find_member_by_signature(
             const ComplexType &owner,
             const FunctionDeclNode *decl,
-            const FunctionDeclNode *ignore = nullptr) const;
+            const FunctionDeclNode *ignore = nullptr
+        ) const;
 
         // every registered declaration, in declaration order
         inline const std::vector<FunctionDeclNode *> &get_all() const {

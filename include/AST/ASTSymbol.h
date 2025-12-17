@@ -7,7 +7,7 @@
 #include "AST/ASTNodeReference.h"
 
 namespace AST
-{  
+{
     class FunctionDeclNode;
     class TypeDeclNode;
     class ConstDeclNode;
@@ -33,7 +33,7 @@ namespace AST
         NodeReference node;
 
         Symbol(SymbolType type, std::string name, NodeReference node) :
-            node(node), _type(type), _name(name) 
+            node(node), _type(type), _name(name)
         {}
 
         Symbol(FunctionDeclNode *func);
@@ -42,12 +42,12 @@ namespace AST
 
         ~Symbol() {};
 
-        SymbolType type() const { 
-            return _type; 
+        SymbolType type() const {
+            return _type;
         }
 
-        std::string name() const { 
-            return _name; 
+        std::string name() const {
+            return _name;
         }
 
     private:

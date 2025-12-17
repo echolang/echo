@@ -51,7 +51,10 @@ namespace
 }
 
 AST::IterationLookup AST::iteration_plan_for(
-    const AST::ValueType &source, const AST::CoreTypes &core, AST::TypeRegistry &types)
+    const AST::ValueType &source,
+    const AST::CoreTypes &core,
+    AST::TypeRegistry &types
+)
 {
     // **the unbound case comes first.** `--no-stdlib` is a legitimate program, and this is also what
     // keeps stdlib/core/contract.eco itself compilable - it is parsed by the very compiler that would

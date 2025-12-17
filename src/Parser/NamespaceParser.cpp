@@ -19,9 +19,9 @@ AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
 
     auto start = payload.cursor.snapshot();
 
-    while(
-        !payload.cursor.is_done() && 
-        payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_namespace_sep})) 
+    while (
+        !payload.cursor.is_done() &&
+        payload.cursor.is_type_sequence(0, {Token::Type::t_identifier, Token::Type::t_namespace_sep}))
     {
         ns_parts.emplace_back(payload.cursor.current().value());
 

@@ -35,7 +35,8 @@ std::string AST::Context::site_discriminator(const TokenReference &at) const
 AST::LexicalScope::LexicalScope(
     AST::Context &context,
     AST::NamespaceManager &namespaces,
-    const std::optional<TokenReference> &block_token) :
+    const std::optional<TokenReference> &block_token
+) :
     context(context), previous(context.current_namespace)
 {
     if (!block_token.has_value()) {
@@ -56,7 +57,8 @@ AST::LexicalScope::LexicalScope(
 AST::MemberTypeScope::MemberTypeScope(
     AST::Context &context,
     AST::NamespaceManager &namespaces,
-    const AST::ComplexType &owner) :
+    const AST::ComplexType &owner
+) :
     context(context), previous(context.current_namespace)
 {
     // through the one owner of that question, which a struct's compile-time constants are published into

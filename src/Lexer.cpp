@@ -5,8 +5,8 @@
 
 constexpr bool is_hex_char(char c)
 {
-    return (c >= '0' && c <= '9') || 
-           (c >= 'a' && c <= 'f') || 
+    return (c >= '0' && c <= '9') ||
+           (c >= 'a' && c <= 'f') ||
            (c >= 'A' && c <= 'F');
 }
 
@@ -17,9 +17,9 @@ constexpr bool is_numeric_char(char c)
 
 constexpr bool is_valid_varname_char(char c)
 {
-    return (c >= 'a' && c <= 'z') || 
-           (c >= 'A' && c <= 'Z') || 
-           (c >= '0' && c <= '9') || 
+    return (c >= 'a' && c <= 'z') ||
+           (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') ||
            (c == '_');
 }
 
@@ -53,7 +53,7 @@ constexpr std::array<bool, 256> generate_varname_lut()
 constexpr auto hex_lut = generate_hex_lut();
 constexpr auto numeric_lut = generate_numeric_lut();
 constexpr auto varname_lut = generate_varname_lut();
- 
+
 void insert_function_into_tree(LexerFunction::TreeNode &root, const std::string &must_match, LexerFunction::Base *func, size_t prefix_limit = 3)
 {
     auto match_limit = std::min<size_t>(prefix_limit, must_match.size());
@@ -84,7 +84,7 @@ void sort_functiontree(LexerFunction::TreeNode &node)
 void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, LexerCursor &cursor)
 {
     // we build a tree like structure based on the "must_match" string of each function
-    // we simply take the first N chars of the must match 
+    // we simply take the first N chars of the must match
     // im sure there is a better way to do this but works for now
     auto fnc_tree_root = std::make_unique<LexerFunction::TreeNode>("root");
 
@@ -166,8 +166,8 @@ void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, 
 #define ECHO_LEX_FNC_CUST_KEYWORD(name, lit, type) \
     name.push_back(std::make_unique<LexerFunction::KeywordToken>(lit, type));
 
-void Lexer::tokenize(TokenCollection &tokens, const std::string &input) 
-{   
+void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
+{
     auto cursor = LexerCursor(input);
 
     // build a list of lexer functions

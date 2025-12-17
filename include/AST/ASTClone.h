@@ -5,9 +5,9 @@
 
 #include <unordered_map>
 
-#include "ASTNode.h"
-#include "ASTNodeReference.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ASTValueType.h"
 
 namespace AST
 {

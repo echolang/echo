@@ -4,7 +4,7 @@
 #include <AST/NullNode.h>
 #include <AST/ScopeNode.h>
 
-TEST_CASE( "Node References", "[AST]" ) 
+TEST_CASE( "Node References", "[AST]" )
 {
     auto null_node = AST::NullNode();
     auto scope_node = AST::ScopeNode();
@@ -12,7 +12,7 @@ TEST_CASE( "Node References", "[AST]" )
     AST::NodeReference ref1 = AST::make_ref<AST::NullNode>(&null_node);
     AST::NodeReference ref2 = AST::make_ref<AST::ScopeNode>(&scope_node);
     AST::NodeReference ref3 = AST::NodeReference();
-    
+
     REQUIRE( ref1.has() );
     REQUIRE( ref2.has() );
     REQUIRE( !ref3.has() );
@@ -30,9 +30,9 @@ TEST_CASE( "Node References", "[AST]" )
     // null renders the type its context gave it; unbound it has none yet
     auto &ref1_node = ref1.get<AST::NullNode>();
     REQUIRE( ref1_node.node_description() == "null<[unknown]>" );
-}   
+}
 
-TEST_CASE( "Node Reference List", "[AST]" ) 
+TEST_CASE( "Node Reference List", "[AST]" )
 {
     auto nodes = AST::NodeCollection();
     auto &null_node = nodes.emplace_back<AST::NullNode>();

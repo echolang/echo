@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ASTCodeRef.h"
+#include "AST/ASTCodeRef.h"
 
 #include <optional>
 #include <vector>
@@ -68,7 +68,7 @@ public: \
 
 
 namespace AST
-{  
+{
     class VarDeclNode;
     enum class ValueTypePrimitive;
     class ValueType;
@@ -112,9 +112,9 @@ namespace AST
         const IssueSeverity severity;
         const CodeRef code_ref;
 
-        IssueRecord(IssueSeverity severity, const CodeRef &code_ref) : 
+        IssueRecord(IssueSeverity severity, const CodeRef &code_ref) :
             severity(severity),
-            code_ref(code_ref) 
+            code_ref(code_ref)
         {}
         virtual ~IssueRecord() {};
 

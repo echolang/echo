@@ -90,7 +90,8 @@ FunctionCallExprNode &OperatorRewriter::build_call(
     const std::string &name,
     const TokenReference &at,
     std::vector<ExprNode *> operands,
-    const Namespace *lookup)
+    const Namespace *lookup
+)
 {
     const TokenReference name_token =
         _current_module->make_virtual_token(name, Token::Type::t_identifier, at);
@@ -112,7 +113,8 @@ FunctionCallExprNode &OperatorRewriter::build_operator_call(
     const std::string &spelling,
     OpFixity fixity,
     const TokenReference &at,
-    std::vector<ExprNode *> operands)
+    std::vector<ExprNode *> operands
+)
 {
     auto &call = build_operator_call_node(
         *_current_module, _collector, spelling, fixity, at, std::move(operands));
@@ -502,7 +504,9 @@ OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node 
 }
 
 bool OperatorRewriter::settle_destination_type(
-    const LiteralDestination &destination, ValueType &settled)
+    const LiteralDestination &destination,
+    ValueType &settled
+)
 {
     ArrayLiteralExprNode &literal = *destination.literal;
 
@@ -605,7 +609,8 @@ bool OperatorRewriter::build_literal_expansion(
     VarDeclNode &into,
     const ValueType &type,
     ExprNode **slot,
-    std::vector<NodeReference> &appends)
+    std::vector<NodeReference> &appends
+)
 {
     // has_property_layout, not has_complex_type: the expansion below asks the destination for a
     // zero-argument constructor and appends into the places it makes, and an interface declares

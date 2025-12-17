@@ -7,7 +7,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "literal int", "[Parser Literal int]" ) 
+TEST_CASE( "literal int", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42"
@@ -19,7 +19,7 @@ TEST_CASE( "literal int", "[Parser Literal int]" )
     REQUIRE(lit->node_description() == "literal<int32>(42)");
 }
 
-TEST_CASE( "large literal int", "[Parser Literal int]" ) 
+TEST_CASE( "large literal int", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42424242424242424"
@@ -31,7 +31,7 @@ TEST_CASE( "large literal int", "[Parser Literal int]" )
     REQUIRE(lit->node_description() == "literal<int64>(42424242424242424)");
 }
 
-TEST_CASE( "expect float literal int", "[Parser Literal int]" ) 
+TEST_CASE( "expect float literal int", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42"
@@ -44,7 +44,7 @@ TEST_CASE( "expect float literal int", "[Parser Literal int]" )
     REQUIRE(lit->node_description() == "literal<float32>(42.0f [42])");
 }
 
-TEST_CASE( "expect int8 literal int", "[Parser Literal int]" ) 
+TEST_CASE( "expect int8 literal int", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42"
@@ -57,7 +57,7 @@ TEST_CASE( "expect int8 literal int", "[Parser Literal int]" )
     REQUIRE(lit->node_description() == "literal<int8>(42)");
 }
 
-TEST_CASE( "expect uint8 literal int would underflow", "[Parser Literal int]" ) 
+TEST_CASE( "expect uint8 literal int would underflow", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "-42"
@@ -73,7 +73,7 @@ TEST_CASE( "expect uint8 literal int would underflow", "[Parser Literal int]" )
     REQUIRE(lit == nullptr);
 }
 
-TEST_CASE( "expect uint8 literal int would overflow", "[Parser Literal int]" ) 
+TEST_CASE( "expect uint8 literal int would overflow", "[Parser Literal int]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "256"

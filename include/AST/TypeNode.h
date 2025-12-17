@@ -3,18 +3,18 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Lexer.h"
 
 #include <optional>
 
-namespace AST 
+namespace AST
 {
     class TypeNode : public Node
     {
     public:
-        
+
         const ValueType type;
 
         std::optional<TokenReference> type_token;

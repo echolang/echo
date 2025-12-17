@@ -50,7 +50,8 @@ static bool parse_explicit_type_args(
     Parser::Payload &payload,
     const TokenReference &at_token,
     std::vector<AST::TypeNode *> &type_args,
-    bool speculative)
+    bool speculative
+)
 {
     auto &cursor = payload.cursor;
 
@@ -107,7 +108,8 @@ static bool parse_call_arguments(
     Parser::Payload &payload,
     const TokenReference &at_token,
     std::vector<AST::ExprNode *> &args,
-    const std::vector<AST::ValueType> *expected_types = nullptr)
+    const std::vector<AST::ValueType> *expected_types = nullptr
+)
 {
     auto &cursor = payload.cursor;
 
@@ -168,7 +170,10 @@ bool Parser::starts_call_statement(Parser::Payload &payload)
 }
 
 AST::IndirectCallExprNode *Parser::parse_indirect_call(
-    Parser::Payload &payload, AST::ExprNode *callee, const TokenReference &at)
+    Parser::Payload &payload,
+    AST::ExprNode *callee,
+    const TokenReference &at
+)
 {
     auto &cursor = payload.cursor;
 
@@ -213,7 +218,10 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 }
 
 AST::FunctionCallExprNode *Parser::parse_funccall(
-    Parser::Payload &payload, const AST::Namespace *requested_namespace, bool *out_is_call)
+    Parser::Payload &payload,
+    const AST::Namespace *requested_namespace,
+    bool *out_is_call
+)
 {
     // the whole call, so declining can put the name back too - the caller has to be able to read it as
     // something else entirely
@@ -315,7 +323,8 @@ AST::FunctionCallExprNode *Parser::build_operator_call(
     const AST::Operator &op,
     AST::OpFixity fixity,
     const TokenReference &at,
-    std::vector<AST::ExprNode *> operands)
+    std::vector<AST::ExprNode *> operands
+)
 {
     for (const auto *operand : operands) {
         if (operand == nullptr) {
@@ -341,7 +350,8 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     Parser::Payload &payload,
     AST::ExprNode *receiver,
     const TokenReference &member_token,
-    bool &is_call)
+    bool &is_call
+)
 {
     auto &cursor = payload.cursor;
 

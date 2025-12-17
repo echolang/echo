@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Lexer.h"
-#include "VarNode.h"
-#include "ExprNode.h"
+#include "AST/VarNode.h"
+#include "AST/ExprNode.h"
 
-namespace AST 
+namespace AST
 {
     class VarRefNode : public ExprNode
     {
@@ -32,7 +32,7 @@ namespace AST
         }
 
         ValueType result_type() const override;
-        
+
         const std::string node_description() override {
             // return "varref(" + _target_node.node()->node_description() + ")";
             return "varref<" + result_type().get_type_desciption() + ">(" + _target_node.node()->node_description() + ")";
@@ -46,7 +46,7 @@ namespace AST
 
     private:
         NodeReference _target_node;
-        
+
     };
 };
 

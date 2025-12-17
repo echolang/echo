@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTNodeReference.h"
-#include "ExprNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ExprNode.h"
 #include "Token.h"
 
 #include <vector>

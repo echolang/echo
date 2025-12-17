@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTNamespace.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNamespace.h"
 #include "Token.h"
-#include "ASTValueType.h"
-#include "AttributeNode.h"
+#include "AST/ASTValueType.h"
+#include "AST/AttributeNode.h"
 
 namespace AST
 {

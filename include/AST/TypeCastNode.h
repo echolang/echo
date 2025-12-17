@@ -3,25 +3,25 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Lexer.h"
 
-#include "ExprNode.h"
+#include "AST/ExprNode.h"
 
-namespace AST 
+namespace AST
 {
     class TypeCastNode : public ExprNode
     {
     public:
         ECO_AST_NODE_TYPE(n_type_cast);
-        
+
         ValueType cast_to;
         ExprNode *expr;
 
-        TypeCastNode(ValueType cast_to, ExprNode *expr, bool implicit = false) : 
+        TypeCastNode(ValueType cast_to, ExprNode *expr, bool implicit = false) :
             ExprNode(implicit),
-            cast_to(cast_to), 
+            cast_to(cast_to),
             expr(expr)
         {}
 
@@ -32,7 +32,7 @@ namespace AST
         const std::string node_description() override {
             return "cast<" + cast_to.get_type_desciption() + ">(" + expr->node_description() + ")";
         }
-        
+
 
         void accept(Visitor &visitor) override {
             visitor.visitTypeCast(*this);

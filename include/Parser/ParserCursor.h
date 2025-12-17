@@ -87,7 +87,7 @@ namespace Parser
             assert(_index < range_size());
             return tokens[_index];
         }
-        
+
         inline TokenReference peek(size_t offset = 1) const {
             assert(is_valid_offset(offset));
             return tokens[_index + offset];

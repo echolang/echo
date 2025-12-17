@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "ASTNode.h"
+#include "AST/ASTNode.h"
 #include "Lexer.h"
 
-namespace AST 
+namespace AST
 {
     struct Operator;
 
@@ -14,7 +14,7 @@ namespace AST
     {
     public:
         ECO_AST_NODE_TYPE(n_operator);
-        
+
         TokenReference token_literal;
         const Operator *op;
 

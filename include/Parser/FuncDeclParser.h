@@ -120,7 +120,11 @@ namespace Parser
     //
     // null when the capture is refused, with the reason already reported
     AST::ExprNode *capture_variable(
-        Payload &payload, AST::VarDeclNode *vardecl, const TokenReference &at, size_t boundaries_crossed);
+        Payload &payload,
+        AST::VarDeclNode *vardecl,
+        const TokenReference &at,
+        size_t boundaries_crossed
+    );
 
     // parses a function's body, from its opening brace through its closing one, into `decl->body`.
     // `scope` is the parameter frame the body is pushed under, so a parameter resolves through it
@@ -217,7 +221,8 @@ namespace Parser
         AST::FunctionDeclNode &decl,
         AST::ScopeNode &into,
         AST::TypeNode *self_type,
-        const TokenReference &at)
+        const TokenReference &at
+    )
     {
         push_implicit_param(payload, decl, into, "$this", self_type, at);
     }

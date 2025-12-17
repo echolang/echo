@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTValueType.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTValueType.h"
 #include "Lexer.h"
-#include "TypeNode.h"
+#include "AST/TypeNode.h"
 
 namespace AST
 {

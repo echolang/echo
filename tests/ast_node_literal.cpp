@@ -12,7 +12,7 @@
         REQUIRE(lit.node_description() == desc); \
     }
 
-TEST_CASE( "node description", "[AST Literal]" ) 
+TEST_CASE( "node description", "[AST Literal]" )
 {
     auto tm = EchoTests::tests_make_tokenized_module(
         "42 " // int literal
@@ -24,7 +24,7 @@ TEST_CASE( "node description", "[AST Literal]" )
         "true " // bool literal
         "false " // bool literal
     );
-    
+
 
     TEST_ASSERT_LIT_DESC(0, AST::LiteralIntExprNode, "literal<int32>(42)");
     TEST_ASSERT_LIT_DESC(1, AST::LiteralIntExprNode, "literal<int32>(-42)");
@@ -36,7 +36,7 @@ TEST_CASE( "node description", "[AST Literal]" )
     TEST_ASSERT_LIT_DESC(7, AST::LiteralBoolExprNode, "literal<bool>(false)");
 }
 
-TEST_CASE( "float value extraction", "[AST Literal]" ) 
+TEST_CASE( "float value extraction", "[AST Literal]" )
 {
     auto tm = EchoTests::tests_make_tokenized_module(
         "3.14 " // double literal
@@ -71,7 +71,7 @@ TEST_CASE( "float value extraction", "[AST Literal]" )
 }
 
 
-TEST_CASE( "float value with expectation", "[AST Literal]" ) 
+TEST_CASE( "float value with expectation", "[AST Literal]" )
 {
     auto tm = EchoTests::tests_make_tokenized_module(
         "3.14 " // double literal
@@ -99,7 +99,7 @@ TEST_CASE( "float value with expectation", "[AST Literal]" )
     REQUIRE(lit1f.float_value() == 3.14f);
 }
 
-TEST_CASE( "int value extraction", "[AST Literal]" ) 
+TEST_CASE( "int value extraction", "[AST Literal]" )
 {
     auto tm = EchoTests::tests_make_tokenized_module(
         "42 " // int literal

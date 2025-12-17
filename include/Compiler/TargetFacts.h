@@ -62,7 +62,8 @@ namespace Compiler
             const std::string &arch_override,
             const std::vector<std::string> &defines,
             TargetFacts &out_facts,
-            std::string &out_error);
+            std::string &out_error
+        );
 
         // the host's facts and nothing else, for a caller that legitimately has no command line to read -
         // the unit tests. One spelling of `resolve("", "", {})`, which cannot fail: every way it reports an

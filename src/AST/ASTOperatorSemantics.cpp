@@ -107,7 +107,8 @@ namespace AST
         const std::string &spelling,
         OpFixity fixity,
         const TokenReference &at,
-        std::vector<ExprNode *> operands)
+        std::vector<ExprNode *> operands
+    )
     {
         // the overload set's key, derived from the symbol and the position it was consumed in - the
         // caller names that position once, in the gate that decided to come here

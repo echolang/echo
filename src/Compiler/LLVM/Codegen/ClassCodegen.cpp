@@ -21,7 +21,11 @@ namespace Compiler::LLVM
 {
 
 llvm::Value *ClassCodegen::gen_header_ptr(
-    llvm::Value *handle, llvm::Type *box_type, unsigned index, const llvm::Twine &name)
+    llvm::Value *handle,
+    llvm::Type *box_type,
+    unsigned index,
+    const llvm::Twine &name
+)
 {
     return _ctx.builder->CreateStructGEP(box_type, handle, index, name);
 }
@@ -390,7 +394,10 @@ void ClassCodegen::gen_instanceof(AST::InstanceOfExprNode &node)
 }
 
 llvm::Value *ClassCodegen::gen_conformance_scan(
-    llvm::Value *handle, llvm::Type *box_type, const AST::ComplexType &interface)
+    llvm::Value *handle,
+    llvm::Type *box_type,
+    const AST::ComplexType &interface
+)
 {
     llvm::Type *i1 = llvm::Type::getInt1Ty(*_ctx.llvm_context);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -471,7 +478,11 @@ llvm::Value *ClassCodegen::gen_retain(llvm::Value *handle, const AST::ValueType 
 }
 
 void ClassCodegen::gen_count_inc(
-    llvm::Value *block, const ClassLayout *layout, unsigned index, const char *label)
+    llvm::Value *block,
+    const ClassLayout *layout,
+    unsigned index,
+    const char *label
+)
 {
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
 
@@ -501,7 +512,10 @@ void ClassCodegen::gen_count_inc(
 }
 
 llvm::Value *ClassCodegen::gen_count(
-    llvm::Value *handle, const AST::ValueType &class_type, unsigned index)
+    llvm::Value *handle,
+    const AST::ValueType &class_type,
+    unsigned index
+)
 {
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
@@ -565,7 +579,10 @@ llvm::Function *ClassCodegen::get_or_create_release_thunk(const AST::ValueType &
 }
 
 llvm::Function *ClassCodegen::build_release_thunk(
-    const std::string &name, const ClassLayout *layout, const AST::ComplexType *complex)
+    const std::string &name,
+    const ClassLayout *layout,
+    const AST::ComplexType *complex
+)
 {
     // **declared before the weak thunk is asked for, and resolved before this one's blocks exist.** both
     // halves of that ordering are load-bearing: this symbol has to be appended to the module first, so a
@@ -644,7 +661,8 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
     llvm::Type *box_type,
     unsigned count_index,
     const char *zero_block_name,
-    llvm::function_ref<void(llvm::Value *handle)> on_zero)
+    llvm::function_ref<void(llvm::Value *handle)> on_zero
+)
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Value *handle = thunk->getArg(0);

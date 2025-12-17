@@ -140,7 +140,8 @@ bool resolve_subtarget(
     // own answer, which is the warning this exists to replace - printed to stderr underneath whatever
     // else is on it, and followed by an object built for something the person did not ask for
     const std::unique_ptr<llvm::MCSubtargetInfo> info(
-        target->createMCSubtargetInfo(triple, "", ""));
+        target->createMCSubtargetInfo(triple, "", "")
+    );
 
     if (!info || !info->isCPUStringValid(out_subtarget.cpu)) {
         out_error = fmt::format(

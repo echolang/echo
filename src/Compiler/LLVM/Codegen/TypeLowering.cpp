@@ -31,7 +31,9 @@
 namespace Compiler::LLVM
 {
 void TypeLowering::create_cmp_units(
-    const AST::Bundle &bundle, const std::set<std::string> &cached_modules)
+    const AST::Bundle &bundle,
+    const std::set<std::string> &cached_modules
+)
 {
     for (auto &module : bundle.modules) {
         // served from the cache: no unit, so nothing below ever declares or defines anything for it
@@ -193,7 +195,10 @@ void TypeLowering::create_cmp_units(
 }
 
 void TypeLowering::apply_function_attributes(
-    const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::FunctionDeclNode *node,
+    llvm::Function *func,
+    Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     // a *hint*, which is exactly what `#[inline]` is: FunctionDeclNode::is_inline is documented as "not a
     // promise the optimizer has to keep", so `inlinehint` fits that wording where `alwaysinline` would
@@ -465,7 +470,10 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
 }
 
 void TypeLowering::build_class_box(
-    Structure &structure, const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+    Structure &structure,
+    const AST::ComplexType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     assert(structure.llvm_struct != nullptr);
 
@@ -521,7 +529,9 @@ void TypeLowering::build_class_box(
 }
 
 llvm::GlobalVariable *TypeLowering::get_or_create_interface_identity(
-    const AST::ComplexType &interface, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::ComplexType &interface,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     // one byte, and only its address is ever read - the same shape a class's typeinfo had before it
     // grew a body, and for the same reason: an interface has nothing to say about itself at runtime
@@ -533,7 +543,9 @@ llvm::GlobalVariable *TypeLowering::get_or_create_interface_identity(
 }
 
 llvm::Constant *TypeLowering::build_conformance_table(
-    const AST::ComplexType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::ComplexType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     const auto &conformances = type.conformances();
 
@@ -570,7 +582,8 @@ llvm::Constant *TypeLowering::build_conformance_table(
 llvm::GlobalVariable *TypeLowering::get_or_create_odr_constant(
     const std::string &name,
     const std::function<llvm::Constant *()> &build,
-    const Compiler::LLVM::CmpUnit &cmp_unit)
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     if (auto *existing = cmp_unit.llvm_module->getGlobalVariable(name, true)) {
         return existing;
@@ -592,7 +605,9 @@ llvm::GlobalVariable *TypeLowering::get_or_create_odr_constant(
 }
 
 Compiler::LLVM::ClassLayout TypeLowering::get_or_create_class_layout(
-    const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::ComplexType *type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     if (type == nullptr) {
         throw _ctx.error(fmt::format("Cannot resolve the layout of an anonymous class {}", _ctx.function_context()));
@@ -699,7 +714,7 @@ void TypeLowering::build_function_maps()
 void TypeLowering::build_struct_maps()
 {
     for (auto &cmp_unit : _ctx.cmp_units) {
-        for(auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::TypeDeclNode>()) {
+        for (auto &struct_decl : cmp_unit->ast_module->nodes.of_type<AST::TypeDeclNode>()) {
             // a generic struct template has type-parameter-typed properties and no concrete
             // layout; only its instantiations (Box<int>) are lowered, lazily in get_llvm_type.
             if (struct_decl->is_generic()) {
@@ -762,13 +777,17 @@ llvm::Value *TypeLowering::gen_unwrapped(llvm::Value *value, const AST::ValueTyp
 }
 
 llvm::Value *TypeLowering::gen_absent(
-    const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     return llvm::Constant::getNullValue(get_llvm_type(type, cmp_unit));
 }
 
 llvm::StructType *TypeLowering::optional_llvm_type(
-    const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     assert(type.is_wrapped_optional() && "optional_llvm_type over a type whose null value is its own");
 
@@ -831,7 +850,8 @@ llvm::StructType *TypeLowering::typeinfo_llvm_type()
 llvm::Constant *TypeLowering::get_or_create_vtable(
     const AST::ValueType &class_type,
     const AST::ValueType &interface,
-    const Compiler::LLVM::CmpUnit &cmp_unit)
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     if (!class_type.has_complex_type() || !interface.is_interface()) {
         return nullptr;
@@ -905,7 +925,9 @@ llvm::Constant *TypeLowering::get_or_create_vtable(
 }
 
 llvm::FunctionType *TypeLowering::get_llvm_function_type(
-    const AST::CallableSignature &signature, const Compiler::LLVM::CmpUnit &cmp_unit)
+    const AST::CallableSignature &signature,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
 {
     std::vector<llvm::Type *> param_types;
     param_types.reserve(signature.parameter_types.size() + 1);

@@ -75,9 +75,13 @@ the code is still built for the host, so a foreign arm usually fails at link or 
 What the case asserts is that the arm parses, resolves and type-checks, which is the only check a
 platform-specific region gets from a machine that is not that platform.
 
-`env/exe_other_platform` is the model: `--target-os linux` plus `expect: fail`, with the resulting `die` as
-the golden. Without a case like it, half of every platform-gated file is verified only by CI on a host the
-author does not have.
+`env/exe_linux_arm` and `env/exe_darwin_arm` are the model, one per arm so that both are checked wherever
+the suite runs. Neither *calls* the gated function: a stdlib function is lowered whether or not a program
+reaches it, so `--target-os` alone selects the arm, while leaving it unreached keeps the case runnable on a
+host it is not for — the JIT prunes what the entry point cannot reach, so a foreign `extern` is never a
+symbol anything has to resolve. The assertion is therefore an `IR` section rather than `OUT`, the `-p`
+module being the unpruned one. Without cases like these, half of every platform-gated file is verified only
+by CI on a host the author does not have.
 
 `flags: --define NAME` declares a condition flag the same way.
 

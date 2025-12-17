@@ -311,7 +311,8 @@ bool Parser::filter_conditional_tokens(
     TokenCollection &tokens,
     size_t from,
     const Compiler::TargetFacts &facts,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     std::vector<Frame> frames;
 

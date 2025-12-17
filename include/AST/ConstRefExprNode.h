@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ExprNode.h"
+#include "AST/ExprNode.h"
 #include "Lexer.h"
 
 namespace AST

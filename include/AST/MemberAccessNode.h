@@ -3,18 +3,18 @@
 
 #pragma once
 
-#include "ASTNode.h"
-#include "ASTNodeReference.h"
-#include "ExprNode.h"
+#include "AST/ASTNode.h"
+#include "AST/ASTNodeReference.h"
+#include "AST/ExprNode.h"
 #include "Token.h"
 
-namespace AST 
+namespace AST
 {
     class MemberAccessNode : public ExprNode
     {
     public:
         ECO_AST_NODE_TYPE(n_member_access);
-        
+
         MemberAccessNode(NodeReference base, TokenReference member_name);
         ~MemberAccessNode() {}
 
@@ -37,14 +37,14 @@ namespace AST
         ValueType base_target_type() const;
 
         inline NodeReference &get_base_node() const {
-            return const_cast<NodeReference&>(_base_node); 
+            return const_cast<NodeReference&>(_base_node);
         }
-        
-        inline TokenReference &get_member_name() const { 
-            return const_cast<TokenReference&>(_member_name); 
+
+        inline TokenReference &get_member_name() const {
+            return const_cast<TokenReference&>(_member_name);
         }
-        
-    private: 
+
+    private:
         NodeReference _base_node;
         TokenReference _member_name;
     };

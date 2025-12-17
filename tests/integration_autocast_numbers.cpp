@@ -8,7 +8,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" ) 
+TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" )
 {
     REQUIRE_NODE_DESC(
         "$a = 1;",
@@ -31,7 +31,7 @@ TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" )
         "vardecl<type<float32>>($a) = literal<float32>(1.0f)"
     );
 
-    // hex 
+    // hex
     REQUIRE_NODE_DESC(
         "$a = 0xFF;",
         "vardecl<type<uint8>>($a) = literal<uint8>(255 [0xFF])"
@@ -53,8 +53,8 @@ TEST_CASE( "type inference", "[Integration][Autocast][Numbers]" )
     );
 }
 
-TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" ) 
-{   
+TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" )
+{
     // basic int
     REQUIRE_NODE_DESC(
         "int $a = 1;",
@@ -95,7 +95,7 @@ TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" )
     );
 }
 
-TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" ) 
+TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" )
 {
     // int
     REQUIRE_NODE_DESC(
@@ -143,7 +143,7 @@ TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" )
 }
 
 
-TEST_CASE( "init autocast (T = bool)", "[Integration][Autocast][Numbers]" ) 
+TEST_CASE( "init autocast (T = bool)", "[Integration][Autocast][Numbers]" )
 {
     REQUIRE_NODE_DESC(
         "int $a = true;",
@@ -154,7 +154,7 @@ TEST_CASE( "init autocast (T = bool)", "[Integration][Autocast][Numbers]" )
         "int $a = false;",
         "vardecl<type<int32>>($a) = literal<int32>(0 [false])"
     );
-    
+
     REQUIRE_NODE_DESC(
         "uint8 $a = true;",
         "vardecl<type<uint8>>($a) = literal<uint8>(1 [true])"
@@ -177,7 +177,7 @@ TEST_CASE( "init autocast (T = bool)", "[Integration][Autocast][Numbers]" )
     );
 }
 
-// TEST_CASE( "struct members", "[Integration][Autocast][Numbers]" ) 
+// TEST_CASE( "struct members", "[Integration][Autocast][Numbers]" )
 // {
 //     REQUIRE_NODE_DESC(
 //         "struct A { int $x; }; $a = A(1);"

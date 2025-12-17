@@ -81,7 +81,8 @@ bool Compiler::compute_module_keys(
     const TargetFacts &facts,
     bool optimize,
     std::map<std::string, ModuleCacheKey> &out_keys,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     out_keys.clear();
 
@@ -255,7 +256,9 @@ bool is_compiler_supplied(const Parser::ModuleManifest &manifest)
 };
 
 std::filesystem::path Compiler::module_cache_dir(
-    const Parser::ModuleManifest &manifest, const std::filesystem::path &cache_dir_override)
+    const Parser::ModuleManifest &manifest,
+    const std::filesystem::path &cache_dir_override
+)
 {
     if (!cache_dir_override.empty()) {
         // one directory for every module, so the module name has to be in the artifact path rather than only
@@ -308,13 +311,16 @@ bool Compiler::cache_dir_is_writable(const std::filesystem::path &directory)
 std::filesystem::path Compiler::module_object_path(
     const Parser::ModuleManifest &manifest,
     const ModuleCacheKey &key,
-    const std::filesystem::path &cache_dir_override)
+    const std::filesystem::path &cache_dir_override
+)
 {
     return module_cache_dir(manifest, cache_dir_override) / fmt::format("{}-{}.o", manifest.name, key.hex);
 }
 
 std::filesystem::path Compiler::module_inputs_path(
-    const Parser::ModuleManifest &manifest, const std::filesystem::path &cache_dir_override)
+    const Parser::ModuleManifest &manifest,
+    const std::filesystem::path &cache_dir_override
+)
 {
     return module_cache_dir(manifest, cache_dir_override) / fmt::format("{}.inputs", manifest.name);
 }

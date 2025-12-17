@@ -17,7 +17,11 @@ namespace AST
 {
 
 ConstDeclNode *find_constant(
-    NamespaceManager &namespaces, const std::string &name, const Namespace *from, bool qualified)
+    NamespaceManager &namespaces,
+    const std::string &name,
+    const Namespace *from,
+    bool qualified
+)
 {
     if (from == nullptr) {
         return nullptr;

@@ -86,7 +86,10 @@ llvm::Function *AbortCodegen::get_or_create_abort_thunk()
 }
 
 void AbortCodegen::gen_abort(
-    const std::string &headline, const std::string &detail, const std::string &location)
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &location
+)
 {
     // the one message shape, so the three stop sites cannot render differently
     const std::string message = detail.empty()
@@ -112,8 +115,12 @@ void AbortCodegen::gen_exit(llvm::Value *code)
     _ctx.builder->CreateUnreachable();
 }
 
-void AbortCodegen::gen_abort_if(llvm::Value *condition,
-    const std::string &headline, const std::string &detail, const std::string &location)
+void AbortCodegen::gen_abort_if(
+    llvm::Value *condition,
+    const std::string &headline,
+    const std::string &detail,
+    const std::string &location
+)
 {
     llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
 

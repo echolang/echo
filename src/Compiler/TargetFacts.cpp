@@ -93,7 +93,11 @@ std::string TargetFacts::axis_names()
 }
 
 bool TargetFacts::axis_equals(
-    const std::string &axis, const std::string &value, bool &out_match, std::string &out_error) const
+    const std::string &axis,
+    const std::string &value,
+    bool &out_match,
+    std::string &out_error
+) const
 {
     assert(is_axis(axis) && "axis_equals called with a name is_axis rejected");
 
@@ -114,7 +118,8 @@ bool TargetFacts::resolve(
     const std::string &arch_override,
     const std::vector<std::string> &defines,
     TargetFacts &out_facts,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     const llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
 

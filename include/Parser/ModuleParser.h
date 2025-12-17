@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "ParserCursor.h"
-#include "ParserPayload.h"
+#include "Parser/ParserCursor.h"
+#include "Parser/ParserPayload.h"
 #include "Token.h"
 #include "Lexer.h"
 #include "AST/ASTModule.h"
@@ -24,11 +24,11 @@ namespace Parser
             std::filesystem::path path;
             std::optional<std::string> content;
 
-            InputFile(std::filesystem::path path) : 
+            InputFile(std::filesystem::path path) :
                 path(path), content(std::nullopt)
             {};
-            
-            InputFile(std::filesystem::path path, const std::string &content) : 
+
+            InputFile(std::filesystem::path path, const std::string &content) :
                 path(path), content(content)
             {};
         };
@@ -46,7 +46,7 @@ namespace Parser
             AST::File *file;
             std::string message;
 
-            TokenizationException(Lexer::TokenException exception, AST::File *file) : 
+            TokenizationException(Lexer::TokenException exception, AST::File *file) :
                 exception(exception), file(file)
             {
                 message = (std::string(exception.what()) + " in file " + file->get_path().string());
@@ -74,7 +74,7 @@ namespace Parser
 
         explicit ModuleParser(Compiler::TargetFacts facts);
         ~ModuleParser() {};
-        
+
         AST::TokenizedFile make_tokenized_file(AST::Module &module, AST::File &file) const;
 
         // the payload one pass walks one file with. `pass` is on the payload rather than an argument
@@ -84,7 +84,7 @@ namespace Parser
             AST::Module &module,
             AST::Collector &collector,
             Parser::Pass pass = Parser::Pass::t_bodies) const;
-        
+
         void parse_input(const InputPayload &payload) const;
         void parse_module(AST::Module &module, AST::Collector &collector) const;
 
@@ -92,15 +92,15 @@ namespace Parser
         std::unique_ptr<Lexer> _lexer;
 
         void parse_file_from_disk(
-            std::filesystem::path path, 
-            AST::Module &module, 
+            std::filesystem::path path,
+            AST::Module &module,
             AST::Collector &collector
         ) const;
 
         void parse_file_from_mem(
             std::filesystem::path path,
             const std::string &content,
-            AST::Module &module, 
+            AST::Module &module,
             AST::Collector &collector
         ) const;
     };

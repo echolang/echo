@@ -87,7 +87,10 @@ static AST::ExprNode *build_incdec_value(Parser::Payload &payload, AST::ExprNode
 }
 
 AST::ExprNode *Parser::parse_assigned_value(
-    Parser::Payload &payload, AST::ExprNode *target, const TokenReference &assign_token)
+    Parser::Payload &payload,
+    AST::ExprNode *target,
+    const TokenReference &assign_token
+)
 {
     auto &cursor = payload.cursor;
 

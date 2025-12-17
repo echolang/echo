@@ -8,7 +8,7 @@
 
 #include "helpers.h"
 
-TEST_CASE( "literal double", "[Parser Literal float]" ) 
+TEST_CASE( "literal double", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "3.14"
@@ -20,7 +20,7 @@ TEST_CASE( "literal double", "[Parser Literal float]" )
     REQUIRE(lit->node_description() == "literal<float64>(3.14)");
 }
 
-TEST_CASE( "literal float", "[Parser Literal float]" ) 
+TEST_CASE( "literal float", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "3.14f"
@@ -32,7 +32,7 @@ TEST_CASE( "literal float", "[Parser Literal float]" )
     REQUIRE(lit->node_description() == "literal<float32>(3.14f)");
 }
 
-TEST_CASE( "expect float but got double", "[Parser Literal float]" ) 
+TEST_CASE( "expect float but got double", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42.0"
@@ -45,7 +45,7 @@ TEST_CASE( "expect float but got double", "[Parser Literal float]" )
     REQUIRE(lit->node_description() == "literal<float32>(42.0f [42.0])");
 }
 
-TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float]" ) 
+TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "123456.123456"
@@ -63,7 +63,7 @@ TEST_CASE( "expect float but got double, precision loss", "[Parser Literal float
     REQUIRE(lit->node_description() == "literal<float32>(123456.125f [123456.123456])");
 }
 
-TEST_CASE( "expect double but got float", "[Parser Literal float]" ) 
+TEST_CASE( "expect double but got float", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42.0f"
@@ -76,7 +76,7 @@ TEST_CASE( "expect double but got float", "[Parser Literal float]" )
     REQUIRE(lit->node_description() == "literal<float64>(42.0 [42.0f])");
 }
 
-TEST_CASE( "expect int8 but got float", "[Parser Literal float]" ) 
+TEST_CASE( "expect int8 but got float", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42.0f"
@@ -87,12 +87,12 @@ TEST_CASE( "expect int8 but got float", "[Parser Literal float]" )
     auto lit = ref.get_ptr<AST::LiteralIntExprNode>();
 
     REQUIRE(env.collector->issues.size() == 0);
-    
+
     REQUIRE(lit->node_description() == "literal<int8>(42 [42.0f])");
     REQUIRE(lit->int8_value() == 42);
 }
 
-TEST_CASE( "expect int8 but got uncastable float", "[Parser Literal float]" ) 
+TEST_CASE( "expect int8 but got uncastable float", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "42.85f"
@@ -111,7 +111,7 @@ TEST_CASE( "expect int8 but got uncastable float", "[Parser Literal float]" )
     REQUIRE_FALSE(ref.has());
 }
 
-TEST_CASE( "expect int8 but got float that would overflow", "[Parser Literal float]" ) 
+TEST_CASE( "expect int8 but got float that would overflow", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "128.0f"
@@ -130,7 +130,7 @@ TEST_CASE( "expect int8 but got float that would overflow", "[Parser Literal flo
     REQUIRE_FALSE(ref.has());
 }
 
-TEST_CASE( "expect uint8 but got float that would underflow", "[Parser Literal float]" ) 
+TEST_CASE( "expect uint8 but got float that would underflow", "[Parser Literal float]" )
 {
     auto env = EchoTests::tests_make_parser_env(
         "-1.0f"

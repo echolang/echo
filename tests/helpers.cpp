@@ -67,7 +67,9 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(std::string con
 }
 
 std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
-    std::string content, Compiler::CompilerOptions options)
+    std::string content,
+    Compiler::CompilerOptions options
+)
 {
     auto bundle = std::make_unique<AST::Bundle>();
     auto module_handle = bundle->modules.add_module("test");
@@ -134,7 +136,7 @@ void EchoTests::assert_code_emits_issue(std::string content, std::string expecte
     auto bundle = EchoTests::tests_make_parsed_bundle(content);
 
     REQUIRE(bundle->collector.issues.size() > 0); // no issues found
-    
+
     for (const auto &issue : bundle->collector.issues) {
         if (issue->message().find(expected_issue) != std::string::npos) {
             REQUIRE(issue->message() == expected_issue);

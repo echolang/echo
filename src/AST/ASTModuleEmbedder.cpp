@@ -2,7 +2,7 @@
 
 #include <fstream>
 #include <fmt/format.h>
-#include <AST/ASTModule.h>
+#include "AST/ASTModule.h"
 
 void AST::write_embedded_module(AST::Module &module, const std::string &output_path)
 {
@@ -24,7 +24,7 @@ void AST::write_embedded_module(AST::Module &module, const std::string &output_p
         file_index++;
         std::string filevar = fmt::format("file_{}", file_index);
 
-        // this is not really clean, but it works for now 
+        // this is not really clean, but it works for now
         // we can take the "STDLIB_SOURCE_DIR" define to determine the relative path
         // of the full file path if it begins with it
         std::string file_path = file.get_path().string();
