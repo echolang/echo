@@ -103,7 +103,11 @@ jobs:
           path: ${{github.workspace}}/${{env.BIN_NAME}}
 
   build_release_macos_arm64:
-    runs-on: macos-14
+    # **the image version is load-bearing**, not just "recent enough". Homebrew's LLVM brings its own
+    # libc++ headers, and paired with an older Xcode's SDK the `isnan`/`isfinite` *macros* in that SDK's
+    # math.h expand inside vendor/fmt's declarations of the same names - a page of `expected unqualified-id`
+    # from a header nobody touched. macos-14 ships Xcode 15.4, which is the losing half of that pair
+    runs-on: macos-15
     needs: build_and_test
     env:
       BUILD_TYPE: Release
