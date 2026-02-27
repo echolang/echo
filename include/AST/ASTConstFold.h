@@ -78,7 +78,7 @@ namespace AST
     // by AST::ConstFolding for a `const if`'s condition and for a `const(...)`, and by
     // ExprCodegen::gen_type_query_builtin for the two AST-fact builtins - which used to fold them
     // itself, two spellings of one fact held in step by nothing. so this is a net *reduction* in owners
-    // rather than the second one todo/E3 warned about.
+    // rather than a second one to keep in step.
     //
     // side-effect free and independent of any pass's state, which is what lets codegen and a fixpoint
     // round ask the same question and rely on the same answer

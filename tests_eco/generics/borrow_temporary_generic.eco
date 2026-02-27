@@ -1,5 +1,5 @@
 // inference and scoring have to agree about the new rank. `AST::unify_type` already decayed `T&` against
-// a non-pointer argument, so before todo/A13c it named an instance that `argument_fit` then rejected -
+// a non-pointer argument, so it used to name an instance that `argument_fit` then rejected -
 // harmless only because the disagreement had nowhere to show
 //
 // **a second overload is present on purpose.** with one candidate, matching rule 2 wins without

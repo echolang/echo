@@ -357,7 +357,7 @@ TEST_CASE("capturing an owning value is refused", "[callable]")
 {
     // by value means a copy, and copying an owner is a whole taxonomy - a retain, a copy constructor,
     // or nothing that exists. the environment's teardown is uniform precisely because it holds no
-    // owner, so admitting one would leak it. todo/A27
+    // owner, so admitting one would leak it
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Buffer { usize $len; destructor() { echo 1; } }\n"
         "function outer() : usize {\n"
@@ -710,7 +710,7 @@ TEST_CASE("running out of input is reported, not aborted", "[callable]")
         "function f() : int32 { return 1;\n",
         "function f() : int32 { if (true) { return 1;\n",
         // deliberately not `struct S { int32 $x;` - a truncated *struct* body reports nothing at all
-        // today, which is a separate pre-existing gap in the member walk (todo/B23) rather than this one
+        // today, which is a separate pre-existing gap in the member walk rather than this one
     }) {
         auto bundle = EchoTests::tests_make_parsed_bundle(source);
         REQUIRE(bundle->collector.has_critical_issues());

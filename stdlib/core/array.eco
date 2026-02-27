@@ -197,7 +197,7 @@ struct array<T> : contract::iterable<T>, contract::const_iterable<const T>
         //
         // plain `if`s and not `const if`: `mem::size_of<T>()` folds to a constant at the call site in
         // codegen, so both tests are already decided by the time LLVM sees them - but AST::const_fold
-        // cannot answer a layout query before codegen, so `const if` would refuse it. When todo/A41
+        // cannot answer a layout query before codegen, so `const if` would refuse it. When that
         // lands these should become `const if` and stop being branches in an unoptimized build too
         usize $floor = 4;
 

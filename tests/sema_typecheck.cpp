@@ -41,7 +41,7 @@ TEST_CASE("unknown struct member is a located diagnostic, not a silent void", "[
 TEST_CASE("unknown member behind an element base is reported too", "[sema]")
 {
     // the base here is an IndexExprNode, which neither the node's own result_type() nor the type
-    // checker's copy of the same switch knew about - so this went entirely unreported (todo/B16)
+    // checker's copy of the same switch knew about - so this went entirely unreported
     // one implementation answers both now
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct point { int $x; int $y; }\n"

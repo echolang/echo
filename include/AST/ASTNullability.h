@@ -48,7 +48,7 @@ namespace AST
     // there are *two* moments, not one, and that is why this exists rather than three string literals
     // at three sites. the parser asks, where the diagnostic is best located and where most programs are
     // decided; and AST::TypeChecker asks again after the monomorphizer, because inside a template the
-    // operand is a bare `T` and the predicate correctly answers "later" - see todo/B27. two askers per
+    // operand is a bare `T` and the predicate correctly answers "later". two askers per
     // form is exactly how three wordings become six and then drift
     std::string certainly_present_refusal(OptionalForm form, const ValueType &operand_type);
 

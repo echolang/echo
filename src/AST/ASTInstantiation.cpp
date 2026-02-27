@@ -112,7 +112,7 @@ namespace AST
             // narrow on purpose: two arguments that are *not* the receiver keep the old rule, so
             // `f<T>(T $a, T $b)` over an int32 and an int64 still reconciles the way it did. What
             // remains wrong is the general case of one parameter bound from several arguments, which
-            // is todo/B50
+            // is still open
             const size_t authoritative = tmpl->args.empty() ? 0 : 1;
 
             for (size_t i = 0; i < argument_types.size(); i++) {

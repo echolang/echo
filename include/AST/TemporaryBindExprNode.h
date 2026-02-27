@@ -23,7 +23,7 @@ namespace AST
     // a hoist: binding at the top of the statement would acquire a `while` condition's temporary once
     // per evaluation and release it once in total, and would bind the right-hand side of a
     // short-circuiting `&&` on the path that never evaluates it. a temporary has to live where it is
-    // *used*, and only an expression knows where that is (todo/A13b)
+    // *used*, and only an expression knows where that is
     //
     // bind `temporaries`, evaluate `body`, run `teardown`, hand back the body's value. every property
     // of this node follows from those four being in that order: the body has already read what it
@@ -49,7 +49,7 @@ namespace AST
 
         // the temporaries this expression owns, in binding order. exactly one today: a temporary is
         // needed for the *root* of a place chain, and a chain has one root. a list because the next
-        // producer binds around a whole call, where two arguments want two (todo/A13c)
+        // producer binds around a whole call, where two arguments want two
         //
         // owned children rather than locals of the enclosing scope: a frame drops its locals in reverse
         // declaration order at the scope's *end*, and for a temporary inside a condition neither the

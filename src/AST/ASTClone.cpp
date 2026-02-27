@@ -183,7 +183,7 @@ Node *ClosureExprNode::clone(CloneContext &cc) const
     ClosureExprNode *c = cc.shallow(this);
     // the declaration is not a child - it hangs off the file root, not off this expression - so it is
     // rebound the way a call's decl is. an instantiated body therefore shares the template's closure
-    // body, which is correct: a closure cannot name the enclosing type parameters (see todo/A27)
+    // body, which is correct: a closure cannot name the enclosing type parameters
     c->decl = cc.rebind(c->decl);
     // the captured places are read in the *enclosing* frame, so they are ordinary owned children of this
     // expression. the environment type is not cloned: it is a layout, shared like a ComplexType always is

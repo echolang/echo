@@ -31,7 +31,7 @@ void Parser::Cursor::skip_till_end_of_scope()
         }
         else if (current().type() == Token::Type::t_close_brace) {
             if (depth == 0) {
-                // This is the closing brace of our scope
+                // the closing brace of our own scope
                 skip(); // skip past the closing brace
                 return;
             } else {

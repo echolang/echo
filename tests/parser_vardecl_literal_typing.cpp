@@ -88,7 +88,7 @@ TEST_CASE("a destination only types a literal when it can", "[Parser][VarDecl]")
     {
         // T says nothing until it is substituted. every one of these was "Unexpected token
         // 'integer_literal' found" while a t_generic expected type still reached the autocast
-        // helpers (todo/B11) - the instance's slot is fitted by the conversion table at codegen
+        // helpers - the instance's slot is fitted by the conversion table at codegen
         auto bundle = EchoTests::tests_make_parsed_bundle(
             "function decl<T>() : T { T $t = 42; return $t; }\n"
             "function poke<T>(ptr<T> $v) : void { $v = 42; }\n");

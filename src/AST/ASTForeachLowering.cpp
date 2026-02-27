@@ -313,7 +313,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     else {
         // **the by-value binding derefs explicitly**, because nothing else will: `current()` hands back
         // `V&` and AST::PointerAdjuster only auto-derefs a *place*, which a call is not - the same
-        // limitation that makes `echo $a->at(0)` an error today (todo/A13a). so the read is written
+        // limitation that makes `echo $a->at(0)` an error today. so the read is written
         // here rather than hoped for, and the adjuster leaves it alone: as_value_for over an operand
         // that already answers `V` has nothing left to peel
         //

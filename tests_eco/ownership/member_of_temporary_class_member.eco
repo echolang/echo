@@ -1,7 +1,7 @@
 // reading a *class* property out of a struct temporary: the read is one more reference and the
 // temporary's teardown is one less, in that order - so the object outlives the statement and dies with
 // the local that kept it. neither the retain nor the release has an arm of its own: the retain is the
-// ordinary "a place is copied" rule, applied before the temporary closes over it (todo/A13b)
+// ordinary "a place is copied" rule, applied before the temporary closes over it
 
 class Node
 {

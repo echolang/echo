@@ -307,7 +307,7 @@ TEST_CASE("a declaration over an enclosing name is a declaration, not an assignm
 TEST_CASE("a function declared where a type parameter is visible is rejected", "[lexical]")
 {
     // `T` would resolve through the type-param scope stack and make this declaration depend on a
-    // substitution nothing will ever hand it. todo/A27 lifts this once a closure's environment is
+    // substitution nothing will ever hand it. this is lifted once a closure's environment is
     // monomorphized along with the enclosing instance
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer<T>(T $v) : int32 {\n"
@@ -616,7 +616,7 @@ TEST_CASE("a body-local struct is refused where a type parameter is visible", "[
     // the type-param scope stack, and nothing would ever hand this declaration a substitution for it.
     // A type is the case where accepting it was *silent* - the monomorphizer clones a generic body once
     // per instantiation, and TypeDeclNode::clone had to mint a substituted layout of its own, so one
-    // type ended up with two unequal ComplexType* identities. see todo/A5 in todo/README.md
+    // type ended up with two unequal ComplexType* identities
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer<T>(T $v) : int32 {\n"
         "    struct P { int32 $x; }\n"

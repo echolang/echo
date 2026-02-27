@@ -68,13 +68,15 @@ namespace AST
     //
     // **the arity is part of the question.** one set holds the append write `$c[] = v` (receiver plus
     // value) and the element write (receiver, indices, value), exactly as `operator []` holds the append
-    // and the element forms - so a type may declare one and not the other, and `$a[3] = v` beside a
-    // declared `$a[] = v` stays a write through a place. it is also what keeps the appends
-    // AST::OperatorRewriter's literal expansion synthesizes out of this question entirely.
+    // and the element forms.
     //
-    // the `template_or_self` redirect on both sides is what lets a `map<int32, string>` find the
-    // `map<K, V>` template's declaration - AST::find_member_functions' idiom, which cannot be reused
-    // directly here because it walks an owner's methods and an operator is never one
+    // So a type may declare one and not the other, and `$a[3] = v` beside a declared `$a[] = v` stays a
+    // write through a place. It is also what keeps the appends AST::OperatorRewriter's literal
+    // expansion synthesizes out of this question entirely.
+    //
+    // The `template_or_self` redirect on both sides is what lets a `map<int32, string>` find the
+    // `map<K, V>` template's declaration. That is AST::find_member_functions' idiom, which cannot be
+    // reused directly here, because it walks an owner's methods and an operator is never one
     bool declares_index_write(Collector &collector, const ValueType &receiver, size_t index_count);
 
     // a symbol-safe spelling of the above, for AST::mangle_function_name. every character outside
@@ -154,14 +156,15 @@ namespace AST
     // **why these two operands cannot answer this operator - said about the operands, not about a
     // candidate's parameters.** nullopt when there is nothing operand-level to say.
     //
-    // one owner because there are three moments that refuse an operator and each used to phrase it its
-    // own way. `TypeChecker::visitBinaryExpr` holds the built-in path; `AST::CallResolver` holds an
-    // operator *call* nothing matched; and the type checker's argument coercion holds the case where the
-    // matcher took a lone candidate without consulting types. Which of the three a use site reaches
-    // depends on whether *anybody, anywhere in the program* declared an infix form of the symbol - the
-    // parser's gate is `has_fixity`, so one `operator ==` in the standard library moved every
-    // non-built-in `==` in every program from the first to the other two, and the advice that made the
-    // message actionable went with it
+    // One owner, because there are three moments that refuse an operator and each used to phrase it
+    // its own way. `TypeChecker::visitBinaryExpr` holds the built-in path. `AST::CallResolver` holds an
+    // operator *call* nothing matched. The type checker's argument coercion holds the case where the
+    // matcher took a lone candidate without consulting types.
+    //
+    // Which of the three a use site reaches depends on whether *anybody, anywhere in the program*
+    // declared an infix form of the symbol. The parser's gate is `has_fixity`, so one `operator ==` in
+    // the standard library moved every non-built-in `==` in every program from the first to the other
+    // two - and the advice that made the message actionable went with it
     //
     // **a fallback rather than a pre-gate**, and that is load-bearing: `operator (P $a) == (P? $b)` is a
     // declaration a user may write, and it makes `$p == null` resolve. So this is only ever asked at a
@@ -180,14 +183,16 @@ namespace AST
     // float, whatever the widths; otherwise the wider wins. nullopt when there is nothing to reconcile -
     // one of them is not a number, or they already agree - which is every operand pair but a few.
     //
-    // one owner, for build_operator_call_node's reason: there are two *moments* that ask, and only one
-    // rule. Parser::parse_binary_expr asks with the operand types it knows at parse time and inserts the
-    // cast through try_implicit_cast, which may retype a literal outright instead. AST::OperatorRewriter
-    // asks again for the operands a later pass typed - `foreach ($a as $i => $x) { if ($i == 0) ... }`,
-    // where `$i` has no type until the loop lowers and the literal has long since defaulted to int32 -
-    // and has only a TypeCastNode to wrap the losing side in.
+    // One owner, for build_operator_call_node's reason: there are two *moments* that ask, and only one
+    // rule.
     //
-    // the insertion is each caller's, the decision is not: two answers here means one program means two
+    // Parser::parse_binary_expr asks with the operand types it knows at parse time and inserts the cast
+    // through try_implicit_cast, which may retype a literal outright instead. AST::OperatorRewriter asks
+    // again for the operands a later pass typed, and has only a TypeCastNode to wrap the losing side in
+    // - `foreach ($a as $i => $x) { if ($i == 0) ... }`, where `$i` has no type until the loop lowers
+    // and the literal has long since defaulted to int32.
+    //
+    // The insertion is each caller's. The decision is not. Two answers here means one program means two
     // things depending on which pass got to type an operand first, and the way that surfaces is codegen
     // asserting on "Both operands to ICmp instruction are not of the same type"
     std::optional<ValueType> common_numeric_type(const ValueType &lhs, const ValueType &rhs);
@@ -202,21 +207,26 @@ namespace AST
     // `uint8` entirely and answered 219902325555200. The operand's type is the operation's type, whole,
     // and the count only says how far.
     //
-    // four readers, and they have to agree or the answer depends on which pass typed an operand first:
-    // Parser::parse_binary_expr and OperatorRewriter::widen_binary_operands, which insert the cast that
-    // must not be inserted here; BinaryExprNode::result_type, which would otherwise answer void for a
-    // mismatched pair and invite one; and AST::const_fold, which folds at the type this names
+    // Four readers, and they have to agree or the answer depends on which pass typed an operand first:
+    //
+    //  - Parser::parse_binary_expr and OperatorRewriter::widen_binary_operands, which insert the cast
+    //    that must not be inserted here
+    //  - BinaryExprNode::result_type, which would otherwise answer void for a mismatched pair and
+    //    invite one
+    //  - AST::const_fold, which folds at the type this names
     bool binary_reconciles_operands(const Operator *op);
 
     // **the type a binary numeric operation is performed at** - what the two operands were reconciled
     // to. the rule above's, read the other way round: a nullopt there means there was nothing to
     // reconcile, and for this question that is the operands already agreeing, so the lhs is the answer.
     //
-    // what needs it is signedness, which cannot be taken from one side alone: `int64 < uint32`
+    // What needs it is signedness, and that cannot be taken from one side alone. `int64 < uint32`
     // reconciles to int64 and is therefore a *signed* comparison, so "either operand is unsigned" is a
-    // second answer that differs from this one in exactly that case. ExprCodegen::gen_binary_expr reads
-    // it for `/ % ** >> < > <= >=`, and AST::const_fold folds the same operators at the same type - two
-    // answers there is a program whose `const if` takes one arm and whose `if` takes the other.
+    // second answer that differs from this one in exactly that case.
+    //
+    // ExprCodegen::gen_binary_expr reads it for `/ % ** >> < > <= >=`, and AST::const_fold folds the
+    // same operators at the same type. Two answers there is a program whose `const if` takes one arm
+    // and whose `if` takes the other.
     //
     // **the operator is part of the question**, for binary_reconciles_operands' reason: a shift is
     // performed at its left operand's type whatever the count is written as. It was `(lhs, rhs)` for as

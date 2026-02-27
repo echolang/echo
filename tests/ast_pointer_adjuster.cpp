@@ -193,7 +193,7 @@ TEST_CASE("A member reached through an element is typed by the field", "[sema][p
     // `$p:$[0]->x` puts an IndexExprNode under the `->`. MemberAccessNode::result_type() used to
     // switch on the base's node class and only knew a varref and a nested member access, so this
     // shape answered void: the write went untyped, the read threw in codegen and no diagnostic
-    // fired anywhere in between (todo/B16)
+    // fired anywhere in between
     auto d = desc(
         "struct P { int $x; }\n"
         "$pt = P(1);\n"
@@ -223,7 +223,7 @@ TEST_CASE("'->' on a peeled pointer is rejected rather than aliased", "[sema][po
 {
     // `->` already reaches through every pointer level, so `$p:$->x` could only mean `$p->x`.
     // it is an error instead: `:$` marks an operation on the address, and the pointer object has
-    // no members of its own (todo/B9 - the rule is the feature)
+    // no members of its own - the rule is the feature
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct P { int $x; }\n"
         "$pt = P(1);\n"

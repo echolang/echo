@@ -44,7 +44,7 @@ namespace AST
     //
     // its own pass rather than one more rule in AST::OperatorRewriter: that class's header states it is
     // one walk over rules sharing a predicate and an operand normalizer, and a foreach shares neither.
-    // the cost is a fifth tree walk per round, which belongs in todo/X3's ledger rather than being paid
+    // the cost is a fifth tree walk per round, which belongs in the fixpoint's own budget rather than being paid
     // for with a false claim in a header.
     //
     // the tree is walked through scope children and **never** through nodes.of_type<ForeachNode>():

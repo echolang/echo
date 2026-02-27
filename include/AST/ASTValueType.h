@@ -963,7 +963,7 @@ namespace AST
         // here, which is the same choice _implicit_conversions makes and the opposite of _conformances.
         // what an implementor *binds* one to is not stored anywhere at all: it is knowable only after the
         // implementor's methods exist, which is strictly later than get_or_create_instantiation's
-        // staleness test can notice (todo/A7), so AST::conformance_bindings derives it on every ask
+        // staleness test can notice, so AST::conformance_bindings derives it on every ask
         void add_associated_type(TypeParamDecl *decl);
 
         const std::vector<TypeParamDecl *> &associated_types() const {
@@ -980,7 +980,7 @@ namespace AST
         // TypeRegistry::get_or_create_instantiation is the *only* thing that produces a ComplexType for
         // an instantiation, because struct equality is ComplexType* identity and a second minter is a
         // second identity for one type. TypeDeclNode::clone used to be that second minter; it now shares
-        // the declaration instead - see todo/A5 in todo/README.md's Resolved section
+        // the declaration instead
 
     private:
         std::vector<Property> _properties;
@@ -1155,7 +1155,7 @@ namespace AST
         // layout, and the conformance list. one function for both, because they are the same operation
         // on the same substitution and go stale together - a generic application can be interned during
         // the declaration pass, *before* the template's own body has been walked, so an instance may
-        // have to be refilled later (todo/A7)
+        // have to be refilled later
         //
         // re-entrant: substituting `struct Bag<E> : contract::iterable<Bag<E>>` asks this registry for
         // `Bag<int32>`, which is already in the cache but mid-derivation, and the staleness test would

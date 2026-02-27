@@ -1,7 +1,7 @@
 // **the case a node exists for.** a temporary in a loop condition is bound and destroyed inside the
 // block the condition is evaluated in, so it is acquired and released once per turn - four times here,
 // three that enter the body and the one that ends the loop. hoisting it to the top of the statement
-// would have acquired it every turn and released it once (todo/A13b)
+// would have acquired it every turn and released it once
 
 struct Counter
 {

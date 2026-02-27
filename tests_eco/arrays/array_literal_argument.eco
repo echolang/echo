@@ -1,6 +1,6 @@
 // an array literal in an argument position. it fills storage, so it has to name it - and where the
 // author named none, the compiler does: a declaration is hoisted ahead of the statement, the appends
-// go with it, and what reaches the parameter is that declaration's name (todo/A13c)
+// go with it, and what reaches the parameter is that declaration's name
 //
 // so the literal is never a *temporary*. it stays `t_addressless` in AST::storage_of, which is what
 // keeps "a literal fills storage" true of every position; only where the storage comes from changed

@@ -234,7 +234,7 @@ void OperatorRewriter::resolve_index(IndexExprNode &index_expr)
 
     // **a raw pointer, and the one spelling of it is `$p:$[n]`.** every operation on an address goes
     // through `:$` - comparison, arithmetic, casting - and indexing was the one hole in that rule
-    // (todo/B9). closing it is what lets a bare `[` mean exactly one thing: ask the container
+    //. closing it is what lets a bare `[` mean exactly one thing: ask the container
     if (base_type.is_pointer()) {
         if (!index_expr.base_was_peeled) {
             _collector.collect_issue<Issue::GenericError>(
@@ -765,7 +765,7 @@ ExprNode *OperatorRewriter::resolve_builtin_operator(ExprNode *expr)
     // operator and the built-in arms by asking AST::binary_has_builtin_meaning, and in a template
     // body the operands are a bare `T` - which that predicate is deliberately non-committal about,
     // so the built-in path wins and a BinaryExprNode is what the body keeps. cloning does not
-    // re-parse, so the substituted body still holds it (todo/A32).
+    // re-parse, so the substituted body still holds it.
     //
     // the same predicate and the same operand normalizer, so this is a second *moment*, not a second
     // rule. a node that legitimately has a built-in meaning answers true here exactly as it did at
@@ -953,7 +953,7 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
     // **and the marker's stored type, which nothing else can repair.** a ChainBaseNode holds the
     // base's non-null type rather than an edge to the base, and clone only *substitutes* it - so a
     // marker minted for a bare `T` becomes `weak<Node>` where it should have become `Node`. re-derived
-    // here, at the one moment the base is known to have changed shape (todo/A35 is why it cannot be
+    // here, at the one moment the base is known to have changed shape (it cannot be
     // re-derived from the marker's own side)
     if (node.chain_base != nullptr) {
         node.chain_base->type = unwrapped_type_of(node.base->result_type());

@@ -1,5 +1,5 @@
 // a value with no storage may answer a borrow parameter: the compiler mints a slot for it that lives
-// exactly as long as the call. the minimal shape of todo/A13c - before it, `inc(41)` reported that no
+// exactly as long as the call. the minimal shape of the rule - before it, `inc(41)` reported that no
 // overload accepted these arguments, because the borrow rank refused anything that was not a place
 
 function inc(int32& $x) : int32

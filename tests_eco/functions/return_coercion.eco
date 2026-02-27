@@ -22,6 +22,6 @@ echo zero();
 echo widen(3);
 
 // widened back before echo so the golden reads the truncated value rather than whatever an i8
-// leaves in a variadic printf slot (todo/B15)
+// leaves in a variadic printf slot
 int32 $truncated = narrow(300);
 echo $truncated;

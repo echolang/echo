@@ -36,7 +36,7 @@ namespace Compiler::LLVM
         // design resolves at the widening precisely so nothing has to be searched for later. one pointer
         // per (class, interface) pair is the whole cost, and the release is then one load like a call.
         //
-        // the alternative was a release slot in the *typeinfo* descriptor, which is what todo/A27 wants
+        // the alternative was a release slot in the *typeinfo* descriptor, which is what a generic closure wants
         // for a closure environment. that stays the right home for A27 and is deliberately not what this
         // uses: the descriptor is built during type lowering, before any function body exists, so filling
         // it would need the thunk to be created before the layout it is built from

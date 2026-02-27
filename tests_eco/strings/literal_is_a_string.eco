@@ -21,6 +21,6 @@ $a = 'hey';
 echo $a;
 echo $a->size();
 
-// the escapes decode (todo/B1's open half): three bytes, not four
+// the escapes decode: three bytes, not four
 $e = "a\nb";
 echo $e->size();

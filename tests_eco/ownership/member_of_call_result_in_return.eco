@@ -1,6 +1,6 @@
 // a temporary inside a `return` value is destroyed by the expression that read it, before the return's
 // own unwind drops the function's locals - so 800 (the local) follows nothing of the temporary's, and
-// the value travels out intact (todo/A13b)
+// the value travels out intact
 
 struct Inner { int32 $tag; }
 

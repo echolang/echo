@@ -993,7 +993,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // come from: TypeRegistry::get_or_create_instantiation interns one ComplexType per (template, args)
     // and this declaration is no template, so the monomorphizer's clone used to mint a second layout of
     // its own - and struct equality is ComplexType* identity, so that was one type wearing two. see
-    // todo/A27, which lifts all three together
+    // all three are lifted together, once closures can be generic
     //
     // asked here, before MemberTypeScope is opened and before the node is found or created, so the
     // refusal mutates nothing on the way out. it cannot double-report with the generic *owner* refusal

@@ -2,7 +2,7 @@
 // generic call site the *next* round instantiates - which is the whole reason the temporary is bound by
 // AST::OwnershipPass, inside the monomorphizer's fixpoint, rather than by a pass after it. the single
 // 900 is the proof: the temporary retained the class it copied out of `$h` and released it again
-// (todo/A13b)
+//
 
 class Node
 {

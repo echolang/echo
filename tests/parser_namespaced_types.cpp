@@ -7,7 +7,7 @@
 #include "helpers.h"
 
 // namespace qualified type names (`a::Foo`) and the mangling that keeps same-named types from
-// different namespaces apart. see todo/B7-complex-type-mangling.md
+// different namespaces apart
 
 namespace
 {

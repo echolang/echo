@@ -1422,7 +1422,7 @@ void ExprCodegen::gen_null_assert(llvm::Value *address)
 
     // through the same runtime *and the same message shape* `die` and `assert` use, so this finally
     // says what went wrong instead of raising SIGILL. a cast node carries no token, so its location
-    // is the enclosing function rather than a line - see todo/C6
+    // is the enclosing function rather than a line
     _ctx.abort->gen_abort_if(is_null,
         "fatal error", "null pointer cast to a reference",
         fmt::format("{}, {}", _ctx.current_file_name(), _ctx.function_context()));
@@ -1661,7 +1661,7 @@ void ExprCodegen::gen_null(AST::NullNode &node)
 //
 // so this is a throw rather than the empty body it used to be. every other expression visitor leaves
 // exactly one value on `value_stack`, and a silent no-op here desynced it - a defect nothing in the
-// IR could point at afterwards (todo/X1)
+// IR could point at afterwards
 void ExprCodegen::gen_operator(AST::OperatorNode &node)
 {
     throw Compiler::InternalCompilerException(fmt::format(

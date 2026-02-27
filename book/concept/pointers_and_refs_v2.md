@@ -629,7 +629,7 @@ function extend(const array<T>& $other) : void   // $other is a read
 const function count() : usize                    // $this is a read
 function push(T $value) : void                    // $this is an inout
 constructor()                                     // $this is an out
-destructor()                                      // $this is a take
+destructor()                                      // $this is an mv
 ```
 
 A `const T&` is a read. An ordinary method's `$this` is an `inout`. A `const function`'s is a read. A

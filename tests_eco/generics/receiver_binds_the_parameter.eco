@@ -4,7 +4,7 @@
 //
 // bound the other way round - which is what `TypeSubstitution::bind` does between two arguments of equal
 // standing, replacing rather than reconciling - every widening through such a parameter was unreachable, and
-// the receiver became the operand reported as not fitting. see todo/B50 for the half that is still open
+// the receiver became the operand reported as not fitting. one half of this is still open
 array<int64> $wide = array<int64>();
 
 // an int32 literal into an `array<int64>`: T binds from the receiver, and the literal widens

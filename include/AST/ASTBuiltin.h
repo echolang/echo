@@ -40,19 +40,21 @@ namespace AST
 
         // **move the value out of a place**, leaving the storage behind it dead
         //
-        // the verb the two predicates above are useless without: knowing `T` owns something buys nothing
-        // if the only way to get an element out of a raw buffer is to *copy* it, which leaves the slot
-        // holding a second owner nothing will ever release. what a container needs is the read that ends
-        // the source's claim, and Echo has no spelling for one - `mv` transfers a *variable*, and an
-        // element of a buffer this type is itself managing is not one
+        // The verb the two predicates above are useless without. Knowing `T` owns something buys
+        // nothing if the only way to get an element out of a raw buffer is to *copy* it, which leaves
+        // the slot holding a second owner nothing will ever release.
         //
-        // its lowering is one load through the borrow, and everything else follows from it being a
-        // **call**: a call result is not a place, so AST::OwnershipPass inserts no copy, and the owner it
-        // hands back is destroyed by the ordinary frame drop of wherever it lands. so `pop()` is a move,
-        // and a destructor's element loop is a take whose value is dropped at the end of the iteration -
-        // with no arm for either anywhere in that pass
+        // What a container needs is the read that ends the source's claim, and Echo has no spelling for
+        // one: `mv` transfers a *variable*, and an element of a buffer this type is itself managing is
+        // not one.
         //
-        // unsafe by construction, and squarely in `mem::` for that reason: taking twice from one place
+        // Its lowering is one load through the borrow, and everything else follows from it being a
+        // **call**. A call result is not a place, so AST::OwnershipPass inserts no copy, and the owner
+        // it hands back is destroyed by the ordinary frame drop of wherever it lands. So `pop()` is a
+        // move, and a destructor's element loop is a take whose value is dropped at the end of the
+        // iteration - with no arm for either anywhere in that pass.
+        //
+        // Unsafe by construction, and squarely in `mem::` for that reason: taking twice from one place
         // duplicates ownership exactly as freeing twice duplicates a free. AST::TypeChecker refuses the
         // two misuses that have a correct spelling instead - a source that is not a place, and a whole
         // local variable, which is what `mv` is for
@@ -72,14 +74,14 @@ namespace AST
         // is exactly the re-assignment it exists to avoid, one level further in - so the seam has to be a
         // builtin, where the write is emitted rather than written
         //
-        // its lowering is one store through the borrow, and what makes that correct is that the value
-        // *arrived by value*: the caller's copy already happened, so this hands over an owner rather than
-        // duplicating one, and nothing is owed a release
+        // Its lowering is one store through the borrow, and what makes that correct is that the value
+        // *arrived by value*. The caller's copy already happened, so this hands over an owner rather
+        // than duplicating one, and nothing is owed a release.
         //
-        // it shares `take`'s place rule exactly - AST::is_unaccounted_storage, one predicate with two
-        // readers - and it is unsafe in the same direction and for the same reason: initializing a place
-        // that already holds a value leaks that value, as taking twice from one place duplicates
-        // ownership. squarely in `mem::` for that reason
+        // It shares `take`'s place rule exactly - AST::is_unaccounted_storage, one predicate with two
+        // readers - and it is unsafe in the same direction and for the same reason. Initializing a place
+        // that already holds a value leaks that value, the way taking twice from one place duplicates
+        // ownership. Squarely in `mem::` for that reason
         t_init,
 
         // the two ways a program stops itself. unlike the two above they take arguments, return
@@ -111,20 +113,21 @@ namespace AST
         // which is what makes the reference cycle in tests_eco/classes an assertion instead of a hope
         t_weak_count,
 
-        // print a value with its type and, for anything with properties, its whole structure. the same
-        // shape as the two counts above - generic, one borrow argument - but a different *kind* of
-        // builtin from all five: they fold to a constant or read one word, and this one **emits**. it is
-        // also the first whose lowering creates basic blocks, which is why its renderer is a codegen
-        // subsystem of its own rather than an arm on ExprCodegen
+        // print a value with its type and, for anything with properties, its whole structure.
         //
-        // a builtin rather than a library function because everything it prints is a compiler fact with
+        // The same shape as the two counts above - generic, one borrow argument - but a different *kind*
+        // of builtin from all five. They fold to a constant or read one word; this one **emits**. It is
+        // also the first whose lowering creates basic blocks, which is why its renderer is a codegen
+        // subsystem of its own rather than an arm on ExprCodegen.
+        //
+        // A builtin rather than a library function, because everything it prints is a compiler fact with
         // no Echo spelling: the name of a type, the names and order of its properties, and the layout it
         // reads them out of. `echo` covers one scalar and refuses a struct outright, which leaves
-        // debugging a value as one `echo` per field with the types remembered by hand
+        // debugging a value as one `echo` per field with the types remembered by hand.
         //
-        // its parameter is a **borrow** for a sharper version of ref_count's reason: a by-value class
-        // argument is +1, so a printer would report a count it created itself, and a by-value struct
-        // argument is a copy - so a struct that declares a copy constructor would run it, and the printer
+        // Its parameter is a **borrow**, for a sharper version of ref_count's reason. A by-value class
+        // argument is +1, so a printer would report a count it created itself. A by-value struct
+        // argument is a copy, so a struct that declares a copy constructor would run it - and the printer
         // would be printing something other than the value it was handed
         t_dprint,
 
@@ -133,16 +136,18 @@ namespace AST
         // between them the whole of where an `array<T>`'s storage, a `str::buf`'s bytes and every raw
         // buffer in the language come from
         //
-        // they were `extern malloc`/`realloc`/`free` until the compiler needed to be able to say how much
-        // memory a program had outstanding. Two sites allocated - these, and the class runtime's box - and
-        // because nothing saw both, the question had no answer at all rather than an expensive one.
-        // Builtins rather than externs so that the seam has *one* owner (Compiler::LLVM::MemoryCodegen)
-        // instead of two spellings of one symbol name that nothing checks against each other
+        // They were `extern malloc`/`realloc`/`free` until the compiler needed to be able to say how
+        // much memory a program had outstanding. Two sites allocated - these, and the class runtime's
+        // box - and because nothing saw both, the question had no answer at all rather than an expensive
+        // one.
         //
-        // the **first concrete, value-returning builtins**: `die`/`assert` are concrete and push nothing,
-        // `size_of`/`ref_count` return a value and are generic. So they are also the first that need no
-        // arm in AST::TypeChecker - an ordinary declared signature is one AST::CallResolver already
-        // checks, which `T&` and a `void`-accepting parameter are not
+        // Builtins rather than externs, so the seam has *one* owner (Compiler::LLVM::MemoryCodegen)
+        // instead of two spellings of one symbol name that nothing checks against each other.
+        //
+        // The **first concrete, value-returning builtins**. `die`/`assert` are concrete and push
+        // nothing; `size_of`/`ref_count` return a value and are generic. So they are also the first that
+        // need no arm in AST::TypeChecker - an ordinary declared signature is one AST::CallResolver
+        // already checks, which `T&` and a `void`-accepting parameter are not
         t_alloc_bytes,
         t_realloc_bytes,
         t_free_bytes,

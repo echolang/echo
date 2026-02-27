@@ -1,7 +1,7 @@
 // indexing and arithmetic both go through `:$`, because they are operations on the address
 // rather than on the value it stands for. offsets count *elements*, never bytes.
 //
-// **`$p[0]` without the peel is refused**, which is todo/B9 settled: a bare `[` always means "ask
+// **`$p[0]` without the peel is refused**: a bare `[` always means "ask
 // this collection for one of its elements", and a raw address is not a collection. so brackets mean
 // exactly one thing, and `:$` still marks every address operation without exception. the diagnostic
 // is pinned in tests_eco/errors/index_pointer_without_peel.eco

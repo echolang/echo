@@ -65,7 +65,7 @@ namespace Compiler::LLVM
         // "<file>:<line>" for a call site, the suffix every message carries
         //
         // the file is the one being emitted, which for a call inside an instantiated generic need
-        // not be the file it was written in - todo/C6 is the fix, and it is a real hole: the
+        // not be the file it was written in, and it is a real hole: the
         // location it prints in that case exists, and is not where the call is
         std::string location_of(const AST::FunctionCallExprNode &node) const;
 

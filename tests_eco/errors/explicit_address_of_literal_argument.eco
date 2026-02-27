@@ -1,4 +1,4 @@
-// **an `&` the author wrote over a non-place is still an error**, and that is what makes todo/A13c need
+// **an `&` the author wrote over a non-place is still an error**, and that is what makes the rule need
 // no flag on the node: an AddrOfExprNode over a non-place is, by construction, one the compiler wrote.
 // the parser refuses this spelling before any of it, so only an *implicit* borrow ever materialises
 // storage

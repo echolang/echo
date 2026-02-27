@@ -246,19 +246,22 @@ namespace AST
     // what it wants is a second reference that does not own. `weak<Foo> $w = &$obj;` says so, and that
     // see book/concept/ownership_and_moving.md, "Weak references and cycles"
     //
-    // **the destination decides, not the operand's type.** that is the rule this chapter already runs on -
-    // a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what turns
-    // a place argument into an address. it also has to be the rule here rather than "a written `&` over a
-    // class", which was tried: six generic accessors in stdlib/core take `&` of a `T` place and need the
-    // slot address, so keying on the operand made `array<int32>` compile and `array<Counter>` not - a
-    // generic body whose meaning depends on its instantiation, which is the one thing a generic must not be
+    // **the destination decides, not the operand's type.** that is the rule this chapter already runs
+    // on: a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what
+    // turns a place argument into an address.
     //
-    // this node is also how every *compiler-inserted* borrow is spelled - a method receiver
-    // (FuncCallParser), a borrow-parameter coercion (CallResolver), a drop's receiver (OwnershipPass) -
-    // and those must keep meaning the slot's address, or `$this` would stop being `Foo&`. one bit
-    // separates them, rather than a second node, because every pass that special-cases `n_expr_addrof`
-    // - place_root_of, PointerAdjuster::adjust_call_arguments, OwnershipPass's place edge - would
-    // otherwise need a duplicate arm that could drift
+    // It also has to be the rule here rather than "a written `&` over a class", which was tried. Six
+    // generic accessors in stdlib/core take `&` of a `T` place and need the slot address, so keying on
+    // the operand made `array<int32>` compile and `array<Counter>` not - a generic body whose meaning
+    // depends on its instantiation, which is the one thing a generic must never be.
+    //
+    // This node is also how every *compiler-inserted* borrow is spelled: a method receiver
+    // (FuncCallParser), a borrow-parameter coercion (CallResolver), a drop's receiver (OwnershipPass).
+    // Those must keep meaning the slot's address, or `$this` would stop being `Foo&`.
+    //
+    // One bit separates them rather than a second node, because every pass that special-cases
+    // `n_expr_addrof` - place_root_of, PointerAdjuster::adjust_call_arguments, OwnershipPass's place
+    // edge - would otherwise need a duplicate arm that could drift
     class AddrOfExprNode : public ExprNode
     {
     public:
@@ -446,12 +449,13 @@ namespace AST
     // one more strong reference to what E names, yielding E's own value
     //
     // wrapped around a class-typed *place* read wherever the value arrives somewhere that will owe a
-    // release for it - a declaration, an assignment, a by-value argument. a class-typed value that is
-    // not a place needs none: a constructor call or a function result is already one reference nobody
-    // else holds, which is the same "a place is copied, a non-place is moved" rule the ownership pass
-    // applies to structs
+    // release for it - a declaration, an assignment, a by-value argument.
     //
-    // in the tree rather than folded into codegen for the reason every implicit thing in this compiler
+    // A class-typed value that is not a place needs none. A constructor call or a function result is
+    // already one reference nobody else holds, which is the same "a place is copied, a non-place is
+    // moved" rule the ownership pass applies to structs.
+    //
+    // In the tree rather than folded into codegen, for the reason every implicit thing in this compiler
     // is: --print-resolved-ast shows exactly where the counting happens, which is the only practical
     // way to check a retain/release balance. AST::OwnershipPass decides, ClassCodegen emits
     // `function(int32 $a) : int32 { ... }` written where a value is expected.
@@ -834,7 +838,7 @@ namespace AST
         // was the base written with `:$`? recorded at parse time because the marker does not survive
         // to the pass that needs it - PointerValueNode is erased by PointerAdjuster - and indexing a
         // raw pointer without it is refused, so that a bare `[` always means "ask the container"
-        // (todo/B9)
+        //
         bool base_was_peeled = false;
 
         // the container's element contract, once the rewriter has found it. null while the base is a
@@ -918,19 +922,21 @@ namespace AST
 
     // `[1, 2, 3]` - a bracketed list of elements, which the *destination* types.
     //
-    // it has no type of its own and `result_type()` says so: a literal is a list of values, and what
-    // collection they go into is decided by the storage they are written to, the same expected-type
+    // It has no type of its own, and `result_type()` says so. A literal is a list of values, and what
+    // collection they go into is decided by the storage they are written to - the same expected-type
     // rule that types every scalar literal.
     //
     // **not `array<T>`-specific.** AST::OperatorRewriter expands one into a zero-argument constructor
-    // of the destination type plus one `$dest[] = element` per element, so any type with both works -
-    // which is what a `Map<K, V>` literal will reuse rather than re-derive.
+    // of the destination type plus one `$dest[] = element` per element, so any type with both works.
+    // That is what a `Map<K, V>` literal will reuse rather than re-derive.
     //
-    // it is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
-    // the appends, and only the enclosing scope has both. where the author named that storage - a
-    // declaration's initializer, an assignment to a variable - the expansion fills it. everywhere else
-    // the compiler names it, hoisting a synthesized declaration ahead of the statement and wrapping
-    // the pair in a scope so it dies with the statement rather than with the frame (todo/A13c)
+    // It is therefore a **statement-level** construct: it needs storage to fill and somewhere to put
+    // the appends, and only the enclosing scope has both.
+    //
+    // Where the author named that storage - a declaration's initializer, an assignment to a variable -
+    // the expansion fills it. Everywhere else the compiler names it, hoisting a synthesized declaration
+    // ahead of the statement and wrapping the pair in a scope, so it dies with the statement rather
+    // than with the frame
     class ArrayLiteralExprNode : public ExprNode
     {
     public:
@@ -958,10 +964,11 @@ namespace AST
         //
         // **the two arms this owes are not AST::ForeachNode's two.** the first is the same:
         // OwnershipPass::body_is_concrete answers false while an unexpanded literal is in a body, so
-        // the pass that walks a body exactly once does not walk it before the appends exist. the
-        // second is *not* a throw in AST::PointerAdjuster - a foreach is a statement, so a refused one
-        // is replaced by an empty scope, while a literal is an expression and report_unplaced_literal
-        // refuses one from edges (`f([1, 2])`) with nothing to put in its place. codegen's arm is the
+        // the pass that walks a body exactly once does not walk it before the appends exist.
+        //
+        // The second is *not* a throw in AST::PointerAdjuster. A foreach is a statement, so a refused
+        // one is replaced by an empty scope. A literal is an expression, and report_unplaced_literal
+        // refuses one from edges (`f([1, 2])`) with nothing to put in its place. Codegen's arm is the
         // backstop instead, and it runs after the has_critical_issues() gate rather than before it
         //
         // copied by clone through cc.shallow, which is correct only while AST::OperatorRewriter skips

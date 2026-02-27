@@ -61,7 +61,7 @@ namespace AST
         // the three nullability forms, re-asked here for the reason every type question in this
         // compiler is asked here: inside a template the operand is a bare `T`, which
         // AST::is_certainly_present deliberately answers "later" for, and the parser is the only place
-        // that ever asked. see todo/B27
+        // that ever asked
         void visit_guard(GuardNode &node) override;
         void visit_null_coalesce(NullCoalesceExprNode &node) override;
         void visit_optional_chain(OptionalChainExprNode &node) override;
@@ -115,7 +115,7 @@ namespace AST
         //
         // without it, one `operator ==` declared anywhere in the program degrades `==` everywhere: a
         // struct with no equality of its own is told it "cannot implicitly convert 'P' to 'const string&'",
-        // naming a type nobody wrote and no file mentions. That is todo/B20's shape, narrowed to the one
+        // naming a type nobody wrote and no file mentions. That is the general shape, narrowed to the one
         // case a standard library makes unavoidable - operators all share the root namespace, so every
         // program has every operator's overload set whether it uses the type or not
         const FunctionDeclNode *_context_callee = nullptr;

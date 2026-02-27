@@ -119,7 +119,7 @@ namespace Compiler::LLVM
         // the callable arm is uniform rather than per type, and that is forced: a callable's static type
         // is its signature and says nothing about which environment it holds, so the teardown cannot be
         // keyed on a class the way the class arm is. it stays correct because an environment holds no
-        // owning capture - one that would is rejected at the capture site (todo/A27)
+        // owning capture - one that would is rejected at the capture site
         llvm::Value *gen_retain(llvm::Value *handle, const AST::ValueType &class_type);
         void gen_release(llvm::Value *handle, const AST::ValueType &class_type);
 

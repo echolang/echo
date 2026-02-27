@@ -349,7 +349,7 @@ void OwnershipPass::synthesize_pending_class_deinits()
 
         // **an instantiation whose properties are not filled in yet is not answerable, and answering
         // anyway is permanent.** An application of a generic can be interned during the declaration pass,
-        // before the template's own body has been walked, and is refilled later (todo/A7). Sweeping one
+        // before the template's own body has been walked, and is refilled later. Sweeping one
         // in that window would build a deinit that drops nothing and `set_deinit` would make that the
         // final answer - so wait for the round in which the layout agrees with its template
         if (ct->is_instantiated() && ct->property_count() != ct->template_or_self()->property_count()) {
@@ -616,21 +616,22 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
     scope.children = std::move(rebuilt);
 
     // the scope's own locals, destroyed in reverse declaration order, at the point after its last
-    // statement. skipped when control never reaches that point: whatever left already owes every frame's
-    // drops and collected them onto its own ReturnNode::unwind, so a second set here is dead tree
+    // statement. Skipped when control never reaches that point: whatever left already owes every
+    // frame's drops and collected them onto its own ReturnNode::unwind, so a second set here is dead
+    // tree.
     //
-    // dead, and not free - it is type-checked, and a drop of a `Box<int32>` local *creates a generic call
-    // site* the monomorphizer then instantiates. it also shows up in `-ar`, which is precisely where a
-    // duplicated drop is supposed to be diagnosed rather than printed
+    // Dead, and not free. It is type-checked, and a drop of a `Box<int32>` local *creates a generic
+    // call site* the monomorphizer then instantiates. It also shows up in `-ar`, which is precisely
+    // where a duplicated drop is supposed to be diagnosed rather than printed.
     //
-    // asked of AST::scope_always_exits rather than re-derived here, which is the fix: this used to test
-    // the *last child* for `ReturnNode` and nothing else, so a `die` tail, an `if` whose arms both return,
-    // and any statement written after a `return` each appended a full duplicate. none of them ever reached
-    // codegen - gen_scope stops at the first terminated block - so the tree was wrong and the binary was
-    // not, which is the kind of divergence `-ar` exists to make visible
+    // Asked of AST::scope_always_exits rather than re-derived here, and that is the fix. This used to
+    // test the *last child* for `ReturnNode` and nothing else, so a `die` tail, an `if` whose arms both
+    // return, and any statement written after a `return` each appended a full duplicate. None of them
+    // ever reached codegen, because gen_scope stops at the first terminated block - so the tree was
+    // wrong and the binary was not, which is the kind of divergence `-ar` exists to make visible.
     //
-    // computed once and handed back, because the arms above this one want the same answer about the
-    // scope they asked for - and asking it a second time is a second walk of the whole subtree
+    // Computed once and handed back. The arms above this one want the same answer about the scope they
+    // asked for, and asking it a second time is a second walk of the whole subtree
     const ExitKind exit = scope_exit_kind(scope);
 
     if (exit == ExitKind::t_none) {
@@ -707,16 +708,17 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     ? ValueDestination::t_initialization
                     : ValueDestination::t_assignment);
 
-            // **a class target releases whatever it held, and codegen orders the sequence.** it cannot
-            // be a node with a place of its own the way a struct's teardown is: the release needs the
-            // old handle out of the slot codegen has already addressed, and a class target may be
-            // `$node->next` or an element, whose index expression must not be evaluated twice. so the
-            // flag says *that* the old reference is owed a release and gen_assign says *when* - retain
-            // the new value, read the old handle, store, release the old
+            // **a class target releases whatever it held, and codegen orders the sequence.**
             //
-            // it also lifts the whole-variable restriction below. writing an owning *struct* into a
+            // It cannot be a node with a place of its own the way a struct's teardown is. The release
+            // needs the old handle out of the slot codegen has already addressed, and a class target
+            // may be `$node->next` or an element, whose index expression must not be evaluated twice.
+            // So the flag says *that* the old reference is owed a release, and gen_assign says *when* -
+            // retain the new value, read the old handle, store, release the old.
+            //
+            // It also lifts the whole-variable restriction below. Writing an owning *struct* into a
             // field is the unspecified partial-ownership case, but a class field holds one handle and
-            // replacing it is completely defined, which is what makes `$node->next = $other` - and so
+            // replacing it is completely defined. That is what makes `$node->next = $other` - and so
             // any linked structure at all - expressible
             // "a copy of this is one more reference" is exactly what AST::classify_copy answers with
             // t_retain, and it is already the compiler's one classifier - asked rather than respelled,
@@ -1305,7 +1307,7 @@ ExprNode *OwnershipPass::bind_pending_temporaries(ExprNode *value, size_t mark)
     //
     // gated on needs_destruction exactly as the two arms that track a *local* are, and for the reason
     // that gate exists: emit_drop's arms answer the shapes that owe a release and then reach for the
-    // ComplexType, so a type that has none has to be answered before it is asked. since todo/A13c a
+    // ComplexType, so a type that has none has to be answered before it is asked. a
     // temporary can be a primitive - `inc(41)` binds an int32 - so this is the first caller that can
     // hand it one. the teardown simply stays empty, which is the common case and the correct one
     for (size_t i = bind.temporaries.size(); i-- > 0;) {
@@ -1493,7 +1495,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             //
             // an `&` the *author* wrote over a non-place never reaches here: the parser refuses it,
             // because a call is not a place whatever it returns and `&5` names nothing at all. **that is
-            // the whole marker**, and it is why todo/A13c needed no flag on the node: an AddrOfExprNode
+            // the whole marker**, and it is why no flag on the node was needed: an AddrOfExprNode
             // over a non-place is, by construction, one the compiler wrote - CallResolver's borrow
             // coercion, its `#[implicit]` receiver, the parser's method receiver, or emit_resolved_
             // member_call. so this arm only ever sees an address something in the same expression is
@@ -1633,7 +1635,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 base = NodeReference(walked->get_node_type(), walked);
 
                 // **a base with no storage of its own needs some** - `$o->mid()->tag`, where the value
-                // the call handed back is nowhere a `->` can reach into (todo/A13b)
+                // the call handed back is nowhere a `->` can reach into
                 //
                 // recorded, not rewritten. nothing between here and the flush reads the base, and the
                 // two positions that *refuse* a temporary instead of binding one then leave the tree
@@ -1661,9 +1663,9 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     ValueDestination destination
 )
 {
-    // **a borrow destination does not read the value, it keeps the address** - so this edge is the
-    // wrong place to destroy the temporary, and which of the three answers that means depends on how
-    // long the destination keeps it:
+    // **a borrow destination does not read the value, it keeps the address.** so this edge is the
+    // wrong place to destroy the temporary. Which of the three answers that means depends on how long
+    // the destination holds on:
     //
     //  - an **argument** hands the address to a callee that reads through it and returns, so the
     //    request travels one step further out. this position *forwards*, which is spelled by opening
@@ -1673,9 +1675,9 @@ ExprNode *OwnershipPass::resolve_value_arrival(
     //    entirely, and no lifetime a temporary can have would be long enough. refused
     //  - anything else *reads* the value, so this edge outlives every request below it. bound
     //
-    // asked of `wanted` rather than of the parameter, so all four destinations answer through one rule
-    // - and so it holds whether or not AST::CallResolver has addressed the argument yet, which is a
-    // different pass in the same fixpoint and may not have run
+    // Asked of `wanted` rather than of the parameter, so all four destinations answer through one
+    // rule. That is also what makes it hold whether or not AST::CallResolver has addressed the
+    // argument yet - a different pass in the same fixpoint, which may not have run
     if (wanted.is_pointer() && destination == ValueDestination::t_argument) {
         return arrive_value(expr, wanted, param, destination);
     }
@@ -1780,22 +1782,26 @@ ExprNode *OwnershipPass::arrive_value(
     }
 
     // **an implicit cast is transparent to value arrival**, and what is under it arrives as its own
-    // type. AST::CallResolver wraps an argument in one whenever `is_implicitly_convertible` declines,
-    // which for a borrow parameter read into a by-value parameter it always does: this pass runs
-    // *inside* the fixpoint, so the argument is still `ptr<const T>` where the parameter says `T` and
-    // AST::PointerAdjuster has not yet written the deref that reconciles them. a cast is
-    // `t_materializable`, so the place test below took the non-place early return and the value was
-    // handed over with no copy and no retain - two owners, one reference count, and the first teardown
-    // frees what the other still names
+    // type.
     //
-    // the copy belongs *inside* the cast, around the place: a RetainExprNode has to be typed as the
+    // AST::CallResolver wraps an argument in one whenever `is_implicitly_convertible` declines, which
+    // for a borrow read into a by-value parameter it always does: this pass runs *inside* the fixpoint,
+    // so the argument is still `ptr<const T>` where the parameter says `T`, and AST::PointerAdjuster
+    // has not yet written the deref that reconciles them.
+    //
+    // A cast is `t_materializable`, so the place test below took the non-place early return and the
+    // value was handed over with no copy and no retain. Two owners, one reference count, and the first
+    // teardown frees what the other still names.
+    //
+    // The copy belongs *inside* the cast, around the place. A RetainExprNode has to be typed as the
     // value for codegen to move the right count, and a copy constructor call has to be the value's
-    // rather than whatever the cast reconciled it to. that is also what makes the interface widening
-    // above a consequence of this rule rather than an arm of its own
+    // rather than whatever the cast reconciled it to. That is also what makes the interface widening
+    // above a consequence of this rule rather than an arm of its own.
     //
-    // idempotent across rounds: next round the operand is a retain or a call, neither of which is a
-    // place, so this cannot wrap twice. `param` is not forwarded - the `mv` rule above has already been
-    // asked of the outer expression, and the parameter's own type is not what arrives under the cast
+    // Idempotent across rounds: next round the operand is a retain or a call, neither of which is a
+    // place, so this cannot wrap twice. `param` is not forwarded, because the `mv` rule above has
+    // already been asked of the outer expression and the parameter's own type is not what arrives
+    // under the cast
     if (TypeCastNode *cast = place_under_implicit_cast(*expr)) {
         cast->expr = arrive_value(
             cast->expr, ValueType::make_mutable(value_type_of(cast->expr->result_type())),
@@ -1884,18 +1890,20 @@ ExprNode *OwnershipPass::arrive_value(
             return expr;
 
         // **a class is copied by retaining it.** this is the one place the two storage classes part
-        // ways, and it is the whole of the difference: a struct that owns something cannot be
-        // duplicated, because there is no way to say what duplicating the thing it owns would mean -
-        // but a class value owns a *count*, and one more reference to the same object is exactly what a
-        // copy of it is
+        // ways, and it is the whole of the difference.
         //
-        // so where a struct gets the diagnostic below, a class gets a retain, and the destination it
+        // A struct that owns something cannot be duplicated, because there is no way to say what
+        // duplicating the thing it owns would mean. A class value owns a *count*, and one more
+        // reference to the same object is exactly what a copy of it is.
+        //
+        // So where a struct gets the diagnostic below, a class gets a retain, and the destination it
         // arrives at owes the matching release: a local at its scope's end, a by-value parameter at the
-        // end of the callee's body, a field when it is overwritten or its owner is torn down. an
-        // explicit `mv` still works and is still cheaper - it hands the existing reference over instead
-        // of adding one - it is just no longer the only option
+        // end of the callee's body, a field when it is overwritten or its owner is torn down.
         //
-        // note this is reached for a *place* only. a class-typed call result is already one reference
+        // An explicit `mv` still works and is still cheaper - it hands the existing reference over
+        // instead of adding one. It is just no longer the only option.
+        //
+        // Note this is reached for a *place* only. A class-typed call result is already one reference
         // nobody else holds, and the early return above lets it through untouched
         case CopyKind::t_retain:
             return &_current_module->nodes.emplace_back<RetainExprNode>(expr);
@@ -1911,18 +1919,19 @@ ExprNode *OwnershipPass::arrive_value(
 
         // **a struct says what its copy is by declaring a constructor that takes a borrow of itself.**
         // the type holding the raw pointer is the only one that knows what duplicating it means, and
-        // this is it saying so - which is the hole book/concept/ownership_and_moving.md's "Not yet
-        // specified" lists first, and the one the others hang off
+        // this is it saying so. It is the hole book/concept/ownership_and_moving.md's "Not yet
+        // specified" lists first, and the one the others hang off.
         //
-        // recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are
-        // the same declaration and there is one way to copy a value rather than two to keep in step.
-        // and nothing downstream needs to know: the result is a call, so it is not a place, and the
+        // Recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are
+        // one declaration - one way to copy a value rather than two to keep in step.
+        //
+        // Nothing downstream needs to know either. The result is a call, so it is not a place, and the
         // callee's implicit `return $this` makes it an owner nobody else holds through the t_return
-        // move above
+        // move above.
         //
-        // the position of this whole switch among its neighbours is load-bearing: after the implicit
-        // moves, because a returned local and an initialization *move*, which is cheaper and always
-        // correct - and because a constructor's own `return $this` would otherwise call the copy
+        // The position of this whole switch among its neighbours is load-bearing. It sits after the
+        // implicit moves, because a returned local and an initialization *move*, which is cheaper and
+        // always correct - and because a constructor's own `return $this` would otherwise call the copy
         // constructor from inside the copy constructor
         case CopyKind::t_constructor:
             copy_ctor = copy_constructor_for(wanted);

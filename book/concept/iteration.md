@@ -96,9 +96,9 @@ read-only loop that touches fields directly, plus `echo`, which is the one excep
 nor borrows. Everything else copies.
 
 I'd rather have it this way round. The conservative answer costs a copy; the clever answer would need
-resolution to have already happened, and getting that wrong costs a miscompile. And it's monotone — every
+resolution to have already happened, and getting that wrong costs a miscompile. It's also monotone — every
 refinement later turns a copy into a borrow, never the reverse. And if you know you want the borrow, don't
-make the compiler guess — write `const &$m` and it's yours.
+make the compiler guess: write `const &$m` and it's yours.
 
 ## Do not change a collection while you are iterating it
 
@@ -198,7 +198,7 @@ foreach ($a as $i => $item) {
 }
 ```
 
-A map is where a non-`usize` key is most obviously useful - see [Maps](maps.md).
+A map is where a non-`usize` key is most obviously useful — see [Maps](maps.md).
 
 The key arrives **by value** — an index, a hash key, a line number. All three element bindings work beside
 it, so `foreach ($a as $i => &$item)` is the keyed form of a write-through loop.

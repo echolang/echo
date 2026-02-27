@@ -33,7 +33,7 @@ namespace Parser
     // declaration cannot carry one.
     //
     // the one list of "what does an attribute publish about a member", so a second marker - whatever
-    // todo/A18 brings - is added here and reaches the method, constructor and destructor sites at
+    // default arguments will bring - is added here and reaches the method, constructor and destructor sites at
     // once instead of being remembered at three. the drain stays at each site, because a declaration
     // reads `#[intrinsic]`/`#[builtin]` off its own list before it gets here
     void publish_declaration_markers(

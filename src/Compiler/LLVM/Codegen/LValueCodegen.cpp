@@ -186,7 +186,7 @@ LValue LValueCodegen::gen_place(AST::ExprNode &expr)
     // **a pointer with no slot of its own.** a call returning `T&` hands the address back as its
     // value - there is no storage holding it, which is why gen_lvalue has no arm for it and why
     // `$o->get()->x` and `$o->get()->m()` both died on "Expression is not addressable", an internal
-    // exception with no location (todo/A13a). that value *is* the place, the same equivalence the
+    // exception with no location. that value *is* the place, the same equivalence the
     // element arm above rests on: the borrow a contract returns is the address
     //
     // the guard is the exact complement of gen_lvalue's switch - a place is what it has arms for -

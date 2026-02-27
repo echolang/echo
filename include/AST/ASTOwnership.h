@@ -61,42 +61,50 @@ namespace AST
     };
 
     // single ownership, as book/concept/ownership_and_moving.md specifies it: one owner per value,
-    // destroyed exactly once when that owner's scope ends, `mv` to hand it elsewhere. three jobs in
-    // one tree walk, because they answer each other:
+    // destroyed exactly once when that owner's scope ends, `mv` to hand it elsewhere.
+    //
+    // Three jobs in one tree walk, because they answer each other:
     //
     //  - **copy or move.** at each place a value arrives - a declaration's initializer, an
-    //    assignment, an initialization, a call argument, a `return` - a *place* source is a copy and
-    //    a non-place source is already a move. for an owning type the copy is rejected (below) and
-    //    `mv` marks the source moved-from. `return $local` is a move with no `mv`, and that is the
-    //    rule the feature rests on: a constructor's `$this` is a body-local with an implicit
-    //    `return $this`, so without it `$a = Buffer(...)` frees the buffer twice
+    //    assignment, an initialization, a call argument, a `return` - a *place* source is a copy and a
+    //    non-place source is already a move. For an owning type the copy is rejected (below) and `mv`
+    //    marks the source moved-from.
+    //
+    //    `return $local` is a move with no `mv`, and that is the rule the feature rests on: a
+    //    constructor's `$this` is a body-local with an implicit `return $this`, so without it
+    //    `$a = Buffer(...)` frees the buffer twice
     //  - **moved state.** a set of moved-from declarations carried down the walk and merged by union
-    //    at a branch, so a move on one arm of an `if` leaves the variable unset after it. reading a
+    //    at a branch, so a move on one arm of an `if` leaves the variable unset after it. Reading a
     //    moved local is a located error rather than a runtime surprise
     //  - **drops.** at every scope end and before every `return`, a destructor call per live local in
     //    reverse declaration order, skipping whatever was moved out
     //
-    // **every drop is an ordinary FunctionCallExprNode in the tree**, receiver `&$local` - the same
-    // choice AST::PointerAdjuster makes about derefs, and it buys the same three things: codegen
+    // **every drop is an ordinary FunctionCallExprNode in the tree**, receiver `&$local`. That is the
+    // same choice AST::PointerAdjuster makes about derefs, and it buys the same three things: codegen
     // needs no scope-exit machinery, -ar shows the drops, and AST::TypeChecker validates what this
-    // pass inserted (-a is the tree as *parsed*, before this pass runs at all)
+    // pass inserted. (-a is the tree as *parsed*, before this pass runs at all.)
     //
-    // **a copy is a call to the type's copy constructor**, when it has one. the chapter's member-wise
-    // deep copy is not what happens and never was - that recursion has no bottom, since every owning
-    // type bottoms out at a raw `ptr<uint8>` the type system knows nothing about, so copying it
-    // member-wise would leave two owners freeing one allocation. the type holding the pointer is the
-    // one that knows, and a constructor taking a borrow of its own type is it saying so. recognised
-    // rather than newly spelled (AST::is_copy_constructor), so `$b = $a` and `Foo($a)` are one
-    // declaration; honoured whether or not the type owns anything, so which of the two a copy means
-    // does not depend on whether a destructor happens to be declared. with no copy constructor, an
-    // implicit copy of an *owning* type is still a located error naming `mv`, a borrow, and now the
-    // third option
+    // **a copy is a call to the type's copy constructor**, when it has one.
+    //
+    // The member-wise deep copy the chapter describes is not what happens, and never was. That
+    // recursion has no bottom: every owning type bottoms out at a raw `ptr<uint8>` the type system
+    // knows nothing about, so copying it member-wise leaves two owners freeing one allocation. The
+    // type holding the pointer is the one that knows, and a constructor taking a borrow of its own
+    // type is it saying so.
+    //
+    // Two things fall out of *recognising* that constructor rather than spelling a new form for it
+    // (AST::is_copy_constructor). `$b = $a` and `Foo($a)` are one declaration, so they cannot drift.
+    // And it is honoured whether or not the type owns anything, so what a copy means never depends on
+    // whether a destructor happens to be declared.
+    //
+    // With no copy constructor, an implicit copy of an *owning* type is still a located error naming
+    // `mv`, a borrow, and now the third option.
     //
     // **runs inside the monomorphizer's fixpoint**, beside the "re-derive a declaration's type from
-    // its initializer" step. it has to: whether a `T $x` needs destroying is unknown until
-    // substitution, and inserting a drop *creates* a generic call site - a `Box<int32>` local's drop
-    // names the template's destructor, and the next round instantiates it through the ordinary path
-    // so no instantiation logic lives here
+    // its initializer" step. It has to, for two reasons. Whether a `T $x` needs destroying is unknown
+    // until substitution. And inserting a drop *creates* a generic call site - a `Box<int32>` local's
+    // drop names the template's destructor, and the next round instantiates it through the ordinary
+    // path, which is why no instantiation logic lives here
     class OwnershipPass
     {
     public:
@@ -112,7 +120,7 @@ namespace AST
         // **what an enclosing position does with the storage requests raised beneath it**, opened
         // where the decision is made and closed over the expression the decision is about.
         //
-        // there are three answers and only two of them are a scope, which is the point:
+        // There are three answers, and only two of them are a scope. That is the point:
         //
         //  - **bind.** the position *reads a value*, so it outlives every request below it. closing
         //    mints the slots, reseats the operands and hangs the drops on the result
@@ -124,16 +132,18 @@ namespace AST
         //    every place edge is one, and so is a call: when the value a call hands back is made of a
         //    temporary it borrowed, the call is not where the lifetime ends
         //
-        // spelling "forward" as the absence of a scope is deliberate. it is the overwhelmingly common
+        // Spelling "forward" as the absence of a scope is deliberate. It is the overwhelmingly common
         // case - every `&`, `->`, `[…]`, `:$` and `?->` in the program - so a walker arm says nothing
-        // and gets the right answer, and a position that *does* decide has to say which decision it
-        // is making. the two constructors are the two decisions: neither can be written without its
-        // reason, a refusal without wording or a bind without an expression to hang the drops on
+        // and gets the right answer, while a position that *does* decide has to say which decision it
+        // is making.
         //
-        // a **frame** lifetime is deliberately not one of these. binding a value to the enclosing
+        // The two constructors are the two decisions, and neither can be written without its reason:
+        // no refusal without wording, no bind without an expression to hang the drops on.
+        //
+        // A **frame** lifetime is deliberately not one of these. Binding a value to the enclosing
         // frame is a rewrite of the *statement* rather than of an expression edge - the statement
         // becomes the declaration - so bind_discarded_temporary owns it, sharing make_temporary and
-        // nothing else. one mint, two shapes
+        // nothing else. One mint, two shapes
         class MaterializationScope
         {
         public:
@@ -411,18 +421,18 @@ namespace AST
 
         // a resolved call to `callee` with `place` as its borrow receiver, positioned at `at`
         //
-        // the receiver is addressed here, exactly as the parser addresses a method's: the parameter is
-        // the borrow `Foo&`, and a value ranked against it would be no fit at all. unless the place
+        // The receiver is addressed here, exactly as the parser addresses a method's: the parameter is
+        // the borrow `Foo&`, and a value ranked against it would be no fit at all. Unless the place
         // already *is* that address - the `$this` of a synthesized class deinit, declared `Foo&`,
-        // which would otherwise be handed a ptr<ptr<Foo>>
+        // which would otherwise be handed a ptr<ptr<Foo>>.
         //
-        // `decl` is set directly rather than resolved: there is no name to look up and no overload set
-        // to search. for an instantiation it is the *template's* declaration, and the monomorphizer's
+        // `decl` is set directly rather than resolved. There is no name to look up and no overload set
+        // to search. For an instantiation it is the *template's* declaration, and the monomorphizer's
         // next round binds the owner's parameters from the receiver and rewires the call to the
-        // instance - which is the whole reason this pass runs inside that fixpoint
+        // instance - which is the whole reason this pass runs inside that fixpoint.
         //
-        // shared by the two things this pass inserts that call a member: a drop and a copy. they
-        // differ only in which declaration they name and where the place comes from
+        // Shared by the two things this pass inserts that call a member, a drop and a copy. They differ
+        // only in which declaration they name and where the place comes from
         FunctionCallExprNode &emit_resolved_member_call(
             FunctionDeclNode *callee,
             const TokenReference &at,
@@ -491,39 +501,41 @@ namespace AST
         // --- classes ---------------------------------------------------------------------------
 
         // the function a class's release calls when the count reaches zero: its own destructor, then
-        // each owning property. synthesized on demand - the first time a release of this class is
-        // inserted - and only when class_needs_deinit says the payload owns anything, so a plain data
-        // class gets none and its release is a decrement and a free
+        // each owning property.
         //
-        // built out of emit_destructor_call and emit_property_drops, the same two pieces a struct's
-        // scope-exit drop is built from. that is the point: what a class tears down at zero and what a
-        // struct tears down at scope end are one decision, not two that have to be kept in step
+        // Synthesized on demand, at the first release of this class, and only when class_needs_deinit
+        // says the payload owns anything - so a plain data class gets none and its release is a
+        // decrement and a free.
+        //
+        // Built out of emit_destructor_call and emit_property_drops, the same two pieces a struct's
+        // scope-exit drop is built from. That is the point: what a class tears down at zero and what a
+        // struct tears down at scope end are one decision, not two that have to be kept in step.
         //
         // `site` is the release that asked for it, and it is what the synthesized declaration and its
-        // `$this` are positioned at. a deinit is shared by every release of the class, so this is the
-        // first one that needed it rather than the class's own declaration - which is still a real
-        // line in the file that tears this class down, and a diagnostic raised inside the body has
-        // somewhere to point other than line 0
+        // `$this` are positioned at. A deinit is shared by every release of the class, so this is the
+        // first one that needed it rather than the class's own declaration. It is still a real line in
+        // the file that tears this class down, so a diagnostic raised inside the body has somewhere to
+        // point other than line 0
         void ensure_class_deinit(const ValueType &class_type, const TokenReference &site);
 
         // every class in the bundle whose payload needs tearing down gets its deinit, whether or not this
         // program happens to release one.
         //
-        // synthesizing on demand alone is not sound across separate compilations, and the failure is
-        // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body branches
-        // on whether the class has a deinit - so a build that never released a `str::buf` produced a
-        // thunk that decrements and frees, a build that did produced one that also tears the payload down,
-        // and both claim the same ODR symbol. The linker keeps whichever it saw first and the program
-        // leaks, with nothing anywhere to point at.
+        // Synthesizing on demand alone is not sound across separate compilations, and the failure is
+        // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body
+        // branches on whether the class has a deinit. So a build that never released a `str::buf`
+        // produced a thunk that decrements and frees, a build that did produced one that also tears the
+        // payload down, and both claim the same ODR symbol. The linker keeps whichever it saw first,
+        // and the program leaks with nothing anywhere to point at.
         //
-        // so existence has to be a function of the *type* rather than of what the build did with it -
+        // So existence has to be a function of the *type* rather than of what the build did with it,
         // which class_needs_deinit already is. This makes the synthesis agree with it.
         //
-        // deliberately **not** done for copy constructors, which are generated the same way and share the
-        // same linkage: nothing else observes whether one exists. A copy constructor's body is field-wise
-        // assignment derived from the properties, so two units that both need one write the same bytes,
-        // and a unit that does not need one simply does not ask. The deinit is special only because the
-        // release thunk reads the slot
+        // Deliberately **not** done for copy constructors, which are generated the same way and share
+        // the same linkage - because nothing else observes whether one exists. A copy constructor's
+        // body is field-wise assignment derived from the properties, so two units that both need one
+        // write the same bytes, and a unit that does not need one simply does not ask. The deinit is
+        // special only because the release thunk reads the slot
         void synthesize_pending_class_deinits();
 
         // where a class layout was declared: the module, so a swept deinit lands somewhere deterministic
@@ -547,28 +559,29 @@ namespace AST
         // the copy constructor for a struct whose owning properties are all classes, transitively:
         // the body its author would have written, which is a field-wise assignment and nothing else
         //
-        // no retain appears in what this builds. `$this->a = $other->a` is an ordinary assignment, so
-        // the next round's walk reaches it through resolve_value_arrival and inserts the retain there
-        // - the same arm a hand-written copy constructor's body goes through. a property that is a
-        // struct with a copy of its own gets a resolved call to it instead, and one that needs a
-        // synthesized copy asks for its own here, which is where the recursion lives
+        // No retain appears in what this builds. `$this->a = $other->a` is an ordinary assignment, so
+        // the next round's walk reaches it through resolve_value_arrival and inserts the retain there -
+        // the same arm a hand-written copy constructor's body goes through.
         //
-        // synthesized on demand at the first copy that needs it, and per *concrete* type rather than
-        // per template: whether the compiler can write the body at all depends on the property types,
-        // and `Box<Handle>` can while `Box<Buffer>` cannot. AST::copy_is_synthesizable (ASTCopy.h) is
-        // the rule, and it declines a type that already has a written one
+        // A property that is a struct with a copy of its own gets a resolved call to it instead, and
+        // one that needs a synthesized copy asks for its own here. That is where the recursion lives.
         //
-        // **answers the declaration**, which is what the caller goes on to call. that is one asking of
-        // the copy-constructor lookup rather than "publish it, then read the slot back" - the arm that
+        // Synthesized on demand at the first copy that needs it, and per *concrete* type rather than
+        // per template - because whether the compiler can write the body at all depends on the property
+        // types, and `Box<Handle>` can while `Box<Buffer>` cannot. AST::copy_is_synthesizable
+        // (ASTCopy.h) is the rule, and it declines a type that already has a written one.
+        //
+        // **answers the declaration**, which is what the caller goes on to call. That is one asking of
+        // the copy-constructor lookup rather than "publish it, then read the slot back". The arm that
         // gets here has already classified the type, and re-deriving what it just decided is what A24
-        // took out of this ladder
+        // took out of this ladder.
         //
-        // deliberately **not** registered in AST::FunctionRegistry, unlike the parser's field-wise
-        // constructor. that registry is read only while parsing, and a call site is resolved as it is
-        // parsed - so a declaration created inside this fixpoint arrives after every written call was
-        // already resolved or already reported. it would make `Pair($p)` no more callable than it is
-        // now, and would put a per-instantiation declaration into a name-keyed overload set the
-        // parser owns. `$q = $p` is the spelling
+        // Deliberately **not** registered in AST::FunctionRegistry, unlike the parser's field-wise
+        // constructor. That registry is read only while parsing, and a call site is resolved as it is
+        // parsed, so a declaration created inside this fixpoint arrives after every written call was
+        // already resolved or already reported. Registering it would make `Pair($p)` no more callable
+        // than it is now, and would put a per-instantiation declaration into a name-keyed overload set
+        // the parser owns. `$q = $p` is the spelling
         FunctionDeclNode *ensure_copy_constructor(const ValueType &type, const TokenReference &site);
 
         // **there is no copy of this value, and this is what the author is told.** two wordings, and

@@ -286,21 +286,23 @@ namespace AST
 
     // step B2: a closure environment property whose type came from a variable that was not typed yet
     //
-    // capture is decided in the parser, at the read, so the property took the captured variable's type as
-    // it stood *then* - which for `$b = Box<int32>(5)` was the template's un-substituted `Box<T>`, stale
-    // for precisely the reason step B's variables are. re-derived from the place the capture reads rather
-    // than from a remembered type: `captured_values[i]` is what fills the property, so the two cannot
-    // drift - and it answers for a capture of any shape, which the declaration behind it would not
-    // (a transitive capture, todo/A27 §3, reads the enclosing environment's property, not a local)
+    // Capture is decided in the parser, at the read, so the property took the captured variable's type
+    // as it stood *then*. For `$b = Box<int32>(5)` that was the template's un-substituted `Box<T>`,
+    // stale for precisely the reason step B's variables are.
     //
-    // immediately after step B, so a variable that round made concrete retypes its capture in the same
-    // round, and before step C, so the body's `$__env->b->get()` resolves against `Box<int32>` rather
-    // than finding only the template's method and reaching codegen unresolved
+    // Re-derived from the place the capture reads rather than from a remembered type. `captured_values[i]`
+    // is what fills the property, so the two cannot drift, and it answers for a capture of any shape -
+    // which the declaration behind it would not, a transitive capture reading the enclosing
+    // environment's property rather than a local.
     //
-    // one environment per closure *expression*, which a clone shares (ClosureExprNode::clone) - fine only
-    // while a closure cannot be written in a generic body, since two instances' captures would otherwise
-    // want two layouts and retype each other every round. that restriction lifts together with the
-    // per-instantiation environment todo/A27 §4 describes
+    // Immediately after step B, so a variable that round made concrete retypes its capture in the same
+    // round. And before step C, so the body's `$__env->b->get()` resolves against `Box<int32>` rather
+    // than finding only the template's method and reaching codegen unresolved.
+    //
+    // One environment per closure *expression*, which a clone shares (ClosureExprNode::clone). That is
+    // fine only while a closure cannot be written in a generic body - two instances' captures would
+    // otherwise want two layouts and retype each other every round. The restriction lifts together with
+    // the per-instantiation environment a generic closure would need
     bool Monomorphizer::rederive_stale_capture_types()
     {
         bool progressed = false;
@@ -420,18 +422,22 @@ namespace AST
 
             // **an argument that still mentions a type parameter is a template's, not a program's.**
             //
-            // the same silence report_unknown_name keeps for a receiver, and for the same reason one
-            // argument further out: this call sits in an un-instantiated body, the clones the fixpoint
+            // The same silence report_unknown_name keeps for a receiver, and for the same reason one
+            // argument further out. This call sits in an un-instantiated body, the clones the fixpoint
             // made are what carry concrete argument types, and reporting the template's would blame the
-            // one body that is never emitted. If nobody instantiated it there is nothing to report; if
-            // somebody did, the clone reports for itself with the types the author can actually see.
+            // one body that is never emitted.
             //
-            // what makes this load-bearing rather than tidy is an **overload set** over a type parameter.
-            // `hash::of($key)` inside `map<K, V>` is undecidable in the template - every concrete
-            // overload scores neutrally against a bare `K`, so match_function answers t_undecidable - and
-            // it becomes decidable in `map<string, int32>`'s clone. Without this, a standard library type
-            // could not call an overload set on its own key type at all, and the diagnostic named every
-            // overload in the set as though the author had written an ambiguous call
+            // If nobody instantiated it there is nothing to report. If somebody did, the clone reports
+            // for itself, with the types the author can actually see.
+            //
+            // What makes this load-bearing rather than tidy is an **overload set** over a type
+            // parameter. `hash::of($key)` inside `map<K, V>` is undecidable in the template - every
+            // concrete overload scores neutrally against a bare `K`, so match_function answers
+            // t_undecidable - and it becomes decidable in `map<string, int32>`'s clone.
+            //
+            // Without this, a standard library type could not call an overload set on its own key type
+            // at all, and the diagnostic named every overload in the set as though the author had
+            // written an ambiguous call
             const bool argument_mentions_a_type_param = std::ranges::any_of(
                 call->arguments,
                 [](const ExprNode *argument) {
@@ -514,15 +520,16 @@ namespace AST
             // so folding either against a `T` the monomorphizer has not bound yet is silently the wrong
             // answer in the one direction that compiles. the same sentence ExprCodegen has always carried.
             //
-            // *ahead of both rewriters below*, and this is the point rather than tidiness: they do not
-            // merely waste work on a subtree about to vanish, they **create call sites in it**. an
-            // `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at clone
-            // time - and AST::OperatorRewriter is what turns them into `operator []` calls that the next
-            // round instantiates and codegen emits. a `foreach` in an untaken arm is the same story one
-            // level up: AST::ForeachLowering mints its `iterate()`. discarding first is the only way not
-            // to pay for either.
+            // *ahead of both rewriters below*, and this is the point rather than tidiness. They do not
+            // merely waste work on a subtree about to vanish, they **create call sites in it**.
             //
-            // *before the ownership pass*, which walks a body **exactly once, ever**. a `T $doomed` in an
+            // An `array<T>`'s untaken copy arm is `$this[] = $other[$i]` - two bare IndexExprNodes at
+            // clone time - and AST::OperatorRewriter is what turns them into `operator []` calls that the
+            // next round instantiates and codegen emits. A `foreach` in an untaken arm is the same story
+            // one level up: AST::ForeachLowering mints its `iterate()`. Discarding first is the only way
+            // not to pay for either.
+            //
+            // *before the ownership pass*, which walks a body **exactly once, ever**. A `T $doomed` in an
             // untaken arm is a local that pass gives a drop, and a drop of an owning `T` is one more
             // generic call site. OwnershipPass::body_is_concrete answers false while a ConstIfNode or a
             // ConstExprNode is in the body, which is what makes this safe rather than merely early

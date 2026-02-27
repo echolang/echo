@@ -1,6 +1,6 @@
 // a member is read from an address, and a value nobody stored has none - so the value is given storage
 // for exactly as long as the expression reading it needs. `Inner` owns nothing, so the temporary owes no
-// teardown at all, which is what the RAST section checks: one binding, and not one drop (todo/A13b)
+// teardown at all, which is what the RAST section checks: one binding, and not one drop
 
 struct Inner { int32 $tag; }
 

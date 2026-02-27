@@ -2,7 +2,7 @@
 // value nobody stored has none - so one is given to it: the temporary is built immediately before the
 // call and destroyed immediately after it, which is why 500 (the method's own echo) lands before 900
 // (the destructor) rather than after. the receiver is argument zero and evaluated first, so binding it
-// just outside the call is exactly where it was written (todo/A13b)
+// just outside the call is exactly where it was written
 
 struct Buffer
 {

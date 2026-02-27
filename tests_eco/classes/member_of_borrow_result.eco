@@ -1,7 +1,7 @@
 // a class-typed borrow is the address of a *slot holding a handle*, so reading a member through one
 // loads the handle out of the returned address and steps into the payload - the same hop a named
 // local's member read makes. the mem::ref_count either side is the assertion that matters: a borrow owns
-// nothing, so nothing along the way may retain or release (todo/A13a)
+// nothing, so nothing along the way may retain or release
 
 class Node
 {

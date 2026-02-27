@@ -1,6 +1,6 @@
 // a member of a member of a call result. the request travels out through the second `->` rather than
 // being bound under it, because that `->` is still addressing the temporary's storage - so the chain
-// binds once, at the top, and the RAST section is what pins that (todo/A13b)
+// binds once, at the top, and the RAST section is what pins that
 
 struct Inner { int32 $tag; }
 struct Middle { Inner $in; }

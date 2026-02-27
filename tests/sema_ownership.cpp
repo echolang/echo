@@ -819,7 +819,7 @@ TEST_CASE("an owning field initialized twice in one constructor is reported", "[
     REQUIRE(has_issue_containing(*bundle, "is initialized twice"));
 }
 
-// --- a temporary with an owner (todo/A13b) -------------------------------------------------------
+// --- a temporary with an owner -------------------------------------------------------
 //
 // `$o->get()->tag` reads a member off a value the callee handed back and nobody stored. the pass gives
 // it storage for exactly as long as the expression reading it, and that storage needs an owner - which

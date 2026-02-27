@@ -12,7 +12,7 @@ ptr<int32> $p = null;      // might not
 ```
 
 `T&` and `ptr<T>` are the same machine address and differ in exactly one respect — whether `null` is
-allowed. That distinction used to live only on pointers. It now lives on every type, and it is spelled
+allowed. That distinction used to live only on pointers. It now lives on every type, and it's spelled
 with a `?`.
 
 ## The question mark
@@ -33,17 +33,17 @@ A value slides into a nullable without saying anything, because doing so only gi
 int32? $widened = 41;      // fine
 ```
 
-Going the other way is where the compiler stops you, and it is the point of the whole feature:
+Going the other way is where the compiler stops you, and it's the point of the whole feature:
 
 ```echo
 int32? $maybe = lookup($key);
 int32  $sure  = $maybe;    // error: cannot implicitly convert 'int32?' to 'int32'
 ```
 
-There is nothing wrong with that program *except* that it has not said what happens when the value is
+There's nothing wrong with that program *except* that it hasn't said what happens when the value is
 absent. The next three sections are the three ways to say it.
 
-`null` is the empty value of every nullable, and there is only ever one kind of empty — `T??` is just `T?`. You
+`null` is the empty value of every nullable, and there's only ever one kind of empty — `T??` is just `T?`. You
 can ask directly:
 
 ```echo
@@ -101,10 +101,10 @@ function greet(int32 $key) : int32
 ```
 
 `$v` is declared in the *enclosing* scope with the non-null type, so everything after the guard reads it
-without ceremony. That is what makes `guard` the form to reach for first: it is the one that gets the
+without ceremony. That's what makes `guard` the form to reach for first: it's the one that gets the
 absence out of the way instead of carrying it forward.
 
-The `else` block must leave — `return` or `die`. It is not a style rule:
+The `else` block must leave — `return` or `die`. That isn't a style rule:
 
 ```echo
 guard int32 $v = lookup($key) else { echo "missing"; }   // error
@@ -123,7 +123,7 @@ if ($maybe != null) {
 ```
 
 Testing a nullable tells you something; it doesn't change the type. `guard` changes the type, and it changes it
-for the whole rest of the scope rather than for one block — which is why it's the form to reach for first.
+for the whole rest of the scope rather than for one block.
 
 ## `??` — supply a replacement
 
@@ -157,14 +157,14 @@ echo $node->next?->next?->tag ?? 0;
 ```
 
 Each `?` there is a link that genuinely may be missing. The compiler says so if you write one that
-cannot be:
+can't be:
 
 ```echo
 echo $node?->tag;          // error: '?->' needs a value that may be absent - write '->'
 ```
 
 The result of a `?->` is nullable, because the whole expression is absent whenever the base was — which
-is why it pairs so naturally with `??`. A chain ending in a `void` call stays `void`: there is nothing
+is why it pairs so naturally with `??`. A chain ending in a `void` call stays `void`: there's nothing
 for a statement to be absent.
 
 ## Just asking
@@ -179,11 +179,11 @@ if (!$maybeNode) {
 ```
 
 `!$x` and `$x == null` are the same question and compile to the same instruction, so pick whichever
-reads better where you are. What they are *not* is a way to use the value: neither one narrows the
-type, so `$maybeNode->tag` after either is still an error. That is what `guard` is for.
+reads better where you are. What they're *not* is a way to use the value: neither one narrows the
+type, so `$maybeNode->tag` after either is still an error. That's what `guard` is for.
 
-Applied to a `bool`, `!` is ordinary negation. It is the one operator in the language that answers two
-different questions, and which one it is asking is decided by what you applied it to.
+Applied to a `bool`, `!` is ordinary negation. It's the one operator in the language that answers two
+different questions, and which one it's asking is decided by what you applied it to.
 
 ## What it costs
 
@@ -201,8 +201,8 @@ program can tell them apart.
 ## Weak references
 
 The other way a value can turn out not to be there is a
-[weak reference](ownership_and_moving.md#weak-references-and-cycles) — a handle on an object that does
-not keep it alive. Upgrading one gives you a nullable, because the object may be gone:
+[weak reference](ownership_and_moving.md#weak-references-and-cycles) — a handle on an object that doesn't
+keep it alive. Upgrading one gives you a nullable, because the object may be gone:
 
 ```echo
 weak<Node> $w = &$node;

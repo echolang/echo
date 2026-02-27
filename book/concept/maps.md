@@ -119,7 +119,7 @@ Two things are worth knowing about it.
 **Writing and reading are two different declarations.** `$m[$k] = $v` resolves to one that takes the value and
 owns the whole insert-or-replace; every other position resolves to one that hands back a borrow of an existing
 element. Which one answers is decided by *where the bracket sits*, and nothing else. You'd never notice,
-except that it's what makes the two behaviours possible at once: a single operator can't promise both "the
+except that it's what makes the two behaviors possible at once: a single operator can't promise both "the
 value that was here is gone" and "hand me the value that's here". Writing one of your own is
 [Operators](operators.md), "Indexing".
 
@@ -254,7 +254,7 @@ as always, and `foreach ($m as &$v)` is refused by name. See
 - **A lookup** is one hash, one mask, and then a walk that reads a single dense array. `==` only
   runs on a slot whose stored hash already matched, so a `string` key costs a byte comparison only on a real
   candidate.
-- **An insert** may rehash. Amortised that's fine; individually it's O(n).
+- **An insert** may rehash. Amortized that's fine; individually it's O(n).
 - **A remove** leaves a tombstone, which later probes walk past. Churn reclaims them rather than growing, so
   a map used as a working set doesn't creep.
 - **`ordered_map`** adds a key copy per entry, an O(n) removal, and one hash lookup per iteration step — the
@@ -268,5 +268,4 @@ as always, and `foreach ($m as &$v)` is refused by name. See
 - **An optional lookup.** `$m->lookup($k) ?? 0` is what you want and `has` + `get` is what there is.
 - **A lazy `keys()`.** It returns a real array today, because a type may declare only one iteration contract
   and a map's is over its values.
-- **Iterating a `const` map**, as above.
 - **Choosing the hasher.** `map<K, V, Hasher>` waits on the same work `array<T, Allocator>` does.

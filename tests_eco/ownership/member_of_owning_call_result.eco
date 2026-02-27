@@ -1,7 +1,7 @@
 // the intermediate is destroyed exactly once, and *after* the read. the destructor echoes, so both are
 // visible in the output rather than inferred: 900 lands between the two markers because the temporary
 // dies at the end of the expression that read it, and 7 - the value it was read for - is printed by the
-// echo that follows (todo/A13b)
+// echo that follows
 
 struct Buffer
 {

@@ -253,10 +253,8 @@ A `type` has to come *before* any requirement that mentions it. A requirement's 
 has to be a name by the time the compiler gets there.
 
 And a `type` belongs to an interface. A struct or class body can't declare one, because an implementor never
-declares its binding — it declares the member that answers the requirement, and the compiler reads the binding
-off that.
-
-The implementor never writes `Iter`. It writes the member, and the compiler reads the binding off it:
+writes its binding — it writes the member that answers the requirement, and the compiler reads the binding off
+that:
 
 ```echo
 struct Bag : contract::iterable<int32>

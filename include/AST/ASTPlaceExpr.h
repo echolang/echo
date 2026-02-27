@@ -20,7 +20,7 @@ namespace AST
     //
     // total by construction: the switch below names only the two answers that are *not* the common case,
     // so a node kind added later lands in `t_materializable` - the useful default - instead of silently
-    // answering "no" the way an allow-list makes it (todo/A36, and the same trap CLAUDE.md lists for
+    // answering "no" the way an allow-list makes it (the same trap CLAUDE.md lists for
     // `NodeReference::is_expression_node()`)
     enum class StorageClass
     {
@@ -29,7 +29,7 @@ namespace AST
 
         // no address, but one can be minted: the value is bound to a temporary and *that* is addressed.
         // which is what a method receiver needs, a method taking the address of the value it is called
-        // on (todo/A13b), and what lets a literal answer a borrow parameter (todo/A13c)
+        // on, and what lets a literal answer a borrow parameter
         t_materializable,
 
         // no address, and it must not be given one. each of these is load-bearing, and each for its
@@ -104,7 +104,7 @@ namespace AST
     // shared deliberately. four places have to agree on this question - the parser rejecting
     // `&($a + $b)`, the adjustment pass deciding value versus place position, the type checker
     // locating a diagnostic, and the lvalue codegen's dispatch. when each kept its own switch
-    // they drifted, which is how member reads and member writes ended up disagreeing (todo/A3)
+    // they drifted, which is how member reads and member writes ended up disagreeing
     inline bool is_place_expression(const ExprNode &expr)
     {
         return storage_of(expr) == StorageClass::t_place;
@@ -179,21 +179,23 @@ namespace AST
 
     // **is this storage the compiler is not accounting for?**
     //
-    // a *different* question from every other one in this header, which are all about whether an
-    // expression has an address. this one is about who owes that address's value an end. a local gets a
-    // scope-exit drop, a temporary gets one from the frame it was bound to, and a property gets one from
-    // its owner's teardown - so every one of those is storage some pass already walks. what is left is
-    // storage reached **through a pointer**, `$p:$` and `$p:$[$i]`, which nothing walks, because a
-    // pointer is not an owner.
+    // A *different* question from every other one in this header, which are all about whether an
+    // expression has an address. This one is about who owes that address's value an end.
     //
-    // that is exactly the storage a container manages itself, and therefore exactly the storage the two
-    // unsafe seams in `mem::` are allowed to touch: `mem::take` empties one and `mem::init` fills one.
-    // Two readers, one rule - AST::TypeChecker refuses both the same way, so "which storage may I move
+    // A local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
+    // property gets one from its owner's teardown - so every one of those is storage some pass already
+    // walks. What is left is storage reached **through a pointer**, `$p:$` and `$p:$[$i]`, which nothing
+    // walks, because a pointer is not an owner.
+    //
+    // That is exactly the storage a container manages itself, and therefore exactly the storage the two
+    // unsafe seams in `mem::` are allowed to touch: `mem::take` empties one, `mem::init` fills one.
+    //
+    // Two readers, one rule. AST::TypeChecker refuses both the same way, so "which storage may I move
     // through" cannot come to two answers. It used to be spelled inline in the `take` check alone, and
-    // `init` arriving is what made a second copy of it a question of when rather than whether
+    // `init` arriving is what made a second copy of it a question of when rather than whether.
     //
-    // the index arm asks AST::IndexExprNode::indexed_base_type rather than looking at the base's node
-    // kind, because that is the sole owner of "is this a pointer index": `$a[$i]` on an `array<T>`
+    // The index arm asks AST::IndexExprNode::indexed_base_type rather than looking at the base's node
+    // kind, because that is the sole owner of "is this a pointer index". `$a[$i]` on an `array<T>`
     // reaches the element operator and is a place the array accounts for, while `$p:$[$i]` is raw
     // storage and is not
     inline bool is_unaccounted_storage(const ExprNode &expr)
@@ -213,12 +215,13 @@ namespace AST
     // access's base and an `&`'s operand - genuinely share, so `$o->get()->tag` and `$o->get()->size()`
     // cannot answer it differently.
     //
-    // the place test is first because it is the cheap one and it is what almost every operand answers:
-    // every compiler-inserted borrow - a receiver, a drop, a CallResolver coercion - is an address of a
-    // place, and a member base is a place in all but the shape this exists for. deriving the type ahead of
-    // it would re-walk a whole `->` chain per link, once per fixpoint round, and throw the answer away
+    // The place test comes first because it is the cheap one, and it is what almost every operand
+    // answers. Every compiler-inserted borrow - a receiver, a drop, a CallResolver coercion - is an
+    // address of a place, and a member base is a place in all but the shape this exists for. Deriving
+    // the type ahead of it would re-walk a whole `->` chain per link, once per fixpoint round, and throw
+    // the answer away
     //
-    // a **pointer** operand needs nothing: a borrow-returning call already is the address (todo/A13a)
+    // a **pointer** operand needs nothing: a borrow-returning call already is the address
     //
     // **it asks the place half of storage_of and deliberately not the addressless half**, which is the
     // one place the two questions come apart. can_bind_temporary answers "may the compiler *ask* for a
@@ -248,7 +251,7 @@ namespace AST
     }
 
     // **does an `&`'s operand need storage minted for it?** everything that lacks storage and has a type
-    // concrete enough to size a slot from - which after todo/A13c is every value the language can
+    // concrete enough to size a slot from - which is every value the language can
     // produce, a literal and an arithmetic result included, not only the struct and class a member base
     // has to be
     //

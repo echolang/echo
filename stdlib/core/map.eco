@@ -531,7 +531,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 
     // ---- internals ------------------------------------------------------------------------------------
     //
-    // public only because there are no visibility modifiers yet (todo/A17). Nothing outside this file
+    // public only because there are no visibility modifiers yet. Nothing outside this file
     // should call any of them.
 
     /**
@@ -638,7 +638,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * How many slots `$count` entries need: a power of two, at least 8, keeping the load under 0.75.
      *
      * The floor is flat rather than element-size dependent, deliberately unlike `array<T>::reserve`'s:
-     * `mem::size_of` cannot decide a `const if` (todo/A41), and a slot here is a `uint64` plus a `K` plus a
+     * `mem::size_of` cannot decide a `const if`, and a slot here is a `uint64` plus a `K` plus a
      * `V` and is never one byte - so there is nothing a size could buy, and nothing to revisit when A41
      * lands.
      */
@@ -995,7 +995,7 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
  * Owning nothing - three addresses and two counts - so it declares no destructor and no copy constructor: a
  * shallow copy is the correct copy, which is `slice_iterator<T>`'s argument unchanged. It lives here beside
  * `map<K, V>` rather than in `contract.eco` because it is a concrete type at the root, and because a nested
- * type inside a generic owner is refused (todo/A29) - the same reason `slice_iterator<T>` sits beside
+ * type inside a generic owner is refused - the same reason `slice_iterator<T>` sits beside
  * `slice<T>`.
  *
  * **It holds the three addresses and the capacity by value**, which is load-bearing rather than incidental,

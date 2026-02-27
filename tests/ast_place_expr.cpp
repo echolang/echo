@@ -18,7 +18,7 @@
 // four consumers have to agree on the answer: the parser rejecting `&($a + $b)`, the adjustment
 // pass deciding value versus place position, the type checker locating a diagnostic, and the
 // lvalue codegen's dispatch. when each kept its own switch they drifted, and member reads ended
-// up disagreeing with member writes (todo/B4). pinning the exact tag set here makes widening it a
+// up disagreeing with member writes. pinning the exact tag set here makes widening it a
 // deliberate act rather than a side effect
 
 using namespace AST;
@@ -103,7 +103,7 @@ TEST_CASE("An address, a literal and a call result are not places", "[AST][point
 
 TEST_CASE("can_bind_temporary admits a value with no home, and only that", "[AST][pointer]")
 {
-    // the expression half of todo/A13c: a non-place may answer a borrow parameter, because a slot can be
+    // the expression half of the temporary-borrow rank: a non-place may answer a borrow parameter, because a slot can be
     // *minted* for it. so this and is_place_expression partition the arguments a borrow accepts, and the
     // exclusions below are what keep the partition from swallowing rules that belong elsewhere
     auto bundle = EchoTests::tests_make_parsed_bundle(
@@ -145,7 +145,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
     // **the arm that keeps the taxonomy total.** storage_of names only the two answers that are not the
     // common case and lets everything else default to t_materializable, which is what makes a node kind
     // added later behave usefully instead of silently answering "no" - the allow-list this replaced had
-    // already lost four value-producing kinds that way (todo/A36)
+    // already lost four value-producing kinds that way
     //
     // so this asserts the classification over *every* NodeType an expression can be, and the list is
     // NodeReference::is_expression_node()'s. a kind added to that one and not considered here fails the
@@ -485,7 +485,7 @@ TEST_CASE("A bound temporary is not a place either", "[AST][pointer][ownership]"
     // out an address that dangles at the end of the statement and `$o->get()->x = 5` would write into
     // bytes nothing will ever read. both are refused in AST::OwnershipPass, which is the only pass that
     // knew a temporary was wanted - and this predicate staying narrow is what keeps them refused
-    // everywhere else too (todo/A13b)
+    // everywhere else too
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Inner { int32 $tag; }\n"
         "struct Outer {\n"

@@ -39,28 +39,31 @@ namespace AST
     //  - **an operator over a bare type parameter.** inside `function add<T>(T $a, T $b)` the
     //    operands are `T`, which AST::binary_has_builtin_meaning is deliberately non-committal about,
     //    so the parser takes the built-in path and builds a BinaryExprNode the substituted body then
-    //    keeps (todo/A32)
+    //    keeps
     //  - **a write through a bracket.** `$c[$k] = $v` is either one call that owns the whole
     //    insert-or-replace or an ordinary write through a place, and which one it is depends on whether
     //    `$c`'s type declares an element-write contract - AST::declares_index_write
     //
-    // so this is **the parser's own decision, re-asked with the types a round produced**, through the
-    // very same predicates and the very same operand normalizer - AST::parse_time_operand, because
-    // this runs before AST::PointerAdjuster and a place read of a borrow is still a pointer here.
-    // there is no second rule anywhere in this file, only a second moment.
+    // so this is **the parser's own decision, re-asked with the types a round produced**. Same
+    // predicates, same operand normalizer - AST::parse_time_operand, because this runs before
+    // AST::PointerAdjuster and a place read of a borrow is still a pointer here. There is no second
+    // rule anywhere in this file, only a second moment.
     //
-    // **one walk, five rules**, and the walk is not this file's. it used to be a second complete
-    // expression-edge switch parallel to PointerAdjuster's, which is exactly where a forgotten arm is
-    // a silent miss - and both of them had forgotten the same four (`guard`, `??`, `?->`, `strong`).
-    // AST::RecursiveVisitor owns the descent now; this pass overrides rewrite_value_edge and inherits
-    // an enumeration it cannot fall behind. the rules do not differ by edge *position* the way the
-    // adjuster's policies do, so both seams answer the same way.
+    // **one walk, five rules**, and the walk is not this file's.
+    //
+    // It used to be a second complete expression-edge switch parallel to PointerAdjuster's, which is
+    // exactly where a forgotten arm is a silent miss. Both of them had forgotten the same four
+    // (`guard`, `??`, `?->`, `strong`). AST::RecursiveVisitor owns the descent now, so this pass
+    // overrides rewrite_value_edge and inherits an enumeration it cannot fall behind. The rules do
+    // not differ by edge *position* the way the adjuster's policies do, so both seams answer alike.
     //
     // runs **inside the monomorphizer's fixpoint**, per round, the way AST::OwnershipPass does and
     // for the same reason: it needs the concrete types the round produced, and the call it builds may
-    // itself be generic - `operator []` over `array<int32>` is an instantiation, which only the
-    // fixpoint can still create. it is ordered ahead of the re-derivation steps because a declaration
-    // inferred from `$a[0]` has no type at all until the element call is attached
+    // itself be generic. `operator []` over `array<int32>` is an instantiation, and only the fixpoint
+    // can still create one.
+    //
+    // Ordered ahead of the re-derivation steps, because a declaration inferred from `$a[0]` has no
+    // type at all until the element call is attached
     class OperatorRewriter : public RecursiveVisitor
     {
     public:
@@ -147,7 +150,7 @@ namespace AST
         // inserts it, through AST::optional_operand_of, which stays the single owner of "a weak is
         // also accepted here"; but inside a template the operand is a bare `T` and there is nothing to
         // upgrade yet, so a `T` that substitutes to a `weak<Node>` reached codegen branching on a
-        // handle nobody retained (todo/B27). this is the same function at the moment the substitution
+        // handle nobody retained. this is the same function at the moment the substitution
         // happened - exactly the second-moment shape rules 1 and 3 already have.
         //
         // idempotent by construction: what it produces is a nullable, and a nullable is handed back

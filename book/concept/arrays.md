@@ -6,7 +6,7 @@
 In PHP an array is a hash map that will hold anything you put in it. In Echo it holds one type, laid
 out contiguously, and — this is the part that's genuinely new — it's a value that you own.
 
-If what you actually want is a key rather than an index, that is [Maps](maps.md) - the same bargain about
+If what you actually want is a key rather than an index, that's [Maps](maps.md) — the same bargain about
 ownership, with a hash instead of a position.
 
 ## Three types, three jobs

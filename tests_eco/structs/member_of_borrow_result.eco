@@ -1,7 +1,7 @@
 // a borrow-returning call hands the address back as its value, so reading a member through it needs
 // no storage of its own - there is nothing to own and nothing to release. `&$o->mid()` is still
 // refused: the restriction is on taking the address of a call, not on reading through the one it
-// returned (todo/A13a)
+// returned
 
 struct Inner { int32 $x; }
 

@@ -1,5 +1,5 @@
 // a **literal** reaching a view parameter through the `#[implicit]` conversion, which needs two things
-// that used to be missing (todo/A13c):
+// that used to be missing:
 //
 //  - the conversion's receiver is `$this`, so it needs an address, and a literal has no storage. it gets
 //    a temporary, the same one any other non-place borrow argument gets

@@ -28,13 +28,16 @@ namespace AST
     // conformance list, and nothing more.
     //
     // **no template_ref redirect here, unlike every lookup in ASTMemberLookup.h** - and that is the
-    // point. an instantiation's conformances are substituted into its own list when it is interned
+    // point.
+    //
+    // An instantiation's conformances are substituted into its own list when it is interned
     // (TypeRegistry::derive_instantiation), because `struct Bag<E> : contract::iterable<E>` conforms to
-    // `contract::iterable<int32>` and not to `contract::iterable<E>`. redirecting to the template instead
-    // would hand back a conformance still mentioning `E`, which compares equal to nothing a use site can ask
-    // about - and re-substituting at read time would need a TypeRegistry to intern
-    // `contract::iterable<int32>` with, which the readers below do not have. so the substitution happens
-    // once, where the layout's does
+    // `contract::iterable<int32>` and not to `contract::iterable<E>`.
+    //
+    // Redirecting to the template instead would hand back a conformance still mentioning `E`, which
+    // compares equal to nothing a use site can ask about. Re-substituting at read time would need a
+    // TypeRegistry to intern `contract::iterable<int32>` with, which the readers below do not have. So
+    // the substitution happens once, where the layout's does
     //
     // a null `ct`, a non-interface `interface`, or an unconstrained type all answer false rather than
     // asserting: every reader is asking a question about types that may not be settled yet
@@ -106,9 +109,9 @@ namespace AST
     // matches, which is why AST::TypeChecker checks a generic conformance once on the template, where
     // both sides share the same TypeParamDecl.
     //
-    // one owner for that redirect, because it rests on an invariant no caller can see:
+    // One owner for that redirect, because it rests on an invariant no caller can see:
     // TypeRegistry::derive_instantiation rebuilds the conformance list in the template's order, so the
-    // two lists are index-parallel. re-derived at a call site it goes stale silently the day that
+    // two lists are index-parallel. Re-derived at a call site, it goes stale silently the day that
     // changes, and the caller then reads its answer off the wrong contract.
     //
     // a `ct` that is not an instantiation answers with itself and an empty substitution, so a caller
@@ -126,15 +129,17 @@ namespace AST
     //
     // **nothing is stored.** an inferred binding is knowable only once the implementor's methods exist,
     // which is strictly later than TypeRegistry::get_or_create_instantiation's staleness test can notice
-    // (todo/A7) - so it is derived on every ask, and an instantiation's answer is its template's
-    // substituted through instantiation_args. that read-time redirect is the one conforms_to declines
-    // only because *its* readers have no TypeRegistry, which this one is handed
+    //. So it is derived on every ask, and an instantiation's answer is its template's,
+    // substituted through instantiation_args. That read-time redirect is the one conforms_to declines,
+    // and only because *its* readers have no TypeRegistry - which this one is handed.
     //
-    // the inference itself: unify each requirement's wanted signature against the members that could
-    // answer it, keep **only** the associated bindings out of the result, and then re-check with the
-    // existing exact `==`. unify_type only proposes; ValueType::operator== still decides. dropping the
-    // non-associated bindings is what stops unification from quietly rebinding the interface's own `V`
-    // to whatever an ill-fitting candidate happened to declare
+    // The inference itself is three steps. Unify each requirement's wanted signature against the members
+    // that could answer it. Keep **only** the associated bindings out of the result. Then re-check with
+    // the existing exact `==`.
+    //
+    // unify_type only proposes; ValueType::operator== still decides. Dropping the non-associated
+    // bindings is what stops unification from quietly rebinding the interface's own `V` to whatever an
+    // ill-fitting candidate happened to declare
     struct ConformanceBinding
     {
         enum class Failure
@@ -192,21 +197,23 @@ namespace AST
 
     // the first requirement of `interface` that `ct` does not satisfy, in declaration order.
     //
-    // a candidate matches when its parameters **from index 1** and its return type equal the
-    // requirement's, after substitution. **index 1, not 0** - argument 0 is the receiver, and it is
-    // `Drawable&` on the requirement and `Circle&` on the implementor by construction, so comparing it
-    // would make every conformance fail. that is the one asymmetry in the comparison and it is the same
-    // one FunctionDeclNode::implicit_arg_count() already exists for
+    // A candidate matches when its parameters **from index 1** and its return type equal the
+    // requirement's, after substitution.
     //
-    // an **operator** requirement is not looked up on the type at all: an operator is registered in the
+    // **index 1, not 0.** argument 0 is the receiver, and it is `Drawable&` on the requirement and
+    // `Circle&` on the implementor by construction, so comparing it would make every conformance fail.
+    // That is the one asymmetry in the comparison, and it is the same one
+    // FunctionDeclNode::implicit_arg_count() already exists for.
+    //
+    // An **operator** requirement is not looked up on the type at all. An operator is registered in the
     // root namespace under a decorated name, never on either operand's method table, so `functions` is
-    // asked instead. passing null declines to check operator requirements, which is what a caller with
-    // no registry to hand (a unit test asking only about methods) wants
+    // asked instead. Passing null declines to check operator requirements, which is what a caller with
+    // no registry to hand wants - a unit test asking only about methods, say.
     //
-    // `types` is the bundle's own registry, and it has to be that one: substituting a requirement's
+    // `types` is the bundle's own registry, and it has to be that one. Substituting a requirement's
     // `array<T>` into `array<int32>` re-interns, and interning through a second registry would mint a
-    // second ComplexType for one type - which would then compare unequal to the implementor's, since
-    // ValueType equality *is* pointer identity. every such lookup here is a cache hit, because the
+    // second ComplexType for one type, which would then compare unequal to the implementor's - since
+    // ValueType equality *is* pointer identity. Every such lookup here is a cache hit, because the
     // interface and the conformance clause both interned what they mention when they were parsed
     std::optional<UnmetRequirement> first_unmet_requirement(
         const ComplexType *ct,

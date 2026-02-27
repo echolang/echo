@@ -34,23 +34,14 @@
 namespace AST
 {
 
-// the destinations that have no conversion to fall back on, and so have to be satisfied exactly:
-// a pointer's conversions are directional (`T&` widens to `ptr<T>`, never the reverse), and a
-// struct or class has none at all
+// **does this destination admit a `null`?** the question and the answer, in one place.
 //
-// primitive-to-primitive is deliberately *not* in here - fitting an int32 literal into a float64
-// slot is TypeLowering::coerce_value's job, which is why this is not simply
-// `!is_implicitly_convertible`. the struct half is what catches `Foo $x = 42;`: the parser used to
-// reject that while typing the literal, but a hint that cannot type a literal is now ignored there,
-// and coerce_value passes a non-primitive destination straight through
-// **does this destination admit a `null`?** null, and the answer, in one place.
+// `check_destination_fits` exempts a null value on purpose - null answers to its own rules - and those
+// rules then got spelled out again at every arrival site that cared. Three of the five were missing the
+// callable case, which reached codegen as a null aggregate, and that either crashed the compiler or
+// produced a value that faults when called.
 //
-// `check_destination_fits` exempts a null value on purpose - "null answers to its own rules" - and those
-// rules then got spelled at every arrival site that cared. three of the five were missing the callable
-// case, which reached codegen as a null aggregate and either crashed the compiler or produced a value
-// that faults when called
-//
-// answers with the reason rather than a bool, so each site can frame it for the destination it is
+// Answers with the reason rather than a bool, so each site can frame it for the destination it is
 static const char *null_rejection_reason(const ValueType &to)
 {
     // **one question now: does this destination admit absence at all?** it used to be a list of the kinds
@@ -88,6 +79,16 @@ static const char *null_rejection_reason(const ValueType &to)
     return "add '?' to its type if it may be absent";
 }
 
+// the destinations with no conversion to fall back on, so they have to be satisfied exactly. A
+// pointer's conversions are directional - `T&` widens to `ptr<T>`, never the reverse - and a struct
+// or a class has none at all.
+//
+// Primitive-to-primitive is deliberately *not* in here. Fitting an int32 literal into a float64 slot
+// is TypeLowering::coerce_value's job, which is why this is not simply `!is_implicitly_convertible`.
+//
+// The struct half is what catches `Foo $x = 42;`. The parser used to reject that while typing the
+// literal, but a hint that cannot type a literal is now ignored there, and coerce_value passes a
+// non-primitive destination straight through
 static bool demands_exact_conversion(const ValueType &type)
 {
     // a callable joins the list for the same reason a pointer is on it: there is no conversion between
@@ -117,19 +118,20 @@ static std::string place_description(const ExprNode &expr)
     }
 }
 
-// can this argument reach this parameter? one rule, AST::argument_fit, which is also what the
-// overload matcher ranks with and what the implicit borrow is decided by - so a call this pass
-// accepts is a call resolution could have chosen, and vice versa. this used to be a fourth
-// hand-written copy of the same case analysis, and it disagreed with argument_fit about the borrow
-// arm (which additionally requires the argument to be a place)
+// **can this argument reach this parameter?** one rule, AST::argument_fit.
 //
-// numeric conversions are inserted as casts by AST::CallResolver, so a t_conversion answer is a
-// legal argument here; only t_none is a real error. an undeterminable type answers t_undetermined,
-// which is how "no information yet" stays out of this pass's diagnostics
+// It is also what the overload matcher ranks with and what the implicit borrow is decided by, so a
+// call this pass accepts is a call resolution could have chosen, and vice versa. This used to be a
+// fourth hand-written copy of the same case analysis, and it disagreed with argument_fit about the
+// borrow arm, which additionally requires the argument to be a place.
 //
-// `expr` is the argument as written, or null when only its type is available. passing it admits
-// t_borrow - the parameter is a borrow and this is a place, so an address would be taken - which is
-// right at a call site and wrong for a cast, because a cast is not an address-of. the two callers
+// Numeric conversions are inserted as casts by AST::CallResolver, so a t_conversion answer is a legal
+// argument here and only t_none is a real error. An undeterminable type answers t_undetermined, which
+// is how "no information yet" stays out of this pass's diagnostics.
+//
+// `expr` is the argument as written, or null when only its type is available. Passing it admits
+// t_borrow - the parameter is a borrow, this is a place, so an address would be taken. That is right
+// at a call site and wrong for a cast, because a cast is not an address-of, and the two callers
 // differ on exactly that
 static bool arg_assignable_to(const ValueType &arg, const ExprNode *expr, const ValueType &param)
 {
@@ -440,22 +442,25 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     }
 
     // **and a base that has no properties at all**, which is a different question from the unknown
-    // member above and was answered nowhere: `$p->x` over a `ptr<int32>` reached codegen and died on
-    // gen_member_lvalue's contextless "Cannot access member 'x' of 'int32'". a borrow-returning call
-    // is one more spelling of the same shape (todo/A13a), so it is worth a location either way
+    // member above, and one that was answered nowhere. `$p->x` over a `ptr<int32>` reached codegen and
+    // died on gen_member_lvalue's contextless "Cannot access member 'x' of 'int32'". A borrow-returning
+    // call is one more spelling of the same shape, so it is worth a location either way.
     //
-    // is_undetermined_type is the reason this is safe to ask here: it is the one spelling of "no
-    // information", so a type parameter or an unresolved call - whose result_type() is void, on top of
-    // the UnknownFunction already reported - passes through rather than earning a second diagnostic.
-    // an interface is excluded because the check above already covers it: it has a complex type and no
+    // is_undetermined_type is what makes this safe to ask here. It is the one spelling of "no
+    // information", so a type parameter or an unresolved call passes through rather than earning a
+    // second diagnostic - such a call's result_type() is void, on top of the UnknownFunction already
+    // reported.
+    //
+    // An interface is excluded because the check above already covers it: it has a complex type and no
     // properties, so a `->x` on one is already an UnknownMember
     // **one chain, so a base earns exactly one message.** the three arms below are three different
-    // things that can be wrong with `E->x`, in order of how specific the advice is - and they were an
-    // `if` and a separate `if`/`else if` until a weak base collected two of them at once, which reads as
-    // two problems where there is one
+    // things that can be wrong with `E->x`, ordered by how specific the advice is.
     //
-    // a weak base first, because "has no members" is true of it but unhelpful: the object it names does
-    // have the member, and what is missing is the upgrade that proves the object is still there
+    // They were an `if` and a separate `if`/`else if` until a weak base collected two of them at once,
+    // which reads as two problems where there is one.
+    //
+    // A weak base comes first, because "has no members" is true of it but unhelpful. The object it
+    // names does have the member. What is missing is the upgrade that proves the object is still there
     if (base_type.is_weak()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.get_member_name()),
@@ -490,7 +495,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
                 base_type.get_type_desciption()));
     }
 
-    // **a base with no storage is no longer this pass's question** (todo/A13). it used to be reported
+    // **a base with no storage is no longer this pass's question**. it used to be reported
     // here - "has no storage to read a member from" - because there was no answer to give: a member is
     // reached from an address, and a value nobody stored has none. both halves have one now, and both
     // live where the answer is rather than where the shape is visible:
@@ -614,29 +619,33 @@ void TypeChecker::visit_optional_chain(OptionalChainExprNode &node)
     RecursiveVisitor::visit_optional_chain(node);
 }
 
-// **an address of something that has no address.** by the time this pass runs, every legitimate borrow of
-// a value with no storage has been reseated onto a temporary's varref by AST::OwnershipPass, so an operand
-// that is still neither a place nor pointer-typed means two gates disagreed: AST::argument_fit ranked
-// t_borrow_temporary where the ownership pass declined to mint a slot
+// **an address of something that has no address.**
 //
-// a *guard rail*, not a user diagnostic - nothing a program can be written to say reaches it. it exists
-// because the alternative failure is the worst kind this compiler has: ExprCodegen::gen_addr_of hands the
-// operand to gen_lvalue, which throws "Expression is not addressable" with no source location at all, far
-// from whichever rule was wrong. one visitor arm converts every future divergence between those two gates
-// into a located error
+// By the time this pass runs, every legitimate borrow of a value with no storage has been reseated
+// onto a temporary's varref by AST::OwnershipPass. So an operand that is still neither a place nor
+// pointer-typed means two gates disagreed: AST::argument_fit ranked t_borrow_temporary where the
+// ownership pass declined to mint a slot.
 //
-// is_undetermined_type passes through for the reason it does everywhere else: an unsettled call already
-// has its own issue and does not need a second one stacked on top
+// This is a *guard rail*, not a user diagnostic. Nothing a program can be written to say reaches it.
+// It exists because the alternative failure is the worst kind this compiler has: ExprCodegen::
+// gen_addr_of hands the operand to gen_lvalue, which throws "Expression is not addressable" with no
+// source location at all, far from whichever rule was wrong. One visitor arm turns every future
+// divergence between those two gates into a located error.
 //
-// **and so does a program that has already failed.** AST::OwnershipPass *refuses* some requests rather
-// than binding them - a write through a temporary's element is the shape that reaches here - and a
-// refusal deliberately leaves the tree exactly as it was written, so the unbacked `&` survives to this
-// arm. the two gates did not disagree there; one of them declined, out loud, with a located reason the
-// author can act on. stacking "this is a compiler bug" on top of it would bury the real message, and
-// run_semantic_passes fails the compile on the first one either way
+// is_undetermined_type passes through for the reason it does everywhere else: an unsettled call
+// already has its own issue and does not need a second one stacked on top.
 //
-// the cost is that the rail is blind in a program that is already broken, which is the one program where
-// it was never the interesting diagnostic
+// **and so does a program that has already failed.** AST::OwnershipPass *refuses* some requests
+// rather than binding them - a write through a temporary's element is the shape that reaches here -
+// and a refusal deliberately leaves the tree exactly as it was written, so the unbacked `&` survives
+// to this arm.
+//
+// The two gates did not disagree there. One of them declined, out loud, with a located reason the
+// author can act on. Stacking "this is a compiler bug" on top of that would bury the real message,
+// and run_semantic_passes fails the compile on the first one either way.
+//
+// The cost is that the rail is blind in a program that is already broken - which is the one program
+// where it was never the interesting diagnostic
 void TypeChecker::visit_addr_of_expr(AddrOfExprNode &node)
 {
     // **the same predicate AST::OwnershipPass mints slots from, not a second spelling of it.** a guard
@@ -756,18 +765,21 @@ void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
 }
 
 // `mem::take<T>(T& $place)` hands the value at a place over and writes nothing back, so the storage it
-// read from is no longer an owner - and *nothing in the compiler knows that*. that is deliberate: the only
-// thing that can say so is whatever manages the storage, which for `array<T>` is the array's own `len`.
+// read from is no longer an owner - and *nothing in the compiler knows that*. That is deliberate. The
+// only thing that can say so is whatever manages the storage, which for `array<T>` is the array's `len`.
 //
-// so the rule is about **which storage the compiler is already accounting for**, and it is narrow on
-// purpose: a local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
+// So the rule is about **which storage the compiler is already accounting for**, and it is narrow on
+// purpose. A local gets a scope-exit drop, a temporary gets one from the frame it was bound to, and a
 // property gets one from its owner's teardown. `take` tells none of them otherwise, so emptying any of
-// them destroys the value twice, silently and far from here. what is left is storage reached *through a
-// pointer* - `$p:$[$i]`, `$p:$` - which is exactly the storage nothing walks, because a pointer is not an
-// owner. that is the same line `mem::free` sits on, which is why both live in `mem::`
+// them destroys the value twice, silently and far from here.
 //
-// reported at this pass rather than in codegen for check_ref_count_argument's reason: the call has a token
-// to point at, and ExprCodegen's failure is an internal compiler error naming only the enclosing function
+// What is left is storage reached *through a pointer* - `$p:$[$i]`, `$p:$` - which is exactly the
+// storage nothing walks, because a pointer is not an owner. That is the same line `mem::free` sits on,
+// which is why both live in `mem::`.
+//
+// Reported at this pass rather than in codegen for check_ref_count_argument's reason: the call has a
+// token to point at, where ExprCodegen's failure is an internal compiler error naming only the
+// enclosing function
 // `mem::init<T>(T& $place, T $value)` is the mirror and is judged by the same rule, so the two share one
 // check rather than one predicate spelled twice. Only the sentence differs, because the two ways of
 // getting it wrong are opposites: taking from accounted storage destroys the value twice, initializing it
@@ -1097,7 +1109,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // two shapes are worth naming. an *address*, because after the adjustment pass a pointer here
     // really is an address rather than a not-yet-dereferenced read, so printing one is almost always
     // a missing read. and a *named type*, struct or class, for which there is no rendering to pick at
-    // all - giving them one is todo/B6
+    // all, and giving them one is still open
     if (is_print_call(node)) {
         for (auto *arg : node.arguments) {
             if (arg == nullptr) {
@@ -1199,7 +1211,7 @@ void TypeChecker::visit_closure_expr(ClosureExprNode &node)
     // capture is by value, and a copy of an owning value is a whole taxonomy - a retain, a copy
     // constructor, or nothing that exists at all. the environment's teardown is uniform precisely
     // because it holds no owner: one `__eco_release_env` thunk and no deinit, so an owner admitted here
-    // is a leak rather than a wrong destructor. see todo/A27
+    // is a leak rather than a wrong destructor
     //
     // here rather than at the capture site in the parser, where the read is written: the captured
     // variable's type is not final until the monomorphizer has settled the call it was inferred from,
@@ -1246,19 +1258,20 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         }
 
         if (!implicit_conversion_is_legal(from, node.cast_to)) {
-            // **an operator says it in its own words.** every `operator` declaration in the program shares
-            // the root namespace, so a program has every operator's overload set whether it uses the types
-            // or not - and naming the losing candidate's parameter type here tells the author about a type
-            // no file of theirs mentions. one `operator ==` for `string` in the standard library otherwise
-            // degrades `==` for every struct in every program to "cannot convert 'P' to 'const string&'".
+            // **an operator says it in its own words.** every `operator` declaration in the program
+            // shares the root namespace, so a program carries every operator's overload set whether it
+            // uses the types or not. Naming the losing candidate's parameter type here would tell the
+            // author about a type no file of theirs mentions - one `operator ==` for `string` in the
+            // standard library otherwise degrades `==` for every struct in every program to "cannot
+            // convert 'P' to 'const string&'".
             //
-            // the operand types are what the author actually wrote, so they are what the message carries;
-            // "no overload of it accepts" rather than "is not supported", because a declaration does exist
-            // and saying otherwise would be a lie the author cannot act on
+            // The operand types are what the author actually wrote, so they are what the message
+            // carries. "no overload of it accepts" rather than "is not supported", because a
+            // declaration does exist and saying otherwise would be a lie the author cannot act on.
             //
-            // and silent where AST::binary_operand_refusal already answered about the *pair* of
-            // operands: visitFunctionCallExpr reported that one, it carries the advice, and this would
-            // be the same mistake said again more vaguely. this stays the wording for the refusals that
+            // And silent where AST::binary_operand_refusal already answered about the *pair* of
+            // operands. visitFunctionCallExpr reported that one, it carries the advice, and this would
+            // be the same mistake said again more vaguely. This stays the wording for the refusals that
             // really are about one argument not fitting a parameter
             if (_context_callee != nullptr && _context_callee->is_operator()) {
                 if (!_context_operands_refused) {
@@ -1292,17 +1305,19 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
 
 // **forming a trusted borrow out of raw storage is the operation `unsafe` marks.**
 //
-// deliberately *not* pointer casting. `ptr<uint32>(&$f)` only computes another raw address - reads and
+// Deliberately *not* pointer casting. `ptr<uint32>(&$f)` only computes another raw address: reads and
 // writes through a `ptr<T>` carry no type tag, so the optimizer stays conservative around all of them
-// and nothing has been promised. what licenses a promise is the step that turns a raw address into a
-// `T&`: from there the type is the contract, every later access carries that family, and it keeps
-// carrying it through however many function boundaries the borrow travels.
+// and nothing has been promised.
 //
-// so this fires on every way a borrow can be minted, not only the explicit cast - the address of a raw
+// What licenses a promise is the step that turns a raw address into a `T&`. From there the type is the
+// contract, every later access carries that family, and it keeps carrying it through however many
+// function boundaries the borrow travels.
+//
+// So this fires on every way a borrow can be minted, not only the explicit cast - the address of a raw
 // element, the implicit borrow a call argument gets, a receiver's auto-borrow, a `return &...`. All of
 // them arrive here as one of the two nodes below, which is why there are two call sites and not six.
 //
-// a `#[builtin:]` callee is exempt: `mem::init` and `mem::take` are the two seams that deliberately
+// A `#[builtin:]` callee is exempt. `mem::init` and `mem::take` are the two seams that deliberately
 // name storage the compiler is not accounting for, and requiring them to manufacture an ordinary
 // readable `T&` over uninitialized bytes would be asking for a promise that is *false* at the moment
 // it is made
@@ -1396,7 +1411,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
             // **a declared operator that did not fire** is a different thing to say, and the only
             // place it can be said. the parser decides from the operand types it can see, so inside a
             // generic body it saw `T`, took the built-in path, and this node is the substituted clone -
-            // a use site that looks like it should have worked. see todo/A32
+            // a use site that looks like it should have worked
             const bool declared_but_unreached = node.op_node->op->has_fixity(OpFixity::t_infix);
 
             _collector.collect_issue<Issue::GenericError>(
@@ -1405,7 +1420,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
                     ? fmt::format(
                         "operator '{}' is declared for '{}' and '{}', but an operator applied to a "
                         "type parameter is not resolved yet - the operand types are only known after "
-                        "substitution. Write a named function and call that instead. See todo/A32.",
+                        "substitution. Write a named function and call that instead.",
                         node.op_node->op->spelling,
                         lhs.get_type_desciption(),
                         rhs.get_type_desciption())

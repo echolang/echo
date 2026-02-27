@@ -1021,7 +1021,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // **an element is addressed, so the container has to have storage or be able to be given
             // some.** a place has it; `$p:$` names an address directly; and anything materializable can
             // be bound to a temporary and indexed out of that, which is what makes `make()[0]` read the
-            // way it looks (todo/A13c). the container is operand 0 of the element call, so it is an
+            // way it looks. the container is operand 0 of the element call, so it is an
             // ordinary borrow argument from there on and AST::argument_fit ranks it t_borrow_temporary
             //
             // what is left is genuinely addressless - a bare `null`, an array literal - and the message
@@ -1455,7 +1455,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         if (is_creating_ptr) {
             // `&` applies to whatever the postfix chain produced, so `&$s->field` works and is
             // not the assert it used to be - the old code took the address of a VarRefNode it
-            // had already replaced with a MemberAccessNode (todo/B4)
+            // had already replaced with a MemberAccessNode
             auto *target = current_ref.unsafe_ptr<AST::ExprNode>();
             if (!AST::is_place_expression(*target)) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -1910,7 +1910,7 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
         // the array literal production widened the ways to arrive here, because a `[` that no postfix
         // chain claimed now parses as one operand rather than being an unexpected token - `5[0]` and
         // `[1, 2][0]` reach it, and they are the whole of what is left. a *call* runs the chain, whose
-        // bracket arm now indexes it: a call result can be given storage (todo/A13c), and only a
+        // bracket arm now indexes it: a call result can be given storage, and only a
         // genuinely addressless base is still refused there. so this needs to be a diagnostic before it
         // is anything else
         if (!expr_parts.empty() && expr_parts.back().opnode == nullptr) {

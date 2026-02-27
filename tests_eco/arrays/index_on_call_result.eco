@@ -1,7 +1,7 @@
 // a container returned by value can be indexed. the call result is not a place, so there is no storage
 // to take the element's address in - the compiler gives it some: the container is operand 0 of the
 // element call, which is an ordinary borrow argument, so it takes t_borrow_temporary and
-// AST::OwnershipPass binds a temporary around the statement that reads through it (todo/A13c)
+// AST::OwnershipPass binds a temporary around the statement that reads through it
 //
 // **the temporary has to outlive the element call**, which is the whole reason a call binds nothing of
 // its own: `operator []` hands back a `T&` *into* the array, so a bind at the call would have destroyed

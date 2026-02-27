@@ -225,7 +225,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     // every keyword spelled out of identifier characters goes in as a KEYWORD rather than a
     // STRING: a plain StringToken matches a prefix, so `const` ate the head of `constructor` and
     // `for` the head of `forward`. the keyword variant is the same trie entry plus a one
-    // character look-ahead for a word boundary (todo/B17)
+    // character look-ahead for a word boundary
     ECHO_LEX_FNC_CUST_KEYWORD(lx_functions, "true", Token::Type::t_bool_literal);
     ECHO_LEX_FNC_CUST_KEYWORD(lx_functions, "false", Token::Type::t_bool_literal);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_const);
@@ -361,7 +361,7 @@ bool LexerFunction::KeywordToken::parse(TokenCollection &tokens, LexerCursor &cu
     // a keyword is a whole word, so the character that follows it must not be one an identifier
     // could continue with. without this the match is a prefix match and eats the head of every
     // identifier that happens to start with a keyword - `constructor` lexed as `const` +
-    // `ructor`, `forward` as `for` + `ward` (todo/B17). peek() answers '\0' past the end, which
+    // `ructor`, `forward` as `for` + `ward`. peek() answers '\0' past the end, which
     // is not a varname character, so a keyword at EOF still matches
     if (varname_lut[static_cast<unsigned char>(cursor.peek(lit.size()))]) {
         return false;

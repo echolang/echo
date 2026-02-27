@@ -49,7 +49,7 @@ void TypeDeclCodegen::gen_type_decl(AST::TypeDeclNode &node)
 void TypeDeclCodegen::gen_member_access(AST::MemberAccessNode &node)
 {
     // the same lvalue path a member write uses, so a read and a write can never disagree
-    // about which field they mean (todo/A3). a pointer-typed field carries its own explicit
+    // about which field they mean. a pointer-typed field carries its own explicit
     // deref node when it is read in value position. it also resolves the property, so the void
     // guard below reads the answer off the place rather than walking the base chain a second time
     auto place = _ctx.lvalues->gen_lvalue(node);

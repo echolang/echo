@@ -1,7 +1,7 @@
 // `->at()` and `->push_slot()` return `T&`, and reading a member off that borrow used to abort the
 // compiler - which is why arrays.md counted it as one of the reasons element access is specified as a
 // place rather than as sugar for a method call. it works now, so filling an element field by field
-// through the slot the container handed back is a thing that can be written (todo/A13a)
+// through the slot the container handed back is a thing that can be written
 
 struct Point { int32 $x; int32 $y; }
 

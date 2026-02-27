@@ -344,7 +344,7 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     closure_decl->ast_namespace = payload.context.current_namespace;
 
     // the same reason a nested declaration is rejected where a type parameter is visible: a closure
-    // cannot receive a substitution for one. lifted with capture-in-generics, see todo/A27
+    // cannot receive a substitution for one. lifted once closures can be generic
     if (payload.context.has_visible_type_params()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(function_token),
@@ -687,7 +687,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // is the block's - and it has no access to the enclosing frame. an enclosing *type parameter* is
     // exactly such an access: `T` would resolve through the type-param scope stack and silently make
     // this declaration depend on a substitution nothing will ever hand it, so it is rejected outright
-    // rather than lowered against an unresolved generic. see todo/A27, which lifts this
+    // rather than lowered against an unresolved generic. lifted once closures can be generic
     if (payload.context.current_namespace != nullptr
         && payload.context.current_namespace->is_lexical()
         && payload.context.has_visible_type_params())

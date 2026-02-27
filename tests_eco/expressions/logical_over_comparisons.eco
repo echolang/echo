@@ -32,7 +32,7 @@ if ($u == 0 || $n > 3) { echo 1; } else { echo 2; }
 // a comparison bound to a bool, and that bool joined with another comparison.
 //
 // note the right-hand sides are *variables* and not literals: `bool $b = $n > 9;` is a separate,
-// pre-existing defect (todo/B40, an integer literal at a `bool` destination), because the declared `bool`
+// pre-existing defect - an integer literal at a `bool` destination - because the declared `bool`
 // types the literal `9` as `true` and the comparison is then over a usize and a bool. That is parse-time
 // literal typing and has nothing to do with what a comparison's result type is
 usize $nine = 9;

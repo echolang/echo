@@ -1,7 +1,7 @@
 // a member of a temporary handed to a *borrow* parameter. the callee reads through the address during
 // the call and returns, so the temporary does not have to outlive the statement - only the call - and
 // that is where it is destroyed: 500 (the callee) before 900 (the release). the request travels one step
-// further out than an ordinary argument's for exactly that reason (todo/A13b)
+// further out than an ordinary argument's for exactly that reason
 //
 // note there is no retain: the callee borrows the class, it does not take a reference of its own
 

@@ -42,7 +42,7 @@ namespace
     // **`[` and `]` are not on it**, and their absence is load-bearing rather than an omission. a
     // bracket belongs to exactly one production - the index form read above this list's caller - and
     // that exclusivity is what lets a use site's `[` be claimed unconditionally by the postfix chain,
-    // which is in turn what makes `$p:$[0]` the only spelling of pointer indexing (todo/B9). a symbol
+    // which is in turn what makes `$p:$[0]` the only spelling of pointer indexing. a symbol
     // allowed to contain one would be a second contract on the same character
     //
     // a **keyword** is refused, and that is the whole of what this list is for: matching happens on

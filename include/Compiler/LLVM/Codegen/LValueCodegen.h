@@ -60,7 +60,7 @@ namespace Compiler::LLVM
     //
     // before this existed the only address path was private to TypeDeclCodegen and hardcoded to
     // a two case switch over variable and member bases, which is why `&$s->x` could not be
-    // spelled and why member access and member mutation drifted apart (todo/A3, todo/B4)
+    // spelled and why member access and member mutation drifted apart
     class LValueCodegen
     {
     public:

@@ -1,5 +1,5 @@
 // two temporaries for one call. `TemporaryBindExprNode::temporaries` is a vector for exactly this and
-// nothing else exercised it - the receiver case that predates todo/A13c can only ever ask for one
+// nothing else exercised it - the older receiver case can only ever ask for one
 
 struct Point
 {

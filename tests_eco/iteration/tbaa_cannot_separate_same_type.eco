@@ -6,7 +6,7 @@
 // the length.
 //
 // this is not a gap to be closed by a better hierarchy. it is the case allocation identity answers
-// and type identity cannot, and it is why todo/A43 is the ticket that matters next. the golden is
+// and type identity cannot, and it is the limit that matters most here. the golden is
 // here so that the day regions land, this file is what changes.
 
 function kernel(array<usize>& $dst, const array<usize>& $src) : void

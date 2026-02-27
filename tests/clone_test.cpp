@@ -226,7 +226,7 @@ TEST_CASE("Cloning a bound temporary rebinds the body onto the clone", "[clone][
     // through a VarNode, so the declaration has to be cloned *before* the body for cc.rebind to have an
     // answer for it. cloned in the other order the body keeps pointing at the original declaration -
     // which has no alloca in the instance, and the failure surfaces as "Variable has no allocation in
-    // scope" from a body nobody wrote (todo/A13b)
+    // scope" from a body nobody wrote
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "struct Inner { int32 $tag; }\n"
         "struct Outer {\n"

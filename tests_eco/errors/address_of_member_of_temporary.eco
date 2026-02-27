@@ -1,6 +1,6 @@
 // the address of a member of a temporary outlives the temporary. binding the value to a local is the
 // answer, and unlike the write next door there is nothing a temporary could be made to do about it:
-// whatever holds the address keeps it after the statement that created the storage has ended (todo/A13b)
+// whatever holds the address keeps it after the statement that created the storage has ended
 
 struct Inner { int32 $tag; }
 

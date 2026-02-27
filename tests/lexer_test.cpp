@@ -456,7 +456,7 @@ TEST_CASE( "Keywords are whole words", "[lexer]" )
 
     // an identifier that merely begins with a keyword is one identifier. this used to split at
     // the keyword boundary, because keywords were matched as prefixes in the lexer's trie:
-    // `constructor` came out as `const` + `ructor` and `forward` as `for` + `ward` (todo/B17)
+    // `constructor` came out as `const` + `ructor` and `forward` as `for` + `ward`
     for (const auto &name : {
         "constructor", "constant", "forward", "format", "classify", "elsewhere",
         "enumerate", "structure", "nullable", "pointer", "iterate", "asset",

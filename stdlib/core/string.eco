@@ -429,7 +429,7 @@ struct string
      * from growing it: `reserve` does nothing when the room is already there.
      *
      * Internal, like `make_unique` - public only because there are no visibility modifiers yet
-     * (todo/A17).
+     *.
      */
     const function clone_reserving(usize $extra) : string
     {
@@ -474,7 +474,7 @@ struct string
      * plain `and` with no short circuit, and the second reads through `$owner`, which the first has
      * only just established is not null.
      *
-     * Internal. It is public only because there are no visibility modifiers yet (todo/A17).
+     * Internal. It is public only because there are no visibility modifiers yet.
      */
     function make_unique() : void
     {
@@ -504,7 +504,7 @@ struct string
      * forget it or spell it differently.
      *
      * Internal, like `make_unique` - public only because there are no visibility modifiers yet
-     * (todo/A17).
+     *.
      */
     function reseat() : void
     {

@@ -1,4 +1,4 @@
-// echo has a printf conversion per primitive and none for a named type (todo/B6)
+// echo has a printf conversion per primitive and none for a named type
 
 class Res { int32 $v; }
 

@@ -42,7 +42,7 @@ namespace AST
     // one object, constructed once from the command line, passed to everything that reports. It replaced
     // three renderers that each knew a different amount: `AST::print_issue` (a message and a miscounted
     // caret), `report_compiler_exception` (that plus a prefix), and `print_critical_error` (a bold title
-    // and no location at all, which is why a manifest error still shows no source excerpt - see todo/M9).
+    // and no location at all, which is why a manifest error still shows no source excerpt).
     //
     // the format is a field rather than a subclass, because `json` is not a different *layout* of the
     // same thing - it is the same Diagnostic serialised instead of drawn, and a virtual `render` split
@@ -72,7 +72,7 @@ namespace AST
 
         // an issue with no source behind it: a broken manifest, a failed tokenization, an unusable
         // target. It gets the badge and the same stream, and deliberately **not** an invented location -
-        // making these carry one is todo/M9's job, and faking it here would remove the reason to do it
+        // making these carry one is a job of its own, and faking it here would remove the reason to do it
         //
         // **the severity is a parameter and defaults to Error** because not every locationless issue
         // stops the compile: `-g` on `run` is a flag that cannot be honoured by a subcommand that still
