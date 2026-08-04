@@ -18,12 +18,13 @@ namespace Parser
     //
     //     #[if: os == darwin]  ...  #[elif: os == linux]  ...  #[else]  ...  #[end]
     //
-    // a *token* filter rather than a rule in the parsers, and that is what makes the feature cheap. None
-    // of the three passes is touched: pass 1 registers type names and does not read attributes at all,
-    // pass 2 and pass 3 would each have to drop a declaration identically or `claim_declaration_site`
-    // breaks, and an `extern` block accepts nothing but `function` and has no attribute plumbing. A filter
-    // needs none of that, and it works uniformly at file level, inside a struct body, inside a function
-    // body, around an `extern` block and around a `namespace` statement.
+    // A *token* filter rather than a rule in the parsers, and that is what makes the feature cheap. None
+    // of the three passes is touched. Pass 1 registers type names and does not read attributes at all.
+    // Passes 2 and 3 would each have to drop a declaration identically or `claim_declaration_site`
+    // breaks. And an `extern` block accepts nothing but `function` and has no attribute plumbing.
+    //
+    // A filter needs none of that, and it works uniformly at file level, inside a struct body, inside a
+    // function body, around an `extern` block and around a `namespace` statement.
     //
     // it is also the only mechanism that lets an excluded region name things that **do not exist here** -
     // `_NSGetExecutablePath` on Linux, `GetModuleFileNameW` on Darwin. Nothing parses it, so nothing has
@@ -53,11 +54,12 @@ namespace Parser
 
     // rewrites the tokens from `from` onwards, keeping only what the conditions admit.
     //
-    // a range rather than a whole collection, because **every file in a module shares one
-    // TokenCollection** and a `TokenizedFile` is a slice into it. `from` is always the index the file
-    // being lexed started at, so the range is the tail and erasing inside it cannot move an earlier
-    // file's slice. It is measured *after* this runs - see AST::Module::tokenize, which is the one place
-    // that ordering is owned.
+    // A range rather than a whole collection, because **every file in a module shares one
+    // TokenCollection** and a `TokenizedFile` is a slice into it.
+    //
+    // `from` is always the index the file being lexed started at, so the range is the tail, and erasing
+    // inside it cannot move an earlier file's slice. It is measured *after* this runs - see
+    // AST::Module::tokenize, which is the one place that ordering is owned.
     //
     // false with a `line N: ...` sentence in `out_error` on any of: an unknown axis, an unknown value for
     // a known axis, a malformed condition, `#[elif]` or `#[else]` after an `#[else]`, an `#[elif]` /

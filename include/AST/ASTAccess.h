@@ -18,18 +18,20 @@ namespace AST
 
     // **an address is not an access.**
     //
-    // a `T&` or a `ptr<T>` is an address: it can be copied, stored, returned and compared, it may
-    // alias anything, and on its own it promises the optimiser nothing. an *access* is the other
-    // half - a non-escaping capability over a region of storage, with a beginning, an end, and an
-    // effect. this enum is the effect, and it is what AST::AccessPass weighs two live accesses
-    // against each other with.
+    // A `T&` or a `ptr<T>` is an address. It can be copied, stored, returned and compared, it may
+    // alias anything, and on its own it promises the optimiser nothing.
     //
-    // deliberately on VarDeclNode and not on ValueType, for the reason spelled out beside
-    // `takes_ownership`: ValueType is the interning identity for TypeRegistry and for the
-    // monomorphizer's instance cache, so a flag there would fork every borrowing type in two. the
-    // consequence is `mv`'s consequence - `f(inout T& $x)` and `f(T& $x)` mangle identically and
-    // collide as a DuplicateFunctionSignature - and it is correct for the same reason: an effect is
-    // a contract about the argument, not a distinction a call can be resolved on
+    // An *access* is the other half: a non-escaping capability over a region of storage, with a
+    // beginning, an end, and an effect. This enum is the effect, and it is what AST::AccessPass weighs
+    // two live accesses against each other with.
+    //
+    // Deliberately on VarDeclNode and not on ValueType, for the reason spelled out beside
+    // `takes_ownership`. ValueType is the interning identity for TypeRegistry and for the
+    // monomorphizer's instance cache, so a flag there would fork every borrowing type in two.
+    //
+    // The consequence is `mv`'s consequence: `f(inout T& $x)` and `f(T& $x)` mangle identically and
+    // collide as a DuplicateFunctionSignature. That is correct for the same reason - an effect is a
+    // contract about the argument, not a distinction a call can be resolved on
     enum class AccessEffect
     {
         // nothing said. a plain `T&` parameter, an address with C aliasing, exactly as every one of
@@ -225,10 +227,10 @@ namespace AST
     // only computes another raw address: reads and writes through a `ptr<T>` are untagged, so the
     // optimizer stays conservative around every one of them and nothing has been promised.
     //
-    // what licenses a promise is the step that turns a raw address into a `T&` - because from there
-    // the type is the contract, every later access carries `AST::access_family_of(T)`, and it carries
-    // it through however many function boundaries the borrow travels. that is the assertion no
-    // compiler can check and an author can, so that is where the word goes.
+    // What licenses a promise is the step that turns a raw address into a `T&`. From there the type is
+    // the contract, every later access carries `AST::access_family_of(T)`, and it keeps carrying it
+    // through however many function boundaries the borrow travels. That is the assertion no compiler
+    // can check and an author can, so that is where the word goes.
     //
     // `to` is the borrow being formed, and `operand` is the **place** it is taken of - never the
     // operand's *type*: `&$p` on a `ptr<T>` local addresses an ordinary slot, and reading the type

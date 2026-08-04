@@ -905,21 +905,23 @@ namespace AST
         }
 
         // the methods that declare an implicit conversion *from* this type - the ones the user marked
-        // `#[implicit]`. a value handed to a parameter of one of their return types is converted by a
-        // call to it, with nothing written at the call site; AST::find_implicit_conversion is the
-        // lookup and AST::argument_fit ranks the result last of the real ranks - below even a borrow
-        // of a temporary, so an overload taking the owning type always beats one taking the window
+        // `#[implicit]`.
+        //
+        // A value handed to a parameter of one of their return types is converted by a call to it, with
+        // nothing written at the call site. AST::find_implicit_conversion is the lookup, and
+        // AST::argument_fit ranks the result last of the real ranks - below even a borrow of a
+        // temporary, so an overload taking the owning type always beats one taking the window.
         //
         // **declarations only, never the target type.** the declaration's return type already *is* the
-        // target, and a second copy of it here would be a member field on ComplexType carrying a type -
-        // which TypeRegistry::derive_instantiation does not fill, so `array<int32>` would keep saying
-        // `slice<T>`. holding the declaration means this slot behaves exactly like _methods, which an
-        // instantiation reaches through the template_or_self redirect rather than owning a copy of
+        // target. A second copy of it here would be a member field on ComplexType carrying a type, which
+        // TypeRegistry::derive_instantiation does not fill - so `array<int32>` would keep saying
+        // `slice<T>`. Holding the declaration means this slot behaves exactly like _methods, which an
+        // instantiation reaches through the template_or_self redirect rather than owning a copy of.
         //
-        // a list rather than the single slot the destructor and the copy constructor get: a type may
-        // offer a window over itself in more than one shape, and it puts the duplicate check on the
-        // right question - not "is the slot taken" but "is there already one to *this* target", which
-        // is what the user needs told. only valid declarations are ever pushed, so no reader re-filters
+        // A list, rather than the single slot the destructor and the copy constructor get. A type may
+        // offer a window over itself in more than one shape, and a list puts the duplicate check on the
+        // right question: not "is the slot taken" but "is there already one to *this* target", which is
+        // what the user needs told. Only valid declarations are ever pushed, so no reader re-filters
         void add_implicit_conversion(FunctionDeclNode *decl) {
             _implicit_conversions.push_back(decl);
         }
@@ -932,13 +934,15 @@ namespace AST
         // what AST::conforms_to answers from, which is what a type-parameter constraint and an `instanceof`
         // over an interface read, and what the runtime conformance table is built from
         //
-        // **types, not declarations** - and so the one member field here that
+        // **types, not declarations**, which makes this the one member field here that
         // TypeRegistry::derive_instantiation has to substitute onto an instantiation, alongside the
-        // properties. that is the opposite of _implicit_conversions above, which deliberately stores
-        // declarations so that no ValueType on this class ever needs substituting; the difference is
-        // that a conversion's target is already spelled by the declaration's return type while a
-        // conformance has no declaration of its own at all. `struct Bag<E> : contract::iterable<E>` has to
-        // become `contract::iterable<int32>` on `Bag<int32>`, or a constraint would be checked against a
+        // properties.
+        //
+        // That is the opposite of _implicit_conversions above, which deliberately stores declarations so
+        // no ValueType on this class ever needs substituting. The difference is that a conversion's
+        // target is already spelled by the declaration's return type, while a conformance has no
+        // declaration of its own at all. `struct Bag<E> : contract::iterable<E>` has to become
+        // `contract::iterable<int32>` on `Bag<int32>`, or a constraint would be checked against a
         // template
         //
         // only valid, deduplicated entries are ever pushed - parse_typedecl refuses a non-interface and

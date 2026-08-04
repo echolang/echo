@@ -18,13 +18,15 @@ namespace Compiler::LLVM
     // __typeinfo holds the address of the class's own `@Foo.typeinfo` global, which is what `instanceof`
     // compares - an address is exact identity across modules and needs no numbering scheme to keep stable
     //
-    // **the two counts are two different questions and they end at two different moments.** __strong is
+    // **the two counts are two different questions, and they end at two different moments.** __strong is
     // how many owners the *object* has; at zero its deinit runs and the payload is dead. __weak is how
     // many handles need the *block* to stay readable, and only at zero is the block freed - so a
-    // `weak<Foo>` can always be asked whether the object is still there rather than dangling to find out.
-    // the strong references collectively hold **one** __weak, seated with the first __strong and dropped
-    // by the release that takes __strong to zero: that convention is what keeps exactly one `free` in the
-    // whole runtime, in `__eco_weak_release`, rather than one per count that could disagree
+    // `weak<Foo>` can always be asked whether the object is still there, rather than dangling to find
+    // out.
+    //
+    // The strong references collectively hold **one** __weak, seated with the first __strong and dropped
+    // by the release that takes __strong to zero. That convention is what keeps exactly one `free` in
+    // the whole runtime, in `__eco_weak_release`, rather than one per count that could disagree
     //
     // the header is the same shape in every box because the payload is *wrapped* - so an erased operand,
     // or a closure environment that has no ClassLayout at all, reaches either count through
@@ -53,10 +55,12 @@ namespace Compiler::LLVM
         static constexpr unsigned value_index = 1;
     };
 
-    // what the typeinfo global *holds*. it began as one `i8 0` whose address was the whole of a class's
-    // identity, and that stays true - `$obj instanceof Circle` is still one address comparison, and the
-    // struct below is source-compatible with it for exactly that reason. what it grew for is the second
-    // question a class can now be asked: which **interfaces** does it conform to
+    // what the typeinfo global *holds*.
+    //
+    // It began as one `i8 0` whose address was the whole of a class's identity, and that stays true.
+    // `$obj instanceof Circle` is still one address comparison, and the struct below is
+    // source-compatible with it for exactly that reason. What it grew for is the second question a class
+    // can now be asked: which **interfaces** does it conform to
     //
     //     %eco.typeinfo = { i64 conformance_count, ptr conformances }
     //

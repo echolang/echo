@@ -20,11 +20,12 @@ namespace Parser
     //     #[depends: "../geom/module.eco"]
     //     #[sources: "src/*.eco"]
     //
-    // written in Echo rather than in a config format of its own so there is one grammar and one lexer in
-    // the project, and so a manifest is highlighted, commented and diffed like the code beside it. It costs
-    // nothing to read that way: a file-scope attribute is already collected by the *declaration* pass, so
-    // the reader runs the real parser's first two passes over a throwaway module and never touches the
-    // bundle being built.
+    // Written in Echo rather than in a config format of its own, so there is one grammar and one lexer
+    // in the project, and so a manifest is highlighted, commented and diffed like the code beside it.
+    //
+    // It costs nothing to read that way. A file-scope attribute is already collected by the
+    // *declaration* pass, so the reader runs the real parser's first two passes over a throwaway module
+    // and never touches the bundle being built.
     //
     // repeated `depends` and `sources` accumulate, because AST::AttributeList is already a multimap. The
     // alternative - one attribute holding a list - would need a list expression the attribute grammar has
@@ -67,10 +68,11 @@ namespace Parser
 
     // reads one manifest. `out_error` is a located message on failure - `<file>:<line>: <what>` - in the
     // shape EchoTests::parse_eco_test_file uses, and for the same reason: **anything the format does not
-    // understand is an error, never a no-op.** An unknown attribute, a missing or repeated `module`, a
-    // `sources` pattern matching nothing, a `depends` path that does not exist - each of those is a
-    // manifest that does not describe what its author meant, and silently compiling something else is
-    // worse than refusing.
+    // understand is an error, never a no-op.**
+    //
+    // An unknown attribute, a missing or repeated `module`, a `sources` pattern matching nothing, a
+    // `depends` path that does not exist. Each of those is a manifest that does not describe what its
+    // author meant, and silently compiling something else is worse than refusing.
     //
     // a `depends` entry may name either a manifest file or the directory holding one, in which case
     // `module.eco` inside it is used.

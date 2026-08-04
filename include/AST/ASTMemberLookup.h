@@ -41,22 +41,25 @@ namespace AST
     // the method that implicitly converts a `from` into a `to`, or null when the type declares none.
     //
     // **the one rule** for "does this type convert to that one": a method its owner marked
-    // `#[implicit]`, whose return type is exactly `to`. exact rather than convertible on purpose, so a
-    // chain of conversions can never be searched for. everything else about a candidate - it takes no
-    // parameters, it is a method, its target is a declared type that owns nothing - was decided at the
-    // declaration by Parser's publish_implicit_conversion, which is what lets this be a comparison
-    // rather than a filter
+    // `#[implicit]`, whose return type is exactly `to`. Exact rather than convertible on purpose, so a
+    // chain of conversions can never be searched for.
     //
-    // this used to recognise the conversion by the member's *spelling*, a published `view_method_name`
-    // constant the compiler compared every method against. the comment there said operator overloading
-    // would eventually replace it with a declarable operator, and **that was wrong**: every form the
-    // operator grammar has is operand syntax the user writes - infix, prefix, suffix, each with
-    // operands and a precedence - while an implicit conversion is inserted at an argument position
-    // where the user wrote nothing at all. there is no operand to hang it on, so `operator` could
-    // never have taken it over, and the mislabel is what let a magic name look temporary. the spelling
-    // is `#[implicit]` and it is declared. (the **bracket** is the genuinely different case, and it
-    // did turn out to be the operator grammar's to take: `$a[$i]` *is* operand syntax, and it is a
-    // declared `operator []` now)
+    // Everything else about a candidate - it takes no parameters, it is a method, its target is a
+    // declared type that owns nothing - was decided at the declaration by Parser's
+    // publish_implicit_conversion. That is what lets this be a comparison rather than a filter.
+    //
+    // This used to recognise the conversion by the member's *spelling*, a published `view_method_name`
+    // constant the compiler compared every method against. The comment there said operator overloading
+    // would eventually replace it with a declarable operator, and **that was wrong**.
+    //
+    // Every form the operator grammar has is operand syntax the user writes - infix, prefix, suffix,
+    // each with operands and a precedence. An implicit conversion is inserted at an argument position
+    // where the user wrote nothing at all. There is no operand to hang it on, so `operator` could never
+    // have taken it over, and the mislabel is what let a magic name look temporary. The spelling is
+    // `#[implicit]`, and it is declared.
+    //
+    // The **bracket** is the genuinely different case, and it did turn out to be the operator grammar's
+    // to take: `$a[$i]` *is* operand syntax, and it is a declared `operator []` now
     //
     // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
     // t_declared_conversion, below every built-in conversion, so an overload taking the owning type
@@ -72,20 +75,21 @@ namespace AST
     // something is destroyed member-wise. that question is AST::needs_destruction (ASTDestruction.h)
     FunctionDeclNode *find_destructor(const ComplexType *ct);
 
-    // is this constructor the one that says how to copy `self_value_type`? a user-written constructor
-    // whose parameter list is exactly one non-nullable borrow of its own type - `Foo&` or
-    // `const Foo&` - *is* the copy constructor. nothing had to be added to the language for that: a
-    // constructor is an ordinary FunctionDeclNode, a borrow parameter an ordinary parameter, and
-    // `Foo($a)` an ordinary overload resolution. so this recognises the declaration that can already
-    // be written rather than introducing a second construction path beside it
+    // is this constructor the one that says how to copy `self_value_type`?
     //
-    // asked here rather than in the parser because it is the same rule find_copy_constructor answers,
-    // from the other direction - recognise versus retrieve - and one rule with two readers drifts
+    // A user-written constructor whose parameter list is exactly one non-nullable borrow of its own type
+    // - `Foo&` or `const Foo&` - *is* the copy constructor. Nothing had to be added to the language for
+    // that. A constructor is an ordinary FunctionDeclNode, a borrow parameter an ordinary parameter, and
+    // `Foo($a)` an ordinary overload resolution. So this recognises the declaration that can already be
+    // written, rather than introducing a second construction path beside it.
     //
-    // `self_value_type` is the struct's self type, which for a generic is the interned
-    // self-application `Box<T>`. the comparison is ValueType::operator==, which is exact, so only
-    // `Box<T>&` matches and a bare `Box&` - which resolves to the template - deliberately does not;
-    // the parser reports that spelling rather than silently not recognising it
+    // Asked here rather than in the parser, because it is the same rule find_copy_constructor answers
+    // from the other direction - recognise versus retrieve - and one rule with two readers drifts.
+    //
+    // `self_value_type` is the struct's self type, which for a generic is the interned self-application
+    // `Box<T>`. The comparison is ValueType::operator==, which is exact, so only `Box<T>&` matches and a
+    // bare `Box&` - which resolves to the template - deliberately does not. The parser reports that
+    // spelling rather than silently not recognising it
     bool is_copy_constructor(const FunctionDeclNode *decl, const ValueType &self_value_type);
 
     // `ct`'s copy constructor, or null. the type's **own slot first**, and only then the template_ref

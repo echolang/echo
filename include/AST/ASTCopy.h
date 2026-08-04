@@ -57,14 +57,15 @@ namespace AST
     // **the sole answer to "how is a value of this type copied".** every arm is named above, and both
     // readers switch on it rather than re-deriving it
     //
-    // a struct's answer is **folded from its properties' own answers** in one walk, so the taxonomy is
-    // compositional: a property with no rule makes the whole struct uncopyable, since it would be
-    // copied as bytes alongside the ones that do have a rule and leave two owners of one resource - and
-    // a struct whose properties are all byte copies is one itself. this is deliberately *not* asked
-    // through AST::needs_destruction (ASTDestruction.h): the two ladders answer different questions - a
-    // struct with a destructor owns something and is still not copyable - and asking that one here
-    // walked the whole property graph a second time at every level, at every copy site, on every round
-    // of the fixpoint
+    // A struct's answer is **folded from its properties' own answers** in one walk, so the taxonomy is
+    // compositional. A property with no rule makes the whole struct uncopyable: it would be copied as
+    // bytes alongside the ones that do have a rule, leaving two owners of one resource. And a struct
+    // whose properties are all byte copies is one itself.
+    //
+    // Deliberately *not* asked through AST::needs_destruction (ASTDestruction.h). The two ladders answer
+    // different questions - a struct with a destructor owns something and is still not copyable - and
+    // asking that one here walked the whole property graph a second time at every level, at every copy
+    // site, on every round of the fixpoint
     //
     // deliberately **not cached** on ComplexType, for the reason AST::needs_destruction gives. it
     // bottoms out where that one does too: a class property is answered without descending into it
@@ -108,21 +109,21 @@ namespace AST
     // **may a copy of this type read a `const` source?** - which is to say, what does the parameter of
     // the copy constructor AST::OwnershipPass synthesizes have to be, `const Foo&` or `Foo&`
     //
-    // asked rather than fixed, because it is not this pass's to decide. a hand-written
+    // Asked rather than fixed, because it is not this pass's to decide. A hand-written
     // `constructor(Point& $other)` takes a *mutable* borrow, and by doing so reserves the right to write
     // through it - so a value holding a `Point` cannot promise to copy itself out of a const source
-    // however it is spelled here. the const-ness has to be folded out of the properties for the same
-    // reason CopyKind is, and this is the same walk with a different question at its leaves
+    // however it is spelled here. The const-ness has to be folded out of the properties for the same
+    // reason CopyKind is, and this is the same walk with a different question at its leaves.
     //
-    // the answer is `const` wherever it can be, and that is what matters: it is the difference between
+    // The answer is `const` wherever it can be, and that is what matters. It is the difference between
     // `$b = $a` working on a `const Foo&` and being the one operation a const value cannot take part in
     // - including a copy out of a const *place*, `$other[$i]` inside stdlib/core/array.eco's
-    // `constructor(const array<T>& $other)`, which is how an owning array copies its elements at all
+    // `constructor(const array<T>& $other)`, which is how an owning array copies its elements at all.
     //
-    // deliberately **not** answered by stripping const at the call instead. a teardown may do that
-    // (AST::OwnershipPass::receiver_for_teardown says why: the storage is going away, so nothing that
-    // happens to it afterwards is observable) and a copy may **not** - its source outlives it and is
-    // read again, so a `Point&` constructor writing through one would be observable
+    // Deliberately **not** answered by stripping const at the call instead. A teardown may do that -
+    // AST::OwnershipPass::receiver_for_teardown says why: the storage is going away, so nothing that
+    // happens to it afterwards is observable. A copy may **not**. Its source outlives it and is read
+    // again, so a `Point&` constructor writing through one would be observable
     bool copy_source_may_be_const(const ValueType &type);
 };
 

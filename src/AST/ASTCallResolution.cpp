@@ -65,16 +65,18 @@ namespace AST
         // so its address is passed instead of a loaded value. this is the implicit form of the
         // address-of that `&$x` makes explicit
         //
-        // the whole rule - which parameters auto-borrow, which arguments can be borrowed, and that an
-        // argument which already fits is left alone - lives in argument_fit, because overload
-        // resolution has to predict this decision exactly. a candidate accepted there and then not
-        // wrapped here would reach codegen passing a value where an address is expected
+        // The whole rule lives in argument_fit - which parameters auto-borrow, which arguments can be
+        // borrowed, and that an argument which already fits is left alone. It has to, because overload
+        // resolution predicts this decision exactly, and a candidate accepted there and then not
+        // wrapped here would reach codegen passing a value where an address is expected.
         //
         // **both borrow ranks produce the same node, and that is the point.** the difference between
         // them - whether the operand already has storage or has to be given some - is a question about
-        // the operand's shape, which AST::OwnershipPass asks of the tree. nothing between here and
-        // codegen should be able to tell the two apart, and AST::PointerAdjuster's argument arm already
-        // routes any AddrOf through adjust_place without asking
+        // the operand's shape, which AST::OwnershipPass asks of the tree.
+        //
+        // Nothing between here and codegen should be able to tell the two apart, and
+        // AST::PointerAdjuster's argument arm already routes any AddrOf through adjust_place without
+        // asking
         ExprNode *borrow_if_wanted(NodeCollection &nodes, ExprNode *arg, ArgumentFit fit)
         {
             // all four borrow ranks, asked of AST::fit_is_borrow rather than enumerated here: the const
@@ -135,32 +137,33 @@ namespace AST
         // **a written `null` argument takes the parameter's type**, which is the one thing about an
         // argument that has to be decided here rather than in the parser.
         //
-        // every other position that admits a null hands the destination down to parse_expr and the null
-        // arm binds it there. a *direct* call cannot: its parameter types are on a declaration nobody has
-        // chosen yet, so Parser::parse_call_arguments passes no expected type at all and the null is
-        // parsed untyped. an indirect call reads them off the callee's signature and does bind, which is
-        // why `$fn(null)` worked and `f(null)` did not
+        // Every other position that admits a null hands the destination down to parse_expr, and the
+        // null arm binds it there. A *direct* call cannot. Its parameter types are on a declaration
+        // nobody has chosen yet, so Parser::parse_call_arguments passes no expected type at all and the
+        // null is parsed untyped. An indirect call reads them off the callee's signature and does bind,
+        // which is why `$fn(null)` worked and `f(null)` did not.
         //
-        // this is the first point in the pipeline holding both the argument node and a resolved parameter,
-        // so it is where the binding belongs. two things went wrong without it, and one call fixes both:
-        // an unbound null reached codegen with no type, where a wrapped `T?` destination has no null
-        // address to be and TypeLowering::coerce_value refused it - and, before that, it stayed
-        // permanently undetermined, so arguments_are_determined below could never let the call settle
+        // This is the first point in the pipeline holding both the argument node and a resolved
+        // parameter, so it is where the binding belongs. Two things went wrong without it, and one call
+        // fixes both. An unbound null reached codegen with no type, where a wrapped `T?` destination has
+        // no null address to be and TypeLowering::coerce_value refused it. And before that, it stayed
+        // permanently undetermined, so arguments_are_determined below could never let the call settle.
         //
-        // a parameter that does *not* admit a null is left alone on purpose. AST::bind_null_to declines
+        // A parameter that does *not* admit a null is left alone on purpose. AST::bind_null_to declines
         // it, the call stays pending, and AST::TypeChecker reports it against the destination through
-        // AST::null_rejection_reason - which is the diagnostic that names `Foo?`
+        // AST::null_rejection_reason - which is the diagnostic that names `Foo?`.
         //
-        // **an array literal is the second thing an argument position has to type**, and for the same
-        // reason spelled the same way: it has no type of its own, its destination is on a declaration
-        // nobody had chosen at parse time, and this is the first point holding both. one loop, two
-        // rules - each still its own function, so neither grew an arm about the other
+        // **an array literal is the second thing an argument position has to type**, for the same reason
+        // spelled the same way. It has no type of its own, its destination is on a declaration nobody
+        // had chosen at parse time, and this is the first point holding both. One loop, two rules - each
+        // still its own function, so neither grew an arm about the other.
         //
-        // answers whether an argument is an array literal still waiting to be *expanded*. that is not
-        // the same as being typed: AST::OperatorRewriter turns the literal into a declaration plus one
-        // append per element and puts the declaration's name here, and coercing against the literal
-        // would fit the wrong node - it is `t_addressless`, so a borrow parameter would get a cast
-        // where an address belongs. so the call waits a round, exactly as an undetermined argument does
+        // The question asked is whether an argument is an array literal still waiting to be *expanded*,
+        // which is not the same as being typed. AST::OperatorRewriter turns the literal into a
+        // declaration plus one append per element and puts the declaration's name here, so coercing
+        // against the literal would fit the wrong node - it is `t_addressless`, and a borrow parameter
+        // would get a cast where an address belongs. So the call waits a round, exactly as an
+        // undetermined argument does
         bool bind_destination_typed_arguments(FunctionCallExprNode &call)
         {
             bool waiting_on_a_literal = false;
@@ -334,23 +337,24 @@ namespace AST
             // nothing reached the matcher for it to have tied - the declarations that were tried are
             // what the user needs to see either way
             //
-            // **an operator with nothing to list says it in its own words**, which is the third place
-            // that rule is applied and the same reason as the two in AST::TypeChecker: every `operator`
+            // **an operator with nothing to list says it in its own words.** the third place that rule
+            // is applied, for the same reason as the two in AST::TypeChecker: every `operator`
             // declaration in the program shares the root namespace, so a program carries every
-            // operator's overload set whether it uses those types or not. `$s[] = 2;` on a slice was
-            // answered with nine candidates naming `map<K,V>` and `ordered_map<K,V>`, and `$p == null`
-            // on a struct with a list naming `const string&`
+            // operator's overload set whether it uses those types or not.
             //
-            // **gated on `match.tied` being empty**, which is the whole of the distinction: a tie is
-            // made of candidates that nearly matched, so those *are* worth naming - indexing an
+            // `$s[] = 2;` on a slice was answered with nine candidates naming `map<K,V>` and
+            // `ordered_map<K,V>`, and `$p == null` on a struct with a list naming `const string&`.
+            //
+            // **gated on `match.tied` being empty**, and that gate is the whole of the distinction. A tie
+            // is made of candidates that nearly matched, so those *are* worth naming - indexing an
             // `array<int32>` with a string is best answered by showing that the parameter is a `usize`.
-            // an empty tie is the fallback below reaching for every declaration in the root namespace,
-            // and that list is the same in every program whatever it was written about
+            // An empty tie is the fallback below reaching for every declaration in the root namespace,
+            // and that list is the same in every program whatever it was written about.
             //
-            // it used to reach the type checker's wording by accident wherever the set held one
-            // declaration: match rule 2 takes a lone candidate without consulting types at all, so the
-            // refusal came from the coercion, which knows it is an operator. a second `==` pair in the
-            // stdlib turned that into a real choice and the message degraded with it
+            // It used to reach the type checker's wording by accident wherever the set held one
+            // declaration. Match rule 2 takes a lone candidate without consulting types at all, so the
+            // refusal came from the coercion, which knows it is an operator. A second `==` pair in the
+            // stdlib turned that into a real choice, and the message degraded with it
             if (!candidates.empty() && candidates.front()->is_operator()) {
                 const std::string spelling = candidates.front()->operator_spelling();
                 const Operator *op = _collector.operators.get_operator(spelling);

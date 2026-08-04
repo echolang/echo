@@ -26,11 +26,12 @@ namespace AST
     // that one initializer is the entire difference between constructing the two storage classes -
     // everything after it, the property writes and the implicit `return $this`, is shared code
     //
-    // so the caller must place the returned declaration **ahead of every statement of the body**. the
-    // *slot* is hoisted to the function's entry block whatever its position (ensure_var_slot, and
-    // ScopeNode::clone clones a scope's declarations before its statements) - but an initializer is a
-    // statement and runs where it was written, so a class's field writes would otherwise store through
-    // a handle that is still null. StmtCodegen::gen_var_decl says the same thing from the other side
+    // So the caller must place the returned declaration **ahead of every statement of the body**.
+    //
+    // The *slot* is hoisted to the function's entry block whatever its position (ensure_var_slot, and
+    // ScopeNode::clone clones a scope's declarations before its statements). But an initializer is a
+    // statement and runs where it was written, so a class's field writes would otherwise store through a
+    // handle that is still null. StmtCodegen::gen_var_decl says the same thing from the other side
     //
     // a body-local of **value** type, never the borrow a method's `$this` is: OwnershipPass moves a
     // returned local only when `!source->type().is_pointer()`, and that move is what stops the value
@@ -46,14 +47,15 @@ namespace AST
     // builds no node for it, so the two predicates cannot disagree here today - the boundary is named
     // while it is still free to name
     //
-    // and not "does a child return" either: a body ending in `die`, or in an `if` whose arms all leave,
-    // is already done, and a return appended behind it is written where nothing reaches. it never
-    // reaches the binary - StmtCodegen::gen_scope stops at the first terminated block - but the
-    // ownership pass sees a ReturnNode and hangs a full unwind drop set on it, dead drops that are still
-    // type checked and that still mint a generic call site for a generic local
+    // And not "does a child return" either. A body ending in `die`, or in an `if` whose arms all leave,
+    // is already done, and a return appended behind it is written where nothing reaches.
     //
-    // mints its own read, never sharing one node with a field write: a node that sits in the tree twice
-    // has two parents, so every pass that rewrites a child in place rewrites it once per parent, and a
+    // It never reaches the binary - StmtCodegen::gen_scope stops at the first terminated block - but the
+    // ownership pass sees a ReturnNode and hangs a full unwind drop set on it. Dead drops that are still
+    // type checked, and that still mint a generic call site for a generic local.
+    //
+    // Mints its own read, never sharing one node with a field write. A node that sits in the tree twice
+    // has two parents, so every pass that rewrites a child in place rewrites it once per parent - and a
     // clone that answers "already cloned" collapses both parents onto the one clone
     //
     // the **explicit** `return;` written inside a constructor is not this one. Parser::parse_return
