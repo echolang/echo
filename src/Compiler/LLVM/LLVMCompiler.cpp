@@ -715,6 +715,7 @@ void LLVMCompiler::visitFunctionDecl(AST::FunctionDeclNode &node) { _stmt.gen_fu
 void LLVMCompiler::visitReturn(AST::ReturnNode &node) { _stmt.gen_return(node); }
 void LLVMCompiler::visitIfStatement(AST::IfStatementNode &node) { _stmt.gen_if_statement(node); }
 void LLVMCompiler::visitWhileStatement(AST::WhileStatementNode &node) { _stmt.gen_while_statement(node); }
+void LLVMCompiler::visit_for_statement(AST::ForStatementNode &node) { _stmt.gen_for_statement(node); }
 void LLVMCompiler::visit_loop_control(AST::LoopControlNode &node) { _stmt.gen_loop_control(node); }
 
 // a `foreach` is lowered away inside the monomorphizer's fixpoint, into the iterator declaration and the

@@ -1,0 +1,4 @@
+// all three clauses are required. an omitted one has an obvious spelling that means something else,
+// so each is a located error rather than a silently different loop
+for (; $i < 10; $i++) {
+}

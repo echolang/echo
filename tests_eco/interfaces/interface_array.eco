@@ -1,0 +1,86 @@
+// an erased value is two words and a reference, so it is an ordinary element type: `array<Renderable>`
+// holds a *heterogeneous* list, which is the one thing an interface can express and a constrained generic
+// `<T: Renderable>` cannot - a `T` is one type per instantiation.
+//
+// what makes it sound is the same reserved slot the ownership test names: `AST::classify_copy` answers
+// `t_retain` for an interface and `needs_destruction` answers true, so `array<T>` takes its element-wise
+// arm and each element's release goes through vtable slot 0 - the array knows only `Renderable`, which
+// says nothing about which block to free
+
+interface Renderable
+{
+    function render(int32 $at) : void;
+}
+
+class Ring : Renderable
+{
+    int32 $n;
+
+    function render(int32 $at) : void {
+        echo $this->n + $at;
+    }
+
+    destructor() {
+        echo 9;
+    }
+}
+
+class Pin : Renderable
+{
+    float64 $size;
+
+    function render(int32 $at) : void {
+        echo $this->size + $at;
+    }
+
+    destructor() {
+        echo 8;
+    }
+}
+
+// two different classes in one list, dispatched without either name appearing
+function direct() : void
+{
+    array<Renderable> $layers = [];
+    $layers[] = Ring(1);
+    $layers[] = Pin(2.5);
+
+    foreach ($layers as $layer) {
+        $layer->render(10);
+    }
+
+    // and the array's teardown walks back to front, so the `Pin` goes first
+}
+
+direct();
+echo 100;
+
+// ...and a class may *hold* that list, which is what lets a renderer own its layers
+class Stack
+{
+    array<Renderable> $layers;
+
+    function add(Renderable $layer) : void {
+        $this->layers[] = $layer;
+    }
+
+    function run(int32 $at) : void
+    {
+        foreach ($this->layers as $layer) {
+            $layer->render($at);
+        }
+    }
+}
+
+function held() : void
+{
+    Stack $stack = Stack(array<Renderable>());
+
+    $stack->add(Ring(1000));
+    $stack->add(Pin(2000.5));
+
+    $stack->run(1);
+}
+
+held();
+echo 200;

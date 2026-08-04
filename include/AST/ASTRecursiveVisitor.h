@@ -78,6 +78,7 @@ namespace AST
         void visit_const_if(ConstIfNode &node) override;
         void visit_const_expr(ConstExprNode &node) override;
         void visitWhileStatement(WhileStatementNode &node) override;
+        void visit_for_statement(ForStatementNode &node) override;
         void visit_loop_control(LoopControlNode &node) override;
         void visit_foreach(ForeachNode &node) override;
         void visit_assign(AssignNode &node) override;

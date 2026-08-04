@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] for_missing_clause.eco:3:6
+
+  a 'for' needs all three clauses - this one has no initializer. write 'for (int32 $i = 0; $i < 10; $i++)', or use 'while' for a loop that initializes nothing.
+
+  2 | // so each is a located error rather than a silently different loop
+  3 | for (; $i < 10; $i++) {
+    :      ^
+  4 | }
+
+1 error, nothing was compiled.

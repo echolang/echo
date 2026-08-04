@@ -1,0 +1,184 @@
+/**
+ * Ranges - `0 .. 10` and `0 ..= 10`.
+ *
+ * **Nothing in the compiler knows what a range is.** `..` and `..=` are ordinary declared infix
+ * operators, `range<T>` is an ordinary struct, and `foreach` reaches it through the same two
+ * interfaces a type of your own would declare. There is no `#[core:]` binding here and there is
+ * deliberately none: a core name exists so the compiler can *say* a type it mints itself, and the
+ * compiler never mints a range - `slice<T>` is unbound for exactly that reason.
+ *
+ * So `for` and `foreach (0 .. 10 as $i)` are unrelated features that happen to read alike. The first
+ * is a language construct; the second is this file.
+ *
+ * ```echo
+ * foreach (0 .. $a->count() as $i) { ... }     // 0, 1, ... count() - 1
+ * foreach (1 ..= 5 as $n) { ... }              // 1, 2, 3, 4, 5
+ *
+ * range<int32> $r = 0 .. 10;                   // an ordinary value, storable and passable
+ * ```
+ *
+ * **`..` is exclusive and `..=` includes its upper bound.** The exclusive form is the one that pairs
+ * with a count, which is what most loops are written over; the inclusive form is what you reach for
+ * when the bound is a real value rather than a length.
+ *
+ * The precedence is the default a declared symbol gets - looser than every arithmetic and bitwise
+ * operator, tighter than every comparison - so `0 .. $n - 1` is `0 .. ($n - 1)`, which is what it
+ * looks like.
+ *
+ * **Write the dots with or without spaces.** `0..10` and `0 .. 10` are the same three tokens; the
+ * numeric literal reader declines to eat a dot that is followed by another one.
+ */
+
+/**
+ * A half-open or closed interval over `T`, and something to loop over.
+ *
+ * It owns nothing, so - like `slice<T>` - it declares no destructor and no copy constructor: a
+ * shallow copy is the correct copy.
+ *
+ * It declares **both** iteration contracts over the same `V`, which is worth a sentence because a
+ * container cannot. `array<T>` declares `contract::const_iterable<const T>`, because a const array
+ * hands out borrows into storage nobody may write. A range's cursor yields a borrow of *its own*
+ * field, so there is no such storage to protect and a `const range<int32>` can honestly hand out an
+ * `int32&`. That is the protocol saying what it always said: `V` is what the loop yields.
+ */
+struct range<T> : contract::iterable<T>, contract::const_iterable<T>
+{
+    T $from;
+    T $to;
+
+    // **a field rather than a second type.** the alternative - lowering `$a ..= $b` to `range($a, $b + 1)`
+    // - is branch-free and silently wrong at `T`'s maximum, where `0 ..= 255` over a `uint8` becomes an
+    // empty loop. this is a constant once the constructor inlines, so a release build pays nothing for it,
+    // and it is where a step field goes the day somebody wants `0 .. 10 by 2`
+    bool $inclusive;
+
+    constructor(T $from, T $to, bool $inclusive)
+    {
+        $this->from = $from;
+        $this->to = $to;
+        $this->inclusive = $inclusive;
+    }
+
+    function iterate() : range_iterator<T>
+    {
+        return range_iterator<T>($this->from, $this->to, $this->inclusive);
+    }
+
+    const function iterate() : range_iterator<T>
+    {
+        return range_iterator<T>($this->from, $this->to, $this->inclusive);
+    }
+}
+
+/**
+ * The cursor a range hands back.
+ *
+ * **It materializes the value it yields into a field of its own**, which every cursor over computed
+ * values has to do: `contract::iterator<V>::current()` returns a `V&`, so there has to be storage to
+ * borrow. It costs one slot and nothing else - see book/concept/iteration.md.
+ *
+ * It holds its bound by value, for `slice_iterator<T>`'s reason: the end is then an ordinary local
+ * the optimiser can prove loop-invariant, which is what gives the loop a computable trip count.
+ */
+struct range_iterator<T> : contract::iterator<T>, contract::keyed<usize>
+{
+    // the next value to hand out, and the one already handed out. **two fields and not one**, which is
+    // what buys the shape below: stepping at the end of `advance()` rather than at the top of the next
+    // one means there is no "has this started" test in the loop, and a loop with no such test has a
+    // trip count the optimiser can compute - which is the difference between a vectorised loop and a
+    // scalar one. `current()` borrows `$value`, so the step may run ahead of it freely
+    T $cursor;
+    T $value;
+
+    T $end;
+    bool $inclusive;
+
+    // **only the closed form needs state**, and only at `T`'s maximum. it folds away entirely in an
+    // exclusive instance, where `$inclusive` is a constant and nothing reads this
+    //
+    // it starts true for a closed range that is already empty, which is the whole of what an
+    // `$from > $end` test would have said - answered once here rather than on every step
+    bool $spent;
+
+    // how many values have been handed out, which is what `key()` answers
+    usize $produced;
+
+    constructor(T $from, T $end, bool $inclusive)
+    {
+        $this->cursor = $from;
+        $this->value = $from;
+        $this->end = $end;
+        $this->inclusive = $inclusive;
+        $this->spent = $from > $end;
+        $this->produced = 0;
+    }
+
+    /**
+     * **The closed form ends on its last step, not on a test against the value above its end.** At `T`'s
+     * maximum there is no such value: `0 ..= 255` over a `uint8` steps to 0 and would loop forever. So
+     * the last value sets `$spent` on its way out, and that is the whole of what the flag is for - the
+     * empty case having been folded into the flag by the constructor.
+     *
+     * The half-open form needs none of it. `$cursor >= $end` stays true once it is true, and the cursor
+     * cannot reach `T`'s maximum without `$end` sitting above it - so its instance is one compare, one
+     * increment and nothing else.
+     *
+     * **Both arms decide only whether there is a value**; handing it out is written once below them,
+     * where a step field would also go.
+     */
+    function advance() : bool
+    {
+        if ($this->inclusive) {
+            if ($this->spent) {
+                return false;
+            }
+
+            if ($this->cursor >= $this->end) {
+                $this->spent = true;
+            }
+        }
+        else if ($this->cursor >= $this->end) {
+            return false;
+        }
+
+        $this->value = $this->cursor;
+
+        // it may wrap here, and only on the step that set `$spent` above - which is the step whose
+        // result nothing ever reads
+        $this->cursor = $this->cursor + 1;
+        $this->produced = $this->produced + 1;
+        return true;
+    }
+
+    function current() : T&
+    {
+        return &$this->value;
+    }
+
+    /**
+     * The position, not the value - `foreach (10 .. 13 as $i => $v)` gives 0 => 10, 1 => 11, 2 => 12.
+     */
+    function key() : usize
+    {
+        return $this->produced - 1;
+    }
+}
+
+/**
+ * `$from .. $to` - every value from `$from` up to but not including `$to`.
+ *
+ * Empty when `$from >= $to`, which is what makes `0 .. $a->count()` right for an empty collection with
+ * nothing written at the use site.
+ */
+operator<T> (T $from) .. (T $to) : range<T>
+{
+    return range<T>($from, $to, false);
+}
+
+/**
+ * `$from ..= $to` - the same, with `$to` included. Empty when `$from > $to`.
+ */
+operator<T> (T $from) ..= (T $to) : range<T>
+{
+    return range<T>($from, $to, true);
+}

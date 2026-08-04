@@ -408,7 +408,14 @@ bool LexerFunction::NumericLiteral::parse(TokenCollection &tokens, LexerCursor &
     }
 
     // if the next character is not a dot we have an integer
-    if (cursor.peek() != '.') {
+    //
+    // **a dot followed by another dot is not a decimal point.** this reader is a root function, so it
+    // runs before the trie is consulted for the character it stops on - and consuming the first dot of
+    // a `..` unconditionally is what made `0..10` lex as the float `0.0`, then a stray `.`, then `10`,
+    // with no `..` ever formed for the operator registry to match. one character of lookahead is the
+    // whole fix, and it costs nothing anywhere else: a decimal point is never followed by a second dot,
+    // and `1.` keeps its implicit zero below
+    if (cursor.peek() != '.' || cursor.peek(1) == '.') {
         tokens.push(value, Token::Type::t_integer_literal, start_line, start_offset);
         return true;
     }

@@ -3,14 +3,51 @@
 
 #pragma once
 
-// When set to "1", the embedded standard library will be used, which is the default behavior.
+// ECHO VERSION
 //
-// This means the standard library will be embedded into the "echoc" binary and will be loaded from there.
+// the major and the minor are the hand-edited half, and this is the only place either is stated:
+// editing one here *is* the decision to start a new series, and the commit that does it is an
+// ordinary commit
+#define ECO_VERSION_MAJOR 0
+#define ECO_VERSION_MINOR 1
+
+// the patch is a fact about the release history rather than about this source tree: every push to
+// master is a patch release, and the number is whatever the highest v<major>.<minor>.<n> tag on the
+// repository is, plus one. So CI resolves it and passes it in, and a series started by editing the
+// minor above restarts at zero by construction, with nothing here to keep in step
+//
+// which is what the guard is for - the value below is only what a local build reports, and a second
+// copy of the released number written here would be a copy that goes stale on every release
+#ifndef ECO_VERSION_PATCH
+#define ECO_VERSION_PATCH 0
+#endif
+
+// appended to the version verbatim, and empty for a release. CI stamps "-dev+<sha>" onto everything
+// built off a branch, so a binary someone was handed can never be mistaken for a released one
+#ifndef ECO_VERSION_SUFFIX
+#define ECO_VERSION_SUFFIX ""
+#endif
+
+#define ECO_STRINGIFY_IMPL(x) #x
+#define ECO_STRINGIFY(x) ECO_STRINGIFY_IMPL(x)
+
+// what `echoc --version` prints. argparse takes the version as a string at construction, so this is
+// composed here rather than formatted at the call site
+#define ECO_VERSION_STRING ECO_STRINGIFY(ECO_VERSION_MAJOR) "." ECO_STRINGIFY(ECO_VERSION_MINOR) "." ECO_STRINGIFY(ECO_VERSION_PATCH) ECO_VERSION_SUFFIX
+
+// When set to "1", the standard library will be embedded into the "echoc" binary and loaded from there.
 //
 // Otherwise, the standard library will be loaded and recompiled from its
 // source files on each run of "echoc". Keep in mind that this requires the stdlib folder to be
 // at the absolute location of where "echoc" was built from, so this is only meant for local development.
+//
+// which is exactly why it is guarded: a *released* binary is built with "-DECO_EMBED_STDLIB=ON", because
+// the absolute path above is the release machine's and means nothing on the machine that downloaded it.
+// The default here stays "0" - a local build wants the stdlib it can edit, and the tests assert against
+// the source tree
+#ifndef ECO_USE_EMBEDDED_STDLIB
 #define ECO_USE_EMBEDDED_STDLIB 0
+#endif
 
 // handy for debugging
 // when set to 1, exceptions will not be caught and will crash the program
@@ -41,6 +78,6 @@
 // automatically - this constant covers the one input nothing can detect: a change to this compiler's own
 // lowering. Forgetting it means a stale object silently linked into a new build, which is the single failure
 // mode in the cache with no diagnostic
-#define ECO_MODULE_CACHE_VERSION "23"
+#define ECO_MODULE_CACHE_VERSION "24"
 
 #endif // ECO_H

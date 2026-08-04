@@ -16,6 +16,7 @@
 #include "Parser/IfStatementParser.h"
 #include "Parser/ReturnParser.h"
 #include "Parser/WhileStatementParser.h"
+#include "Parser/ForStatementParser.h"
 #include "Parser/LoopControlParser.h"
 #include "Parser/ForeachParser.h"
 #include "Parser/NamespaceParser.h"
@@ -204,6 +205,14 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
+        }
+        // `for (init; condition; step) { }`. what it hands back is the **wrapper scope** holding the init
+        // beside the loop, not the loop - see Parser::parse_forstatement, and AST::ForStatementNode for
+        // why the init is a sibling rather than an edge
+        else if (cursor.is_type(Token::Type::t_for)) {
+            if (auto *wrapper = parse_forstatement(payload)) {
+                scope_node.children.push_back(AST::make_ref(wrapper));
+            }
         }
         // `foreach ($a as $el) { ... }`. beside `while` for readability; a dedicated keyword token
         // cannot collide with starts_vardecl, so the position is not load-bearing

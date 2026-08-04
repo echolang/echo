@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownVariable  for_header_variable_is_scoped.eco:7:6
+
+  The variable '$i' is not declared in the current scope
+
+  6 | 
+  7 | echo $i;
+    :      ^^
+  8 | 
+
+1 error, nothing was compiled.

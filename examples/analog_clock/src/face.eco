@@ -4,11 +4,17 @@
  * All the geometry is polar, and all of it is in `float64`. The one thing to keep in mind is that a
  * terminal cell is about twice as tall as it is wide, so a circle drawn with equal radii comes out an
  * egg - `Dial::aspect` is what stretches x to make it round.
+ *
+ * The three of them are **layers**. Each is a class conforming to `Renderable`, and the `Renderer` next
+ * door holds all three in one `array<Renderable>` without knowing which is which. That is what an
+ * interface is for and what a constrained generic `<T: Renderable>` could not say: a `T` is one type per
+ * instantiation, and this list is three.
  */
 
 namespace clock;
 
-// owns nothing, so unlike a `Canvas` this is copied and passed around freely
+// owns nothing, so unlike a `Canvas` this is copied and passed around freely - each of the three layers
+// below holds one of its own rather than borrowing a shared one
 struct Dial
 {
     float64 $radius;    // in rows
@@ -29,78 +35,123 @@ struct Dial
     {
         return $this->radius * $this->aspect * 2.0 + 1.0;
     }
-    
+
     #[inline]
     function rows() : usize
     {
         return $this->radius * 2.0 + 1.0;
     }
-}
 
-// where a point at `$turns` around the dial, `$reach` of the way out from the centre, lands.
-// clockwise from 12, so x follows the sine and y the negated cosine
-#[inline]
-function dial_x(Dial& $d, float64 $turns, float64 $reach) : float64
-{
-    return $d->cx + std::math::sin($turns * 2.0 * pi()) * $d->radius * $reach * $d->aspect;
-}
-
-#[inline]
-function dial_y(Dial& $d, float64 $turns, float64 $reach) : float64
-{
-    return $d->cy - std::math::cos($turns * 2.0 * pi()) * $d->radius * $reach;
-}
-
-function draw_dial(Canvas& $c, Dial& $d) : void
-{
-    // the ring, sampled finely enough to leave no gaps. the widest circumference is in x, so the step
-    // is chosen against that
-    float64 $samples = $d->radius * $d->aspect * 8.0;
-    float64 $i = 0.0;
-    while ($i < $samples) {
-        float64 $turns = $i / $samples;
-        $c->plot(dial_x($d, $turns, 1.0), dial_y($d, $turns, 1.0), glyph_ring());
-        $i = $i + 1.0;
+    // where a point at `$turns` around the dial, `$reach` of the way out from the centre, lands.
+    // clockwise from 12, so x follows the sine and y the negated cosine
+    #[inline]
+    function x(float64 $turns, float64 $reach) : float64
+    {
+        return $this->cx + std::math::sin($turns * std::math::TAU) * $this->radius * $reach * $this->aspect;
     }
 
-    // the twelve hour marks, on the ring, with the quarters called out
-    int32 $mark = 0;
-    while ($mark < 12) {
-        uint8 $id = glyph_hour_mark();
-        if ($mark % 3 == 0) { $id = glyph_quarter_mark(); }
-
-        float64 $turns = $mark;
-        $c->plot(dial_x($d, $turns / 12.0, 1.0), dial_y($d, $turns / 12.0, 1.0), $id);
-        $mark++;
+    #[inline]
+    function y(float64 $turns, float64 $reach) : float64
+    {
+        return $this->cy - std::math::cos($turns * std::math::TAU) * $this->radius * $reach;
     }
 }
 
-// one routine for all three hands: walk out from the centre in half-row steps, plotting as you go.
-// half a row is under one cell in both directions, so the line comes out solid without any of
-// Bresenham's bookkeeping
-function draw_hand(Canvas& $c, Dial& $d, float64 $turns, float64 $reach, uint8 $id) : void
+// **what a layer is**: something that can put itself on a canvas, given the time.
+//
+// one requirement and nothing else - an interface here holds no properties and no bodies, and it names
+// neither an associated type nor an operator, both of which would make it a contract you could only
+// reach through a generic rather than a value you can store.
+//
+// the time is a parameter rather than something a layer holds, so no layer has to be reached into
+// between frames - the two that ignore it simply ignore it
+interface Renderable
 {
-    float64 $length = $d->radius * $reach;
-    float64 $step = 0.5;
+    function render(Canvas& $c, Time& $t) : void;
+}
 
-    // starts one step out, so the pin at the centre stays visible under all three hands
-    float64 $at = $step;
-    while ($at <= $length) {
-        $c->plot(dial_x($d, $turns, $at / $d->radius), dial_y($d, $turns, $at / $d->radius), $id);
-        $at = $at + $step;
+// the ring and the twelve hour marks. the only layer that never moves, and the only one that has no use
+// for the time
+class Face : Renderable
+{
+    // a layer's dial is its own business, so it is `private` - and **that is what costs the constructor
+    // below**: a private property suppresses the field-wise one outright, since that one would write
+    // every property from outside. all three layers pay the same three lines for the same reason
+    private Dial $dial;
+
+    constructor(Dial $dial)
+    {
+        $this->dial = $dial;
+    }
+
+    function render(Canvas& $c, Time& $t) : void
+    {
+        // the ring, sampled finely enough to leave no gaps. the widest circumference is in x, so the step
+        // is chosen against that.
+        //
+        // **a `for` and not a range**, because the counter is a `float64`: a range walks the values of a
+        // type one at a time, and there is no such walk over the reals. the two loops in this file that
+        // count in floats are `for`s and the one that counts in integers is a range, which is the whole of
+        // how to choose between them
+        float64 $samples = $this->dial->radius * $this->dial->aspect * 8.0;
+
+        for (float64 $i = 0.0; $i < $samples; $i = $i + 1.0) {
+            float64 $turns = $i / $samples;
+            $c->plot($this->dial->x($turns, 1.0), $this->dial->y($turns, 1.0), GLYPH_RING);
+        }
+
+        // the twelve hour marks, on the ring, with the quarters called out
+        foreach (0 .. 12 as $mark) {
+            uint8 $id = GLYPH_HOUR_MARK;
+            if ($mark % 3 == 0) { $id = GLYPH_QUARTER_MARK; }
+
+            float64 $turns = $mark;
+            $c->plot($this->dial->x($turns / 12.0, 1.0), $this->dial->y($turns / 12.0, 1.0), $id);
+        }
     }
 }
 
-function draw_hands(Canvas& $c, Dial& $d, Time& $t) : void
+// the three hands and the pin they turn on
+class Hands : Renderable
 {
-    // longest last, so a hand that crosses another is drawn over it rather than under
-    draw_hand($c, $d, hour_turns($t), 0.55, glyph_hour_hand());
-    draw_hand($c, $d, minute_turns($t), 0.85, glyph_minute_hand());
-    draw_hand($c, $d, second_turns($t), 0.95, glyph_second_hand());
+    private Dial $dial;
 
-    // the pin goes on top of all three - a hand pointing near the horizontal rounds onto the centre
-    // cell, and the dial reads better with the hub still there
-    $c->plot($d->cx, $d->cy, glyph_pin());
+    constructor(Dial $dial)
+    {
+        $this->dial = $dial;
+    }
+
+    // one routine for all three hands: walk out from the centre in half-row steps, plotting as you go.
+    // half a row is under one cell in both directions, so the line comes out solid without any of
+    // Bresenham's bookkeeping.
+    //
+    // not part of `Renderable` - an interface is what a layer owes the renderer, and this is the layer's
+    // own business
+    function hand(Canvas& $c, float64 $turns, float64 $reach, uint8 $id) : void
+    {
+        float64 $length = $this->dial->radius * $reach;
+        float64 $step = 0.5;
+
+        // it starts one step out, so the pin at the centre stays visible under all three hands - which is
+        // also why this is a `for` beyond the counter's type: a range starts where it starts and steps by
+        // one, and this one does neither
+        for (float64 $at = $step; $at <= $length; $at = $at + $step) {
+            $c->plot($this->dial->x($turns, $at / $this->dial->radius),
+                     $this->dial->y($turns, $at / $this->dial->radius), $id);
+        }
+    }
+
+    function render(Canvas& $c, Time& $t) : void
+    {
+        // longest last, so a hand that crosses another is drawn over it rather than under
+        $this->hand($c, hour_turns($t), 0.55, GLYPH_HOUR_HAND);
+        $this->hand($c, minute_turns($t), 0.85, GLYPH_MINUTE_HAND);
+        $this->hand($c, second_turns($t), 0.95, GLYPH_SECOND_HAND);
+
+        // the pin goes on top of all three - a hand pointing near the horizontal rounds onto the centre
+        // cell, and the dial reads better with the hub still there
+        $c->plot($this->dial->cx, $this->dial->cy, GLYPH_PIN);
+    }
 }
 
 // `HH:MM:SS`. There is no int-to-string anywhere in the stdlib and no formatting, so the digits are
@@ -116,6 +167,8 @@ function two_digits(string& $out, int32 $value) : void
     $out->push_byte($ones);
 }
 
+// a free function and not a method on `Time`: it is string arithmetic rather than drawing, and the layer
+// below is the only thing that puts it anywhere
 function clock_text(Time& $t) : string
 {
     string $out = '';
@@ -130,13 +183,24 @@ function clock_text(Time& $t) : string
     return $out;
 }
 
-function draw_readout(Canvas& $c, Dial& $d, Time& $t) : void
+// the digital readout, centred under the dial
+class Readout : Renderable
 {
-    string $text = clock_text($t);
+    private Dial $dial;
 
-    // centred under the dial, one blank row below it
-    int32 $x = $d->cx - 3.0;
-    int32 $y = $d->rows() + 1;
+    constructor(Dial $dial)
+    {
+        $this->dial = $dial;
+    }
 
-    $c->write_text($x, $y, &$text);
+    function render(Canvas& $c, Time& $t) : void
+    {
+        string $text = clock_text($t);
+
+        // centred under the dial, one blank row below it
+        int32 $x = $this->dial->cx - 3.0;
+        int32 $y = $this->dial->rows() + 1;
+
+        $c->write_text($x, $y, &$text);
+    }
 }

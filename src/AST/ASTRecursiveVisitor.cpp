@@ -29,6 +29,7 @@
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/MemberAccessNode.h"
@@ -212,6 +213,15 @@ void RecursiveVisitor::visitWhileStatement(WhileStatementNode &node)
 {
     value_edge(node.condition);
     statement_edge(node.loop_scope);
+}
+
+// the order they run in: the condition, then the body, then the step. AST::OwnershipPass is the one walker
+// that cares - it is what decides where a temporary in the condition dies and which frames a `break` unwinds
+void RecursiveVisitor::visit_for_statement(ForStatementNode &node)
+{
+    value_edge(node.condition);
+    statement_edge(node.loop_scope);
+    statement_edge(node.step);
 }
 
 void RecursiveVisitor::visit_loop_control(LoopControlNode &node)

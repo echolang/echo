@@ -1,0 +1,23 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  for_and_range_without_stdlib.eco:8:12
+
+  Unexpected token 'dot (.)' found. Expected 'as'
+
+  7 | 
+  8 | foreach (0 .. 3 as $j) {
+    :            ^ expected as
+  9 | }
+
+[error] UnexpectedToken  for_and_range_without_stdlib.eco:9:1
+
+  Unexpected token 'close_brace '}'' found
+
+   8 | foreach (0 .. 3 as $j) {
+   9 | }
+     : ^ unexpected here
+  10 | 
+
+2 errors, nothing was compiled.

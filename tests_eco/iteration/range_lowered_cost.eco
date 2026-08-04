@@ -1,0 +1,15 @@
+// **the same assertion tests_eco/iteration/lowered_cost makes about a slice**, made about a range: the
+// cursor is an ordinary struct with two ordinary methods, so a loop over one costs what a hand-written
+// counted loop costs. a vectorised body is the proof - LoopVectorize only widens a loop it could prove
+// has no calls, no aliasing hazard and a computable trip count
+function total(const array<int32>& $a) : int32
+{
+    int32 $sum = 0;
+    foreach (0 .. $a->count() as $i) {
+        $sum = $sum + $a[$i];
+    }
+    return $sum;
+}
+
+array<int32> $xs = [1, 2, 3];
+echo total($xs);

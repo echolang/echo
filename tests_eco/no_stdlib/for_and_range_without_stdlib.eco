@@ -1,0 +1,9 @@
+// the two halves of this feature are unrelated, and `--no-stdlib` is what makes that visible: `for` is a
+// language construct and loops with nothing declared at all, while `..` is a declared operator living in
+// stdlib/core/range.eco - without it the dots are not a symbol and the expression stops at the first one
+for (int32 $i = 0; $i < 3; $i++) {
+    echo $i;
+}
+
+foreach (0 .. 3 as $j) {
+}

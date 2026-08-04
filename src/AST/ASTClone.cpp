@@ -36,6 +36,7 @@
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
 #include "AST/MemberAccessNode.h"
@@ -419,6 +420,15 @@ Node *WhileStatementNode::clone(CloneContext &cc) const
     WhileStatementNode *c = cc.shallow(this);
     c->condition = cc.child(c->condition);
     c->loop_scope = cc.child(c->loop_scope);
+    return c;
+}
+
+Node *ForStatementNode::clone(CloneContext &cc) const
+{
+    ForStatementNode *c = cc.shallow(this);
+    c->condition = cc.child(c->condition);
+    c->loop_scope = cc.child(c->loop_scope);
+    c->step = cc.child(c->step);
     return c;
 }
 

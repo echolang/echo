@@ -48,6 +48,33 @@ set(ECO_STDLIB_DEFINITION "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
 target_compile_definitions(${APPNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 target_compile_definitions(${LIBNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 
+# what a *released* binary is built with. the path above is the build machine's, so a binary someone
+# downloaded can only find the standard library if it carries it - see the comment on
+# ECO_USE_EMBEDDED_STDLIB in include/eco.h. Off by default: a local build wants the stdlib it can edit,
+# and stdlib/build/stdlib_embedded.h is only as fresh as the last `--emit-stdlib-header`
+option(ECO_EMBED_STDLIB "Embed the standard library into the echoc binary" OFF)
+
+if(ECO_EMBED_STDLIB)
+    target_compile_definitions(${APPNAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
+    target_compile_definitions(${LIBNAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
+endif()
+
+# the patch number and the version suffix are CI's to supply, because the patch is a fact about the
+# release history rather than about this tree. Both are added only when non-empty, so a plain configure
+# leaves include/eco.h's own values alone rather than overriding them with a blank
+set(ECO_VERSION_PATCH "" CACHE STRING "Patch version to stamp into the binary. Empty: use include/eco.h's.")
+set(ECO_VERSION_SUFFIX "" CACHE STRING "Appended to the version verbatim, e.g. '-dev+abc1234'. Empty for a release.")
+
+if(NOT ECO_VERSION_PATCH STREQUAL "")
+    target_compile_definitions(${APPNAME} PRIVATE ECO_VERSION_PATCH=${ECO_VERSION_PATCH})
+    target_compile_definitions(${LIBNAME} PRIVATE ECO_VERSION_PATCH=${ECO_VERSION_PATCH})
+endif()
+
+if(NOT ECO_VERSION_SUFFIX STREQUAL "")
+    target_compile_definitions(${APPNAME} PRIVATE "ECO_VERSION_SUFFIX=\"${ECO_VERSION_SUFFIX}\"")
+    target_compile_definitions(${LIBNAME} PRIVATE "ECO_VERSION_SUFFIX=\"${ECO_VERSION_SUFFIX}\"")
+endif()
+
 # create an install target
 install(TARGETS ${APPNAME} DESTINATION bin)
 

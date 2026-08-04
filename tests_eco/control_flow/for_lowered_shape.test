@@ -1,0 +1,16 @@
+--- OUT --->
+0
+drop
+--- AST --->
+// the wrapper scope holds the header declaration and then the loop. the loop itself carries no init,
+// which is the whole reason `$i`'s lifetime needs no rule of its own - it is an ordinary frame local,
+// and a `break` or a `return` out of the body unwinds it through the machinery a block already has
+CHECK: vardecl<type<int32>>($i) = literal<int32>(0)
+CHECK: for (; binexp<bool>(varref<int32>(var($i)) < literal<int32>(1)); varref<int32>(var($i)) = binexp<int32>(varref<int32>(var($i)) + literal<int32>(1)))
+
+--- RAST --->
+// and the body's own local is dropped at the end of the body, once per iteration. the `for` survives to
+// codegen - unlike `foreach` it is not a transient node, so `-ar` still shows one
+CHECK: for (;
+CHECK: vardecl<type<Noisy>>($n)
+CHECK: call destructor(addrof<Noisy&>(varref<Noisy>(var($n)))): void

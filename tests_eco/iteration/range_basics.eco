@@ -1,0 +1,41 @@
+// **nothing in the compiler knows what a range is.** `..` and `..=` are declared operators in
+// stdlib/core/range.eco and `range<T>` conforms to the same two interfaces a type of your own would
+foreach (0 .. 4 as $i) {
+    echo $i;
+}
+echo "-";
+
+// the inclusive form takes its upper bound with it
+foreach (1 ..= 3 as $n) {
+    echo $n;
+}
+echo "-";
+
+// written tight, which is a fact about the numeric literal reader: a dot followed by a dot is not a
+// decimal point, so `0..3` is an integer, two dots and an integer
+foreach (0..3 as $t) {
+    echo $t;
+}
+echo "-";
+
+// an ordinary value, storable and passable - the operator is not a loop-position special case
+range<int32> $r = 7 .. 10;
+foreach ($r as $v) {
+    echo $v;
+}
+echo "-";
+
+// a const one loops too, and yields a value you may write. a range's cursor borrows *its own* field
+// rather than storage the range owns, which is why it declares const_iterable over a plain V where a
+// container has to declare it over a const one
+const range<int32> $frozen = 0 .. 2;
+foreach ($frozen as $f) {
+    echo $f;
+}
+echo "-";
+
+// the key is the position, not the value
+foreach (10 .. 13 as $k => $kv) {
+    echo $k;
+    echo $kv;
+}

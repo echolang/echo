@@ -739,10 +739,16 @@ AST::OperatorRegistry::Match declared_operator_at(
     return match;
 }
 
-// the same question where only the answer's existence is wanted
-bool starts_declared_operator(Parser::Payload &payload, Parser::Cursor &cursor, AST::OpFixity fixity)
+// the same question where only the answer's existence is wanted, asked of **either expression
+// position in one match**: is_expr_token wants a symbol that could *begin* an expression or *continue*
+// one, and those are two fixities over the one symbol - so asking per fixity at an unmoved cursor runs
+// the sequence scan twice for a single answer, at the token that ends every expression in the program
+bool starts_declared_operator_in_expression(Parser::Payload &payload, Parser::Cursor &cursor)
 {
-    return declared_operator_at(payload, cursor, fixity).has();
+    const auto match = operator_match_at(payload, cursor);
+
+    return match.has()
+        && (match.op->has_fixity(AST::OpFixity::t_prefix) || match.op->has_fixity(AST::OpFixity::t_infix));
 }
 
 bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
@@ -793,19 +799,25 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // `if (!$b)`, expr_parts holds nothing but the `(` and parse_expr_ref's single-part reporter
            // fires on an operator with no operand
            AST::Operator::is_prefix_only_token(cursor.current().type()) ||
-           // a declared **prefix** operator, which may be spelled out of tokens nothing else in this
-           // list admits - `!!` is two t_exclamation, and neither has a precedence. without this the
-           // loop below never enters for `echo !!'hello';`, `expr_parts` stays empty, and the
-           // sanity assert at the end of parse_expr_ref takes the compiler down
+           // a declared operator in **prefix or infix** position, either of which may be spelled out of
+           // tokens nothing else in this list admits. a prefix one *begins* an expression - `!!` is two
+           // t_exclamation and neither carries a precedence, so without it the loop below never enters
+           // for `echo !!'hello';`, `expr_parts` stays empty and the sanity assert at the end of
+           // parse_expr_ref takes the compiler down. an infix one *continues* one, the same gap on the
+           // other side: `..`, the range operator, would otherwise end the expression at its first
+           // token and `0 .. 10` reports an unexpected `.`
            //
-           // gated to prefix fixity so a bare identifier - which is already admitted above, as the
+           // gated to those two fixities so a bare identifier - which is already admitted above, as the
            // start of a call - does not change meaning just because some suffix operator is spelled
-           // that way somewhere in the program
+           // that way somewhere in the program. neither arm changes anything for a symbol spelled as a
+           // word, and the shunting yard's `expects_operand` still refuses an infix one written in
+           // operand position - see notes/operators.md, "A custom infix symbol is not an operator in
+           // operand position"
            //
            // **last**, because it is the only arm that costs a lookup: the precedence test above is a
            // switch on the token type and answers for every built-in operator token, so only a token
            // that is nothing else in this list reaches the symbol trie
-           starts_declared_operator(payload, cursor, AST::OpFixity::t_prefix);
+           starts_declared_operator_in_expression(payload, cursor);
 }
 
 // `( expr )`, the shape every call-like form here is written in - `weak(...)`, `strong(...)`, a pointer

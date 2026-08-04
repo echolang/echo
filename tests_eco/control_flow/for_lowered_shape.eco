@@ -1,0 +1,13 @@
+// the header declaration is an ordinary statement in a scope of its own, and the loop is its sibling -
+// which is what makes `$i` visible to the condition, the step and the body, and dead after the loop
+struct Noisy
+{
+    int32 $id;
+    constructor(int32 $id) { $this->id = $id; }
+    destructor() { echo "drop"; }
+}
+
+for (int32 $i = 0; $i < 1; $i++) {
+    Noisy $n = Noisy($i);
+    echo $i;
+}

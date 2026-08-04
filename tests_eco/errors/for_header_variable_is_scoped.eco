@@ -1,0 +1,7 @@
+// the header's declaration belongs to the loop and to nothing after it - the wrapper scope the parser
+// mints around the init and the loop *is* its lifetime
+for (int32 $i = 0; $i < 2; $i++) {
+    echo $i;
+}
+
+echo $i;

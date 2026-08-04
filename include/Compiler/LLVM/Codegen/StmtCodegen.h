@@ -17,8 +17,10 @@ namespace AST
     class IfStatementNode;
     class GuardNode;
     class WhileStatementNode;
+    class ForStatementNode;
     class LoopControlNode;
     class AssignNode;
+    class ExprNode;
 };
 
 namespace Compiler::LLVM
@@ -53,12 +55,22 @@ namespace Compiler::LLVM
         void gen_guard(AST::GuardNode &node);
         void gen_while_statement(AST::WhileStatementNode &node);
 
+        // `for (init; condition; step)`. the init is not here - it is the preceding statement in the
+        // wrapper scope Parser::parse_forstatement minted, so codegen has already emitted it
+        void gen_for_statement(AST::ForStatementNode &node);
+
         // `break` / `continue`: the exit's own drops, then a branch to whichever of the innermost
         // CodegenContext::LoopTarget's two blocks the kind names
         void gen_loop_control(AST::LoopControlNode &node);
         void gen_assign(AST::AssignNode &node);
 
     private:
+
+        // **the one loop lowering**, which both statements above go through. a `while` passes no step and
+        // its `continue` target is the condition block; a `for` passes one and its `continue` target is
+        // the step block. that is the entire difference between the two, said once
+        void gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::ScopeNode &body);
+
         CodegenContext &_ctx;
     };
 };

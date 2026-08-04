@@ -1,0 +1,11 @@
+// an inner break leaves the inner loop only, and the outer loop's step still runs
+for (int32 $outer = 0; $outer < 3; $outer++) {
+    for (int32 $inner = 0; $inner < 10; $inner++) {
+        if ($inner == 2) {
+            break;
+        }
+        echo $inner;
+    }
+    echo "-";
+}
+echo "end";

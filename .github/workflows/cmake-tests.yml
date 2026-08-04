@@ -8,6 +8,18 @@ on:
     branches:
       - '**'
 
+# the release job creates a tag and a release, which is a write to the repository
+permissions:
+  contents: write
+
+# master is serialized rather than cancelled: the patch number is resolved from the tags that exist
+# when a run starts, so two pushes landing close together would otherwise both resolve to the same
+# one and the second would fail on an existing tag. On a branch there is nothing to serialize, and a
+# stale run is just work nobody is waiting for
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   build_and_test:
     runs-on: ubuntu-24.04
@@ -57,9 +69,74 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ./tests
 
-  build_release:
+  # the version the release binaries are stamped with and the tag the release gets. Resolved once, so
+  # both platforms and the release itself cannot disagree about what was built
+  #
+  # the patch number is not stored anywhere: it is the highest v<major>.<minor>.<patch> tag plus one,
+  # so bumping ECO_VERSION_MINOR in include/eco.h by hand starts a series at .0 with no second edit
+  # and no commit pushed back onto master
+  resolve_version:
     runs-on: ubuntu-24.04
     needs: build_and_test
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      patch: ${{ steps.resolve.outputs.patch }}
+      suffix: ${{ steps.resolve.outputs.suffix }}
+      tag: ${{ steps.resolve.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          # the whole history, because the tags *are* the input
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          major=$(sed -n 's/^#define ECO_VERSION_MAJOR \([0-9][0-9]*\).*$/\1/p' include/eco.h)
+          minor=$(sed -n 's/^#define ECO_VERSION_MINOR \([0-9][0-9]*\).*$/\1/p' include/eco.h)
+
+          if [ -z "$major" ] || [ -z "$minor" ]; then
+            echo "Could not read ECO_VERSION_MAJOR / ECO_VERSION_MINOR from include/eco.h." >&2
+            exit 1
+          fi
+
+          # the highest patch in this series, or -1 when the series has no tag yet - so a new series
+          # starts at 0 and an existing one continues
+          highest=$(git tag --list "v${major}.${minor}.*" \
+            | sed -n "s/^v${major}\.${minor}\.\([0-9][0-9]*\)$/\1/p" \
+            | sort -n \
+            | tail -1)
+          highest=${highest:--1}
+
+          patch=$((highest + 1))
+          version="${major}.${minor}.${patch}"
+
+          # a binary built off a branch says so, so one that was handed to somebody can never be
+          # mistaken for a release
+          suffix=""
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            suffix="-dev+$(git rev-parse --short HEAD)"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "Tag v${version} already exists, refusing to resolve it again." >&2
+            exit 1
+          fi
+
+          echo "patch=${patch}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${suffix}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved ${version}${suffix} (previous patch in series: ${highest})"
+
+  build_release:
+    runs-on: ubuntu-24.04
+    needs: resolve_version
     env:
       BUILD_TYPE: Release
       USE_CLANG: 1
@@ -73,7 +150,7 @@ jobs:
         uses: ZhongRuoyu/setup-llvm@v0
         with:
           llvm-version: 20
-  
+
       - name: Install dependencies
         run: |
           sudo apt update
@@ -82,7 +159,10 @@ jobs:
             libc++-dev \
             libc++abi-dev \
             zlib1g-dev
-  
+
+      # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
+      # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
+      # carries have to come from the sources this commit actually has
       - name: Configure CMake
         run: |
           cmake -B build -G Ninja \
@@ -91,20 +171,82 @@ jobs:
             -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
             -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
 
-      - name: Build release
+      - name: Build stage one
+        run: cmake --build ${{github.workspace}}/build --config Release --target echoc
+
+      # an empty program is enough: the entry point is a file's scope statements, so there is nothing
+      # to write, and `run` is used rather than `build` so no linker is involved
+      - name: Regenerate the embedded stdlib header
         run: |
-          cmake --build ${{github.workspace}}/build --config Release --target echoc
-          cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
-  
-      - name: Upload release binary
+          : > emit.eco
+          ./build/echoc run --emit-stdlib-header emit.eco
+          rm emit.eco
+
+      # linux only, and deliberately: the embedded file order comes from expanding the manifest's
+      # #[sources:] globs, which is filesystem order, so comparing bytes across two operating systems
+      # would be a flake. Each platform builds against the header it just regenerated either way -
+      # this step is about the *committed* one being stale, which is silent otherwise
+      - name: Check the committed stdlib header is not stale
+        run: |
+          if ! git diff --exit-code -- stdlib/build/stdlib_embedded.h; then
+            echo "::error file=stdlib/build/stdlib_embedded.h::The committed embedded stdlib header does not match the stdlib sources. Regenerate it with 'echoc run --emit-stdlib-header <file>.eco' and commit the result."
+            exit 1
+          fi
+
+      # stage two: the binary that ships. The stdlib goes inside it, because the path stage one reads
+      # it from is this runner's and means nothing to whoever downloads the result
+      - name: Configure release build
+        run: |
+          cmake -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DCMAKE_C_COMPILER="$LLVM_PATH/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
+            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
+            -DECO_EMBED_STDLIB=ON \
+            -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
+            -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
+
+      - name: Build release
+        run: cmake --build ${{github.workspace}}/build-release --config Release --target echoc
+
+      - name: Smoke test the release binary
+        env:
+          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+        run: |
+          set -euo pipefail
+          cp build-release/echoc "$RUNNER_TEMP/echoc"
+
+          reported=$("$RUNNER_TEMP/echoc" --version)
+          if [ "$reported" != "$EXPECTED" ]; then
+            echo "The binary reports '$reported', expected '$EXPECTED'." >&2
+            exit 1
+          fi
+
+          # from outside the checkout, and using the standard library: the one thing that proves the
+          # stdlib is really inside the binary rather than being read from this runner's source tree
+          cd "$RUNNER_TEMP"
+          printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
+          ./echoc run smoke.eco
+
+      - name: Package release archive
+        env:
+          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          cp build-release/echoc stage/
+          cp README.md LICENSE stage/
+          tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
+
+      - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
-          path: ${{github.workspace}}/${{env.BIN_NAME}}
+          path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
 
   build_release_macos_arm64:
     runs-on: macos-15
-    needs: build_and_test
+    needs: resolve_version
     env:
       BUILD_TYPE: Release
       USE_CLANG: 1
@@ -113,7 +255,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-  
+
       - name: Setup LLVM
         uses: ZhongRuoyu/setup-llvm@v0
         with:
@@ -131,55 +273,96 @@ jobs:
             -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
             -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm"
 
-      - name: Build release
-        run: |
-          cmake --build ${{github.workspace}}/build --config Release --target echoc
-          cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
+      - name: Build stage one
+        run: cmake --build ${{github.workspace}}/build --config Release --target echoc
 
-      - name: Upload release binary
+      - name: Regenerate the embedded stdlib header
+        run: |
+          : > emit.eco
+          ./build/echoc run --emit-stdlib-header emit.eco
+          rm emit.eco
+
+      - name: Configure release build
+        run: |
+          cmake -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+            -DCMAKE_C_COMPILER=/usr/bin/clang \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+            -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
+            -DECO_EMBED_STDLIB=ON \
+            -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
+            -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
+
+      - name: Build release
+        run: cmake --build ${{github.workspace}}/build-release --config Release --target echoc
+
+      - name: Smoke test the release binary
+        env:
+          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+        run: |
+          set -euo pipefail
+          cp build-release/echoc "$RUNNER_TEMP/echoc"
+
+          reported=$("$RUNNER_TEMP/echoc" --version)
+          if [ "$reported" != "$EXPECTED" ]; then
+            echo "The binary reports '$reported', expected '$EXPECTED'." >&2
+            exit 1
+          fi
+
+          cd "$RUNNER_TEMP"
+          printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
+          ./echoc run smoke.eco
+
+      - name: Package release archive
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          cp build-release/echoc stage/
+          cp README.md LICENSE stage/
+          tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
+
+      - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
-          path: ${{github.workspace}}/${{env.BIN_NAME}}
+          path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
 
-  # build_release_macos_arm:
-  #   runs-on: macos-latest-xlarge
-  #   needs: build_and_test
-  #   env:
-  #     BUILD_TYPE: Release
-  #     CC: clang
-  #     CXX: clang++
-  #     USE_CLANG: 1
-  #     BIN_NAME: echo-macos-arm
+  # every push to master is a patch release. `gh release create` creates the tag itself, so nothing
+  # here pushes a ref by hand and nothing commits back onto the branch
+  release:
+    runs-on: ubuntu-24.04
+    needs: [resolve_version, build_release, build_release_macos_arm64]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
 
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v5
-  
-  #     - name: Setup LLVM
-  #       uses: ZhongRuoyu/setup-llvm@v0
-  #       with:
-  #         llvm-version: 18
-  
-  #     - name: Install dependencies
-  #       run: |
-  #         brew install cmake ninja
-  
-  #     - name: Configure CMake
-  #       run: |
-  #         cmake -B build -G Ninja \
-  #           -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
-  #           -DCMAKE_C_COMPILER=clang \
-  #           -DCMAKE_CXX_COMPILER=clang++
-  
-  #     - name: Build release
-  #       run: |
-  #         cmake --build ${{github.workspace}}/build --config Release --target echoc
-  #         cp ${{github.workspace}}/build/echoc ${{github.workspace}}/${{env.BIN_NAME}}
-  
-  #     - name: Upload release binary
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: ${{env.BIN_NAME}}
-  #         path: ${{github.workspace}}/${{env.BIN_NAME}}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # asked again here rather than trusted from resolve_version: the builds took minutes, and a tag
+      # that appeared meanwhile means this run's number is somebody else's
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{needs.resolve_version.outputs.tag}}
+          VERSION: ${{needs.resolve_version.outputs.version}}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists - another run got there first." >&2
+            exit 1
+          fi
+
+          gh release create "${TAG}" \
+            --target "${{ github.sha }}" \
+            --title "echo ${TAG}" \
+            --generate-notes \
+            artifacts/echo-linux-x86_64/echo-linux-x86_64.tar.gz \
+            artifacts/echo-macos-arm64/echo-macos-arm64.tar.gz

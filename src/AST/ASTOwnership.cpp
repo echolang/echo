@@ -32,6 +32,7 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
@@ -770,13 +771,14 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
                     if (!_initialized_storage.insert(key).second) {
                         _collector.collect_issue<Issue::GenericError>(
-                            code_ref_for(assign->token_assign),
-                            fmt::format(
+                            code_ref_for(assign->token_assign), fmt::format(
                                 "'{}' is initialized twice, and '{}' owns a resource - the value the first "
                                 "write built would never be destroyed. Build it once, or assign the whole "
                                 "variable instead so the old value is torn down.",
                                 description,
-                                target_type.get_type_desciption()));
+                                target_type.get_type_desciption()
+                            )
+                        );
                     }
                 }
             }
@@ -791,12 +793,13 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
                 if (root == nullptr) {
                     _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(assign->token_assign),
-                        fmt::format(
+                        code_ref_for(assign->token_assign), fmt::format(
                             "Cannot assign a '{}' into a field or element - it owns a resource, and "
                             "replacing part of a value is not supported yet. Assign the whole variable, "
                             "or release the old value first.",
-                            target_type.get_type_desciption()));
+                            target_type.get_type_desciption()
+                        )
+                    );
                 }
                 else {
                     // whatever the variable held is being replaced, so it is destroyed first -
@@ -988,72 +991,17 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
         {
             auto *stmt = static_cast<WhileStatementNode *>(node);
 
-            // a value edge, and the one that most needs to be: a temporary bound here is bound and
-            // destroyed *inside* the block the condition is evaluated in, once per iteration. hoisting
-            // it to the statement would acquire it every turn and release it once
-            stmt->condition = walk_value_edge(stmt->condition);
+            // no step: a `while`'s condition *is* its step, and so is the advance of the `foreach` that
+            // lowers into one
+            walk_loop(stmt->condition, stmt->loop_scope, nullptr);
+            break;
+        }
 
-            // a move inside a loop body runs on every iteration, so a variable declared *outside* the
-            // loop would be moved out of twice - the second iteration reading a value that is no
-            // longer there. the locals the loop declares itself are fine: each iteration gets its own
-            if (stmt->loop_scope != nullptr) {
-                std::unordered_set<const VarDeclNode *> outer;
-                for (const auto &frame : _frames) {
-                    outer.insert(frame.locals.begin(), frame.locals.end());
-                }
+        case NodeType::n_for_statement:
+        {
+            auto *stmt = static_cast<ForStatementNode *>(node);
 
-                const auto before = _moved;
-
-                // the frame walk_scope is about to push for the body, recorded here rather than inside
-                // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
-                // only tells it whether the frame it needs is already there
-                _loop_frames.push_back(LoopFrame{_frames.size(), {}, {}});
-                const ExitKind body_exit = walk_scope(*stmt->loop_scope);
-                const LoopFrame body = std::move(_loop_frames.back());
-                _loop_frames.pop_back();
-
-                // **the state that reaches the back edge**, which is what the diagnostic below is about:
-                // the body's fall-through where it has one, plus every `continue`. a body that always
-                // leaves has no fall-through, so the header is re-entered only by a `continue` - and by
-                // nothing at all if there is none
-                auto back_edge = body_exit == ExitKind::t_none ? _moved : before;
-                back_edge.insert(body.continue_moved.begin(), body.continue_moved.end());
-
-                // **and the state that reaches the code after the loop**: the back edge - the condition
-                // is what the loop is left by, and it is read from the header - plus every `break`
-                auto after_loop = back_edge;
-                after_loop.insert(body.break_moved.begin(), body.break_moved.end());
-
-                // judged over both, and that is the over-approximation this keeps. a `break` runs at
-                // most once, so moving an outer local on that path does not repeat - but the loop can
-                // also be left through its condition, where the value was never moved and the drop after
-                // the loop would run on it, and AST::scope_exit_kind deliberately answers nothing about
-                // a loop's trip count (`while (true)` included). so "moved anywhere inside the loop"
-                // stays the rule, and a break-only move is refused with the rest
-                for (const auto *decl : after_loop) {
-                    if (before.count(decl) > 0 || outer.count(decl) == 0) {
-                        continue;
-                    }
-
-                    _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(decl->token_varname),
-                        fmt::format(
-                            "'{}' is moved out of inside a loop, so the next iteration would move a "
-                            "value that is no longer there. Move it after the loop, or declare it "
-                            "inside one.",
-                            decl->name_full()));
-                }
-
-                // a decl only a `break` moved is one the condition-exit path did not, so a read after
-                // the loop says *may* have been moved rather than claiming it was
-                for (const auto *decl : body.break_moved) {
-                    if (back_edge.count(decl) == 0) {
-                        _maybe_moved.insert(decl);
-                    }
-                }
-
-                _moved = std::move(after_loop);
-            }
+            walk_loop(stmt->condition, stmt->loop_scope, stmt->step);
             break;
         }
 
@@ -1097,6 +1045,89 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
     }
 
     return child;
+}
+
+// **the one loop walk**, which both loop statements above go through. what a `for` adds is the step, and
+// it is walked *inside* the loop's frame and after the body: it runs on the fall-through and on every
+// `continue`, so a temporary it materializes lives and dies there, once per iteration
+void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *step)
+{
+    // a value edge, and the one that most needs to be: a temporary bound here is bound and
+    // destroyed *inside* the block the condition is evaluated in, once per iteration. hoisting
+    // it to the statement would acquire it every turn and release it once
+    condition = walk_value_edge(condition);
+
+    // a move inside a loop body runs on every iteration, so a variable declared *outside* the
+    // loop would be moved out of twice - the second iteration reading a value that is no
+    // longer there. the locals the loop declares itself are fine: each iteration gets its own
+    if (body != nullptr) {
+        std::unordered_set<const VarDeclNode *> outer;
+        for (const auto &frame : _frames) {
+            outer.insert(frame.locals.begin(), frame.locals.end());
+        }
+
+        const auto before = _moved;
+
+        // the frame walk_scope is about to push for the body, recorded here rather than inside
+        // it: walk_scope does not know whose scope it has been handed, and its `own_frame` test
+        // only tells it whether the frame it needs is already there
+        _loop_frames.push_back(LoopFrame{_frames.size(), {}, {}});
+        const ExitKind body_exit = walk_scope(*body);
+
+        // the step, still inside the loop frame - it is part of an iteration, not of what comes
+        // after one. a `for` whose body always leaves reaches it only through a `continue`, and
+        // through nothing at all when there is none; it is walked either way, because codegen
+        // emits the block either way and an unwalked scope is a block with no drops in it
+        if (step != nullptr) {
+            walk_scope(*step);
+        }
+
+        const LoopFrame frame = std::move(_loop_frames.back());
+        _loop_frames.pop_back();
+
+        // **the state that reaches the back edge**, which is what the diagnostic below is about:
+        // the body's fall-through where it has one, plus every `continue`. a body that always
+        // leaves has no fall-through, so the header is re-entered only by a `continue` - and by
+        // nothing at all if there is none
+        auto back_edge = body_exit == ExitKind::t_none ? _moved : before;
+        back_edge.insert(frame.continue_moved.begin(), frame.continue_moved.end());
+
+        // **and the state that reaches the code after the loop**: the back edge - the condition
+        // is what the loop is left by, and it is read from the header - plus every `break`
+        auto after_loop = back_edge;
+        after_loop.insert(frame.break_moved.begin(), frame.break_moved.end());
+
+        // judged over both, and that is the over-approximation this keeps. a `break` runs at
+        // most once, so moving an outer local on that path does not repeat - but the loop can
+        // also be left through its condition, where the value was never moved and the drop after
+        // the loop would run on it, and AST::scope_exit_kind deliberately answers nothing about
+        // a loop's trip count (`while (true)` included). so "moved anywhere inside the loop"
+        // stays the rule, and a break-only move is refused with the rest
+        for (const auto *decl : after_loop) {
+            if (before.count(decl) > 0 || outer.count(decl) == 0) {
+                continue;
+            }
+
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(decl->token_varname), fmt::format(
+                    "'{}' is moved out of inside a loop, so the next iteration would move a "
+                    "value that is no longer there. Move it after the loop, or declare it "
+                    "inside one.",
+                    decl->name_full()
+                )
+            );
+        }
+
+        // a decl only a `break` moved is one the condition-exit path did not, so a read after
+        // the loop says *may* have been moved rather than claiming it was
+        for (const auto *decl : frame.break_moved) {
+            if (back_edge.count(decl) == 0) {
+                _maybe_moved.insert(decl);
+            }
+        }
+
+        _moved = std::move(after_loop);
+    }
 }
 
 VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference &site)
@@ -1242,8 +1273,8 @@ std::string OwnershipPass::describe_pending(ExprNode *owner) const
     // tested on the one owner that *has* a member to name, rather than on the one that has not: the
     // other way round every kind added later falls into the member arm and is cast to something it is not
     if (owner->get_node_type() == NodeType::n_member_access) {
-        return fmt::format("its member '{}'",
-            static_cast<MemberAccessNode *>(owner)->get_member_name().value());
+        return fmt::format(
+            "its member '{}'", static_cast<MemberAccessNode *>(owner)->get_member_name().value());
     }
 
     return "it";
@@ -1333,13 +1364,14 @@ void OwnershipPass::refuse_pending_temporaries(size_t mark, const char *action, 
         ExprNode *owner = _pending_temporaries[i];
 
         _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(owner)),
-            fmt::format(
+            code_ref_for(location_of_expression(owner)), fmt::format(
                 "'{}' has no storage of its own, so {} {} {}. Bind it to a variable first.",
                 pending_edge(owner).get()->result_type().get_type_desciption(),
                 action,
                 describe_pending(owner),
-                outcome));
+                outcome
+            )
+        );
     }
 
     // discarded rather than bound: nothing has been rewritten yet, so the tree stays exactly as it was
@@ -1363,11 +1395,12 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
     }
 
     _collector.collect_issue<Issue::GenericError>(
-        code_ref_for(decl->token_varname),
-        fmt::format(
+        code_ref_for(decl->token_varname), fmt::format(
             "'{}' owns a resource and is moved out of on only one branch, so nothing would destroy it "
             "on the other. Move it on every branch, or after the 'if'.",
-            decl->name_full()));
+            decl->name_full()
+        )
+    );
 }
 
 ExprNode *OwnershipPass::walk_value_edge(ExprNode *expr)
@@ -1392,10 +1425,12 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
 
             if (decl != nullptr && _moved.count(decl) > 0) {
                 _collector.collect_issue<Issue::GenericError>(
-                    code_ref_for(location_of_expression(expr)),
-                    fmt::format("'{}' {} moved out of.",
+                    code_ref_for(location_of_expression(expr)), fmt::format(
+                        "'{}' {} moved out of.",
                         decl->name_full(),
-                        _maybe_moved.count(decl) > 0 ? "may have been" : "has been"));
+                        _maybe_moved.count(decl) > 0 ? "may have been" : "has been"
+                    )
+                );
             }
             break;
         }
@@ -1772,11 +1807,12 @@ ExprNode *OwnershipPass::arrive_value(
         // reported at the *argument*, not at the parameter: the annotation is the declaration's, but
         // the `mv` that has to be written is the caller's
         _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)),
-            fmt::format(
+            code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' takes ownership of this argument - write 'mv' in front of it, or the value would "
                 "be handed over without the call site saying so.",
-                param->name_full()));
+                param->name_full()
+            )
+        );
 
         return walk_expression(expr);
     }
@@ -1975,13 +2011,14 @@ void OwnershipPass::reject_uncopyable(
             : std::string("Move the whole value rather than a part of it");
 
         _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)),
-            fmt::format(
+            code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' is unique: exactly one value may name its storage, so it is moved and never "
                 "copied. {}, or take a borrow ('{}&') if it is only being read.",
                 wanted.get_type_desciption(),
                 transfer,
-                wanted.get_type_desciption()));
+                wanted.get_type_desciption()
+            )
+        );
 
         return;
     }
@@ -1991,22 +2028,22 @@ void OwnershipPass::reject_uncopyable(
     // own token when the source names no variable at all
     if (source == nullptr) {
         _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)),
-            fmt::format(
+            code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' owns a resource, so this {} would copy a value that cannot be copied. Give '{}' a "
                 "copy constructor ('constructor({}& $other)') to say what a copy is - moving a field or "
                 "an element out of a value is not supported yet.",
                 wanted.get_type_desciption(),
                 describe(destination),
                 wanted.get_type_desciption(),
-                wanted.get_type_desciption()));
+                wanted.get_type_desciption()
+            )
+        );
 
         return;
     }
 
     _collector.collect_issue<Issue::GenericError>(
-        code_ref_for(location_of_expression(expr)),
-        fmt::format(
+        code_ref_for(location_of_expression(expr)), fmt::format(
             "'{}' owns a resource and cannot be copied implicitly at this {}. Write 'mv {}' to "
             "transfer ownership, take a borrow ('{}&') if the value is only being read, or give '{}' a "
             "copy constructor ('constructor({}& $other)').",
@@ -2015,7 +2052,9 @@ void OwnershipPass::reject_uncopyable(
             source->name_full(),
             wanted.get_type_desciption(),
             wanted.get_type_desciption(),
-            wanted.get_type_desciption()));
+            wanted.get_type_desciption()
+        )
+    );
 }
 
 void OwnershipPass::collect_unwind(size_t floor_frame, std::vector<NodeReference> &out)

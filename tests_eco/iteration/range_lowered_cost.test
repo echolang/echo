@@ -1,0 +1,21 @@
+flags: -O
+
+--- OUT --->
+6
+--- IR --->
+// **the loop vectorises, and that is the assertion** - the same one lowered_cost makes about a slice,
+// made about a range. LoopVectorize only widens a loop it could prove has no calls, no aliasing hazard
+// and a computable trip count, so `..`, `iterate`, `advance` and `current` are all inlined away and the
+// cursor struct is SROA'd to registers, or none of this would be here
+//
+// the trip count is what the cursor's shape was written for. it steps at the *end* of `advance()` rather
+// than at the top of the next one, so there is no "has this started" test in the loop header - with one
+// there the header is a diamond, the trip count is not computable and this loop came out scalar
+CHECK: vector.body:
+CHECK-NOT: call
+CHECK-NOT: alloca
+CHECK: load <4 x i32>
+CHECK: add <4 x i32>
+
+// the `$inclusive` field is a constant by here and the closed form's `$spent` flag with it, so neither
+// survives into the loop: an exclusive range is one compare and one increment

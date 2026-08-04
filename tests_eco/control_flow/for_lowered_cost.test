@@ -1,0 +1,12 @@
+flags: -O
+
+--- OUT --->
+6
+--- IR --->
+// the step block is a block of its own and the back edge runs through it, which is what makes `continue`
+// and the fall-through the same edge. by here the loop rotation has folded all three into the vector loop
+CHECK: vector.body:
+CHECK-NOT: call
+CHECK-NOT: alloca
+CHECK: load <4 x i32>
+CHECK: add <4 x i32>

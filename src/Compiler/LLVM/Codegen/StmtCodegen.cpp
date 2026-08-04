@@ -24,6 +24,7 @@
 #include "AST/LoopControlNode.h"
 #include "AST/IfStatementNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 #include "AST/ASTPlaceExpr.h"
 
 #include <llvm/IR/Constants.h>
@@ -510,35 +511,69 @@ void StmtCodegen::gen_if_statement(AST::IfStatementNode &node)
 
 void StmtCodegen::gen_while_statement(AST::WhileStatementNode &node)
 {
-    llvm::BasicBlock *loop_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "loop", _ctx.builder->GetInsertBlock()->getParent());
-    llvm::BasicBlock *body_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "body", _ctx.builder->GetInsertBlock()->getParent());
-    llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", _ctx.builder->GetInsertBlock()->getParent());
+    // no step: for a `while` the condition *is* the step, which is also why the `foreach` this lowers
+    // from needs no step block - its advance lives in the condition by design
+    gen_loop(*node.condition, nullptr, *node.loop_scope);
+}
+
+void StmtCodegen::gen_for_statement(AST::ForStatementNode &node)
+{
+    gen_loop(*node.condition, node.step, *node.loop_scope);
+}
+
+void StmtCodegen::gen_loop(AST::ExprNode &condition, AST::ScopeNode *step, AST::ScopeNode &body)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    llvm::BasicBlock *loop_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "loop", function);
+    llvm::BasicBlock *body_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "body", function);
+    llvm::BasicBlock *step_block = step != nullptr
+        ? llvm::BasicBlock::Create(*_ctx.llvm_context, "step", function)
+        : nullptr;
+    llvm::BasicBlock *merge_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "merge", function);
+
+    // where the body falls out to and where a `continue` goes - the same block, always, which is what
+    // makes `continue` and the natural back edge indistinguishable to everything below
+    llvm::BasicBlock *next_block = step_block != nullptr ? step_block : loop_block;
 
     _ctx.builder->CreateBr(loop_block);
 
     // loop block
     _ctx.set_insert_point(loop_block);
-    node.condition->accept(*_ctx.visitor);
-    llvm::Value *condition = _ctx.value_stack.top();
+    condition.accept(*_ctx.visitor);
+    llvm::Value *condition_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    _ctx.builder->CreateCondBr(condition, body_block, merge_block);
+    _ctx.builder->CreateCondBr(condition_value, body_block, merge_block);
 
     // body block. the back edge is only emitted when the body can actually fall out of its end -
     // a body whose every path returns already terminated its block, and a second terminator there
     // fails the verifier
     _ctx.set_insert_point(body_block);
     {
-        // **the body only**, and the continue target is the *condition* block: for a `while` the
-        // condition is the step, so `continue` and the natural back edge below are the same edge. that is
-        // also why no step block is needed for the `foreach` this lowers from - its advance lives in the
-        // condition by design
-        LoopTargetScope loop(_ctx, merge_block, loop_block);
+        // **the body only.** the condition above and the step below are outside the guard: a `break`
+        // written in either belongs to an enclosing loop, and neither is a place a loop exit can be
+        // written anyway
+        LoopTargetScope loop(_ctx, merge_block, next_block);
 
-        node.loop_scope->accept(*_ctx.visitor);
+        body.accept(*_ctx.visitor);
     }
     if (!_ctx.block_is_terminated()) {
-        _ctx.builder->CreateBr(loop_block);
+        _ctx.builder->CreateBr(next_block);
+    }
+
+    // step block, and the back edge out of it. terminated even where nothing can reach it - a body whose
+    // every path returns and holds no `continue` leaves this block unreachable, and an unreachable block
+    // still owes the verifier a terminator. guarded exactly as the body's edge is, and for the same
+    // reason rather than for a case a step can reach today: the guard says "unless the step already
+    // ended it", which is what keeps the answer the step's own rather than this function's
+    if (step_block != nullptr) {
+        _ctx.set_insert_point(step_block);
+        step->accept(*_ctx.visitor);
+
+        if (!_ctx.block_is_terminated()) {
+            _ctx.builder->CreateBr(loop_block);
+        }
     }
 
     // merge block

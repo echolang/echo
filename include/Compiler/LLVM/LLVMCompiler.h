@@ -106,6 +106,7 @@ public:
     void visit_const_if(AST::ConstIfNode &node);
     void visit_const_expr(AST::ConstExprNode &node);
     void visitWhileStatement(AST::WhileStatementNode &node);
+    void visit_for_statement(AST::ForStatementNode &node);
     void visit_loop_control(AST::LoopControlNode &node);
     void visit_foreach(AST::ForeachNode &node);
     void visit_assign(AST::AssignNode &node);

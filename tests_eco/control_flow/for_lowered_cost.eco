@@ -1,0 +1,13 @@
+// the counted loop is a counted loop: one condition block, one body, one step, and nothing between them
+// that an optimiser has to see through
+function total(const array<int32>& $a) : int32
+{
+    int32 $sum = 0;
+    for (usize $i = 0; $i < $a->count(); $i++) {
+        $sum = $sum + $a[$i];
+    }
+    return $sum;
+}
+
+array<int32> $xs = [1, 2, 3];
+echo total($xs);

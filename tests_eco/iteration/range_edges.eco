@@ -1,0 +1,25 @@
+// the empty shapes, and the one that a naive cursor gets wrong
+foreach (5 .. 5 as $a) { echo "never"; }
+foreach (10 .. 0 as $b) { echo "never"; }
+foreach (5 ..= 4 as $c) { echo "never"; }
+echo "empty";
+
+// a single element from each form
+foreach (5 ..= 5 as $d) { echo $d; }
+foreach (5 .. 6 as $e) { echo $e; }
+
+// **the end test comes before the step, never after.** stepping first and testing afterwards wraps a
+// uint8 at 255 back to 0, and the loop never ends
+uint8 $lo = 253;
+foreach ($lo ..= 255 as $byte) { echo $byte; }
+
+// signed bounds, including a negative start
+foreach (-2 ..= 1 as $s) { echo $s; }
+
+// a count is a usize and the literal takes its type from it, so this needs nothing written at the site
+array<int32> $xs = [11, 22, 33];
+foreach (0 .. $xs->count() as $i) { echo $xs[$i]; }
+
+array<int32> $empty = [];
+foreach (0 .. $empty->count() as $j) { echo "never"; }
+echo "done";

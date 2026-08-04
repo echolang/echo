@@ -44,6 +44,7 @@ namespace AST
     class ConstIfNode;
     class ConstExprNode;
     class WhileStatementNode;
+    class ForStatementNode;
     class LoopControlNode;
     class ForeachNode;
     class AssignNode;
@@ -100,6 +101,7 @@ namespace AST
         virtual void visit_const_if(ConstIfNode &node) = 0;
         virtual void visit_const_expr(ConstExprNode &node) = 0;
         virtual void visitWhileStatement(WhileStatementNode &node) = 0;
+        virtual void visit_for_statement(ForStatementNode &node) = 0;
         virtual void visit_loop_control(LoopControlNode &node) = 0;
         virtual void visit_foreach(ForeachNode &node) = 0;
         virtual void visit_assign(AssignNode &node) = 0;

@@ -1083,17 +1083,20 @@ int main(int argc, char *argv[], char *envp[])
         }
     }
 
-    argparse::ArgumentParser cli("echoc");
+    // the version goes to every parser, not just the top-level one: argparse registers `-v`/`--version`
+    // on each of them out of its default argument set, and a subparser left to its own devices answers
+    // with the library's placeholder "1.0"
+    argparse::ArgumentParser cli("echoc", ECO_VERSION_STRING);
     cli.add_description("The echo programming language compiler");
 
-    argparse::ArgumentParser run_command("run");
+    argparse::ArgumentParser run_command("run", ECO_VERSION_STRING);
     run_command.add_description("Runs the given source files.");
     run_command.add_argument("source")
         .default_value(std::vector<std::string>{})
         .help(".eco source files to be parsed, compiled and run.")
         .remaining();
 
-    argparse::ArgumentParser build_command("build");
+    argparse::ArgumentParser build_command("build", ECO_VERSION_STRING);
     build_command.add_description("Builds the given source files.");
     build_command.add_argument("source")
         .default_value(std::vector<std::string>{})

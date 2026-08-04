@@ -7,78 +7,97 @@
  *
  *     an id below 32 is one of this example's own glyphs; an id of 32 or above is that ASCII byte.
  *
- * So `48 + $digit` is still a digit and `32` is still a space, and the grid stays a flat
- * `array<uint8>` - which matters, because `array<array<T>>` copies its elements bytewise and would be
- * silently wrong.
+ * So `48 + $digit` is still a digit and `32` is still a space, and the readout below can stay plain
+ * arithmetic.
+ *
+ * The grid is `array<array<uint8>>` - one array per row. Nothing in here computes `$y * $width + $x`,
+ * which is what lets every walk over it be a `foreach` over a thing rather than over a number.
  */
 
 namespace clock;
 
-// the glyphs, as functions - Echo has no global variable, and a top-level statement in a module that
-// is not the entry module never runs
-function glyph_empty() : uint8 { return 0; }
-function glyph_ring() : uint8 { return 1; }
-function glyph_hour_mark() : uint8 { return 2; }
-function glyph_quarter_mark() : uint8 { return 3; }
-function glyph_hour_hand() : uint8 { return 4; }
-function glyph_minute_hand() : uint8 { return 5; }
-function glyph_second_hand() : uint8 { return 6; }
-function glyph_pin() : uint8 { return 7; }
+// the glyphs. **constants, not functions and not variables**: a constant has no storage anywhere and is
+// copied into each use site, which is exactly what a name for `1` should be. a file-scope *variable*
+// would be a different thing entirely - a top-level statement in a module that is not the entry module
+// never runs, so it would be read before it was ever written
+const uint8 GLYPH_EMPTY = 0;
+const uint8 GLYPH_RING = 1;
+const uint8 GLYPH_HOUR_MARK = 2;
+const uint8 GLYPH_QUARTER_MARK = 3;
+const uint8 GLYPH_HOUR_HAND = 4;
+const uint8 GLYPH_MINUTE_HAND = 5;
+const uint8 GLYPH_SECOND_HAND = 6;
+const uint8 GLYPH_PIN = 7;
 
 function append_glyph(string& $out, uint8 $id) : void
 {
-    if ($id == 0) { $out->append(' '); return; }
-    if ($id == 1) { $out->append('·'); return; }
-    if ($id == 2) { $out->append('●'); return; }
-    if ($id == 3) { $out->append('◆'); return; }
-    if ($id == 4) { $out->append('█'); return; }
-    if ($id == 5) { $out->append('▒'); return; }
-    if ($id == 6) { $out->append('•'); return; }
-    if ($id == 7) { $out->append('┼'); return; }
+    if ($id == GLYPH_EMPTY) { $out->append(' '); return; }
+    if ($id == GLYPH_RING) { $out->append('·'); return; }
+    if ($id == GLYPH_HOUR_MARK) { $out->append('●'); return; }
+    if ($id == GLYPH_QUARTER_MARK) { $out->append('◆'); return; }
+    if ($id == GLYPH_HOUR_HAND) { $out->append('█'); return; }
+    if ($id == GLYPH_MINUTE_HAND) { $out->append('▒'); return; }
+    if ($id == GLYPH_SECOND_HAND) { $out->append('•'); return; }
+    if ($id == GLYPH_PIN) { $out->append('┼'); return; }
 
     // anything else is its own ASCII byte
     $out->push_byte($id);
 }
 
-// **Borrowed everywhere, never copied.** A `Canvas` owns its `array`, and a struct is copied field by
-// field - so handing one around by value would duplicate the buffer's pointer and free it twice. It is
-// built once, as a local, and every function that draws takes a `Canvas&`.
+// **Borrowed everywhere, never copied.** A `Canvas` owns its rows, and a struct is copied field by
+// field - so handing one around by value would duplicate every buffer pointer in it and free them
+// twice. It is built once, as a local, and every function that draws takes a `Canvas&`.
 struct Canvas
 {
-    usize $width;
-    usize $height;
-    array<uint8> $cells;
+    // nothing outside these braces reads either dimension: a caller asks for a frame, or plots a point
+    // and lets `set` clip it
+    private usize $width;
+    private usize $height;
+
+    // this one wants to be private too, and cannot be: a private property that owns something makes its
+    // struct unusable at every use site today
+    array<array<uint8>> $rows;
 
     constructor(usize $width, usize $height)
     {
         $this->width = $width;
         $this->height = $height;
 
-        // there is no fill constructor and no fixed-size array, so the cells are pushed one at a time
-        // into a buffer reserved up front
-        $this->cells = array<uint8>();
-        $this->cells->reserve($width * $height);
+        // there is no fill constructor and no fixed-size array, so each row is pushed cell by cell into
+        // a buffer sized up front. `arr::with_capacity` is that in one call
+        $this->rows = arr::with_capacity<array<uint8>>($height);
 
-        usize $i = 0;
-        while ($i < $width * $height) {
-            $this->cells[] = 0;
-            $i++;
+        foreach (0 .. $height as $y) {
+            array<uint8> $row = arr::with_capacity<uint8>($width);
+
+            foreach (0 .. $width as $x) {
+                $row[] = GLYPH_EMPTY;
+            }
+
+            // **`mv`, because a row owns an allocation.** a plain `push($row)` copies it - a second
+            // buffer, filled from the first, and the first freed at the end of the turn
+            $this->rows->push(mv $row);
         }
     }
 
+    // no index anywhere: the rows are borrowed to be written through, and so are their cells
     function fill(uint8 $id) : void
     {
-        usize $i = 0;
-        while ($i < $this->cells->count()) {
-            $this->cells[$i] = $id;
-            $i++;
+        foreach ($this->rows as &$row) {
+            foreach ($row as &$cell) {
+                $cell = $id;
+            }
         }
     }
 
     // out of range is a no-op rather than an error - a hand at the edge of the dial rounds outside it,
     // and clipping here keeps every caller free of bounds checks.
     //
-    // the tests are nested because `&&` does not short-circuit yet: one condition per `if`.
+    // the coordinates are `int32` rather than `usize` precisely so they *can* be negative: `plot` rounds
+    // a `float64` that lands off the dial in either direction, and a `usize` would have wrapped it to an
+    // enormous positive one that the two upper bounds then let through.
+    //
+    // the tests are one per `if` because `&&` does not short-circuit yet.
     function set(int32 $x, int32 $y, uint8 $id) : void
     {
         if ($x < 0) { return; }
@@ -86,7 +105,7 @@ struct Canvas
         if ($x >= $this->width) { return; }
         if ($y >= $this->height) { return; }
 
-        $this->cells[$y * $this->width + $x] = $id;
+        $this->rows[$y][$x] = $id;
     }
 
     // the geometry is all in floats, so this is where it lands on a cell. assigning a `float64` to an
@@ -100,34 +119,35 @@ struct Canvas
         $this->set($cx, $cy, $id);
     }
 
+    // the one walk here that still counts, and it counts because the index means two things: which byte
+    // of the text, and which column it lands in
     function write_text(int32 $x, int32 $y, string& $text) : void
     {
-        usize $i = 0;
-        while ($i < $text->size()) {
-            int32 $col = $x + $i;
-            $this->set($col, $y, $text->byte_at($i));
-            $i++;
+        foreach (0 .. $text->size() as $i) {
+            $this->set($x + $i, $y, $text->byte_at($i));
         }
     }
 
-    // the whole picture as one string, cursor-home first. `echo` prints one expression and always adds
-    // a newline, so a frame has to arrive in a single statement - printing cell by cell would flicker
-    // and cost a write syscall per glyph.
+    // the whole picture as one string. `echo` prints one expression and always adds a newline, so a
+    // frame has to arrive in a single statement - printing cell by cell would flicker and cost a write
+    // syscall per glyph.
+    //
+    // nothing terminal-specific in here, deliberately: homing the cursor is what the *animation* does
+    // between frames, and a canvas that knew about it could not hand back a picture anybody could
+    // compare. `main.eco` puts the escape in front of this on the live path
     function to_frame() : string
     {
-        string $out = "\x1b[H";
-        $out->reserve($this->cells->count() * 3 + $this->height);
+        string $out = '';
+        $out->reserve($this->width * $this->height * 3 + $this->height);
 
-        usize $y = 0;
-        while ($y < $this->height) {
-            usize $x = 0;
-            while ($x < $this->width) {
-                append_glyph(&$out, $this->cells[$y * $this->width + $x]);
-                $x++;
+        // `const &$row` borrows the row without copying it and says out loud that nothing here writes
+        // one. a plain `$row` would be a copy of an owning array, per row, per frame
+        foreach ($this->rows as const &$row) {
+            foreach ($row as $cell) {
+                append_glyph(&$out, $cell);
             }
 
             $out->append("\n");
-            $y++;
         }
 
         return $out;

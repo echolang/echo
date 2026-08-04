@@ -58,11 +58,43 @@ function sleep_ms(uint32 $ms) : void
     c_usleep($ms * 1000);
 }
 
-// there is no `PI` in the stdlib and no way to write a global, so the constant is a function. it
-// costs nothing: the body is one `ret` of a constant
-function pi() : float64
+// -- reading a time off the command line ---------------------------------------------------------
+//
+// `HH:MM:SS` draws that one frame and exits: the live clock is a different picture every second, and a
+// fixed time is the one way to look at the drawing twice and compare. Anything else runs the clock.
+//
+// The parse is `two_digits` in reverse - `48` is `'0'`, so a digit is its byte minus 48 - and it is
+// the same shape for the same reason: the standard library has no int-to-string and no string-to-int.
+// Nothing here validates beyond the shape, because a malformed argument draws a wrong clock and that
+// is the whole of the damage.
+function time_from_args(Time& $out) : bool
 {
-    return 3.14159265358979323846;
+    if (std::env::argc() < 2) {
+        return false;
+    }
+
+    // a view, not a `string`: it borrows the bytes libc already holds, so reading an argument costs
+    // no allocation at all. `$size` is a property rather than a method - a view is two public words
+    string::view $spec = std::env::arg(1);
+
+    if ($spec->size != 8) {
+        return false;
+    }
+
+    $out->hour = two_digits_at($spec, 0);
+    $out->minute = two_digits_at($spec, 3);
+    $out->second = two_digits_at($spec, 6);
+
+    return true;
+}
+
+#[inline]
+function two_digits_at(string::view $s, usize $at) : int32
+{
+    int32 $tens = $s->byte_at($at) - 48;
+    int32 $ones = $s->byte_at($at + 1) - 48;
+
+    return $tens * 10 + $ones;
 }
 
 // -- where each hand points, in fractions of a full turn clockwise from 12 -----------------------

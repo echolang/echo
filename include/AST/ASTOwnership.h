@@ -282,6 +282,15 @@ namespace AST
         // target down before the right-hand side had read it
         NodeReference walk_statement(const NodeReference &child);
 
+        // **the one loop walk**, shared by `while` and `for`. `step` is null for a `while`, whose
+        // condition *is* its step - and for the `foreach` that lowers into one, whose advance lives
+        // there by design. it is walked inside the loop's frame and after the body, because that is
+        // when it runs: on the fall-through, and on every `continue`
+        //
+        // the condition is a *reference* to the edge, because walking one may replace it - a temporary
+        // materialized in a loop's condition is bound and destroyed inside the block that evaluates it
+        void walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *step);
+
         // binds a discarded owning value to a synthesized local of the enclosing frame, so the scope
         // destroys it. the frame's ordinary reverse-order drop then covers it with no special case
         VarDeclNode &bind_discarded_temporary(ExprNode *expr);

@@ -1,0 +1,12 @@
+// the counted loop. `$i` is declared in the header and belongs to the loop
+for (int32 $i = 0; $i < 4; $i++) {
+    echo $i;
+}
+
+// the init may write a variable from an enclosing scope rather than declaring one, and that variable
+// keeps whatever the loop left in it
+int32 $n = 0;
+for ($n = 10; $n > 7; $n--) {
+    echo $n;
+}
+echo $n;

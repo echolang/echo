@@ -5,29 +5,48 @@
  * no `main` to declare. Every other file here holds only declarations, so this one is the program and
  * the order does not matter.
  *
- * Ctrl-C is the way out, and it cannot be trapped - so nothing about the terminal is switched on that
- * would have to be switched back off. No alternate screen buffer, no hidden cursor: the screen is
- * cleared once, and every frame after that only homes the cursor and overwrites what is there.
+ * Two ways to run: with an `HH:MM:SS` argument it draws that one frame and exits, and with none it
+ * animates until Ctrl-C. The first is how the picture in the README was made, and the quickest way to
+ * see what a change to the drawing did; the second is the clock.
+ *
+ * Ctrl-C is the way out of the live one, and it cannot be trapped - so nothing about the terminal is
+ * switched on that would have to be switched back off. No alternate screen buffer, no hidden cursor:
+ * the screen is cleared once, and every frame after that only homes the cursor and overwrites what is
+ * there.
  */
 
 // a dial eleven rows in radius, in cells twice as tall as they are wide
 clock::Dial $dial = clock::Dial(11.0, 2.0);
 
-// two rows taller than the dial: a blank one, then the readout
-clock::Canvas $canvas = clock::Canvas($dial->columns(), $dial->rows() + 2);
+clock::Renderer $renderer = clock::Renderer($dial);
 
-echo "\x1b[2J";
+// **the order they are added is the order they are drawn**, which is the whole of the compositing rule -
+// it used to be the order of four calls in the middle of a function, and it is a list now. each one is a
+// class widened to `Renderable` on the way in; the `Dial` each holds is a copy, because a `Dial` owns
+// nothing
+$renderer->add(clock::Face($dial));
+$renderer->add(clock::Hands($dial));
+$renderer->add(clock::Readout($dial));
 
-while (true) {
-    clock::Time $now = clock::now();
+clock::Time $fixed = clock::Time(0, 0, 0);
 
-    $canvas->fill(clock::glyph_empty());
-    clock::draw_dial($canvas, $dial);
-    clock::draw_hands($canvas, $dial, $now);
-    clock::draw_readout($canvas, $dial, $now);
+if (clock::time_from_args(&$fixed)) {
+    // no screen clear and no cursor-home dance: one picture, printed where the cursor already is
+    echo $renderer->frame(&$fixed);
+}
+else {
+    echo "\x1b[2J";
 
-    echo $canvas->to_frame();
+    while (true) {
+        clock::Time $now = clock::now();
 
-    // five redraws a second: the second hand lands on its tick promptly without the process spinning
-    clock::sleep_ms(200);
+        // the cursor-home escape lives here rather than in the renderer: it is what makes two pictures an
+        // animation, and a `frame` that emitted it could not hand back one anybody could compare
+        string $frame = "\x1b[H";
+        $frame->append($renderer->frame(&$now));
+        echo $frame;
+
+        // five redraws a second: the second hand lands on its tick promptly without the process spinning
+        clock::sleep_ms(200);
+    }
 }

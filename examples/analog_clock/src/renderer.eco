@@ -1,0 +1,49 @@
+/*
+ * What turns a list of layers into a picture.
+ *
+ * This is the example's one place where a **class** is the right answer rather than a struct. A
+ * `Renderer` owns a canvas *and* a list of layers, it is built once and handed around, and the layers in
+ * it are themselves handles - so it is a thing you hold a reference to, which is what a class is. The
+ * `Canvas` and the `Dial` next door stay structs for the mirror reason: one has exactly one owner and is
+ * only ever borrowed, and the other owns nothing at all.
+ */
+
+namespace clock;
+
+class Renderer
+{
+    private Canvas $canvas;
+    private array<Renderable> $layers;
+
+    // it takes a `Dial` and **builds** its canvas rather than being handed one, which is what keeps an
+    // owning struct from ever having to be moved into a property. two rows taller than the dial: a blank
+    // one, then the readout
+    constructor(Dial $dial)
+    {
+        $this->canvas = Canvas($dial->columns(), $dial->rows() + 2);
+        $this->layers = array<Renderable>();
+    }
+
+    // the parameter says `Renderable` and nothing more, so this is where a `Face`, a `Hands` and a
+    // `Readout` stop being three types and become one list. **only a class can arrive here** - an
+    // interface value is a reference, and a struct that conforms is a compile-time contract you reach
+    // through a constrained generic instead
+    function add(Renderable $layer) : void
+    {
+        $this->layers[] = $layer;
+    }
+
+    // **one whole frame.** the layers are drawn in the order they were added, and each dispatch goes
+    // through the vtable the erasure carried in - nothing here names `Face` or `Hands` or `Readout`, so
+    // adding a fourth layer is one more `add` in `main.eco` and no change to this file
+    function frame(Time& $t) : string
+    {
+        $this->canvas->fill(GLYPH_EMPTY);
+
+        foreach ($this->layers as $layer) {
+            $layer->render(&$this->canvas, $t);
+        }
+
+        return $this->canvas->to_frame();
+    }
+}

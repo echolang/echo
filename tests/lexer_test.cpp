@@ -94,6 +94,59 @@ TEST_CASE( "Numeric Literals", "[lexer]" )
     REQUIRE( pi.value() == "3.1415926535897932384626433" );
 }
 
+// **a dot followed by a dot is not a decimal point.** the range operator `..` is spelled out of two
+// ordinary t_dot tokens, and LexerFunction::NumericLiteral runs ahead of the symbol trie - so without
+// one character of lookahead `0..10` lexes as the float `0.0`, a stray `.` and `10`, and no `..` is
+// ever formed for AST::OperatorRegistry to match
+TEST_CASE( "A range's dots are not a decimal point", "[lexer]" )
+{
+    Lexer lexer;
+    TokenCollection tokens;
+
+    lexer.tokenize(tokens, "0..10");
+
+    REQUIRE( tokens.tokens.size() == 4 );
+    REQUIRE( tokens.tokens[0].type == Token::Type::t_integer_literal );
+    REQUIRE( tokens.token_values[0] == "0" );
+    REQUIRE( tokens.tokens[1].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[2].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[3].type == Token::Type::t_integer_literal );
+    REQUIRE( tokens.token_values[3] == "10" );
+
+    // the inclusive form is the same three tokens plus the `=`, which is why `..=` needs no token type
+    // of its own - the operator registry reassembles it out of what is already here
+    tokens.clear();
+    lexer.tokenize(tokens, "1..=5");
+
+    REQUIRE( tokens.tokens.size() == 5 );
+    REQUIRE( tokens.tokens[0].type == Token::Type::t_integer_literal );
+    REQUIRE( tokens.tokens[1].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[2].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[3].type == Token::Type::t_assign );
+    REQUIRE( tokens.tokens[4].type == Token::Type::t_integer_literal );
+
+    // and a float beside one is untouched: the fraction run stops at the first dot on its own, so this
+    // never needed the lookahead and must not have been changed by it
+    tokens.clear();
+    lexer.tokenize(tokens, "1.0..2.5");
+
+    REQUIRE( tokens.tokens.size() == 4 );
+    REQUIRE( tokens.tokens[0].type == Token::Type::t_floating_literal );
+    REQUIRE( tokens.token_values[0] == "1.0" );
+    REQUIRE( tokens.tokens[1].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[2].type == Token::Type::t_dot );
+    REQUIRE( tokens.tokens[3].type == Token::Type::t_floating_literal );
+    REQUIRE( tokens.token_values[3] == "2.5" );
+
+    // `1.` keeps its implicit zero - the one shape where the guard could have eaten a real decimal point
+    tokens.clear();
+    lexer.tokenize(tokens, "1. ");
+
+    REQUIRE( tokens.tokens.size() == 1 );
+    REQUIRE( tokens.tokens[0].type == Token::Type::t_floating_literal );
+    REQUIRE( tokens.token_values[0] == "1.0" );
+}
+
 TEST_CASE( "Strings", "[lexer]" ) {
     Lexer lexer;
     TokenCollection tokens;

@@ -29,6 +29,7 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
+#include "AST/ForStatementNode.h"
 
 #include <cassert>
 
@@ -113,6 +114,11 @@ const TokenReference *source_token_of(const Node &node)
             const auto &loop = static_cast<const WhileStatementNode &>(node);
             return loop.token_while.has_value() ? &loop.token_while.value() : through(loop.condition);
         }
+
+        // no `has_value` dance beside the one above: nothing mints a `for` but the parser, so there is
+        // always a keyword behind it
+        case NodeType::n_for_statement:
+            return &static_cast<const ForStatementNode &>(node).token_for;
 
         // synthesized by AST::OwnershipPass, always. It stands for the value going away, so it means
         // whatever named that value
@@ -253,10 +259,8 @@ const TokenReference *source_token_of(const Node &node)
         case NodeType::n_expr_void:
             return nullptr;
 
-        // reserved in the enum with no node class behind it - there is no `for` statement yet, and a
-        // node that cannot exist cannot be located
+        // reserved in the enum with no node class behind it - a node that cannot exist cannot be located
         case NodeType::n_void:
-        case NodeType::n_for_statement:
             return nullptr;
     }
 

@@ -1,0 +1,9 @@
+// **the one thing a `while` cannot express.** a `for`'s continue target is its step block, not its
+// condition - so the increment runs on the way round and the loop terminates. written as a `while` with
+// the increment at the top of the body, `continue` would skip it and this would never end
+for (int32 $i = 0; $i < 6; $i++) {
+    if ($i == 3) {
+        continue;
+    }
+    echo $i;
+}
