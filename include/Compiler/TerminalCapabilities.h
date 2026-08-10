@@ -27,6 +27,18 @@ namespace Compiler
         t_json
     };
 
+    // which stream the facts are about.
+    //
+    // **the policy below is unchanged**: everything that *reports* asks about stderr, and that is not
+    // negotiable. This exists for the one thing that does not report - `--help` is an answer to a question
+    // the user asked, so it goes to stdout, and a page wrapped to stderr's width when stdout is the
+    // redirected one is a page wrapped to the wrong window
+    enum class TerminalStream
+    {
+        t_stderr,
+        t_stdout
+    };
+
     // **the sole answer to "what can this terminal do".**
     //
     // four facts - colour, unicode, width, interactive - resolved once from the command line and the
@@ -42,7 +54,8 @@ namespace Compiler
     //
     // **stderr is the stream that matters**, because that is where diagnostics go. stdout under `run`
     // belongs to the program being executed, and asking whether *it* is a terminal answers a question
-    // nobody here has.
+    // almost nobody here has - Compiler::CommandLineHelp is the single exception, and it is an exception
+    // precisely because a help page is not a report.
     struct TerminalCapabilities
     {
         // may an escape sequence be written. false whenever the answer is in doubt - a stray `\x1b[31m` in
@@ -68,14 +81,23 @@ namespace Compiler
         // that wants colour in a file and none that wants a carriage return in one
         bool interactive = false;
 
-        // resolves the facts for the diagnostic stream (stderr), applying the two flags over what the
-        // environment says. The flags win outright: `--color=always` into a pipe is a user asking for
-        // escape sequences on purpose, which is what a CI job that renders them wants.
+        // resolves the facts for a stream - the diagnostic one, stderr, unless another is named - applying
+        // the two flags over what the environment says. The flags win outright: `--color=always` into a
+        // pipe is a user asking for escape sequences on purpose, which is what a CI job that renders them
+        // wants.
         //
         // `NO_COLOR` (any value) and `TERM=dumb` suppress; `CLICOLOR_FORCE` (non-empty, not "0") forces.
         // unicode is decided by the locale saying UTF-8, or by `WT_SESSION` - Windows Terminal, as opposed
-        // to the legacy console the same binary may be run from
-        static TerminalCapabilities resolve(ColorChoice color_choice, DiagnosticFormat format);
+        // to the legacy console the same binary may be run from.
+        //
+        // the three environment escape hatches are properties of the *invocation* and so are asked the
+        // same way whichever stream this is about; what moves with the stream is the isatty underneath
+        // each of them, and the ioctl `width` reads
+        static TerminalCapabilities resolve(
+            ColorChoice color_choice,
+            DiagnosticFormat format,
+            TerminalStream stream = TerminalStream::t_stderr
+        );
 
         // no colour, no unicode, no width, not interactive. What every non-terminal gets, and what the
         // unit tests assert against so a suite's output does not depend on where it was run from

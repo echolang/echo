@@ -489,7 +489,7 @@ namespace
 
 TEST_CASE("an implicit copy is a resolved call to the type's copy constructor", "[ownership]")
 {
-    // the same bargain every drop makes: the tree says what happens, so codegen needs nothing, -ar
+    // the same bargain every drop makes: the tree says what happens, so codegen needs nothing, --print ast-resolved
     // shows it, and the type checker validates what the pass inserted
     auto bundle = EchoTests::tests_make_parsed_bundle(
         std::string(k_copyable) +

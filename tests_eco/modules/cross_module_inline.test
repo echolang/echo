@@ -1,5 +1,5 @@
 modules: modules/lib_core
-flags: -O
+flags: --optimize whole
 
 --- OUT --->
 42

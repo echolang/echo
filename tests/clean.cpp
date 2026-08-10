@@ -91,12 +91,12 @@ TEST_CASE("the build after a clean reuses nothing", "[clean]")
     REQUIRE(project.echoc("build -o out", app_dir).exit_code == 0);
 
     // warm first, so the assertion below is about the clean rather than about a store that was never filled
-    const ProcessResult warm = project.echoc("build -o out --explain-cache", app_dir);
+    const ProcessResult warm = project.echoc("build -o out --explain cache", app_dir);
     REQUIRE(warm.output.find("cleanlib") != std::string::npos);
 
     REQUIRE(project.echoc("clean", app_dir).exit_code == 0);
 
-    const ProcessResult cold = project.echoc("build -o out --explain-cache", app_dir);
+    const ProcessResult cold = project.echoc("build -o out --explain cache", app_dir);
 
     REQUIRE(cold.exit_code == 0);
 
@@ -133,12 +133,12 @@ TEST_CASE("clean leaves the standard library's store alone unless asked", "[clea
         // thing in any build to produce again. Saying so is what keeps it from reading as an omission
         const std::string line = line_starting_with(cleaned.output, "stdlib");
         REQUIRE(line.find("kept") != std::string::npos);
-        REQUIRE(line.find("--stdlib") != std::string::npos);
+        REQUIRE(line.find("--with-stdlib") != std::string::npos);
     }
 
     SECTION("and --stdlib reaches it")
     {
-        const ProcessResult cleaned = project.echoc("clean --stdlib", app_dir);
+        const ProcessResult cleaned = project.echoc("clean --with-stdlib", app_dir);
 
         REQUIRE(cleaned.exit_code == 0);
         REQUIRE(line_starting_with(cleaned.output, "stdlib").find("kept") == std::string::npos);

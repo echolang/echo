@@ -85,7 +85,7 @@ echo $c->count + $boxed;
 
     // --track-allocations because the corpus does, and because it puts the emitted allocation runtime -
     // which carries no subprogram and must therefore carry no locations - into the build
-    const ProcessResult result = project.echoc("build -g -ta -o app app.eco");
+    const ProcessResult result = project.echoc("build -g --track-allocations -o app app.eco");
 
     INFO(result.output);
     REQUIRE(result.exit_code == 0);
@@ -142,7 +142,7 @@ echo $total;
 )");
 
     const ProcessResult result = project.echoc(
-        "build -g -ta -m " + quoted(project.root() / "lib") + " --build-dir "
+        "build -g --track-allocations -m " + quoted(project.root() / "lib") + " --build-dir "
             + quoted(project.root() / "cache") + " -o app main.eco",
         project.root() / "app");
 
@@ -176,7 +176,7 @@ function answer() : int32 { return 42; }
 
     write_file(project.root() / "app" / "main.eco", "echo answer();\n");
 
-    const std::string common = " -ta --explain-cache -m " + quoted(project.root() / "lib")
+    const std::string common = " --track-allocations --explain cache -m " + quoted(project.root() / "lib")
         + " --build-dir " + quoted(project.root() / "cache") + " -o app main.eco";
 
     const ProcessResult without_g = project.echoc("build" + common, project.root() / "app");

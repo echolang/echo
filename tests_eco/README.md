@@ -79,7 +79,7 @@ platform-specific region gets from a machine that is not that platform.
 the suite runs. Neither *calls* the gated function: a stdlib function is lowered whether or not a program
 reaches it, so `--target-os` alone selects the arm, while leaving it unreached keeps the case runnable on a
 host it is not for — the JIT prunes what the entry point cannot reach, so a foreign `extern` is never a
-symbol anything has to resolve. The assertion is therefore an `IR` section rather than `OUT`, the `-p`
+symbol anything has to resolve. The assertion is therefore an `IR` section rather than `OUT`, the `--print ir`
 module being the unpruned one. Without cases like these, half of every platform-gated file is verified only
 by CI on a host the author does not have.
 
@@ -122,11 +122,11 @@ module directory that the manifest's `#[sources:]` does not actually name is ski
 ### Sections
 
 `OUT` is a byte golden. `IR`, `UNIT_IR`, `AST` and `RAST` are directive sections, checked against
-`--print-ir`, `--print-unit-ir`, `--print-ast` and `--print-resolved-ast` respectively.
+`--print ir`, `--print ir-units`, `--print ast` and `--print ast-resolved` respectively.
 
-> **`IR` is the whole program, `UNIT_IR` is one unit at a time.** `--print-ir` folds every compilation
+> **`IR` is the whole program, `UNIT_IR` is one unit at a time.** `--print ir` folds every compilation
 > unit into one module first, because that is the only thing an O3 pipeline or a single dump can look at -
-> so an `IR` section always describes the `-O` build even when the case sets no flags. `UNIT_IR` prints
+> so an `IR` section always describes the `--optimize whole` build even when the case sets no flags. `UNIT_IR` prints
 > each unit as the object writer receives it, which is what an ordinary `echoc build` emits, and each unit
 > is preceded by a `[unit <name>]` header to anchor on. It is only meaningful on a **`mode: build`** case:
 > `run` merges unconditionally, because the JIT can take only one module.
@@ -225,12 +225,12 @@ region *between* its neighbours rather than to the whole dump. Whole-dump would 
 the allocation seam is defined above `main` and the class runtime calls it, so "this function does
 not allocate" has to mean "not in this region".
 
-Each section is a separate `echoc` invocation, so `--print-ir` can never pollute the `OUT` golden, and
-a failure names which of the case's contracts broke. They cannot share one invocation: `-a` and `-ar`
+Each section is a separate `echoc` invocation, so `--print ir` can never pollute the `OUT` golden, and
+a failure names which of the case's contracts broke. They cannot share one invocation: `--print ast` and `--print ast-resolved`
 print byte-identical module headers, so there would be nothing to split a combined stream on, and on a
-rejected program `-p` never runs at all.
+rejected program `--print ir` never runs at all.
 
-**`-a` and `-ar` dump every module, the standard library included** — around 650 lines of it in front
+**`--print ast` and `--print ast-resolved` dump every module, the standard library included** — around 650 lines of it in front
 of a five-line program, most of that `stdlib/core/string.eco`. So an `AST` or `RAST` section should either set `stdlib: off` or open with
 
 ```
@@ -264,11 +264,11 @@ block. This is the one thing authors get wrong, and it fails as an assertion fir
 silently passing one. Exit status and the `OUT` golden already assert the result, and it works in `run`
 and `build` alike — except that `build` is a release build, where `assert` is elided and asserts nothing.
 
-**Or with `flags: -em`**, which has `main` print a `[memory]` section on its way out. This is the only way
+**Or with `flags: --explain memory`**, which has `main` print a `[memory]` section on its way out. This is the only way
 to see the state *past* the program's own module-scope teardown, so it is the whole-program answer:
 
 ```
-flags: -em
+flags: --explain memory
 
 --- OUT --->
 7
@@ -292,9 +292,9 @@ One thing differs from `mode: run`, and it is not cosmetic — **these are not t
 program**: `echoc build` defaults to `--release`, so `assert` and the `ptr<T>` → `T&` null check are
 **elided**. Write `flags: --debug` if you want run-mode semantics.
 
-Optimization is *not* a difference. Both subcommands optimize only when passed `-O`, so an `IR`
+Optimization is *not* a difference. Both subcommands optimize only when passed `--optimize whole`, so an `IR`
 section in build mode reads release IR that the optimizer has not touched unless the case asks for it
-with `flags: -O`. (`build` used to optimize unconditionally and ignore the flag, which meant there was
+with `flags: --optimize whole`. (`build` used to optimize unconditionally and ignore the flag, which meant there was
 no way to see what codegen had actually emitted for a release build.)
 
 So write build-mode cases *for* build mode rather than converting existing ones. The `OUT` golden is
@@ -318,7 +318,7 @@ diagnostics are `mode: run`'s business.
 If the case needs flags, run it with those flags in step 2, or the expectation records a different
 invocation than the one the runner performs.
 
-Write a directive section by hand from a real dump — `./build/echoc run -p <file>` — and keep it to the
+Write a directive section by hand from a real dump — `./build/echoc run --print ir <file>` — and keep it to the
 claim you mean. A directive that quotes a whole basic block is a byte-for-byte golden wearing a
 disguise.
 

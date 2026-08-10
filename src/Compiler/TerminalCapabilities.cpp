@@ -8,11 +8,13 @@
 #if defined(_WIN32)
 #include <io.h>
 #define ECO_ISATTY(fd) _isatty(fd)
+#define ECO_STDOUT_FD 1
 #define ECO_STDERR_FD 2
 #else
 #include <sys/ioctl.h>
 #include <unistd.h>
 #define ECO_ISATTY(fd) isatty(fd)
+#define ECO_STDOUT_FD STDOUT_FILENO
 #define ECO_STDERR_FD STDERR_FILENO
 #endif
 
@@ -36,15 +38,18 @@ namespace
         return value != nullptr && std::strstr(value, needle) != nullptr;
     }
 
-    bool stderr_is_a_terminal()
+    // **the fd is a parameter and not a constant, and all three readers below take it.** stderr is still
+    // the stream this whole file is about; a help page is the one thing asking about the other, and a
+    // helper that kept reading the constant would answer about stderr while its caller believed otherwise
+    bool stream_is_a_terminal(int fd)
     {
-        return ECO_ISATTY(ECO_STDERR_FD) != 0;
+        return ECO_ISATTY(fd) != 0;
     }
 
     // the two escape hatches every modern CLI honours, in the order they are specified to apply:
     // NO_COLOR wins over CLICOLOR_FORCE, because opting *out* of decoration is the one a user sets
     // globally and a tool must not be able to override
-    bool environment_allows_color()
+    bool environment_allows_color(int fd)
     {
         if (read_env("NO_COLOR") != nullptr) {
             return false;
@@ -60,16 +65,16 @@ namespace
             return false;
         }
 
-        return stderr_is_a_terminal();
+        return stream_is_a_terminal(fd);
     }
 
     // **asked of the locale and not of the terminal**, because it is the encoding of the bytes we are
     // about to write that decides whether they render, and that is what the locale describes. Windows
     // Terminal is checked by name for the one case the locale cannot answer: the legacy console the same
     // binary may equally be run from is the reason a `--diagnostics=ascii` escape hatch exists at all
-    bool environment_allows_unicode()
+    bool environment_allows_unicode(int fd)
     {
-        if (!stderr_is_a_terminal()) {
+        if (!stream_is_a_terminal(fd)) {
             return false;
         }
 
@@ -88,9 +93,9 @@ namespace
         return false;
     }
 
-    unsigned int terminal_width()
+    unsigned int terminal_width(int fd)
     {
-        if (!stderr_is_a_terminal()) {
+        if (!stream_is_a_terminal(fd)) {
             return 0;
         }
 
@@ -104,7 +109,7 @@ namespace
 
 #if !defined(_WIN32)
         struct winsize size;
-        if (ioctl(ECO_STDERR_FD, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+        if (ioctl(fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
             return size.ws_col;
         }
 #endif
@@ -115,10 +120,15 @@ namespace
 
 Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
     ColorChoice color_choice,
-    DiagnosticFormat format
+    DiagnosticFormat format,
+    TerminalStream stream
 )
 {
     TerminalCapabilities caps;
+
+    // resolved once and handed to all four readers below, so a stream added here cannot reach three of
+    // them and miss the fourth
+    const int fd = stream == TerminalStream::t_stdout ? ECO_STDOUT_FD : ECO_STDERR_FD;
 
     switch (color_choice) {
     case ColorChoice::t_always:
@@ -128,7 +138,7 @@ Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
         caps.color = false;
         break;
     case ColorChoice::t_auto:
-        caps.color = environment_allows_color();
+        caps.color = environment_allows_color(fd);
         break;
     }
 
@@ -143,15 +153,15 @@ Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
         caps.unicode = false;
         break;
     case DiagnosticFormat::t_auto:
-        caps.unicode = environment_allows_unicode();
+        caps.unicode = environment_allows_unicode(fd);
         break;
     }
 
-    caps.width = terminal_width();
+    caps.width = terminal_width(fd);
 
     // no flag consults this one - see the field's comment. It is the same isatty the two `auto` paths
     // above already reached, asked once more rather than a second time somewhere else
-    caps.interactive = stderr_is_a_terminal();
+    caps.interactive = stream_is_a_terminal(fd);
 
     return caps;
 }

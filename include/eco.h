@@ -31,8 +31,8 @@
 #define ECO_STRINGIFY_IMPL(x) #x
 #define ECO_STRINGIFY(x) ECO_STRINGIFY_IMPL(x)
 
-// what `echoc --version` prints. argparse takes the version as a string at construction, so this is
-// composed here rather than formatted at the call site
+// what `echoc --version` prints, and the whole of that line - the release workflow string-compares it
+// against the tag it resolved. Composed here rather than formatted at the call site
 #define ECO_VERSION_STRING ECO_STRINGIFY(ECO_VERSION_MAJOR) "." ECO_STRINGIFY(ECO_VERSION_MINOR) "." ECO_STRINGIFY(ECO_VERSION_PATCH) ECO_VERSION_SUFFIX
 
 // When set to "1", the standard library will be embedded into the "echoc" binary and loaded from there.

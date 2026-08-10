@@ -2,8 +2,6 @@
 #include <fstream>
 #include <sstream>
 
-#include <argparse.h>
-
 #include <fmt/core.h>
 
 #include "eco.h"
@@ -22,6 +20,10 @@
 #include "Parser/ModuleParser.h"
 #include "Compiler/BuildLayout.h"
 #include "Compiler/CBuild.h"
+#include "Compiler/CommandLine.h"
+#include "Compiler/CommandLineHelp.h"
+#include "Compiler/CommandLineOption.h"
+#include "Compiler/DriverOptions.h"
 #include "Compiler/CompilerException.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
@@ -52,10 +54,8 @@
 // a wildcard matching nothing is deliberately not counted: an empty glob is a pattern with no
 // matches, not a file somebody expected to exist
 std::vector<std::filesystem::path> get_file_list_from_args(
-    argparse::ArgumentParser &cli, const std::string &arg, size_t &missing)
+    const std::vector<std::string> &path_strings, size_t &missing)
 {
-    auto path_strings = cli.get<std::vector<std::string>>(arg);
-
     std::vector<std::filesystem::path> files;
 
     for (const auto &path_string : path_strings) {
@@ -161,7 +161,7 @@ static std::optional<std::filesystem::path> discover_project_manifest()
 // shared with `echoc clean`, which resolves the same facts for the same reason - a manifest may gate its
 // `#[depends:]` behind an `#[if:]`, so the graph reached without them is not the graph the build produced
 static bool resolve_target_facts(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     Compiler::TargetFacts &out
 )
@@ -169,9 +169,9 @@ static bool resolve_target_facts(
     std::string error;
 
     if (!Compiler::TargetFacts::resolve(
-            cli.present("--target-os") ? cli.get<std::string>("--target-os") : std::string(),
-            cli.present("--target-arch") ? cli.get<std::string>("--target-arch") : std::string(),
-            cli.get<std::vector<std::string>>("--define"),
+            driver.target_os,
+            driver.target_arch,
+            driver.defines,
             out,
             error)) {
         diagnostics.render_untyped("Invalid Target", error);
@@ -322,7 +322,7 @@ static int parse_manifest_modules(
 // - `build` never created a stdlib module at all, so any program calling `mem::` or `std::math::`
 // compiled under `run` and failed under `build`
 static int build_bundle(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
     Parser::ModuleParser &parser,
@@ -331,7 +331,7 @@ static int build_bundle(
 )
 {
 #if ECO_USE_EMBEDDED_STDLIB
-    if (!cli.get<bool>("--no-stdlib")) {
+    if (!driver.no_stdlib) {
         parse_embedded_stdlib_module(bundle, parser);
     }
 #endif
@@ -347,9 +347,9 @@ static int build_bundle(
         // the parser's own facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
         // list of files and the conditions inside those files have to be decided by the same answer
         if (!resolve_manifests(
-                cli.get<std::vector<std::string>>("--module"),
-                !cli.get<bool>("--no-stdlib"),
-                cli.get<std::vector<std::string>>("source").empty(),
+                driver.modules,
+                !driver.no_stdlib,
+                driver.sources.empty(),
                 diagnostics, parser.target_facts, manifests, roots)) {
             return 1;
         }
@@ -360,7 +360,7 @@ static int build_bundle(
     }
 
     size_t missing_files = 0;
-    auto source_files = get_file_list_from_args(cli, "source", missing_files);
+    auto source_files = get_file_list_from_args(driver.sources, missing_files);
 
     // a named file that is not there fails the build, even when others compiled. it is an input the
     // user asked for, so carrying on would produce a binary missing whatever was in it - reported by
@@ -455,7 +455,7 @@ static int build_bundle(
 
     // regenerating the embeddable header is a build step, not a compile step. it used to run on
     // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
-    if (cli.is_used("--emit-stdlib-header")) {
+    if (driver.emit_stdlib_header) {
         if (AST::Module *stdlib = bundle.modules.find_module_ptr("stdlib")) {
             AST::write_embedded_module(*stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
         }
@@ -465,7 +465,7 @@ static int build_bundle(
         }
     }
 
-    if (cli.get<bool>("--print-symbol-table")) {
+    if (driver.prints(Compiler::PrintKind::t_symbols)) {
         // two stores, deliberately: the namespace tree holds the types, the function registry
         // holds the overload sets
         std::cout << bundle.collector.namespaces.root().debug_dump_symbols() << std::endl;
@@ -473,7 +473,7 @@ static int build_bundle(
         std::cout << bundle.collector.functions.debug_dump() << std::endl;
     }
 
-    if (cli.get<bool>("--print-ast")) {
+    if (driver.prints(Compiler::PrintKind::t_ast)) {
         for (const auto &mod : bundle.modules) {
             std::cout << "Module: " << mod->debug_description() << std::endl;
         }
@@ -490,9 +490,9 @@ static int build_bundle(
 // each auto-deref by AST::PointerAdjuster, each destructor call, retain and release by
 // AST::OwnershipPass - and none of them exists yet at -a time. checking that a reference count
 // balances means reading the tree *here*
-static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundle)
+static void print_resolved_ast(const Compiler::DriverOptions &driver, AST::Bundle &bundle)
 {
-    if (!cli.get<bool>("--print-resolved-ast")) {
+    if (!driver.prints(Compiler::PrintKind::t_ast_resolved)) {
         return;
     }
 
@@ -505,7 +505,7 @@ static void print_resolved_ast(argparse::ArgumentParser &cli, AST::Bundle &bundl
 // a pass added to one entry point and forgotten in the other is a silent behaviour difference
 // tests/helpers.cpp mirrors this list and has to be updated alongside it
 static int run_semantic_passes(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
     const Compiler::CompilerOptions &options
@@ -525,7 +525,7 @@ static int run_semantic_passes(
     AST::Monomorphizer monomorphizer(bundle);
     monomorphizer.run();
 
-    if (cli.get<bool>("--print-instances")) {
+    if (driver.prints(Compiler::PrintKind::t_instances)) {
         // **the one dump written while a progress row is live.** Every other one in this file sits
         // between steps, which is the measure of whether the steps are placed right - so this is the
         // whole of the suspend list rather than the first entry in one
@@ -554,7 +554,7 @@ static int run_semantic_passes(
     const bool compiled = !bundle.collector.has_critical_issues();
     step.finish(compiled);
 
-    print_resolved_ast(cli, bundle);
+    print_resolved_ast(driver, bundle);
 
     // **stdout is flushed first, always.** Diagnostics go to stderr and a JIT'd program's output goes to
     // stdout; the two are unbuffered and buffered respectively, so a reader that merged them would see
@@ -568,62 +568,6 @@ static int run_semantic_passes(
 
     return compiled ? 0 : 1;
 }
-
-// resolves every option that describes *the program being compiled* against the subcommand's
-// defaults. one function because the two subcommands disagree only about those defaults, and a second
-// spelling of the rules would let them drift - `build` is a release build unless told otherwise
-//
-// the build mode is still orthogonal to -O, and now visibly so: both subcommands read that flag, so
-// `build --release` without it emits release *semantics* - no asserts, no null checks - without the
-// optimizer having run over them
-//
-// `--explain-memory` implying `--track-allocations` is settled here rather than at the two places that
-// read them, because a report over a counter nothing maintains does not fail - it reads zero forever,
-// which is the answer a person hoped for
-//
-// cannot fail: the mutually exclusive group refuses --debug with --release at parse time
-static Compiler::CompilerOptions resolve_options(
-    argparse::ArgumentParser &cli,
-    Compiler::BuildMode fallback
-)
-{
-    Compiler::CompilerOptions options;
-
-    options.mode = fallback;
-
-    if (cli.get<bool>("--debug")) {
-        options.mode = Compiler::BuildMode::t_debug;
-    }
-    else if (cli.get<bool>("--release")) {
-        options.mode = Compiler::BuildMode::t_release;
-    }
-
-    options.debug_info = cli.get<bool>("--debug-info");
-
-    // **`-g` alone also means `--no-optimize`**, settled here rather than at the reader for the reason
-    // `--explain-memory` implying `--track-allocations` is: the un-implied combination is not what
-    // anybody asking for it wanted. Backend::optimize_unit's O2 pipeline reorders, folds and inlines
-    // until stepping through the line table walks a program nobody wrote and every local reads
-    // <optimized out> - which is a debug build in name only.
-    //
-    // `-O` is the opposite request said out loud, so it wins: `-g -O` is "debug info over the optimized
-    // program", which is a real thing to want and is what DISPFlagOptimized will be there to label
-    options.no_optimize = cli.get<bool>("--no-optimize")
-        || (options.debug_info && !cli.get<bool>("--optimize"));
-
-    options.no_tbaa = cli.get<bool>("--no-tbaa");
-
-    options.report_allocations = cli.get<bool>("--explain-memory");
-    options.track_allocations = options.report_allocations || cli.get<bool>("--track-allocations");
-
-    // the request as written, resolved by Compiler::resolve_subtarget wherever it is needed. Validated
-    // in run_front_end beside --target-os, which is where a mistyped flag value is reported
-    options.target_cpu = cli.get<std::string>("--target-cpu");
-    options.target_features = cli.get<std::string>("--target-features");
-
-    return options;
-}
-
 
 // what a build reuses and what it has to produce.
 //
@@ -713,16 +657,11 @@ static ModulePlan plan_module_artifacts(
 // the O3 pipeline and the IR dump can only look at one - and that is exactly what a per-module object cache
 // cannot have. So the two are mutually exclusive by construction rather than by a warning: `-O` and `-p` get
 // whole-program optimization and no cache, everything else gets the cache.
-static bool wants_whole_program_module(argparse::ArgumentParser &cli)
-{
-    return cli.get<bool>("--optimize") || cli.get<bool>("--print-ir");
-}
-
 // the cache key of every manifest module. Computed whenever anything downstream reads one - the plan, or
 // `--explain-cache` - and skipped entirely otherwise, because a key costs a read of every source in the
 // build and a whole-program build reuses nothing
 static bool compute_cache_keys(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const std::vector<Parser::ModuleManifest> &manifests,
     const Compiler::CompilerOptions &options,
@@ -734,7 +673,7 @@ static bool compute_cache_keys(
 
     std::string error;
     if (!Compiler::compute_module_keys(
-            manifests, options, facts, cli.get<bool>("--optimize"), out_keys, error)) {
+            manifests, options, facts, driver.optimize_is_whole_program(), out_keys, error)) {
         diagnostics.render_untyped("Module Cache Error", error);
         return false;
     }
@@ -748,7 +687,7 @@ static bool compute_cache_keys(
 // answer to a question the plan already owns, and the two could disagree - which is exactly the bug this
 // diagnostic exists to help find
 static void report_cache_plan(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const std::vector<Parser::ModuleManifest> &manifests,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
     const ModulePlan &plan,
@@ -756,7 +695,7 @@ static void report_cache_plan(
     bool bypassed
 )
 {
-    if (!cli.get<bool>("--explain-cache")) {
+    if (!driver.explains(Compiler::ExplainKind::t_cache)) {
         return;
     }
 
@@ -921,21 +860,19 @@ static std::filesystem::path fallback_scratch_dir()
 
 // keying a module reads every one of its sources, so it is not free. Only two things ever look at a key: the
 // plan, which a whole-program build does not have, and `--explain-cache`
-static bool needs_cache_keys(argparse::ArgumentParser &cli, bool whole_program)
+static bool needs_cache_keys(const Compiler::DriverOptions &driver)
 {
-    return !whole_program || cli.get<bool>("--explain-cache");
+    return !driver.whole_program || driver.explains(Compiler::ExplainKind::t_cache);
 }
 
 static bool run_front_end(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     AST::Bundle &bundle,
-    Compiler::BuildMode fallback,
-    bool whole_program,
     FrontEnd &out
 )
 {
-    if (!resolve_target_facts(cli, diagnostics, out.target_facts)) {
+    if (!resolve_target_facts(driver, diagnostics, out.target_facts)) {
         return false;
     }
 
@@ -950,8 +887,8 @@ static bool run_front_end(
 
         if (!Compiler::resolve_subtarget(
                 llvm::sys::getDefaultTargetTriple(),
-                cli.get<std::string>("--target-cpu"),
-                cli.get<std::string>("--target-features"),
+                driver.options.target_cpu,
+                driver.options.target_features,
                 subtarget,
                 error)) {
             diagnostics.render_untyped("Invalid Target", error);
@@ -966,7 +903,7 @@ static bool run_front_end(
 
     {
         Compiler::ScopedPhase phase("parse");
-        if (build_bundle(cli, diagnostics, bundle, parser, out.manifests, out.entry_module) != 0) {
+        if (build_bundle(driver, diagnostics, bundle, parser, out.manifests, out.entry_module) != 0) {
             return false;
         }
     }
@@ -981,7 +918,7 @@ static bool run_front_end(
             });
 
         out.layout = Compiler::BuildLayout::resolve(
-            std::filesystem::path(cli.get<std::string>("--build-dir")),
+            driver.build_dir,
             entry != out.manifests.end() ? &*entry : nullptr,
             fallback_scratch_dir());
 
@@ -997,21 +934,21 @@ static bool run_front_end(
         }
     }
 
-    // ahead of the semantic passes, because one of them reads it: AST::TypeChecker refuses
-    // `mem::live_allocations()` when nothing is counting. it depends on nothing but the command line, so
-    // the only thing its old position bought was the appearance of an order
-    out.options = resolve_options(cli, fallback);
+    // **settled before anything is parsed now**, where it used to be resolved here from a parser this
+    // function was handed. AST::TypeChecker reads it - it refuses `mem::live_allocations()` when nothing
+    // is counting - so it has to exist by the semantic passes, and that is the whole of what it owes
+    out.options = driver.options;
 
     {
         Compiler::ScopedPhase phase("semantic passes");
-        if (run_semantic_passes(cli, diagnostics, bundle, out.options) != 0) {
+        if (run_semantic_passes(driver, diagnostics, bundle, out.options) != 0) {
             return false;
         }
     }
 
-    if (needs_cache_keys(cli, whole_program)
+    if (needs_cache_keys(driver)
         && !compute_cache_keys(
-            cli, diagnostics, out.manifests, out.options, out.target_facts, out.cache_keys)) {
+            driver, diagnostics, out.manifests, out.options, out.target_facts, out.cache_keys)) {
         return false;
     }
 
@@ -1044,7 +981,7 @@ struct NativeLibrary
 // the lowest priority of any search path. The valve is for reaching a library nothing declared, and a
 // *conflicting* install is better answered by naming the file with `object:`
 static bool collect_link_requirements(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const FrontEnd &front,
     std::vector<Compiler::LinkRequirement> &out
@@ -1054,7 +991,7 @@ static bool collect_link_requirements(
         Compiler::merge_link_requirements(manifest->link, out);
     }
 
-    const std::vector<std::string> spelled_on_command_line = cli.get<std::vector<std::string>>("--link");
+    const std::vector<std::string> &spelled_on_command_line = driver.link;
 
     if (spelled_on_command_line.empty()) {
         return true;
@@ -1137,14 +1074,14 @@ struct CModuleBuilds
 };
 
 static bool build_c_modules(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const FrontEnd &front,
     bool for_jit,
     CModuleBuilds &out
 )
 {
-    const bool explaining = cli.get<bool>("--explain-cache");
+    const bool explaining = driver.explains(Compiler::ExplainKind::t_cache);
 
     const std::filesystem::path scratch_dir = front.layout.scratch_cc_dir();
 
@@ -1293,14 +1230,14 @@ static bool load_native_libraries(
 // process but not the program, and handing it over would have `env::exe()` name the compiler. A
 // manifest-only invocation names no source file, and then the module root is the best there is - and
 // `fallback` covers the last case, a manifest discovered rather than asked for
-std::string program_name(argparse::ArgumentParser &cli, const std::string &fallback)
+std::string program_name(const Compiler::DriverOptions &driver, const std::string &fallback)
 {
-    const std::vector<std::string> sources = cli.get<std::vector<std::string>>("source");
+    const std::vector<std::string> &sources = driver.sources;
     if (!sources.empty()) {
         return sources.front();
     }
 
-    const std::vector<std::string> modules = cli.get<std::vector<std::string>>("--module");
+    const std::vector<std::string> &modules = driver.modules;
     if (!modules.empty()) {
         return modules.front();
     }
@@ -1313,9 +1250,9 @@ std::string program_name(argparse::ArgumentParser &cli, const std::string &fallb
 // read off the flag rather than off the resolved options. On `build` this used to be unconditional, which
 // made `-O` a switch it accepted and silently ignored, and left no way at all to see what codegen emitted
 // for a release build, since `-p` only ever showed the optimizer's output
-static void optimize_if_asked(argparse::ArgumentParser &cli, LLVMCompiler &compiler)
+static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompiler &compiler)
 {
-    if (!cli.get<bool>("--optimize")) {
+    if (!driver.optimize_is_whole_program()) {
         return;
     }
 
@@ -1328,9 +1265,8 @@ static void optimize_if_asked(argparse::ArgumentParser &cli, LLVMCompiler &compi
 }
 
 int main_run(
-    argparse::ArgumentParser &cli,
+    const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
-    const std::vector<std::string> &program_arguments,
     const char *const *environment)
 {
     // **said rather than ignored, and said before anything else.** `-g` is declared on both subcommands so
@@ -1343,7 +1279,7 @@ int main_run(
     // question about the *invocation* rather than about the program being compiled, and the options are
     // not resolved until run_front_end has already printed the summary - under json a diagnostic after
     // that one breaks the "diagnostics, then one summary" shape of the stream
-    if (cli.get<bool>("--debug-info")) {
+    if (driver.options.emitting_debug_info()) {
         diagnostics.render_untyped(
             "Debug Info Ignored",
             "'-g' produces no artifact a debugger can open on 'run': the JIT emits no object file. "
@@ -1361,14 +1297,14 @@ int main_run(
     // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
     // module beside main's, which is a question about duplicate weak symbols rather than about caching
     FrontEnd front;
-    if (!run_front_end(cli, diagnostics, bundle, Compiler::BuildMode::t_debug, /*whole_program=*/true, front)) {
+    if (!run_front_end(driver, diagnostics, bundle, front)) {
         return 1;
     }
 
     const Compiler::CompilerOptions options = front.options;
     const std::string &entry_module = front.entry_module;
 
-    report_cache_plan(cli, front.manifests, front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
+    report_cache_plan(driver, front.manifests, front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
 
     // **before codegen**, because a C source that does not compile is a build that is going to fail either
     // way, and finding out after the whole Echo program has been lowered wastes the wait. It also puts the
@@ -1376,7 +1312,7 @@ int main_run(
     std::vector<Compiler::LinkRequirement> link;
     CModuleBuilds c_builds;
 
-    if (!collect_link_requirements(cli, diagnostics, front, link)) {
+    if (!collect_link_requirements(driver, diagnostics, front, link)) {
         return 1;
     }
 
@@ -1384,7 +1320,7 @@ int main_run(
         Compiler::ScopedPhase phase("cc");
 
         if (!build_c_modules(
-                cli, diagnostics, front, /*for_jit=*/true, c_builds)) {
+                driver, diagnostics, front, /*for_jit=*/true, c_builds)) {
             return 1;
         }
     }
@@ -1414,17 +1350,17 @@ int main_run(
         return report_compiler_exception(diagnostics, e);
     }
 
-    optimize_if_asked(cli, compiler);
+    optimize_if_asked(driver, compiler);
 
-    if (cli.get<bool>("--print-ir")) {
+    if (driver.prints(Compiler::PrintKind::t_ir)) {
         compiler.printIR(false);
     }
 
     // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
     // entry module was read from - not `echoc`, which is the process but not the program. So the tail
     // the driver split off a `--` is prepended with it rather than used as-is
-    std::vector<std::string> argv = { program_name(cli, entry_module) };
-    argv.insert(argv.end(), program_arguments.begin(), program_arguments.end());
+    std::vector<std::string> argv = { program_name(driver, entry_module) };
+    argv.insert(argv.end(), driver.program_arguments.begin(), driver.program_arguments.end());
 
     // the JIT prunes the module to what the entry point reaches before it runs anything - see
     // Backend::prune_to_entry, which is where that has to live to be sound and is why `-p` above still
@@ -1444,7 +1380,7 @@ int main_run(
 
     // after the program, because the prune happened inside the run - the same position `[timings]` takes,
     // and for the same reason
-    if (cli.get<bool>("--explain-prune")) {
+    if (driver.explains(Compiler::ExplainKind::t_prune)) {
         std::cout << compiler.prune_report();
     }
 
@@ -1459,25 +1395,20 @@ int main_run(
     return status;
 }
 
-int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &diagnostics)
+int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
 {
     // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
     const auto started = std::chrono::steady_clock::now();
 
     auto bundle = AST::Bundle();
 
-    // **before anything is compiled.** This used to sit after codegen and after the optimizer, so a
-    // forgotten `-o` threw away the whole compile to say one sentence - and the output path is now an
-    // input to the decision of what to emit at all, not just where to put it
-    if (!cli.present("-o")) {
-        std::cerr << "No output file specified." << std::endl;
-        return 1;
-    }
-
-    const bool whole_program = wants_whole_program_module(cli);
+    // **the missing -o is refused by the parser now**, off the option row's `required_by`, so this
+    // function is reached only by an invocation that named one. It used to be a hand-written check here,
+    // which was a second opinion about whether the flag was optional
+    const bool whole_program = driver.whole_program;
 
     FrontEnd front;
-    if (!run_front_end(cli, diagnostics, bundle, Compiler::BuildMode::t_release, whole_program, front)) {
+    if (!run_front_end(driver, diagnostics, bundle, front)) {
         return 1;
     }
 
@@ -1489,7 +1420,7 @@ int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
         ? ModulePlan{}
         : plan_module_artifacts(front.layout, front.manifests, front.cache_keys, entry_module);
 
-    report_cache_plan(cli, front.manifests, front.cache_keys, plan, entry_module, whole_program);
+    report_cache_plan(driver, front.manifests, front.cache_keys, plan, entry_module, whole_program);
 
     // **a reused module gets a row and a rebuilt one does not.** Work that did not happen is the
     // surprising half; which input changed for the ones that did is `--explain-cache`'s question, and
@@ -1502,13 +1433,13 @@ int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
         }
     }
 
-    const std::string output = cli.get<std::string>("-o");
+    const std::string output = driver.output.string();
 
     // before codegen, for the reason `run` states: a C source that does not compile fails this build
     // whatever the Echo half does, and the wait is the same either way
     std::vector<Compiler::LinkRequirement> link;
 
-    if (!collect_link_requirements(cli, diagnostics, front, link)) {
+    if (!collect_link_requirements(driver, diagnostics, front, link)) {
         return 1;
     }
 
@@ -1518,7 +1449,7 @@ int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
         CModuleBuilds c_builds;
 
         if (!build_c_modules(
-                cli, diagnostics, front, /*for_jit=*/false, c_builds)) {
+                driver, diagnostics, front, /*for_jit=*/false, c_builds)) {
             return 1;
         }
 
@@ -1547,16 +1478,16 @@ int main_build(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
         return report_compiler_exception(diagnostics, e);
     }
 
-    optimize_if_asked(cli, compiler);
+    optimize_if_asked(driver, compiler);
 
-    if (cli.get<bool>("--print-ir")) {
+    if (driver.prints(Compiler::PrintKind::t_ir)) {
         compiler.printIR(false);
     }
 
     // after the merge decision above and before the emit below, so what it prints is what gets written.
     // it optimizes the units it prints unless told not to - the same call emit_objects makes, so the dump
     // and the object cannot disagree
-    if (cli.get<bool>("--print-unit-ir")) {
+    if (driver.prints(Compiler::PrintKind::t_ir_units)) {
         compiler.print_unit_ir();
     }
 
@@ -1638,21 +1569,21 @@ static void note_legacy_directory(const Parser::ModuleManifest &manifest, std::v
 // **it parses no source and runs no pass.** Resolving the manifest graph is the whole of what it needs -
 // which module directories exist is a function of the manifests and the flags, and reading a single .eco
 // file to answer it would make `clean` fail on a program that does not compile
-int main_clean(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &diagnostics)
+int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
 {
     Compiler::TargetFacts facts;
 
-    if (!resolve_target_facts(cli, diagnostics, facts)) {
+    if (!resolve_target_facts(driver, diagnostics, facts)) {
         return 1;
     }
 
     std::vector<Parser::ModuleManifest> manifests;
     std::vector<std::filesystem::path> roots;
 
-    // the standard library is resolved whether or not it is being removed: `--stdlib` needs its directory
+    // the standard library is resolved whether or not it is being removed: `--with-stdlib` needs its directory
     // to name it, and leaving it out would make the line saying it was kept impossible to write
     if (!resolve_manifests(
-            cli.get<std::vector<std::string>>("--module"),
+            driver.modules,
             /*with_stdlib=*/true,
             /*allow_project_discovery=*/true,
             diagnostics, facts, manifests, roots)) {
@@ -1660,10 +1591,10 @@ int main_clean(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
     }
 
     const Compiler::BuildLayout layout = Compiler::BuildLayout::resolve(
-        std::filesystem::path(cli.get<std::string>("--build-dir")), nullptr, {});
+        driver.build_dir, nullptr, {});
 
-    const bool including_stdlib = cli.get<bool>("--stdlib");
-    const bool dry_run = cli.get<bool>("--dry-run");
+    const bool including_stdlib = driver.with_stdlib;
+    const bool dry_run = driver.dry_run;
 
     // **the standard library is always in the graph and is never what was asked for.** So "is there
     // anything to clean" is a question about the rest of it - an empty list here means the invocation
@@ -1709,7 +1640,7 @@ int main_clean(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
         // machine and is the most expensive thing in any build to produce again, so removing it is asked
         // for by name rather than included in a project's tidy-up
         if (Compiler::is_compiler_supplied_module(manifest) && !including_stdlib) {
-            std::cout << "kept (pass --stdlib to remove it)" << std::endl;
+            std::cout << "kept (pass --with-stdlib to remove it)" << std::endl;
             continue;
         }
 
@@ -1761,376 +1692,73 @@ int main_clean(argparse::ArgumentParser &cli, const AST::DiagnosticRenderer &dia
 // gets its own from the OS
 int main(int argc, char *argv[], char *envp[])
 {
-    // **everything after a bare `--` belongs to the program, not to echoc.** Split it off before
-    // argparse ever sees it: `source` is declared `.remaining()`, so it would otherwise swallow the
-    // whole tail as filenames and `echoc run p.eco -- a b` would look for a file called `a`
-    std::vector<std::string> program_arguments;
-    int echoc_argc = argc;
+    // **parse, then answer, then resolve.** Compiler::parse_command_line owns every rule about what the
+    // words mean, including the bare `--` split, so nothing here reaches into argv - and --help and
+    // --version come back as answers rather than as an exit taken inside a library, which is what lets
+    // the driver choose the stream each of them goes to
+    Compiler::CommandLine cli;
+    std::string cli_error;
 
-    for (int i = 1; i < argc; i++) {
-        if (std::string(argv[i]) == "--") {
-            echoc_argc = i;
-            program_arguments.assign(argv + i + 1, argv + argc);
-            break;
+    const bool parsed = Compiler::parse_command_line(argc, argv, cli, cli_error);
+
+    // **the page is drawn with stdout's facts and the refusal with stderr's**, which is the one place in
+    // this compiler those legitimately differ: a help page is an answer to a question and belongs on the
+    // stream the asker redirected, where everything that reports belongs on the other
+    const Compiler::TerminalCapabilities answering = Compiler::TerminalCapabilities::resolve(
+        cli.color_choice(), cli.diagnostic_format(), Compiler::TerminalStream::t_stdout);
+
+    const Compiler::CommandLineHelp help(std::cout, answering);
+
+    if (parsed && cli.wants_version) {
+        help.render_version();
+        return 0;
+    }
+
+    if (parsed && cli.wants_help) {
+        if (cli.help_topic != nullptr) {
+            help.render_option_help(cli.subcommand, *cli.help_topic);
         }
+        else {
+            help.render_help(cli.subcommand);
+        }
+
+        return 0;
     }
 
-    // the version goes to every parser, not just the top-level one: argparse registers `-v`/`--version`
-    // on each of them out of its default argument set, and a subparser left to its own devices answers
-    // with the library's placeholder "1.0"
-    argparse::ArgumentParser cli("echoc", ECO_VERSION_STRING);
-    cli.add_description("The echo programming language compiler");
+    if (!parsed) {
+        const Compiler::TerminalCapabilities reporting = Compiler::TerminalCapabilities::resolve(
+            cli.color_choice(), cli.diagnostic_format(), Compiler::TerminalStream::t_stderr);
 
-    argparse::ArgumentParser run_command("run", ECO_VERSION_STRING);
-    run_command.add_description("Runs the given source files.");
-    run_command.add_argument("source")
-        .default_value(std::vector<std::string>{})
-        .help(".eco source files to be parsed, compiled and run.")
-        .remaining();
+        Compiler::CommandLineHelp(std::cerr, reporting).render_error(cli_error, cli.subcommand);
 
-    argparse::ArgumentParser build_command("build", ECO_VERSION_STRING);
-    build_command.add_description("Builds the given source files.");
-    build_command.add_argument("source")
-        .default_value(std::vector<std::string>{})
-        .help(".eco source files to be parsed and compiled.")
-        .remaining();
-
-    build_command.add_argument("-o", "--output")
-        .help("Output file name.");
-
-    // **deliberately not in the shared flag loop below.** `clean` compiles nothing, so `-O`, `-g`, `-p` and
-    // the rest would be flags it accepts and silently ignores - the thing the comment on `--explain-prune`
-    // says is worse than rejecting them. It registers what it reads and nothing else
-    argparse::ArgumentParser clean_command("clean", ECO_VERSION_STRING);
-    clean_command.add_description(
-        "Removes what a build produced, so the next one starts from nothing.");
-
-    clean_command.add_argument("--stdlib")
-        .help("Also remove the standard library's store. It is shared by every project on this machine "
-              "and is the slowest thing to build again, so a project's clean leaves it alone.")
-        .default_value(false)
-        .implicit_value(true);
-
-    clean_command.add_argument("-n", "--dry-run")
-        .help("Print what would be removed, and remove nothing.")
-        .default_value(false)
-        .implicit_value(true);
-
-    // the third measurement dump, and the only one not shared: `build` never prunes, because the prune is
-    // part of the JIT and a per-module object may not depend on what reaches `main`. A flag a subcommand
-    // accepts and silently ignores is worse than one it rejects - `-O` was exactly that on `build` - so
-    // this is registered where it means something and nowhere else. `-o` above is the same asymmetry the
-    // other way round
-    run_command.add_argument("-ep", "--explain-prune")
-        .help("Print what the JIT prune dropped, and what the entry point still reaches.")
-        .default_value(false)
-        .implicit_value(true);
-
-    // **what every subcommand needs, `clean` included.** These are the flags that decide which modules an
-    // invocation is talking about and where their artifacts are - not what is compiled or how - so a
-    // subcommand that compiles nothing still has to answer them the same way, or `echoc clean` would look
-    // in a different place than the `echoc build` it is undoing
-    for (auto &command : {std::ref(run_command), std::ref(build_command), std::ref(clean_command)}) {
-        // repeatable, and the graph is resolved as a whole - so naming a library that depends on another
-        // pulls the other in too, once, ahead of it. A dependency does not have to be spelled here
-        command.get().add_argument("-m", "--module")
-            .help("Build a module from its manifest. May be given more than once; a manifest may be an "
-                  "'module.eco' file or a directory holding one.")
-            .default_value(std::vector<std::string>{})
-            .append()
-            .metavar("MANIFEST");
-
-        command.get().add_argument("--build-dir")
-            .help("Where build artifacts are written. Defaults to 'ecobuild' beside each manifest, or to "
-                  "whatever that manifest's '#[build_dir: ...]' names. One directory for the whole build, "
-                  "with a subdirectory per module.")
-            .default_value(std::string(""));
-
-        // what `#[if: ...]` regions are evaluated against. Repeatable, bare names only - a define is a
-        // flag a condition can test and carries no value, because naming a *value* is what `const`
-        // declarations are for
-        command.get().add_argument("--define")
-            .help("Declare a flag that '#[if: NAME]' can test. May be given more than once.")
-            .default_value(std::vector<std::string>{})
-            .append();
-
-        // **not cross-compilation.** These change what a condition sees and nothing else: the code is
-        // still compiled for the host, so asking for a foreign OS will usually fail at link. They exist so
-        // that a test can assert what *another* platform's branch does without owning that platform, which
-        // is the only way a `#[if: os == linux]` region is ever checked on a Mac
-        command.get().add_argument("--target-os")
-            .help("Evaluate conditions as if targeting this OS. Does not cross-compile.");
-
-        command.get().add_argument("--target-arch")
-            .help("Evaluate conditions as if targeting this architecture. Does not cross-compile.");
-
-        // **how a diagnostic is drawn, and the one flag an editor sets.** `auto` picks the drawn form
-        // when stderr can render it and the plain one otherwise, which is what makes a CI log, a Windows
-        // console and a golden test all get the same ASCII without anybody configuring it.
-        //
-        // `json` is here rather than under a flag of its own because a user choosing it is choosing what
-        // comes out of the same stream, and a second flag would let `--json --diagnostics=pretty` be
-        // asked. Deliberately **not** in the module cache key - it changes nothing about an emitted
-        // object, and a key that reacted to it would go cold for no reason
-        command.get().add_argument("--diagnostics")
-            .help("How diagnostics are rendered: auto, pretty, ascii or json (one object per line).")
-            .default_value(std::string("auto"));
-
-        command.get().add_argument("--color", "--colour")
-            .help("Colourise diagnostics: auto, always or never. NO_COLOR and CLICOLOR_FORCE are honoured.")
-            .default_value(std::string("auto"));
-
-        // **it silences the checklist and nothing else.** A diagnostic, a warning and every `-t`/`-ec`/
-        // `-ep`/`-a`/`-ar`/`-syt`/`-pi` dump are untouched: those were asked for by name, and a flag that
-        // could be ignored because another flag was set is a flag nobody can rely on.
-        //
-        // there is no `--progress` beside it, and the omission is deliberate. `--color=always` exists
-        // because a CI job legitimately renders SGR out of a stored log; nobody wants a carriage return
-        // in one. The day that output is wanted the answer is a `plain` mode - committed rows, no cursor
-        // movement - and not a force of this one, which would be a loaded gun beside the e2e corpus
-        command.get().add_argument("--silent")
-            .help("Do not draw the progress checklist. Diagnostics and every explicit dump are unaffected.")
-            .default_value(false)
-            .implicit_value(true);
-
+        return 1;
     }
 
-    // add IR & AST printing flag
-    for (auto &command : {std::ref(run_command), std::ref(build_command)}) {
-        command.get().add_argument("-p", "--print-ir")
-            .help("Print the LLVM IR to the console.")
-            .default_value(false)
-            .implicit_value(true);
+    // what the invocation *means*, with every implication applied once - see Compiler::DriverOptions.
+    // It can still refuse, on a value whose acceptance another owner holds
+    Compiler::DriverOptions driver;
 
-        command.get().add_argument("-a", "--print-ast")
-            .help("Print the AST as parsed, before the semantic passes.")
-            .default_value(false)
-            .implicit_value(true);
-
-        command.get().add_argument("-ar", "--print-resolved-ast")
-            .help("Print the AST after the semantic passes: derefs, drops, retains and releases included.")
-            .default_value(false)
-            .implicit_value(true);
-
-        command.get().add_argument("-syt", "--print-symbol-table")
-            .help("Print the registered symbol table to the console.")
-            .default_value(false)
-            .implicit_value(true);
-
-        command.get().add_argument("-pi", "--print-instances")
-            .help("Print the monomorphizer's instances, rewired call sites and struct instantiations.")
-            .default_value(false)
-            .implicit_value(true);
-
-        command.get().add_argument("-O", "--optimize")
-            .help("Whole-program: fold every unit into one module and run the O3 pipeline over it. "
-                  "Bypasses the module object cache, which per-module objects and a merge cannot both have.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // **the dump for the path that has no merge.** `-p` folds every unit into one module, because that
-        // is the only thing an O3 pipeline or a single dump can look at - so it can only ever show the
-        // whole-program build. This one shows each unit as the object writer gets it, which is what an
-        // ordinary `echoc build` actually emits, and is the only way to assert on it
-        command.get().add_argument("-pu", "--print-unit-ir")
-            .help("Print each compilation unit's IR separately, as the object writer receives it. The "
-                  "per-module path, where '-p' shows the merged whole-program one.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // **not the inverse of -O**, and the help text has to say so: -O changes *what is compiled
-        // together*, this only turns off the per-unit pipeline every build otherwise gets. For reading raw
-        // IR and for bisecting a miscompile against the optimizer
-        command.get().add_argument("--no-optimize")
-            .help("Emit unoptimized IR: skip the per-unit pipeline an ordinary build runs. Not the inverse "
-                  "of -O, which merges every unit and optimizes the whole program.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // **orthogonal to --debug/--release**, and the help text has to say so: that pair decides which
-        // checks the program carries, this decides what the object tells a debugger. On its own it also
-        // turns the per-unit pipeline off - see resolve_options - because a line table over O2 output
-        // describes a program nobody wrote
-        command.get().add_argument("-g", "--debug-info")
-            .help("Emit DWARF, so the program can be stepped through in a debugger. Orthogonal to "
-                  "--debug/--release, which decides which checks the program carries. Implies "
-                  "--no-optimize unless -O is given.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // **not a tuning knob.** a *defined* program must answer the same with it and without it, so
-        // this is how the corpus's adversarial cases are run both ways - and how a miscompile is
-        // bisected against the aliasing model rather than against the optimizer
-        command.get().add_argument("--no-tbaa")
-            .help("Emit no type-based alias metadata. A defined program must produce the same result "
-                  "with and without it; a difference is a bug in the family table or a false 'unsafe'.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // the measurement dumps both subcommands have. They sit with `-a`/`-ar`/`-p`/`-syt`/`-pi` rather than
-        // off to one side because they answer the same kind of question those do - what did the compiler
-        // actually do - and a number nobody can ask for is a number nobody looks at. Each prints a `[section]`
-        // header, the shape --print-symbol-table already uses, so the output is greppable and stays stable
-        // enough to assert on. `--explain-prune` above is the third and belongs to `run` alone
-        command.get().add_argument("-ec", "--explain-cache")
-            .help("Print each module's cache key, whether its artifact is present, and what changed.")
-            .default_value(false)
-            .implicit_value(true);
-
-        command.get().add_argument("-t", "--timings")
-            .help("Print where the compile spent its time, by phase.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // and the fourth, which is unlike the other three in one way worth knowing before you reach for
-        // it: `-ec`, `-t` and `-ep` print something echoc worked out, and this one **changes the program
-        // that is emitted**. It maintains a counter beside every allocation and has `main` print what is
-        // still outstanding on its way out, so the number describes the program's own run rather than the
-        // compile. Off by default for exactly that reason
-        //
-        // no entry in the module cache key: the entry module is never cached, so the report can never be
-        // silently missing from a served artifact. --track-allocations *is* in the key, because it
-        // changes what every other module's object contains
-        command.get().add_argument("-em", "--explain-memory")
-            .help("Make the compiled program print how many allocations were still outstanding when it "
-                  "ended. Implies --track-allocations.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // the bookkeeping on its own, for a program that wants to read the count from Echo with
-        // `mem::live_allocations()` rather than have one printed at the end
-        command.get().add_argument("-ta", "--track-allocations")
-            .help("Count how many allocations are outstanding, so 'mem::live_allocations()' can be read.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // **the pressure valve, and deliberately the same grammar a manifest writes.** Where a library
-        // lives is a property of the machine rather than of the module, so there has to be a way to reach
-        // one nothing declared - but a *second* spelling for it would be two things to keep correct, and
-        // the one used least would be the one that drifts. Merged after every manifest's, so a declaration
-        // wins the dedup and a search path given here is consulted last
-        command.get().add_argument("--link")
-            .help("Add a link requirement: 'lib:<name>', 'framework:<name>', 'search:<dir>' or "
-                  "'object:<file>'. May be given more than once.")
-            .default_value(std::vector<std::string>{})
-            .append();
-
-        // **the other kind of target flag entirely**, and the two are neighbours here only because they
-        // start with the same word. The pair above changes what a `#[if:]` condition sees; this pair
-        // changes what is emitted - every cost model in the optimizer and instruction selection itself
-        // are downstream of it.
-        //
-        // the default is the *platform baseline for the triple*, never the host: `native` produces an
-        // object that may not run on the machine next to it, with an illegal instruction rather than a
-        // diagnostic, and `echoc build` hands somebody a binary. So the host is reachable and has to be
-        // asked for by name
-        command.get().add_argument("--target-cpu")
-            .help("Which CPU to optimize and select instructions for. Defaults to the platform "
-                  "baseline for this target; 'native' means this machine, whose output may not run "
-                  "elsewhere.")
-            .default_value(std::string(""));
-
-        command.get().add_argument("--target-features")
-            .help("Target features to enable or disable, as '+sve,-crc'. Empty unless asked for.")
-            .default_value(std::string(""));
-
-        // the build mode decides which checks the program carries: `assert` and the null check the
-        // `ptr<T>` -> `T&` narrowing emits are both debug-only. deliberately orthogonal to -O,
-        // which says how hard to optimize what is emitted, not what to emit
-        //
-        // `run` defaults to debug and `build` to release - see main_run / main_build. the group is
-        // what refuses both at once, so the conflict is reported by the parser with usage, the way
-        // every other CLI mistake is, rather than by a hand-rolled check with its own message
-        auto &build_mode = command.get().add_mutually_exclusive_group();
-
-        build_mode.add_argument("--debug")
-            .help("Debug build: keep 'assert' and the compiler's own runtime checks. The default for 'run'.")
-            .default_value(false)
-            .implicit_value(true);
-
-        build_mode.add_argument("--release")
-            .help("Release build: drop 'assert' and the compiler's own runtime checks. The default for 'build'.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // the standard library is a module like any other, so it can be left out. `die`, `assert`
-        // and the stdlib namespaces are then simply undeclared names.
-        //
-        // grouped with --emit-stdlib-header for the same reason --debug and --release are grouped:
-        // there is no stdlib module to write out, so the combination is a CLI mistake and the parser
-        // is where a CLI mistake is reported - not `build_bundle`, whose job is to construct modules
-        auto &stdlib_use = command.get().add_mutually_exclusive_group();
-
-        stdlib_use.add_argument("--no-stdlib")
-            .help("Compile without the standard library. 'array', 'string', 'die', 'assert' and the "
-                  "'contract::', 'mem::', 'str::', 'arr::', 'hash::' and 'std::' namespaces are then undeclared.")
-            .default_value(false)
-            .implicit_value(true);
-
-        // regenerating the embeddable stdlib header rewrites a tracked file, so it is opt-in
-        // rather than a side effect of every compile
-        stdlib_use.add_argument("--emit-stdlib-header")
-            .help("Regenerate stdlib/build/stdlib_embedded.h from the standard library sources.")
-            .default_value(false)
-            .implicit_value(true);
-    }
-
-    cli.add_subparser(run_command);
-    cli.add_subparser(build_command);
-    cli.add_subparser(clean_command);
-
-    try {
-        cli.parse_args(echoc_argc, argv);
-    }
-    catch (const std::exception &err) {
-        std::cerr << err.what() << std::endl;
-        std::cerr << cli;
+    if (!Compiler::resolve_driver_options(cli, driver, cli_error)) {
+        std::cerr << cli_error << std::endl;
         return 1;
     }
 
     // enabled here rather than inside each entry point, so the very first phase a subcommand enters is
     // already being timed
-    if (cli.is_subcommand_used(run_command) || cli.is_subcommand_used(build_command)) {
-        auto &command = cli.is_subcommand_used(run_command) ? run_command : build_command;
-
-        if (command.get<bool>("--timings")) {
-            Compiler::PhaseTimings::instance().enable();
-        }
+    if (driver.explains(Compiler::ExplainKind::t_time)) {
+        Compiler::PhaseTimings::instance().enable();
     }
-
-    if (!cli.is_subcommand_used(run_command)
-        && !cli.is_subcommand_used(build_command)
-        && !cli.is_subcommand_used(clean_command)) {
-        std::cerr << cli;
-        return 1;
-    }
-
-    // whichever one was used, for the flags all three share - see the loop that registers them
-    auto &command = cli.is_subcommand_used(run_command)
-        ? run_command
-        : (cli.is_subcommand_used(build_command) ? build_command : clean_command);
 
     // **one renderer, built here and passed down.** Everything that reports takes a reference to it, so
     // there is exactly one answer to what a diagnostic looks like - which is the whole point: this
     // replaced three printers that had each grown their own idea of it
-    Compiler::ColorChoice color_choice = Compiler::ColorChoice::t_auto;
-    Compiler::DiagnosticFormat format = Compiler::DiagnosticFormat::t_auto;
-    std::string flag_error;
-
-    if (!Compiler::parse_color_choice(command.get<std::string>("--color"), color_choice, flag_error)
-        || !Compiler::parse_diagnostic_format(
-            command.get<std::string>("--diagnostics"), format, flag_error)) {
-        std::cerr << flag_error << std::endl;
-        return 1;
-    }
-
     const Compiler::TerminalCapabilities capabilities
-        = Compiler::TerminalCapabilities::resolve(color_choice, format);
+        = Compiler::TerminalCapabilities::resolve(driver.color, driver.format);
 
     // **stderr, whatever the format.** stdout under `run` belongs to the program being executed, so a
     // compiler writing into it is a compiler whose output cannot be piped - and an editor reading the
     // json form wants one stream that carries diagnostics and nothing else
-    const AST::DiagnosticRenderer diagnostics(std::cerr, format, capabilities);
+    const AST::DiagnosticRenderer diagnostics(std::cerr, driver.format, capabilities);
 
     // **the same stream, and the gate that keeps them from fighting over it.** The checklist is drawn only
     // when stderr is a terminal that can be redrawn, `--silent` was not given, and the format is not the
@@ -2140,17 +1768,25 @@ int main(int argc, char *argv[], char *envp[])
     // enabled after the capabilities and not beside PhaseTimings above, because it needs them - and after
     // the renderer, because a row must never be the first thing on a stream a diagnostic is about to fail
     // onto
-    if (capabilities.interactive && !command.get<bool>("--silent") && !diagnostics.is_machine_readable()) {
+    if (capabilities.interactive && !driver.silent && !diagnostics.is_machine_readable()) {
         Compiler::ProgressReporter::instance().enable(std::cerr, capabilities);
     }
 
-    if (cli.is_subcommand_used(run_command)) {
-        return main_run(run_command, diagnostics, program_arguments, envp);
+    switch (driver.subcommand) {
+    case Compiler::Subcommand::t_run:
+        return main_run(driver, diagnostics, envp);
+
+    case Compiler::Subcommand::t_clean:
+        return main_clean(driver, diagnostics);
+
+    case Compiler::Subcommand::t_build:
+        return main_build(driver, diagnostics);
+
+    // unreachable: the parser refuses an invocation with no command, so this is here to make the switch
+    // total rather than to be taken
+    case Compiler::Subcommand::t_none:
+        break;
     }
 
-    if (cli.is_subcommand_used(clean_command)) {
-        return main_clean(clean_command, diagnostics);
-    }
-
-    return main_build(build_command, diagnostics);
+    return 1;
 }

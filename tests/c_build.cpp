@@ -63,7 +63,7 @@ Compiler::CBuildSpec spec_for(const ScopedProject &project, const std::string &m
     return spec;
 }
 
-// the key of the one object a build produced, read off the `--explain-cache` line build_c_sources writes
+// the key of the one object a build produced, read off the `--explain cache` line build_c_sources writes
 std::string key_of(const std::vector<std::string> &explain)
 {
     REQUIRE(explain.size() == 1);

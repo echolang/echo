@@ -1,4 +1,4 @@
-flags: -em
+flags: --explain memory
 expect: fail
 
 --- OUT --->

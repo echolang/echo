@@ -1,5 +1,5 @@
 stdlib: off
-flags: -ep
+flags: --explain prune
 
 --- OUT --->
 42

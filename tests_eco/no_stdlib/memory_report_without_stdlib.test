@@ -1,5 +1,5 @@
 stdlib: off
-flags: -em
+flags: --explain memory
 
 --- OUT --->
 7

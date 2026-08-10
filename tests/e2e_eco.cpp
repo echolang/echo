@@ -186,7 +186,7 @@ namespace
         INFO("dump:\n" << result.output);
 
         // the status is asserted before the directives, and on this path too - a dump invocation that
-        // died early (a mistyped `flags:` argparse refuses, a crash before the dump runs) produces a
+        // died early (a mistyped `flags:` the parser refuses, a crash before the dump runs) produces a
         // short or empty stream, and CHECK-NOTs against a stream that was never produced all hold
         if (!check_status(test, result, "the dump invocation")) {
             return;

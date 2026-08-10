@@ -14,7 +14,7 @@
 //
 // these are subprocess tests rather than corpus goldens for two reasons the .test format cannot express: the
 // working directory is the thing under test in half of them, and a cache key folds in the LLVM version and the
-// host triple, so no digest is comparable across machines. Substring assertions on `--explain-cache` are, and
+// host triple, so no digest is comparable across machines. Substring assertions on `--explain cache` are, and
 // that is what is checked.
 
 namespace fs = std::filesystem;
@@ -113,7 +113,7 @@ TEST_CASE("a project directory needs no arguments", "[cache][project]")
         // the manifest calls its module `greeter`, and nothing in it mentions `main`. Requiring
         // `#[module: "main"]` to make a project runnable would put the compiler's internals in every
         // user's manifest
-        const ProcessResult result = project.echoc("run --explain-cache", project.root());
+        const ProcessResult result = project.echoc("run --explain cache", project.root());
 
         REQUIRE(result.exit_code == 0);
         REQUIRE_FALSE(line_starting_with(result.output, "greeter").empty());
@@ -142,7 +142,7 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         "#[sources: \"*.eco\"]\n");
     write_file(project.root() / "app" / "app.eco", "echo cachelib::twice(21);\n");
 
-    const std::string args = "run --explain-cache --build-dir " + quoted(project.build_dir());
+    const std::string args = "run --explain cache --build-dir " + quoted(project.build_dir());
     const fs::path app_dir = project.root() / "app";
 
     const ProcessResult first = project.echoc(args, app_dir);
@@ -325,11 +325,11 @@ TEST_CASE("a library's object does not depend on which application consumes it",
     // the library's key must be identical, because none of its own inputs differ between the two builds
     const std::string key_a = line_starting_with(
         project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_a)
-            + " --explain-cache app.eco", project.root() / "app_a").output, "shared");
+            + " --explain cache app.eco", project.root() / "app_a").output, "shared");
 
     const std::string key_b = line_starting_with(
         project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_b)
-            + " --explain-cache app.eco", project.root() / "app_b").output, "shared");
+            + " --explain cache app.eco", project.root() / "app_b").output, "shared");
 
     REQUIRE_FALSE(key_a.empty());
     REQUIRE(key_a == key_b);
@@ -366,11 +366,12 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
     write_file(project.root() / "app" / "app.eco", "echo storelib::twice(21);\n");
 
     const fs::path app_dir = project.root() / "app";
-    // `source` is declared `.remaining()`, so every flag has to sit *before* the filename - a `-O` after it
-    // is read as another source file, which argparse then reports as a missing one
+    // a flag may sit either side of the filename: Compiler::parse_command_line recognises a positional
+    // at any position. The parser this replaced declared sources "remaining", so a flag written after one
+    // was read as another source file and reported as a missing one
     const std::string flags =
         "build -o out -m " + quoted(project.root() / "lib")
-        + " --build-dir " + quoted(project.build_dir()) + " --explain-cache";
+        + " --build-dir " + quoted(project.build_dir()) + " --explain cache";
 
     const std::string args = flags + " app.eco";
 
@@ -412,7 +413,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         write_file(inner.root() / "app.eco", "echo 1;\n");
 
         const std::string inner_args =
-            "build -o out --build-dir " + quoted(inner.build_dir()) + " --explain-cache";
+            "build -o out --build-dir " + quoted(inner.build_dir()) + " --explain cache";
 
         inner.echoc(inner_args, inner.root());
         const ProcessResult second = inner.echoc(inner_args, inner.root());
@@ -448,7 +449,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
     SECTION("an optimized build reuses nothing, because it is whole-program")
     {
-        const ProcessResult optimized = project.echoc(flags + " -O app.eco", app_dir);
+        const ProcessResult optimized = project.echoc(flags + " --optimize whole app.eco", app_dir);
 
         REQUIRE(optimized.exit_code == 0);
         REQUIRE(optimized.output.find("bypassed") != std::string::npos);
@@ -470,7 +471,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
         // no --build-dir, so the default store is `ecobuild` inside that unwritable directory
         const ProcessResult result = inner.echoc(
-            "build -o out -m " + quoted(inner.root() / "lib") + " --explain-cache app.eco",
+            "build -o out -m " + quoted(inner.root() / "lib") + " --explain cache app.eco",
             inner.root() / "app");
 
         // permissions restored before any assertion, so a failure cannot leave an undeletable directory behind
@@ -497,7 +498,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         write_file(inner.root() / "app.eco", "echo 1;\n");
 
         const ProcessResult result = inner.echoc(
-            "build -o out --explain-cache app.eco", inner.root());
+            "build -o out --explain cache app.eco", inner.root());
 
         REQUIRE(result.exit_code == 0);
         REQUIRE_FALSE(line_starting_with(result.output, "stdlib").empty());

@@ -1,5 +1,5 @@
 mode: build
-flags: -O
+flags: --optimize whole
 
 --- OUT --->
 7

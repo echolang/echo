@@ -1,4 +1,4 @@
-flags: -O
+flags: --optimize whole
 
 --- OUT --->
 255

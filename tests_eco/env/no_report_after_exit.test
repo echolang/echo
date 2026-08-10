@@ -1,4 +1,4 @@
-flags: --explain-memory
+flags: --explain memory
 
 --- OUT --->
 1

@@ -185,14 +185,14 @@ Compiling a library you didn't change is wasted work, so `echoc build` doesn't d
 compiled object is stored, and reused when nothing that could affect it has changed:
 
 ```bash
-$ echoc build -o app -m ../geom -ec app.eco
+$ echoc build -o app -m ../geom --explain cache app.eco
 [cache]
   stdlib  c5e7618b5d8fc44f  hit
   core    a30f7b1c9de44210  hit
   geom    e0d848a3cdbb155f  miss  ('point.eco' changed)
 ```
 
-`-ec` is how you ask what happened, and a miss names the file rather than reporting a number you can't act on.
+`--explain cache` is how you ask what happened, and a miss names the file rather than reporting a number you can't act on.
 
 Artifacts live in `ecobuild` beside each manifest — everything the build produced, in one directory, so the
 only thing left next to your source is the binary you asked for. A library's artifacts travel with the
@@ -252,9 +252,9 @@ resolves to — one more overload in a set you call into is enough. Rebuilding i
 
 ## What the cache doesn't do
 
-**An optimized build doesn't use it.** `-O` folds every module into one unit before optimizing, because the
+**An optimized build doesn't use it.** `--optimize whole` folds every module into one unit before optimizing, because the
 inliner can only work on a body it can see; per-module objects and whole-program optimization are exclusive,
-and `-ec` says `bypassed` rather than pretending otherwise.
+and `--explain cache` says `bypassed` rather than pretending otherwise.
 
 If you want a function inlinable across a module boundary regardless, mark it:
 
