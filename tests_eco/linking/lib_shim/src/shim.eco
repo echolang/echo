@@ -1,0 +1,12 @@
+namespace shim;
+
+// the C symbol reaches the linker exactly as written - and, under `run`, reaches the JIT through the
+// loadable library echoc built out of this module's objects
+extern {
+    function eco_shim_answer() : int32;
+}
+
+function answer() : int32
+{
+    return eco_shim_answer();
+}

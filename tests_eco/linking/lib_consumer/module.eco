@@ -1,0 +1,11 @@
+/*
+ * Names its dependency and no link requirement of its own. That the program below links at all is the
+ * assertion: `lib:m` was declared one module away and nothing here repeats it.
+ */
+
+#[module: "linkconsumer"]
+#[version: "0.1.0"]
+
+#[depends: "../lib_mathuser"]
+
+#[sources: "src/*.eco"]

@@ -1,0 +1,7 @@
+modules: linking/lib_bad_scheme
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:10: 'framwork' is not a link scheme, expected one of: lib, framework, search, object.

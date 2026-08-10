@@ -1,0 +1,11 @@
+/*
+ * `#[cc:]` has its own closed vocabulary, read the same way. An `include:` on its own would describe a
+ * build of nothing, which is why one with no `sources:` is refused too.
+ */
+
+#[module: "linkbadcc"]
+#[version: "0.1.0"]
+
+#[cc: "headers:c/include"]
+
+#[sources: "src/*.eco"]

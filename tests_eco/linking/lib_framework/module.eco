@@ -1,0 +1,12 @@
+/*
+ * A framework means nothing off Darwin, so naming one on another platform is refused rather than dropped.
+ * Dropping it silently leaves the build failing on exactly the symbols the declaration was there to
+ * provide, with nothing saying it was never applied - and the fix is one `#[if:]` the author writes once.
+ */
+
+#[module: "linkframework"]
+#[version: "0.1.0"]
+
+#[link: "framework:OpenGL"]
+
+#[sources: "src/*.eco"]

@@ -1,0 +1,4 @@
+// `lib:m` is declared by linkmath, which this program never names - it names linkconsumer, which depends
+// on it. A requirement travels with the module that needs it
+float64 $h = hyp::of(3.0, 4.0);
+echo $h;

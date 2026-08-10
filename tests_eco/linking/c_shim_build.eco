@@ -1,0 +1,4 @@
+// a module's C sources become objects in this program's link, and the `extern` block reaches them by
+// their raw symbol names. Nothing in the compiler knows what a shim is: it is a build step before the
+// link and an `object:` requirement afterwards
+echo shim::answer();

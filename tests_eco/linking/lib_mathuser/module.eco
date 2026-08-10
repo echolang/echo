@@ -1,0 +1,14 @@
+/*
+ * A library that needs a native library linked, and says so itself.
+ *
+ * The whole point is what the *consumer* has to know, which is nothing: the case beside this one names
+ * `#[depends:]` and no flags at all. A link requirement travels with the module that needs it, through
+ * however many modules sit between it and the program.
+ */
+
+#[module: "linkmath"]
+#[version: "0.1.0"]
+
+#[link: "lib:m"]
+
+#[sources: "src/*.eco"]

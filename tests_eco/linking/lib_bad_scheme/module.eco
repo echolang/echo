@@ -1,0 +1,12 @@
+/*
+ * The scheme is mandatory, and a misspelled one is a located error rather than a library of that name.
+ * Left to mean "a library called framwork:OpenGL" it would surface as a linker message about something
+ * nobody wrote, in a build with no other sign the declaration had been misread.
+ */
+
+#[module: "linkbadscheme"]
+#[version: "0.1.0"]
+
+#[link: "framwork:OpenGL"]
+
+#[sources: "src/*.eco"]

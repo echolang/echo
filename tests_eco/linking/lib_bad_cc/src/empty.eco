@@ -1,0 +1,6 @@
+namespace probe;
+
+function nothing() : int32
+{
+    return 0;
+}

@@ -1,0 +1,6 @@
+// **the same program under the JIT**, which is the case that pins the loadable library.
+//
+// MCJIT resolves an external out of the running echoc process, and `eco_shim_answer` is emphatically not
+// in it - so this printing anything at all is the whole assertion. `lib:m` under `run` would not be a
+// test, because echoc is itself linked against libm and `sqrt` would resolve with nothing done
+echo shim::answer();

@@ -1,0 +1,7 @@
+modules: linking/lib_bad_cc
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:9: 'headers' is not a C build scheme, expected one of: sources, include, define, flag.

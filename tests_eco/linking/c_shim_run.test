@@ -1,0 +1,4 @@
+modules: linking/lib_shim
+
+--- OUT --->
+42
