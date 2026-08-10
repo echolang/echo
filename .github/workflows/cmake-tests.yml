@@ -151,6 +151,8 @@ jobs:
         with:
           llvm-version: 20
 
+      # libzstd-dev is here for its *static* half: LLVM links zstd, and the release build below puts it
+      # inside the binary rather than naming it - see ECO_STATIC_ZSTD in CMakeLists.txt
       - name: Install dependencies
         run: |
           sudo apt update
@@ -158,7 +160,8 @@ jobs:
             ninja-build \
             libc++-dev \
             libc++abi-dev \
-            zlib1g-dev
+            zlib1g-dev \
+            libzstd-dev
 
       # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
       # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
@@ -203,6 +206,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$LLVM_PATH/bin/clang++" \
             -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
             -DECO_EMBED_STDLIB=ON \
+            -DECO_STATIC_ZSTD=ON \
             -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
             -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
 
@@ -227,6 +231,11 @@ jobs:
           cd "$RUNNER_TEMP"
           printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
           ./echoc run smoke.eco
+
+      # the smoke test above runs on the machine that built the binary, so it cannot see a dependency
+      # on something only that machine has - which the loader turns into a process that never starts
+      - name: Check the binary carries its dependencies
+        run: ./tools/check_release_deps.sh build-release/echoc
 
       - name: Package release archive
         env:
@@ -261,9 +270,12 @@ jobs:
         with:
           llvm-version: 20
 
+      # zstd is here for its *static* half - see ECO_STATIC_ZSTD in CMakeLists.txt. The shared one is
+      # already on the runner, which is exactly the problem: it lives under /opt/homebrew, and that
+      # path does not exist on the Mac that downloads the result
       - name: Install dependencies
         run: |
-          brew install cmake ninja
+          brew install cmake ninja zstd
 
       - name: Configure CMake
         run: |
@@ -290,6 +302,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
             -DLLVM_DIR="$LLVM_PATH/lib/cmake/llvm" \
             -DECO_EMBED_STDLIB=ON \
+            -DECO_STATIC_ZSTD=ON \
             -DECO_VERSION_PATCH=${{needs.resolve_version.outputs.patch}} \
             -DECO_VERSION_SUFFIX=${{needs.resolve_version.outputs.suffix}}
 
@@ -312,6 +325,11 @@ jobs:
           cd "$RUNNER_TEMP"
           printf 'assert(1 == 1);\nvar $xs = [1, 2, 3];\ndprint($xs[1]);\n' > smoke.eco
           ./echoc run smoke.eco
+
+      # this runner has Homebrew and the machine downloading the result does not, so a /opt/homebrew
+      # load command is invisible to every step above and fatal on arrival
+      - name: Check the binary carries its dependencies
+        run: ./tools/check_release_deps.sh build-release/echoc
 
       - name: Package release archive
         run: |

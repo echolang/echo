@@ -59,6 +59,55 @@ if(ECO_EMBED_STDLIB)
     target_compile_definitions(${LIBNAME} PRIVATE ECO_USE_EMBEDDED_STDLIB=1)
 endif()
 
+# the same idea one layer down: a released binary carries its libraries the way it carries the
+# standard library. LLVM's export set names zstd::libzstd_shared, which on a build machine with
+# Homebrew resolves to an absolute /opt/homebrew path - a path that means nothing on the machine that
+# downloaded the binary, where dyld then refuses to start the process at all rather than degrading. So
+# a release built the ordinary way is not a slower compiler there, it is no compiler.
+#
+# off by default for ECO_EMBED_STDLIB's reason: a local build wants what the machine already has, and
+# the static archive is not installed everywhere the shared library is
+option(ECO_STATIC_ZSTD "Link zstd statically, so the binary carries it rather than naming a path" OFF)
+
+if(ECO_STATIC_ZSTD)
+    # rewritten where the dependency is *stated* - in the interface of whichever LLVM library names it
+    # - rather than by adding the archive to our own link line, which would leave the dylib on the line
+    # as well and change nothing. LLVM ships its own Findzstd.cmake and LLVMConfig resolves
+    # find_package(zstd) through it, so the dependency is always a target name and never a path, and
+    # the same module defines the static target whenever a libzstd.a is installed
+    set(ECO_ZSTD_IS_LINKED FALSE)
+
+    foreach(ECO_LLVM_LIB IN LISTS LLVM_AVAILABLE_LIBS)
+        if(NOT TARGET ${ECO_LLVM_LIB})
+            continue()
+        endif()
+
+        get_target_property(ECO_LLVM_LIB_DEPS ${ECO_LLVM_LIB} INTERFACE_LINK_LIBRARIES)
+
+        if(NOT ECO_LLVM_LIB_DEPS OR NOT "zstd::libzstd_shared" IN_LIST ECO_LLVM_LIB_DEPS)
+            continue()
+        endif()
+
+        set(ECO_ZSTD_IS_LINKED TRUE)
+
+        if(TARGET zstd::libzstd_static)
+            list(TRANSFORM ECO_LLVM_LIB_DEPS REPLACE "^zstd::libzstd_shared$" "zstd::libzstd_static")
+            set_property(TARGET ${ECO_LLVM_LIB} PROPERTY INTERFACE_LINK_LIBRARIES "${ECO_LLVM_LIB_DEPS}")
+        endif()
+    endforeach()
+
+    # an LLVM built without zstd names it nowhere and owes us nothing, so only a dependency we found
+    # and could not answer is a failure. It is a hard one: the alternative is a release that carries a
+    # dependency on the build machine's filesystem, which is the bug this option exists for
+    if(ECO_ZSTD_IS_LINKED AND NOT TARGET zstd::libzstd_static)
+        message(FATAL_ERROR
+            "ECO_STATIC_ZSTD is on, but LLVM links zstd dynamically and there is no static zstd to "
+            "put in its place (zstd_STATIC_LIBRARY is unset). Install one - libzstd-dev on Debian, "
+            "brew install zstd on macOS - or configure without ECO_STATIC_ZSTD and accept a binary "
+            "that only starts on a machine which already has the shared library.")
+    endif()
+endif()
+
 # the patch number and the version suffix are CI's to supply, because the patch is a fact about the
 # release history rather than about this tree. Both are added only when non-empty, so a plain configure
 # leaves include/eco.h's own values alone rather than overriding them with a blank
