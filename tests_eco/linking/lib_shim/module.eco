@@ -2,10 +2,13 @@
  * A library that ships C beside its Echo, which is what an actual binding to a native library is: a shim
  * saying the thing C says and Echo does not, with `extern { }` declarations layered over it.
  *
- * `#[cc:]` carries a scheme inside its value exactly as `#[link:]` does, so what a C build can be told
- * grows without the manifest's attribute list growing with it. The include path resolves against *this*
+ * `#[cc:]` carries its scheme as a tag exactly as `#[link:]` does, so what a C build can be told grows
+ * without the manifest's attribute list growing with it. The include path resolves against *this*
  * directory rather than the working directory, which is what lets the library be depended on from
  * anywhere - the case beside this one is run from tests_eco/.
+ *
+ * `define` is the one scheme that reads a record, because its keys are the payload rather than a
+ * vocabulary - so several macros fit in one attribute and each keeps its own value.
  *
  * The `sources:` pattern deliberately does not match `c/include/`: a header is not a translation unit,
  * and picking one up would compile it as one.
@@ -14,8 +17,8 @@
 #[module: "linkshim"]
 #[version: "0.1.0"]
 
-#[cc: "sources:c/*.c"]
-#[cc: "include:c/include"]
-#[cc: "define:ECO_SHIM_BASE=40"]
+#[cc: sources "c/*.c"]
+#[cc: include "c/include"]
+#[cc: define { ECO_SHIM_BASE: 40 }]
 
 #[sources: "src/*.eco"]

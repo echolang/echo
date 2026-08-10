@@ -479,7 +479,7 @@ TEST_CASE("live_allocations is refused when nothing is counting", "[sema][memory
     // **the e2e corpus cannot test this.** tests/eco_test_file.cpp passes --track-allocations to every
     // case deliberately, so there is no `.test` shaped  like its absence - which is what this is for
     const std::string program =
-        "#[builtin: \"live_allocations\"]\n"
+        "#[builtin: live_allocations]\n"
         "function live_allocations() : usize;\n"
         "echo live_allocations();\n";
 

@@ -49,9 +49,13 @@ namespace Parser
         // a manifest is **Echo**, read by this same lexer and this same attribute parser into a scratch
         // bundle - which is what makes the format honest, and is also why one flag is needed. The two
         // grammars accept different attribute names, and each has to report against *its own* set:
-        // `#[source:]` in a manifest is worth "expected one of: module, version, depends, sources" and not
-        // a list naming `#[inline]`, which is legal nowhere near it. So Parser::parse_attribute defers to
-        // Parser::read_manifest_attributes here rather than answering first with the wrong vocabulary
+        // `#[source:]` in a manifest is worth an "expected one of" naming only what a manifest takes, and
+        // not a list naming `#[inline]`, which is legal nowhere near it. So Parser::parse_attribute defers
+        // to Parser::read_manifest_attributes here rather than answering first with the wrong vocabulary.
+        //
+        // the *value* grammar does not split on this flag and must not start to: what an attribute value
+        // may say is one question (Parser::parse_attribute_value), and which attribute names mean
+        // something here is another
         bool is_manifest = false;
 
         // reports the token the cursor is sitting on as unexpected where `expected` was wanted

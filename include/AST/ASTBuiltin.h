@@ -8,7 +8,7 @@
 
 namespace AST
 {
-    // the compiler builtins a function declaration can be bound to with `#[builtin: "..."]`
+    // the compiler builtins a function declaration can be bound to with `#[builtin: ...]`
     //
     // a builtin is answered by the compiler at the call site rather than being emitted as a
     // function, so it has no symbol and no body. that is what separates it from `intrinsic`,

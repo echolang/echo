@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] attribute_wrong_shape.eco:3:9
+
+  the 'core' attribute wants a name here, not a string.
+
+  2 | // `#[if: os == darwin]` follows. a string is refused, with the noun the reader wanted
+  3 | #[core: "array"]
+    :         ^^^^^^^
+  4 | struct Thing
+
+1 error, nothing was compiled.

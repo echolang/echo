@@ -893,28 +893,38 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
         // a bodyless declaration gets its implementation from one of two places: an LLVM
         // intrinsic, which still becomes a real llvm::Function, or a compiler builtin, which has
         // no symbol at all and whose call sites fold to a constant
+        //
+        // an intrinsic is spelled as a **string** because an LLVM intrinsic name is free text with
+        // dots in it; a builtin is spelled as a **name**, because the set is closed and a closed
+        // vocabulary reads bare - the same rule `#[if: os == darwin]` has always followed
         if (auto *intrinsic_attr = funcdecl->attributes.get_first("intrinsic")) {
-            auto value = attribute_string_value(payload, intrinsic_attr, "intrinsic");
-            if (!value) {
+            funcdecl->intrinsic = read_attribute_value(payload, intrinsic_attr, "intrinsic",
+                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                    return reader.string(written);
+                });
+
+            if (!funcdecl->intrinsic) {
                 return nullptr;
             }
-            funcdecl->intrinsic = value;
         }
 
         if (auto *builtin_attr = funcdecl->attributes.get_first("builtin")) {
-            auto value = attribute_string_value(payload, builtin_attr, "builtin");
-            if (!value) {
+            funcdecl->builtin = read_attribute_value(payload, builtin_attr, "builtin",
+                [](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+                    std::optional<std::string> value = reader.name(written);
+
+                    if (value.has_value() && !AST::is_known_builtin(value.value())) {
+                        reader.refuse(written.span,
+                            fmt::format("Unknown compiler builtin '{}'.", value.value()));
+                        value.reset();
+                    }
+
+                    return value;
+                });
+
+            if (!funcdecl->builtin) {
                 return nullptr;
             }
-
-            if (!AST::is_known_builtin(value.value())) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
-                    payload.context.code_ref(builtin_attr->attribute_tokens),
-                    fmt::format("Unknown compiler builtin '{}'.", value.value()));
-                return nullptr;
-            }
-
-            funcdecl->builtin = value;
         }
 
         return funcdecl;

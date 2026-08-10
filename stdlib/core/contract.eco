@@ -31,7 +31,7 @@ namespace contract;
  * a `true`. That is the whole contract - and it is what lets `current()` skip a bounds check that
  * `advance()` already performed.
  */
-#[core: "iterator"]
+#[core: iterator]
 interface iterator<V>
 {
     /**
@@ -51,7 +51,7 @@ interface iterator<V>
  * `Iter` is an associated type: the implementor chooses it and this interface only constrains it. You
  * never write it - the compiler reads it off your `iterate()`.
  */
-#[core: "iterable"]
+#[core: iterable]
 interface iterable<V>
 {
     type Iter : iterator<V>;
@@ -77,7 +77,7 @@ interface iterable<V>
  * a cursor over storage it may not write, so a container's two `iterate()` overloads return two different
  * cursors, and `foreach` picks between them by whether the value it was given is const.
  */
-#[core: "const_iterable"]
+#[core: const_iterable]
 interface const_iterable<V>
 {
     type Iter : iterator<V>;
@@ -95,7 +95,7 @@ interface const_iterable<V>
  * `current`: that is what lets the capability set grow. A future `reversible` or `random_access<V>` is
  * another interface beside this one, and a cursor declares the ones it can honour.
  */
-#[core: "keyed"]
+#[core: keyed]
 interface keyed<K>
 {
     /**

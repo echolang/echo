@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "Compiler/LinkRequirement.h"
 #include "Compiler/TargetSubtarget.h"
 
 #include <filesystem>
@@ -70,6 +71,14 @@ namespace Compiler::LLVM
         // returns what the entry point returned, so `echoc run` exits the way the program did. A
         // module-scope `die` or `env::exit` never reaches this - both call libc's `exit` from inside the
         // JIT'd code, which takes echoc down with them, and that is already the right exit status
+        //
+        // **every native library this program needs is already open by the time this is called**, and the
+        // driver is what opened them: MCJIT resolves an external out of the running process and nothing
+        // else ever puts one there, so a `#[link:]` becomes a
+        // llvm::sys::DynamicLibrary::LoadLibraryPermanently before the engine exists. Deliberately not a
+        // parameter here - the registry it loads into is process-global either way, and refusing over one
+        // that will not open needs the requirement's declaring module and the diagnostic renderer, neither
+        // of which the backend has. A missing one is not survivable: MCJIT hangs rather than reporting
         int run_code(const std::vector<std::string> &arguments, const char *const *environment);
 
         // what the prune dropped and what survived it: the `[prune]` section `--explain-prune` asks for,
@@ -85,8 +94,16 @@ namespace Compiler::LLVM
         // successful to a shell, a Makefile and the e2e suite alike
         //
         // the whole-program spelling: one unit, one object, one link. Kept for the paths that merged
-        // everything into main first - `-O` and `--print-ir` - where per-module objects do not exist
-        bool make_exec(std::string executable_name);
+        // everything into main first - `-O` and `--print-ir` - where per-module objects do not exist.
+        //
+        // **`object_path` is passed in rather than derived from the executable's name.** Where a build
+        // artifact goes is Compiler::BuildLayout's one question, and this used to answer it a second
+        // time with a string concatenation - which is how every optimized build left an object beside
+        // the binary that nothing ever collected
+        bool make_exec(
+            const std::string &executable_name,
+            const std::filesystem::path &object_path,
+            const std::vector<Compiler::LinkRequirement> &link);
 
         // one unit to one object file. **Sound only because an ODR-shared definition is emitted into
         // every unit that references it**: without that a unit's object would be missing the bodies its
@@ -97,8 +114,16 @@ namespace Compiler::LLVM
         // driver, which is a ~33ms difference on every build: almost all of `clang -o exe exe.o` is
         // driver startup, and this stage is otherwise a constant floor no amount of caching removes.
         // The fallback is what keeps a platform whose flags we cannot spell buildable rather than broken
+        //
+        // `link` is what the build's manifests and command line asked for, already merged and ordered by
+        // the driver. **Both spellings render it through Compiler::partition_link_requirements** - the
+        // fallback is the path exercised least, so a second hand-written rendering there is one that
+        // drifts without anybody noticing until a platform needs it
         bool link_executable(
-            const std::string &executable_name, const std::vector<std::filesystem::path> &objects);
+            const std::string &executable_name,
+            const std::vector<std::filesystem::path> &objects,
+            const std::vector<Compiler::LinkRequirement> &link
+        );
 
     private:
         // **Mach-O only, and only under `-g`.** `ld` leaves the DWARF in the objects and writes only a

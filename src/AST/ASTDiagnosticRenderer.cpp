@@ -1,5 +1,8 @@
 #include "AST/ASTDiagnosticRenderer.h"
 
+#include "Compiler/ProgressReporter.h"
+#include "Compiler/TerminalStyle.h"
+
 #include <fmt/core.h>
 
 #include <algorithm>
@@ -16,18 +19,6 @@ namespace
     // function body is a real thing - an ownership refusal names the scope - and printing eighty lines to
     // say one is what makes a reader stop reading diagnostics
     constexpr uint32_t MAX_SPAN_LINES = 8;
-
-    constexpr const char *SGR_RESET = "\x1b[0m";
-    constexpr const char *SGR_DIM = "\x1b[2m";
-    constexpr const char *SGR_BOLD = "\x1b[1m";
-    constexpr const char *SGR_ERROR_BADGE = "\x1b[1;41;97m";
-    constexpr const char *SGR_WARNING_BADGE = "\x1b[1;43;30m";
-    constexpr const char *SGR_INFO_BADGE = "\x1b[1;44;97m";
-    constexpr const char *SGR_ERROR = "\x1b[1;31m";
-    constexpr const char *SGR_WARNING = "\x1b[1;33m";
-    constexpr const char *SGR_INFO = "\x1b[1;34m";
-    constexpr const char *SGR_SECONDARY = "\x1b[1;36m";
-    constexpr const char *SGR_HELP = "\x1b[1;36m";
 
     std::string expand_tabs(const std::string &line)
     {
@@ -105,14 +96,14 @@ namespace
     {
         switch (severity) {
         case AST::IssueSeverity::Error:
-            return SeverityStyle { "error", SGR_ERROR, SGR_ERROR_BADGE };
+            return SeverityStyle { "error", Compiler::sgr::error, Compiler::sgr::error_badge };
         case AST::IssueSeverity::Warning:
-            return SeverityStyle { "warning", SGR_WARNING, SGR_WARNING_BADGE };
+            return SeverityStyle { "warning", Compiler::sgr::warning, Compiler::sgr::warning_badge };
         case AST::IssueSeverity::Info:
-            return SeverityStyle { "info", SGR_INFO, SGR_INFO_BADGE };
+            return SeverityStyle { "info", Compiler::sgr::info, Compiler::sgr::info_badge };
         }
 
-        return SeverityStyle { "error", SGR_ERROR, SGR_ERROR_BADGE };
+        return SeverityStyle { "error", Compiler::sgr::error, Compiler::sgr::error_badge };
     }
 
     // the shortest thing that still names the file. **The basename and not the path**, matching what
@@ -237,11 +228,7 @@ AST::DiagnosticRenderer::DiagnosticRenderer(
 
 std::string AST::DiagnosticRenderer::styled(const std::string &text, const char *sgr) const
 {
-    if (!_capabilities.color) {
-        return text;
-    }
-
-    return std::string(sgr) + text + SGR_RESET;
+    return Compiler::styled(text, sgr, _capabilities.color);
 }
 
 std::string AST::DiagnosticRenderer::badge(IssueSeverity severity) const
@@ -262,6 +249,8 @@ std::string AST::DiagnosticRenderer::badge(IssueSeverity severity) const
 
 void AST::DiagnosticRenderer::render(const Diagnostic &diagnostic) const
 {
+    Compiler::ProgressReporter::instance().suspend();
+
     if (is_machine_readable()) {
         render_json(diagnostic);
         return;
@@ -278,10 +267,10 @@ void AST::DiagnosticRenderer::render_header(const Diagnostic &diagnostic) const
 
     std::string line = badge(diagnostic.severity) + " ";
     if (diagnostic.code.has_value()) {
-        line += styled(*diagnostic.code, SGR_BOLD) + "  ";
+        line += styled(*diagnostic.code, Compiler::sgr::bold) + "  ";
     }
 
-    line += styled(location, SGR_DIM);
+    line += styled(location, Compiler::sgr::dim);
 
     _out << line << "\n\n";
 }
@@ -295,7 +284,7 @@ void AST::DiagnosticRenderer::render_frame(
 {
     const File *file = span.file;
     if (file == nullptr || !file->content.has_value()) {
-        _out << "  " << styled("<source unavailable>", SGR_DIM) << "\n\n";
+        _out << "  " << styled("<source unavailable>", Compiler::sgr::dim) << "\n\n";
         return;
     }
 
@@ -306,7 +295,7 @@ void AST::DiagnosticRenderer::render_frame(
     const unsigned int gutter_width = digit_count(last_context);
     const std::string blank_gutter = std::string(gutter_width, ' ');
 
-    const char *mark_sgr = is_primary ? style_of(severity).sgr : SGR_SECONDARY;
+    const char *mark_sgr = is_primary ? style_of(severity).sgr : Compiler::sgr::secondary;
     const char *mark_glyph = is_primary ? _theme.primary_mark : _theme.secondary_mark;
 
     // folded when the span is taller than a reader will follow. The elision row says how many lines went,
@@ -316,8 +305,8 @@ void AST::DiagnosticRenderer::render_frame(
     for (uint32_t line = first_context; line <= last_context; line++) {
         if (folds && line > span.start.line + 2 && line < span.end.line - 1) {
             if (line == span.start.line + 3) {
-                _out << "  " << blank_gutter << " " << styled(_theme.underline_rule, SGR_DIM) << " "
-                     << styled(fmt::format("... {} lines", span.end.line - span.start.line - 4), SGR_DIM)
+                _out << "  " << blank_gutter << " " << styled(_theme.underline_rule, Compiler::sgr::dim) << " "
+                     << styled(fmt::format("... {} lines", span.end.line - span.start.line - 4), Compiler::sgr::dim)
                      << "\n";
             }
             continue;
@@ -328,8 +317,8 @@ void AST::DiagnosticRenderer::render_frame(
 
         const bool in_span = line >= span.start.line && line <= span.end.line;
 
-        _out << "  " << styled(fmt::format("{:>{}}", line, gutter_width), SGR_DIM) << " "
-             << styled(_theme.gutter, SGR_DIM) << " " << expanded << "\n";
+        _out << "  " << styled(fmt::format("{:>{}}", line, gutter_width), Compiler::sgr::dim) << " "
+             << styled(_theme.gutter, Compiler::sgr::dim) << " " << expanded << "\n";
 
         if (!in_span) {
             continue;
@@ -352,7 +341,7 @@ void AST::DiagnosticRenderer::render_frame(
             underline += " " + styled(label, mark_sgr);
         }
 
-        _out << "  " << blank_gutter << " " << styled(_theme.underline_rule, SGR_DIM) << " "
+        _out << "  " << blank_gutter << " " << styled(_theme.underline_rule, Compiler::sgr::dim) << " "
              << underline << "\n";
     }
 
@@ -374,7 +363,7 @@ void AST::DiagnosticRenderer::render_text(const Diagnostic &diagnostic) const
 
     for (const auto &note : diagnostic.notes) {
         const char *word = note.kind == NoteKind::t_help ? "help" : "note";
-        _out << "  " << styled(word, SGR_HELP) << ": " << note.message << "\n";
+        _out << "  " << styled(word, Compiler::sgr::help) << ": " << note.message << "\n";
     }
 
     if (!diagnostic.notes.empty()) {
@@ -439,6 +428,8 @@ void AST::DiagnosticRenderer::render_json(const Diagnostic &diagnostic) const
 
 void AST::DiagnosticRenderer::render_summary(size_t errors, size_t warnings, bool compiled) const
 {
+    Compiler::ProgressReporter::instance().suspend();
+
     if (is_machine_readable()) {
         _out << fmt::format(
             "{{\"type\":\"summary\",\"errors\":{},\"warnings\":{},\"compiled\":{}}}\n",
@@ -469,7 +460,7 @@ void AST::DiagnosticRenderer::render_summary(size_t errors, size_t warnings, boo
     std::string line = counts;
     if (_theme.chips) {
         const char *mark = errors > 0 ? _theme.failure_mark : _theme.warning_mark;
-        const char *sgr = errors > 0 ? SGR_ERROR : SGR_WARNING;
+        const char *sgr = errors > 0 ? Compiler::sgr::error : Compiler::sgr::warning;
 
         line = "  " + styled(mark, sgr) + "  " + counts;
     }
@@ -487,6 +478,8 @@ void AST::DiagnosticRenderer::render_untyped(
     IssueSeverity severity
 ) const
 {
+    Compiler::ProgressReporter::instance().suspend();
+
     if (is_machine_readable()) {
         Diagnostic diagnostic;
         diagnostic.severity = severity;
@@ -495,7 +488,7 @@ void AST::DiagnosticRenderer::render_untyped(
         return;
     }
 
-    _out << badge(severity) << " " << styled(title, SGR_BOLD) << "\n\n";
+    _out << badge(severity) << " " << styled(title, Compiler::sgr::bold) << "\n\n";
 
     // the message may already be several lines - a manifest reader hands over one line per refusal - and
     // each of them belongs at the same indent as a diagnostic's message.

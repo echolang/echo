@@ -57,7 +57,7 @@
  * whose cursor is `map_iterator<K, const V>` - the same cursor, with the one property that names `V`
  * substituted to `ptr<const V>`. `$k` still arrives by value and is unaffected.
  */
-#[core: "map"]
+#[core: map]
 struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     ptr<uint64> $hashes;

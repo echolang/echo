@@ -37,7 +37,7 @@ namespace AST
         FunctionRegistry functions = FunctionRegistry();
 
         // the handful of stdlib types the compiler itself names - `string` and `string::view` - bound by
-        // `#[core: "..."]`. bundle-wide and here beside `namespaces` and `type_registry` because that is
+        // `#[core: ...]`. bundle-wide and here beside `namespaces` and `type_registry` because that is
         // what every parser already has at hand through Payload::collector, and because the binding must
         // outlive the module that declared it: a literal in *any* file resolves against it
         CoreTypes core_types = CoreTypes();

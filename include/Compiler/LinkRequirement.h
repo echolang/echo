@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTAttributeReader.h"
 #include "Compiler/TargetFacts.h"
 
 #include <fmt/core.h>
@@ -66,7 +67,12 @@ namespace Compiler
     // TargetFacts' axis vocabularies already live by
     std::string link_scheme_list();
 
-    // **the `<scheme>:<value>` grammar itself, once**, for the two attributes that share it.
+    // **the `<scheme>:<value>` grammar itself, once** - now the *command line's* spelling, and only its.
+    //
+    // A manifest writes the scheme as a tag in the grammar (`#[link: framework "OpenGL"]`), read by
+    // AST::AttributeReader::tag out of this same table. Two spellings, because the two media are not
+    // alike: an argv word cannot carry a quoted payload without a shell quoting it first, and an Echo
+    // file has a lexer. One vocabulary between them, which is what the shared table is for.
     //
     // split on the *first* colon so a value may contain one - `search:C:\libs` is a search path and not a
     // scheme called `search:C` - then the table, then the empty-value guard. `noun` is what the three
@@ -129,10 +135,30 @@ namespace Compiler
         return list;
     }
 
-    // `<scheme>:<value>`, the way a manifest wrote it. **the one thing a message may quote back**: a
-    // diagnostic naming the bare value sends the reader looking for `glfw` in a file that says `lib:glfw`,
-    // and a path scheme's settled absolute value is not in the manifest at all
+    // the way it was written. **the one thing a message may quote back**: a diagnostic naming the bare
+    // value sends the reader looking for `glfw` in a file that says `lib "glfw"`, and a path scheme's
+    // settled absolute value is not in the manifest at all.
+    //
+    // **which of the two spellings it renders is `declared_by`**, which already records the medium: a
+    // manifest's requirement is credited to its module and reads `lib "glfw"`, a command line's is
+    // credited to nobody and reads `lib:glfw`. Quoting one in the other's syntax is a message that
+    // sends its reader looking for a line nothing contains
     std::string link_requirement_spelling(const LinkRequirement &requirement);
+
+    // one attribute's worth of requirements - `lib "GL"`, `framework "OpenGL"`, `lib ["GL", "GLU"]`, or
+    // an untagged list holding several of those. **appends**, because one attribute may name more than
+    // one, and refuses through `reader` so the manifest and a source file report it the same way.
+    //
+    // reads the same scheme table `parse_link_requirement` does, and settles a path exactly as it does:
+    // what differs between the two is where the scheme and the value were read from, and nothing after
+    bool parse_link_attribute(
+        const AST::AttributeValue &value,
+        const std::filesystem::path &base,
+        const TargetFacts &facts,
+        const std::string &declared_by,
+        AST::AttributeReader &reader,
+        std::vector<LinkRequirement> &out
+    );
 
     // `<scheme>:<value>` - one requirement, or false with a located-shaped sentence in `out_error`.
     //

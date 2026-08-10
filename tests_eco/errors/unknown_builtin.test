@@ -1,20 +1,20 @@
 expect: fail
 
 --- OUT --->
-[error] unknown_builtin.eco:3:3
+[error] unknown_builtin.eco:3:12
 
   Unknown compiler builtin 'sizeof_but_misspelled'.
 
   2 | // than failing later as an unresolved symbol
-  3 | #[builtin: "sizeof_but_misspelled"]
-    :   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  3 | #[builtin: sizeof_but_misspelled]
+    :            ^^^^^^^^^^^^^^^^^^^^^
   4 | function bogus<T>() : usize;
 
 [error] unknown_builtin.eco:4:10
 
   'bogus<T>()' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
 
-  3 | #[builtin: "sizeof_but_misspelled"]
+  3 | #[builtin: sizeof_but_misspelled]
   4 | function bogus<T>() : usize;
     :          ^^^^^
   5 | 

@@ -45,5 +45,5 @@
  * A value erased to an interface prints `<interface>`: the concrete type is a word in the heap
  * block at runtime, and there is no name stored next to it to print.
  */
-#[builtin: "dprint"]
+#[builtin: dprint]
 function dprint<T>(T& $value) : void;

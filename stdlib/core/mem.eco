@@ -30,13 +30,13 @@ namespace mem;
  *
  * Nothing outside this file should call them. `usize` stands in for C's `size_t`.
  */
-#[builtin: "alloc_bytes"]
+#[builtin: alloc_bytes]
 function alloc_bytes(usize $bytes) : ptr<uint8>;
 
-#[builtin: "realloc_bytes"]
+#[builtin: realloc_bytes]
 function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 
-#[builtin: "free_bytes"]
+#[builtin: free_bytes]
 function free_bytes(ptr<uint8> $p) : void;
 
 /**
@@ -63,13 +63,13 @@ extern {
  * This is the allocation stride, so it includes any tail padding - `size_of<T>() * $n` is exactly
  * the room `$n` elements of `T` need, and `$p:$[n]` lands on element `n`.
  */
-#[builtin: "size_of"]
+#[builtin: size_of]
 function size_of<T>() : usize;
 
 /**
  * The alignment `T` requires, in bytes, as a compile-time constant.
  */
-#[builtin: "align_of"]
+#[builtin: align_of]
 function align_of<T>() : usize;
 
 /**
@@ -87,7 +87,7 @@ function align_of<T>() : usize;
  * Write the element-wise arm anyway. This says a bulk copy is *allowed*, never that a per-element one
  * would be wrong.
  */
-#[builtin: "is_trivially_copyable"]
+#[builtin: is_trivially_copyable]
 function is_trivially_copyable<T>() : bool;
 
 /**
@@ -102,7 +102,7 @@ function is_trivially_copyable<T>() : bool;
  * block, and there is nothing to do when this is false. Guarding the loop with it is what keeps an
  * `array<int32>`'s destructor free rather than a walk over `count()` elements that each do nothing.
  */
-#[builtin: "needs_destruction"]
+#[builtin: needs_destruction]
 function needs_destruction<T>() : bool;
 
 /**
@@ -127,7 +127,7 @@ function needs_destruction<T>() : bool;
  * `pop()` could only *copy* the element out, leaving the slot holding a second owner that nothing
  * would ever release.
  */
-#[builtin: "take"]
+#[builtin: take]
 function take<T>(T& $place) : T;
 
 /**
@@ -153,7 +153,7 @@ function take<T>(T& $place) : T;
  * `$value` arrives **by value**, so the caller's copy has already happened: this hands that owner
  * over rather than duplicating it, exactly as `take`'s result is handed to its caller.
  */
-#[builtin: "init"]
+#[builtin: init]
 function init<T>(T& $place, T $value) : void;
 
 /**
@@ -274,7 +274,7 @@ function bit_cast<To, From>(From $value) : To
  * they have to be copied before they are written, exactly as shared bytes do. `string` is written
  * against precisely that - see `stdlib/core/string.eco`.
  */
-#[builtin: "ref_count"]
+#[builtin: ref_count]
 function ref_count<T>(T& $handle) : usize;
 
 /**
@@ -294,7 +294,7 @@ function ref_count<T>(T& $handle) : usize;
  * leaked one, so this is how the corpus pins a reference cycle actually being collected rather
  * than merely appearing to be - see `tests_eco/classes/weak_cycle_no_leak.eco`.
  */
-#[builtin: "weak_count"]
+#[builtin: weak_count]
 function weak_count<T>(T& $handle) : usize;
 
 /**
@@ -329,5 +329,5 @@ function weak_count<T>(T& $handle) : usize;
  * assert(mem::live_allocations() == 0);
  * ```
  */
-#[builtin: "live_allocations"]
+#[builtin: live_allocations]
 function live_allocations() : usize;

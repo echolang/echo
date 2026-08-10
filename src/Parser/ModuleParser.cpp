@@ -1,6 +1,7 @@
 #include "Parser/ModuleParser.h"
 
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/ProgressReporter.h"
 
 #include "eco.h"
 #include "Parser/ConditionalFilter.h"
@@ -94,6 +95,12 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
     {
     Compiler::ScopedPhase phase("lex");
     for (auto &file : module.files()) {
+        // **the one loop that visits each file exactly once**, which is why "which file are we on" is
+        // answerable here and nowhere else in this function: the three passes below each walk the whole
+        // list again, so a tick in one of them would describe a file already read. It reaches a
+        // process-wide reporter from the parser exactly as the ScopedPhase above it does
+        Compiler::ProgressReporter::instance().tick(file.get_path().filename().string());
+
 #if ECO_DONT_CATCH_EXCEPTIONS
         auto tfile = make_tokenized_file(module, file);
         file_payloads.push_back(std::make_tuple(&file, tfile));

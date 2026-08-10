@@ -26,6 +26,7 @@ namespace
 using EchoTests::ProcessResult;
 using EchoTests::quoted;
 using EchoTests::run_capturing;
+using EchoTests::line_starting_with;
 using EchoTests::write_file;
 
 // the scratch project, under this suite's own directory
@@ -37,24 +38,6 @@ public:
     {};
 };
 
-// the `--explain-cache` line for one module: "<name>  <key>  <hit|miss>[  (why)]"
-std::string cache_line(const std::string &output, const std::string &module_name)
-{
-    std::istringstream stream(output);
-    std::string line;
-
-    while (std::getline(stream, line)) {
-        std::istringstream fields(line);
-        std::string first;
-        fields >> first;
-
-        if (first == module_name) {
-            return line;
-        }
-    }
-
-    return "";
-}
 
 bool files_are_identical(const fs::path &a, const fs::path &b)
 {
@@ -133,8 +116,8 @@ TEST_CASE("a project directory needs no arguments", "[cache][project]")
         const ProcessResult result = project.echoc("run --explain-cache", project.root());
 
         REQUIRE(result.exit_code == 0);
-        REQUIRE_FALSE(cache_line(result.output, "greeter").empty());
-        REQUIRE(cache_line(result.output, "main").empty());
+        REQUIRE_FALSE(line_starting_with(result.output, "greeter").empty());
+        REQUIRE(line_starting_with(result.output, "main").empty());
     }
 }
 
@@ -159,16 +142,16 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         "#[sources: \"*.eco\"]\n");
     write_file(project.root() / "app" / "app.eco", "echo cachelib::twice(21);\n");
 
-    const std::string args = "run --explain-cache --cache-dir " + quoted(project.cache_dir());
+    const std::string args = "run --explain-cache --build-dir " + quoted(project.build_dir());
     const fs::path app_dir = project.root() / "app";
 
     const ProcessResult first = project.echoc(args, app_dir);
     REQUIRE(first.exit_code == 0);
     REQUIRE(first.output.find("42") != std::string::npos);
 
-    const std::string lib_before = cache_line(first.output, "cachelib");
-    const std::string app_before = cache_line(first.output, "app");
-    const std::string stdlib_before = cache_line(first.output, "stdlib");
+    const std::string lib_before = line_starting_with(first.output, "cachelib");
+    const std::string app_before = line_starting_with(first.output, "app");
+    const std::string stdlib_before = line_starting_with(first.output, "stdlib");
 
     REQUIRE_FALSE(lib_before.empty());
     REQUIRE_FALSE(app_before.empty());
@@ -177,9 +160,9 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
     {
         const ProcessResult second = project.echoc(args, app_dir);
 
-        REQUIRE(cache_line(second.output, "cachelib") == lib_before);
-        REQUIRE(cache_line(second.output, "app") == app_before);
-        REQUIRE(cache_line(second.output, "stdlib") == stdlib_before);
+        REQUIRE(line_starting_with(second.output, "cachelib") == lib_before);
+        REQUIRE(line_starting_with(second.output, "app") == app_before);
+        REQUIRE(line_starting_with(second.output, "stdlib") == stdlib_before);
     }
 
     SECTION("editing the library moves its key and its dependent's, but not the stdlib's")
@@ -194,13 +177,13 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
 
         const ProcessResult after = project.echoc(args, app_dir);
 
-        REQUIRE(cache_line(after.output, "cachelib") != lib_before);
+        REQUIRE(line_starting_with(after.output, "cachelib") != lib_before);
 
         // transitively, without a second graph walk: a dependency contributes its whole key
-        REQUIRE(cache_line(after.output, "app") != app_before);
+        REQUIRE(line_starting_with(after.output, "app") != app_before);
 
         // and nothing below it in the order is disturbed
-        REQUIRE(cache_line(after.output, "stdlib") == stdlib_before);
+        REQUIRE(line_starting_with(after.output, "stdlib") == stdlib_before);
     }
 
     SECTION("editing the application does not move the library's key")
@@ -209,8 +192,8 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
 
         const ProcessResult after = project.echoc(args, app_dir);
 
-        REQUIRE(cache_line(after.output, "cachelib") == lib_before);
-        REQUIRE(cache_line(after.output, "app") != app_before);
+        REQUIRE(line_starting_with(after.output, "cachelib") == lib_before);
+        REQUIRE(line_starting_with(after.output, "app") != app_before);
     }
 
     SECTION("debug and release are different builds of the same source")
@@ -218,8 +201,9 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         const ProcessResult debug = project.echoc(args + " --debug", app_dir);
         const ProcessResult release = project.echoc(args + " --release", app_dir);
 
-        REQUIRE_FALSE(cache_line(debug.output, "cachelib").empty());
-        REQUIRE(cache_line(debug.output, "cachelib") != cache_line(release.output, "cachelib"));
+        REQUIRE_FALSE(line_starting_with(debug.output, "cachelib").empty());
+        REQUIRE(line_starting_with(debug.output, "cachelib")
+            != line_starting_with(release.output, "cachelib"));
     }
 
     SECTION("two subtargets are different builds of the same source")
@@ -234,21 +218,23 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         const ProcessResult generic = project.echoc(args + " --target-cpu=generic", app_dir);
         const ProcessResult native = project.echoc(args + " --target-cpu=native", app_dir);
 
-        REQUIRE_FALSE(cache_line(generic.output, "cachelib").empty());
-        REQUIRE(cache_line(generic.output, "cachelib") != cache_line(native.output, "cachelib"));
+        REQUIRE_FALSE(line_starting_with(generic.output, "cachelib").empty());
+        REQUIRE(line_starting_with(generic.output, "cachelib")
+            != line_starting_with(native.output, "cachelib"));
 
         // and the feature string is a second input, not a spelling of the first
         const ProcessResult featured =
             project.echoc(args + " --target-cpu=generic --target-features=+crc", app_dir);
 
-        REQUIRE(cache_line(featured.output, "cachelib") != cache_line(generic.output, "cachelib"));
+        REQUIRE(line_starting_with(featured.output, "cachelib")
+            != line_starting_with(generic.output, "cachelib"));
     }
 
     SECTION("a miss names the file that changed rather than reporting a digest")
     {
         // the record is written by a build, so there is nothing to compare against on the very first run -
         // which is itself the correct answer, and why an unexplainable miss prints no reason at all
-        const std::string line = cache_line(first.output, "cachelib");
+        const std::string line = line_starting_with(first.output, "cachelib");
         REQUIRE(line.find("miss") != std::string::npos);
     }
 }
@@ -317,7 +303,7 @@ TEST_CASE("a library's object does not depend on which application consumes it",
 
     const auto build = [&](const std::string &app, const fs::path &cache) {
         return project.echoc(
-            "build -o out -m " + quoted(manifest) + " --cache-dir " + quoted(cache) + " app.eco",
+            "build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache) + " app.eco",
             project.root() / app);
     };
 
@@ -337,12 +323,12 @@ TEST_CASE("a library's object does not depend on which application consumes it",
     REQUIRE(ran_b.output.find("3") != std::string::npos);
 
     // the library's key must be identical, because none of its own inputs differ between the two builds
-    const std::string key_a = cache_line(
-        project.echoc("build -o out -m " + quoted(manifest) + " --cache-dir " + quoted(cache_a)
+    const std::string key_a = line_starting_with(
+        project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_a)
             + " --explain-cache app.eco", project.root() / "app_a").output, "shared");
 
-    const std::string key_b = cache_line(
-        project.echoc("build -o out -m " + quoted(manifest) + " --cache-dir " + quoted(cache_b)
+    const std::string key_b = line_starting_with(
+        project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_b)
             + " --explain-cache app.eco", project.root() / "app_b").output, "shared");
 
     REQUIRE_FALSE(key_a.empty());
@@ -384,17 +370,17 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
     // is read as another source file, which argparse then reports as a missing one
     const std::string flags =
         "build -o out -m " + quoted(project.root() / "lib")
-        + " --cache-dir " + quoted(project.cache_dir()) + " --explain-cache";
+        + " --build-dir " + quoted(project.build_dir()) + " --explain-cache";
 
     const std::string args = flags + " app.eco";
 
     const ProcessResult cold = project.echoc(args, app_dir);
     REQUIRE(cold.exit_code == 0);
-    REQUIRE(cache_line(cold.output, "storelib").find("miss") != std::string::npos);
+    REQUIRE(line_starting_with(cold.output, "storelib").find("miss") != std::string::npos);
 
     // the artifact and its record, both under the module's own directory in the store
     fs::path stored_object;
-    for (const auto &entry : fs::recursive_directory_iterator(project.cache_dir())) {
+    for (const auto &entry : fs::recursive_directory_iterator(project.build_dir())) {
         if (entry.path().extension() == ".o" && entry.path().filename().string().rfind("storelib", 0) == 0) {
             stored_object = entry.path();
         }
@@ -407,7 +393,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         const ProcessResult warm = project.echoc(args, app_dir);
 
         REQUIRE(warm.exit_code == 0);
-        REQUIRE(cache_line(warm.output, "storelib").find("hit") != std::string::npos);
+        REQUIRE(line_starting_with(warm.output, "storelib").find("hit") != std::string::npos);
 
         // and the program still works, which is the only thing a reused object is for
         const ProcessResult ran = run_capturing(quoted(app_dir / "out") + " 2>&1");
@@ -426,12 +412,12 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         write_file(inner.root() / "app.eco", "echo 1;\n");
 
         const std::string inner_args =
-            "build -o out --cache-dir " + quoted(inner.cache_dir()) + " --explain-cache";
+            "build -o out --build-dir " + quoted(inner.build_dir()) + " --explain-cache";
 
         inner.echoc(inner_args, inner.root());
         const ProcessResult second = inner.echoc(inner_args, inner.root());
 
-        const std::string line = cache_line(second.output, "selfprog");
+        const std::string line = line_starting_with(second.output, "selfprog");
         REQUIRE(line.find("miss") != std::string::npos);
         REQUIRE(line.find("never cached") != std::string::npos);
     }
@@ -450,7 +436,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
         REQUIRE(after.exit_code == 0);
 
-        const std::string line = cache_line(after.output, "storelib");
+        const std::string line = line_starting_with(after.output, "storelib");
         REQUIRE(line.find("miss") != std::string::npos);
         REQUIRE(line.find("lib.eco") != std::string::npos);
 
@@ -466,7 +452,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
         REQUIRE(optimized.exit_code == 0);
         REQUIRE(optimized.output.find("bypassed") != std::string::npos);
-        REQUIRE(cache_line(optimized.output, "storelib").find("miss") != std::string::npos);
+        REQUIRE(line_starting_with(optimized.output, "storelib").find("miss") != std::string::npos);
     }
 
     SECTION("an unwritable store is not an error")
@@ -482,7 +468,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         fs::permissions(inner.root() / "lib", fs::perms::owner_read | fs::perms::owner_exec,
             fs::perm_options::replace, ec);
 
-        // no --cache-dir, so the default store is `.echo` inside that unwritable directory
+        // no --build-dir, so the default store is `ecobuild` inside that unwritable directory
         const ProcessResult result = inner.echoc(
             "build -o out -m " + quoted(inner.root() / "lib") + " --explain-cache app.eco",
             inner.root() / "app");
@@ -492,7 +478,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
         REQUIRE(result.exit_code == 0);
 
-        const std::string line = cache_line(result.output, "rolib");
+        const std::string line = line_starting_with(result.output, "rolib");
         REQUIRE(line.find("miss") != std::string::npos);
         REQUIRE(line.find("not writable") != std::string::npos);
 
@@ -514,11 +500,11 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
             "build -o out --explain-cache app.eco", inner.root());
 
         REQUIRE(result.exit_code == 0);
-        REQUIRE_FALSE(cache_line(result.output, "stdlib").empty());
+        REQUIRE_FALSE(line_starting_with(result.output, "stdlib").empty());
 
         // STDLIB_SOURCE_DIR is the compiler's own source tree, and nothing may appear in it
         std::error_code ec;
-        REQUIRE_FALSE(fs::exists(fs::path(STDLIB_SOURCE_DIR) / ".echo", ec));
+        REQUIRE_FALSE(fs::exists(fs::path(STDLIB_SOURCE_DIR) / "ecobuild", ec));
     }
 
     SECTION("a deleted artifact is rebuilt rather than fatal")
@@ -529,7 +515,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         const ProcessResult after = project.echoc(args, app_dir);
 
         REQUIRE(after.exit_code == 0);
-        REQUIRE(cache_line(after.output, "storelib").find("miss") != std::string::npos);
+        REQUIRE(line_starting_with(after.output, "storelib").find("miss") != std::string::npos);
 
         const ProcessResult ran = run_capturing(quoted(app_dir / "out") + " 2>&1");
         REQUIRE(ran.output.find("42") != std::string::npos);

@@ -13,7 +13,7 @@ namespace AST
 {
     class TypeDeclNode;
 
-    // the stdlib types the *compiler itself* has to be able to name, bound by `#[core: "..."]` on the
+    // the stdlib types the *compiler itself* has to be able to name, bound by `#[core: ...]` on the
     // declaration.
     //
     // the compiler deliberately does not hardcode the name `string`, for the reason a builtin's surface
@@ -91,7 +91,7 @@ namespace AST
     public:
         // binds a kind to the declaration that carried the attribute. the parse passes reach the same
         // declaration more than once, so re-binding the identical node is normal and silent; binding a
-        // *different* one is a second `#[core: "string"]` in the program, which the caller reports
+        // *different* one is a second `#[core: string]` in the program, which the caller reports
         void bind(CoreTypeKind kind, TypeDeclNode *decl);
 
         TypeDeclNode *declaration(CoreTypeKind kind) const;

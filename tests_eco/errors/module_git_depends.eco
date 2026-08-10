@@ -1,0 +1,2 @@
+// the manifest named by this case declares a git dependency, which parses and is then refused
+echo 1;

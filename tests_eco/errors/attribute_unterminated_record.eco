@@ -1,0 +1,4 @@
+// a record that never closes. the recovery steps over the balanced `[ ... ]` the attribute is, rather
+// than hunting for a statement terminator, so exactly one message comes of it
+#[cc: define { A: 1]
+echo 1;

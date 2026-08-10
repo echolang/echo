@@ -1,0 +1,9 @@
+// `#[core:]` names one of a closed set, so it is spelled as a bare name - the same rule
+// `#[if: os == darwin]` follows. a string is refused, with the noun the reader wanted
+#[core: "array"]
+struct Thing
+{
+    int32 $a;
+}
+
+echo 1;

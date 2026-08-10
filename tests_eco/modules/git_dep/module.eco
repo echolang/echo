@@ -1,0 +1,12 @@
+/*
+ * The shape a git dependency takes, and the refusal that says it is not built yet. Parsed and validated
+ * rather than rejected as an unknown word: "not resolved yet" is a different sentence from "not a kind
+ * of dependency", and only one of the two is true.
+ */
+
+#[module: "gitdep"]
+#[version: "0.1.0"]
+
+#[depends: git { url: "https://github.com/example/thing", rev: "v1.2.0" }]
+
+#[sources: "*.eco"]

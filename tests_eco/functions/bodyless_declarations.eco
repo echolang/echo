@@ -9,7 +9,7 @@ extern {
 function magnitude(float64 $x) : float64;
 
 // the compiler answers this one at each call site, so it has no symbol at all
-#[builtin: "size_of"]
+#[builtin: size_of]
 function byte_size<T>() : usize;
 
 // and the implementors hold the bodies of an interface's requirements

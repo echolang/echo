@@ -142,7 +142,7 @@ echo $total;
 )");
 
     const ProcessResult result = project.echoc(
-        "build -g -ta -m " + quoted(project.root() / "lib") + " --cache-dir "
+        "build -g -ta -m " + quoted(project.root() / "lib") + " --build-dir "
             + quoted(project.root() / "cache") + " -o app main.eco",
         project.root() / "app");
 
@@ -177,7 +177,7 @@ function answer() : int32 { return 42; }
     write_file(project.root() / "app" / "main.eco", "echo answer();\n");
 
     const std::string common = " -ta --explain-cache -m " + quoted(project.root() / "lib")
-        + " --cache-dir " + quoted(project.root() / "cache") + " -o app main.eco";
+        + " --build-dir " + quoted(project.root() / "cache") + " -o app main.eco";
 
     const ProcessResult without_g = project.echoc("build" + common, project.root() / "app");
     const ProcessResult with_g = project.echoc("build -g" + common, project.root() / "app");

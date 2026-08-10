@@ -857,11 +857,12 @@ bool LLVMCompiler::emit_objects(
 
 bool LLVMCompiler::link_executable(
     const std::string &executable_name,
-    const std::vector<std::filesystem::path> &objects
+    const std::vector<std::filesystem::path> &objects,
+    const std::vector<Compiler::LinkRequirement> &link
 )
 {
     Compiler::ScopedPhase phase("link");
-    return _backend.link_executable(executable_name, objects);
+    return _backend.link_executable(executable_name, objects, link);
 }
 
 void LLVMCompiler::optimize() { _backend.optimize(); }
@@ -872,4 +873,11 @@ int LLVMCompiler::run_code(const std::vector<std::string> &arguments, const char
     return _backend.run_code(arguments, environment);
 }
 const std::string &LLVMCompiler::prune_report() const { return _backend.prune_report(); }
-bool LLVMCompiler::make_exec(std::string executable_name) { return _backend.make_exec(executable_name); }
+bool LLVMCompiler::make_exec(
+    const std::string &executable_name,
+    const std::filesystem::path &object_path,
+    const std::vector<Compiler::LinkRequirement> &link
+)
+{
+    return _backend.make_exec(executable_name, object_path, link);
+}

@@ -7,7 +7,7 @@
 
 #include "subprocess.h"
 
-// what a `#[cc: "..."]` value means, and what the C object cache is a function of.
+// what a `#[cc: ...]` value means, and what the C object cache is a function of.
 //
 // the interesting half is the last one. A C translation unit's inputs are not its source file: they are its
 // source file and every header it reached, and nothing in a manifest names those. clang's own depfile is
@@ -84,7 +84,7 @@ Compiler::CBuildResult built(
     std::string error;
 
     REQUIRE(Compiler::build_c_sources(
-        spec, options, project.cache_dir(), project.root() / "scratch", explain, result, error));
+        spec, options, project.build_dir(), project.root() / "scratch", explain, result, error));
     REQUIRE(error.empty());
 
     return result;
@@ -260,7 +260,7 @@ TEST_CASE("a module with no C sources builds nothing", "[cbuild]")
 
     REQUIRE(spec.empty());
     REQUIRE(Compiler::build_c_sources(
-        spec, options, project.cache_dir(), project.root() / "scratch", explain, result, error));
+        spec, options, project.build_dir(), project.root() / "scratch", explain, result, error));
 
     REQUIRE(result.objects.empty());
     REQUIRE(explain.empty());

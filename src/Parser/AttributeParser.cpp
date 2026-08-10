@@ -1,45 +1,34 @@
 #include "Parser/AttributeParser.h"
 
-#include "Parser/ExprParser.h"
+#include "Parser/AttributeValueParser.h"
 
 #include "AST/ASTAttributes.h"
-#include "AST/ExprNode.h"
-#include "AST/LiteralValueNode.h"
 
 #include <fmt/core.h>
 
-std::optional<std::string> Parser::attribute_string_value(
+void Parser::report_attribute_refusals(Parser::Payload &payload, const AST::AttributeReader &reader)
+{
+    for (const AST::AttributeRefusal &refusal : reader.refusals()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(refusal.span.slice()), refusal.message);
+    }
+}
+
+const AST::AttributeValue *Parser::attribute_value_of(
     Parser::Payload &payload,
     AST::AttributeNode *attribute,
     const std::string &attribute_name
 )
 {
-    if (attribute->attribute_exprs.size() != 1) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(attribute->attribute_tokens),
-            fmt::format("The '{}' attribute takes exactly one value.", attribute_name));
-        return std::nullopt;
+    if (attribute->value.has_value()) {
+        return &attribute->value.value();
     }
 
-    // AST::literal_string_value, not a hand-rolled node-type test: it is the one answer to "what text
-    // does this expression spell", shared with the abort message the type checker validates and the one
-    // ExprCodegen folds - so an attribute can never read a literal differently from the rest of the
-    // compiler
-    const AST::NodeReference &written = attribute->attribute_exprs[0];
+    payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.context.code_ref(attribute->attribute_tokens),
+        fmt::format("The '{}' attribute needs a value - write '#[{}: ...]'.", attribute_name, attribute_name));
 
-    std::optional<std::string> value;
-    if (written.has() && written.is_expression_node()) {
-        value = AST::literal_string_value(written.unsafe_ptr<AST::ExprNode>());
-    }
-
-    if (!value.has_value()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(attribute->attribute_tokens),
-            fmt::format("The '{}' attribute value must be a string.", attribute_name));
-        return std::nullopt;
-    }
-
-    return value;
+    return nullptr;
 }
 
 AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
@@ -58,6 +47,17 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
         payload.cursor.try_skip_to_next_statement();
         return nullptr;
     }
+
+    // kept so a refused value can be stepped over as the balanced group it is, rather than recovered
+    // from by hunting for the next statement terminator - an attribute is not a statement and the `]`
+    // that ends it is right there
+    const Parser::Cursor::Snapshot bracket_start = payload.cursor.snapshot();
+
+    const auto step_over_the_bracket = [&]() -> AST::AttributeNode * {
+        payload.cursor.restore(bracket_start);
+        payload.cursor.skip_balanced_group(Token::Type::t_open_bracket, Token::Type::t_close_bracket);
+        return nullptr;
+    };
 
     payload.cursor.skip(); // skip the opening square bracket
 
@@ -86,7 +86,6 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
     auto att_token_start = payload.cursor.snapshot();
     payload.cursor.skip(); // skip the identifier
 
-
     // if the next token is a closing square bracket, then we have a simple attribute
     if (payload.cursor.is_type(Token::Type::t_close_bracket)) {
         payload.cursor.skip(); // skip the closing square bracket
@@ -100,40 +99,24 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
         return &node;
     }
 
-    // `#[name:$value]` now lexes its `:$` as the pointer-of operator - this is the one place in
-    // the grammar where a colon can be immediately followed by a `$`. a space disambiguates,
-    // and saying so beats letting the attribute fail as a mysteriously missing colon
-    if (payload.cursor.is_type(Token::Type::t_ptr_of)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(payload.cursor.current()),
-            "Write a space after ':' in an attribute value - ':$' is the pointer-of operator"
-        );
-        payload.cursor.try_skip_to_next_statement();
-        return nullptr;
+    if (!Parser::expect_attribute_colon(payload)) {
+        return step_over_the_bracket();
     }
 
-    // otherwise we expect a colon and a value
-    if (!payload.cursor.is_type(Token::Type::t_colon)) {
-        payload.collect_unexpected_token(Token::Type::t_colon);
-        payload.cursor.try_skip_to_next_statement();
-        return nullptr;
+    AST::AttributeValue value;
+
+    if (!Parser::parse_attribute_value(payload, value)) {
+        return step_over_the_bracket();
     }
-
-    payload.cursor.skip(); // skip the colon
-
-    // use the expression parser to parse the value
-    AST::NodeReferenceList exprs;
-    exprs.push_back(Parser::parse_expr_ref(payload));
 
     // build the attribute node
     auto &node = payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
-    node.attribute_exprs = std::move(exprs);
+    node.value = std::move(value);
 
     // next we expect a closing square bracket
     if (!payload.cursor.is_type(Token::Type::t_close_bracket)) {
         payload.collect_unexpected_token(Token::Type::t_close_bracket);
-        payload.cursor.try_skip_to_next_statement();
-        return nullptr;
+        return step_over_the_bracket();
     }
 
     payload.cursor.skip(); // skip the closing square bracket

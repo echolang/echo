@@ -222,7 +222,7 @@ namespace AST
         {};
         ~LiteralStringExprNode() {};
 
-        // the `#[core: "string"]` type, stamped at construction from the collector - `result_type()` is
+        // the `#[core: string]` type, stamped at construction from the collector - `result_type()` is
         // const and takes nothing, so it cannot go looking for it. carried per node rather than read
         // from a global, and it survives a clone because this node clones shallowly.
         //

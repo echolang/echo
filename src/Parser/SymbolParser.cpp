@@ -246,7 +246,7 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
             // pass's exactly, and until now this one skipped `#` as an unknown token. that made every
             // attribute a *body-pass* fact, which is fine for `#[builtin: ...]` (read off the same
             // declaration node either pass reconciles on) but not for anything the next pass has to
-            // already know: `#[core: "string"]` binds the type a string literal is, and a literal is
+            // already know: `#[core: string]` binds the type a string literal is, and a literal is
             // parsed in the body pass. binding it here is what makes that independent of file order,
             // since this pass completes over *every* file before the next one starts
             parse_attribute(payload);

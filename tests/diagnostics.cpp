@@ -216,6 +216,12 @@ TEST_CASE("an explicit colour or format choice overrides the environment", "[dia
     REQUIRE(!automatic.color);
     REQUIRE(!automatic.unicode);
 
+    // and no flag can make it say otherwise: `interactive` is what keeps a carriage return out of this
+    // suite's captured output, and out of the 596 e2e goldens it byte-compares
+    REQUIRE(!automatic.interactive);
+    REQUIRE(!TerminalCapabilities::resolve(ColorChoice::t_always, DiagnosticFormat::t_pretty).interactive);
+    REQUIRE(!TerminalCapabilities::plain().interactive);
+
     REQUIRE(TerminalCapabilities::resolve(ColorChoice::t_always, DiagnosticFormat::t_auto).color);
     REQUIRE(!TerminalCapabilities::resolve(ColorChoice::t_never, DiagnosticFormat::t_pretty).color);
     REQUIRE(TerminalCapabilities::resolve(ColorChoice::t_auto, DiagnosticFormat::t_pretty).unicode);

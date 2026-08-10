@@ -78,7 +78,7 @@ namespace
 
         REQUIRE((binary != nullptr) == is_build);
 
-        // without --cache-dir the default store applies, which is `.echo` beside each manifest - so
+        // without --build-dir the default applies, which is `ecobuild` beside each manifest - so
         // running the corpus would write artifacts into tests_eco/ and into stdlib/, and two cases
         // sharing a manifest would share a cache
         // an `args:` line reaches a JIT'd program through echoc's own `--` separator, which is what tells
@@ -93,7 +93,7 @@ namespace
             + "\"" ECHOC_BINARY "\" "
             + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
             + (dump.empty() ? "" : dump + " ")
-            + "--cache-dir " + quoted(scratch / "cache") + " "
+            + "--build-dir " + quoted(scratch / "cache") + " "
             + test.compiler_flags(root)
             + quoted(eco) + program_arguments + " 2>&1";
     }

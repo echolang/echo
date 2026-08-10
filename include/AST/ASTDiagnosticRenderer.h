@@ -50,7 +50,12 @@ namespace AST
     //
     // **everything goes to the stream given at construction, which is stderr.** stdout under `run`
     // belongs to the program being executed, and a compiler that writes into it is a compiler whose
-    // output cannot be piped
+    // output cannot be piped.
+    //
+    // it is not the only thing that writes there: Compiler::ProgressReporter draws a row on the same
+    // stream, so each of the three entry points below suspends it first. **That duty is this class's for
+    // the reason this class exists** - it is the one place every diagnostic in the compiler passes
+    // through, and a rule spread over ~203 reporting sites is a rule with a hole in it
     class DiagnosticRenderer
     {
     public:
@@ -95,8 +100,8 @@ namespace AST
         const Compiler::TerminalCapabilities _capabilities;
         const DiagnosticTheme _theme;
 
-        // wraps `text` in an SGR sequence, or hands it back untouched when colour is off. The one place
-        // an escape sequence is written, so "is colour allowed" is asked once rather than per call site
+        // Compiler::styled with this renderer's colour answer already supplied - a spelling over it and
+        // not a second one, so the ~15 call sites below read without repeating `_capabilities.color`
         std::string styled(const std::string &text, const char *sgr) const;
 
         // the severity chip a banner row opens with - `render_header`'s and `render_untyped`'s, which

@@ -107,10 +107,10 @@ delimiter; a `key: value` line *inside* a section is content.
 A `modules:` entry names a directory holding a `module.eco` manifest — see
 [modules/](modules/), where `lib_geom` depends on `lib_core` and only the former has to be named.
 
-Every case gets its **own scratch directory** under the build tree, holding its `-o` binary, the objects
-emitted beside it and its `--cache-dir`. It is created empty and wiped afterwards, pass or fail. Without the
-cache override the default store applies — `.echo` beside each manifest — so the corpus would write
-artifacts into `tests_eco/` and into `stdlib/`, and two cases sharing a manifest would share a cache. A case
+Every case gets its **own scratch directory** under the build tree, holding its `-o` binary and its
+`--build-dir`. It is created empty and wiped afterwards, pass or fail. Without the override the default
+applies — `ecobuild` beside each manifest — so the corpus would write artifacts into `tests_eco/` and into
+`stdlib/`, and two cases sharing a manifest would share a store. A case
 that passes only because an earlier one populated something is not a case, which is also why it is per case
 rather than per suite: Catch2 is free to shuffle them.
 
@@ -138,6 +138,11 @@ module directory that the manifest's `#[sources:]` does not actually name is ski
 
 An empty `OUT` is fine — a program that prints nothing is a legitimate case. An empty directive section
 is an error: it asserts nothing.
+
+`OUT` holds the compiler's **stdout and stderr merged** — the harness runs echoc through `popen` with
+`2>&1`. That is why a diagnostic golden is plain ASCII with no configuration: `--diagnostics=auto`
+resolves against a pipe. The progress checklist is off for the same reason and needs no `--silent` in
+`flags` — a golden holding a spinner frame would be a golden holding the terminal it was recorded on.
 
 ### Why the delimiter is matched exactly
 

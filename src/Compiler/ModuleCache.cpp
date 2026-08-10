@@ -16,18 +16,19 @@
 namespace
 {
 
-constexpr uint64_t k_fnv_offset_basis = 1469598103934665603ULL;
+// the basis is Compiler::k_fnv_offset_basis, in the header - the C object cache folds with it too
+using Compiler::k_fnv_offset_basis;
+
 constexpr uint64_t k_fnv_prime = 1099511628211ULL;
 
-std::string to_hex(uint64_t value)
+};
+
+std::string Compiler::to_hex(uint64_t value)
 {
     return fmt::format("{:016x}", value);
 }
 
-// the whole file, or nullopt. **the content, never the timestamp**: a manifest's file list is a glob, so a
-// checkout, a branch switch or a `touch` all move mtimes without changing what is compiled - and the reverse
-// matters more, since two files can share an mtime and differ
-std::optional<std::string> read_whole_file(const std::filesystem::path &path)
+std::optional<std::string> Compiler::read_whole_file(const std::filesystem::path &path)
 {
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) {
@@ -55,7 +56,33 @@ std::optional<std::string> read_whole_file(const std::filesystem::path &path)
     return bytes;
 }
 
-};
+bool Compiler::fold_target_environment(
+    const CompilerOptions &options,
+    uint64_t &digest,
+    std::string &out_error
+)
+{
+    // once, into a local: normalizing a triple parses and reallocates, and both folds below want the same
+    // string
+    const std::string triple = llvm::sys::getDefaultTargetTriple();
+
+    digest = fnv1a64(triple, digest);
+
+    // **and which CPU inside that triple**, which the triple does not say. Two builds differing only in
+    // `--target-cpu` produce different instructions in every module that has a loop, so without this one of
+    // them is served the other's object - the unsound-cache case rather than the ineffective one. The
+    // *resolved* pair and not the request, because the platform baseline changing is the same difference
+    // wearing no flag at all
+    Subtarget subtarget;
+
+    if (!resolve_subtarget(triple, options.target_cpu, options.target_features, subtarget, out_error)) {
+        return false;
+    }
+
+    digest = fnv1a64(subtarget_signature(subtarget), digest);
+
+    return true;
+}
 
 uint64_t Compiler::fnv1a64(const void *data, size_t length, uint64_t seed)
 {
@@ -101,25 +128,10 @@ bool Compiler::compute_module_keys(
     uint64_t environment = k_fnv_offset_basis;
     environment = fnv1a64(std::string(ECO_MODULE_CACHE_VERSION), environment);
     environment = fnv1a64(std::string(LLVM_VERSION_STRING), environment);
-    environment = fnv1a64(llvm::sys::getDefaultTargetTriple(), environment);
 
-    // **and which CPU inside that triple**, which the triple does not say. Two builds differing only in
-    // `--target-cpu` produce different instructions in every module that has a loop, so without this
-    // one of them is served the other's object - the unsound-cache case rather than the ineffective one.
-    // The *resolved* pair and not the request, because the platform baseline changing is the same
-    // difference wearing no flag at all
-    {
-        Subtarget subtarget;
-        std::string subtarget_error;
-
-        if (!resolve_subtarget(
-                llvm::sys::getDefaultTargetTriple(), options.target_cpu, options.target_features,
-                subtarget, subtarget_error)) {
-            out_error = subtarget_error;
-            return false;
-        }
-
-        environment = fnv1a64(subtarget_signature(subtarget), environment);
+    // the triple and the CPU inside it, shared with the C object cache - see fold_target_environment
+    if (!fold_target_environment(options, environment, out_error)) {
+        return false;
     }
 
     environment = fnv1a64(options.assertions_enabled() ? std::string("debug") : std::string("release"), environment);
@@ -225,113 +237,27 @@ bool Compiler::compute_module_keys(
     return true;
 }
 
-namespace
-{
-
-// `$XDG_CACHE_HOME/echo`, else `$HOME/.cache/echo`, else empty when neither is set
-std::filesystem::path user_cache_root()
-{
-    if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
-        return std::filesystem::path(xdg) / "echo";
-    }
-
-    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return std::filesystem::path(home) / ".cache" / "echo";
-    }
-
-    return {};
-}
-
-// this manifest ships with the compiler rather than with the program being built
-bool is_compiler_supplied(const Parser::ModuleManifest &manifest)
-{
-    const std::filesystem::path stdlib_root(STDLIB_SOURCE_DIR);
-
-    std::error_code ec;
-    const std::filesystem::path relative = std::filesystem::relative(manifest.path, stdlib_root, ec);
-
-    return !ec && !relative.empty() && relative.native().rfind("..", 0) != 0;
-}
-
-};
-
-std::filesystem::path Compiler::module_cache_dir(
-    const Parser::ModuleManifest &manifest,
-    const std::filesystem::path &cache_dir_override
-)
-{
-    if (!cache_dir_override.empty()) {
-        // one directory for every module, so the module name has to be in the artifact path rather than only
-        // in the filename - two modules could otherwise agree on a key only by agreeing on everything
-        return cache_dir_override / manifest.name;
-    }
-
-    // **the standard library does not cache into the compiler's own source tree.**
-    //
-    // `.echo` beside the manifest is right for a library that belongs to the program being built: the cache
-    // travels with the code, and deleting a checkout deletes it. The standard library's manifest lives wherever
-    // this compiler was built from, which is nobody's project - writing there means every user's build
-    // scribbles in the toolchain, and against an installed compiler that directory is read-only, so the build
-    // would fail rather than merely not cache.
-    if (is_compiler_supplied(manifest)) {
-        const std::filesystem::path user_root = user_cache_root();
-
-        if (!user_root.empty()) {
-            return user_root / manifest.name;
-        }
-    }
-
-    return manifest.directory / ".echo";
-}
-
-bool Compiler::cache_dir_is_writable(const std::filesystem::path &directory)
-{
-    std::error_code ec;
-
-    std::filesystem::create_directories(directory, ec);
-    if (ec) {
-        return false;
-    }
-
-    // creating the directory is not the same as being allowed to write in it - it may already have existed with
-    // no permission to add to it. So actually write something, which is the only answer that cannot be wrong
-    const std::filesystem::path probe = directory / ".probe";
-    {
-        std::ofstream out(probe, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            return false;
-        }
-    }
-
-    std::filesystem::remove(probe, ec);
-
-    return true;
-}
-
 std::filesystem::path Compiler::module_object_path(
     const Parser::ModuleManifest &manifest,
     const ModuleCacheKey &key,
-    const std::filesystem::path &cache_dir_override
+    const BuildLayout &layout
 )
 {
-    return module_cache_dir(manifest, cache_dir_override) / fmt::format("{}-{}.o", manifest.name, key.hex);
+    return layout.module_dir(manifest) / fmt::format("{}-{}.o", manifest.name, key.hex);
 }
 
 std::filesystem::path Compiler::module_inputs_path(
     const Parser::ModuleManifest &manifest,
-    const std::filesystem::path &cache_dir_override
+    const BuildLayout &layout
 )
 {
-    return module_cache_dir(manifest, cache_dir_override) / fmt::format("{}.inputs", manifest.name);
+    return layout.module_dir(manifest) / fmt::format("{}.inputs", manifest.name);
 }
 
 bool Compiler::write_inputs_record(const std::filesystem::path &path, const ModuleCacheKey &key)
 {
-    std::error_code ec;
-    if (path.has_parent_path()) {
-        std::filesystem::create_directories(path.parent_path(), ec);
-    }
-
+    // the directory is the caller's - it prepared one before it decided to emit here at all, and creating
+    // one on the way past would be a second place that answers where an artifact goes
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         return false;

@@ -2,6 +2,7 @@
 
 #include "eco.h"
 
+#include "Compiler/BuildLayout.h"
 #include "Compiler/HostTool.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/ModuleCache.h"
@@ -11,6 +12,7 @@
 #include <fmt/core.h>
 
 #include <fstream>
+#include <map>
 #include <set>
 
 namespace
@@ -112,7 +114,7 @@ bool c_spec_digest(
     uint64_t digest = Compiler::fnv1a64(std::string(ECO_C_BUILD_VERSION), Compiler::k_fnv_offset_basis);
 
     // the triple and the CPU inside it, shared with the Echo object cache - see fold_target_environment
-    if (!Compiler::fold_target_environment(options, digest, digest, out_error)) {
+    if (!Compiler::fold_target_environment(options, digest, out_error)) {
         return false;
     }
 
@@ -147,6 +149,64 @@ std::string artifact_stem(uint64_t module_digest, const std::filesystem::path &s
         "{}-{}", source.stem().string(), Compiler::to_hex(Compiler::fnv1a64(source.string(), module_digest)));
 }
 
+// every header this build has already looked at, and what it resolved to.
+//
+// **a header set belongs to a module rather than to a source.** The sources in one module reach very nearly
+// the same headers, so reading each one per source is the same megabyte read once per source - on every
+// build, including the all-hit incremental one where those reads are the only work the cache check does.
+// A miss then pays it twice more, once for the key and once for the sidecar written from the depfile the
+// compile just produced.
+//
+// a header folds in as its **own standalone digest** rather than as its bytes, which is what lets one answer
+// be kept per header rather than one per (header, seed) pair - fnv1a is a rolling hash, so a digest taken
+// under one seed says nothing under the next
+class HeaderDigests
+{
+public:
+    std::filesystem::path resolve(const std::filesystem::path &prerequisite)
+    {
+        const auto known = _resolved.find(prerequisite);
+
+        if (known != _resolved.end()) {
+            return known->second;
+        }
+
+        std::error_code ec;
+        std::filesystem::path resolved = std::filesystem::weakly_canonical(prerequisite, ec);
+
+        if (ec) {
+            resolved.clear();
+        }
+
+        _resolved.emplace(prerequisite, resolved);
+        return resolved;
+    }
+
+    uint64_t of(const std::filesystem::path &header)
+    {
+        const auto known = _digests.find(header);
+
+        if (known != _digests.end()) {
+            return known->second;
+        }
+
+        // **a header that has since been deleted still moves the key**, because its absence folds in as a
+        // different byte than its contents did. Skipping it silently would make removing an include a
+        // no-op for the cache
+        const std::optional<std::string> bytes = Compiler::read_whole_file(header);
+
+        const uint64_t digest = Compiler::fnv1a64(
+            bytes.value_or(std::string("<gone>")), Compiler::k_fnv_offset_basis);
+
+        _digests.emplace(header, digest);
+        return digest;
+    }
+
+private:
+    std::map<std::filesystem::path, std::filesystem::path> _resolved;
+    std::map<std::filesystem::path, uint64_t> _digests;
+};
+
 // and the other half: the source's bytes and every header the last build recorded it reaching.
 //
 // **this one cannot be in a filename**, and that is the whole shape of this cache. The depfile that names
@@ -157,7 +217,11 @@ std::string artifact_stem(uint64_t module_digest, const std::filesystem::path &s
 // `source_digest` is the source's own bytes already folded into the settings half, which the caller holds
 // because it reads the source exactly once for however many times this is asked
 std::string c_content_key(
-    const std::filesystem::path &source, uint64_t source_digest, const std::filesystem::path &depfile)
+    const std::filesystem::path &source,
+    uint64_t source_digest,
+    const std::filesystem::path &depfile,
+    HeaderDigests &seen
+)
 {
     uint64_t digest = source_digest;
 
@@ -167,10 +231,9 @@ std::string c_content_key(
     std::set<std::filesystem::path> headers;
 
     for (const std::filesystem::path &prerequisite : read_depfile(depfile)) {
-        std::error_code ec;
-        const std::filesystem::path resolved = std::filesystem::weakly_canonical(prerequisite, ec);
+        const std::filesystem::path resolved = seen.resolve(prerequisite);
 
-        if (ec || resolved == source) {
+        if (resolved.empty() || resolved == source) {
             continue;
         }
 
@@ -179,15 +242,7 @@ std::string c_content_key(
 
     for (const std::filesystem::path &header : headers) {
         digest = Compiler::fnv1a64(header.string(), digest);
-
-        // **a header that has since been deleted still moves the key**, because its absence folds in as a
-        // different byte than its contents did. Skipping it silently would make removing an include a
-        // no-op for the cache
-        const std::optional<std::string> header_bytes = Compiler::read_whole_file(header);
-
-        digest = header_bytes.has_value()
-            ? Compiler::fnv1a64(header_bytes.value(), digest)
-            : Compiler::fnv1a64(std::string("<gone>"), digest);
+        digest = Compiler::fnv1a64(Compiler::to_hex(seen.of(header)), digest);
     }
 
     return Compiler::to_hex(digest);
@@ -221,6 +276,75 @@ void append_common_arguments(
 
 };
 
+namespace
+{
+
+// the settled value into the member its scheme names. **which member a scheme fills is one switch**, so a
+// scheme added to the table above does not compile until it says where its value goes
+void place_cc_value(Compiler::CcScheme scheme, const std::string &settled, Compiler::CBuildSpec &spec)
+{
+    switch (scheme) {
+    case Compiler::CcScheme::t_sources:
+        spec.source_patterns.push_back(settled);
+        break;
+
+    case Compiler::CcScheme::t_include:
+        spec.includes.push_back(settled);
+        break;
+
+    case Compiler::CcScheme::t_define:
+        spec.defines.push_back(settled);
+        break;
+
+    case Compiler::CcScheme::t_flag:
+        spec.flags.push_back(settled);
+        break;
+    }
+}
+
+// `include:` is the one scheme whose value is a path, and settling it is the only thing an attribute's
+// value needs doing to it that a command line's does too
+bool settle_cc_value(
+    Compiler::CcScheme scheme,
+    const std::string &value,
+    const std::filesystem::path &base,
+    std::string &out_value,
+    std::string &out_error
+)
+{
+    switch (scheme) {
+    case Compiler::CcScheme::t_sources:
+        // **as written.** expanding a pattern has one owner and it is Parser::expand_source_pattern; a
+        // second expander here is how `*` would come to mean one thing in `#[sources:]` and another here
+        out_value = value;
+        return true;
+
+    case Compiler::CcScheme::t_include: {
+        const std::filesystem::path directory = Compiler::settled_path(base, value);
+
+        std::error_code ec;
+        if (!std::filesystem::is_directory(directory, ec)) {
+            out_error = fmt::format(
+                "the include path '{}' resolves to '{}', which is not a directory.",
+                value, directory.string());
+            return false;
+        }
+
+        out_value = directory.string();
+        return true;
+    }
+
+    case Compiler::CcScheme::t_define:
+    case Compiler::CcScheme::t_flag:
+        out_value = value;
+        return true;
+    }
+
+    return false;
+}
+
+};
+
 std::string Compiler::cc_scheme_list()
 {
     return scheme_list_of(cc_scheme_table());
@@ -241,70 +365,74 @@ bool Compiler::parse_cc_requirement(
         return false;
     }
 
-    switch (out_scheme) {
-    case CcScheme::t_sources:
-        // **as written.** expanding a pattern has one owner and it is Parser::expand_source_pattern; a
-        // second expander here is how `*` would come to mean one thing in `#[sources:]` and another here
-        out_value = value;
-        return true;
-
-    case CcScheme::t_include: {
-        const std::filesystem::path directory = settled_path(base, value);
-
-        std::error_code ec;
-        if (!std::filesystem::is_directory(directory, ec)) {
-            out_error = fmt::format(
-                "the include path '{}' resolves to '{}', which is not a directory.",
-                value, directory.string());
-            return false;
-        }
-
-        out_value = directory.string();
-        return true;
-    }
-
-    case CcScheme::t_define:
-    case CcScheme::t_flag:
-        out_value = value;
-        return true;
-    }
-
-    return false;
+    return settle_cc_value(out_scheme, value, base, out_value, out_error);
 }
 
-bool Compiler::apply_cc_requirement(
-    const std::string &spelled,
+bool Compiler::apply_cc_attribute(
+    const AST::AttributeValue &value,
     const std::filesystem::path &base,
-    CBuildSpec &spec,
-    std::string &out_error
+    AST::AttributeReader &reader,
+    CBuildSpec &spec
 )
 {
-    CcScheme scheme = CcScheme::t_sources;
-    std::string settled;
+    bool applied_all = true;
 
-    if (!parse_cc_requirement(spelled, base, scheme, settled, out_error)) {
-        return false;
+    for (const AST::AttributeValue *entry : AST::AttributeReader::each(value)) {
+        CcScheme scheme = CcScheme::t_sources;
+
+        if (!reader.tag(*entry, cc_scheme_table(), "C build scheme", cc_scheme_list(), scheme)) {
+            applied_all = false;
+            continue;
+        }
+
+        for (const AST::AttributeValue *word : AST::AttributeReader::payload(*entry)) {
+            // **the open record, and only `define` has one.** its keys are the payload rather than a
+            // vocabulary, so nothing here reject_unknown_fields could be handed - which is exactly the
+            // reading a `git { url:, rev: }` does not get
+            if (word->is(AST::AttributeValueKind::t_record)) {
+                if (scheme != CcScheme::t_define) {
+                    reader.refuse(word->span, fmt::format(
+                        "only 'define' takes a record - a '{}' names one value.",
+                        entry->tag()));
+                    applied_all = false;
+                    continue;
+                }
+
+                for (const AST::AttributeField &field : word->fields) {
+                    std::optional<std::string> macro = reader.word(field.value);
+
+                    if (!macro.has_value()) {
+                        applied_all = false;
+                        continue;
+                    }
+
+                    spec.defines.push_back(field.key + "=" + macro.value());
+                }
+
+                continue;
+            }
+
+            std::optional<std::string> spelled = reader.string(*word);
+
+            if (!spelled.has_value()) {
+                applied_all = false;
+                continue;
+            }
+
+            std::string settled;
+            std::string reason;
+
+            if (!settle_cc_value(scheme, spelled.value(), base, settled, reason)) {
+                reader.refuse(word->span, reason);
+                applied_all = false;
+                continue;
+            }
+
+            place_cc_value(scheme, settled, spec);
+        }
     }
 
-    switch (scheme) {
-    case CcScheme::t_sources:
-        spec.source_patterns.push_back(settled);
-        break;
-
-    case CcScheme::t_include:
-        spec.includes.push_back(settled);
-        break;
-
-    case CcScheme::t_define:
-        spec.defines.push_back(settled);
-        break;
-
-    case CcScheme::t_flag:
-        spec.flags.push_back(settled);
-        break;
-    }
-
-    return true;
+    return applied_all;
 }
 
 bool Compiler::build_c_sources(
@@ -322,19 +450,17 @@ bool Compiler::build_c_sources(
     }
 
     // **an unwritable store is a slower build and never a failed one**, the rule plan_module_artifacts
-    // already follows for Echo objects. cache_dir_is_writable creates the directory as it probes it, so
-    // only the scratch fallback is left to create here
+    // already follows for Echo objects. Both directories are echoc's own - one under a module directory the
+    // driver already vouched for, one under the system's temporary path - so neither has anything to prove
     std::error_code ec;
-    const bool keeping = !cache_dir.empty() && cache_dir_is_writable(cache_dir);
+    const bool keeping =
+        prepare_build_directory(cache_dir, BuildDirTrust::t_ours) == BuildDirState::t_ready;
     const std::filesystem::path directory = keeping ? cache_dir : scratch_dir;
 
-    if (!keeping) {
-        std::filesystem::create_directories(directory, ec);
-
-        if (ec) {
-            out_error = fmt::format("{}: cannot be created for the C build.", directory.string());
-            return false;
-        }
+    if (!keeping
+        && prepare_build_directory(directory, BuildDirTrust::t_ours) != BuildDirState::t_ready) {
+        out_error = fmt::format("{}: cannot be created for the C build.", directory.string());
+        return false;
     }
 
     // everything the whole spec shares, folded once rather than once per source
@@ -347,6 +473,9 @@ bool Compiler::build_c_sources(
     const uint64_t module_digest = fnv1a64(spec.module_name, Compiler::k_fnv_offset_basis);
 
     out.content_digest = module_digest;
+
+    // one per module, so the header set every source in it shares is read once
+    HeaderDigests seen;
 
     for (const std::filesystem::path &source : spec.sources) {
         const uint64_t source_settings = fnv1a64(source.string(), settings);
@@ -367,7 +496,7 @@ bool Compiler::build_c_sources(
         }
 
         const uint64_t source_digest = fnv1a64(source_bytes.value(), source_settings);
-        const std::string key = c_content_key(source, source_digest, depfile);
+        const std::string key = c_content_key(source, source_digest, depfile, seen);
 
         out.content_digest = fnv1a64(key, out.content_digest);
 
@@ -410,7 +539,7 @@ bool Compiler::build_c_sources(
         // one build rather than compiling every source twice. The source's own bytes are the ones already
         // folded into source_digest - the compile did not change them
         if (keeping) {
-            std::ofstream(sidecar, std::ios::binary) << c_content_key(source, source_digest, depfile);
+            std::ofstream(sidecar, std::ios::binary) << c_content_key(source, source_digest, depfile, seen);
         }
 
         out.objects.push_back(object);
@@ -437,11 +566,12 @@ bool Compiler::build_c_shared_library(
     }
 
     std::error_code ec;
-    const bool keeping = !cache_dir.empty() && cache_dir_is_writable(cache_dir);
+    const bool keeping =
+        prepare_build_directory(cache_dir, BuildDirTrust::t_ours) == BuildDirState::t_ready;
     const std::filesystem::path directory = keeping ? cache_dir : scratch_dir;
 
     if (!keeping) {
-        std::filesystem::create_directories(directory, ec);
+        prepare_build_directory(directory, BuildDirTrust::t_ours);
     }
 
     // **keyed on the objects' content digest, never on their names.** An object's path carries only the

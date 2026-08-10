@@ -73,16 +73,16 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
         // read a spelling off, which is exactly what it is reporting. the example is the stdlib's own
         return refuse(
             "an array literal with no declared type needs the core array type, and nothing in this "
-            "program declares '#[core: \"array\"]'. it lives in the standard library, which this "
+            "program declares '#[core: array]'. it lives in the standard library, which this "
             "compilation left out - write the type, e.g. 'array<int32> $a = [...];'.");
     }
 
-    // whatever `#[core: "array"]` names has to be applicable to one element type.
+    // whatever `#[core: array]` names has to be applicable to one element type.
     // TypeRegistry::get_or_create_instantiation *asserts* both halves of this, so an oddly shaped
     // binding has to be a refusal here rather than an abort there
     if (!array_tmpl->is_generic() || array_tmpl->type_parameters.size() != 1) {
         return refuse(fmt::format(
-            "'{}' is declared '#[core: \"array\"]' but takes no single element type, so an array "
+            "'{}' is declared '#[core: array]' but takes no single element type, so an array "
             "literal cannot be built from it.",
             array_tmpl->name.value_or("the core array type")));
     }

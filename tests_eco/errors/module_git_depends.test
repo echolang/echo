@@ -1,0 +1,7 @@
+modules: modules/git_dep
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:10: git dependencies are not resolved yet - a dependency is a path to a manifest that is already on disk. Vendor the module and name it with a path.

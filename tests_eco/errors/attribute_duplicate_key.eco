@@ -1,0 +1,4 @@
+// a record key written twice is a decision made twice. reported at the *second* spelling, which is the
+// one that says which of the two can be deleted
+#[cc: define { WIDTH: 1, WIDTH: 2 }]
+echo 1;

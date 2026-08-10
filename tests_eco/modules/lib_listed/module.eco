@@ -1,0 +1,15 @@
+/*
+ * One attribute, several patterns. Anywhere an attribute takes one value it takes a list of them, which
+ * is one rule in the reader rather than an arm per attribute - the repeated-attribute spelling below it
+ * still works and means the same thing.
+ *
+ * `#[depends: path "..."]` says out loud what a bare string already means, which is what leaves room for
+ * a second kind of dependency without the common case growing a word.
+ */
+
+#[module: "listed"]
+#[version: "0.1.0"]
+
+#[depends: path "../lib_core"]
+
+#[sources: ["src/*.eco", "extra/*.eco"]]

@@ -853,7 +853,7 @@ static void synthesize_field_wise_constructor(
         payload.collector, payload.context.code_ref(name_token), &default_ctor);
 }
 
-// `#[core: "string"]` - the stdlib telling the compiler which declared type this is. bound in both the
+// `#[core: string]` - the stdlib telling the compiler which declared type this is. bound in both the
 // declaration and the body pass; re-binding the same node is how the two reconcile, and a *different*
 // node is a second declaration of one core type, which is reported.
 //
@@ -867,29 +867,34 @@ static void bind_core_type_attribute(Parser::Payload &payload, AST::TypeDeclNode
         return;
     }
 
-    auto value = Parser::attribute_string_value(payload, core_attr, "core");
-    if (!value.has_value()) {
-        return;
-    }
+    // a **name**, not a string: the set AST::core_type_kind_for accepts is closed, and a closed
+    // vocabulary is spelled bare wherever it appears inside a `#[...]`
+    Parser::read_attribute_value(payload, core_attr, "core",
+        [&](AST::AttributeReader &reader, const AST::AttributeValue &written) {
+            std::optional<std::string> value = reader.name(written);
 
-    auto kind = AST::core_type_kind_for(value.value());
-    if (!kind.has_value()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(core_attr->attribute_tokens),
-            fmt::format("Unknown core type '{}'.", value.value()));
-        return;
-    }
+            if (!value.has_value()) {
+                return value;
+            }
 
-    if (auto *bound = payload.collector.core_types.declaration(kind.value());
-        bound != nullptr && bound != struct_node) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(core_attr->attribute_tokens),
-            fmt::format("The core type '{}' is already declared as '{}'.",
-                value.value(), bound->namespaced_type_name()));
-        return;
-    }
+            std::optional<AST::CoreTypeKind> kind = AST::core_type_kind_for(value.value());
 
-    payload.collector.core_types.bind(kind.value(), struct_node);
+            if (!kind.has_value()) {
+                reader.refuse(written.span, fmt::format("Unknown core type '{}'.", value.value()));
+                return value;
+            }
+
+            if (auto *bound = payload.collector.core_types.declaration(kind.value());
+                bound != nullptr && bound != struct_node) {
+                reader.refuse(written.span, fmt::format(
+                    "The core type '{}' is already declared as '{}'.",
+                    value.value(), bound->namespaced_type_name()));
+                return value;
+            }
+
+            payload.collector.core_types.bind(kind.value(), struct_node);
+            return value;
+        });
 }
 
 // `#[unique]` - exactly one value may name this type's storage, so it is moved and never copied.
@@ -1235,7 +1240,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         if (cursor.is_type(Token::Type::t_hash)) {
             // an attribute ahead of a member. it lands on `context.scope()` - the file root, since a
             // struct body pushes no scope of its own - and the member declaration below drains it from
-            // there, exactly as a top-level declaration does. `#[core: "string_view"]` on a nested
+            // there, exactly as a top-level declaration does. `#[core: string_view]` on a nested
             // `view` is the case that needs it
             parse_attribute(payload);
         }

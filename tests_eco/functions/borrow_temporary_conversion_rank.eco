@@ -7,10 +7,10 @@
 
 class local_buf { usize $capacity; usize $used; ptr<uint8> $bytes; }
 
-#[core: "string"]
+#[core: string]
 struct string
 {
-    #[core: "string_view"]
+    #[core: string_view]
     struct view { ptr<const uint8> $bytes; usize $size; }
 
     string::view $window;

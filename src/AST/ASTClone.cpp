@@ -568,11 +568,11 @@ Node *TypeDeclNode::clone(CloneContext &cc) const
 // attributes
 // ---------------------------------------------------------------------------
 
+// an attribute value is a plain value holding no node edges, so the shallow copy is the whole clone -
+// unlike every other node here, which owes its children a visit
 Node *AttributeNode::clone(CloneContext &cc) const
 {
-    AttributeNode *c = cc.shallow(this);
-    for (auto &expr_ref : c->attribute_exprs) expr_ref = cc.clone_ref(expr_ref);
-    return c;
+    return cc.shallow(this);
 }
 
 };  // namespace AST

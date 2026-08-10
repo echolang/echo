@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] attribute_unterminated_record.eco:3:20
+
+  this record is missing its '}' - the '{' is on line 3.
+
+  2 | // than hunting for a statement terminator, so exactly one message comes of it
+  3 | #[cc: define { A: 1]
+    :                    ^
+  4 | echo 1;
+
+1 error, nothing was compiled.

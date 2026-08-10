@@ -30,7 +30,7 @@ namespace mem;
  * `mem::buffer<T>()` and `resize`, one of which produces a fresh region and the other of which
  * consumes the old one. See notes/aliasing.md.
  */
-#[core: "buffer"]
+#[core: buffer]
 #[unique]
 struct buffer<T>
 {

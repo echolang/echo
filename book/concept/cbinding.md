@@ -113,5 +113,120 @@ can help you with it.
 
 ## Linking
 
-Both `echoc run` (which resolves symbols in the running process) and `echoc build` (which links with `clang`)
-reach libc with no extra flags.
+libc needs nothing. Both `echoc run` and `echoc build` reach it with no flags at all, which is why every
+example above compiles as written.
+
+Anything else has to be linked, and **the module that needs it is what says so** — in its `module.eco`, with
+`#[link:]`:
+
+```echo
+#[module: "opengl"]
+#[version: "0.1.0"]
+
+#[link: lib "glfw"]
+
+#[sources: "src/*.eco"]
+```
+
+A program depending on that module writes `#[depends: "../opengl"]` and nothing else. It doesn't repeat the
+library, and it doesn't need to know there is one. That's the whole point: which libraries a binding needs is
+the binding's business, and a requirement travels with it through as many modules as sit in between.
+
+### The four kinds
+
+Every value is *tagged* with what kind of thing it names, and the list is closed:
+
+| | |
+|---|---|
+| `lib "GL"` | a library by name, resolved the way the linker resolves everything else |
+| `framework "OpenGL"` | a Darwin framework. Refused anywhere else — see below |
+| `search "vendor/lib"` | a directory to look in, **relative to the manifest** |
+| `object "vendor/glad.o"` | a prebuilt object file, also relative to the manifest |
+
+The tag isn't optional, and `#[link: "GL"]` is an error rather than shorthand. That's deliberate: if a bare
+string meant "a library", then a misspelled `framwork "OpenGL"` would have to mean *something*, and you'd
+find out at link time in a message about a library you never wrote. With the tag required, the typo is
+caught in the manifest, on the line that has it — and pointing at the word that is wrong.
+
+Naming several at once is fine, and means exactly what writing them separately means:
+
+```echo
+#[link: lib ["GL", "GLU"]]
+#[link: [lib "GL", framework "OpenGL"]]
+```
+
+### Platforms
+
+A `module.eco` is Echo, read through the same conditional filter every other file goes through, so gating a
+link requirement needs no new syntax:
+
+```echo
+#[if: os == darwin]
+#[link: framework ["OpenGL", "Cocoa"]]
+#[elif: os == linux]
+#[link: lib "GL"]
+#[end]
+```
+
+The same `#[if:]` gates the `extern` blocks in your sources, and both are evaluated against the same facts —
+so you can't end up with one platform's declarations and another's libraries.
+
+A `framework` outside Darwin is refused outright rather than ignored. Ignoring it would leave a Linux build
+failing on exactly the symbols the declaration was supposed to provide, with nothing saying it had been
+dropped — so the compiler asks you to write the `#[if:]`, once.
+
+### When a library is somewhere odd
+
+Where a library is *installed* is a property of the machine, not of your program, so it doesn't belong in a
+manifest. `--link` names the same four kinds, on either subcommand — with a colon rather than a space,
+because a shell would otherwise want the quotes escaped:
+
+```bash
+echoc build --link search:/opt/homebrew/lib -o app
+echoc run   --link search:/opt/homebrew/lib
+```
+
+These merge after every manifest's, so they only ever add — a declaration always wins.
+
+## Compiling C alongside Echo
+
+Sometimes a binding needs actual C: a loader like glad, a `static inline` header wrapper, a platform entry
+point. `#[cc:]` compiles it and puts the objects in your link.
+
+```echo
+#[cc: sources "c/*.c"]
+#[cc: include "c/include"]
+#[cc: define "GLAD_GL_IMPLEMENTATION"]
+#[cc: flag "-Wno-unused-function"]
+```
+
+Four kinds, tagged the same way as `#[link:]`'s. `sources` is a pattern, expanded exactly like
+`#[sources:]`; `include` is a directory relative to the manifest; `define` and `flag` go to the C compiler
+as written. Language is picked by extension, so `.c`, `.m` and `.cpp` all work — a C++ shim just adds
+`#[link: lib "c++"]` itself.
+
+`define` is the one that takes a **record**, because its keys are your macro names rather than a vocabulary
+the compiler knows. All three of these spellings mean the same thing:
+
+```echo
+#[cc: define "NDEBUG"]                                     // -DNDEBUG
+#[cc: define ["NDEBUG", "TRACE"]]                          // -DNDEBUG -DTRACE
+#[cc: define { GLAD_GL_IMPLEMENTATION: 1, WIDTH: 40 }]     // -DGLAD_GL_IMPLEMENTATION=1 -DWIDTH=40
+```
+
+Nothing is re-quoted on the way out — the C compiler is run with an argument list and no shell in between,
+so a define holding a space arrives holding a space.
+
+**The C contributes objects and nothing else.** No include path and no macro from a `#[cc:]` reaches Echo's
+front end. Echo does not read C headers, so your `extern { }` declarations are still written by hand and
+still yours to get right — which is the same deal as everywhere else on this page, and the reason the
+wrapping advice above matters.
+
+Objects are cached beside the module, keyed on the source *and every header it included* — clang reports
+those and echoc reads them back, so editing a header rebuilds what needs rebuilding and nothing else.
+
+Under `echoc run` there's no link at all, so the compiler builds those objects into a loadable library and
+opens it before the program starts. You don't have to do anything; it's worth knowing only because it's the
+reason `run` works on a program with a C shim in it.
+
+[examples/opengl_triangle](../../examples/opengl_triangle) is all of this in one small program.

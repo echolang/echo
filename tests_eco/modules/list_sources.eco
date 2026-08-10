@@ -1,0 +1,2 @@
+// both patterns of the one `#[sources: [...]]` were expanded, and the `#[depends: path ...]` resolved
+echo listed_one() + listed_two() + modcore::doubled(10);

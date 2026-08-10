@@ -23,6 +23,91 @@ const std::vector<std::pair<std::string, Compiler::LinkScheme>> &scheme_table()
     return table;
 }
 
+// the name a scheme is written under, in either medium
+std::string scheme_name_of(Compiler::LinkScheme scheme)
+{
+    for (const auto &[spelled, candidate] : scheme_table()) {
+        if (candidate == scheme) {
+            return spelled;
+        }
+    }
+
+    return "";
+}
+
+// what a scheme and a value *mean*, once the two have been read - which is the whole of what the two
+// spellings share. A manifest's tag and a command line's `<scheme>:` differ in how the pair is spelled
+// and in nothing after it, so the platform refusal and the two path settlements live here rather than
+// once per entry point
+bool settle_link_requirement(
+    Compiler::LinkScheme scheme,
+    const std::string &value,
+    const std::filesystem::path &base,
+    const Compiler::TargetFacts &facts,
+    const std::string &declared_by,
+    Compiler::LinkRequirement &out,
+    std::string &out_error
+)
+{
+    out = Compiler::LinkRequirement{};
+    out.scheme = scheme;
+    out.declared_by = declared_by;
+
+    // the value as written, so a refusal below has a requirement worth quoting back. The two path schemes
+    // replace it with what it settled to once they have proved the path is there
+    out.value = value;
+
+    switch (scheme) {
+    case Compiler::LinkScheme::t_library:
+        return true;
+
+    case Compiler::LinkScheme::t_framework:
+        // **refused rather than ignored.** A framework means nothing off Darwin, and quietly dropping it
+        // would leave a linux build failing on the symbols it was supposed to provide with nothing saying
+        // the declaration was never applied. Gating it is one line the author writes once
+        if (facts.operating_system != "darwin") {
+            out_error = fmt::format(
+                "'{}' is a Darwin framework and this build targets {}. Gate it with "
+                "'#[if: os == darwin]' and name the platform's own library in the other arm.",
+                Compiler::link_requirement_spelling(out), facts.operating_system);
+            return false;
+        }
+
+        return true;
+
+    case Compiler::LinkScheme::t_search: {
+        const std::filesystem::path directory = Compiler::settled_path(base, value);
+
+        std::error_code ec;
+        if (!std::filesystem::is_directory(directory, ec)) {
+            out_error = fmt::format(
+                "the search path '{}' resolves to '{}', which is not a directory.",
+                value, directory.string());
+            return false;
+        }
+
+        out.value = directory.string();
+        return true;
+    }
+
+    case Compiler::LinkScheme::t_object: {
+        const std::filesystem::path object = Compiler::settled_path(base, value);
+
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(object, ec)) {
+            out_error = fmt::format(
+                "the object '{}' resolves to '{}', which is not a file.", value, object.string());
+            return false;
+        }
+
+        out.value = object.string();
+        return true;
+    }
+    }
+
+    return false;
+}
+
 };
 
 std::string Compiler::link_scheme_list()
@@ -32,13 +117,17 @@ std::string Compiler::link_scheme_list()
 
 std::string Compiler::link_requirement_spelling(const LinkRequirement &requirement)
 {
-    for (const auto &[spelled, scheme] : scheme_table()) {
-        if (scheme == requirement.scheme) {
-            return spelled + ":" + requirement.value;
-        }
+    const std::string name = scheme_name_of(requirement.scheme);
+
+    if (name.empty()) {
+        return requirement.value;
     }
 
-    return requirement.value;
+    // `declared_by` is already the record of which medium wrote it: a manifest credits its module, a
+    // command line credits nobody
+    return requirement.declared_by.empty()
+        ? name + ":" + requirement.value
+        : fmt::format("{} \"{}\"", name, requirement.value);
 }
 
 bool Compiler::parse_link_requirement(
@@ -58,61 +147,54 @@ bool Compiler::parse_link_requirement(
         return false;
     }
 
-    out = LinkRequirement{};
-    out.scheme = scheme;
-    out.declared_by = declared_by;
+    return settle_link_requirement(scheme, value, base, facts, declared_by, out, out_error);
+}
 
-    switch (scheme) {
-    case LinkScheme::t_library:
-        out.value = value;
-        return true;
+bool Compiler::parse_link_attribute(
+    const AST::AttributeValue &value,
+    const std::filesystem::path &base,
+    const TargetFacts &facts,
+    const std::string &declared_by,
+    AST::AttributeReader &reader,
+    std::vector<LinkRequirement> &out
+)
+{
+    bool settled_all = true;
 
-    case LinkScheme::t_framework:
-        // **refused rather than ignored.** A framework means nothing off Darwin, and quietly dropping it
-        // would leave a linux build failing on the symbols it was supposed to provide with nothing saying
-        // the declaration was never applied. Gating it is one line the author writes once
-        if (facts.operating_system != "darwin") {
-            out_error = fmt::format(
-                "'framework:{}' is a Darwin framework and this build targets {}. Gate it with "
-                "'#[if: os == darwin]' and name the platform's own library in the other arm.",
-                value, facts.operating_system);
-            return false;
+    // two peels, and they answer different questions. the outer one fans out an *untagged* list, where
+    // each item carries its own scheme - `[lib "GL", framework "OpenGL"]`. the inner one fans out the
+    // payload of a scheme already resolved - `lib ["GL", "GLU"]`, which is one scheme and two libraries
+    for (const AST::AttributeValue *entry : AST::AttributeReader::each(value)) {
+        LinkScheme scheme = LinkScheme::t_library;
+
+        if (!reader.tag(*entry, scheme_table(), "link scheme", link_scheme_list(), scheme)) {
+            settled_all = false;
+            continue;
         }
 
-        out.value = value;
-        return true;
+        for (const AST::AttributeValue *word : AST::AttributeReader::payload(*entry)) {
+            std::optional<std::string> spelled = reader.string(*word);
 
-    case LinkScheme::t_search: {
-        const std::filesystem::path directory = settled_path(base, value);
+            if (!spelled.has_value()) {
+                settled_all = false;
+                continue;
+            }
 
-        std::error_code ec;
-        if (!std::filesystem::is_directory(directory, ec)) {
-            out_error = fmt::format(
-                "the search path '{}' resolves to '{}', which is not a directory.",
-                value, directory.string());
-            return false;
+            LinkRequirement requirement;
+            std::string reason;
+
+            if (!settle_link_requirement(
+                    scheme, spelled.value(), base, facts, declared_by, requirement, reason)) {
+                reader.refuse(word->span, reason);
+                settled_all = false;
+                continue;
+            }
+
+            out.push_back(requirement);
         }
-
-        out.value = directory.string();
-        return true;
     }
 
-    case LinkScheme::t_object: {
-        const std::filesystem::path object = settled_path(base, value);
-
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(object, ec)) {
-            out_error = fmt::format(
-                "the object '{}' resolves to '{}', which is not a file.", value, object.string());
-            return false;
-        }
-
-        out.value = object.string();
-        return true;
-    }
-    }
-
-    return false;
+    return settled_all;
 }
 
 void Compiler::partition_link_requirements(
@@ -164,10 +246,10 @@ std::optional<std::filesystem::path> Compiler::runtime_library_of(
 
     case LinkScheme::t_object:
         out_refusal = fmt::format(
-            "'object:{}' cannot be loaded by 'echoc run': the JIT resolves symbols out of the running "
+            "'{}' cannot be loaded by 'echoc run': the JIT resolves symbols out of the running "
             "process and an object file is not something it can open. Use 'echoc build' for this program, "
             "or ship the object as a library.",
-            requirement.value);
+            link_requirement_spelling(requirement));
         return std::nullopt;
 
     case LinkScheme::t_framework: {

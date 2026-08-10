@@ -149,6 +149,10 @@ Compiler::TerminalCapabilities Compiler::TerminalCapabilities::resolve(
 
     caps.width = terminal_width();
 
+    // no flag consults this one - see the field's comment. It is the same isatty the two `auto` paths
+    // above already reached, asked once more rather than a second time somewhere else
+    caps.interactive = stderr_is_a_terminal();
+
     return caps;
 }
 

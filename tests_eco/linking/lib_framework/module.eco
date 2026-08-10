@@ -7,6 +7,6 @@
 #[module: "linkframework"]
 #[version: "0.1.0"]
 
-#[link: "framework:OpenGL"]
+#[link: framework "OpenGL"]
 
 #[sources: "src/*.eco"]

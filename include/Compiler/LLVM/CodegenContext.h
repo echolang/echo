@@ -58,7 +58,7 @@ namespace Compiler::LLVM
         // every check the compiler can skip skips together
         CompilerOptions options;
 
-        // the stdlib types the compiler names, bound by `#[core: "..."]` during parsing. published here
+        // the stdlib types the compiler names, bound by `#[core: ...]` during parsing. published here
         // by compile_bundle rather than reached for, so codegen never holds the whole collector - the
         // only thing it needs from it is which declared type is `string`
         const AST::CoreTypes *core_types_ptr = nullptr;

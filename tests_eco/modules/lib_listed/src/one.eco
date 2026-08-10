@@ -1,0 +1,3 @@
+function listed_one() : int32 {
+    return 1;
+}

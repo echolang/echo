@@ -214,4 +214,17 @@ std::string TargetFacts::cache_signature() const
     return result;
 }
 
+std::string TargetFacts::shared_library_extension() const
+{
+    if (operating_system == "darwin") {
+        return ".dylib";
+    }
+
+    if (operating_system == "windows") {
+        return ".dll";
+    }
+
+    return ".so";
+}
+
 };

@@ -7,6 +7,6 @@
 #[module: "linkbadscheme"]
 #[version: "0.1.0"]
 
-#[link: "framwork:OpenGL"]
+#[link: framwork "OpenGL"]
 
 #[sources: "src/*.eco"]

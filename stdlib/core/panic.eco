@@ -24,7 +24,7 @@
  * A `die` ends the block it is in: statements after it are not compiled, and a function whose
  * last statement is a `die` does not also need a `return`.
  */
-#[builtin: "die"]
+#[builtin: die]
 function die() : void;
 
 /**
@@ -32,7 +32,7 @@ function die() : void;
  * together with the source location, so it has to be readable at compile time - a runtime string
  * has nothing to fold, and is a located error rather than a message that quietly goes missing.
  */
-#[builtin: "die"]
+#[builtin: die]
 function die(string $message) : void;
 
 /**
@@ -45,11 +45,11 @@ function die(string $message) : void;
  * The condition is type-checked either way, so a release build never accepts an assert a debug
  * build would have rejected.
  */
-#[builtin: "assert"]
+#[builtin: assert]
 function assert(bool $condition) : void;
 
 /**
  * The message must be a **string literal**, for the reason `die`'s must.
  */
-#[builtin: "assert"]
+#[builtin: assert]
 function assert(bool $condition, string $message) : void;

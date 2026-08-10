@@ -1,6 +1,8 @@
 #include "Parser/ManifestParser.h"
 
+#include "Compiler/BuildLayout.h"
 #include "Compiler/PhaseTimings.h"
+#include "Compiler/SettledPath.h"
 
 #include "Parser/AttributeParser.h"
 #include "Parser/ModuleParser.h"
@@ -39,22 +41,6 @@ std::string locate(const std::filesystem::path &path, uint32_t line, const std::
 std::string locate(const std::filesystem::path &path, const std::string &message)
 {
     return fmt::format("{}: {}", path.filename().string(), message);
-}
-
-// a `depends` entry may name the manifest or the directory holding it, because both read naturally and
-// only one of them survives moving the file
-std::optional<std::filesystem::path> manifest_at(const std::filesystem::path &target)
-{
-    std::error_code ec;
-
-    if (std::filesystem::is_directory(target, ec)) {
-        const std::filesystem::path inside = target / "module.eco";
-        return std::filesystem::is_regular_file(inside, ec)
-            ? std::optional<std::filesystem::path>(inside) : std::nullopt;
-    }
-
-    return std::filesystem::is_regular_file(target, ec)
-        ? std::optional<std::filesystem::path>(target) : std::nullopt;
 }
 
 
@@ -136,13 +122,6 @@ std::optional<std::vector<std::filesystem::path>> expand_directory_pattern(
     return matches;
 }
 
-std::filesystem::path canonical_or_absolute(const std::filesystem::path &path)
-{
-    std::error_code ec;
-    std::filesystem::path resolved = std::filesystem::canonical(path, ec);
-    return ec ? std::filesystem::absolute(path) : resolved;
-}
-
 // the scratch state reading a manifest needs, built **once for a whole graph** rather than once per
 // manifest.
 //
@@ -174,6 +153,20 @@ struct ManifestScratch
 };
 
 };
+
+std::optional<std::filesystem::path> Parser::manifest_at(const std::filesystem::path &target)
+{
+    std::error_code ec;
+
+    if (std::filesystem::is_directory(target, ec)) {
+        const std::filesystem::path inside = target / "module.eco";
+        return std::filesystem::is_regular_file(inside, ec)
+            ? std::optional<std::filesystem::path>(inside) : std::nullopt;
+    }
+
+    return std::filesystem::is_regular_file(target, ec)
+        ? std::optional<std::filesystem::path>(target) : std::nullopt;
+}
 
 std::vector<std::filesystem::path> Parser::expand_source_pattern(const std::filesystem::path &pattern)
 {
@@ -215,12 +208,63 @@ std::string manifest_parse_errors(
 
 // the attribute values, straight off the nodes the declaration pass collected. `sources` and `depends` come
 // back as written, because both resolve against the manifest's directory and neither can be checked here.
+// `#[depends: ...]`, in every shape it takes.
 //
-// takes the payload rather than the module alone: attribute_string_value reports through it, so the values
-// have to be read while it is alive
+//     #[depends: "../geom"]                                a path, the common case
+//     #[depends: path "../geom"]                           the same, said out loud
+//     #[depends: ["../geom", "../core"]]                   several
+//     #[depends: git { url: "https://...", rev: "v1" }]    a **fixed** record - refused, see below
+//
+// **a bare string still means a path**, so the tag is what a second kind needs rather than what the
+// first one costs. `git` is parsed and validated and then refused, because nothing fetches one yet:
+// accepting it silently would give a build a dependency it never got, and leaving the tag out entirely
+// would report it as an unknown scheme, which is the wrong sentence for a thing that is merely not
+// built yet
+// refuses through `reader` rather than answering, so the caller drains it the one way every other
+// attribute here is drained - a second success channel is a second thing to forget to check
+void read_manifest_depends(
+    const AST::AttributeValue &written,
+    AST::AttributeReader &reader,
+    std::vector<std::string> &out_depends)
+{
+    for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
+        if (entry->has_tag() && entry->tag() == "git") {
+            if (!reader.record(*entry)) {
+                continue;
+            }
+
+            reader.require_field(*entry, "url");
+            reader.reject_unknown_fields(*entry, { "url", "rev" });
+
+            if (reader.has_refusals()) {
+                continue;
+            }
+
+            reader.refuse(entry->span,
+                "git dependencies are not resolved yet - a dependency is a path to a manifest that is "
+                "already on disk. Vendor the module and name it with a path.");
+            continue;
+        }
+
+        if (entry->has_tag() && entry->tag() != "path") {
+            reader.refuse(entry->tag_span, fmt::format(
+                "'{}' is not a kind of dependency, expected one of: path, git.", entry->tag()));
+            continue;
+        }
+
+        if (std::optional<std::string> value = reader.string(*entry)) {
+            out_depends.push_back(value.value());
+        }
+    }
+}
+
+//
+// takes the payload rather than the module alone: it reports through the collector, so the values have
+// to be read while it is alive
 bool read_manifest_attributes(
     Parser::Payload &payload,
     AST::Module &module,
+    const Compiler::TargetFacts &facts,
     Parser::ModuleManifest &out,
     std::vector<std::string> &out_sources,
     std::vector<std::string> &out_depends,
@@ -238,32 +282,96 @@ bool read_manifest_attributes(
             return false;
         }
 
-        std::optional<std::string> value = Parser::attribute_string_value(payload, attribute, name);
-        if (!value.has_value()) {
+        if (!attribute->value.has_value()) {
             out_error = locate(out.path, line,
-                fmt::format("the '{}' attribute needs exactly one string value.", name));
+                fmt::format("the '{}' attribute needs a value - write '#[{}: ...]'.", name, name));
             return false;
         }
+
+        const AST::AttributeValue &written = attribute->value.value();
+
+        // **the reader accumulates, this loop drains.** A manifest has no diagnostic renderer of its
+        // own yet, so every refusal has to come back out as one `<file>:<line>: <what>` sentence - and
+        // the span the reader carried is what points the line at the offending value rather than at the
+        // attribute it sat in
+        AST::AttributeReader reader(name);
+
+        const auto drained = [&]() {
+            if (!reader.has_refusals()) {
+                return false;
+            }
+
+            const AST::AttributeRefusal &first = reader.refusals().front();
+            out_error = locate(out.path, first.span.is_valid() ? first.span.line() : line, first.message);
+            return true;
+        };
 
         if (name == "module") {
             if (!out.name.empty()) {
                 out_error = locate(out.path, line, "'module' is declared twice.");
                 return false;
             }
-            out.name = value.value();
+
+            if (std::optional<std::string> value = reader.string(written)) {
+                out.name = value.value();
+            }
         }
         else if (name == "version") {
             if (!out.version.empty()) {
                 out_error = locate(out.path, line, "'version' is declared twice.");
                 return false;
             }
-            out.version = value.value();
+
+            if (std::optional<std::string> value = reader.string(written)) {
+                out.version = value.value();
+            }
         }
         else if (name == "depends") {
-            out_depends.push_back(value.value());
+            read_manifest_depends(written, reader, out_depends);
         }
         else if (name == "sources") {
-            out_sources.push_back(value.value());
+            for (const AST::AttributeValue *pattern : AST::AttributeReader::each(written)) {
+                if (std::optional<std::string> value = reader.string(*pattern)) {
+                    out_sources.push_back(value.value());
+                }
+            }
+        }
+        else if (name == "link") {
+            // **the scheme is checked here, against this invocation's facts.** A `framework:` on a linux
+            // build is a mistake in the manifest and refusing it needs the platform, which the reader has
+            // and nothing downstream does - by link time there is only a word left
+            Compiler::parse_link_attribute(written, out.directory, facts, out.name, reader, out.link);
+        }
+        else if (name == "build_dir") {
+            if (!out.build_dir.empty()) {
+                out_error = locate(out.path, line, "'build_dir' is declared twice.");
+                return false;
+            }
+
+            // **where an artifact may go is BuildLayout's question**, not this reader's - the same one line
+            // the `link` and `cc` arms are, so `--build-dir` and a manifest cannot drift on what a build
+            // directory is allowed to be
+            if (std::optional<std::string> value = reader.string(written)) {
+                std::string reason;
+
+                if (!Compiler::resolve_declared_build_dir(
+                        value.value(), out.directory, out.build_dir, reason)) {
+                    out_error = locate(out.path, line, reason);
+                    return false;
+                }
+            }
+        }
+        else if (name == "cc") {
+            // **which member of the spec a scheme fills is CBuild's question**, not this reader's - so a
+            // scheme added there does not need a second arm here
+            Compiler::apply_cc_attribute(written, out.directory, reader, out.cc);
+        }
+
+        // **drained once, after every arm.** A refusal the reader accumulated is what makes an arm's value
+        // absent, so a drain per arm is a check the next attribute added here has to remember - and the
+        // one it forgets accepts a value the reader already turned down
+        if (drained()) {
+            return false;
         }
     }
 
@@ -280,19 +388,38 @@ bool read_manifest_attributes(
         return false;
     }
 
+    // **credited after the loop, not inside it.** The attributes are read in the order they were written
+    // and `#[module:]` is only conventionally first, so a `#[link:]` above it would otherwise be attributed
+    // to a module with no name - in the one message whose whole job is to say who asked
+    for (Compiler::LinkRequirement &requirement : out.link) {
+        requirement.declared_by = out.name;
+    }
+
+    out.cc.module_name = out.name;
+
     return true;
 }
 
-// out.sources, from the patterns as written. **relative to the manifest, never to the working directory**
-bool expand_manifest_sources(
-    const std::vector<std::string> &patterns, Parser::ModuleManifest &out, std::string &out_error)
+// **the one glob a manifest's patterns go through**, whichever attribute wrote them.
+//
+// `noun` is what the refusal calls them, and `exclude` is the one file a pattern may match and not keep.
+// Everything else - relative to the manifest and never to the working directory, regular files only,
+// deduplicated, and **sorted** - is the same question for both, and the sort is load-bearing twice over: it
+// is what keeps a module's token indices, and the link order of its own C objects, a property of the module
+// rather than of the order somebody happened to write two patterns in.
+//
+// **a pattern matching nothing is an error here**, unlike a wildcard on the command line. On the command
+// line an empty glob is a pattern the user typed loosely; in a manifest it is a declaration that this module
+// is made of files, and finding none of them means the module is silently empty
+bool expand_manifest_patterns(
+    const std::vector<std::string> &patterns,
+    const Parser::ModuleManifest &out,
+    const std::string &noun,
+    const std::filesystem::path &exclude,
+    std::vector<std::filesystem::path> &out_files,
+    std::string &out_error
+)
 {
-    if (patterns.empty()) {
-        out_error = locate(out.path,
-            "no '#[sources: \"...\"]' - a manifest has to say which files the module is made of.");
-        return false;
-    }
-
     Compiler::ScopedPhase glob_phase("sources glob");
 
     std::error_code ec;
@@ -306,13 +433,9 @@ bool expand_manifest_sources(
                 continue;
             }
 
-            const std::filesystem::path resolved = canonical_or_absolute(match);
+            const std::filesystem::path resolved = Compiler::canonical_or_absolute(match);
 
-            // **a manifest is never one of its own sources.** It is an Echo file living in the directory it
-            // describes, so `#[sources: "*.eco"]` matches it - and compiling it would declare its own
-            // attributes into the program being built. Excluding it here rather than asking authors to write
-            // a pattern that avoids it: the obvious pattern is the one that breaks
-            if (resolved == out.path) {
+            if (!exclude.empty() && resolved == exclude) {
                 continue;
             }
 
@@ -320,21 +443,57 @@ bool expand_manifest_sources(
             kept++;
         }
 
-        // **a pattern matching nothing is an error here**, unlike a wildcard on the command line. On the
-        // command line an empty glob is a pattern the user typed loosely; in a manifest it is a declaration
-        // that this module is made of files, and finding none of them means the module is silently empty
         if (kept == 0) {
             out_error = locate(out.path,
-                fmt::format("the sources pattern '{}' matched no files.", pattern));
+                fmt::format("the {} pattern '{}' matched no files.", noun, pattern));
             return false;
         }
     }
 
-    // sorted, so the module's token indices - and so every symbol minted from a source position - do not
-    // depend on the order the patterns were written in
-    out.sources.assign(unique_sources.begin(), unique_sources.end());
+    out_files.assign(unique_sources.begin(), unique_sources.end());
 
     return true;
+}
+
+// out.sources, from the patterns as written.
+//
+// **a manifest is never one of its own sources.** It is an Echo file living in the directory it describes,
+// so `#[sources: "*.eco"]` matches it - and compiling it would declare its own attributes into the program
+// being built. Excluded here rather than by asking authors to write a pattern that avoids it: the obvious
+// pattern is the one that breaks
+bool expand_manifest_sources(
+    const std::vector<std::string> &patterns, Parser::ModuleManifest &out, std::string &out_error)
+{
+    if (patterns.empty()) {
+        out_error = locate(out.path,
+            "no '#[sources: \"...\"]' - a manifest has to say which files the module is made of.");
+        return false;
+    }
+
+    return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, out_error);
+}
+
+// out.cc.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
+// in a manifest and there is no second grammar for a pattern.
+//
+// **an `include:`, `define:` or `flag:` with no `sources:` is refused**, rather than being a spec that
+// describes a build of nothing. Those three only ever mean something to a translation unit, so a manifest
+// carrying one and no source has said something it cannot have meant - the rule a `#[sources:]` pattern
+// matching no files already follows
+bool expand_manifest_cc_sources(Parser::ModuleManifest &out, std::string &out_error)
+{
+    if (out.cc.source_patterns.empty()) {
+        if (out.cc.includes.empty() && out.cc.defines.empty() && out.cc.flags.empty()) {
+            return true;
+        }
+
+        out_error = locate(out.path,
+            "this module has '#[cc: ...]' options but no '#[cc: \"sources:...\"]' to apply them to.");
+        return false;
+    }
+
+    return expand_manifest_patterns(
+        out.cc.source_patterns, out, "C sources", /*exclude=*/{}, out.cc.sources, out_error);
 }
 
 // out.depends, canonical. An entry may name the manifest or the directory holding it - see manifest_at
@@ -343,7 +502,7 @@ bool resolve_manifest_depends(
 {
     for (const std::string &spelled : written) {
         const std::filesystem::path target = out.directory / spelled;
-        const std::optional<std::filesystem::path> resolved = manifest_at(target);
+        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(target);
 
         if (!resolved.has_value()) {
             out_error = locate(out.path, fmt::format(
@@ -352,7 +511,7 @@ bool resolve_manifest_depends(
             return false;
         }
 
-        out.depends.push_back(canonical_or_absolute(resolved.value()));
+        out.depends.push_back(Compiler::canonical_or_absolute(resolved.value()));
     }
 
     return true;
@@ -372,7 +531,7 @@ bool read_manifest_with(
     }
 
     out = Parser::ModuleManifest{};
-    out.path = canonical_or_absolute(path);
+    out.path = Compiler::canonical_or_absolute(path);
     out.directory = out.path.parent_path();
 
     // a throwaway module and a throwaway collector: the manifest declares nothing, and parsing it into the
@@ -426,12 +585,14 @@ bool read_manifest_with(
         }
 
         if (!read_manifest_attributes(
-                payload, module, out, sources_written, depends_written, out_error)) {
+                payload, module, scratch.parser.target_facts, out, sources_written, depends_written,
+                out_error)) {
             return false;
         }
     }
 
     return expand_manifest_sources(sources_written, out, out_error)
+        && expand_manifest_cc_sources(out, out_error)
         && resolve_manifest_depends(depends_written, out, out_error);
 }
 
@@ -470,14 +631,14 @@ bool Parser::resolve_module_graph(
     std::vector<std::filesystem::path> root_order;
 
     for (const std::filesystem::path &root : roots) {
-        const std::optional<std::filesystem::path> resolved = manifest_at(root);
+        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(root);
         if (!resolved.has_value()) {
             out_error = fmt::format(
                 "{}: no such manifest - expected a manifest file or a directory holding a 'module.eco'.",
                 root.string());
             return false;
         }
-        pending.push_back(canonical_or_absolute(resolved.value()));
+        pending.push_back(Compiler::canonical_or_absolute(resolved.value()));
         root_order.push_back(pending.back());
     }
 

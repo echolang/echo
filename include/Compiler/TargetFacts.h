@@ -91,6 +91,15 @@ namespace Compiler
         // type's question: a fact added without a line here would silently share a cache key with a build
         // that did not have it, which is the one cache failure with no diagnostic
         std::string cache_signature() const;
+
+        // `.dylib` / `.dll` / `.so` - what this platform calls a loadable library.
+        //
+        // **a method rather than a free function of the host**, because the two callers legitimately want
+        // different facts and the spelling has to say which: Compiler::build_c_shared_library names a file
+        // this machine's dlopen will open, so it asks `host()`, while anything naming a file for the
+        // *target* asks the invocation's. A free `host_library_extension()` read the same either way, and
+        // the one that was wrong would have been wrong in silence
+        std::string shared_library_extension() const;
     };
 };
 

@@ -33,12 +33,12 @@
  * pointers, so a per-container allocator would be an invented ABI. The intended future shape is a
  * monomorphized array<T, A> plus mem::alloc_with, which is purely additive.
  *
- * `#[core: "array"]` is what lets the compiler *say* `array<E>`, and it needs to say it in exactly
+ * `#[core: array]` is what lets the compiler *say* `array<E>`, and it needs to say it in exactly
  * one situation: `$a = [1, 2, 3];`, an array literal with no declared type to take one from. It
  * knows no method, no property and no shape of this type - everything below is looked up the way
  * your own code is.
  */
-#[core: "array"]
+#[core: array]
 struct array<T> : contract::iterable<T>, contract::const_iterable<const T>
 {
     // **the allocation, and the length that says how much of it is live.** two fields and not three,

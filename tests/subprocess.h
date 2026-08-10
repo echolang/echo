@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <sys/wait.h>
@@ -63,6 +64,28 @@ namespace EchoTests
         return "\"" + path.string() + "\"";
     }
 
+    // the one line of a report whose first whitespace-separated field is `first_field`, or "".
+    //
+    // both `--explain-cache` and `[clean]` print one whitespace-aligned row per module and both suites ask
+    // the same question of one - which field follows is what they differ in, and that is the assertion
+    inline std::string line_starting_with(const std::string &output, const std::string &first_field)
+    {
+        std::istringstream stream(output);
+        std::string line;
+
+        while (std::getline(stream, line)) {
+            std::istringstream fields(line);
+            std::string first;
+            fields >> first;
+
+            if (first == first_field) {
+                return line;
+            }
+        }
+
+        return "";
+    }
+
     inline void write_file(const std::filesystem::path &path, const std::string &content)
     {
         std::filesystem::create_directories(path.parent_path());
@@ -94,7 +117,7 @@ namespace EchoTests
         ScopedProject &operator=(const ScopedProject &) = delete;
 
         const std::filesystem::path &root() const { return _root; }
-        std::filesystem::path cache_dir() const { return _root / "cache"; }
+        std::filesystem::path build_dir() const { return _root / "build"; }
 
         // `cd <dir> && echoc <args>`, because the working directory is what project discovery and
         // manifest resolution both read. The root is the default, which is what every case but the

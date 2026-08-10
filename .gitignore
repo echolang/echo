@@ -11,6 +11,11 @@ CTestTestfile.cmake
 _deps
 .cmake
 
-# compiled module artifacts. The default store is `.echo` beside each manifest, so a library's cache lives
-# with the code it belongs to - deleting a checkout deletes its cache, and no two projects share one
+# compiled module artifacts. The default build directory is `ecobuild` beside each manifest, so a library's
+# artifacts live with the code they belong to - deleting a checkout deletes them, and no two projects share
+# one. `echoc clean` is the tidy way to remove them
+ecobuild/
+
+# what older versions of echoc used for the same thing. Kept so a checkout made before the rename does not
+# start showing one; nothing writes here any more, and `echoc clean` says so when it finds one
 .echo/

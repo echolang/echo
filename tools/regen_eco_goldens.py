@@ -102,7 +102,7 @@ def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None)
         + shlex.quote(str(ECHOC))
         + " "
         + subcommand
-        + "--cache-dir "
+        + "--build-dir "
         + shlex.quote(str(scratch / "cache"))
         + " "
         + flags

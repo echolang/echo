@@ -20,13 +20,20 @@ namespace
     constexpr std::string_view k_declaration_attributes[] = {
         "inline", "implicit", "intrinsic", "builtin", "core", "unique" };
 
-    // and the manifest's four, which reach this parser too: a `module.eco` is **Echo**, read by the real
+    // and the manifest's seven, which reach this parser too: a `module.eco` is **Echo**, read by the real
     // lexer and the real attribute parser into a scratch bundle. Leaving them out of the union made every
     // manifest in the tree report four unknown attributes at once.
     //
     //   module / version / depends / sources    Parser::read_manifest_attributes
+    //   link                                    -> Compiler::parse_link_requirement
+    //   cc                                      -> Compiler::parse_cc_requirement
+    //   build_dir                               -> Compiler::BuildLayout
+    //
+    // link and cc carry a scheme inside their value rather than being one attribute per kind, so what a
+    // build may need linked can grow without this list growing with it - which is also why neither name
+    // says what it is for beyond the tool it reaches
     constexpr std::string_view k_manifest_attributes[] = {
-        "module", "version", "depends", "sources" };
+        "module", "version", "depends", "sources", "link", "cc", "build_dir" };
 
     template <size_t N>
     bool contains(const std::string_view (&names)[N], const std::string &name)

@@ -8,7 +8,7 @@
 
 #include "subprocess.h"
 
-// what a `#[link: "..."]` value means, and what it becomes on a link line and inside the JIT.
+// what a `#[link: ...]` value means, and what it becomes on a link line and inside the JIT.
 //
 // the scheme vocabulary is closed for the reason TargetFacts' axis vocabularies are: a value outside it has
 // to be a located error, because a link requirement that quietly does nothing surfaces much later as a
@@ -72,19 +72,31 @@ TEST_CASE("a library names itself and nothing else", "[link]")
     REQUIRE(requirement.declared_by == "lib");
 }
 
-TEST_CASE("a requirement spells itself the way the manifest wrote it", "[link]")
+TEST_CASE("a requirement spells itself the way it was written", "[link]")
 {
     ScopedProject project("spelling");
 
     fs::create_directories(project.root() / "vendor");
 
     // what a diagnostic quotes back. The settled value of a path scheme is absolute and is not the text in
-    // the file, so the scheme has to come back with it or the reader is sent looking for the wrong string
-    REQUIRE(Compiler::link_requirement_spelling(parsed("lib:GL", project.root())) == "lib:GL");
+    // the file, so the scheme has to come back with it or the reader is sent looking for the wrong string.
+    //
+    // **which of the two spellings is `declared_by`**, which already records the medium: `parsed` here
+    // credits a module, so these read as a manifest wrote them
+    REQUIRE(Compiler::link_requirement_spelling(parsed("lib:GL", project.root())) == "lib \"GL\"");
     REQUIRE(Compiler::link_requirement_spelling(parsed("framework:OpenGL", project.root()))
-        == "framework:OpenGL");
+        == "framework \"OpenGL\"");
     REQUIRE(Compiler::link_requirement_spelling(parsed("search:vendor", project.root()))
-        .rfind("search:/", 0) == 0);
+        .rfind("search \"/", 0) == 0);
+
+    // a command-line one is credited to nobody, and comes back in the syntax it was typed in - quoting
+    // it as an attribute would send its reader looking for a manifest line that does not exist
+    Compiler::LinkRequirement from_argv;
+    std::string error;
+
+    REQUIRE(Compiler::parse_link_requirement(
+        "lib:GL", project.root(), facts_for("darwin"), "", from_argv, error));
+    REQUIRE(Compiler::link_requirement_spelling(from_argv) == "lib:GL");
 }
 
 TEST_CASE("the scheme is mandatory", "[link]")

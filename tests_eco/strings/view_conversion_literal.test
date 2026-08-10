@@ -1,5 +1,5 @@
 # the string type is declared *in the program*, exactly as its sibling view_conversion does and for the
-# same reason: two `#[core: "string"]` declarations in one program is a located error
+# same reason: two `#[core: string]` declarations in one program is a located error
 stdlib: off
 
 --- OUT --->

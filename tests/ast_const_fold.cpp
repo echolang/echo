@@ -213,7 +213,7 @@ TEST_CASE("the two ownership builtins fold from the taxonomy", "[const_fold]")
 {
     // an int32 owns nothing, so it copies as bytes and needs no teardown
     auto trivial = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"is_trivially_copyable\"]\n"
+        "#[builtin: is_trivially_copyable]\n"
         "function itc<T>() : bool;\n"
         "if (itc<int32>()) { echo 1; }\n");
 
@@ -222,7 +222,7 @@ TEST_CASE("the two ownership builtins fold from the taxonomy", "[const_fold]")
     // and a class handle owns a reference, so both answers invert - because AST::classify_copy and
     // AST::needs_destruction say so, not because this file does
     auto owning = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"needs_destruction\"]\n"
+        "#[builtin: needs_destruction]\n"
         "function nd<T>() : bool;\n"
         "class Node { int32 $v; }\n"
         "if (nd<Node>()) { echo 1; }\n");
@@ -230,7 +230,7 @@ TEST_CASE("the two ownership builtins fold from the taxonomy", "[const_fold]")
     REQUIRE(fold_last_condition(*owning).as_bool());
 
     auto plain = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"needs_destruction\"]\n"
+        "#[builtin: needs_destruction]\n"
         "function nd<T>() : bool;\n"
         "if (nd<int32>()) { echo 1; }\n");
 
@@ -244,7 +244,7 @@ TEST_CASE("a builtin asked about an unbound T is pending, never a refusal", "[co
     // unsettled type parameter on purpose, so folding against an unbound `T` is silently the wrong
     // answer in the one direction that compiles. inside a template body it has to read as a not-yet
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"needs_destruction\"]\n"
+        "#[builtin: needs_destruction]\n"
         "function nd<T>() : bool;\n"
         "function probe<T>() : int32 { if (nd<T>()) { return 1; } return 0; }\n");
 
@@ -256,7 +256,7 @@ TEST_CASE("a layout query is refused, and says why", "[const_fold]")
     // size_of and align_of read an llvm::DataLayout, which exists only at codegen. a refusal rather than
     // a pending, because no fixpoint round is ever going to answer it
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"size_of\"]\n"
+        "#[builtin: size_of]\n"
         "function so<T>() : usize;\n"
         "usize $subject = so<int32>();\n");
 
@@ -269,7 +269,7 @@ TEST_CASE("a layout query is refused, and says why", "[const_fold]")
 TEST_CASE("a builtin that does something rather than answering is refused", "[const_fold]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "#[builtin: \"live_allocations\"]\n"
+        "#[builtin: live_allocations]\n"
         "function live() : usize;\n"
         "usize $subject = live();\n");
 

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Compiler/CBuild.h"
+#include "Compiler/LinkRequirement.h"
 #include "Compiler/TargetFacts.h"
 
 #include <filesystem>
@@ -19,6 +21,9 @@ namespace Parser
     //     #[version: "0.1.0"]
     //     #[depends: "../geom/module.eco"]
     //     #[sources: "src/*.eco"]
+    //     #[link: lib "m"]
+    //     #[cc: sources "c/*.c"]
+    //     #[build_dir: "target"]
     //
     // Written in Echo rather than in a config format of its own, so there is one grammar and one lexer
     // in the project, and so a manifest is highlighted, commented and diffed like the code beside it.
@@ -27,9 +32,9 @@ namespace Parser
     // *declaration* pass, so the reader runs the real parser's first two passes over a throwaway module
     // and never touches the bundle being built.
     //
-    // repeated `depends` and `sources` accumulate, because AST::AttributeList is already a multimap. The
-    // alternative - one attribute holding a list - would need a list expression the attribute grammar has
-    // no reader for.
+    // repeated `depends` and `sources` accumulate, because AST::AttributeList is already a multimap -
+    // and so does a list inside one, because AST::AttributeReader::each reads a lone value as a list of
+    // it. The two spellings are one rule and not two arms.
     struct ModuleManifest
     {
         // the manifest file itself, absolute and canonical - this is the identity two `depends` paths
@@ -53,6 +58,26 @@ namespace Parser
 
         // the manifests this module needs parsed before it, absolute and canonical
         std::vector<std::filesystem::path> depends;
+
+        // what this module needs linked, in the order it was written. **not an input to the module's cache
+        // key**, and that is a statement rather than an omission: a link requirement changes no object, only
+        // the link step - and the executable is never cached. The manifest's own bytes are already folded
+        // into the key, so editing one rebuilds this module anyway
+        std::vector<Compiler::LinkRequirement> link;
+
+        // the C sources that ship with this module, if any. `sources` inside it is expanded the same way
+        // `#[sources:]` is, by the same expander
+        Compiler::CBuildSpec cc;
+
+        // where this module's build artifacts go, absolute, and **empty when the manifest declares none** -
+        // which is what lets the default and the command line answer instead. Resolved here rather than at
+        // the point of use for the reason every other path in this struct is: a manifest has to mean the
+        // same thing wherever echoc is run from.
+        //
+        // **not an input to the module's cache key**, and that is a statement rather than an omission, the
+        // same one `link` makes: where an object is put changes nothing about the object. The manifest's
+        // own bytes are already folded into the key, so editing this line rebuilds the module anyway
+        std::filesystem::path build_dir;
     };
 
     // the paths one source pattern names, in no particular order and unfiltered - a directory can come back,
@@ -65,6 +90,13 @@ namespace Parser
     // glob::glob builds a std::regex per call, which measured at ~5 ms each in a debug build and made the
     // standard library's three patterns cost nearly twice what lexing all of it does. `--timings` found that.
     std::vector<std::filesystem::path> expand_source_pattern(const std::filesystem::path &pattern);
+
+    // **the sole answer to "what manifest does this path name".** A `-m`, a `#[depends:]` entry and the
+    // project discovered in the working directory may each name the manifest file or the directory
+    // holding one, because both read naturally and only one of them survives moving the file - so the
+    // `module.eco` inside a directory is spelled here and asked for everywhere else. Nullopt when there
+    // is no manifest there at all
+    std::optional<std::filesystem::path> manifest_at(const std::filesystem::path &target);
 
     // reads one manifest. `out_error` is a located message on failure - `<file>:<line>: <what>` - in the
     // shape EchoTests::parse_eco_test_file uses, and for the same reason: **anything the format does not

@@ -37,7 +37,7 @@ already highlights it, the compiler already knows how to read it, and there's no
 maintain. It's read by the real lexer, into a scratch bundle that is thrown away; nothing it declares reaches
 your program.
 
-Four attributes, and between them the whole format:
+Seven attributes, and between them the whole format:
 
 | | |
 |---|---|
@@ -45,6 +45,36 @@ Four attributes, and between them the whole format:
 | `#[version: "0.1.0"]` | recorded, and part of the build fingerprint. Nothing resolves against it yet |
 | `#[sources: "pattern"]` | files this module is made of. Repeatable |
 | `#[depends: "path"]` | another module this one needs. Repeatable |
+| `#[link: <kind> "value"]` | a native library this module needs linked. Repeatable |
+| `#[cc: <kind> "value"]` | C sources that ship with this module. Repeatable |
+| `#[build_dir: "path"]` | where this module's build artifacts go. Defaults to `ecobuild` |
+
+`link` and `cc` are what a binding to a real native library is made of, and they travel with the module that
+declares them — anything depending on it inherits them without repeating a word. Both *tag* their value with
+what kind of thing it is rather than being an attribute per kind, so what a build can be told grows without
+this table growing with it. [C binding](cbinding.md) has the kinds and what each one does. `build_dir` is the
+opposite kind of thing — it says nothing about your program, only about where the compiler puts what it
+makes; see [building the second time](#building-the-second-time).
+
+### Values
+
+An attribute's value is data, and it comes in six shapes: a string, a number, `true` or `false`, a bare
+**name**, a `[` list `]`, and a `{` record `}`. A value may be tagged with a name in front of it, which is
+how `#[link: framework "OpenGL"]` says what kind of thing it names.
+
+A bare name means *itself* — it is never a constant, a variable or a type. That is the same rule
+[conditional compilation](conditional.md) has always followed, where `darwin` in `#[if: os == darwin]` is a
+name and not something the program declares. Which is also the rule for when to quote: a closed set the
+compiler knows is a bare name, and free text is a string.
+
+**Anywhere one value is accepted, a list of them is accepted.** So these say the same thing:
+
+```echo
+#[sources: "src/*.eco"]
+#[sources: "gen/*.eco"]
+
+#[sources: ["src/*.eco", "gen/*.eco"]]
+```
 
 Anything the format doesn't understand is an error, never a silently ignored line. Why be that strict? Because
 the alternative fails where you can't see it. A misspelled `#[source:]` gives you a module with no files and no
@@ -91,6 +121,11 @@ When a library needs another library, it says so itself rather than making you s
 
 #[sources: "src/*.eco"]
 ```
+
+A dependency can also say out loud what kind it is — `#[depends: path "../core"]` means exactly what the
+bare string does. The tag exists so a second kind can arrive without the common case growing a word, and
+`git { url: "...", rev: "..." }` is the shape that is waiting for one; today it parses, checks its fields
+and is then refused, because nothing fetches a repository yet.
 
 Now `-m ../geom` pulls in `../core` too, once, in the order that works. A `#[depends:]` entry may name the
 manifest file or the directory holding it — both read naturally, and only one of them survives moving the
@@ -159,9 +194,40 @@ $ echoc build -o app -m ../geom -ec app.eco
 
 `-ec` is how you ask what happened, and a miss names the file rather than reporting a number you can't act on.
 
-Artifacts live in `.echo` beside each manifest. So a library's cache travels with the library, deleting a
-checkout deletes its cache, and no two projects can be confused for one another. `--cache-dir` puts them
-somewhere else.
+Artifacts live in `ecobuild` beside each manifest — everything the build produced, in one directory, so the
+only thing left next to your source is the binary you asked for. A library's artifacts travel with the
+library, deleting a checkout deletes them, and no two projects can be confused for one another.
+
+A module can name its own directory instead:
+
+```echo
+#[build_dir: "target"]
+```
+
+which is relative to the manifest, like every other path in it. `--build-dir <dir>` overrides both, and puts
+every module under one root with its own subdirectory — the manifest describes your project's layout, the
+flag describes this particular build.
+
+When you want to start over, `echoc clean` empties them:
+
+```bash
+$ echoc clean
+[clean]
+  stdlib  /home/you/.cache/echo/stdlib  kept (pass --stdlib to remove it)
+  geom    /home/you/geom/ecobuild       removed
+  app     /home/you/app/ecobuild        removed
+removed 2 build directories.
+```
+
+It reaches the whole graph — a dependency's artifacts are as much your build's output as your own — and
+`-n` shows you what it would do without doing it. It leaves the standard library's store alone by default,
+since that one is shared by every project on the machine and is the slowest thing to build again.
+
+The one thing it will not do is delete a directory it can't prove it made. Every build directory gets a
+`CACHEDIR.TAG` — a small marker file that also tells backup tools to skip it — and if you point
+`#[build_dir:]` or `--build-dir` at a directory that already holds something without one, the build refuses
+before writing anything and `clean` refuses before removing anything. A build directory is a place that gets
+emptied, and being sure about which one it is matters more than being convenient.
 
 Two exceptions to "beside the manifest", both because a cache must never get in the way. The standard library
 ships with the compiler rather than with your program, so it caches under `$XDG_CACHE_HOME/echo` (or

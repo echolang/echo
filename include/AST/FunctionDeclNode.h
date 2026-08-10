@@ -252,7 +252,7 @@ namespace AST
             return extern_symbol.has_value();
         }
 
-        // marked `#[builtin: "size_of"]`: the compiler answers a call to this function directly
+        // marked `#[builtin: size_of]`: the compiler answers a call to this function directly
         // instead of emitting one. distinct from `intrinsic`, which names an *LLVM* intrinsic and
         // therefore still produces an llvm::Function - a builtin has no symbol at all, and its
         // call sites fold to a constant. the type it is asking about arrives in instantiation_args

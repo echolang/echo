@@ -9,6 +9,6 @@
 #[module: "linkmath"]
 #[version: "0.1.0"]
 
-#[link: "lib:m"]
+#[link: lib "m"]
 
 #[sources: "src/*.eco"]

@@ -307,6 +307,57 @@ struct TokenSlice
     }
 };
 
+// a token range, as three plain values.
+//
+// **TokenSlice with the const stripped off**, and that is the whole of why it exists: a slice holds a
+// reference and two const members, so it can be neither assigned nor stored in a container that has to
+// grow - and an attribute value has to live in a std::vector and in a std::optional at once. Everything
+// that wants a slice asks for one; nothing stores the slice itself.
+//
+// **`end_index` is inclusive, exactly as TokenSlice's is** - a span of one token has start == end, which
+// is what AST::span_of draws an underline from. The two factories below are the only places that
+// convention is spelled, because a cursor position is one *past* the last token consumed and converting
+// it by hand at each site is one off-by-one per site.
+//
+// an invalid span is a real answer - a value carries one for the tag it does not have
+struct TokenSpan
+{
+    const TokenCollection *tokens = nullptr;
+    size_t start_index = 0;
+    size_t end_index = 0;
+
+    // one token
+    static TokenSpan of(const TokenReference &token) {
+        return TokenSpan { &token.get_collection_ref(), token.get_handle(), token.get_handle() };
+    }
+
+    // everything a walk consumed, given where it started and where the cursor now is. `past_end` is a
+    // cursor index, so the last token it holds is the one before it
+    static TokenSpan upto(const TokenCollection &tokens, size_t start, size_t past_end) {
+        return TokenSpan { &tokens, start, past_end > start ? past_end - 1 : start };
+    }
+
+    bool is_valid() const {
+        return tokens != nullptr && end_index >= start_index && start_index < tokens->size();
+    }
+
+    TokenSlice slice() const {
+        assert(is_valid());
+        return tokens->slice(start_index, end_index);
+    }
+
+    TokenReference first() const {
+        assert(is_valid());
+        return TokenReference(*tokens, start_index);
+    }
+
+    // the line a hand-formatted message points at - the manifest reader's `<file>:<line>: <what>`,
+    // which has no renderer to hand it a slice. zero when there is nothing to point at
+    uint32_t line() const {
+        return is_valid() ? first().line() : 0;
+    }
+};
+
 struct TokenList
 {
     const TokenCollection &tokens;

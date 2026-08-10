@@ -29,8 +29,9 @@ namespace Compiler
 
     // **the sole answer to "what can this terminal do".**
     //
-    // three facts - colour, unicode, width - resolved once from the command line and the environment, and
-    // read by everything that writes to a terminal. Shaped like Compiler::TargetFacts on purpose: a small
+    // four facts - colour, unicode, width, interactive - resolved once from the command line and the
+    // environment, and read by everything that writes to a terminal. Shaped like Compiler::TargetFacts on
+    // purpose: a small
     // struct of settled facts rather than a helper each caller asks its own way, because the failure mode
     // is the same one. Two places deciding independently whether to emit an escape sequence is how a
     // redirected stream ends up with half of them in it.
@@ -57,6 +58,16 @@ namespace Compiler
         // reports, and is deliberately the same answer as "narrow enough that wrapping would not help"
         unsigned int width = 0;
 
+        // may the cursor be moved on this stream - a carriage return and an erase-to-end-of-line, so a
+        // line can be rewritten in place. **Not derivable from the other three.** `width` is 0 whenever
+        // the ioctl fails on a terminal that is very much one, and `color` is forced true by
+        // `--color=always`, which is a request for escape sequences in a *log* and emphatically not a
+        // request for a line that rewrites itself in one.
+        //
+        // **the one fact here with no flag behind it**, for that same reason: there is a real invocation
+        // that wants colour in a file and none that wants a carriage return in one
+        bool interactive = false;
+
         // resolves the facts for the diagnostic stream (stderr), applying the two flags over what the
         // environment says. The flags win outright: `--color=always` into a pipe is a user asking for
         // escape sequences on purpose, which is what a CI job that renders them wants.
@@ -66,8 +77,8 @@ namespace Compiler
         // to the legacy console the same binary may be run from
         static TerminalCapabilities resolve(ColorChoice color_choice, DiagnosticFormat format);
 
-        // no colour, no unicode, no width. What every non-terminal gets, and what the unit tests assert
-        // against so a suite's output does not depend on where it was run from
+        // no colour, no unicode, no width, not interactive. What every non-terminal gets, and what the
+        // unit tests assert against so a suite's output does not depend on where it was run from
         static TerminalCapabilities plain();
     };
 

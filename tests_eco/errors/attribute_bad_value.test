@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] attribute_bad_value.eco:4:11
+
+  a record key has to be a name, written 'key: value'.
+
+  3 | // value on the right may be anything, but the thing being named cannot be a number
+  4 | #[core: { 1: "array" }]
+    :           ^
+  5 | struct Thing
+
+1 error, nothing was compiled.

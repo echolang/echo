@@ -18,7 +18,7 @@ function pid() : int32
  *
  * So a program invoked with no arguments answers 1, the way C's `argc` does.
  */
-#[builtin: "process_argc"]
+#[builtin: process_argc]
 function argc() : usize;
 
 /**
@@ -27,7 +27,7 @@ function argc() : usize;
  * The low-level seam, here because `arg` and `args` are built on it and there are no visibility
  * modifiers yet. Prefer those - they do the bounds check and hand back a `string::view`.
  */
-#[builtin: "process_argv"]
+#[builtin: process_argv]
 function raw_argv() : ptr<ptr<uint8>>;
 
 /**
@@ -37,7 +37,7 @@ function raw_argv() : ptr<ptr<uint8>>;
  * arrives as the entry point's third argument rather than through `environ`, which is a data symbol
  * an `extern` block has no way to bind and which Darwin does not export under that name anyway.
  */
-#[builtin: "process_envp"]
+#[builtin: process_envp]
 function raw_envp() : ptr<ptr<uint8>>;
 
 /**
@@ -245,5 +245,5 @@ function exe() : string
  *
  * The exit code is what the shell sees. `0` means success by convention.
  */
-#[builtin: "exit"]
+#[builtin: exit]
 function exit(int32 $code) : void;

@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include "AST/ASTAttributeValue.h"
 #include "AST/ASTNode.h"
 #include "Token.h"
 
+#include <optional>
+
 namespace AST
 {
-    class ExprNode;
-
     class AttributeNode : public Node
     {
     public:
@@ -17,20 +18,28 @@ namespace AST
 
         TokenSlice attribute_tokens;
         TokenReference attribute_id;
-        TokenList attribute_values;
 
-        NodeReferenceList attribute_exprs;
+        // what was written after the colon, or nothing for a flag like `#[inline]`.
+        //
+        // **a value, not an expression.** This used to be a NodeReferenceList holding whatever
+        // Parser::parse_expr_ref made of the tokens, which put a live LiteralStringExprNode into the
+        // module's arena for every `#[core: ...]` in the program and left every consumer to test node
+        // types by hand. See AST::AttributeValue for why an expression is the wrong tool here
+        std::optional<AttributeValue> value;
 
         AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) :
             attribute_tokens(attribute_tokens),
-            attribute_id(attribute_id),
-            attribute_values(TokenList(attribute_tokens.tokens))
+            attribute_id(attribute_id)
         {
         };
         ~AttributeNode() {};
 
         const std::string node_description() override {
-            return "attr<" + attribute_id.value() + ">";
+            if (!value.has_value()) {
+                return "attr<" + attribute_id.value() + ">";
+            }
+
+            return "attr<" + attribute_id.value() + ": " + attribute_value_spelling(value.value()) + ">";
         }
 
         void accept(Visitor &visitor) override {

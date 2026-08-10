@@ -4,4 +4,4 @@ expect: fail
 --- OUT --->
 [error] Module Manifest Error
 
-  module.eco:4: unknown manifest attribute 'source', expected one of: module, version, depends, sources
+  module.eco:4: unknown manifest attribute 'source', expected one of: module, version, depends, sources, link, cc, build_dir

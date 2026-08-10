@@ -1,0 +1,10 @@
+// an attribute value is a closed data grammar, so a shape it cannot say is a located error rather than
+// whatever the expression parser would have made of the tokens. a record key is a name, always - the
+// value on the right may be anything, but the thing being named cannot be a number
+#[core: { 1: "array" }]
+struct Thing
+{
+    int32 $a;
+}
+
+echo 1;

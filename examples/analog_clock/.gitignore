@@ -1,6 +1,3 @@
-# what `echoc build -o clock` leaves here: the binary, and the per-module object beside it
+# what `echoc build -o clock` leaves here: the binary, and the build directory holding everything else
 clock
-*.o
-
-# the object cache, where --cache-dir defaults to when a build has a manifest
-.echo/
+ecobuild/

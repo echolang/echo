@@ -139,7 +139,10 @@ public:
     const std::string &prune_report() const;
 
     // false when no binary was produced, see Backend::make_exec
-    bool make_exec(std::string executable_name);
+    bool make_exec(
+        const std::string &executable_name,
+        const std::filesystem::path &object_path,
+        const std::vector<Compiler::LinkRequirement> &link);
 
     // one object per unit that still has a module, into `object_for(unit name)`. The objects are appended to
     // `out_objects` in unit order, so the link command is deterministic
@@ -149,7 +152,10 @@ public:
 
     // links what emit_objects produced, plus anything a cache supplied
     bool link_executable(
-        const std::string &executable_name, const std::vector<std::filesystem::path> &objects);
+        const std::string &executable_name,
+        const std::vector<std::filesystem::path> &objects,
+        const std::vector<Compiler::LinkRequirement> &link
+    );
 
 private:
     Compiler::LLVM::CodegenContext _ctx;

@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/HostTool.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
@@ -8,6 +9,7 @@
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
+#include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/TargetSelect.h>
@@ -262,7 +264,11 @@ void append_objects(
 }
 
 std::optional<std::vector<std::string>> host_linker_command(
-    const std::string &executable_name, const std::vector<std::filesystem::path> &objects)
+    const std::string &executable_name,
+    const std::vector<std::filesystem::path> &objects,
+    const std::vector<std::filesystem::path> &link_objects,
+    const std::vector<std::string> &link_words
+)
 {
 #if defined(__APPLE__)
     const std::string &sdk_root = host_sdk_root();
@@ -282,36 +288,27 @@ std::optional<std::vector<std::string>> host_linker_command(
 
     std::vector<std::string> command = { "ld", "-o", executable_name };
     append_objects(command, objects);
+
+    // the build's own prebuilt objects sit with ours, ahead of every library: a `-l` resolves against the
+    // undefined symbols the linker has seen so far, and an object added after them contributes none
+    append_objects(command, link_objects);
+
     command.push_back("-lSystem");
     command.push_back("-syslibroot");
     command.push_back(sdk_root);
     command.push_back("-arch");
     command.push_back(arch);
 
+    command.insert(command.end(), link_words.begin(), link_words.end());
+
     return command;
 #else
     (void)executable_name;
     (void)objects;
+    (void)link_objects;
+    (void)link_words;
     return std::nullopt;
 #endif
-}
-
-// runs one argv and answers whether it succeeded. **as an argv, with no shell in between**: an SDK path or
-// an output name may contain a space, and llvm::sys::ExecuteAndWait takes the words as words - the quoting
-// this replaces wrapped each in `"` and had no answer at all for a path containing one, besides spawning a
-// /bin/sh on top of the linker to interpret it
-bool run_command(const std::vector<std::string> &argv)
-{
-    llvm::ErrorOr<std::string> program = llvm::sys::findProgramByName(argv.front());
-
-    if (!program) {
-        return false;
-    }
-
-    std::vector<llvm::StringRef> args(argv.begin(), argv.end());
-    args.front() = program.get();
-
-    return llvm::sys::ExecuteAndWait(program.get(), args) == 0;
 }
 
 };
@@ -331,11 +328,10 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
         return false;
     }
 
+    // the directory is the driver's - it prepared one before it decided to emit here at all. Creating one
+    // on the way past would be a second answer to where a build artifact goes, in the layer furthest from
+    // the question
     std::error_code ec;
-
-    if (object_path.has_parent_path()) {
-        std::filesystem::create_directories(object_path.parent_path(), ec);
-    }
 
     llvm::raw_fd_ostream dest(object_path.string(), ec, llvm::sys::fs::OF_None);
 
@@ -360,7 +356,8 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
 
 bool Backend::link_executable(
     const std::string &executable_name,
-    const std::vector<std::filesystem::path> &objects
+    const std::vector<std::filesystem::path> &objects,
+    const std::vector<Compiler::LinkRequirement> &link
 )
 {
     if (objects.empty()) {
@@ -368,8 +365,14 @@ bool Backend::link_executable(
         return false;
     }
 
-    if (const auto command = host_linker_command(executable_name, objects)) {
-        if (run_command(command.value())) {
+    // **rendered once, for both spellings below.** An `object:` becomes another object file and everything
+    // else becomes words after them, and which is which is not a decision either call site repeats
+    std::vector<std::filesystem::path> link_objects;
+    std::vector<std::string> link_words;
+    Compiler::partition_link_requirements(link, link_objects, link_words);
+
+    if (const auto command = host_linker_command(executable_name, objects, link_objects, link_words)) {
+        if (Compiler::run_tool(command.value())) {
             gen_debug_symbols(executable_name);
             return true;
         }
@@ -381,9 +384,13 @@ bool Backend::link_executable(
 
     std::vector<std::string> fallback = { "clang", "-o", executable_name };
     append_objects(fallback, objects);
+    append_objects(fallback, link_objects);
+    fallback.insert(fallback.end(), link_words.begin(), link_words.end());
 
-    if (!run_command(fallback)) {
-        llvm::errs() << "Error: linking failed\n";
+    // **no message of its own.** Whichever tool ran has already said what went wrong, on the stderr it
+    // inherited; naming which module asked for each requirement is the driver's to render, because that
+    // sentence needs the DiagnosticRenderer and this layer has neither it nor a reason to grow one
+    if (!Compiler::run_tool(fallback)) {
         return false;
     }
 
@@ -412,7 +419,7 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
     //
     // **best effort**, exactly as host_linker_command is: a toolchain without dsymutil still produces a
     // binary that runs, and one that is debuggable for as long as its objects stay put
-    if (!run_command({ "dsymutil", executable_name })) {
+    if (!Compiler::run_tool({ "dsymutil", executable_name })) {
         llvm::errs() << "Note: dsymutil failed or is unavailable - the executable is debuggable only "
                         "while its object files remain where they were linked from\n";
     }
@@ -422,7 +429,11 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
 #endif
 }
 
-bool Backend::make_exec(std::string executable_name)
+bool Backend::make_exec(
+    const std::string &executable_name,
+    const std::filesystem::path &object_path,
+    const std::vector<Compiler::LinkRequirement> &link
+)
 {
     Compiler::LLVM::CmpUnit *main_cmp_unit = _ctx.main_cmp_unit();
     if (!main_cmp_unit) {
@@ -430,13 +441,11 @@ bool Backend::make_exec(std::string executable_name)
         return false;
     }
 
-    const std::filesystem::path object_path = executable_name + ".o";
-
     if (!emit_object(*main_cmp_unit, object_path)) {
         return false;
     }
 
-    return link_executable(executable_name, { object_path });
+    return link_executable(executable_name, { object_path }, link);
 }
 
 // guards the module, builds the four analysis managers and cross-registers the proxies, then runs

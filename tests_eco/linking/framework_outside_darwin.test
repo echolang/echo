@@ -5,4 +5,4 @@ expect: fail
 --- OUT --->
 [error] Module Manifest Error
 
-  module.eco:10: 'framework:OpenGL' is a Darwin framework and this build targets linux. Gate it with '#[if: os == darwin]' and name the platform's own library in the other arm.
+  module.eco:10: 'framework "OpenGL"' is a Darwin framework and this build targets linux. Gate it with '#[if: os == darwin]' and name the platform's own library in the other arm.

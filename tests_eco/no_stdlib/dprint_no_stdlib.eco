@@ -4,7 +4,7 @@
 //
 // dprint itself is declared here rather than reached from the stdlib, for the obvious reason
 
-#[builtin: "dprint"]
+#[builtin: dprint]
 function dprint<T>(T& $value) : void;
 
 struct Pair

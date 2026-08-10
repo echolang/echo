@@ -21,7 +21,7 @@
  * the two disagree is the point rather than an oversight - `'héllo'` is five characters in six
  * bytes. Nothing here validates UTF-8, and nothing here normalizes or case-folds.
  *
- * `#[core: "string"]` and `#[core: "string_view"]` are how the compiler finds these two without
+ * `#[core: string]` and `#[core: string_view]` are how the compiler finds these two without
  * hardcoding a name - a literal's type, `echo`'s one non-primitive case. It resolves the shape
  * **by property name** (`AST::resolve_core_string_layout`): `$window` and `$owner` here, `$bytes`
  * and `$size` on the view. So the fields may be reordered but not renamed, `$window` has to *be*
@@ -46,7 +46,7 @@
  * owning property is a class - is exactly what makes `$b = $a;` one retain of the buffer rather
  * than a duplicated allocation. The `str::buf` handle is released at scope exit either way.
  */
-#[core: "string"]
+#[core: string]
 struct string
 {
     /**
@@ -63,7 +63,7 @@ struct string
      * words and hides nothing, so a reader wanting the count writes `$v->size`. `string` has the
      * method because its count lives one level down, in the window.
      */
-    #[core: "string_view"]
+    #[core: string_view]
     struct view
     {
         ptr<const uint8> $bytes;

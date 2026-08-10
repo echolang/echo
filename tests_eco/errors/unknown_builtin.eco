@@ -1,6 +1,6 @@
 // #[builtin: ...] naming something the compiler does not know is rejected at the attribute, rather
 // than failing later as an unresolved symbol
-#[builtin: "sizeof_but_misspelled"]
+#[builtin: sizeof_but_misspelled]
 function bogus<T>() : usize;
 
 echo bogus<int32>();

@@ -6,7 +6,7 @@
 
 namespace
 {
-    // the one table. a name is the surface spelling written in `#[core: "..."]`, deliberately not the
+    // the one table. a name is the surface spelling written in `#[core: ...]`, deliberately not the
     // type's own name - the two are free to differ, and a reader of the attribute should not have to
     // guess which of them the compiler keys on
     const std::unordered_map<std::string, AST::CoreTypeKind> &core_type_table()
@@ -83,7 +83,7 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     AST::TypeDeclNode *view_decl = types.declaration(AST::CoreTypeKind::t_string_view);
 
     if (string_decl == nullptr || view_decl == nullptr) {
-        out_error = "no type is declared with #[core: \"string\"] and #[core: \"string_view\"]";
+        out_error = "no type is declared with #[core: string] and #[core: string_view]";
         return std::nullopt;
     }
 
@@ -114,7 +114,7 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     // bytes in the wrong shape - which LLVM would accept as a type mismatch far from the cause
     if (string_decl->complex_type().get_property_type(layout.window_index)
         != types.string_view_type()) {
-        out_error = fmt::format("'{}'s $window is not the #[core: \"string_view\"] type",
+        out_error = fmt::format("'{}'s $window is not the #[core: string_view] type",
             string_decl->complex_type().namespaced_name());
         return std::nullopt;
     }

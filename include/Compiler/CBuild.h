@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTAttributeReader.h"
 #include "Compiler/CompilerOptions.h"
 
 #include <filesystem>
@@ -31,7 +32,9 @@ namespace Compiler
         // `include:c/include` - `-I`, absolute once parsed
         t_include,
 
-        // `define:GLAD_GL_IMPLEMENTATION` - `-D`
+        // `define GLAD_GL_IMPLEMENTATION` - `-D`. **the one scheme that reads a record**, because a
+        // define is the one whose keys are the payload rather than a vocabulary: `define { NAME: 1 }`
+        // is `-DNAME=1`, and many of them fit in one attribute
         t_define,
 
         // `flag:-Wno-unused` - the escape hatch, passed through verbatim. Unlike a link requirement this
@@ -69,7 +72,11 @@ namespace Compiler
     //
     // `include:` comes back absolute and checked; `sources:` comes back as the **pattern as written**,
     // because expanding it is Parser::expand_source_pattern's question and answering it a second time here
-    // is how the command line and a manifest would come to mean different things by one `*`
+    // is how the command line and a manifest would come to mean different things by one `*`.
+    //
+    // **the argv spelling, and nothing registers a flag for it yet** - so its only callers are the tests
+    // that pin the grammar. It is here rather than beside a `--cc` because the settling below it is the
+    // half a flag would not be allowed to answer for itself
     bool parse_cc_requirement(
         const std::string &spelled,
         const std::filesystem::path &base,
@@ -78,14 +85,23 @@ namespace Compiler
         std::string &out_error
     );
 
-    // the same thing, put where it goes. **which member of a spec a scheme fills is this subsystem's
-    // question**, not the manifest reader's: a scheme added above then touches one file rather than two in
-    // two layers, and the reader is left with the one-line shape `#[link:]` already has
-    bool apply_cc_requirement(
-        const std::string &spelled,
+    // one `#[cc: ...]` attribute, put where it goes - the manifest's spelling of the same thing, off
+    // the same scheme table.
+    //
+    // three payload shapes, and all three mean the same to the compiler that receives them: one value,
+    // a list of values, and - for `define` alone - a record whose keys are macro names.
+    //
+    //     #[cc: define "NDEBUG"]                        -DNDEBUG
+    //     #[cc: define ["NDEBUG", "TRACE"]]             -DNDEBUG -DTRACE
+    //     #[cc: define { GLAD_GL_IMPLEMENTATION: 1 }]   -DGLAD_GL_IMPLEMENTATION=1
+    //
+    // nothing is re-quoted on the way out: Compiler::run_tool passes an argv with no shell between, so a
+    // define holding a space needs no escaping and giving it one would put the quotes in the macro
+    bool apply_cc_attribute(
+        const AST::AttributeValue &value,
         const std::filesystem::path &base,
-        CBuildSpec &spec,
-        std::string &out_error
+        AST::AttributeReader &reader,
+        CBuildSpec &spec
     );
 
     // what one module's C build produced. `objects` go into the link, or into the loadable library
@@ -113,9 +129,11 @@ namespace Compiler
     // nothing anywhere saying so, which is the module cache's one silent failure mode reproduced in a
     // second store.
     //
-    // `cache_dir` empty means there is nowhere to keep anything and everything goes to `scratch_dir`: an
-    // unwritable store is a slower build and never a failed one, the rule the Echo object cache already
-    // follows. `out_explain` collects a line per source for `--explain-cache`
+    // both directories come from Compiler::BuildLayout, which is the one thing that decides where a build
+    // artifact goes - this store only names the files inside one. `cache_dir` empty means there is nowhere
+    // to keep anything and everything goes to `scratch_dir`: an unwritable store is a slower build and
+    // never a failed one, the rule the Echo object cache already follows. `out_explain` collects a line per
+    // source for `--explain-cache`
     bool build_c_sources(
         const CBuildSpec &spec,
         const CompilerOptions &options,
