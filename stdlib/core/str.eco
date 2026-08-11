@@ -27,10 +27,12 @@ namespace str;
  * `->c_str()` sound with no copy, and what lets a window which stops early be *detected* rather
  * than silently handing a caller bytes past its end.
  *
- * Nothing but `string` should construct one. There are no visibility modifiers yet, so that is a
- * convention rather than a rule.
+ * Nothing but `string` should construct one, and that stays a convention rather than a rule - `public`, and
+ * it has to be: `string::owner` is a property of this type, so anyone holding a `string` can already name it.
+ * Hiding the type while exposing a property of it would be incoherent. What *is* enforced is the shape:
+ * every mutator is `private` on `string`'s side, so no caller reaches one through the owner it holds.
  */
-class buf
+public class buf
 {
     usize $capacity;
     usize $used;
@@ -128,7 +130,7 @@ extern {
  * allocation bought for nothing. Reach for `from_c_str` when the bytes are *not* yours to rely on -
  * a buffer you are about to free, or anything behind a `setenv`.
  */
-function view_of_c_str(ptr<const uint8> $s) : string::view
+public function view_of_c_str(ptr<const uint8> $s) : string::view
 {
     return string::view($s, c_strlen($s));
 }
@@ -141,7 +143,7 @@ function view_of_c_str(ptr<const uint8> $s) : string::view
  * maintained where they are declared, and the block is sized up front so that append does not grow
  * it - the same bargain `string::clone_reserving` makes.
  */
-function from_c_str(ptr<const uint8> $s) : string
+public function from_c_str(ptr<const uint8> $s) : string
 {
     usize $n = c_strlen($s);
 

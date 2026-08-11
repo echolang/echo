@@ -1,0 +1,8 @@
+// the module's public surface, built out of the internal half beside it. `grown` is reachable here because
+// this file is in the same module; `scale` is not, and this file does not try
+//
+// `public` is the one modifier in this library that does any work - it is what makes the name crossable
+public function offered(int32 $v) : int32
+{
+    return grown($v);
+}

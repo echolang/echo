@@ -343,6 +343,12 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // reaches a closure, so it belongs to no overload set
     closure_decl->ast_namespace = payload.context.current_namespace;
 
+    // and where it was written, which is what the body inside it is judged against: a call to a `private`
+    // declaration made from a closure written in the same file has to be allowed, and TypeChecker asks the
+    // enclosing declaration for that. its visibility stays `t_public` and has to - no name reaches a
+    // closure, so there is nothing to hide it from
+    closure_decl->declared_in = AST::origin_at(payload.context);
+
     // the same reason a nested declaration is rejected where a type parameter is visible: a closure
     // cannot receive a substitution for one. lifted once closures can be generic
     if (payload.context.has_visible_type_params()) {
@@ -595,7 +601,11 @@ void Parser::publish_implicit_conversion(
     owner.add_implicit_conversion(funcdecl);
 }
 
-AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser::FuncDeclKind kind)
+AST::FunctionDeclNode * Parser::parse_funcdecl(
+    Parser::Payload &payload,
+    Parser::FuncDeclKind kind,
+    Parser::VisibilityPrefix visibility
+)
 {
     auto &cursor = payload.cursor;
 
@@ -604,11 +614,10 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
     // know which pass it is forwarding
     const bool symbol_only = payload.pass == Pass::t_declarations;
 
-    // the member modifier prefix. read here, before the `function` keyword, because that is where
-    // starts_funcdecl already looks and where A17's `public`/`private` will sit - one scan producing
-    // one bundle, so adding the next modifier is a field rather than a second parameter threaded
-    // through everything below
-    MemberModifiers modifiers;
+    // the member modifier prefix. `const` is read here, before the `function` keyword, because that is
+    // where starts_funcdecl already looks; the visibility arrived from the dispatch that got here, which
+    // had to consume it before it could tell a method from a property - see MemberModifiers
+    MemberModifiers modifiers { visibility, std::nullopt };
 
     if (cursor.is_type(Token::Type::t_const)) {
         modifiers.const_token.emplace(cursor.current());
@@ -682,6 +691,12 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(Parser::Payload &payload, Parser:
 
     // set the namespace of the function
     funcdecl->ast_namespace = payload.context.current_namespace;
+
+    // who may call it, and where it was written to answer that against. written in both passes, which is
+    // safe by construction: they read the same tokens at the same index, so the second computes what the
+    // first already recorded - the same standing every other field reconciled on a declaration site has
+    funcdecl->visibility = modifiers.visibility.value;
+    funcdecl->declared_in = AST::origin_at(payload.context);
 
     // a `function` written inside a `{ }` block is a scoped declaration - the lexical namespace above
     // is the block's - and it has no access to the enclosing frame. an enclosing *type parameter* is

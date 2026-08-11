@@ -1,2 +1,2 @@
 namespace cycleb;
-function b() : int32 { return 2; }
+public function b() : int32 { return 2; }

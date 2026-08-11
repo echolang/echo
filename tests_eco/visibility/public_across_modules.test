@@ -1,0 +1,7 @@
+modules: visibility/lib_internal
+
+# the three levels across a manifest boundary: the library's `public` function reaches the module-level
+# helper beside it, which reaches a `private` one in its own file, and the application names only the
+# `public` one. nothing here is refused - errors/internal_across_modules.eco is the half that is
+--- OUT --->
+40

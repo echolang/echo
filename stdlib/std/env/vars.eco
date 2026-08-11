@@ -21,7 +21,7 @@ namespace std::env;
  * that is not set both read as "nothing useful here" through the fallback overload, and only this
  * tells them apart.
  */
-function has(string::view $key) : bool
+public function has(string::view $key) : bool
 {
     ptr<uint8> $found = c_getenv($key->c_str());
 
@@ -39,7 +39,7 @@ function has(string::view $key) : bool
  * every whole `string`; a **sub-window** of one is not, and asking with one is a `die`. `clone()`
  * it first.
  */
-function var(string::view $key) : string::view?
+public function var(string::view $key) : string::view?
 {
     ptr<uint8> $found = c_getenv($key->c_str());
 
@@ -57,7 +57,7 @@ function var(string::view $key) : string::view?
  * always does, and so does anything held in a variable the caller still has. It is *not* safe to
  * pass a temporary built on the spot.
  */
-function var(string::view $key, string::view $fallback) : string::view
+public function var(string::view $key, string::view $fallback) : string::view
 {
     return var($key) ?? $fallback;
 }
@@ -75,7 +75,7 @@ function var(string::view $key, string::view $fallback) : string::view
  * Entries are handed out in the order the platform laid them down, which is not sorted and not
  * deduplicated. A `KEY` appearing twice is yielded twice, and `var` would answer with the first.
  */
-struct var_iterator : contract::iterator<string::view>, contract::keyed<string::view>
+public struct var_iterator : contract::iterator<string::view>, contract::keyed<string::view>
 {
     ptr<ptr<uint8>> $block;
     usize $pos;
@@ -143,7 +143,7 @@ struct var_iterator : contract::iterator<string::view>, contract::keyed<string::
  * A cursor over every environment variable, for `foreach`. Allocates nothing.
  */
 #[inline]
-function vars() : var_iterator
+public function vars() : var_iterator
 {
     return var_iterator();
 }

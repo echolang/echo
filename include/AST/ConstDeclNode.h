@@ -5,14 +5,13 @@
 
 #include "AST/ASTNode.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTVisibility.h"
 #include "Lexer.h"
 #include "AST/TypeNode.h"
 
 namespace AST
 {
     class ExprNode;
-    class File;
-    class Module;
     class ComplexType;
 
     // how far AST::ConstantExpander has got with one declaration's own initializer. one field serving as
@@ -69,18 +68,22 @@ namespace AST
         // by the time the expander runs
         ComplexType *owner = nullptr;
 
-        // the file this was written in, so a diagnostic about the declaration renders the right excerpt.
-        // **the one node that carries one**, and it has to: every other node is reachable from a file root,
-        // so a pass tracks the file it is walking - this one is reachable from the arena alone, and a cycle
-        // is reported at the declaration rather than at whichever use site happened to close the loop
-        const File *declared_in_file = nullptr;
+        // where this was written, which two questions read for two different reasons. the *file*, so a
+        // diagnostic about the declaration renders the right excerpt - this node is reachable from the arena
+        // alone, so no pass can name it from the walk that reached it, and a cycle is reported at the
+        // declaration rather than at whichever use site happened to close the loop. and the *module*,
+        // because a module may only name symbols from one parsed before it, which parse-time resolution
+        // enforces everywhere else by construction - a reference expanded after the whole program is parsed
+        // has to check it, or a library could hold a clone of an application's expression in its own arena
+        //
+        // this used to be two fields spelled here and nowhere else. AST::DeclarationOrigin is the same pair
+        // on every declaration that carries one, so the visibility rules ask one shape rather than three
+        DeclarationOrigin declared_in;
 
-        // and the module, which answers a *different* question: whether another module is even allowed to name
-        // this constant. A module may only name symbols from one parsed before it, and parse-time resolution
-        // enforces that everywhere else by construction - a reference expanded after the whole program is
-        // parsed has to check it, or a library could read an application's constant and end up holding a clone
-        // of the application's expression in its own arena
-        const Module *declared_in_module = nullptr;
+        // **who may name this constant.** the file and module axes only: a constant declared in a struct body
+        // is `self::MAX`, reached through the owner's namespace, and a `private` there would be the *member*
+        // axis - which the parser refuses rather than silently reading as this one
+        Visibility visibility = Visibility::t_public;
 
         ConstExpansion expansion = ConstExpansion::t_pending;
 

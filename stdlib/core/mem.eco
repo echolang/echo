@@ -31,13 +31,13 @@ namespace mem;
  * Nothing outside this file should call them. `usize` stands in for C's `size_t`.
  */
 #[builtin: alloc_bytes]
-function alloc_bytes(usize $bytes) : ptr<uint8>;
+public function alloc_bytes(usize $bytes) : ptr<uint8>;
 
 #[builtin: realloc_bytes]
-function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
+public function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 
 #[builtin: free_bytes]
-function free_bytes(ptr<uint8> $p) : void;
+public function free_bytes(ptr<uint8> $p) : void;
 
 /**
  * The three byte-level operations that move memory around without ever asking for any.
@@ -64,13 +64,13 @@ extern {
  * the room `$n` elements of `T` need, and `$p:$[n]` lands on element `n`.
  */
 #[builtin: size_of]
-function size_of<T>() : usize;
+public function size_of<T>() : usize;
 
 /**
  * The alignment `T` requires, in bytes, as a compile-time constant.
  */
 #[builtin: align_of]
-function align_of<T>() : usize;
+public function align_of<T>() : usize;
 
 /**
  * True when duplicating a `T` is duplicating its bytes and nothing else, as a compile-time constant.
@@ -88,7 +88,7 @@ function align_of<T>() : usize;
  * would be wrong.
  */
 #[builtin: is_trivially_copyable]
-function is_trivially_copyable<T>() : bool;
+public function is_trivially_copyable<T>() : bool;
 
 /**
  * True when a `T` going out of scope has something to give back, as a compile-time constant.
@@ -103,7 +103,7 @@ function is_trivially_copyable<T>() : bool;
  * `array<int32>`'s destructor free rather than a walk over `count()` elements that each do nothing.
  */
 #[builtin: needs_destruction]
-function needs_destruction<T>() : bool;
+public function needs_destruction<T>() : bool;
 
 /**
  * The value at `$place`, handed over. **The storage keeps its bytes and stops being an owner.**
@@ -128,7 +128,7 @@ function needs_destruction<T>() : bool;
  * would ever release.
  */
 #[builtin: take]
-function take<T>(T& $place) : T;
+public function take<T>(T& $place) : T;
 
 /**
  * `$value`, stored into a place that **holds nothing**. The mirror of `take` above.
@@ -154,7 +154,7 @@ function take<T>(T& $place) : T;
  * over rather than duplicating it, exactly as `take`'s result is handed to its caller.
  */
 #[builtin: init]
-function init<T>(T& $place, T $value) : void;
+public function init<T>(T& $place, T $value) : void;
 
 /**
  * Allocates room for `$count` elements of `T`, uninitialized.
@@ -162,7 +162,7 @@ function init<T>(T& $place, T $value) : void;
  * Returns `null` when the allocation fails. Because the result is `ptr<T>` and not `T&`, the type
  * system makes you acknowledge that before you can use it as a reference.
  */
-function alloc<T>(usize $count) : ptr<T>
+public function alloc<T>(usize $count) : ptr<T>
 {
     // **the raw seam.** the allocator hands back bytes and this is what says they are `T`s - but it
     // needs no `unsafe`, and that is the boundary working as intended: this produces a `ptr<T>`, and
@@ -176,7 +176,7 @@ function alloc<T>(usize $count) : ptr<T>
  * May move the block, so the returned address is the one to keep - the old one is dead. Does not
  * preserve any alignment stronger than the allocator's own.
  */
-function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
+public function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
 {
     return ptr<T>(realloc_bytes(ptr<uint8>($p:$), $count * size_of<T>()));
 }
@@ -184,7 +184,7 @@ function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
 /**
  * Releases an allocation. Freeing `null` is a no-op.
  */
-function free<T>(ptr<T> $p) : void
+public function free<T>(ptr<T> $p) : void
 {
     free_bytes(ptr<uint8>($p:$));
 }
@@ -192,7 +192,7 @@ function free<T>(ptr<T> $p) : void
 /**
  * Copies `$count` elements from `$src` to `$dst`. The two regions must not overlap.
  */
-function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
+public function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 {
     copy_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
 }
@@ -205,7 +205,7 @@ function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
  * destroyed: each element ends up somewhere else, so the count of owners is unchanged - which is what
  * makes it correct for an owning `T` with no branch on `T` at all.
  */
-function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
+public function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 {
     move_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
 }
@@ -213,7 +213,7 @@ function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 /**
  * Fills `$count` elements with zero bytes.
  */
-function zero<T>(ptr<T> $p, usize $count) : void
+public function zero<T>(ptr<T> $p, usize $count) : void
 {
     set_bytes(ptr<uint8>($p:$), 0, $count * size_of<T>());
 }
@@ -241,7 +241,7 @@ function zero<T>(ptr<T> $p, usize $count) : void
  * over one of its own locals, every pointer it makes is raw, and it hands back a value - so there is
  * no step at which it asserts anything about somebody else's storage.
  */
-function bit_cast<To, From>(From $value) : To
+public function bit_cast<To, From>(From $value) : To
 {
     assert(size_of<From>() == size_of<To>(), "bit_cast needs two types of the same size");
 
@@ -275,7 +275,7 @@ function bit_cast<To, From>(From $value) : To
  * against precisely that - see `stdlib/core/string.eco`.
  */
 #[builtin: ref_count]
-function ref_count<T>(T& $handle) : usize;
+public function ref_count<T>(T& $handle) : usize;
 
 /**
  * How many handles need the *block* `$handle` names to stay readable. Zero for a null handle.
@@ -295,7 +295,7 @@ function ref_count<T>(T& $handle) : usize;
  * than merely appearing to be - see `tests_eco/classes/weak_cycle_no_leak.eco`.
  */
 #[builtin: weak_count]
-function weak_count<T>(T& $handle) : usize;
+public function weak_count<T>(T& $handle) : usize;
 
 /**
  * How many allocations the program is still holding.
@@ -330,4 +330,4 @@ function weak_count<T>(T& $handle) : usize;
  * ```
  */
 #[builtin: live_allocations]
-function live_allocations() : usize;
+public function live_allocations() : usize;

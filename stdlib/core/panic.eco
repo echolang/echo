@@ -25,7 +25,7 @@
  * last statement is a `die` does not also need a `return`.
  */
 #[builtin: die]
-function die() : void;
+public function die() : void;
 
 /**
  * The message must be a **string literal**, not a `string` variable. It is folded into the binary
@@ -33,7 +33,7 @@ function die() : void;
  * has nothing to fold, and is a located error rather than a message that quietly goes missing.
  */
 #[builtin: die]
-function die(string $message) : void;
+public function die(string $message) : void;
 
 /**
  * Stops the program when `$condition` is false.
@@ -46,10 +46,10 @@ function die(string $message) : void;
  * build would have rejected.
  */
 #[builtin: assert]
-function assert(bool $condition) : void;
+public function assert(bool $condition) : void;
 
 /**
  * The message must be a **string literal**, for the reason `die`'s must.
  */
 #[builtin: assert]
-function assert(bool $condition, string $message) : void;
+public function assert(bool $condition, string $message) : void;

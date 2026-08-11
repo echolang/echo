@@ -1,6 +1,6 @@
 // a key type whose hash is a *constant*, so every key lands in one bucket. that is the only way to
 // exercise probing, tombstone reuse and rehash under complete collision from a test
-struct clash
+public struct clash
 {
     int32 $n;
 }

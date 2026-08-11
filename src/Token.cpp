@@ -107,6 +107,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_mv: return "mv";
         case Token::Type::t_unsafe: return "unsafe";
         case Token::Type::t_private: return "private";
+        case Token::Type::t_internal: return "internal";
+        case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
 
         default: return "[undefined]";
@@ -186,6 +188,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_mv: return "mv";
         case Token::Type::t_unsafe: return "unsafe";
         case Token::Type::t_private: return "private";
+        case Token::Type::t_internal: return "internal";
+        case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
 
         default:

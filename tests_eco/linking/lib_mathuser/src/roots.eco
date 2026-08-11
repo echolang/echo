@@ -4,7 +4,7 @@ extern {
     function sqrt(float64 $x) : float64;
 }
 
-function of(float64 $x) : float64
+public function of(float64 $x) : float64
 {
     return sqrt($x);
 }

@@ -1,0 +1,28 @@
+expect: fail
+
+# `private` on a *method*, the half of A17 that had no parser at all until now - `private function` fell
+# into the property arm and reported a cascade of unexpected tokens. beside errors/private_property.eco,
+# which pins the property half of the same rule
+#
+# three sites, and only the first is allowed: the owner's own body, a *different* type's body, and file
+# scope - which is inside no type at all, so it never reaches a private member of any type
+--- OUT --->
+[error] PrivateMethod  private_method.eco:26:20
+
+  'Sealed::check()' is private to 'Sealed' and cannot be called from here. Only that type's own bodies reach it - if it is part of what 'Sealed' offers, drop the 'private'.
+
+  25 |     {
+  26 |         return $s->check();
+     :                    ^^^^^
+  27 |     }
+
+[error] PrivateMethod  private_method.eco:35:10
+
+  'Sealed::check()' is private to 'Sealed' and cannot be called from here. Only that type's own bodies reach it - if it is part of what 'Sealed' offers, drop the 'private'.
+
+  34 | // and neither does a statement at file scope, which is inside no type at all
+  35 | echo $s->check();
+     :          ^^^^^
+  36 | 
+
+2 errors, nothing was compiled.

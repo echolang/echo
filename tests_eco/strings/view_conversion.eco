@@ -19,7 +19,7 @@ struct string
 // no reference count at all - a view owns nothing
 function show(string::view $v) : void { echo $v->size; }
 
-$foo = 'john';
+$foo = 'jan';
 show($foo);
 
 // but an overload taking the owning type still wins: a declared conversion is ranked below every

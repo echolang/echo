@@ -2,7 +2,10 @@
 
 #include "Parser/FuncDeclParser.h"
 
-std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(Parser::Payload &payload)
+std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(
+    Parser::Payload &payload,
+    Parser::VisibilityPrefix visibility
+)
 {
     auto &cursor = payload.cursor;
 
@@ -47,7 +50,9 @@ std::vector<AST::FunctionDeclNode *> Parser::parse_extern_block(Parser::Payload 
             continue;
         }
 
-        if (auto *funcdecl = parse_funcdecl(payload, FuncDeclKind::t_extern)) {
+        // the block's modifier, handed to every declaration in it - one prefix forwarded rather than each
+        // line taking its own, a C library's surface being exported or not as a whole
+        if (auto *funcdecl = parse_funcdecl(payload, FuncDeclKind::t_extern, visibility)) {
             declarations.push_back(funcdecl);
         }
     }

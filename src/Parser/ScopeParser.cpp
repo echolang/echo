@@ -26,6 +26,7 @@
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/OperatorDeclParser.h"
+#include "Parser/VisibilityParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
 {
@@ -123,6 +124,12 @@ AST::ScopeNode & Parser::parse_scope(
     AST::LexicalScope lexical_scope(context, payload.collector.namespaces, block_token);
 
     while (!cursor.is_done()) {
+        // **the visibility modifier, read here and at the same point the declaration pass reads it** -
+        // one function for both, since the two walks have to consume the same tokens and report the same
+        // refusals or they reach different declarations, and there is nothing that would report that. see
+        // Parser::parse_declaration_surface for the rest of why this is ahead of the dispatch
+        const VisibilityPrefix visibility = consume_declaration_visibility(payload, block_token);
+
         // deep scope, optionally marked `unsafe`. one arm for both, because an unsafe block *is* a
         // block: it opens a lexical namespace, drops its locals and lowers identically, and the
         // marker changes only what AST::TypeChecker accepts inside it
@@ -168,7 +175,7 @@ AST::ScopeNode & Parser::parse_scope(
             parse_namespacedecl(payload);
         }
         else if (starts_funcdecl(cursor)) {
-            parse_funcdecl(payload);
+            parse_funcdecl(payload, FuncDeclKind::t_normal, visibility);
         }
         else if (starts_operatordecl(cursor)) {
             // the body. the signature was registered by the declaration pass and the symbol a pass
@@ -179,7 +186,7 @@ AST::ScopeNode & Parser::parse_scope(
             parse_typedecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_extern)) {
-            parse_extern_block(payload);
+            parse_extern_block(payload, visibility);
         }
         else if (cursor.is_type(Token::Type::t_return)) {
             scope_node.children.push_back(AST::make_ref(parse_return(payload)));

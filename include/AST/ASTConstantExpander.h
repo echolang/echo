@@ -90,6 +90,12 @@ namespace AST
         // about where to move the declaration is as useful there
         bool refuse_if_later_module(const ConstDeclNode &decl, const ConstRefExprNode &ref);
 
+        // **and whether the declaration let this file name it**, which is a different question from the one
+        // above: that one is about the shape of the build, this one about what the declaration said. this
+        // pass is where a constant's visibility is asked for the same reason it is where the module order
+        // is - a constant is the one name resolved after the whole program is parsed
+        bool refuse_if_not_visible(const ConstDeclNode &decl, const ConstRefExprNode &ref);
+
         CodeRef code_ref_for(const TokenReference &token);
         CodeRef code_ref_at_declaration(const ConstDeclNode &decl);
 

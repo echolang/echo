@@ -1,0 +1,9 @@
+# the member axis, both halves in one program: a private property, a private method reached from a sibling
+# method, and a `public const` property - readable from outside and const to everybody, including the type's
+# own methods, because `const` there is simply the property's type
+--- OUT --->
+1
+1
+0
+2
+2

@@ -5,7 +5,7 @@
 stdlib: off
 
 --- OUT --->
-4
+3
 2
 --- IR --->
 # the cost model, which is the whole reason `string::view` is a public type: handing a `string` to a
@@ -14,7 +14,7 @@ stdlib: off
 CHECK: define i32 @main(
 
 # the literal, as ever, a constant
-CHECK: store %string { %view { ptr @str, i64 4 }, ptr null }
+CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
 
 # show(string::view) - the conversion is a call to the `#[implicit]` method the type declared, taking
 # the address of the place, and then the view travels as a plain two-word value

@@ -8,6 +8,7 @@
 #include "AST/ASTContext.h"
 #include "AST/FunctionDeclNode.h"
 #include "Parser/ParserPayload.h"
+#include "Parser/VisibilityParser.h"
 
 namespace AST
 {
@@ -68,8 +69,18 @@ namespace Parser
         t_extern,
     };
 
-    // whether the body is parsed or left for the body pass is read off `payload.pass`
-    AST::FunctionDeclNode *parse_funcdecl(Payload &payload, FuncDeclKind kind = FuncDeclKind::t_normal);
+    // whether the body is parsed or left for the body pass is read off `payload.pass`.
+    //
+    // `visibility` is what the dispatch that reached this declaration already consumed - see
+    // MemberModifiers on why that one modifier arrives from outside while `const` does not. **required**,
+    // and deliberately: VisibilityPrefix's own default is `t_public`, which is the position's answer for a
+    // member and the opposite of it for a top-level declaration - so a caller that omitted one would
+    // silently export what its author scoped to a module
+    AST::FunctionDeclNode *parse_funcdecl(
+        Payload &payload,
+        FuncDeclKind kind,
+        VisibilityPrefix visibility
+    );
 
     // consumes a declaration's body from its first token: either a braced body or the bare `;` of a
     // declaration that has none. the one place that knows how a declaration body is skipped, shared by
@@ -193,11 +204,21 @@ namespace Parser
         AST::TypeNode *type_node,
         const TokenReference &at);
 
-    // **the modifiers written ahead of `function`.** one bundle read by one scan, so the next member
-    // modifier - A17's `public`/`private` - is a field added here rather than a second parameter
-    // threaded through parse_funcdecl and everything it hands the declaration to
+    // **the modifiers written ahead of `function`.** one bundle, so a modifier is a field added here rather
+    // than a second parameter threaded through parse_funcdecl and everything it hands the declaration to.
+    //
+    // the two are read at two moments, and that split is deliberate rather than an inconsistency. `const`
+    // is read *here*, by parse_funcdecl's own scan, because it belongs to the `function` grammar - only a
+    // function has a receiver to make const. Visibility is read by Parser::parse_visibility_prefix
+    // *before* the dispatch that decided this was a function at all, because `public const int32 $x;`,
+    // `public const MAX = 5;` and `public const function f()` are three different declarations and the four
+    // predicates that tell them apart all scan from the head of the statement
     struct MemberModifiers
     {
+        // who may name it, already narrowed to Visibility::t_owner if this is a member - the position that
+        // decided it is a place this parser no longer knows it was in
+        VisibilityPrefix visibility;
+
         // where the `const` was written, so a refusal points at the modifier rather than at the name.
         // present *is* the modifier - a separate bool beside it would be a second carrier of one fact,
         // and the site that words the refusal reads the token through a `.value()` the bool does not

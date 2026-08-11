@@ -1,0 +1,35 @@
+// the other half of A17's member axis, beside errors/private_property.eco. `private` on a method means
+// the owner type: a sibling method reaches it, and nothing else does - not a free function, not a file
+// scope statement, and not another type
+
+struct Sealed
+{
+    int32 $n;
+
+    private function check() : int32
+    {
+        return $this->n + 1;
+    }
+
+    // the type's own body reaches it, which is the half that is *not* an error
+    function ok() : int32
+    {
+        return $this->check();
+    }
+}
+
+struct Other
+{
+    // a different type does not reach it. privacy is per type, not per file and not per namespace
+    function peek(Sealed& $s) : int32
+    {
+        return $s->check();
+    }
+}
+
+$s = Sealed(1);
+
+echo $s->ok();
+
+// and neither does a statement at file scope, which is inside no type at all
+echo $s->check();

@@ -1,3 +1,3 @@
 namespace backref;
 
-const usize DERIVED = APP_BASE * 2;
+public const usize DERIVED = APP_BASE * 2;

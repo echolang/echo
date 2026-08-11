@@ -28,7 +28,7 @@ function which(string $s) : void { echo 2; }
 which('hello');
 
 // and the same for a place, which is how the rule read before a literal could reach it
-$owned = 'john';
+$owned = 'jan';
 which($owned);
 
 // with only the view overload in scope, the conversion is what makes the call resolve at all

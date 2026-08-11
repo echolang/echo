@@ -42,7 +42,7 @@ void write_library(const fs::path &directory, const std::string &module_name, co
     write_file(directory / "src" / "lib.eco",
         "namespace " + module_name + ";\n"
         "\n"
-        "function twice(int32 $n) : int32\n"
+        "public function twice(int32 $n) : int32\n"
         "{\n"
         "    return $n * 2;\n"
         "}\n");

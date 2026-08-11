@@ -41,7 +41,7 @@
  * field, so there is no such storage to protect and a `const range<int32>` can honestly hand out an
  * `int32&`. That is the protocol saying what it always said: `V` is what the loop yields.
  */
-struct range<T> : contract::iterable<T>, contract::const_iterable<T>
+public struct range<T> : contract::iterable<T>, contract::const_iterable<T>
 {
     T $from;
     T $to;
@@ -80,7 +80,7 @@ struct range<T> : contract::iterable<T>, contract::const_iterable<T>
  * It holds its bound by value, for `slice_iterator<T>`'s reason: the end is then an ordinary local
  * the optimiser can prove loop-invariant, which is what gives the loop a computable trip count.
  */
-struct range_iterator<T> : contract::iterator<T>, contract::keyed<usize>
+public struct range_iterator<T> : contract::iterator<T>, contract::keyed<usize>
 {
     // the next value to hand out, and the one already handed out. **two fields and not one**, which is
     // what buys the shape below: stepping at the end of `advance()` rather than at the top of the next

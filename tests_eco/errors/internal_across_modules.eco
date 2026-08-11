@@ -1,0 +1,11 @@
+// the module boundary, from the only place it can be tested: a second module. two files of one module
+// share a module and so satisfy the default by construction - errors/private_across_files.eco is that case
+//
+// the library's `public` surface is fine; every declaration in it that said nothing is refused here, and no
+// refusal carries a "declared here" label - the declaration is in another module, whose tokens this
+// diagnostic's module cannot resolve to a file (see Issue::InaccessibleDeclaration)
+
+echo offered(1);
+
+Detail $d = Detail(2);
+echo detail_of($d->n) + DETAIL_SCALE;

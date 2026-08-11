@@ -1,0 +1,8 @@
+// the module boundary, from the only place it can be seen: a second module.
+//
+// the library beside this case declares three functions at three levels - a `private` one only its own
+// file names, one with no modifier that the rest of its module names, and a `public` one. this program
+// names the third and nothing else, which is the whole point of the default being the module: a library's
+// surface is what its author wrote `public` on rather than everything they happened to declare
+
+echo offered(13);

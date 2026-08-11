@@ -58,7 +58,7 @@
  * substituted to `ptr<const V>`. `$k` still arrives by value and is unaffected.
  */
 #[core: map]
-struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
+public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     ptr<uint64> $hashes;
     ptr<K> $keys;
@@ -531,8 +531,13 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 
     // ---- internals ------------------------------------------------------------------------------------
     //
-    // public only because there are no visibility modifiers yet. Nothing outside this file
-    // should call any of them.
+    // `private`, so only `map<K, V>`'s own bodies reach them - which is what this banner used to have to ask
+    // for in prose. the power-of-two capacity every bitmask below depends on is the invariant it protects.
+    //
+    // **two of them are not, and cannot be**: `find` and `seat` are called by the index operators, and an
+    // operator is a *free* declaration rather than a member of either operand type - so it is outside the
+    // type in exactly the sense `private` means. that is the seam the modifier cannot close here, and it is
+    // the same fact that makes an operator take no visibility modifier of its own
 
     /**
      * True when the slot at `$at` holds a live entry.
@@ -542,7 +547,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * array and `free_slot_for` asks the narrower "is it empty", so neither goes through this.
      */
     #[inline]
-    const function slot_is_live(usize $at) : bool
+    private const function slot_is_live(usize $at) : bool
     {
         // spelled as a branch rather than `return <comparison>`, exactly as `is_empty` and `has` are: a
         // literal types at its destination, and the destination of a returned expression is the return
@@ -571,7 +576,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * hasher whose entropy sits at the top would collide here and nowhere a test would look.
      */
     #[inline]
-    const function first_slot(uint64 $h) : usize
+    private const function first_slot(uint64 $h) : usize
     {
         return $h & ($this->cap - 1);
     }
@@ -585,7 +590,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * way, and the step itself is not what differs between them.
      */
     #[inline]
-    const function next_slot(usize $at) : usize
+    private const function next_slot(usize $at) : usize
     {
         if ($at + 1 == $this->cap) {
             return 0;
@@ -606,7 +611,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * product ran out of address space long before.
      */
     #[inline]
-    const function over_load(usize $entries, usize $slots) : bool
+    private const function over_load(usize $entries, usize $slots) : bool
     {
         // a branch and not `return <comparison>`, for `slot_is_live`'s reason
         if ($entries * 4 > $slots * 3) {
@@ -623,7 +628,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * *tombstone*. Two of 2^64 hashes are nudged up by two, which doubles the probability of exactly the
      * values 2 and 3 and costs a whole allocation less than a state array beside this one would.
      */
-    const function slot_hash(const K& $key) : uint64
+    private const function slot_hash(const K& $key) : uint64
     {
         uint64 $h = hash::of($key);
 
@@ -642,7 +647,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * `V` and is never one byte - so there is nothing a size could buy, and nothing to revisit when A41
      * lands.
      */
-    const function slots_for(usize $count) : usize
+    private const function slots_for(usize $count) : usize
     {
         usize $slots = 8;
 
@@ -712,7 +717,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * and the key's teardown have one implementation. Marks dead before destroying anything, for
      * `clear()`'s reason.
      */
-    function vacate(usize $at) : void
+    private function vacate(usize $at) : void
     {
         $this->hashes:$[$at] = 1;
         $this->len = $this->len - 1;
@@ -831,7 +836,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * mostly holes twice the size it needs. So the question is asked about the live entries alone: if
      * *they* still fit, this is a re-seat rather than a growth.
      */
-    function grow() : void
+    private function grow() : void
     {
         usize $slots = $this->cap;
 
@@ -854,7 +859,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * what decides its new slot; and two live entries can never be equal, so the walk below only has to
      * find an *empty* slot. So a rehash has no dependency on `K`'s hasher or on `K`'s equality at all.
      */
-    function rehash(usize $slots) : void
+    private function rehash(usize $slots) : void
     {
         ptr<uint64> $old_hashes = $this->hashes;
         ptr<K> $old_keys = $this->keys;
@@ -909,7 +914,7 @@ struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
      * this is not `find` with a different comparison. Its one caller is inside `rehash`, past the fresh
      * allocation, which is what establishes `first_slot`'s nonzero capacity here.
      */
-    const function free_slot_for(uint64 $h) : usize
+    private const function free_slot_for(uint64 $h) : usize
     {
         usize $at = $this->first_slot($h);
 
@@ -1007,7 +1012,7 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
  * an array ends every borrow into it - and for a map that is any insert at all, not only a visibly large
  * one.
  */
-struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
+public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
 {
     ptr<uint64> $hashes;
     ptr<K> $keys;

@@ -7,6 +7,7 @@
 #include "AST/ASTNamespace.h"
 #include "Token.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTVisibility.h"
 #include "AST/AttributeNode.h"
 
 namespace AST
@@ -23,6 +24,10 @@ namespace AST
         // the attributes written ahead of this declaration, the same list a function carries. `core` is
         // the only one read today
         AttributeList attributes;
+
+        // who may name this type lives on the **layout**, not here - see ComplexType::visibility. an
+        // instantiation has a layout and no declaration node, and a constructor call names a type without
+        // spelling it in type position, so both of those questions have to be answerable without this node
 
         TypeDeclNode(TokenReference name_token, ComplexTypeKind kind = ComplexTypeKind::t_struct) :
             name_token(name_token)

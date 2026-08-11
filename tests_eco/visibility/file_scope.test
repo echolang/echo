@@ -1,0 +1,6 @@
+# all three levels on a declaration, inside the one file that declares them - so nothing is refused. what
+# the case pins is that the modifier parses on a type, a function and a constant, and that `internal` and
+# `public` are accepted where they change nothing: `internal` is the default said out loud, and a
+# single-file program has no second module for `public` to reach
+--- OUT --->
+42

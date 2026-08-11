@@ -72,7 +72,7 @@ void write_library(const fs::path &directory, const std::string &module_name)
     write_file(directory / "src" / "lib.eco",
         "namespace " + module_name + ";\n"
         "\n"
-        "function twice(int32 $n) : int32\n"
+        "public function twice(int32 $n) : int32\n"
         "{\n"
         "    return $n * 2;\n"
         "}\n");
@@ -170,7 +170,7 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
         write_file(project.root() / "lib" / "src" / "lib.eco",
             "namespace cachelib;\n"
             "\n"
-            "function twice(int32 $n) : int32\n"
+            "public function twice(int32 $n) : int32\n"
             "{\n"
             "    return $n + $n;\n"
             "}\n");
@@ -258,7 +258,7 @@ TEST_CASE("a library's object does not depend on which application consumes it",
     write_file(project.root() / "lib" / "src" / "lib.eco",
         "namespace shared;\n"
         "\n"
-        "struct Holder<T>\n"
+        "public struct Holder<T>\n"
         "{\n"
         "    T $value;\n"
         "\n"
@@ -269,11 +269,11 @@ TEST_CASE("a library's object does not depend on which application consumes it",
         "}\n"
         "\n"
         "#[inline]\n"
-        "function hot(int32 $n) : int32 { return $n + 1; }\n"
+        "public function hot(int32 $n) : int32 { return $n + 1; }\n"
         "\n"
-        "function plain(int32 $n) : int32 { return $n * 2; }\n"
+        "public function plain(int32 $n) : int32 { return $n * 2; }\n"
         "\n"
-        "const usize PAGE = 4096;\n");
+        "public const usize PAGE = 4096;\n");
 
     // two applications that use the library differently: one instantiates the generic over int32 and calls
     // the inline function, the other instantiates over a type *it* declares and calls only the plain one
@@ -428,7 +428,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         write_file(project.root() / "lib" / "src" / "lib.eco",
             "namespace storelib;\n"
             "\n"
-            "function twice(int32 $n) : int32\n"
+            "public function twice(int32 $n) : int32\n"
             "{\n"
             "    return $n + $n;\n"
             "}\n");

@@ -442,7 +442,9 @@ echo abs(-42); // 42
 
 ### Namespaces
 
-To make a class or a function available to other namespaces you have to declare it as `public`.
+A namespace keeps names apart; it says nothing about who may reach them. **Visibility is about modules and
+files, not namespaces**: a declaration belongs to its own module unless it says `public`, `private` narrows it
+to one file, and `internal` is the default written out. Inside a type, `private` means the type itself.
 
 ```echo
 namespace MyModule\Logging;
@@ -595,7 +597,7 @@ $stackString = String("Hey Whats up"); // allocated on the stack
 
 // NOTE: `&` over a *class* does not give `String2&` - it gives `weak<String2>`, a reference that does
 // not keep the object alive, and reading one needs `strong(...)`, `guard`, `??` or `?->`. this section
-// is the original sketch; book/concept/ownership_and_moving.md and book/concept/nullability.md are the
+// is the original sketch; docs/memory/ownership.md and docs/memory/nullability.md are the
 // current specification of both
 $arcString = String2("Something else"); // a class: reference counted, on the heap. there is no `new`
 

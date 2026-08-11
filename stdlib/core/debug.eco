@@ -46,4 +46,4 @@
  * block at runtime, and there is no name stored next to it to print.
  */
 #[builtin: dprint]
-function dprint<T>(T& $value) : void;
+public function dprint<T>(T& $value) : void;

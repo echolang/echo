@@ -1,4 +1,5 @@
 #include "Parser/TypeParser.h"
+#include "Parser/VisibilityParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/IfStatementParser.h"
 #include "AST/ASTValueType.h"
@@ -383,6 +384,7 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
         name, *payload.context.current_namespace);
     if (symbol && symbol->type() == AST::SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
+        refuse_invisible_type(payload, *decl, payload.cursor.current());
         return std::vector<AST::ValueType>{ decl->value_type() };
     }
 
@@ -420,6 +422,8 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
     }
 
     AST::TypeDeclNode *owner = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
+
+    refuse_invisible_type(payload, *owner, cursor.current());
 
     // snapshot/restore, the idiom parse_member_call and starts_vardecl already use for exactly this
     // ambiguity: a name can be both a type and a namespace, and every failure below leaves the caller
@@ -1068,6 +1072,9 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
             if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_type) {
                 user_type_decl = struct_symbol->node.unsafe_ptr<AST::TypeDeclNode>();
                 primitive_type = user_type_decl->value_type();
+
+                // reported, and the type still handed back - see Parser::refuse_invisible_type
+                refuse_invisible_type(payload, *user_type_decl, token);
             }
 
             // an unresolved qualified name can only be a mistake - the namespace lookup creates

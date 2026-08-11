@@ -1,0 +1,65 @@
+modules: errors/lib_file_private
+expect: fail
+
+# `private` on a declaration is the *file* and not the module: a second file of the same module is refused,
+# while the declarations beside it that said nothing - and so belong to the module - are reached. four
+# spellings of the same name are each refused where they are written: a type, a constructor call, a function
+# call and a constant
+--- OUT --->
+[error] InaccessibleDeclaration  sibling.eco:12:5
+
+  'Hidden' is private to 'owner.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  11 | {
+  12 |     Hidden $h = Hidden(hidden_helper());
+     :     ^^^^^^
+  13 |     return $h->n + HIDDEN_LIMIT;
+
+  4 | 
+  5 | private struct Hidden
+    :                ------ declared here
+  6 | {
+
+[error] InaccessibleDeclaration  sibling.eco:13:20
+
+  'HIDDEN_LIMIT' is private to 'owner.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  12 |     Hidden $h = Hidden(hidden_helper());
+  13 |     return $h->n + HIDDEN_LIMIT;
+     :                    ^^^^^^^^^^^^
+  14 | }
+
+  14 | 
+  15 | private const int32 HIDDEN_LIMIT = 9;
+     :                     ------------ declared here
+  16 | 
+
+[error] InaccessibleDeclaration  sibling.eco:12:17
+
+  'Hidden' is private to 'owner.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  11 | {
+  12 |     Hidden $h = Hidden(hidden_helper());
+     :                 ^^^^^^
+  13 |     return $h->n + HIDDEN_LIMIT;
+
+  4 | 
+  5 | private struct Hidden
+    :                ------ declared here
+  6 | {
+
+[error] InaccessibleDeclaration  sibling.eco:12:24
+
+  'hidden_helper()' is private to 'owner.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  11 | {
+  12 |     Hidden $h = Hidden(hidden_helper());
+     :                        ^^^^^^^^^^^^^
+  13 |     return $h->n + HIDDEN_LIMIT;
+
+   9 | 
+  10 | private function hidden_helper() : int32
+     :                  ------------- declared here
+  11 | {
+
+4 errors, nothing was compiled.

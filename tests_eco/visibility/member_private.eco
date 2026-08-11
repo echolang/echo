@@ -1,0 +1,52 @@
+// the member axis: `private` on a property and on a method means the owner *type*, and nothing else reaches
+// either - which is a different question from the file and module levels the same word names on a top-level
+// declaration. the property half landed with A43 and the method half had no parser at all, so this case is
+// deliberately both at once: they share one rule and one refusal
+
+struct Counter
+{
+    // reachable from Counter's own bodies only
+    private int32 $ticks;
+
+    // readable everywhere, and const to everyone including Counter's own methods: `const` here is the
+    // property's *type*, so what may write it is what may write any const place - an initialization
+    public const int32 $limit;
+
+    constructor(int32 $limit)
+    {
+        $this->ticks = 0;
+        $this->limit = $limit;
+    }
+
+    // only Counter calls this
+    private function at_limit() : bool
+    {
+        return $this->ticks >= $this->limit;
+    }
+
+    // and a sibling method reaches it, which is the half that makes the modifier worth having
+    function tick() : bool
+    {
+        if ($this->at_limit()) {
+            return false;
+        }
+
+        $this->ticks = $this->ticks + 1;
+        return true;
+    }
+
+    const function ticks() : int32
+    {
+        return $this->ticks;
+    }
+}
+
+$c = Counter(2);
+
+echo $c->tick();
+echo $c->tick();
+echo $c->tick();
+
+// the public half of the type is untouched by any of it
+echo $c->ticks();
+echo $c->limit;

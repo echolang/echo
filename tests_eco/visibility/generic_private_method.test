@@ -1,0 +1,7 @@
+# a `private` method on a generic type, called from that type's own body in two instantiations. what it
+# pins is that the flag survives monomorphization - it is on the declaration the instance redirects to -
+# and that an instantiated body is judged against its template's file rather than the file the clone
+# was appended to
+--- OUT --->
+42
+1000

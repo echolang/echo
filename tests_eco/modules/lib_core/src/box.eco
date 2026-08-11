@@ -3,7 +3,7 @@ namespace modcore;
 // a generic declared in one module and instantiated from two others, which is the case that used to put a
 // library's object code at the mercy of its consumers: the instance is cloned into *this* module because
 // the template lives here, while the type it is instantiated with is declared somewhere else entirely
-struct Box<T>
+public struct Box<T>
 {
     T $value;
 
@@ -13,7 +13,7 @@ struct Box<T>
     }
 }
 
-function doubled(int32 $n) : int32
+public function doubled(int32 $n) : int32
 {
     return $n * 2;
 }
@@ -22,7 +22,7 @@ function doubled(int32 $n) : int32
 // generic instance gets - AST::FunctionEmission::t_odr_shared. Declared beside `doubled` above so a test can
 // assert the two against each other: same module, same shape, different placement
 #[inline]
-function tripled(int32 $n) : int32
+public function tripled(int32 $n) : int32
 {
     return $n * 3;
 }

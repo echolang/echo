@@ -10,7 +10,7 @@ hey
 3
 --- IR --->
 # a string literal is a *constant*, not a construction: static bytes in the binary, a length, and a
-# null owner. this is the claim that makes `$foo = 'john'` free, and it is not observable from program
+# null owner. this is the claim that makes `$foo = 'jan'` free, and it is not observable from program
 # output - only from here
 
 # the bytes live in the binary, NUL-terminated so `->c_str()` on a literal costs nothing

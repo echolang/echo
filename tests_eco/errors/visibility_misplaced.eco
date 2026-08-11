@@ -1,0 +1,58 @@
+// **every shape that takes no visibility modifier**, in one case, because they are one rule read from
+// six sides: a modifier says who may name a *declaration*, and each of these is either not a declaration
+// or is already reachable exactly where the thing that owns it is
+//
+// each refusal is reported at the modifier itself rather than at the declaration behind it, and the
+// declaration behind it still parses - so one misplaced word costs one diagnostic and no cascade
+
+struct Holder
+{
+    int32 $n;
+
+    // `internal` is the module axis, and a member has none: what a module may reach is the type
+    internal int32 $shared;
+
+    // a nested type is only ever named through its owner
+    private struct Inner
+    {
+        int32 $m;
+    }
+
+    // a destructor is never called by name
+    private destructor()
+    {
+    }
+
+    // a constant declared inside a type is reached through that type
+    private const int32 STEP = 2;
+}
+
+// an operator's symbol is global wherever it is written
+private operator (Holder $a) + (Holder $b) : int32
+{
+    return $a->n + $b->n;
+}
+
+interface Shape
+{
+    // a requirement *is* the interface's surface
+    private function area() : int32;
+}
+
+function body() : void
+{
+    // and no modifier at all inside a body: a declaration there is reachable from that block and from
+    // nowhere else already
+    private struct Local
+    {
+        int32 $k;
+    }
+
+    private function nested() : int32
+    {
+        return 1;
+    }
+}
+
+// nor on something that is not a declaration
+public echo 1;

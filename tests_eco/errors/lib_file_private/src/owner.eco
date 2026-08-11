@@ -1,0 +1,28 @@
+// `private` is the **file** axis on a declaration: this file names these three and no other file does,
+// not even another file of the same module. that is the distinction the sibling below is here to prove -
+// nothing written would be the module, and neither is the member axis a `private` inside a type body means
+
+private struct Hidden
+{
+    int32 $n;
+}
+
+private function hidden_helper() : int32
+{
+    return 1;
+}
+
+private const int32 HIDDEN_LIMIT = 9;
+
+// and the same three at the module level - nothing written, which is what a declaration means by saying
+// nothing - which the sibling *does* reach. so the case shows the two axes side by side rather than only
+// the refusal
+struct Shared
+{
+    int32 $n;
+}
+
+function shared_helper() : int32
+{
+    return 2;
+}

@@ -5,6 +5,7 @@
 
 #include "AST/ASTNode.h"
 #include "AST/ASTValueType.h"
+#include "AST/ASTVisibility.h"
 
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
@@ -122,6 +123,21 @@ namespace AST
         inline bool is_member() const {
             return owner_type != nullptr;
         }
+
+        // **who may call this**, and where it was written to answer that against.
+        //
+        // one field rather than one per axis, because a declaration only ever sits on one of them and the
+        // parser is what knows which: a `private` on a method is `t_owner` and a `private` on a free
+        // function is `t_file`. holding both would be two fields that must agree about a declaration that
+        // is only one thing
+        //
+        // there is no carrier for this on the *layout*, the way ComplexType::Property::is_private is the
+        // layout-side copy of a property's. There does not have to be: AST::find_member_functions redirects
+        // an instantiation through `template_ref`, so what a call site finds for `Box<int32>::hidden()` is
+        // the declaration `Box<T>` wrote, flag and all
+        Visibility visibility = Visibility::t_public;
+
+        DeclarationOrigin declared_in;
 
         // a method declared in an `interface` body: a **requirement**, not an implementation. it is an
         // ordinary member declaration in every other respect - registered through

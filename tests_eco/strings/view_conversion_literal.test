@@ -5,7 +5,7 @@ stdlib: off
 --- OUT --->
 5
 2
-4
+3
 --- RAST --->
 # **one bind, two temporaries.** the literal is bound first because the conversion reads through it, and
 # the conversion's result is bound second because `show` borrows *that*. the release of the literal's

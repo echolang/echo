@@ -158,6 +158,38 @@ CodeRef TypeChecker::code_ref_for(const TokenReference &token)
     return CodeRef{_current_module, _current_file, token.make_slice()};
 }
 
+DeclarationOrigin TypeChecker::current_origin() const
+{
+    // **a generic instantiation's body is asked from nowhere, deliberately.**
+    //
+    // a template body is source written in one module and *compiled into* whichever module instantiates it,
+    // so "which module is asking" has no single answer - and the answer that looks obvious, the template's
+    // own, is the one that breaks the language's own extension points. `map<K, V>` calls `hash::of($key)`
+    // and `operator ==`, and for a user's key type those live in the *user's* module: judging that call
+    // against `stdlib` refuses a program whose author did nothing wrong and cannot see the reason.
+    //
+    // an unknown origin reaches everywhere, which is the rule AST::visible_from already states for a site
+    // the walk could not place - so this is that rule and not a second one
+    if (_current_function != nullptr && _current_function->is_instantiated()) {
+        return DeclarationOrigin {};
+    }
+
+    // otherwise the enclosing declaration's own stamp. off the declaration rather than off the walk, so an
+    // ordinary body is judged against the file it was written in whatever reached it
+    if (_current_function != nullptr && _current_function->declared_in.is_known()) {
+        return _current_function->declared_in;
+    }
+
+    // and at file scope there is no declaration to ask - where the walk is exactly right, a file root being
+    // reachable only from the file it is
+    return DeclarationOrigin { _current_module, _current_file };
+}
+
+const ComplexType *TypeChecker::enclosing_type() const
+{
+    return _current_function != nullptr ? enclosing_type_of(*_current_function) : nullptr;
+}
+
 void TypeChecker::run()
 {
     for (auto &module_ptr : _bundle.modules) {
@@ -228,10 +260,7 @@ void TypeChecker::check_private_member(
         return;
     }
 
-    const ComplexType *from =
-        _current_function != nullptr ? enclosing_type_of(*_current_function) : nullptr;
-
-    if (can_reach_private_member(from, &complex)) {
+    if (can_reach_private_member(enclosing_type(), &complex)) {
         return;
     }
 
@@ -239,6 +268,89 @@ void TypeChecker::check_private_member(
         code_ref_for(node.get_member_name()),
         property.name,
         complex.namespaced_name());
+}
+
+// **asked of a settled call, on purpose.** an invisible declaration is not filtered out of the overload
+// set: it competes like any other candidate and the *chosen* one is then refused by name, so a program can
+// never quietly bind a different overload than the one written. what the author reads is the declaration
+// they meant and why it is out of reach, not "no such function"
+void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
+{
+    FunctionDeclNode *decl = node.decl;
+
+    if (decl == nullptr) {
+        return;
+    }
+
+    // **a constructor call is the one place a type is named without being spelled in type position.**
+    // `Hidden(1)` builds a value and mentions no type at all as far as Parser::parse_value_type is
+    // concerned, so the three type-name sites never see it - and without this arm the whole modifier is
+    // sidesteppable by leaving the declared type off the local
+    //
+    // asked of the *layout* rather than of a TypeDeclNode, which an instantiation has not got, and through
+    // AST::enclosing_type_of, `owner_type` being null on a constructor
+    if (decl->is_constructor()) {
+        if (const ComplexType *built = enclosing_type_of(*decl)) {
+            const ComplexType *declared = built->template_or_self();
+            const DeclarationOrigin from = current_origin();
+
+            // asked before the sentence is worded - the AST::visible_from / AST::visibility_refusal split
+            // exists so that the common answer costs no name and no format, and every constructor call in
+            // the program reaches this
+            if (!visible_from(declared->visibility, declared->declared_in, from)) {
+                // a constructor's `name_token` *is* its struct's name token - one of the two things
+                // FunctionDeclNode keeps a separate `declaration_token` for - so the label lands on the
+                // type declaration, which is where the modifier was written
+                _collector.collect_issue<Issue::InaccessibleDeclaration>(
+                    code_ref_for(node.token_function_name),
+                    visibility_refusal(
+                        declared->visibility, declared->declared_in, from, built->namespaced_name()),
+                    declared->declared_in,
+                    decl->name_token);
+
+                return;
+            }
+        }
+    }
+
+    if (decl->visibility == Visibility::t_public) {
+        return;
+    }
+
+    // the *owner* axis: a `private` method or constructor. asked through AST::enclosing_type_of on both
+    // sides rather than off `owner_type`, which is null on a constructor - the one shape that has to reach
+    // its own type's privates and the reason that function exists at all
+    if (decl->visibility == Visibility::t_owner) {
+        const ComplexType *owner = enclosing_type_of(*decl);
+
+        if (can_reach_private_member(enclosing_type(), owner)) {
+            return;
+        }
+
+        _collector.collect_issue<Issue::PrivateMethod>(
+            code_ref_for(node.token_function_name),
+            decl->signature_description(),
+            owner != nullptr ? owner->namespaced_name() : std::string("<unknown type>"));
+
+        return;
+    }
+
+    // and the file and module axes, which are about where the two declarations were written and not about
+    // types at all - so the rule is AST::visible_from and the wording comes off it
+    const DeclarationOrigin from = current_origin();
+
+    // the answer first and the sentence only if it is no - see the split's comment in ASTVisibility.h.
+    // `signature_description()` walks the namespace chain and renders every parameter type, and this runs
+    // at every call to every declaration that did not say `public`
+    if (visible_from(decl->visibility, decl->declared_in, from)) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::InaccessibleDeclaration>(
+        code_ref_for(node.token_function_name),
+        visibility_refusal(decl->visibility, decl->declared_in, from, decl->signature_description()),
+        decl->declared_in,
+        std::optional<TokenReference>(decl->declaration_site_token()));
 }
 
 void TypeChecker::check_has_implementation(FunctionDeclNode &node)
@@ -1061,6 +1173,11 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         // outside the gate too, and for a plainer reason than its neighbour's: the question is whether
         // the *builtin* may be called at all, which does not depend on a single argument being resolved
         check_allocation_tracking(node);
+
+        // and outside it for the plainest reason of the three: who may call a declaration is a property of
+        // the declaration, so it is the same answer for a template and for every instance of it - the
+        // monomorphizer having copied the flag along with everything else
+        check_call_visibility(node);
     }
 
     // generic templates are resolved to concrete instances by the monomorphizer; only a

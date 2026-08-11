@@ -59,6 +59,11 @@ an attribute attaches to the declaration after it, and these bracket a *region*.
 `&&` binds tighter than `||`, and `!` tighter than both — the precedence you'd expect. Values are bare names,
 not quoted strings: nothing in a condition is Echo source, so a string literal would only suggest it might be.
 
+That rule isn't local to conditions — it holds for everything written inside a `#[...]`. A bare name means
+itself there, never a constant and never a type, which is why `#[core: array]` and `#[link: framework
+"OpenGL"]` are spelled the way they are. [Modules](modules.md#values) has the rest of the shapes an
+attribute value can take.
+
 **Both halves of an axis test are checked, and that's the point of naming the axis.** `#[if: os == darwn]`
 is a typo, and it is reported:
 

@@ -32,7 +32,7 @@ namespace mem;
  */
 #[core: buffer]
 #[unique]
-struct buffer<T>
+public struct buffer<T>
 {
     // **private, and that is what turns the claim above into a fact.** while these were reachable,
     // `$b->data:$ = $a->data;` built a second owner of one allocation in ordinary safe code - so

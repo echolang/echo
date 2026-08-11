@@ -6,7 +6,7 @@ extern {
     function eco_shim_answer() : int32;
 }
 
-function answer() : int32
+public function answer() : int32
 {
     return eco_shim_answer();
 }

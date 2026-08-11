@@ -8,6 +8,7 @@
 #include "Parser/AttributeParser.h"
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/ConstDeclParser.h"
+#include "Parser/VisibilityParser.h"
 
 #include "AST/ASTSymbol.h"
 #include "AST/TypeDeclNode.h"
@@ -31,11 +32,38 @@ void Parser::parse_type_names(Parser::Payload &payload)
 
     std::vector<OpenRegion> open_regions;
 
-    // the declaration just read, waiting for the `{` that opens its body. anything other than that
-    // brace arriving next clears it: a malformed declaration must not adopt a later block
-    AST::TypeDeclNode *pending_body = nullptr;
+    // **what the walk is holding on behalf of the next declaration, and it is one lifetime.** anything
+    // other than that declaration arriving clears the whole of it - a malformed declaration must not adopt
+    // a later block, and a modifier must not attach itself to whatever came next - so the two are one
+    // struct cleared in one statement rather than two locals paired by hand at every exit
+    //
+    // **a type's visibility is settled in this pass**, a whole pass earlier than any other declaration
+    // settles its own, and for the reason an operator's symbol is published here: the declaration pass
+    // resolves a property's type against a type declared in another file, so a question asked there would
+    // be asked of a declaration that pass has not reached yet - and the answer would depend on file order,
+    // which is the one thing the three passes exist to make irrelevant
+    struct Pending
+    {
+        // the declaration just read, waiting for the `{` that opens its body
+        AST::TypeDeclNode *body = nullptr;
+
+        // the visibility word just walked past, waiting for the declaration keyword it belongs to
+        std::optional<AST::Visibility> visibility;
+    };
+
+    Pending pending;
 
     while (!cursor.is_done()) {
+        // walked past rather than parsed. this pass validates nothing, so a modifier written where none is
+        // allowed is left to the two passes that follow - they parse the statement and can say what shape
+        // it was written on
+        if (const std::optional<AST::Visibility> written =
+                AST::visibility_of_token(cursor.current().type())) {
+            pending.visibility = written;
+            cursor.skip();
+            continue;
+        }
+
         // `namespace a::b;` is a statement, not a block - it names the namespace the rest of the
         // file declares into, so this pass has to follow it to push a symbol into the right one
         //
@@ -45,12 +73,16 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // following it here would move every *later* declaration in the file into a namespace the two
         // passes that come after keep at the file's, and the refusal stays theirs to report
         if (cursor.is_type(Token::Type::t_namespace)) {
+            // cleared on both paths: `namespace a::b;` is a statement and not a declaration, so a modifier
+            // written ahead of one belongs to nothing - and left pending it would attach itself to the next
+            // declaration in the file
+            pending = Pending {};
+
             if (open_regions.empty()) {
                 parse_namespacedecl(payload);
                 continue;
             }
 
-            pending_body = nullptr;
             cursor.skip();
             continue;
         }
@@ -82,7 +114,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
 
             // the rest of the declaration - its operand lists, return type and body - is walked token
             // by token by the loop below, which is what keeps `brace_depth` right
-            pending_body = nullptr;
+            pending = Pending {};
             continue;
         }
 
@@ -92,7 +124,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
             if (cursor.is_type(Token::Type::t_open_brace)) {
                 // every brace pushes a region, carrying the declaration that opened it or nothing.
                 // pushing only the type bodies is what made this two counters that had to agree
-                open_regions.push_back(OpenRegion { pending_body });
+                open_regions.push_back(OpenRegion { pending.body });
             }
             else if (cursor.is_type(Token::Type::t_close_brace)) {
                 if (!open_regions.empty()) {
@@ -100,7 +132,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
                 }
             }
 
-            pending_body = nullptr;
+            pending = Pending {};
             cursor.skip();
             continue;
         }
@@ -114,7 +146,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // where the scope exists; a body-local name is visible in one block of one file, and this pass
         // is here so a name written *out of order across files* resolves
         if (!open_regions.empty() && open_regions.back().type_body == nullptr) {
-            pending_body = nullptr;
+            pending = Pending {};
             cursor.skip(); // the struct or class keyword, and the loop walks the rest of it
             continue;
         }
@@ -122,6 +154,12 @@ void Parser::parse_type_names(Parser::Payload &payload)
         // the struct whose body this declaration sits directly inside, if any. an empty stack is the
         // file's own namespace, and every other region was answered above
         AST::TypeDeclNode *owner = open_regions.empty() ? nullptr : open_regions.back().type_body;
+
+        // consumed here, before any of the early exits below: a duplicate name is a node this pass
+        // deliberately does not mint, and a modifier left pending across one would attach itself to
+        // whatever declaration came next
+        const std::optional<AST::Visibility> declared_visibility = pending.visibility;
+        pending.visibility.reset();
 
         const AST::ComplexTypeKind kind = typedecl_kind(cursor);
 
@@ -160,6 +198,20 @@ void Parser::parse_type_names(Parser::Payload &payload)
         auto &type_node = payload.context.emplace_node<AST::TypeDeclNode>(name_token, kind);
         type_node.set_namespace(payload.context.current_namespace);
 
+        // and where it was written, for the same reason the kind is settled here: this is the only place
+        // the node is created, so the two later passes reuse an answer rather than each deriving one
+        type_node.complex_type().declared_in = AST::origin_at(payload.context);
+
+        // **and its level, which defaults to the declaring module** - the whole of the design decision: a
+        // type is part of what its module offers only if its author wrote `public`.
+        //
+        // a *nested* type keeps the field's `t_public` default instead, and has to: it is reachable exactly
+        // where its owner is, and the owner is what carries that answer. a modifier on one is refused by
+        // the pass that can say what shape it was written on
+        if (owner == nullptr) {
+            type_node.complex_type().visibility = AST::declaration_visibility(declared_visibility);
+        }
+
         // the type parameters, not only the name: for a generic type the arity is part of its
         // identity, and parse_generic_application reads the arity off the template to check an
         // application against it. without this `struct Holder { Box<int32> $b; }` written *above*
@@ -183,7 +235,7 @@ void Parser::parse_type_names(Parser::Payload &payload)
         }
 
         // the body this declaration is about to open, so the `{` arriving next knows whose it is
-        pending_body = &type_node;
+        pending.body = &type_node;
     }
 }
 
@@ -216,12 +268,20 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
     }
 
     while (!cursor.is_done()) {
+        // **the visibility modifier, ahead of the dispatch and not inside one of its arms.** the four
+        // predicates below all scan from the head of the statement, and `public const int32 $x;`,
+        // `public const MAX = 5;` and `public const function f()` are three different declarations - so the
+        // modifier has to be gone before any of them is asked. the body pass reads it at exactly this point
+        // for exactly this reason: the two walks must consume the same tokens or they reach different
+        // declarations, and that failure is silent
+        const VisibilityPrefix visibility = consume_declaration_visibility(payload, block_token);
+
         // functions do not become namespace symbols: a symbol slot holds one node per name, and a
         // name denotes an overload *set*. parse_funcdecl registers them in
         // Collector::functions instead, which is also why `struct Foo` and its constructor `Foo`
         // no longer fight over the same slot
         if (starts_funcdecl(cursor)) {
-            parse_funcdecl(payload);
+            parse_funcdecl(payload, FuncDeclKind::t_normal, visibility);
         }
         else if (starts_operatordecl(cursor)) {
             // the *signature*. the symbol itself was published a pass ago, in parse_type_names, so
@@ -231,7 +291,8 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
         }
         else if (starts_typedecl(cursor)) {
             // the name is already a symbol - parse_type_names pushed it, over every file, before
-            // this pass started. that is what lets the declarations below name a type from any file
+            // this pass started. that is what lets the declarations below name a type from any file -
+            // and its *visibility* was settled there too, off the same modifier this walk just consumed
             parse_typedecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_extern)) {
@@ -239,7 +300,7 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
             // a cross-module call would resolve to this node and mangle the Echo name while codegen
             // emitted the raw C symbol - an undefined symbol at link time. registration happens
             // inside parse_funcdecl, same as any other function
-            parse_extern_block(payload);
+            parse_extern_block(payload, visibility);
         }
         else if (cursor.is_type(Token::Type::t_hash)) {
             // an attribute, walked in this pass too - the frames of this walk must mirror the body
@@ -274,7 +335,7 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
                 cursor.try_skip_to_next_statement();
             }
             else {
-                parse_constdecl(payload, nullptr);
+                parse_constdecl(payload, nullptr, visibility);
             }
         }
         else if (cursor.is_type(Token::Type::t_open_brace)) {

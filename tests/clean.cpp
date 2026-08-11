@@ -41,7 +41,7 @@ void write_project(const ScopedProject &project)
     write_file(project.root() / "lib" / "src" / "lib.eco",
         "namespace cleanlib;\n"
         "\n"
-        "function twice(int32 $n) : int32\n"
+        "public function twice(int32 $n) : int32\n"
         "{\n"
         "    return $n * 2;\n"
         "}\n");

@@ -20,110 +20,110 @@ namespace std::math;
  */
 #[inline]
 #[intrinsic: "llvm.sin"]
-function sin(float $x) : float;
+public function sin(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.sin"]
-function sin(float64 $x) : float64;
+public function sin(float64 $x) : float64;
 
 /**
  * Returns the cosine of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.cos"]
-function cos(float $x) : float;
+public function cos(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.cos"]
-function cos(float64 $x) : float64;
+public function cos(float64 $x) : float64;
 
 /**
  * Returns the tangent of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.tan"]
-function tan(float $x) : float;
+public function tan(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.tan"]
-function tan(float64 $x) : float64;
+public function tan(float64 $x) : float64;
 
 /**
  * Returns the arc sine of a given value, in radians.
  */
 #[inline]
 #[intrinsic: "llvm.asin"]
-function asin(float $x) : float;
+public function asin(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.asin"]
-function asin(float64 $x) : float64;
+public function asin(float64 $x) : float64;
 
 /**
  * Returns the arc cosine of a given value, in radians.
  */
 #[inline]
 #[intrinsic: "llvm.acos"]
-function acos(float $x) : float;
+public function acos(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.acos"]
-function acos(float64 $x) : float64;
+public function acos(float64 $x) : float64;
 
 /**
  * Returns the arc tangent of a given value, in radians.
  */
 #[inline]
 #[intrinsic: "llvm.atan"]
-function atan(float $x) : float;
+public function atan(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.atan"]
-function atan(float64 $x) : float64;
+public function atan(float64 $x) : float64;
 
 /**
  * Returns the arc tangent of $y / $x, using the signs of both to pick the quadrant.
  */
 #[inline]
 #[intrinsic: "llvm.atan2"]
-function atan2(float $y, float $x) : float;
+public function atan2(float $y, float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.atan2"]
-function atan2(float64 $y, float64 $x) : float64;
+public function atan2(float64 $y, float64 $x) : float64;
 
 /**
  * Returns the hyperbolic sine of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.sinh"]
-function sinh(float $x) : float;
+public function sinh(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.sinh"]
-function sinh(float64 $x) : float64;
+public function sinh(float64 $x) : float64;
 
 /**
  * Returns the hyperbolic cosine of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.cosh"]
-function cosh(float $x) : float;
+public function cosh(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.cosh"]
-function cosh(float64 $x) : float64;
+public function cosh(float64 $x) : float64;
 
 /**
  * Returns the hyperbolic tangent of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.tanh"]
-function tanh(float $x) : float;
+public function tanh(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.tanh"]
-function tanh(float64 $x) : float64;
+public function tanh(float64 $x) : float64;
 
 // ----------------------------------------------------------------------------
 // roots, powers, exponentials and logarithms
@@ -134,88 +134,88 @@ function tanh(float64 $x) : float64;
  */
 #[inline]
 #[intrinsic: "llvm.sqrt"]
-function sqrt(float $x) : float;
+public function sqrt(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.sqrt"]
-function sqrt(float64 $x) : float64;
+public function sqrt(float64 $x) : float64;
 
 /**
  * Returns $base raised to the power of $exponent.
  */
 #[inline]
 #[intrinsic: "llvm.pow"]
-function pow(float $base, float $exponent) : float;
+public function pow(float $base, float $exponent) : float;
 
 #[inline]
 #[intrinsic: "llvm.pow"]
-function pow(float64 $base, float64 $exponent) : float64;
+public function pow(float64 $base, float64 $exponent) : float64;
 
 /**
  * Returns e raised to the power of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.exp"]
-function exp(float $x) : float;
+public function exp(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.exp"]
-function exp(float64 $x) : float64;
+public function exp(float64 $x) : float64;
 
 /**
  * Returns 2 raised to the power of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.exp2"]
-function exp2(float $x) : float;
+public function exp2(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.exp2"]
-function exp2(float64 $x) : float64;
+public function exp2(float64 $x) : float64;
 
 /**
  * Returns 10 raised to the power of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.exp10"]
-function exp10(float $x) : float;
+public function exp10(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.exp10"]
-function exp10(float64 $x) : float64;
+public function exp10(float64 $x) : float64;
 
 /**
  * Returns the natural logarithm of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.log"]
-function log(float $x) : float;
+public function log(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.log"]
-function log(float64 $x) : float64;
+public function log(float64 $x) : float64;
 
 /**
  * Returns the base 2 logarithm of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.log2"]
-function log2(float $x) : float;
+public function log2(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.log2"]
-function log2(float64 $x) : float64;
+public function log2(float64 $x) : float64;
 
 /**
  * Returns the base 10 logarithm of a given value.
  */
 #[inline]
 #[intrinsic: "llvm.log10"]
-function log10(float $x) : float;
+public function log10(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.log10"]
-function log10(float64 $x) : float64;
+public function log10(float64 $x) : float64;
 
 // ----------------------------------------------------------------------------
 // rounding
@@ -226,44 +226,44 @@ function log10(float64 $x) : float64;
  */
 #[inline]
 #[intrinsic: "llvm.floor"]
-function floor(float $x) : float;
+public function floor(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.floor"]
-function floor(float64 $x) : float64;
+public function floor(float64 $x) : float64;
 
 /**
  * Returns the smallest integral value not less than a given value.
  */
 #[inline]
 #[intrinsic: "llvm.ceil"]
-function ceil(float $x) : float;
+public function ceil(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.ceil"]
-function ceil(float64 $x) : float64;
+public function ceil(float64 $x) : float64;
 
 /**
  * Returns a given value with its fractional part discarded, rounding toward zero.
  */
 #[inline]
 #[intrinsic: "llvm.trunc"]
-function trunc(float $x) : float;
+public function trunc(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.trunc"]
-function trunc(float64 $x) : float64;
+public function trunc(float64 $x) : float64;
 
 /**
  * Returns the nearest integral value, rounding halfway cases away from zero.
  */
 #[inline]
 #[intrinsic: "llvm.round"]
-function round(float $x) : float;
+public function round(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.round"]
-function round(float64 $x) : float64;
+public function round(float64 $x) : float64;
 
 /**
  * Returns the nearest integral value, rounding halfway cases to the even neighbour.
@@ -273,22 +273,22 @@ function round(float64 $x) : float64;
  */
 #[inline]
 #[intrinsic: "llvm.roundeven"]
-function roundeven(float $x) : float;
+public function roundeven(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.roundeven"]
-function roundeven(float64 $x) : float64;
+public function roundeven(float64 $x) : float64;
 
 /**
  * Returns the nearest integral value, according to the current rounding mode.
  */
 #[inline]
 #[intrinsic: "llvm.rint"]
-function rint(float $x) : float;
+public function rint(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.rint"]
-function rint(float64 $x) : float64;
+public function rint(float64 $x) : float64;
 
 // ----------------------------------------------------------------------------
 // sign
@@ -302,22 +302,22 @@ function rint(float64 $x) : float64;
  */
 #[inline]
 #[intrinsic: "llvm.fabs"]
-function abs(float $x) : float;
+public function abs(float $x) : float;
 
 #[inline]
 #[intrinsic: "llvm.fabs"]
-function abs(float64 $x) : float64;
+public function abs(float64 $x) : float64;
 
 /**
  * Returns $magnitude with the sign of $sign.
  */
 #[inline]
 #[intrinsic: "llvm.copysign"]
-function copysign(float $magnitude, float $sign) : float;
+public function copysign(float $magnitude, float $sign) : float;
 
 #[inline]
 #[intrinsic: "llvm.copysign"]
-function copysign(float64 $magnitude, float64 $sign) : float64;
+public function copysign(float64 $magnitude, float64 $sign) : float64;
 
 // ----------------------------------------------------------------------------
 // minimum, maximum and fused multiply-add
@@ -332,62 +332,62 @@ function copysign(float64 $magnitude, float64 $sign) : float64;
  */
 #[inline]
 #[intrinsic: "llvm.minnum"]
-function min(float $a, float $b) : float;
+public function min(float $a, float $b) : float;
 
 #[inline]
 #[intrinsic: "llvm.minnum"]
-function min(float64 $a, float64 $b) : float64;
+public function min(float64 $a, float64 $b) : float64;
 
 #[inline]
 #[intrinsic: "llvm.smin"]
-function min(int32 $a, int32 $b) : int32;
+public function min(int32 $a, int32 $b) : int32;
 
 #[inline]
 #[intrinsic: "llvm.smin"]
-function min(int64 $a, int64 $b) : int64;
+public function min(int64 $a, int64 $b) : int64;
 
 #[inline]
 #[intrinsic: "llvm.umin"]
-function min(uint32 $a, uint32 $b) : uint32;
+public function min(uint32 $a, uint32 $b) : uint32;
 
 #[inline]
 #[intrinsic: "llvm.umin"]
-function min(uint64 $a, uint64 $b) : uint64;
+public function min(uint64 $a, uint64 $b) : uint64;
 
 /**
  * Returns the larger of two values.
  */
 #[inline]
 #[intrinsic: "llvm.maxnum"]
-function max(float $a, float $b) : float;
+public function max(float $a, float $b) : float;
 
 #[inline]
 #[intrinsic: "llvm.maxnum"]
-function max(float64 $a, float64 $b) : float64;
+public function max(float64 $a, float64 $b) : float64;
 
 #[inline]
 #[intrinsic: "llvm.smax"]
-function max(int32 $a, int32 $b) : int32;
+public function max(int32 $a, int32 $b) : int32;
 
 #[inline]
 #[intrinsic: "llvm.smax"]
-function max(int64 $a, int64 $b) : int64;
+public function max(int64 $a, int64 $b) : int64;
 
 #[inline]
 #[intrinsic: "llvm.umax"]
-function max(uint32 $a, uint32 $b) : uint32;
+public function max(uint32 $a, uint32 $b) : uint32;
 
 #[inline]
 #[intrinsic: "llvm.umax"]
-function max(uint64 $a, uint64 $b) : uint64;
+public function max(uint64 $a, uint64 $b) : uint64;
 
 /**
  * Returns $a * $b + $c, computed with a single rounding.
  */
 #[inline]
 #[intrinsic: "llvm.fma"]
-function fma(float $a, float $b, float $c) : float;
+public function fma(float $a, float $b, float $c) : float;
 
 #[inline]
 #[intrinsic: "llvm.fma"]
-function fma(float64 $a, float64 $b, float64 $c) : float64;
+public function fma(float64 $a, float64 $b, float64 $c) : float64;

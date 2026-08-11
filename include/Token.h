@@ -94,6 +94,8 @@ public:
         t_mv,                       // mv
         t_unsafe,                   // unsafe
         t_private,                  // private
+        t_internal,                 // internal
+        t_public,                   // public
         t_operator,                 // operator
         t_unknown
     };

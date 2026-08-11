@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "AST/ASTVisibility.h"
+
 #include <type_traits>
 #include <string>
 #include <vector>
@@ -677,6 +679,24 @@ namespace AST
         // deliberately not on ValueType: it is a property of the declared type, identical for every
         // spelling of it, and a flag on the interning identity would fork `buffer<T>` in two
         bool is_unique = false;
+
+        // **who may name this type**, and where it was written to answer that against.
+        //
+        // here beside `kind` and `is_unique`, and for exactly their reason: an *instantiation* has a
+        // ComplexType and no declaration node, so this is the only thing that can answer for `Box<int32>`
+        // what `Box` was declared as - and TypeRegistry::get_or_create_instantiation carries both across.
+        //
+        // it also answers for the one shape that has a type but no type *name* to check:
+        // `Hidden(1)` builds a value without spelling `Hidden` in type position anywhere, so the refusal
+        // has to be reachable from the constructor's own declaration. AST::enclosing_type_of gives that
+        // constructor's ComplexType, and this is what makes the answer available there
+        //
+        // settled in the *type names* pass, a pass earlier than every other declaration settles its own:
+        // the declaration pass resolves a property's type against a type declared in another file, so
+        // asking there would depend on which file was walked first
+        Visibility visibility = Visibility::t_public;
+
+        DeclarationOrigin declared_in;
 
         bool is_class_kind() const {
             return kind == ComplexTypeKind::t_class;

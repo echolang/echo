@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTCodeRef.h"
+#include "AST/ASTDeclarationOrigin.h"
 
 #include <optional>
 #include <vector>
@@ -104,6 +105,19 @@ namespace AST
         TokenSlice span;
         std::string message;
     };
+
+    // **a label is a *second place to look at*, and a span on a line the primary frame already draws is
+    // not one** - the renderer gives every label a frame of its own, so it would come out as the same
+    // source line printed twice. `$a->extend($a)` and a declaration refused from the line below it are
+    // both exactly that case.
+    //
+    // one function rather than the rule spelled in each `labels()` override, the answer being about the
+    // renderer's one-frame-per-label behaviour and not about any one kind
+    std::vector<IssueLabel> label_outside_primary(
+        const CodeRef &code_ref,
+        const TokenReference &at,
+        std::string message
+    );
 
     class IssueRecord
     {
@@ -220,6 +234,31 @@ namespace AST
         // is the diagnostic that makes an invariant enforceable rather than merely documented - every
         // aliasing conclusion `mem::buffer<T>` licenses rests on this refusal existing
         MAKE_ISSUE_DEF2(PrivateMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+
+        // a `private` **method** called from outside the type that declared it. a kind of its own rather
+        // than PrivateMember's second reading, for two reasons that are the same reason: the advice
+        // differs - "go through a method" is what PrivateMember says, and a method *is* one - and an
+        // issue's message is part of the collector's dedup key, so one kind cannot carry two sentences
+        MAKE_ISSUE_DEF2(PrivateMethod, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+
+        // a declaration named from outside the file or module it is reachable from. one kind for both
+        // scopes, the sentence coming from AST::visibility_refusal - which is the rule, so a diagnostic
+        // that worded it here would be a second answer to "what does this modifier mean"
+        //
+        // `declaration_token` is a *label*: the second place to look is where the declaration was written,
+        // and the message already says which scope it named.
+        //
+        // **not drawn for a refusal across modules**, and that is not an omission. AST::span_of resolves a
+        // label's file through `Module::file_of` on the module the *issue* was built against, which answers
+        // null for a token another module owns - and then falls back to the file the diagnostic is already
+        // drawing. A cross-module label would therefore point at the declaration's line numbers inside the
+        // *caller's* file, which is worse than pointing nowhere.
+        //
+        // `declared_in` is here for exactly that: the module the token belongs to, against `code_ref`'s -
+        // which is the module `span_of` will resolve it through. Asked here rather than by the four sites
+        // that report this, none of which has any other use for the answer
+        MAKE_ISSUE_DEF3(InaccessibleDeclaration, IssueSeverity::Error, const std::string, _message, const DeclarationOrigin, declared_in, const std::optional<TokenReference>, declaration_token,
+            std::vector<IssueLabel> labels() const override;);
 
         // two arguments of one call name overlapping storage, and at least one of them is written
         // through. its own kind rather than a GenericError because it is the diagnostic that makes an

@@ -1,6 +1,6 @@
 namespace modgated;
 
-function gated_platform() : string
+public function gated_platform() : string
 {
     return 'linux';
 }

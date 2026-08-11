@@ -1,0 +1,2 @@
+#[module: "internals"]
+#[sources: "src/*.eco"]

@@ -32,7 +32,7 @@ namespace contract;
  * `advance()` already performed.
  */
 #[core: iterator]
-interface iterator<V>
+public interface iterator<V>
 {
     /**
      * Step to the next element. False when there are none left.
@@ -52,7 +52,7 @@ interface iterator<V>
  * never write it - the compiler reads it off your `iterate()`.
  */
 #[core: iterable]
-interface iterable<V>
+public interface iterable<V>
 {
     type Iter : iterator<V>;
 
@@ -78,7 +78,7 @@ interface iterable<V>
  * cursors, and `foreach` picks between them by whether the value it was given is const.
  */
 #[core: const_iterable]
-interface const_iterable<V>
+public interface const_iterable<V>
 {
     type Iter : iterator<V>;
 
@@ -96,7 +96,7 @@ interface const_iterable<V>
  * another interface beside this one, and a cursor declares the ones it can honour.
  */
 #[core: keyed]
-interface keyed<K>
+public interface keyed<K>
 {
     /**
      * Where the current element sits. Only valid after `advance()` answered true.

@@ -464,6 +464,12 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // copy is a byte copy, so two values end up naming one allocation and both free it
     instantiated->is_unique = tmpl->is_unique;
 
+    // and so is visibility: `Hidden<int32>` is as reachable as `Hidden` is, and where it was written is
+    // the template's file. without this a private generic type would be private as a template and public
+    // for every instance of it - which is the shape a use site actually names
+    instantiated->visibility = tmpl->visibility;
+    instantiated->declared_in = tmpl->declared_in;
+
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = args;
 

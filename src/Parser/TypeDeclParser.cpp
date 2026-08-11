@@ -20,6 +20,7 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 #include "Parser/TypeParser.h"
+#include "Parser/VisibilityParser.h"
 
 #include <fmt/core.h>
 
@@ -459,7 +460,8 @@ static void publish_copy_constructor(
 static void parse_constructor(
     Parser::Payload &payload,
     AST::TypeDeclNode *struct_node,
-    const AST::ValueType &self_value_type
+    const AST::ValueType &self_value_type,
+    Parser::VisibilityPrefix visibility
 )
 {
     auto &cursor = payload.cursor;
@@ -492,6 +494,14 @@ static void parse_constructor(
     // the struct's own namespace: `Foo(...)` has to resolve wherever the type name does, which for a
     // block-local struct is that block and nowhere else
     ctor_decl->ast_namespace = payload.context.current_namespace;
+
+    // **`private constructor(...)` is the owner axis, exactly as on a method**, and it needs no arm of its
+    // own anywhere below: a constructor is a FunctionDeclNode whose call site is an ordinary
+    // FunctionCallExprNode, so the one check on a settled call already covers it. what it *does* need is
+    // AST::enclosing_type_of on both sides of that check rather than `owner_type`, a constructor carrying
+    // a null owner - which is the whole reason that function exists
+    ctor_decl->visibility = visibility.value;
+    ctor_decl->declared_in = AST::origin_at(payload.context);
 
     // share the struct's parameter declarations rather than declaring its own: the ctor's return
     // type is the struct's self-application Foo<T>, so a substitution built from this list has to
@@ -1237,7 +1247,29 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     };
 
     while (!cursor.is_done()) {
+        // **the member's visibility, read ahead of the dispatch below and not inside one of its arms.**
+        // `private` here means the owner type rather than the file - the position is the only thing that
+        // says which, and parse_visibility_prefix is the one place that reads it off the position.
+        //
+        // ahead of the dispatch because the arms that follow all scan from the head of the member:
+        // `public const int32 $x;` is a property, `public const MAX = 5;` is a constant and
+        // `public const function f()` is a const method, and only starts_constdecl's `$` test and
+        // starts_funcdecl's `function` keyword tell the three apart. this used to be a bare `t_private`
+        // test inside the property arm, which is exactly why `private function` did not parse: the method
+        // arm is asked first and never saw the keyword
+        VisibilityPrefix visibility = parse_visibility_prefix(payload, VisibilityPosition::t_member);
+
         if (cursor.is_type(Token::Type::t_hash)) {
+            // **the modifier goes ahead of the attribute, not behind it.** the arm below consumes the
+            // attribute and comes back around, at which point the prefix is gone - so without this a
+            // `private` written here is silently dropped and the member is reachable from everywhere.
+            // the same ordering is refused at file scope by Parser::consume_declaration_visibility
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A visibility modifier belongs to the declaration, so it goes after the attributes and "
+                "directly ahead of the member it is about.");
+
             // an attribute ahead of a member. it lands on `context.scope()` - the file root, since a
             // struct body pushes no scope of its own - and the member declaration below drains it from
             // there, exactly as a top-level declaration does. `#[core: string_view]` on a nested
@@ -1260,6 +1292,15 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 continue;
             }
 
+            // a nested type is reached *through* its owner - `A::Inner`, and never a bare `Inner` - so it
+            // is already exactly as reachable as the owner is. narrowing it further would be a third scope
+            // between the owner and the file, which nothing else in the language has
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A type declared inside another is only ever named through its owner, so it is already as "
+                "reachable as that owner is.");
+
             parse_typedecl(payload);
         }
         // `type Iter : contract::iterator<V>;` - an interface's associated type.
@@ -1274,6 +1315,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         else if (cursor.is_type(Token::Type::t_identifier)
             && cursor.current().value() == "type"
             && cursor.peek_is_type(1, Token::Type::t_identifier)) {
+            // an associated type is part of what the interface *requires*, so it is as public as the
+            // interface. the same reason a requirement below takes no modifier
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "An associated type is part of what the interface requires, so it is reachable exactly "
+                "where the interface is.");
+
             parse_associated_type(payload, *struct_node, is_interface_body, collect_members);
         }
         // **ahead of starts_vardecl**, for the two arms above's reason and one sharper than theirs:
@@ -1294,7 +1343,20 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // parses and registers through register_member_function, which is all a requirement is.
             // only the *body* has to be refused, and that is asked of the returned node below - in the
             // body pass, since the declaration pass returns before it ever reaches one
-            AST::FunctionDeclNode *member = parse_funcdecl(payload);
+            // an interface's method is a **requirement**: it is the surface every implementor answers, so
+            // there is nothing for a modifier to hide it from. refused ahead of parse_funcdecl so the
+            // declaration is not left carrying a visibility the language does not give it
+            if (is_interface_body) {
+                refuse_visibility_prefix(
+                    payload,
+                    visibility,
+                    "A method declared in an interface is a requirement, so it is reachable exactly where "
+                    "the interface is - it is what an implementor promises to answer.");
+
+                visibility.value = AST::Visibility::t_public;
+            }
+
+            AST::FunctionDeclNode *member = parse_funcdecl(payload, FuncDeclKind::t_normal, visibility);
 
             if (is_interface_body && member != nullptr && member->body != nullptr) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -1333,25 +1395,23 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // published in the declaration pass only, the idiom parse_associated_type follows: both passes
             // walk this body, and publishing twice would report the second as a redeclaration of the first
             else if (collect_members) {
-                parse_constdecl(payload, struct_node);
+                parse_constdecl(payload, struct_node, visibility);
             }
             else {
                 cursor.try_skip_to_next_statement();
             }
         }
-        else if (cursor.is_type(Token::Type::t_private) || starts_vardecl(payload)) {
-            // `private ptr<T> $data;` - read here rather than in parse_varexpr, because it is a
-            // property of a *property*: a local has no outside to be hidden from, and there is no
-            // `private` on one
-            const bool is_private = cursor.is_type(Token::Type::t_private);
-            if (is_private) {
-                cursor.skip();
-            }
-
+        else if (starts_vardecl(payload)) {
+            // `private ptr<T> $data;`. the modifier was consumed at the head of this loop rather than here,
+            // because the arms above are asked first and a `private function` never reached this one -
+            // which is the whole of why A17 sat half done
+            //
+            // and it is a property of a *property* rather than of a declaration: a local has no outside to
+            // be hidden from, and there is no `private` on one
             auto var = parse_varexpr(payload, &structscope);
 
             if (var != nullptr) {
-                var->is_private = is_private;
+                var->is_private = visibility.value == AST::Visibility::t_owner;
             }
 
             // a requirement is behaviour, not storage. a required *property* would fix the layout of
@@ -1376,6 +1436,12 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // that is the reason publish_implicit_conversion refuses a free function rather than each
             // caller doing it: the declaration's own parser owes the diagnostic, and every walk that
             // reaches one then gets it. spelling it here as well made the wording a copy
+            //
+            // the modifier is the one thing refused here rather than there, and for that same reason
+            // inverted: an operator's symbol is global wherever it is written, so the refusal is about the
+            // modifier and not about the position, and a struct body is not the only place to say it
+            refuse_visibility_prefix(payload, visibility, k_operator_visibility_refusal);
+
             Parser::parse_operatordecl(payload);
         }
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
@@ -1386,7 +1452,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 continue;
             }
 
-            parse_constructor(payload, struct_node, self_value_type);
+            parse_constructor(payload, struct_node, self_value_type, visibility);
         }
         else if (cursor.is_type(Token::Type::t_destructor)) {
             // a real token, unlike `constructor` above: it has to be one so no member can be named
@@ -1398,6 +1464,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 refuse_braced_member("a destructor");
                 continue;
             }
+
+            // no name reaches a destructor: it is called by the ownership pass, from the scope that owns
+            // the value, so there is no call site for a modifier to refuse
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A destructor is never called by name - the compiler runs it where the value it belongs to "
+                "ends - so there is no call site for a modifier to narrow.");
 
             parse_destructor(payload, struct_node, &self_type_node);
         }

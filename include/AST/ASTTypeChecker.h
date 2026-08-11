@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTVisibility.h"
 #include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
@@ -53,6 +54,28 @@ namespace AST
         // property the caller already resolved, so the name is looked up once per member access
         void check_private_member(MemberAccessNode &node, const ComplexType &complex,
             const ComplexType::Property &property);
+
+        // **refuses a call to something this site is not allowed to name.** asked of a *settled* call, so
+        // an invisible declaration still took part in overload resolution and the program is refused by
+        // name rather than silently binding a different overload than the one written.
+        //
+        // one check for all three axes, because one field carries them: a `private` method is the owner
+        // axis and defers to AST::can_reach_private_member, and a `private` or `internal` free function is
+        // the file or module axis and defers to AST::visible_from. this also covers a private
+        // *constructor* with no arm of its own - AST::enclosing_type_of answers for both member shapes
+        void check_call_visibility(FunctionCallExprNode &node);
+
+        // **where the site being walked was written.** off the enclosing declaration rather than off the
+        // walk, and that is the whole of why this is a function: the monomorphizer appends an instance to
+        // `files().first()` of its template's module, so `_current_file` names a file the instantiated body
+        // was never written in - while the clone's own stamp is its template's, which is the answer wanted
+        DeclarationOrigin current_origin() const;
+
+        // and the *owner* axis's half of the same question: the type whose body is being walked, null at
+        // file scope. through AST::enclosing_type_of rather than `owner_type`, a constructor carrying a
+        // null owner - see AST::can_reach_private_member, which is what this is asked for
+        const ComplexType *enclosing_type() const;
+
         void visit_type_decl(TypeDeclNode &node) override;
         void visitMemberAccess(MemberAccessNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;

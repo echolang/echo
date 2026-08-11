@@ -8,7 +8,7 @@ namespace std::math;
  * @return The absolute value of $value.
  */
 #[inline]
-function abs<T>(T $value) : T
+public function abs<T>(T $value) : T
 {
     if ($value < 0) {
         return -$value;
@@ -26,7 +26,7 @@ function abs<T>(T $value) : T
  * @return The clamped value.
  */
 #[inline]
-function clamp(float $value, float $min, float $max) : float
+public function clamp(float $value, float $min, float $max) : float
 {
     return min(max($value, $min), $max);
 }
@@ -41,7 +41,7 @@ function clamp(float $value, float $min, float $max) : float
  * @return The clamped value.
  */
 #[inline]
-function clamp(float64 $value, float64 $min, float64 $max) : float64
+public function clamp(float64 $value, float64 $min, float64 $max) : float64
 {
     return min(max($value, $min), $max);
 }

@@ -20,7 +20,7 @@ namespace std::env;
  * of a loop that allocates until the machine gives up; no path on any supported platform comes near
  * it.
  */
-function working_dir() : string
+public function working_dir() : string
 {
     usize $capacity = 256;
 
@@ -56,7 +56,7 @@ function working_dir() : string
  * Nullable because an unset `HOME` has no honest answer. Returning `""` would hand back a path that
  * resolves - to the working directory - and the caller could not tell that from a real one.
  */
-function home_dir() : string::view?
+public function home_dir() : string::view?
 {
     return var('HOME');
 }
@@ -67,7 +67,7 @@ function home_dir() : string::view?
  * Not nullable, because unlike `HOME` there *is* an honest answer when the variable is missing: the
  * path every POSIX system has.
  */
-function tmp_dir() : string::view
+public function tmp_dir() : string::view
 {
     return var('TMPDIR', '/tmp');
 }

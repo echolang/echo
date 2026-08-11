@@ -51,7 +51,11 @@ namespace
     }
 };
 
-AST::ConstDeclNode *Parser::parse_constdecl(Parser::Payload &payload, AST::TypeDeclNode *owner)
+AST::ConstDeclNode *Parser::parse_constdecl(
+    Parser::Payload &payload,
+    AST::TypeDeclNode *owner,
+    Parser::VisibilityPrefix visibility
+)
 {
     auto &cursor = payload.cursor;
 
@@ -122,9 +126,27 @@ AST::ConstDeclNode *Parser::parse_constdecl(Parser::Payload &payload, AST::TypeD
         return nullptr;
     }
 
+    // a constant written in a struct body is reached as `self::MAX` or `buffer::MAX`, through the owner's
+    // member surface, so it is already exactly as reachable as its owner - which is what `public` on a
+    // member says anyway, and so is accepted here in silence like any other redundant default.
+    //
+    // a `private` one would be the *member* axis, and this is the one member shape that does not carry it:
+    // AST::ConstantExpander is what resolves a constant reference, and it tracks the enclosing type for
+    // `self::` but not for a privacy question. refused rather than read as the file axis, which would answer
+    // something nobody asked
+    if (owner != nullptr && visibility.value == AST::Visibility::t_owner) {
+        refuse_visibility_prefix(
+            payload,
+            visibility,
+            "A constant declared inside a type is reached through that type, so it is already as reachable "
+            "as its owner is - and there is no narrower scope for one.");
+
+        visibility.value = AST::Visibility::t_public;
+    }
+
     auto &const_node = payload.context.emplace_node<AST::ConstDeclNode>(name_token, type);
-    const_node.declared_in_file = payload.context.file.file;
-    const_node.declared_in_module = &payload.context.module;
+    const_node.declared_in = AST::origin_at(payload.context);
+    const_node.visibility = visibility.value;
     const_node.value = parse_expr(payload, type);
 
     if (const_node.value == nullptr) {

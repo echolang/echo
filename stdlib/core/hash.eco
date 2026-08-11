@@ -85,8 +85,8 @@ namespace hash;
  * carries a basis one digit short of this one; the two are unrelated uses that never compare a value,
  * so this file spells the real thing rather than mirroring that.
  */
-const uint64 OFFSET_BASIS = 14695981039346656037;
-const uint64 PRIME = 1099511628211;
+public const uint64 OFFSET_BASIS = 14695981039346656037;
+public const uint64 PRIME = 1099511628211;
 
 /**
  * The two multipliers `mix` stirs with - SplitMix64's finalizer, in Stafford's variant 13.
@@ -95,8 +95,8 @@ const uint64 PRIME = 1099511628211;
  * inverse modulo 2^64, so no two keys are ever merged by one. Everything `mix` promises rests on that,
  * and on nothing about the particular digits.
  */
-const uint64 MIX_A = 13787848793156543929;
-const uint64 MIX_B = 10723151780598845931;
+public const uint64 MIX_A = 13787848793156543929;
+public const uint64 MIX_B = 10723151780598845931;
 
 /**
  * One machine word, stirred so that every output bit depends on every input bit.
@@ -117,7 +117,7 @@ const uint64 MIX_B = 10723151780598845931;
  * table actually reads.
  */
 #[inline]
-function mix(uint64 $key) : uint64
+public function mix(uint64 $key) : uint64
 {
     uint64 $h = $key;
 
@@ -140,7 +140,7 @@ function mix(uint64 $key) : uint64
  * across that boundary short of `-O`'s whole-program merge, and the `run` path performs no IR pass at all.
  */
 #[inline]
-function step(uint64 $seed, uint8 $byte) : uint64
+public function step(uint64 $seed, uint8 $byte) : uint64
 {
     return ($seed ^ $byte) * PRIME;
 }
@@ -154,7 +154,7 @@ function step(uint64 $seed, uint8 $byte) : uint64
  * `#[inline]` for `step`'s reason: this is the loop every map lookup and every insert runs.
  */
 #[inline]
-function bytes(ptr<const uint8> $data, usize $size, uint64 $seed) : uint64
+public function bytes(ptr<const uint8> $data, usize $size, uint64 $seed) : uint64
 {
     uint64 $h = $seed;
     usize $i = 0;
@@ -187,7 +187,7 @@ function bytes(ptr<const uint8> $data, usize $size, uint64 $seed) : uint64
  * attribute each is a call across the unit boundary around four instructions.
  */
 #[inline]
-function combine(uint64 $seed, uint64 $value) : uint64
+public function combine(uint64 $seed, uint64 $value) : uint64
 {
     return mix((($seed << 5) | ($seed >> 59)) ^ $value);
 }
@@ -205,7 +205,7 @@ function combine(uint64 $seed, uint64 $value) : uint64
  * thought about, silently. This is that capability with the decision left where it belongs: at the call
  * site, in your own `of`, where you know what your type is made of.
  */
-function of_bytes<T>(const T& $value) : uint64
+public function of_bytes<T>(const T& $value) : uint64
 {
     // a `ptr<const uint8>` over the value's bytes, walked by value. no borrow is formed, so nothing
     // is promised and no `unsafe` is owed - the doc above is the whole of the argument about when
@@ -234,23 +234,23 @@ function of_bytes<T>(const T& $value) : uint64
  * the attribute every lookup and every insert pays an opaque cross-unit call around six instructions - and
  * an opaque call is also a memory barrier, so the probe loop reloads the capacity and the key across it.
  */
-#[inline] function of(const int8& $value) : uint64 { return mix($value); }
-#[inline] function of(const int16& $value) : uint64 { return mix($value); }
-#[inline] function of(const int32& $value) : uint64 { return mix($value); }
-#[inline] function of(const int64& $value) : uint64 { return mix($value); }
-#[inline] function of(const isize& $value) : uint64 { return mix($value); }
+#[inline] public function of(const int8& $value) : uint64 { return mix($value); }
+#[inline] public function of(const int16& $value) : uint64 { return mix($value); }
+#[inline] public function of(const int32& $value) : uint64 { return mix($value); }
+#[inline] public function of(const int64& $value) : uint64 { return mix($value); }
+#[inline] public function of(const isize& $value) : uint64 { return mix($value); }
 
-#[inline] function of(const uint8& $value) : uint64 { return mix($value); }
-#[inline] function of(const uint16& $value) : uint64 { return mix($value); }
-#[inline] function of(const uint32& $value) : uint64 { return mix($value); }
-#[inline] function of(const uint64& $value) : uint64 { return mix($value); }
-#[inline] function of(const usize& $value) : uint64 { return mix($value); }
+#[inline] public function of(const uint8& $value) : uint64 { return mix($value); }
+#[inline] public function of(const uint16& $value) : uint64 { return mix($value); }
+#[inline] public function of(const uint32& $value) : uint64 { return mix($value); }
+#[inline] public function of(const uint64& $value) : uint64 { return mix($value); }
+#[inline] public function of(const usize& $value) : uint64 { return mix($value); }
 
 /**
  * A bool has two values, so the only thing its hash owes anybody is that they differ - but they should
  * differ *everywhere*, not just in the bottom bit, or a `map<bool, V>` puts both in adjacent slots.
  */
-#[inline] function of(const bool& $value) : uint64 { return mix($value); }
+#[inline] public function of(const bool& $value) : uint64 { return mix($value); }
 
 /**
  * The float overloads, which are **not** a byte hash.
@@ -273,7 +273,7 @@ function of_bytes<T>(const T& $value) : uint64
  * `const` borrow has no address to take, and because the zero above has to be written somewhere.
  */
 #[inline]
-function of(const float32& $value) : uint64
+public function of(const float32& $value) : uint64
 {
     float32 $normal = $value;
 
@@ -290,7 +290,7 @@ function of(const float32& $value) : uint64
 }
 
 #[inline]
-function of(const float64& $value) : uint64
+public function of(const float64& $value) : uint64
 {
     float64 $normal = $value;
 
@@ -318,13 +318,13 @@ function of(const float64& $value) : uint64
  * one - so neither ever surprises the other.
  */
 #[inline]
-function of(const string& $value) : uint64
+public function of(const string& $value) : uint64
 {
     return of($value->window);
 }
 
 #[inline]
-function of(const string::view& $value) : uint64
+public function of(const string::view& $value) : uint64
 {
     return bytes($value->bytes, $value->size, OFFSET_BASIS);
 }

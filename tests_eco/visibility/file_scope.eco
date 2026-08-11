@@ -1,0 +1,36 @@
+// the file axis, and the module default beside it. a single-file program is one module of one file, so a
+// `private` declaration here is reachable from exactly this file - which is everything there is - and a
+// declaration with no modifier is reachable from this module, which is also everything there is
+//
+// what the case pins is that the modifier parses on all three declaration shapes and refuses nothing
+// inside its own file. the boundary the two levels actually differ at needs two files, and two modules:
+// errors/private_across_files.eco and errors/internal_across_modules.eco are those cases
+
+private struct Node
+{
+    int32 $value;
+}
+
+private function make(int32 $v) : Node
+{
+    return Node($v);
+}
+
+// nothing written, so this belongs to its module - which is what a declaration means by saying nothing
+function sum(Node $a, Node $b) : int32
+{
+    return $a->value + $b->value;
+}
+
+// `internal` written out. it is the default, so this changes nothing at all - and that is why it is
+// accepted: a module's surface is the one line of a library a consumer reads, so a declaration that means
+// "not part of it" should be able to say so rather than only omit a word
+internal const int32 OFFSET = 0;
+
+// and `public`, which is the one word here that does any work: it is what crosses the module boundary
+public function total() : int32
+{
+    return sum(make(4), make(38)) + OFFSET;
+}
+
+echo total();

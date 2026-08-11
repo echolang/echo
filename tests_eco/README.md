@@ -70,7 +70,7 @@ located error rather than a word the shell would try to run.
 ### Testing another platform
 
 `flags: --target-os linux` compiles the Linux arm of a `#[if: os == ...]` region on whatever machine runs the
-suite — see [book/concept/conditional.md](../book/concept/conditional.md). It is **not** cross-compilation:
+suite — see [docs/projects/conditional-compilation.md](../docs/projects/conditional-compilation.md). It is **not** cross-compilation:
 the code is still built for the host, so a foreign arm usually fails at link or at runtime, and that is fine.
 What the case asserts is that the arm parses, resolves and type-checks, which is the only check a
 platform-specific region gets from a machine that is not that platform.

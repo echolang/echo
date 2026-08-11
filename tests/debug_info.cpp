@@ -119,7 +119,7 @@ TEST_CASE("an ODR-shared body carries the same debug info in every unit", "[debu
 )");
 
     write_file(project.root() / "lib" / "pair.eco", R"(
-struct Pair<T>
+public struct Pair<T>
 {
     T $a;
     T $b;
@@ -165,7 +165,7 @@ TEST_CASE("-g is part of the module cache key", "[debuginfo]")
 )");
 
     write_file(project.root() / "lib" / "answer.eco", R"(
-function answer() : int32 { return 42; }
+public function answer() : int32 { return 42; }
 )");
 
     write_file(project.root() / "app" / "module.eco", R"(

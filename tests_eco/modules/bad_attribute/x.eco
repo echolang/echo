@@ -1,2 +1,2 @@
 namespace badattr;
-function x() : int32 { return 3; }
+public function x() : int32 { return 3; }

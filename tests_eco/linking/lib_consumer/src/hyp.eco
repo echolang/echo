@@ -1,6 +1,6 @@
 namespace hyp;
 
-function of(float64 $a, float64 $b) : float64
+public function of(float64 $a, float64 $b) : float64
 {
     return roots::of($a * $a + $b * $b);
 }

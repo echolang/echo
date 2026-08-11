@@ -1,0 +1,18 @@
+// a library whose internals say nothing - which is the module - and whose surface says `public`. nothing
+// here is wrong: the refusals belong to the consumer, which is the only place the module boundary is visible
+struct Detail
+{
+    int32 $n;
+}
+
+function detail_of(int32 $v) : int32
+{
+    return $v * 2;
+}
+
+const int32 DETAIL_SCALE = 4;
+
+public function offered(int32 $v) : int32
+{
+    return detail_of($v) + DETAIL_SCALE;
+}

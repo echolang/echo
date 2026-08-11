@@ -1,0 +1,2 @@
+#[module: "filepriv"]
+#[sources: "src/*.eco"]

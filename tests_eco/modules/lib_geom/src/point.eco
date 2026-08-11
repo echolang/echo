@@ -1,6 +1,6 @@
 namespace modgeom;
 
-struct Point
+public struct Point
 {
     int32 $x;
     int32 $y;
@@ -12,7 +12,7 @@ struct Point
 }
 
 // reaches into the module this one depends on, both for a plain function and for the generic
-function boxed_x(Point $p) : int32
+public function boxed_x(Point $p) : int32
 {
     modcore::Box<int32> $b = modcore::Box<int32>($p->x);
     return modcore::doubled($b->get());

@@ -54,22 +54,22 @@ CodeRef ConstantExpander::code_ref_at_declaration(const ConstDeclNode &decl)
 {
     // the declaring file, not the walked one: the excerpt is read out of the file's own content, and a cycle
     // is as likely to be noticed from another file as from the one that wrote it
-    const File *file = decl.declared_in_file != nullptr ? decl.declared_in_file : _current_file;
+    const File *file = decl.declared_in.file != nullptr ? decl.declared_in.file : _current_file;
 
     return CodeRef{_current_module, file, decl.token_name.make_slice()};
 }
 
 bool ConstantExpander::module_may_name(const ConstDeclNode &decl) const
 {
-    if (decl.declared_in_module == nullptr || _current_module == nullptr) {
+    if (decl.declared_in.module == nullptr || _current_module == nullptr) {
         return true;
     }
 
-    if (decl.declared_in_module == _current_module) {
+    if (decl.declared_in.module == _current_module) {
         return true;
     }
 
-    const auto declared_at = _module_order.find(decl.declared_in_module);
+    const auto declared_at = _module_order.find(decl.declared_in.module);
     const auto used_at = _module_order.find(_current_module);
 
     if (declared_at == _module_order.end() || used_at == _module_order.end()) {
@@ -201,7 +201,31 @@ ConstDeclNode *ConstantExpander::resolve(ConstRefExprNode &ref)
         return nullptr;
     }
 
-    return refuse_if_later_module(*decl, ref) ? nullptr : decl;
+    if (refuse_if_later_module(*decl, ref) || refuse_if_not_visible(*decl, ref)) {
+        return nullptr;
+    }
+
+    return decl;
+}
+
+// the sibling of the refusal below, and the reason the two are separate: a *later* module is a fact about
+// the build's shape that no modifier can change, while this one is a choice the declaration made. asked
+// second, so a constant in a module nobody may name yet is reported as that rather than as a private one
+bool ConstantExpander::refuse_if_not_visible(const ConstDeclNode &decl, const ConstRefExprNode &ref)
+{
+    const DeclarationOrigin from { _current_module, _current_file };
+
+    if (visible_from(decl.visibility, decl.declared_in, from)) {
+        return false;
+    }
+
+    _collector.collect_issue<Issue::InaccessibleDeclaration>(
+        code_ref_for(ref.token_name),
+        visibility_refusal(decl.visibility, decl.declared_in, from, ref.token_name.value()),
+        decl.declared_in,
+        std::optional<TokenReference>(decl.token_name));
+
+    return true;
 }
 
 bool ConstantExpander::refuse_if_later_module(const ConstDeclNode &decl, const ConstRefExprNode &ref)
@@ -215,8 +239,8 @@ bool ConstantExpander::refuse_if_later_module(const ConstDeclNode &decl, const C
         fmt::format(
             "'{}' is declared in the module '{}', which is compiled after '{}' - a module may only name "
             "symbols from one parsed before it. Move the constant into '{}' or into a module it depends on.",
-            ref.token_name.value(), decl.declared_in_module->name, _current_module->name,
-            decl.declared_in_module->name));
+            ref.token_name.value(), decl.declared_in.module->name, _current_module->name,
+            decl.declared_in.module->name));
 
     return true;
 }

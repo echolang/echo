@@ -6,6 +6,22 @@
 #define ISSUE_MESSAGE_FNC(className) \
 std::string AST::Issue::className::message() const
 
+std::vector<AST::IssueLabel> AST::label_outside_primary(
+    const AST::CodeRef &code_ref,
+    const TokenReference &at,
+    std::string message
+)
+{
+    const auto [primary_line, primary_end] = code_ref.line_range();
+    const uint32_t label_line = at.line();
+
+    if (label_line >= primary_line && label_line <= primary_end) {
+        return {};
+    }
+
+    return { AST::IssueLabel { at.make_slice(), std::move(message) } };
+}
+
 ISSUE_MESSAGE_FNC(GenericError)
 {
     return _message;
@@ -177,6 +193,31 @@ ISSUE_MESSAGE_FNC(PrivateMember)
         member_name, type_name, type_name);
 }
 
+ISSUE_MESSAGE_FNC(PrivateMethod)
+{
+    return fmt::format(
+        "'{}' is private to '{}' and cannot be called from here. Only that type's own bodies reach it - "
+        "if it is part of what '{}' offers, drop the 'private'.",
+        member_name, type_name, type_name);
+}
+
+ISSUE_MESSAGE_FNC(InaccessibleDeclaration)
+{
+    return _message;
+}
+
+std::vector<AST::IssueLabel> AST::Issue::InaccessibleDeclaration::labels() const
+{
+    // the label only where the renderer can place it: a token another module owns resolves to no file
+    // through the module this issue was built against, and the fallback would draw its line numbers
+    // inside the file the diagnostic is already showing - see the kind's comment
+    if (!declaration_token.has_value() || declared_in.module != code_ref.module) {
+        return {};
+    }
+
+    return label_outside_primary(code_ref, declaration_token.value(), "declared here");
+}
+
 ISSUE_MESSAGE_FNC(ConflictingAccess)
 {
     return _message;
@@ -184,17 +225,7 @@ ISSUE_MESSAGE_FNC(ConflictingAccess)
 
 std::vector<AST::IssueLabel> AST::Issue::ConflictingAccess::labels() const
 {
-    // a label is a *second place to look at*, and a span on a line the primary frame already draws is
-    // not one - the renderer gives every label a frame of its own, so it would come out as the same
-    // source line printed twice. the common shape, `$a->extend($a)`, is exactly that case
-    const auto [primary_line, primary_end] = code_ref.line_range();
-    const uint32_t label_line = other_argument_token.line();
-
-    if (label_line >= primary_line && label_line <= primary_end) {
-        return {};
-    }
-
-    return { IssueLabel { other_argument_token.make_slice(), "the other access is here" } };
+    return label_outside_primary(code_ref, other_argument_token, "the other access is here");
 }
 
 std::vector<AST::IssueNote> AST::Issue::ConflictingAccess::notes() const

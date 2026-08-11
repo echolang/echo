@@ -16,7 +16,7 @@
  *
  * Counts and indices are `usize` throughout, matching `mem::`.
  */
-struct slice<T> : contract::iterable<T>, contract::const_iterable<const T>
+public struct slice<T> : contract::iterable<T>, contract::const_iterable<const T>
 {
     ptr<T> $data;
     usize $len;
@@ -188,7 +188,7 @@ operator<T> (const slice<T>& $s)[usize $index] : const T&
  * The usual borrow rule applies, unchanged: growing the array ends this window, exactly as it ends
  * every other borrow into it.
  */
-struct slice_iterator<T> : contract::iterator<T>, contract::keyed<usize>
+public struct slice_iterator<T> : contract::iterator<T>, contract::keyed<usize>
 {
     slice<T> $window;
 

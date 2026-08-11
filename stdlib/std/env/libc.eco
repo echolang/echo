@@ -8,8 +8,9 @@
  * `getOrInsertFunction` and refuses mismatched ones, so the failure is loud - but it is a failure
  * this file's existence means nobody has to think about.
  *
- * Nothing here is meant to be called from outside `std::env`. There are no visibility modifiers
- * yet, so the `c_` prefix is what says so.
+ * Nothing here is callable from outside this module: an `extern` block takes the same visibility a
+ * declaration does, and neither of these says `public`. The `c_` prefix still earns its keep as a reader's
+ * signal, since the module boundary is not visible from inside the module.
  *
  * **Types are ours to get right** - nothing checks a declaration against the real C header. `usize`
  * stands in for `size_t` and `int32` for C's `int`.

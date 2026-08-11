@@ -26,7 +26,7 @@ namespace arr;
  * paying a copy, a call and a redundant capacity re-check per element; `extend` is where that decision
  * lives now, so a merge and a hand-written append are the same code.
  */
-function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
+public function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
 {
     // the room is asked for ahead of both appends rather than letting each reserve its own half:
     // `extend` reserves for what it is about to add, so two of them would double once in between
@@ -50,7 +50,7 @@ function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
  *
  * `count()` is `0` afterwards. Use `reserve_exact` through this if the slack matters.
  */
-function with_capacity<T>(usize $count) : array<T>
+public function with_capacity<T>(usize $count) : array<T>
 {
     array<T> $out = array<T>();
     $out->reserve($count);

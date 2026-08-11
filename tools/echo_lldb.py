@@ -13,7 +13,7 @@ Rust and Swift all ship formatters, and this is Echo's.
     (lldb) command script import tools/echo_lldb.py
 
 Everything registers into the `echo` type category, so `type category disable echo` gives the raw
-view back. See notes/debuginfo.md for why this layer exists and book/concept/debugging.md for using it.
+view back. See notes/debuginfo.md for why this layer exists and docs/projects/debugging.md for using it.
 
 **Two things a reader of this file has to know before changing anything.**
 

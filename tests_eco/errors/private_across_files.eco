@@ -1,0 +1,6 @@
+// the file axis needs two files of *one* module to mean anything - two modules would be `internal`'s
+// case - so the refusals live in the fixture's second file and this program only builds it
+//
+// see errors/lib_file_private/src/sibling.eco, which is where every one of them is written
+
+echo 0;

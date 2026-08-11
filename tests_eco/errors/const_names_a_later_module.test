@@ -2,13 +2,13 @@ modules: errors/lib_backref
 expect: fail
 
 --- OUT --->
-[error] derived.eco:3:23
+[error] derived.eco:3:30
 
   'APP_BASE' is declared in the module 'main', which is compiled after 'backref' - a module may only name symbols from one parsed before it. Move the constant into 'main' or into a module it depends on.
 
   2 | 
-  3 | const usize DERIVED = APP_BASE * 2;
-    :                       ^^^^^^^^
+  3 | public const usize DERIVED = APP_BASE * 2;
+    :                              ^^^^^^^^
   4 | 
 
 1 error, nothing was compiled.

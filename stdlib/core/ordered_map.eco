@@ -37,7 +37,7 @@
  *
  * If any of those ever stops being worth it the swap is internal: the surface below is identical either way.
  */
-struct ordered_map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
+public struct ordered_map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
     map<K, V> $table;
 
@@ -320,7 +320,7 @@ operator<K, V> (const ordered_map<K, V>& $m)[const K& $key] : const V&
  * **Each step costs a hash lookup**, which is the composed design's price and is worth knowing rather than
  * worrying about: the keys are read sequentially, the values are not.
  */
-struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
+public struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
 {
     ptr<map<K, V>> $table;
     slice<K> $order;
@@ -380,7 +380,7 @@ struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
  * which is a different table from the one it was handed. There is no spelling for "const the yield and
  * not the table", so the const the table is reached through goes on the pointer instead.
  */
-struct ordered_map_const_iterator<K, V> : contract::iterator<const V>, contract::keyed<K>
+public struct ordered_map_const_iterator<K, V> : contract::iterator<const V>, contract::keyed<K>
 {
     ptr<const map<K, V>> $table;
     slice<const K> $order;

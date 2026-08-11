@@ -39,7 +39,7 @@
  * your own code is.
  */
 #[core: array]
-struct array<T> : contract::iterable<T>, contract::const_iterable<const T>
+public struct array<T> : contract::iterable<T>, contract::const_iterable<const T>
 {
     // **the allocation, and the length that says how much of it is live.** two fields and not three,
     // because the address and the capacity are one thing - they are created together, they move

@@ -1,0 +1,28 @@
+// **privacy survives instantiation**, which is the case that pins two things at once: the layout
+// carries the visibility of a type (so `Hidden<int32>` is as reachable as `Hidden`), and
+// AST::find_member_functions redirects an instance through its template - so what `Box<int32>`'s own
+// body finds for `grow()` is the declaration `Box<T>` wrote, `private` and all
+//
+// and the instance's own body is judged against the *template's* file, not the file the monomorphizer
+// appended the clone to
+
+private struct Box<T>
+{
+    T $value;
+
+    private function doubled_value() : T
+    {
+        return $this->value + $this->value;
+    }
+
+    function doubled() : T
+    {
+        return $this->doubled_value();
+    }
+}
+
+$a = Box<int32>(21);
+$b = Box<int64>(500);
+
+echo $a->doubled();
+echo $b->doubled();

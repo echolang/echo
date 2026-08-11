@@ -1,0 +1,2 @@
+#[module: "sealedlib"]
+#[sources: "src/*.eco"]

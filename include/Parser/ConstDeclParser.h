@@ -5,6 +5,7 @@
 
 #include "AST/ConstDeclNode.h"
 #include "Parser/ParserPayload.h"
+#include "Parser/VisibilityParser.h"
 
 namespace AST
 {
@@ -26,7 +27,15 @@ namespace Parser
     //
     // null when the declaration was refused, in which case nothing has been published and the cursor has
     // been moved past the statement.
-    AST::ConstDeclNode *parse_constdecl(Parser::Payload &payload, AST::TypeDeclNode *owner);
+    //
+    // `visibility` is what the dispatch that reached this already consumed. A **member** constant takes
+    // none: it is reached through its owner's member surface, so a modifier there would be the member axis,
+    // and this refuses one rather than silently reading it as the file axis
+    AST::ConstDeclNode *parse_constdecl(
+        Parser::Payload &payload,
+        AST::TypeDeclNode *owner,
+        VisibilityPrefix visibility
+    );
 };
 
 #endif

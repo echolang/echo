@@ -1,0 +1,11 @@
+// private to this file. the module's other file cannot name it, and nothing outside the module can
+private function scale(int32 $v) : int32
+{
+    return $v * 3;
+}
+
+// nothing written, so this belongs to the module: the rest of it names this, a consumer does not
+function grown(int32 $v) : int32
+{
+    return scale($v) + 1;
+}

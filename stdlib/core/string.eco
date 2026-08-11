@@ -47,7 +47,7 @@
  * than a duplicated allocation. The `str::buf` handle is released at scope exit either way.
  */
 #[core: string]
-struct string
+public struct string
 {
     /**
      * A window over bytes someone else owns.
@@ -428,10 +428,9 @@ struct string
      * are maintained where they are declared. Sizing the block up front is what keeps `append_bytes`
      * from growing it: `reserve` does nothing when the room is already there.
      *
-     * Internal, like `make_unique` - public only because there are no visibility modifiers yet
-     *.
+     * `private`, so only `string`'s own bodies reach it
      */
-    const function clone_reserving(usize $extra) : string
+    private const function clone_reserving(usize $extra) : string
     {
         usize $n = $this->window->size;
 
@@ -474,9 +473,9 @@ struct string
      * plain `and` with no short circuit, and the second reads through `$owner`, which the first has
      * only just established is not null.
      *
-     * Internal. It is public only because there are no visibility modifiers yet.
+     * `private`, so only `string`'s own bodies reach it.
      */
-    function make_unique() : void
+    private function make_unique() : void
     {
         if (mem::ref_count($this->owner) == 1) {
             if ($this->window->size == $this->owner->used) {
@@ -503,10 +502,10 @@ struct string
      * One method rather than the same statement at the end of four mutators, so the fifth cannot
      * forget it or spell it differently.
      *
-     * Internal, like `make_unique` - public only because there are no visibility modifiers yet
+     * `private`, so only `string`'s own bodies reach it
      *.
      */
-    function reseat() : void
+    private function reseat() : void
     {
         $this->window = string::view($this->owner->bytes, $this->owner->used);
     }

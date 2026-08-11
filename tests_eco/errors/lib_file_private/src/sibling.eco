@@ -1,0 +1,14 @@
+// the same module, a different file. the module-level half is reachable from here; the `private` half is
+// not, and every one of the four spellings below is refused - a type in type position, the same type
+// spelled as a constructor call, a function call, and a constant reference
+function reaches_module_level() : int32
+{
+    Shared $s = Shared(shared_helper());
+    return $s->n;
+}
+
+function cannot_reach_private() : int32
+{
+    Hidden $h = Hidden(hidden_helper());
+    return $h->n + HIDDEN_LIMIT;
+}

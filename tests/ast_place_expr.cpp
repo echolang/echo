@@ -329,7 +329,8 @@ TEST_CASE("null is deliberately not an expression node for conversion purposes",
     // would hide the tag and turn "cannot be null" into a silent conversion
     //
     // pinned because the omission looks exactly like the bug CLAUDE.md's "Adding an AST node"
-    // step 9 warns about, and would otherwise be "fixed" into a regression
+    // warns about for `NodeReference::is_expression_node()`, and would otherwise be "fixed"
+    // into a regression
     auto bundle = EchoTests::tests_make_parsed_bundle("ptr<int> $p = null;\n");
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 

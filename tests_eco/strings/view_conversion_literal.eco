@@ -35,5 +35,5 @@ show('hello');
 showv('hi');
 
 // a place still needs only the one temporary - there is nothing to give the receiver, it has storage
-$owned = 'john';
+$owned = 'jan';
 show($owned);
