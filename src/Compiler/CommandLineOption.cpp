@@ -128,9 +128,10 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::build, accepts::build, ExclusionGroup::t_none,
             "<file>", "",
             "where the executable is written",
-            "Where the executable is written. Required, and refused up front rather than after a "
-            "compile: the build has nowhere to put what it made, and finding that out last wastes "
-            "every second of it.",
+            "Where to write the executable.\n"
+            "  echoc build -o app src/*.eco\n"
+            "If you forget it you hear about it before the compile rather than after: a build with "
+            "nowhere to put what it made has wasted every second it spent.",
             {}, nullptr
         },
         {
@@ -139,11 +140,15 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<manifest>", "",
             "build a module from its manifest",
-            "Build a module from its manifest. May be given more than once; a manifest may be a "
-            "'module.eco' file or the directory holding one.\n"
-            "The graph is resolved as a whole, so naming a library that depends on another pulls the "
-            "other in too, once, ahead of it - a dependency does not have to be spelled here. Root "
-            "order is authoritative, never the order they sit in on disk.",
+            "Build a module from its manifest. Point it at the 'module.eco' file or at the directory "
+            "holding one, whichever you find easier to type:\n"
+            "  echoc build -m lib -o app main.eco\n"
+            "  echoc build -m lib/module.eco -o app main.eco\n"
+            "You only ever name the modules you care about. The graph is resolved as a whole, so a "
+            "library that depends on another pulls the other in too, once, ahead of it, and you never "
+            "have to spell out a dependency yourself.\n"
+            "When you do name several, the order you write them in is the order they are parsed, never "
+            "the order they happen to sit in on disk.",
             {}, nullptr
         },
         {
@@ -152,12 +157,15 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<dir>", "",
             "where build artifacts are written",
-            "Where build artifacts are written. Defaults to 'ecobuild' beside each manifest, or to "
-            "whatever that manifest's '#[build_dir: ...]' names. One directory for the whole build, "
-            "with a subdirectory per module.\n"
-            "A directory named here is one a person chose, so it has to carry echoc's CACHEDIR.TAG "
-            "before anything is written into it or removed from it. That is what keeps 'clean' from "
-            "being a command that can empty somebody's source tree.",
+            "Keep the build's leftovers somewhere other than beside your sources:\n"
+            "  echoc build --build-dir /tmp/echo-build -o app main.eco\n"
+            "The whole build then lands in that one directory, one subdirectory per module. By default "
+            "each module builds into 'ecobuild' beside its own manifest, or into whatever that "
+            "manifest's '#[build_dir: ...]' names.\n"
+            "A directory you name yourself has to carry echoc's CACHEDIR.TAG before echoc writes into it "
+            "or removes anything from it. An empty one is marked for you; one that already holds files "
+            "echoc did not put there is refused. That refusal is the whole reason 'echoc clean' cannot "
+            "empty your source tree over a typo.",
             {}, nullptr
         },
         {
@@ -166,13 +174,17 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<requirement>", "",
             "add a link requirement",
-            "Add a link requirement: 'lib:<name>', 'framework:<name>', 'search:<dir>' or "
-            "'object:<file>'. May be given more than once.\n"
-            "The pressure valve, and deliberately the same closed vocabulary a manifest writes. Where "
-            "a library is installed is a property of the machine rather than of the module, so there "
-            "has to be a way to reach one nothing declared - but a second spelling would be two things "
-            "to keep correct, and the one used least is the one that drifts. Merged after every "
-            "manifest's, so a declaration wins and a search path given here is consulted last.",
+            "Tell the linker about something no module declared:\n"
+            "  echoc build --link lib:m --link search:/opt/homebrew/lib -o app main.eco\n"
+            "Four kinds, and the tag is not optional: 'lib:<name>' for a library, 'framework:<name>' for "
+            "a Darwin framework, 'search:<dir>' for a directory to look in, 'object:<file>' for an "
+            "object to link straight in.\n"
+            "Most of the time you should not need any of them. A module says what it needs with "
+            "'#[link:]', and whoever uses that module writes '#[depends:]' and nothing else. This flag "
+            "is for the half that belongs to your machine rather than to the module, like a library "
+            "installed somewhere nobody could have predicted.\n"
+            "Whatever you write here is merged after every manifest's, so a declaration wins and a "
+            "search path you give is consulted last.",
             {}, nullptr
         },
         {
@@ -181,10 +193,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_build_mode,
             nullptr, "",
             "keep 'assert' and the runtime checks",
-            "Keep 'assert' and the compiler's own runtime checks - the null check a 'ptr<T>' to 'T&' "
-            "narrowing emits, and whatever check comes next. The default for 'run'.\n"
-            "This is about the checks the *program* carries and says nothing about optimization or "
-            "about what a debugger can see; --optimize and --debug-symbols are the other two axes.",
+            "Keep 'assert' and the runtime checks the compiler emits for you, like the null check on a "
+            "'ptr<T>' to 'T&' narrowing:\n"
+            "  echoc build --debug -o app main.eco\n"
+            "'run' does this already, 'build' does not, so this is the flag you write when you want a "
+            "checked native binary.\n"
+            "It decides which checks your program carries and nothing else. Optimization and debug "
+            "symbols are separate axes, so a checked build can still be fully optimized. Mix them "
+            "however you like.",
             {}, nullptr
         },
         {
@@ -193,7 +209,10 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_build_mode,
             nullptr, "",
             "drop 'assert' and the runtime checks",
-            "Drop 'assert' and the compiler's own runtime checks. The default for 'build'.",
+            "Drop 'assert' and the runtime checks the compiler emits for you:\n"
+            "  echoc run --release bench.eco\n"
+            "'build' does this already, so the interesting use is the one above: measuring something "
+            "through the JIT without the checks in the way.",
             {}, nullptr
         },
         {
@@ -202,30 +221,36 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<mode>", "module",
             "how hard, and over how much at once",
-            "How hard the optimizer works, and over how much of the program at once.\n"
-            "One option and not two: the pair this replaced was '-O' and '--no-optimize', which sound "
-            "like each other's inverse and were not - one said what is compiled together and the other "
-            "whether the per-unit pipeline ran at all, so writing both was expressible and meant almost "
-            "nothing.",
+            "How hard the optimizer works, and how much of your program it may look at once:\n"
+            "  echoc build --optimize whole -o app main.eco\n"
+            "An ordinary build already optimizes every unit on its own, so reach for this when you want "
+            "either less than that or more.\n"
+            "It used to be two flags, '-O' and '--no-optimize'. They read like opposites and were not: "
+            "one chose what is compiled together, the other whether the pipeline ran at all, so writing "
+            "both was legal and meant almost nothing. It is one option with three values now.",
             {
                 {
                     "none", accepts::compiling, code_of(OptimizeMode::t_none),
                     "skip the per-unit pipeline",
-                    "Skip the per-unit pipeline an ordinary build runs, and emit unoptimized IR. For reading raw "
-                    "IR, and for bisecting a miscompile against the optimizer."
+                    "Skip the pipeline entirely and emit the IR as codegen wrote it. Use it when you want to read "
+                    "raw IR, or to find out whether the optimizer is the one miscompiling your program."
                 },
                 {
                     "module", accepts::compiling, code_of(OptimizeMode::t_module),
                     "optimize each unit on its own",
-                    "Run the baseline pipeline over each unit on its own. The only mode that leaves a per-module "
-                    "object there is any point storing, which is why it is the default."
+                    "Optimize each unit on its own, which is what you get when you say nothing at all. Also the "
+                    "only mode that leaves a per-module object worth storing, so it is the only one your build "
+                    "cache can help with, and that is why it is the default rather than 'whole'."
                 },
                 {
                     "whole", accepts::compiling, code_of(OptimizeMode::t_whole),
                     "merge every unit, then optimize",
-                    "Fold every unit into one module and optimize the whole program. The optimizer can only inline "
-                    "a body it can see - and after the merge there are no per-module objects left, so this "
-                    "bypasses the object cache. '#[inline]' is how a function stays inlinable without it."
+                    "Fold every unit into one module first, then optimize the lot. The optimizer can only inline a "
+                    "body it can see, so this is what gets you inlining across module boundaries, and it is the "
+                    "mode to reach for when you are shipping.\n"
+                    "The catch: there are no per-module objects left afterwards, so it bypasses the cache and "
+                    "every build starts over. If you only need one function to stay inlinable, mark it "
+                    "'#[inline]' and keep your fast builds."
                 }
             },
             nullptr
@@ -235,15 +260,21 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             OptionArity::t_flag, OptionCategory::t_build,
             accepts::compiling, 0, ExclusionGroup::t_none,
             nullptr, "",
-            "emit DWARF, so a debugger can step it",
-            "Emit DWARF, so the program can be stepped through in a debugger.\n"
-            "A third axis, orthogonal to --debug/--release: that pair decides which checks the program "
-            "carries, this decides what the object tells a debugger. Folding them would make an "
-            "assertion-free build undebuggable by construction, which is exactly the build somebody "
-            "reaches for a debugger over.\n"
-            "It sets --optimize to none unless --optimize was written, because a line table over "
-            "optimized output describes a program nobody wrote. 'run' accepts it and says it cannot "
-            "honour it - the JIT emits no object for a debugger to open.",
+            "emit DWARF, so you can step through it",
+            "Emit DWARF, so a debugger can step through your '.eco' files, line by line, with your own "
+            "variable names:\n"
+            "  echoc build -g -o app main.eco\n"
+            "  lldb ./app\n"
+            "On macOS echoc runs 'dsymutil' for you afterwards, because the linker leaves the DWARF "
+            "behind in the objects and lldb would find nothing.\n"
+            "It also turns --optimize down to none, unless you asked for a level yourself. A line table "
+            "over optimized output describes a program nobody wrote, so stepping through one is a good "
+            "way to lose an afternoon.\n"
+            "Despite the name this is not --debug with a shorter spelling. That pair decides which "
+            "checks your program carries, this decides what the object tells a debugger, and a build "
+            "with no assertions that you can still step through is exactly the build you tend to want a "
+            "debugger for. 'run' takes the flag and then tells you it cannot honour it: the JIT writes "
+            "no object for a debugger to open.",
             {}, nullptr
         },
         {
@@ -252,10 +283,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             nullptr, "",
             "emit no type-based alias metadata",
-            "Emit no type-based alias metadata.\n"
-            "Not a tuning knob: a defined program must produce the same result with it and without it, "
-            "and a program where the two disagree has either found a bug in the access-family table or "
-            "made a false 'unsafe' promotion. That equivalence is the whole reason the flag exists.",
+            "Emit no type-based alias metadata, which is echoc's way of telling the optimizer that two "
+            "accesses cannot possibly touch the same storage.\n"
+            "  echoc build --no-tbaa -o app main.eco\n"
+            "Not a tuning knob: a bisection tool. A well-defined program has to give the same answer "
+            "with it and without it, so if yours only works once you pass this, the flag has just told "
+            "you something. Either you found a bug in echoc's access-family table, or an 'unsafe' block "
+            "in your code is promising something that is not true. Either way, that comparison is what "
+            "the flag is for.",
             {}, nullptr
         },
         {
@@ -264,13 +299,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             nullptr, "",
             "count outstanding allocations",
-            "Count how many allocations are outstanding, so 'mem::live_allocations()' can be read from "
-            "Echo. Without it that builtin is refused rather than answered 0.\n"
-            "Its own option rather than a consequence of --debug, and that is the point: a debug build "
-            "is about the checks the program owes itself, and this is bookkeeping somebody asked for. "
-            "Tying it to the build mode would make the emitted allocation call spell itself "
-            "differently in the two modes, which quietly weakens every IR golden written against the "
-            "wrong one.",
+            "Have the program keep count of how many allocations are still outstanding, so 'mem::"
+            "live_allocations()' can be read from Echo:\n"
+            "  echoc run --track-allocations leak_test.eco\n"
+            "Without the flag that builtin is refused at compile time rather than quietly answering 0, "
+            "so a leak test can never pass because somebody forgot to turn the counter on.\n"
+            "It is its own flag rather than something --debug switches on, which means you can leave it "
+            "out of a debug build and put it into a release one. Very handy: the build you check for "
+            "leaks is then the build you actually ship.",
             {}, nullptr
         },
         {
@@ -279,10 +315,15 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_stdlib_use,
             nullptr, "",
             "compile without the standard library",
-            "Compile without the standard library. 'array', 'string', 'die', 'assert' and the "
-            "'contract::', 'mem::', 'str::', 'arr::', 'hash::' and 'std::' namespaces are then simply "
-            "undeclared names.\n"
-            "The standard library is a module like any other, so it can be left out.",
+            "Compile without the standard library:\n"
+            "  echoc run --no-stdlib bare.eco\n"
+            "'array', 'string', 'die', 'assert' and the 'contract::', 'mem::', 'str::', 'arr::', "
+            "'hash::' and 'std::' namespaces are then simply undeclared names. Even '0 .. 10' stops "
+            "meaning anything, because a range is an ordinary operator written in Echo rather than "
+            "something the compiler knows about.\n"
+            "The standard library is a module like any other, so nothing stops you from leaving it out. "
+            "Good for a freestanding program, and a fine way to find out how little of Echo is actually "
+            "built into echoc.",
             {}, nullptr
         },
         {
@@ -291,11 +332,13 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_stdlib_use,
             nullptr, "",
             "regenerate the embedded stdlib header",
-            "Regenerate 'stdlib/build/stdlib_embedded.h' from the standard library sources. It embeds "
-            "the bytes rather than a file list, so it has to be regenerated when a stdlib file is "
-            "edited and not only when one is added.\n"
+            "Regenerate 'stdlib/build/stdlib_embedded.h' from the standard library sources, which is how "
+            "a downloaded echoc carries a standard library at all:\n"
+            "  echoc build --emit-stdlib-header -o app main.eco\n"
+            "Only interesting if you work on echoc itself. The header embeds the bytes rather than a "
+            "file list, so regenerate it whenever you edit a stdlib file and not only when you add one.\n"
             "Rewriting a tracked file is opt-in rather than a side effect of every compile. Refused "
-            "beside --no-stdlib, because there is then no standard library to write out.",
+            "beside --no-stdlib, where there would be no standard library to write out.",
             {}, nullptr
         },
         {
@@ -304,13 +347,19 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<name>", "",
             "evaluate '#[if:]' as if targeting this OS",
-            "Evaluate '#[if: os == ...]' conditions as if targeting this OS. Does not "
-            "cross-compile - the code is still compiled for this machine, so asking for a foreign OS "
-            "will usually fail at link.\n"
-            "It exists so a test can assert what another platform's branch does without owning that "
-            "platform, which is the only way an '#[if: os == linux]' region is ever checked on a Mac. "
-            "'clean' reads it too, because a manifest may gate its '#[depends:]' behind a condition - "
-            "so the graph reached without it is not the graph the build produced.",
+            "Look at the code the way another platform sees it. Every '#[if: os == ...]' condition is "
+            "evaluated against the name you give here, so the other platform's regions are the ones that "
+            "get parsed:\n"
+            "  echoc build --target-os linux -o app main.eco\n"
+            "One of 'darwin', 'linux' or 'windows'. A name outside that list is an error rather than a "
+            "condition that is quietly false, because '#[if: os == darwn]' should not be a region that "
+            "vanishes in silence.\n"
+            "It does not cross-compile. The code is still compiled for this machine, so a foreign OS "
+            "will usually fail at link. What you get is a check on another platform's branch without "
+            "owning that platform, which is the only way an '#[if: os == linux]' region is ever looked "
+            "at on a Mac.\n"
+            "'clean' takes it too, because a manifest may hide its '#[depends:]' behind a condition: "
+            "without the same flag, the graph 'clean' walks is not the graph your build produced.",
             {}, nullptr
         },
         {
@@ -319,7 +368,10 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<name>", "",
             "the same for the architecture",
-            "Evaluate conditions as if targeting this architecture. Does not cross-compile.",
+            "The same thing for '#[if: arch == ...]', with 'arm64' or 'x86_64' as the vocabulary:\n"
+            "  echoc build --target-arch x86_64 -o app main.eco\n"
+            "Same rules as --target-os, including the part where it does not cross-compile and an "
+            "unknown name is an error.",
             {}, nullptr
         },
         {
@@ -328,10 +380,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<name>", "",
             "declare a flag '#[if: NAME]' can test",
-            "Declare a flag that '#[if: NAME]' can test. May be given more than once.\n"
-            "Bare names only: naming a *value* is what 'const' declarations are for. An undefined flag "
-            "is false rather than an error - the opposite of the os and arch vocabularies, which are "
-            "closed, because '#[if: TRACE]' could otherwise never take its else arm.",
+            "Switch on a region of your own code, guarded by '#[if: NAME]':\n"
+            "  echoc run --define TRACE --define VERBOSE app.eco\n"
+            "Bare names only. There is no '--define NAME=value', because naming a value is what a "
+            "'const' declaration is for and echoc would rather have one way to do that than two.\n"
+            "A flag you never define is false rather than an error, which is the opposite of how the os "
+            "and arch vocabularies behave. It has to be: if an undefined flag were an error, "
+            "'#[if: TRACE]' could never take its else arm, which is the arm you spend most of your time "
+            "in.",
             {}, nullptr
         },
         {
@@ -340,15 +396,15 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<name>", "",
             "which CPU to select instructions for",
-            "Which CPU to optimize and select instructions for. Defaults to the platform baseline for "
-            "this target.\n"
-            "The other kind of target flag entirely, and a neighbour of --target-os only because they "
-            "start with the same word: that one changes what a condition sees, this changes what is "
-            "emitted - every cost model in the optimizer and instruction selection itself are "
-            "downstream of it.\n"
-            "Never the host by default. 'native' means this machine, and its output may not run on the "
-            "machine next to it - with an illegal instruction rather than a diagnostic - so it has to "
-            "be asked for by name.",
+            "Which CPU to optimize and select instructions for:\n"
+            "  echoc build --target-cpu native -o app main.eco\n"
+            "The default is the platform baseline, never this machine. 'native' is the interesting value "
+            "and it is deliberately opt-in: a binary built that way may greet the machine next to yours "
+            "with an illegal instruction rather than a diagnostic, and a compiler should not hand you "
+            "that by default.\n"
+            "It shares a word with --target-os and nothing else. That one changes what a condition sees, "
+            "this one changes what comes out: every cost model in the optimizer, and instruction "
+            "selection itself, sit downstream of it.",
             {}, nullptr
         },
         {
@@ -357,7 +413,10 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<list>", "",
             "features to enable or disable",
-            "Target features to enable or disable, as '+sve,-crc'. Empty unless asked for.",
+            "Turn individual target features on or off, when the CPU name alone is not the answer:\n"
+            "  echoc build --target-features +sve,-crc -o app main.eco\n"
+            "A comma-separated list, each entry prefixed '+' or '-'. Empty unless you ask for something, "
+            "and applied on top of whatever --target-cpu already implies.",
             {}, nullptr
         },
         {
@@ -366,46 +425,51 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<what>", "",
             "dump what the compiler built, by layer",
-            "Dump what the compiler built, by layer. May be given more than once, so "
-            "'-p ast -p ir' is two dumps rather than the last one.\n"
-            "Each writes a '[section]' header, so the output is greppable and stable enough to assert "
-            "on.",
+            "Watch what the compiler built, one layer at a time:\n"
+            "  echoc run -p ast-resolved -p ir app.eco\n"
+            "Ask for two layers and you get two dumps rather than only the last one, which is what makes "
+            "'the AST said this, the IR said that' a single command.\n"
+            "Each dump writes a '[section]' header, so the output greps cleanly and is stable enough to "
+            "assert on in a test.",
             {
                 {
                     "ast", accepts::compiling, code_of(PrintKind::t_ast),
                     "the AST as parsed",
-                    "The AST as parsed, before the semantic passes."
+                    "The AST as parsed, before any semantic pass has touched it. This is your code, as a tree, and "
+                    "nothing more."
                 },
                 {
                     "ast-resolved", accepts::compiling, code_of(PrintKind::t_ast_resolved),
                     "the AST after the semantic passes",
-                    "The AST after the semantic passes. Every deref, drop, retain and release is a node here that "
-                    "does not exist in 'ast', so a reference count is checked by reading this one."
+                    "The AST after the semantic passes, which is where the interesting reading is. Every deref, "
+                    "drop, retain and release is a real node here that does not exist in 'ast', so this is how you "
+                    "find out what echoc decided about a reference count without going near the IR."
                 },
                 {
                     "ir", accepts::compiling, code_of(PrintKind::t_ir),
                     "the merged whole-program LLVM IR",
-                    "The LLVM IR, as one whole-program module. Printing it implies the merge, because a single dump "
-                    "can only look at one module - so this always describes the whole-program build even with no "
-                    "other flag set."
+                    "The LLVM IR, as one whole-program module. Worth knowing: printing it implies the merge, "
+                    "because one dump can only look at one module. So what you are reading describes the "
+                    "'--optimize whole' build even when you did not ask for one, and 'ir-units' is the dump that "
+                    "describes an ordinary build."
                 },
                 {
                     "ir-units", accepts::compiling, code_of(PrintKind::t_ir_units),
                     "each unit, as the object writer gets it",
-                    "Each compilation unit's IR separately, as the object writer receives it. The per-module path, "
-                    "and the only way to assert on what an ordinary build actually emits."
+                    "Each compilation unit's IR on its own, exactly as the object writer receives it. No merge, so "
+                    "this is the only dump that shows what an ordinary build really emits."
                 },
                 {
                     "symbols", accepts::compiling, code_of(PrintKind::t_symbols),
                     "the registered symbol table",
-                    "The registered symbol table: the namespace tree that holds the types, and the function "
-                    "registry that holds the overload sets."
+                    "The registered symbol table: the namespace tree holding the types, and the function registry "
+                    "holding the overload sets. Read it when echoc cannot find a name you are sure you declared."
                 },
                 {
                     "instances", accepts::compiling, code_of(PrintKind::t_instances),
                     "generic instances and rewired calls",
-                    "The monomorphizer's instances, rewired call sites and struct instantiations. Reach for this "
-                    "one first when a generic goes wrong."
+                    "Which generic instances were minted, which call sites were rewired to them, and which structs "
+                    "were instantiated. When a generic goes wrong, start here rather than in the IR."
                 }
             },
             nullptr
@@ -416,34 +480,39 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::compiling, 0, ExclusionGroup::t_none,
             "<what>", "",
             "explain a decision the compiler made",
-            "Explain a decision the compiler made. May be given more than once.\n"
-            "Measure, don't guess. These are ordinary diagnostics rather than debugging leftovers: the "
-            "first run of 'time' found that expanding the standard library's source globs cost more "
-            "than lexing all of it. Each writes a '[section]' header.",
+            "Ask echoc why, instead of guessing:\n"
+            "  echoc build --explain cache --explain time -o app main.eco\n"
+            "These are ordinary output rather than debugging leftovers, and they earn their keep: the "
+            "very first run of 'time' turned up that expanding the standard library's source globs cost "
+            "more than lexing all 1938 lines of it.\n"
+            "Each writes a '[section]' header, so you can grep for the one you wanted.",
             {
                 {
                     "cache", accepts::compiling, code_of(ExplainKind::t_cache),
                     "each module's key, and what changed",
-                    "Each module's cache key, whether its artifact is present, and on a miss which input changed."
+                    "Why a module was rebuilt: its cache key, whether a stored object was found, and on a miss the "
+                    "input that changed. The report to reach for when a build recompiles something you were sure "
+                    "it had cached."
                 },
                 {
                     "prune", accepts::run, code_of(ExplainKind::t_prune),
                     "what the JIT prune dropped",
-                    "How many function definitions the JIT prune dropped, and which ones the entry point still "
-                    "reaches. 'run' only, because only the JIT prunes - 'build' refuses it rather than accepting "
-                    "a flag it would silently ignore."
+                    "How many function definitions the JIT threw away before running, and which ones your entry "
+                    "point still reaches. 'run' only, because only the JIT prunes. Written on a 'build' it is a "
+                    "refusal that names 'run', rather than a flag quietly doing nothing."
                 },
                 {
                     "memory", accepts::compiling, code_of(ExplainKind::t_memory),
                     "live allocations when the program ended",
-                    "Make the compiled program print how many allocations were still outstanding when it ended. "
-                    "Unlike the other three this changes the emitted program rather than reporting what echoc "
-                    "did, and it implies --track-allocations."
+                    "How many allocations your program still held when it ended, printed by the program itself. "
+                    "The odd one out here: it changes what echoc emits rather than reporting what echoc did, which "
+                    "is why it implies --track-allocations."
                 },
                 {
                     "time", accepts::compiling, code_of(ExplainKind::t_time),
                     "where the compile spent its time",
-                    "Where the compile spent its time, by phase, as a tree."
+                    "Where the compile spent its time, phase by phase, as a tree. Start here before you optimize "
+                    "anything about your build."
                 }
             },
             nullptr
@@ -454,11 +523,15 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<auto|pretty|ascii|json>", "auto",
             "how a diagnostic is drawn",
-            "How a diagnostic is drawn: auto, pretty, ascii, or json - one object per line, which is "
-            "what editor tooling reads.\n"
-            "'auto' picks the drawn form when stderr can render it and the plain one otherwise, which "
-            "is what makes a CI log, a Windows console and a golden test all get the same ASCII with "
-            "nobody configuring anything. Diagnostics go to stderr whichever form is chosen.",
+            "How an error or a warning is drawn:\n"
+            "  echoc build --diagnostics json -o app main.eco\n"
+            "'json' is JSON Lines, one object per diagnostic and one summary object at the end, which is "
+            "what an editor or a language server wants to read. 'pretty' draws the boxes and 'ascii' "
+            "keeps to plain characters, for when you want to pick by hand.\n"
+            "'auto' picks 'pretty' when stderr is a terminal that can draw it and 'ascii' when it is not, "
+            "so a CI log, a Windows console and a golden test all end up with the same plain output and "
+            "nobody has to configure anything.\n"
+            "Diagnostics go to stderr whichever form you choose, so '2>' is how you capture them.",
             {}, check_diagnostics
         },
         {
@@ -467,9 +540,13 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             "<auto|always|never>", "auto",
             "colourise diagnostics",
-            "Colourise diagnostics. 'always' into a pipe is a request for escape sequences on purpose, "
-            "which is what a job that renders them out of a stored log wants.\n"
-            "NO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured.",
+            "Colourise diagnostics:\n"
+            "  echoc build --color always -o app main.eco 2> build.log\n"
+            "That example is not a mistake. 'always' really does put escape sequences into a file or a "
+            "pipe, which is exactly what you want when something downstream renders them back out later. "
+            "'never' is the other direction, and 'auto' colours a terminal and nothing else.\n"
+            "NO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured, so a machine that has already said how "
+            "it feels about colour does not need this flag at all.",
             {}, check_color
         },
         {
@@ -478,14 +555,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             nullptr, "",
             "do not draw the progress checklist",
-            "Do not draw the progress checklist.\n"
-            "It silences that and nothing else: diagnostics, warnings and every --print and --explain "
-            "dump were asked for by name, and a flag that could be ignored because another flag was "
-            "set is a flag nobody can rely on.\n"
-            "There is deliberately no --progress beside it. The checklist is drawn only when stderr is "
-            "a terminal that can be redrawn, which is the same rule '--diagnostics=auto' follows and "
-            "for the same reason; --color=always exists because a job legitimately renders escape "
-            "sequences out of a stored log, and nobody wants a carriage return in one.",
+            "Stop drawing the checklist that rewrites itself as each module and phase finishes:\n"
+            "  echoc build --silent -o app main.eco\n"
+            "That is all it silences. Your diagnostics, your warnings and every --print and --explain "
+            "dump were asked for by name and stay exactly where they are. A flag that goes quiet because "
+            "some other flag was set is a flag you cannot rely on.\n"
+            "You may not need it: the checklist is only ever drawn when stderr is a terminal that can be "
+            "redrawn, so a pipe, a redirect and a CI log are silent already. There is no --progress on "
+            "the other side either, because nobody wants a carriage return in a stored log.",
             {}, nullptr
         },
         {
@@ -494,9 +571,11 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::clean, 0, ExclusionGroup::t_none,
             nullptr, "",
             "also remove the standard library's store",
-            "Also remove the standard library's store. It is shared by every project on this machine "
-            "and is the slowest thing in any build to produce again, so a project's clean leaves it "
-            "alone.",
+            "Also empty the standard library's store:\n"
+            "  echoc clean --with-stdlib\n"
+            "Cleaning a project leaves that store alone, because every project on this machine shares it "
+            "and it is the slowest thing in any build to produce again. Ask for it when you suspect the "
+            "stdlib objects themselves, and expect the next build to take a while.",
             {}, nullptr
         },
         {
@@ -505,7 +584,10 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::clean, 0, ExclusionGroup::t_none,
             nullptr, "",
             "print what would be removed, remove nothing",
-            "Print what would be removed, and remove nothing.",
+            "Print what would be removed and remove nothing:\n"
+            "  echoc clean -n\n"
+            "A good habit in general, and worth the extra command whenever you have pointed a build "
+            "somewhere of your own with --build-dir or '#[build_dir:]'.",
             {}, nullptr
         },
         {
@@ -514,8 +596,14 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             nullptr, "",
             "print this page, or one option in full",
-            "Print this page. Given with a command - 'echoc build --help' - print that command's "
-            "page instead.",
+            "Print a page. Which page depends on what you put around it:\n"
+            "  echoc --help\n"
+            "  echoc build --help\n"
+            "  echoc build --help optimize\n"
+            "The last form is where the prose lives: the compact page has one line per option, and the "
+            "paragraphs, the values and the gotchas are one command further in.\n"
+            "The option name goes in bare, without its dashes, and a short spelling works too: 'echoc "
+            "build --help g' is the --debug-symbols page.",
             {}, nullptr
         },
         {
@@ -524,7 +612,8 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             accepts::all, 0, ExclusionGroup::t_none,
             nullptr, "",
             "print the version",
-            "Print the version and exit.",
+            "Print the version this echoc was built as, and exit:\n"
+            "  echoc --version",
             {}, nullptr
         }
     };
@@ -652,51 +741,61 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
     static const std::vector<SubcommandInfo> table = {
         {
             Subcommand::t_run, "run", accepts::run,
-            "compile and run them, through the JIT",
-            "Compile the given source files and run the program in this process, through the JIT. "
-            "Nothing is written beside your sources and no linker is involved.\n"
-            "Everything after a bare '--' belongs to the program rather than to echoc, so "
-            "'echoc run p.eco -- a b' passes 'a' and 'b' to the program.",
+            "compile and run through the JIT",
+            "Compile your program and run it right here in this process, through the JIT. No object "
+            "files, no linker, nothing written beside your sources, which makes this the quickest way to "
+            "try something out:\n"
+            "  echoc run app.eco\n"
+            "Everything after a bare '--' belongs to your program rather than to echoc:\n"
+            "  echoc run app.eco -- --verbose input.txt\n"
+            "Assertions and the compiler's runtime checks are on unless you say --release, which is the "
+            "opposite of what 'build' does.",
             true,
             "<sources...>",
             "the .eco files to compile and run",
-            "The .eco files to compile and run. A '*' is expanded through the same expander a "
-            "manifest's '#[sources:]' uses, so a pattern does not mean one thing on the command line "
-            "and another in a manifest, and a file named here and not found fails the build rather "
-            "than being quietly left out.\n"
-            "Loose sources become the 'main' module. Give none and the program is whatever manifest "
-            "this invocation points at - the one --module names, or the 'module.eco' in the working "
-            "directory.",
+            "The .eco files to compile and run. Loose files like these become the 'main' module.\n"
+            "A '*' is expanded by echoc itself, through the same expander a manifest's '#[sources:]' "
+            "uses, so a pattern means the same thing here as it does there. A file you name and echoc "
+            "cannot find fails the build rather than being quietly left out.\n"
+            "Name none at all and your program is whatever manifest this invocation points at: the one "
+            "--module names, or the 'module.eco' in your working directory.",
             true
         },
         {
             Subcommand::t_build, "build", accepts::build,
             "compile and link a native executable",
-            "Compile the given source files and link a native executable. Needs 'clang' on PATH for "
-            "the link step.\n"
-            "Each module that comes from a manifest is served from its stored object where nothing it "
-            "depends on has changed. The program itself is never cached, because its unit is where "
-            "the C 'main' is created.",
+            "Compile your program and link a real native executable, which needs 'clang' on your PATH "
+            "for the link step:\n"
+            "  echoc build -o app src/*.eco\n"
+            "Assertions and the compiler's runtime checks are off unless you say --debug.\n"
+            "Every module that comes from a manifest is served from its stored object for as long as "
+            "nothing it depends on has changed, so a second build usually only recompiles the program "
+            "itself. That part is never cached, because its unit is where the C 'main' is created.",
             true,
             "<sources...>",
             "the .eco files to compile",
-            "The .eco files to compile. A '*' is expanded through the same expander a manifest's "
-            "'#[sources:]' uses, so a pattern does not mean one thing on the command line and another "
-            "in a manifest, and a file named here and not found fails the build rather than being "
-            "quietly left out.\n"
-            "Loose sources become the 'main' module. Give none and the program is whatever manifest "
-            "this invocation points at - the one --module names, or the 'module.eco' in the working "
-            "directory.",
+            "The .eco files to compile. Loose files like these become the 'main' module.\n"
+            "A '*' is expanded by echoc itself, through the same expander a manifest's '#[sources:]' "
+            "uses, so a pattern means the same thing here as it does there. A file you name and echoc "
+            "cannot find fails the build rather than being quietly left out.\n"
+            "Name none at all and your program is whatever manifest this invocation points at: the one "
+            "--module names, or the 'module.eco' in your working directory.",
             false
         },
         {
             Subcommand::t_clean, "clean", accepts::clean,
             "remove what a build produced",
-            "It parses no source and runs no pass: which module directories exist is a function of "
-            "the manifests and of the flags that decide where artifacts go, and reading a single .eco "
-            "file to answer it would make 'clean' fail on a program that does not compile. That is "
-            "also why it accepts the flags that locate a build and refuses every flag that describes "
-            "one - a flag a command accepts and silently ignores is worse than one it rejects.",
+            "Empty every build directory this project's modules write into:\n"
+            "  echoc clean -n\n"
+            "  echoc clean\n"
+            "Do it in that order the first time. '-n' prints what would go and removes nothing.\n"
+            "It parses no source and runs no pass, which is deliberate: which build directories exist "
+            "follows from the manifests and from the flags that decide where artifacts go, and reading a "
+            "single .eco file to work that out would make 'clean' fail on exactly the program you most "
+            "want to clean, the one that does not compile.\n"
+            "So it takes the flags that locate a build, like --module, --build-dir and --target-os, and "
+            "refuses every flag that describes one. A flag a command accepts and silently ignores is "
+            "worse than one it rejects.",
             false,
             nullptr,
             nullptr,

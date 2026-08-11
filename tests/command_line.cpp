@@ -835,7 +835,7 @@ TEST_CASE("one option's page is that option and nothing else", "[cli]")
     // the full prose, which the compact page deliberately does not carry. Asserted on a phrase rather
     // than the whole string, because the renderer wraps it - a byte comparison would be a golden of the
     // wording, which is the thing this suite deliberately does not pin
-    REQUIRE(contains(text, "which sound like each other's inverse"));
+    REQUIRE(contains(text, "one option with three values now"));
     REQUIRE_FALSE(contains(text, Compiler::option_for(Opt::t_optimize).summary));
 
     // every value, with its own description rather than the page's one-liner - the first words of each,

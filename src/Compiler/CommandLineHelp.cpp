@@ -207,16 +207,22 @@ void Compiler::CommandLineHelp::write_wrapped(const std::string &text, unsigned 
     // block - which is what lets a description carry a short indented list of its values
     size_t line_start = 0;
     bool first = true;
+    bool previous_was_indented = false;
 
     while (line_start <= text.size()) {
         const size_t line_end = std::min(text.find('\n', line_start), text.size());
         const std::string line = text.substr(line_start, line_end - line_start);
+        const bool indented = !line.empty() && line.front() == ' ';
 
-        if (!first) {
+        // **two indented lines in a row are one block, not two paragraphs.** A blank line between them is
+        // what turns a two-command example into two examples that look unrelated - and a run of commands
+        // is the whole reason a description may indent a line at all
+        if (!first && !(indented && previous_was_indented)) {
             _out << std::endl;
         }
 
         first = false;
+        previous_was_indented = indented;
 
         // a line the author indented keeps that indent on every row it wraps to, so a list inside a
         // paragraph stays a list rather than unravelling at the first wrap
@@ -554,6 +560,20 @@ void Compiler::CommandLineHelp::render_help(Subcommand subject) const
     _out << std::endl;
 
     render_usage(subject);
+
+    // **the command's own prose, and its positional's, belong on its page.** Both were written into the
+    // table and neither had a reader, which made them a description nobody could reach - the one thing
+    // `--help <option>` exists to prevent for the options. A positional has no spelling to name as a
+    // help topic, so this page is the only place its paragraphs can go
+    _out << std::endl;
+    write_wrapped(info.description, 0);
+
+    if (info.positional != nullptr) {
+        _out << std::endl;
+        _out << spaces(HEADING_INDENT) << styled(info.positional, Compiler::sgr::info) << std::endl;
+
+        write_wrapped(info.positional_description, BODY_INDENT);
+    }
 
     for (const OptionCategory category : {
              OptionCategory::t_inputs,
