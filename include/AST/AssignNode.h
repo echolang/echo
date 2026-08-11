@@ -66,9 +66,9 @@ namespace AST
         //
         // two fields rather than one, because the two say the same thing differently:
         //
-        //  - a **struct** is destroyed in place by ordinary destructor calls in the tree - the same
-        //    nodes emit_drop appends at a scope end, so -ar shows them, the type checker validates
-        //    them and a generic destructor instantiates from this call site like any other. they run
+        //  - a **struct** is destroyed in place by an ordinary teardown call in the tree - the same
+        //    node emit_drop appends at a scope end, so -ar shows it, the type checker validates it
+        //    and a generic teardown instantiates from this call site like any other. it runs
         //    before the store that overwrites those bytes. only ever set for a whole variable:
         //    writing an owning struct into a field is the unspecified partial-ownership case
         //  - a **class** owes one reference less, and that cannot be a node. the release needs the old

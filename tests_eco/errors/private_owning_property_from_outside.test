@@ -1,0 +1,26 @@
+# two carets, both on the member the author wrote. while a teardown was inlined at the drop site this case
+# could not exist: the
+# compiler's own teardown reported the same error first, against `$g`'s declaration, so a real violation
+# was indistinguishable from the drop
+expect: fail
+
+--- OUT --->
+[error] PrivateMember  private_owning_property_from_outside.eco:23:10
+
+  '$cells' is private to 'Grid' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'Grid' instead.
+
+  22 | // door one: reading the field
+  23 | echo $g->cells->count();
+     :          ^^^^^
+  24 | 
+
+[error] PrivateMember  private_owning_property_from_outside.eco:26:5
+
+  '$cells' is private to 'Grid' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'Grid' instead.
+
+  25 | // door two: writing through it
+  26 | $g->cells->push(2);
+     :     ^^^^^
+  27 | 
+
+2 errors, nothing was compiled.

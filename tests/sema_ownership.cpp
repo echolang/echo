@@ -36,8 +36,20 @@ namespace
         "    destructor() { $this->data:$ = null; }\n"
         "}\n";
 
-    // the drops in a node list, in order. a drop is an ordinary call whose declaration is a destructor -
-    // there is nothing else it could be, since no source can spell one
+    // is this the declaration a teardown calls? one of the two things AST::OwnershipPass::ensure_deinit
+    // can answer: a declared destructor, or the `$deinit` synthesized for the type when its teardown has
+    // to reach inside the value. neither is spellable from source, so nothing else can look like one
+    bool is_teardown(const FunctionDeclNode *decl)
+    {
+        if (decl == nullptr) {
+            return false;
+        }
+
+        return decl->is_destructor()
+            || (decl->owner_type != nullptr && decl->owner_type->deinit() == decl);
+    }
+
+    // the drops in a node list, in order
     std::vector<FunctionCallExprNode *> drops_in_list(const NodeReferenceList &list)
     {
         std::vector<FunctionCallExprNode *> found;
@@ -48,7 +60,7 @@ namespace
             }
 
             auto &call = child.get<FunctionCallExprNode>();
-            if (call.decl != nullptr && call.decl->is_destructor()) {
+            if (is_teardown(call.decl)) {
                 found.push_back(&call);
             }
         }
@@ -238,10 +250,12 @@ TEST_CASE("a borrow parameter owns nothing and is not dropped", "[ownership]")
     REQUIRE(drops_in(body_of(m, "peek")).empty());
 }
 
-TEST_CASE("an owning property is destroyed member-wise, with no destructor declared", "[ownership]")
+TEST_CASE("an owning property is destroyed inside a synthesized deinit", "[ownership]")
 {
-    // "a struct that contains an owner is itself an owner, and nothing needs to be declared for that."
-    // the drop for `$w` reaches into the property, which is what the receiver's place shape shows
+    // "a struct that contains an owner is itself an owner, and nothing needs to be declared for that" -
+    // but the *reaching inside* happens in a body the type owns rather than at the use site, and that is
+    // and that is the rule: a member access minted in the scope holding the local is the compiler reaching
+    // into a type from outside it, which `private` refuses against a line nobody wrote
     auto bundle = EchoTests::tests_make_parsed_bundle(
         std::string(k_buffer) +
         "struct Wrap { Buffer $inner; usize $version; }\n"
@@ -252,17 +266,54 @@ TEST_CASE("an owning property is destroyed member-wise, with no destructor decla
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 
     auto &m = bundle->modules.find_module("test");
+    ComplexType &wrap = type_named(m, "Wrap")->complex_type();
+
+    // the use site owes one call, over the whole variable, to Wrap's own teardown
     auto drops = drops_in(body_of(m, "f"));
 
-    // Wrap has no destructor of its own, so the only drop is its property's
     REQUIRE(drops.size() == 1);
-    REQUIRE(drops[0]->decl->owner_type == &type_named(m, "Buffer")->complex_type());
+    REQUIRE(drops[0]->decl == wrap.deinit());
+    REQUIRE(dropped_variable(drops[0])->name_full() == "$w");
 
-    // and it is reached through the field, not through the whole variable
-    REQUIRE(drops[0]->arguments.size() == 1);
-    auto *addr = drops[0]->arguments[0];
+    // and the property's destructor is called from inside that body, through the field. Wrap declares no
+    // destructor of its own, so this is the only statement in it
+    REQUIRE(wrap.deinit() != nullptr);
+    REQUIRE(wrap.deinit()->owner_type == &wrap);
+    REQUIRE(wrap.deinit()->body != nullptr);
+
+    auto inner = drops_in(*wrap.deinit()->body);
+
+    REQUIRE(inner.size() == 1);
+    REQUIRE(inner[0]->decl->owner_type == &type_named(m, "Buffer")->complex_type());
+
+    REQUIRE(inner[0]->arguments.size() == 1);
+    auto *addr = inner[0]->arguments[0];
     REQUIRE(addr->get_node_type() == NodeType::n_expr_addrof);
     REQUIRE(static_cast<AddrOfExprNode *>(addr)->operand->get_node_type() == NodeType::n_member_access);
+}
+
+TEST_CASE("a declared destructor is the whole teardown, and no deinit is synthesized", "[ownership]")
+{
+    // the other answer AST::OwnershipPass::ensure_deinit can give. `Buffer`'s fields are a `usize` and a
+    // pointer, so its teardown never reaches inside the value and there is nothing for a synthesized body
+    // to hold - the drop site calls what the author wrote, which is one call rather than two
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "function f() : void {\n"
+        "    $b = Buffer(1, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    TypeDeclNode *buffer = type_named(m, "Buffer");
+
+    REQUIRE(buffer->complex_type().deinit() == nullptr);
+
+    auto drops = drops_in(body_of(m, "f"));
+
+    REQUIRE(drops.size() == 1);
+    REQUIRE(drops[0]->decl == AST::find_destructor(&buffer->complex_type()));
 }
 
 TEST_CASE("a `return` drops every enclosing scope, innermost first", "[ownership]")

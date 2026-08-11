@@ -1,0 +1,23 @@
+# one body per type and one call per value, at three levels of nesting. the allocation assertions are the
+# half that says it is *correct* - five buffers built, five given back - and the RAST is the half that says
+# it is one body rather than a copy per drop site
+--- OUT --->
+2
+2
+1
+balanced
+--- RAST --->
+# three locals, three calls, reverse declaration order at the scope end
+CHECK: call $deinit(addrof<Inner&>(varref<Inner>(var($c))))
+CHECK: call $deinit(addrof<Outer&>(varref<Outer>(var($b))))
+CHECK: call $deinit(addrof<Outer&>(varref<Outer>(var($a))))
+
+# `Inner`'s body reaches its own private property and nothing else
+CHECK: function $deinit -> type<void>
+CHECK: call $deinit(addrof<array<int32>&>(ma<array<int32>>(varref<Inner&>(var($this))->numbers)))
+
+# and `Outer`'s reaches one level down only - two calls, in reverse declaration order, naming `Inner`'s
+# teardown rather than repeating what it does. `$numbers` is not spellable from here and does not appear
+CHECK: function $deinit -> type<void>
+CHECK: call $deinit(addrof<Inner&>(ma<Inner>(varref<Outer&>(var($this))->second)))
+CHECK: call $deinit(addrof<Inner&>(ma<Inner>(varref<Outer&>(var($this))->first)))

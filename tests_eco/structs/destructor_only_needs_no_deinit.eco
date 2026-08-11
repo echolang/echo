@@ -1,0 +1,29 @@
+// **a declared destructor is the whole teardown, so it *is* the teardown** - nothing is synthesized and the
+// drop site calls what the author wrote. the alternative would wrap every one of these in a body that does
+// nothing else, and `mem::buffer<T>` is one, which every array, string and map holds
+//
+// the reason the shortcut is a struct's alone: a struct's teardown is reached through a call site the
+// monomorphizer rewires, so naming a template's destructor there is ordinary. a class's is reached from
+// codegen through the slot, which needs a concrete symbol
+struct Handle
+{
+    ptr<uint8> $bytes;
+    usize $size;
+
+    destructor()
+    {
+        echo "released";
+        mem::free($this->bytes);
+    }
+}
+
+{
+    Handle $h = Handle(mem::alloc<uint8>(16), 16);
+
+    assert(mem::live_allocations() == 1, "one block");
+    echo $h->size;
+}
+
+assert(mem::live_allocations() == 0, "the destructor freed it");
+
+echo "balanced";

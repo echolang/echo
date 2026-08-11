@@ -273,7 +273,33 @@ TEST_CASE("a library's object does not depend on which application consumes it",
         "\n"
         "public function plain(int32 $n) : int32 { return $n * 2; }\n"
         "\n"
-        "public const usize PAGE = 4096;\n");
+        "public const usize PAGE = 4096;\n"
+        "\n"
+        // an owning struct whose teardown is a synthesized body rather than a written destructor. it is
+        // built into the module that declares the *type* - here the library - so the question this asks is
+        // whether a consumer tearing one down can put a definition in the library's object. it must not:
+        // the body is emitted into every unit that references it, with linkonce_odr linkage
+        "public struct Journal\n"
+        "{\n"
+        "    private array<int32> $entries;\n"
+        "\n"
+        "    constructor()\n"
+        "    {\n"
+        "        $this->entries = array<int32>();\n"
+        "    }\n"
+        "\n"
+        "    function add(int32 $v) : void { $this->entries->push($v); }\n"
+        "\n"
+        "    const function count() : usize { return $this->entries->count(); }\n"
+        "}\n"
+        "\n"
+        // and the library tears one down itself, so its own object legitimately holds a copy either way
+        "public function journal_of(int32 $v) : usize\n"
+        "{\n"
+        "    Journal $j = Journal();\n"
+        "    $j->add($v);\n"
+        "    return $j->count();\n"
+        "}\n");
 
     // two applications that use the library differently: one instantiates the generic over int32 and calls
     // the inline function, the other instantiates over a type *it* declares and calls only the plain one
@@ -282,12 +308,18 @@ TEST_CASE("a library's object does not depend on which application consumes it",
     // the generic does not: a constant is expanded into a *clone* of its value, and cloning it into the
     // declaring module's arena rather than the consuming one would put a node the application emits into the
     // library's collection - so the library's object would grow a copy per consumer
+    // one of them tears the library's owning struct down and the other only calls through it, which is the
+    // asymmetry that would show up as a definition appearing in the library's object for one build and not
+    // the other
     write_file(project.root() / "app_a" / "app.eco",
         "shared::Holder<int32> $h = shared::Holder<int32>(7);\n"
         "echo $h->get();\n"
         "echo shared::hot(1);\n"
         "usize $page = shared::PAGE;\n"
-        "echo $page;\n");
+        "echo $page;\n"
+        "shared::Journal $j = shared::Journal();\n"
+        "$j->add(2);\n"
+        "echo $j->count();\n");
 
     write_file(project.root() / "app_b" / "app.eco",
         "struct Local { int32 $x; }\n"
@@ -295,7 +327,8 @@ TEST_CASE("a library's object does not depend on which application consumes it",
         "echo $h->get()->x;\n"
         "echo shared::plain(4);\n"
         "usize $half = shared::PAGE / 2;\n"
-        "echo $half;\n");
+        "echo $half;\n"
+        "echo shared::journal_of(5);\n");
 
     const fs::path manifest = project.root() / "lib" / "module.eco";
     const fs::path cache_a = project.root() / "cache_a";

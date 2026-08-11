@@ -409,11 +409,14 @@ namespace AST
         // can see, and the scope-exit append in walk_scope has no equivalent
         void collect_unwind(size_t floor_frame, std::vector<NodeReference> &out);
 
-        // destroying a value of `type` at `root`->`path`: its own destructor if it has one, then
-        // each property that needs destroying, in reverse declaration order. no implicit destructor
-        // is synthesized for the member-wise part - it is inlined at the drop site, because whether
-        // a property needs destroying is not answerable where a synthesized declaration would have
-        // to be built (a generic property type is still open in the parser)
+        // destroying a value of `type` at `root`->`path`: one call to whatever ensure_deinit answers for
+        // it, or one release when the value is a handle rather than the thing.
+        //
+        // **the teardown is not written here.** it used to be - the destructor and then a drop per owning
+        // property, inlined into whichever scope held the value - and the member accesses that took were
+        // the compiler reaching inside a type from outside it, which is a `private` refusal against a line
+        // nobody wrote. what a synthesized declaration could not answer *in the parser* is whether a
+        // generic property needs destroying, and this pass runs after instantiation, so it can.
         //
         // `path` is the member path from `root` down to the value being destroyed, and it is one
         // vector pushed and popped in step with the recursion rather than a copy per property: a
@@ -463,15 +466,29 @@ namespace AST
         // one that is not const, is handed back untouched so that rule keeps its single owner
         ExprNode *receiver_for_teardown(ExprNode *place);
 
-        // the destructor call for one value, when its type declares one. the receiver is the address of
-        // the place - except when the place already *is* that address, which is the deinit's `$this`
+        // a call to `callee` tearing down the value at `root`->`path`. the receiver is the address of the
+        // place - except when the place already *is* that address, which is a deinit's `$this`.
+        //
+        // two askers, naming the two callees ensure_deinit can answer with: the drop site, and
+        // emit_destructor_call below on behalf of a body being built
+        void emit_teardown_call(
+            FunctionDeclNode *callee,
+            VarDeclNode *root,
+            const std::vector<std::string> &path,
+            std::vector<NodeReference> &out);
+
+        // the destructor call for one value, when its type declares one
         void emit_destructor_call(
             VarDeclNode *root,
             const std::vector<std::string> &path,
             const ComplexType *ct,
             std::vector<NodeReference> &out);
 
-        // each property of `ct` that needs destroying, in reverse declaration order
+        // each property of `ct` that needs destroying, in reverse declaration order.
+        //
+        // **called from build_deinit and nowhere else**, which is what keeps the member accesses it mints
+        // inside a body whose owner is `ct`. it is the only thing in this pass that reaches `make_place`
+        // with a non-empty path
         void emit_property_drops(
             VarDeclNode *root,
             std::vector<std::string> &path,
@@ -484,9 +501,9 @@ namespace AST
         // nothing left open for the monomorphizer to bind and an empty body attached. the caller fills
         // in what differs - the kind, the return type, the parameters, the statements
         //
-        // `site` is the release or the copy that asked for the declaration, rather than the type's own
-        // line: a synthesized declaration at line 0 gives every diagnostic raised inside its body
-        // nowhere to point
+        // `site` is a real line: the type's own name for a deinit, the copy that asked for a copy
+        // constructor. a synthesized declaration at line 0 gives every diagnostic raised inside its body
+        // nowhere to point, and gives a `-g` build a subprogram nobody can step into
         FunctionDeclNode &begin_synthesized_decl(const std::string &name, const TokenReference &site);
 
         // a single non-nullable borrow parameter, which is what both synthesized declarations take -
@@ -499,36 +516,59 @@ namespace AST
             const TokenReference &site
         );
 
-        // hands a finished declaration to the file root, and marks the round changed so the next one
-        // walks its body
+        // hands a finished declaration to the file root it was synthesized into, and marks the round
+        // changed so the next one walks its body
         //
         // through `_pending_declarations` rather than add_funcdecl directly: run_round is iterating
         // the very children this appends to. codegen emits a body only for a declaration that is one
         // of them, so a synthesizer that skips this step emits a `declare` nobody defines
         void publish_synthesized_decl(FunctionDeclNode &decl);
 
-        // --- classes ---------------------------------------------------------------------------
+        // --- teardown ---------------------------------------------------------------------------
 
-        // the function a class's release calls when the count reaches zero: its own destructor, then
-        // each owning property.
+        // **the one function that tears a value of this type down**, or null when it owes no teardown.
         //
-        // Synthesized on demand, at the first release of this class, and only when class_needs_deinit
-        // says the payload owns anything - so a plain data class gets none and its release is a
-        // decrement and a free.
+        // A class reaches it from its release thunk at the moment the strong count hits zero; a struct
+        // reaches it from the drop this pass wrote at the end of the value's scope. One question, because
+        // there is one teardown: what a class destroys at zero and what a struct destroys at a scope end
+        // can never disagree, since one piece of code decides both.
         //
-        // Built out of emit_destructor_call and emit_property_drops, the same two pieces a struct's
-        // scope-exit drop is built from. That is the point: what a class tears down at zero and what a
-        // struct tears down at scope end are one decision, not two that have to be kept in step.
+        // Three answers, and the middle one is the interesting one:
         //
-        // `site` is the release that asked for it, and it is what the synthesized declaration and its
-        // `$this` are positioned at. A deinit is shared by every release of the class, so this is the
-        // first one that needed it rather than the class's own declaration. It is still a real line in
-        // the file that tears this class down, so a diagnostic raised inside the body has somewhere to
-        // point other than line 0
-        void ensure_class_deinit(const ValueType &class_type, const TokenReference &site);
+        //   - null, when AST::needs_deinit says the value owns nothing. For a class that is a release
+        //     which decrements and frees, and codegen skips the call it has nothing to make.
+        //   - **the declared destructor, when it is the whole teardown** - a struct with no owning
+        //     property. Nothing is synthesized and nothing fills the slot: the drop site calls what the
+        //     author wrote, which is what it has always done. `mem::buffer<T>` is the live example, and
+        //     every array, string and map holds one. A *class* is excluded from this arm, because its end
+        //     of the wire is codegen reading the slot, which needs a concrete symbol - and for an
+        //     instantiation AST::find_destructor answers the template's declaration, which has none.
+        //   - a synthesized `$deinit` otherwise, built by build_deinit below.
+        //
+        // Idempotent through the slot, so it is safe to ask at every drop site, and it answers "not yet"
+        // rather than guessing for a layout whose properties are not filled in - see build_deinit.
+        //
+        // `at` is the teardown that asked, and is used only when the type has no home to be written at -
+        // absent from the sweep, which is asking about types nothing in the program has torn down yet
+        FunctionDeclNode *ensure_deinit(const ValueType &type, std::optional<TokenReference> at);
 
-        // every class in the bundle whose payload needs tearing down gets its deinit, whether or not this
-        // program happens to release one.
+        // builds the body: the type's own destructor first, then each owning property in reverse
+        // declaration order, out of emit_destructor_call and emit_property_drops.
+        //
+        // **it is the only caller of either**, and that is the whole of the rule: those two mint
+        // member accesses over the value's properties, and a member access minted anywhere other than
+        // inside a body the type owns is refused by `private` - which made a struct with a private owning
+        // property unusable at every use site while a class, whose teardown was already a body like this
+        // one, was fine.
+        //
+        // `site` is where the declaration is written, which ensure_deinit resolves to the type's own name
+        // token wherever the type has a home. A deinit is shared by every teardown of the type, so the
+        // first teardown that happened to need it is the worst possible author: the body's DISubprogram
+        // would name the owner's file and a line from somewhere else entirely
+        FunctionDeclNode *build_deinit(ComplexType &type, const TokenReference &site);
+
+        // every **class** in the bundle whose payload needs tearing down gets its deinit, whether or not
+        // this program happens to release one.
         //
         // Synthesizing on demand alone is not sound across separate compilations, and the failure is
         // silent. `__eco_release_<T>` is emitted per unit with linkonce_odr linkage, and its body
@@ -538,22 +578,24 @@ namespace AST
         // and the program leaks with nothing anywhere to point at.
         //
         // So existence has to be a function of the *type* rather than of what the build did with it,
-        // which class_needs_deinit already is. This makes the synthesis agree with it.
+        // which AST::needs_deinit already is. This makes the synthesis agree with it.
         //
-        // Deliberately **not** done for copy constructors, which are generated the same way and share
-        // the same linkage - because nothing else observes whether one exists. A copy constructor's
-        // body is field-wise assignment derived from the properties, so two units that both need one
-        // write the same bytes, and a unit that does not need one simply does not ask. The deinit is
-        // special only because the release thunk reads the slot
+        // Deliberately **not** done for a struct, nor for copy constructors, which are generated the same
+        // way and share the same linkage - because nothing else observes whether either exists. A struct's
+        // deinit is reached from a call the ownership pass writes at the drop site, and that call and the
+        // body are minted together; a copy constructor's body is field-wise assignment derived from the
+        // properties. In both cases two units that need one write the same bytes and a unit that does not
+        // simply does not ask. The class deinit is special only because the release thunk reads the slot
         void synthesize_pending_class_deinits();
 
-        // where a class layout was declared: the module, so a swept deinit lands somewhere deterministic
+        // where a type was declared: the module, so a synthesized deinit lands somewhere deterministic
         // rather than in whichever file's walk happened to reach the type first, and the declaration node,
         // which is the only thing holding the name token to position it at - a ComplexType carries its
         // name as a string and has no token of its own
         struct TypeHome
         {
             Module *module = nullptr;
+            File *file = nullptr;
             TypeDeclNode *decl = nullptr;
         };
 
@@ -602,11 +644,21 @@ namespace AST
         void reject_uncopyable(
             ExprNode *expr, const ValueType &wanted, const VarDeclNode *source, ValueDestination destination);
 
-        // declarations synthesized this round - class deinits and copy constructors - appended to the
-        // file root after the walk rather than during it, since resolve_function is iterating those
-        // children. one list because it is one mechanism: whatever lands here is emitted by codegen
-        // and walked by the next round like any other declaration
-        std::vector<FunctionDeclNode *> _pending_declarations;
+        // a declaration synthesized this round, and the file root it belongs to. two fields because the
+        // second is not the walk's own file: a deinit is built into the file that declares its type, which
+        // may be a module the walk is nowhere near
+        struct PendingDecl
+        {
+            FunctionDeclNode *decl = nullptr;
+            File *file = nullptr;
+        };
+
+        // declarations synthesized this round - deinits and copy constructors - appended to their file
+        // roots **once, at the end of the round** rather than during the walk, since resolve_function is
+        // iterating those children. one list drained in one place because it is one mechanism: whatever
+        // lands here is emitted by codegen and walked by the next round like any other declaration, and a
+        // second channel is what would let a synthesizer append into a root something is iterating
+        std::vector<PendingDecl> _pending_declarations;
     };
 };
 

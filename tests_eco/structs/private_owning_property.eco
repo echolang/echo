@@ -1,0 +1,69 @@
+// **a `private` property that owns something.** the modifier worked on trivially destructible fields only:
+// a struct's teardown used to be inlined at the drop site, so the member access reaching `$cells` was minted
+// in whatever scope held the local and the type could not be constructed anywhere - not at file scope, not
+// inside a function, not even with a hand-written constructor. a class was unaffected, its teardown going
+// through a synthesized member that carries an owner
+//
+// now every struct that owns anything gets the same synthesized `$deinit`, so the access is inside a body
+// whose owner is `Grid` and the ordinary rule answers it
+struct Grid
+{
+    // nothing outside these braces touches the storage: a caller adds a cell or asks how many there are
+    private array<int32> $cells;
+
+    constructor()
+    {
+        $this->cells = array<int32>();
+    }
+
+    function add(int32 $value) : void
+    {
+        $this->cells->push($value);
+    }
+
+    const function count() : usize
+    {
+        return $this->cells->count();
+    }
+}
+
+// position one: a local at file scope, where the enclosing function is *nothing* and so could never have
+// answered `Grid`
+{
+    $g = Grid();
+
+    $g->add(1);
+    $g->add(2);
+
+    echo $g->count();
+
+    assert(mem::live_allocations() == 1, "one buffer, inside the private property");
+}
+
+assert(mem::live_allocations() == 0, "the private property was destroyed exactly once");
+
+// position two: a local inside a function, where the enclosing function is a real one that is simply not
+// `Grid` - a different way to fail the same question
+function fill(int32 $upto) : usize
+{
+    Grid $g = Grid();
+
+    int32 $i = 0;
+    while ($i < $upto) {
+        $g->add($i);
+        $i = $i + 1;
+    }
+
+    return $g->count();
+}
+
+echo fill(4);
+
+assert(mem::live_allocations() == 0, "and once per call, on the way out of the function");
+
+// position three: a temporary, which is torn down where it was bound rather than at a scope end
+echo Grid()->count();
+
+assert(mem::live_allocations() == 0, "a temporary owes the same teardown");
+
+echo "balanced";

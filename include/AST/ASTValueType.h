@@ -908,14 +908,21 @@ namespace AST
             return _copy_constructor;
         }
 
-        // a class only: the synthesized function that tears the payload down when the strong count
-        // reaches zero - this type's own destructor first, then each owning property. null when the
-        // payload owns nothing, and null for every struct
+        // the synthesized function that tears a value of this type down - this type's own destructor
+        // first, then each owning property. a class reaches it from its release thunk when the strong
+        // count hits zero, a struct from the drop AST::OwnershipPass wrote at the end of the value's
+        // scope, and it is one function because it is one teardown: what a class destroys at zero and
+        // what a struct destroys at a scope end can never disagree.
         //
-        // a *synthesized* function rather than a sequence codegen builds, because it is built by the
-        // very same AST::OwnershipPass::emit_drop recursion that a struct's scope exit uses. that is
-        // the point: what a class destroys at zero and what a struct destroys at scope end can never
-        // disagree, because one piece of code decides both. codegen only calls it
+        // null in two cases that are not the same. **the value owns nothing**, so there is nothing to
+        // tear down - for a class that is a release which decrements and frees. or, for a **struct**,
+        // its declared destructor is the whole teardown and needs no body wrapped around it, so
+        // AST::OwnershipPass::ensure_deinit answers that destructor and leaves this slot alone. a class
+        // is never that second case, because *this slot* is what codegen reads and an instantiation's
+        // find_destructor answers the template's declaration, which has no symbol.
+        //
+        // deliberately no template_or_self redirect, unlike the destructor above: the body is built per
+        // concrete type, since which properties own anything is what an instantiation decides
         void set_deinit(FunctionDeclNode *decl) {
             _deinit = decl;
         }

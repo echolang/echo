@@ -305,7 +305,20 @@ void OwnershipPass::build_type_module_map()
 
     for (auto &module_ptr : _bundle.modules) {
         for (auto *type_decl : module_ptr->nodes.of_type<TypeDeclNode>()) {
-            _type_module[&type_decl->complex_type()] = TypeHome{ module_ptr.get(), type_decl };
+            // **the file, not just the module.** the stdlib is 21 files, so the module's first file is
+            // `arr.eco` for every type in it - and a body written there takes its DWARF *file* from the
+            // root that holds it while its *line* comes from the type's own token, which is a subprogram
+            // no debugger can open. file_of answers null for a token another module owns or one nothing
+            // spells, and then the module's first file is all there is to say
+            const File *declared_in = type_decl->name_token.has_value()
+                ? module_ptr->file_of(type_decl->name_token.value())
+                : nullptr;
+
+            _type_module[&type_decl->complex_type()] = TypeHome{
+                module_ptr.get(),
+                const_cast<File *>(declared_in),
+                type_decl,
+            };
         }
     }
 }
@@ -341,66 +354,10 @@ void OwnershipPass::synthesize_pending_class_deinits()
             continue;
         }
 
-        // a template has no layout to tear down: its property types still mention its parameters, so
-        // needs_destruction cannot answer for them. Its instantiations are swept instead, and they are in
-        // the second list above
-        if (ct->is_generic() && !ct->is_instantiated()) {
-            continue;
-        }
-
-        // **an instantiation whose properties are not filled in yet is not answerable, and answering
-        // anyway is permanent.** An application of a generic can be interned during the declaration pass,
-        // before the template's own body has been walked, and is refilled later. Sweeping one
-        // in that window would build a deinit that drops nothing and `set_deinit` would make that the
-        // final answer - so wait for the round in which the layout agrees with its template
-        if (ct->is_instantiated() && ct->property_count() != ct->template_or_self()->property_count()) {
-            continue;
-        }
-
-        if (!class_needs_deinit(ct)) {
-            continue;
-        }
-
-        // the declaring module for a declared class, the template's for an instantiation. Absent for an
-        // anonymous compiler-minted type, whose deinit is asked for on demand by the walk that owns it
-        auto home = _type_module.find(ct->template_or_self());
-        if (home == _type_module.end()) {
-            continue;
-        }
-
-        if (home->second.module == nullptr || home->second.decl == nullptr
-            || !home->second.decl->name_token.has_value()) {
-            continue;
-        }
-
-        File *home_file = home->second.module->files().first();
-
-        // a module with no file, or one whose root the body pass never built. Nothing can be published
-        // into it, and the demand-driven asks remain as the fallback
-        if (home_file == nullptr || home_file->root == nullptr) {
-            continue;
-        }
-
-        Module *previous_module = _current_module;
-        File *previous_file = _current_file;
-
-        _current_module = home->second.module;
-        _current_file = home_file;
-
-        // the class's own name is the site, which is what this sweep buys over the demand-driven asks
-        // beside it: a diagnostic from inside the body points at the class rather than at whichever
-        // release happened to be walked first
-        ensure_class_deinit(ValueType::make_complex(ct), home->second.decl->name_token.value());
-
-        // published into the home module's file root here rather than through the loop below, whose
-        // _pending_declarations belongs to the file walk and is cleared per file
-        for (FunctionDeclNode *decl : _pending_declarations) {
-            home_file->root->add_funcdecl(*decl);
-        }
-        _pending_declarations.clear();
-
-        _current_module = previous_module;
-        _current_file = previous_file;
+        // the layout guards, the home lookup and the site all belong to ensure_deinit, which every drop
+        // site reaches too - what this sweep contributes is *asking* for a class nothing in this program
+        // released, and the order it asks in
+        ensure_deinit(ValueType::make_complex(ct), std::nullopt);
     }
 }
 
@@ -408,8 +365,8 @@ bool OwnershipPass::run_round()
 {
     _changed = false;
 
-    // before the file walks, so a deinit created this round is an ordinary root child by the time the
-    // loop below reaches it and gets its own body resolved on the next round like any other
+    // before the file walks, so the classes nothing released are asked about in the sweep's own sorted
+    // order rather than interleaved with whatever the walk ran into
     synthesize_pending_class_deinits();
 
     for (auto &module_ptr : _bundle.modules) {
@@ -421,10 +378,6 @@ bool OwnershipPass::run_round()
             if (file.root == nullptr) {
                 continue;
             }
-
-            // cleared before the walk, not between its two halves: the file root's own statements ask
-            // for synthesized declarations too
-            _pending_declarations.clear();
 
             // the file root is a body in every sense that matters here: codegen synthesizes `main`
             // out of it, so a local declared at file scope owns its value and is destroyed at the
@@ -439,19 +392,22 @@ bool OwnershipPass::run_round()
                     resolve_function(child.get<FunctionDeclNode>());
                 }
             }
-
-            // the declarations this file's walk asked for - class deinits and copy constructors.
-            // appended after the loop rather than during it, since that loop is iterating the very
-            // vector this appends to. they are picked up on the next round like any other
-            // declaration, which is also when their own bodies get walked: a deinit's `$this` is a
-            // borrow and owes nothing of its own, and a copy constructor's field-wise assignments
-            // are exactly what has to be walked for the retains to appear
-            for (FunctionDeclNode *decl : _pending_declarations) {
-                file.root->add_funcdecl(*decl);
-            }
-            _pending_declarations.clear();
         }
     }
+
+    // **everything this round synthesized, in one place, after every walk.** a deinit or a copy
+    // constructor cannot be appended while the walk runs - resolve_function is iterating the very children
+    // it would append to - and it cannot be appended per file either, because a deinit is built into the
+    // file that declares its *type*, which is not the file being walked. so the whole round drains here.
+    //
+    // they are picked up on the next round like any other declaration, which is also when their own bodies
+    // get walked: a deinit's `$this` is a borrow and owes nothing of its own, and a copy constructor's
+    // field-wise assignments are exactly what has to be walked for the retains to appear. publishing set
+    // `_changed`, so that round exists
+    for (const PendingDecl &pending : _pending_declarations) {
+        pending.file->root->add_funcdecl(*pending.decl);
+    }
+    _pending_declarations.clear();
 
     return _changed;
 }
@@ -738,7 +694,7 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 if (assign->releases_old && target_type.is_class()) {
                     // the release codegen emits here calls the same thunk a scope-exit release does,
                     // so the deinit has to exist by the time it is reached
-                    ensure_class_deinit(target_type, location_of_expression(assign->target));
+                    ensure_deinit(target_type, location_of_expression(assign->target));
                 }
 
                 if (root != nullptr) {
@@ -1769,7 +1725,7 @@ ExprNode *OwnershipPass::arrive_value(
         const ValueType source = widened != nullptr ? widened->result_type() : expr->result_type();
 
         if (source.is_class()) {
-            ensure_class_deinit(source, location_of_expression(expr));
+            ensure_deinit(source, location_of_expression(expr));
         }
     }
 
@@ -2131,26 +2087,41 @@ void OwnershipPass::emit_drop(
         return;
     }
 
-    // a class owes exactly one thing here: one reference less. **not** its destructor and not its
-    // properties - those belong to the moment the count reaches zero, which may be now, may be later,
-    // and may be from an entirely different scope. the release decides, and the class's deinit - built
-    // out of the same two helpers this function uses below - is what it calls when it turns out to be
-    // the last
+    // a class owes exactly one thing here: one reference less. **not** its teardown - that belongs to the
+    // moment the count reaches zero, which may be now, may be later, and may be from an entirely
+    // different scope. the release decides, and the deinit is what it calls when it turns out to be the
+    // last. asked for here all the same, because this is a moment the class's identity is known
     //
     // returning here rather than falling through is also what makes `class Node { Node $next; }`
     // terminate: recursing into the properties of a type that can contain itself has no bottom
     if (type.is_class()) {
-        ensure_class_deinit(type, root->token_varname);
+        ensure_deinit(type, root->token_varname);
 
         out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
         _changed = true;
         return;
     }
 
-    // the type's own destructor first, then its properties: a destructor is written to release what
-    // the struct itself owns, and it may well read a field while doing so
-    emit_destructor_call(root, path, ct, out);
-    emit_property_drops(root, path, ct, out);
+    // **a struct's teardown is a call, exactly like a class's.** it used to be inlined here - the
+    // destructor and then a drop per owning property, minted into whatever scope held the value - and the
+    // member accesses that took were the compiler reaching inside a type from outside it, which `private`
+    // refused. ensure_deinit answers the one function that tears this value down, and where the body of
+    // that function is is its decision rather than this one's
+    FunctionDeclNode *tear_down = ensure_deinit(type, root->token_varname);
+
+    // **a teardown this pass owes and could not write is a defect, and it is said out loud.** every caller
+    // reached here through needs_destruction, which for a struct is the same question ensure_deinit
+    // answers - so a null here means the layout disagreed with its template, which by this point in the
+    // pipeline it cannot legitimately do. and a body is walked exactly once, so the alternatives are both
+    // silent: emitting nothing leaks, and deferring never converges, since nothing in the fixpoint
+    // refreshes a stale layout
+    if (tear_down == nullptr) {
+        throw std::runtime_error(
+            "ownership: no teardown could be written for '" + type.get_mangled_name()
+            + "', whose layout is incomplete. This is a compiler defect, not a source error.");
+    }
+
+    emit_teardown_call(tear_down, root, path, out);
 }
 
 FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
@@ -2174,9 +2145,22 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 {
     const ValueType type = place->result_type();
 
-    // an address is the deinit's `$this`, already the borrow its parameter wants - and a mutable
-    // place is what every other drop hands over. neither is this rule's business
-    if (type.is_pointer() || !type.is_const()) {
+    // an address is the deinit's `$this`, already the borrow its parameter wants. **stripped of const
+    // there too**, and that is not defensive: the exemption in AST::const_receiver_refusal is spelled for
+    // `is_destructor()`, and a synthesized deinit is an ordinary method - so what keeps a teardown out of
+    // that rule is this function never handing one a const borrow, and it can only claim that by being
+    // total
+    if (type.is_pointer()) {
+        if (!type.pointee().is_const()) {
+            return place;
+        }
+
+        return &_current_module->nodes.emplace_back<TypeCastNode>(
+            ValueType::make_pointer(ValueType::make_mutable(type.pointee()), false), place, false);
+    }
+
+    // a mutable place is what every other drop hands over
+    if (!type.is_const()) {
         return place;
     }
 
@@ -2184,6 +2168,25 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 
     return &_current_module->nodes.emplace_back<TypeCastNode>(
         ValueType::make_pointer(ValueType::make_mutable(type), false), &address, false);
+}
+
+void OwnershipPass::emit_teardown_call(
+    FunctionDeclNode *callee,
+    VarDeclNode *root,
+    const std::vector<std::string> &path,
+    std::vector<NodeReference> &out
+)
+{
+    // spelled as the callee names itself: a written `destructor` is a keyword token, a synthesized
+    // `$deinit` an identifier. taken from the declaration rather than decided here, so the two answers
+    // ensure_deinit can give arrive at the same site looking like what they are
+    const TokenReference &receiver_token = virtual_token(
+        callee->func_name(),
+        callee->name_token.has_value() ? callee->name_token.value().type() : Token::Type::t_identifier,
+        root->token_varname);
+
+    out.push_back(make_ref(emit_resolved_member_call(
+        callee, receiver_token, receiver_for_teardown(make_place(root, path)))));
 }
 
 void OwnershipPass::emit_destructor_call(
@@ -2199,11 +2202,7 @@ void OwnershipPass::emit_destructor_call(
         return;
     }
 
-    const TokenReference &receiver_token =
-        virtual_token("destructor", Token::Type::t_destructor, root->token_varname);
-
-    out.push_back(make_ref(emit_resolved_member_call(
-        dtor, receiver_token, receiver_for_teardown(make_place(root, path)))));
+    emit_teardown_call(dtor, root, path, out);
 }
 
 void OwnershipPass::emit_property_drops(
@@ -2267,30 +2266,138 @@ VarDeclNode &OwnershipPass::add_borrow_parameter(
 
 void OwnershipPass::publish_synthesized_decl(FunctionDeclNode &decl)
 {
-    _pending_declarations.push_back(&decl);
+    // the file the declaration was *built into*, which for a deinit is the one that declares its type
+    // rather than the one whose walk asked. carried here rather than resolved at the drain, which by then
+    // has only the round to go on
+    _pending_declarations.push_back(PendingDecl{ &decl, _current_file });
     _changed = true;
 }
 
-void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const TokenReference &site)
+FunctionDeclNode *OwnershipPass::ensure_deinit(const ValueType &type, std::optional<TokenReference> at)
 {
-    ComplexType *ct = class_type.get_complex_type();
+    ComplexType *ct = type.get_complex_type();
 
-    if (ct == nullptr || ct->deinit() != nullptr) {
-        return;
+    if (ct == nullptr) {
+        return nullptr;
     }
 
-    // a class whose payload owns nothing needs no teardown at all: its release is a decrement and a
-    // free, and codegen skips the call when there is no deinit to make
-    if (!class_needs_deinit(ct)) {
-        return;
+    if (ct->deinit() != nullptr) {
+        return ct->deinit();
     }
 
-    auto &decl = begin_synthesized_decl("deinit", site);
+    // a value that owns nothing owes no teardown at all: for a class that means its release is a
+    // decrement and a free, and codegen skips the call when there is no deinit to make
+    if (!needs_deinit(ct)) {
+        return nullptr;
+    }
 
-    // a member of the class, which is what gives the mangled name its owner segment - mangled_token()
+    // **a template has no layout to tear down.** its property types still mention its parameters, so
+    // needs_destruction cannot answer for them, and set_deinit would make that non-answer final - there
+    // is no template_or_self redirect on the slot, deliberately, because every instance needs its own
+    if (ct->is_generic() && !ct->is_instantiated()) {
+        return nullptr;
+    }
+
+    // **an instantiation whose properties are not filled in yet is not answerable either**, and the same
+    // permanence applies: an application of a generic can be interned during the declaration pass, before
+    // the template's own body has been walked, and is refilled later. answering in that window would
+    // build a body that drops nothing and make it the final answer, so wait for the round in which the
+    // layout agrees with its template. AST::body_is_concrete refuses to walk a body that would ask
+    if (ct->is_instantiated() && ct->property_count() != ct->template_or_self()->property_count()) {
+        return nullptr;
+    }
+
+    // **the destructor is the whole teardown, so it *is* the deinit** - nothing to synthesize, and the
+    // drop site calls what the author wrote. `mem::buffer<T>` is the live example, and every array, string
+    // and map holds one, so this is the difference between one call at a teardown and three.
+    //
+    // a struct only, and the reason is which end reads the answer. a struct's teardown is reached through
+    // a call site the monomorphizer rewires, so naming the *template's* destructor here is ordinary - it
+    // is what emit_destructor_call has always done. a class's is reached from codegen, through the slot,
+    // which needs a concrete symbol: filling it with what find_destructor answers for an instantiation
+    // would hand the release thunk a declaration that has no symbol at all
+    if (!ct->is_class_kind() && !properties_need_destruction(ct)) {
+        return find_destructor(ct);
+    }
+
+    // **where the declaration is written: at the type, not at the drop that asked for it.** a deinit is
+    // shared by every teardown of the type, so the first one to need it is the worst possible author -
+    // the body's DISubprogram would take its file from the owner type and its line from a virtual token
+    // in another file, and the body's own call nodes would land in whichever module's walk got there
+    // first, which build_function_maps' arena sweep turns into a different function order in that
+    // module's object. absent only for a compiler-minted anonymous layout, which is a closure
+    // environment and therefore a class, and for those the walking file is the honest answer
+    Module *previous_module = _current_module;
+    File *previous_file = _current_file;
+    std::optional<TokenReference> site = at;
+
+    const auto home = _type_module.find(ct->template_or_self());
+
+    if (home != _type_module.end() && home->second.module != nullptr && home->second.decl != nullptr
+        && home->second.decl->name_token.has_value()) {
+        // the file the type was declared in, so the body's file and its line agree. only when nothing
+        // could place the declaration does the module's first file stand in
+        File *home_file = home->second.file != nullptr
+            ? home->second.file
+            : home->second.module->files().first();
+
+        // a module with no file, or one whose root the body pass never built. nothing can be published
+        // into it, so the teardown that asked stays the answer
+        if (home_file != nullptr && home_file->root != nullptr) {
+            _current_module = home->second.module;
+            _current_file = home_file;
+
+            // emplace rather than assign: a TokenReference holds its collection by reference and so has
+            // no copy assignment
+            site.emplace(home->second.decl->name_token.value());
+        }
+    }
+
+    // nowhere to write it and nobody asking from a real line - which is only synthesize_pending_class_deinits
+    // sweeping an anonymous layout, and for those the demand-driven ask carries the drop's own token
+    if (!site.has_value()) {
+        _current_module = previous_module;
+        _current_file = previous_file;
+
+        return nullptr;
+    }
+
+    FunctionDeclNode *decl = build_deinit(*ct, site.value());
+
+    _current_module = previous_module;
+    _current_file = previous_file;
+
+    return decl;
+}
+
+FunctionDeclNode *OwnershipPass::build_deinit(ComplexType &type, const TokenReference &site)
+{
+    ComplexType *ct = &type;
+
+    // **`$deinit`, not `deinit`.** the name reaches AST::mangle_function_name through func_name(), and a
+    // member's mangled name is its owner segment, its name and its parameter types - so a user's
+    // `function deinit()` on this very type mangled to the same symbol and TypeLowering threw "this is a
+    // name mangling defect, not a source error" at a program that had done nothing wrong. what makes
+    // `destructor` safe there is that it is a keyword token nobody can spell as a name, and `deinit` never
+    // was one; `$` is the compiler's own namespace for exactly this - `$this`, `$__it`, `$__env`, `$__temp1`
+    auto &decl = begin_synthesized_decl("$deinit", site);
+
+    // **a hint, because a teardown is a call at every scope exit.** the body is one or two calls with no
+    // branches, so what an optimized build wants is the sequence a drop site used to hold inline - and
+    // AST::function_emission_kind already answers t_odr_shared for anything this pass builds, so the
+    // definition is in the same module as every call to it and the inliner needs no whole-program merge.
+    // spelled here rather than in begin_synthesized_decl: a copy constructor is a call the *program* makes
+    decl.is_inline = true;
+
+    // a member of the type, which is what gives the mangled name its owner segment - mangled_token()
     // already carries the namespace and, for an instantiation, the type arguments. the namespace is
     // deliberately left null: the owner segment already qualifies it, and ComplexType holds its
     // namespace as a const pointer
+    //
+    // **it is also the whole of the fix for a private owning property.** the member accesses this body
+    // holds are the ones a drop used to mint in whatever scope held the value, where AST::enclosing_type_of
+    // had no type to answer with and `private` refused the compiler's own teardown. an owner here answers
+    // it, and AST::can_reach_private_member needs no arm for a synthesized body
     decl.owner_type = ct;
     decl.member_kind = MemberKind::t_method;
 
@@ -2300,24 +2407,25 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
     // keeping it alive any more: a by-value class parameter would be released at the end of this very
     // body - the release that got us here, recursing forever
     //
-    // **the class's own type, not `class_type`.** the two differ whenever the drop that asked for this
-    // deinit was over a *use* of the class carrying a per-level flag - a `Foo?` local, a `const Foo`
-    // property - and this declaration belongs to the class, not to whichever use happened to be dropped
-    // first. building `$this` as `Foo?&` made it fail to match the destructor's own `Foo&` receiver, and
-    // the shape of the failure is why it is worth spelling: nothing here is wrong, one coercion far away
+    // **the type's own, not the use that was dropped.** the two differ whenever the drop that asked for
+    // this deinit was over a *use* carrying a per-level flag - a `Foo?` local, a `const Foo` property -
+    // and this declaration belongs to the type, not to whichever use happened to be dropped first.
+    // building `$this` as `Foo?&` made it fail to match the destructor's own `Foo&` receiver, and the
+    // shape of the failure is why it is worth spelling: nothing here is wrong, one coercion far away
     // simply has no rule, and reverse-declaration drop order decided which use reached this line first
     auto &this_decl = add_borrow_parameter(decl, "$this", ValueType::make_complex(ct), site);
 
     ScopeNode &body = *decl.body;
 
-    // published *before* the body is built, not after. building it emits a release for every
-    // class-typed property, and a release asks for that class's deinit - so `class Node { Node $next; }`
-    // would ask for its own, find none, and recurse forever. the same reason TypeRegistry interns an
-    // instantiation before substituting its properties
+    // published *before* the body is built, not after. building it drops every owning property, and a
+    // property asks for its own type's deinit - so `class Node { Node $next; }` would ask for its own,
+    // find none, and recurse forever. the same reason TypeRegistry interns an instantiation before
+    // substituting its properties
     ct->set_deinit(&decl);
 
-    // the payload's teardown, in the same order and by the same code as a struct's: the class's own
-    // destructor first, then each owning property in reverse declaration order
+    // the whole teardown, and the only place either half is emitted: the type's own destructor first,
+    // then each owning property in reverse declaration order. a destructor is written to release what the
+    // value itself owns and may well read a field while doing so
     std::vector<NodeReference> statements;
     std::vector<std::string> path;
     emit_destructor_call(&this_decl, path, ct, statements);
@@ -2328,6 +2436,8 @@ void OwnershipPass::ensure_class_deinit(const ValueType &class_type, const Token
     }
 
     publish_synthesized_decl(decl);
+
+    return &decl;
 }
 
 FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, const TokenReference &site)
@@ -2347,7 +2457,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     ComplexType *ct = type.get_complex_type();
 
     // the type's own, stripped of whatever per-level flags the *use* that asked for this copy carried -
-    // `const Foo`, `Foo?`. ensure_class_deinit above has the same rule and the note there says why: a
+    // `const Foo`, `Foo?`. build_deinit above has the same rule and the note there says why: a
     // declaration synthesized for a type belongs to the type, and the first use to reach it is decided
     // by walk order rather than by anything meaningful
     const ValueType own_type = ValueType::make_complex(ct);
@@ -2391,7 +2501,7 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
     ScopeNode &body = *decl.body;
 
-    // published *before* the body is built, the same rule ensure_class_deinit follows. the body is
+    // published *before* the body is built, the same rule build_deinit follows. the body is
     // walked on a later round rather than here, so nothing recurses through this call - but the
     // invariant is worth keeping unconditional, and it is what stops the `return $this` below from
     // ever being read as a copy of a type whose copy is still being decided

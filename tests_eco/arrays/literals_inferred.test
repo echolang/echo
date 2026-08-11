@@ -10,11 +10,11 @@ Ronon
 --- RAST --->
 CHECK: Module: [main]
 // the inference itself, which OUT cannot show: three declarations, three element types, none of
-// them written down. and one destructor each - a body holding an unexpanded literal is not
+// them written down. and one teardown each - a body holding an unexpanded literal is not
 // concrete, so the ownership pass waited for the expansion rather than walking past it
 CHECK: vardecl<type<array<string>>>($names) = call array(): array<string>
 CHECK: vardecl<type<array<int32>>>($numbers) = call array(): array<int32>
 CHECK: vardecl<type<array<float64>>>($ratios) = call array(): array<float64>
-CHECK: call destructor(addrof<array<float64>&>
-CHECK: call destructor(addrof<array<int32>&>
-CHECK: call destructor(addrof<array<string>&>
+CHECK: call $deinit(addrof<array<float64>&>
+CHECK: call $deinit(addrof<array<int32>&>
+CHECK: call $deinit(addrof<array<string>&>

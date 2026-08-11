@@ -4,5 +4,7 @@ expect: ok
 3
 9
 --- RAST --->
-// the drop, as an ordinary resolved call
-CHECK: call destructor(addrof<array<int32>&>
+// the drop, as an ordinary resolved call to the one function that tears an `array<int32>` down -
+// its own destructor and its buffer, in a body shared by every drop of the type rather than inlined
+// here
+CHECK: call $deinit(addrof<array<int32>&>

@@ -5,7 +5,11 @@
 4
 2
 --- RAST --->
-// the borrow is taken out of the temporary, and the release runs after the call returns
+// the borrow is taken out of the temporary, and the teardown runs after the call returns
 CHECK: call use(addrof<Node&>(ma<Node>(varref<Pair>(var($__temp1))->node)))
-CHECK: release(ma<Node>(varref<Pair>(var($__temp1))->node))
+CHECK: call $deinit(addrof<Pair&>(varref<Pair>(var($__temp1))))
+
+// and the release of the member is *inside* `Pair`'s own teardown rather than beside the call. that is
+// the only place a member access may be minted - one body per type, reached from every drop of it
+CHECK: release(ma<Node>(varref<Pair&>(var($this))->node))
 CHECK-NOT: retain

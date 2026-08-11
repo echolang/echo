@@ -1,0 +1,16 @@
+# the second of the two answers `AST::OwnershipPass::ensure_deinit` can give, and the one that keeps the
+# hot path from growing a frame: `Handle`'s fields are a pointer and a `usize`, so its teardown never has to
+# reach inside the value and there is nothing for a synthesized body to hold
+--- OUT --->
+16
+released
+balanced
+--- RAST --->
+# the drop is the destructor the author wrote, called directly
+CHECK: call destructor(addrof<Handle&>(varref<Handle>(var($h))))
+--- IR --->
+CHECK: define i32 @main(
+
+# and no body was synthesized for it. `$deinit` appears in this program for the types that do need one -
+# `string`, `array` - but never for `Handle`, whose mangled owner segment would put its name in the symbol
+CHECK-NOT: Handle_$deinit

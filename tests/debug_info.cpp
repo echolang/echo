@@ -194,3 +194,89 @@ public function answer() : int32 { return 42; }
     REQUIRE(with_g.output.find("[cache]") != std::string::npos);
     REQUIRE(without_g.output != with_g.output);
 }
+
+TEST_CASE("a synthesized teardown is described at the type it belongs to", "[debuginfo]")
+{
+    // **the file and the line have to come from one place, and nothing else checks that they did.** A
+    // `$deinit` is built out of virtual tokens, so `AST::Module::file_of` answers null for it and
+    // DebugInfoCodegen falls back to `function_file_map` for the *file* while taking the *line* from the
+    // token - which is the type's own declaration. The two agree only because OwnershipPass writes the
+    // declaration into the file that declares the type: while it used the module's first file instead, a
+    // stdlib type's teardown claimed `arr.eco` at a line belonging to `string.eco`, and a debugger asked
+    // to step into it opened the wrong file or none.
+    //
+    // Two files in the module is what makes it visible, and the corpus cannot: it has no way to read
+    // DWARF, and a `CHECK` over rendered IR cannot follow `file: !13` to the DIFile it names. So this
+    // parses the metadata reference and resolves it
+    ScopedProject project("teardown_site");
+
+    write_file(project.root() / "lib" / "module.eco", R"(
+#[module: "lib"]
+#[sources: "*.eco"]
+)");
+
+    // the first file by name, and deliberately not where the owning type lives
+    write_file(project.root() / "lib" / "a_first.eco", R"(
+public function unrelated() : int32 { return 1; }
+)");
+
+    write_file(project.root() / "lib" / "z_journal.eco", R"(
+public struct Journal
+{
+    private array<int32> $entries;
+
+    constructor()
+    {
+        $this->entries = array<int32>();
+    }
+
+    function add(int32 $v) : void { $this->entries->push($v); }
+
+    const function count() : usize { return $this->entries->count(); }
+}
+)");
+
+    write_file(project.root() / "app" / "main.eco", R"(
+Journal $j = Journal();
+$j->add(7);
+echo $j->count() + unrelated();
+)");
+
+    const ProcessResult result = project.echoc(
+        "build -g --track-allocations -p ir -m " + quoted(project.root() / "lib") + " -o app main.eco",
+        project.root() / "app");
+
+    INFO(result.output);
+    REQUIRE(result.exit_code == 0);
+
+    // the subprogram for `Journal`'s teardown, and the metadata node it names as its file
+    const size_t at = result.output.find("linkageName: \"_M7Journal_$deinit");
+    REQUIRE(at != std::string::npos);
+
+    const size_t line_start = result.output.rfind("!DISubprogram", at);
+    const size_t line_end = result.output.find('\n', at);
+    REQUIRE(line_start != std::string::npos);
+
+    const std::string subprogram = result.output.substr(line_start, line_end - line_start);
+
+    INFO(subprogram);
+
+    const size_t file_at = subprogram.find("file: !");
+    REQUIRE(file_at != std::string::npos);
+
+    const size_t id_start = file_at + std::string("file: ").size();
+    const size_t id_end = subprogram.find(',', id_start);
+    const std::string file_id = subprogram.substr(id_start, id_end - id_start);
+
+    // and it resolves to the file that declares the type, not to the module's first one
+    const size_t file_node = result.output.find(file_id + " = !DIFile(");
+    REQUIRE(file_node != std::string::npos);
+
+    const std::string file_line = result.output.substr(file_node, result.output.find('\n', file_node) - file_node);
+
+    INFO(file_line);
+    REQUIRE(file_line.find("z_journal.eco") != std::string::npos);
+
+    // the scope is that same node, so a DILocation inside the body cannot name a third file
+    REQUIRE(subprogram.find("scope: " + file_id + ",") != std::string::npos);
+}

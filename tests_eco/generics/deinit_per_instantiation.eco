@@ -1,0 +1,39 @@
+// **one teardown per instantiated type, never one per template.** `Box<T>`'s own layout cannot answer what
+// tearing a box down means - `T` is still open, so nothing in it needs destroying yet - and the answer is
+// written on the layout with no redirect back to the template, deliberately, so each instance carries its
+// own
+//
+// `Box<array<int32>>` owes a teardown and `Box<int32>` owes none. building either on the template would
+// give the other the wrong one, permanently: the slot is filled before the body is built, so a wrong answer
+// is never revisited
+struct Box<T>
+{
+    private T $item;
+
+    constructor(T $item)
+    {
+        $this->item = mv $item;
+    }
+
+    const function has() : bool
+    {
+        return true;
+    }
+}
+
+{
+    array<int32> $numbers = array<int32>();
+    $numbers->push(7);
+
+    Box<array<int32>> $owning = Box<array<int32>>(mv $numbers);
+    Box<int32> $plain = Box<int32>(3);
+
+    echo $owning->has();
+    echo $plain->has();
+
+    assert(mem::live_allocations() == 1, "only the owning box holds a buffer");
+}
+
+assert(mem::live_allocations() == 0, "and it gave it back");
+
+echo "balanced";

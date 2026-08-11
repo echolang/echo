@@ -6,6 +6,12 @@
 3
 900
 --- RAST --->
-// retain inside the body, release in the teardown - the read happens before the destroy
+// retain inside the body, teardown after it - the read happens before the destroy, and that ordering is
+// what the two on one line assert
 CHECK: tempbind<Node>(vardecl<type<Pair>>($__temp1) = call make(
-CHECK: retain<Node>(ma<Node>(varref<Pair>(var($__temp1))->node)); release(ma<Node>(varref<Pair>(var($__temp1))->node))
+CHECK: retain<Node>(ma<Node>(varref<Pair>(var($__temp1))->node)); call $deinit(addrof<Pair&>(varref<Pair>(var($__temp1))))
+
+// the *release* is one level down, in `Pair`'s own teardown - so the pair of counts is still one up and
+// one down, they are simply no longer siblings. the retain is the ordinary "a place is copied" rule at
+// the statement, the release is what tearing a `Pair` down has always meant
+CHECK: release(ma<Node>(varref<Pair&>(var($this))->node))

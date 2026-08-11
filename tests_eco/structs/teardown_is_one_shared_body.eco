@@ -1,0 +1,56 @@
+// **one body per type, however many values of it are torn down.** the teardown used to be written out at
+// every drop site, so a program with N locals of one owning struct carried N copies of the same member-wise
+// walk; it is one `linkonce_odr` body now and every drop is a call to it
+//
+// the nesting is the second half: `Outer` owns an `Inner` which owns an `array<int32>`, and each level's
+// body reaches exactly one level down. that is what keeps a member access inside the type that declares
+// the property - `Outer`'s body never names `$numbers`
+struct Inner
+{
+    private array<int32> $numbers;
+
+    constructor(int32 $seed)
+    {
+        $this->numbers = array<int32>();
+        $this->numbers->push($seed);
+    }
+
+    const function count() : usize
+    {
+        return $this->numbers->count();
+    }
+}
+
+struct Outer
+{
+    private Inner $first;
+    private Inner $second;
+
+    constructor()
+    {
+        $this->first = Inner(1);
+        $this->second = Inner(2);
+    }
+
+    const function total() : usize
+    {
+        return $this->first->count() + $this->second->count();
+    }
+}
+
+{
+    Outer $a = Outer();
+    Outer $b = Outer();
+    Inner $c = Inner(3);
+
+    echo $a->total();
+    echo $b->total();
+    echo $c->count();
+
+    // two Outers, each holding two Inners, plus a loose Inner: five buffers
+    assert(mem::live_allocations() == 5, "five buffers");
+}
+
+assert(mem::live_allocations() == 0, "and every one of them given back");
+
+echo "balanced";

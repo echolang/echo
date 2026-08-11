@@ -2,31 +2,6 @@
 
 #include "AST/ASTMemberLookup.h"
 
-namespace
-{
-    // "declares a destructor, or holds a property that needs destroying" - the one walk behind both
-    // questions below, so a struct's teardown and a class payload's teardown can never disagree about
-    // what a body owes
-    //
-    // asked of the *instantiation's* properties rather than the template's: `Box<Buffer>` needs
-    // destruction where `Box<int32>` does not, and only the instantiation's layout has the substituted
-    // property types. terminates on a class-typed property, which answers true without descending
-    bool body_needs_destruction(const AST::ComplexType *ct)
-    {
-        if (AST::find_destructor(ct) != nullptr) {
-            return true;
-        }
-
-        for (size_t i = 0; i < ct->property_count(); i++) {
-            if (AST::needs_destruction(ct->get_property_type(i))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-}
-
 bool AST::needs_destruction(const AST::ValueType &type)
 {
     // a callable owes exactly one release: its captured environment. answered before the leaf below and
@@ -71,11 +46,32 @@ bool AST::needs_destruction(const AST::ValueType &type)
     const AST::ComplexType *ct = type.get_complex_type();
 
     // a struct that contains an owner is itself an owner
-    return ct != nullptr && body_needs_destruction(ct);
+    return needs_deinit(ct);
 }
 
-bool AST::class_needs_deinit(const AST::ComplexType *type)
+bool AST::needs_deinit(const AST::ComplexType *ct)
 {
-    // exactly the walk needs_destruction does for a struct, asked one level inside the block
-    return type != nullptr && type->is_class_kind() && body_needs_destruction(type);
+    if (ct == nullptr) {
+        return false;
+    }
+
+    return AST::find_destructor(ct) != nullptr || AST::properties_need_destruction(ct);
+}
+
+bool AST::properties_need_destruction(const AST::ComplexType *ct)
+{
+    if (ct == nullptr) {
+        return false;
+    }
+
+    // asked of the *instantiation's* properties rather than the template's: `Box<Buffer>` needs
+    // destruction where `Box<int32>` does not, and only the instantiation's layout has the substituted
+    // property types. terminates on a class-typed property, which answers true without descending
+    for (size_t i = 0; i < ct->property_count(); i++) {
+        if (AST::needs_destruction(ct->get_property_type(i))) {
+            return true;
+        }
+    }
+
+    return false;
 }

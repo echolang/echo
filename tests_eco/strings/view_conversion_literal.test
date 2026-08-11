@@ -8,11 +8,11 @@ stdlib: off
 3
 --- RAST --->
 # **one bind, two temporaries.** the literal is bound first because the conversion reads through it, and
-# the conversion's result is bound second because `show` borrows *that*. the release of the literal's
-# owner is last, so it runs after the call rather than before it
+# the conversion's result is bound second because `show` borrows *that*. the teardown of the literal is
+# last, so it runs after the call rather than before it
 CHECK: tempbind<void>(vardecl<type<string>>($__temp1) = literal<string>("'hello'"); vardecl<type<string::view>>($__temp2) = call view(addrof<string&>(varref<string>(var($__temp1))))
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp2))))
-CHECK: release(ma<local_buf>(varref<string>(var($__temp1))->owner))
+CHECK: call $deinit(addrof<string&>(varref<string>(var($__temp1))))
 
 # a by-value parameter needs only the receiver's temporary: the view travels as a plain two-word value
 CHECK: call showv(tempbind<string::view>(vardecl<type<string>>($__temp3) = literal<string>("'hi'")
@@ -20,6 +20,10 @@ CHECK: call showv(tempbind<string::view>(vardecl<type<string>>($__temp3) = liter
 # and a place needs no receiver temporary at all - `$owned` already has storage, so the only one minted
 # is for the borrow of the conversion's result
 CHECK: tempbind<void>(vardecl<type<string::view>>($__temp4) = call view(addrof<string&>(varref<string>(var($owned))))
+
+# and the release of the owner, which is what tearing a `string` down *is* - in one body belonging to the
+# type, written into the module that declares it, which here is the program itself
+CHECK: release(ma<local_buf>(varref<string&>(var($this))->owner))
 --- IR --->
 CHECK: define i32 @main(
 

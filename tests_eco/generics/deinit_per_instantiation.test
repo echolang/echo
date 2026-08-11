@@ -1,0 +1,15 @@
+# one symbol for the instantiation that owns something and none for the one that does not, out of a single
+# template. the mangled owner segment carries the type arguments, so the two could never have collided - what
+# this pins is that the answer is written per instance rather than once on `Box<T>`, where the first
+# instantiation to be torn down would have decided it for every other
+--- OUT --->
+1
+1
+balanced
+--- IR --->
+# `Box<array<int32>>` owns its item, so it has a teardown, and the element type is in the symbol
+CHECK: define linkonce_odr void @"_M3BoxIMLC5arrayIMLPiEE_$deinit
+
+# and `Box<int32>` owes nothing, so nothing was written for it. the `I..E` between the owner segment and
+# `_$deinit` is where its argument would be
+CHECK-NOT: @"_M3BoxIMLPiE_$deinit

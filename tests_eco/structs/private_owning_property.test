@@ -1,0 +1,20 @@
+# a struct with a private owning property, constructed at file scope, inside a function and
+# as a temporary. every one of those was refused with `'$cells' is private to 'Grid'` against a line the
+# author did not write, and the assertions are the other half - the property has to be destroyed exactly
+# once, not zero times and not twice
+--- OUT --->
+2
+4
+0
+balanced
+--- RAST --->
+# each of the three positions owes one call and nothing more: no member access to `$cells` anywhere a
+# `Grid` is torn down, which is what made every one of them a `PrivateMember` error
+CHECK: call $deinit(addrof<Grid&>(varref<Grid>(var($g))))
+CHECK: unwind call $deinit(addrof<Grid&>(varref<Grid>(var($g))))
+CHECK: call $deinit(addrof<Grid&>(varref<Grid>(var($__temp1))))
+
+# and the access is inside `Grid`'s own body, where its owner answers AST::enclosing_type_of and the
+# ordinary `private` rule lets it through. one body, three call sites
+CHECK: function $deinit -> type<void>
+CHECK: call $deinit(addrof<array<int32>&>(ma<array<int32>>(varref<Grid&>(var($this))->cells)))

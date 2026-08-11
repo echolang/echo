@@ -1,0 +1,52 @@
+// the synthesized teardown is named `$deinit`, and `$` is what makes that name the compiler's own. it used
+// to be `deinit`, which is not a keyword the way `destructor` is - so a member of that name on a type that
+// owns anything mangled to the same symbol as the synthesized one, and the whole compilation died with
+// "this is a name mangling defect, not a source error" against a program that had done nothing wrong
+struct Journal
+{
+    array<int32> $entries;
+
+    constructor()
+    {
+        $this->entries = array<int32>();
+    }
+
+    // an ordinary method that happens to be spelled like the thing the compiler writes
+    function deinit() : usize
+    {
+        $this->entries->clear();
+        return $this->entries->count();
+    }
+}
+
+// and a class, which is where the collision was reachable before a struct could own anything privately
+class Ledger
+{
+    array<int32> $rows;
+
+    constructor()
+    {
+        $this->rows = array<int32>();
+        $this->rows->push(1);
+    }
+
+    function deinit() : usize
+    {
+        return $this->rows->count();
+    }
+}
+
+{
+    Journal $j = Journal();
+    $j->entries->push(1);
+    $j->entries->push(2);
+
+    echo $j->deinit();
+
+    Ledger $l = Ledger();
+    echo $l->deinit();
+}
+
+assert(mem::live_allocations() == 0, "both gave their buffers back");
+
+echo "balanced";

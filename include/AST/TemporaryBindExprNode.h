@@ -65,7 +65,7 @@ namespace AST
         // owes nothing
         //
         // AssignNode::teardown_old's shape for its reason - the drops are ordinary calls in the tree,
-        // so -ar shows them, AST::TypeChecker validates them, and a generic destructor named by one is
+        // so -ar shows them, AST::TypeChecker validates them, and a generic teardown named by one is
         // instantiated by the next round of the very fixpoint that inserted it
         NodeReferenceList teardown;
 

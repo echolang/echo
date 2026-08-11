@@ -1,0 +1,26 @@
+// the other half of the rule, and the half that could regress into silence: making the compiler's own teardown
+// legal must not make *reaching* the property legal. so the modifier still refuses, and the caret is still
+// on the access the author wrote rather than on a token minted by a drop
+struct Grid
+{
+    private array<int32> $cells;
+
+    constructor()
+    {
+        $this->cells = array<int32>();
+    }
+
+    function add(int32 $value) : void
+    {
+        $this->cells->push($value);
+    }
+}
+
+$g = Grid();
+$g->add(1);
+
+// door one: reading the field
+echo $g->cells->count();
+
+// door two: writing through it
+$g->cells->push(2);

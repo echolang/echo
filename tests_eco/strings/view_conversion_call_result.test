@@ -7,15 +7,19 @@
 100
 1
 --- RAST --->
+# the release of the buffer, in the one body every teardown of a `string` goes through - written into the
+# module that declares `string`, so it is printed with the standard library and ahead of everything below
+CHECK: release(ma<str::buf>(varref<string&>(var($this))->owner))
+
 # the ordering *is* the assertion: the clone is bound, the view is taken of it, `show` reads through the
-# view, and only then is the clone's buffer released. a call that bound its arguments' temporaries put
-# that release between the second and third of those
+# view, and only then is the clone torn down - which is where its buffer is released, one body down. a
+# call that bound its arguments' temporaries put that teardown between the second and third of those
 CHECK: vardecl<type<string>>($__temp1) = call clone(
 CHECK: vardecl<type<string::view>>($__temp2) = call view(addrof<string&>(varref<string>(var($__temp1))))
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp2))))
-CHECK: release(ma<str::buf>(varref<string>(var($__temp1))->owner))
+CHECK: call $deinit(addrof<string&>(varref<string>(var($__temp1))))
 
 # and the same for a substring, which holds a second reference to the same buffer
 CHECK: vardecl<type<string>>($__temp3) = call sub(
 CHECK: call show(addrof<string::view&>(varref<string::view>(var($__temp4))))
-CHECK: release(ma<str::buf>(varref<string>(var($__temp3))->owner))
+CHECK: call $deinit(addrof<string&>(varref<string>(var($__temp3))))

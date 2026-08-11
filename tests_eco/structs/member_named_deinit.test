@@ -1,0 +1,14 @@
+# a member spelled `deinit` on a type that owns something, which aborted the compiler outright before the
+# synthesized one moved into the `$` namespace. both storage classes, because the class half was reachable
+# long before a struct could own a private anything - and neither is an error, so there is no diagnostic to
+# assert, only a program that compiles and runs
+--- OUT --->
+0
+1
+balanced
+--- IR --->
+# the author's, under its own name
+CHECK: define i64 @_M7Journal_deinitZZ
+
+# and the compiler's, in a namespace no member can be written into
+CHECK: define linkonce_odr void @"_M7Journal_$deinitZZ
