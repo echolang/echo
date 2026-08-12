@@ -283,13 +283,16 @@ static bool manifest_is_a_root(
 // topological order above exists for
 static int parse_manifest_modules(
     const AST::DiagnosticRenderer &diagnostics,
-    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     const std::vector<std::filesystem::path> &roots,
+    const Parser::ActiveTargets &active_targets,
     AST::Bundle &bundle,
     Parser::ModuleParser &parser
 )
 {
-    for (const Parser::ModuleManifest &manifest : manifests) {
+    for (const Parser::ModuleManifest *entry : manifests) {
+        const Parser::ModuleManifest &manifest = *entry;
+
         Compiler::ProgressStep step(
             Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_parse, manifest.name);
 
@@ -302,20 +305,26 @@ static int parse_manifest_modules(
             .collector = bundle.collector
         };
 
-        for (const auto &source : manifest.sources) {
+        // **through the one owner, never off `manifest.sources`.** What this module compiles is a question
+        // about the program being built, and the module cache asks the very same function - two merges
+        // here would be a cache handing one program the object built for another
+        const Parser::ModuleContribution contribution =
+            Parser::module_contribution_for(manifest, active_targets);
+
+        for (const auto &source : contribution.sources) {
             input.files.push_back(Parser::ModuleParser::InputFile(source));
         }
 
         step.summary(fmt::format(
             "{} file{}",
-            manifest.sources.size(), manifest.sources.size() == 1 ? "" : "s"));
+            contribution.sources.size(), contribution.sources.size() == 1 ? "" : "s"));
 
         // **a module the invocation pointed at lists its files; a dependency reports a count.** the same
         // distinction resolve_manifests already draws, and for the sentence it draws it with: whoever
         // asks what this invocation pointed at must not be told "the standard library". Twenty-one rows
         // of stdlib under every build is that answer given anyway
         if (manifest_is_a_root(manifest, roots)) {
-            step.detail(manifest.sources);
+            step.detail(contribution.sources);
         }
 
         if (handle_parse(diagnostics, parser, input)) {
@@ -346,6 +355,13 @@ struct Program
     std::filesystem::path entry_file;
 
     std::filesystem::path output;
+
+    // whose `#[target: ...] { ... }` scopes this program opens. **Deliberately not derivable from `name`**:
+    // a test run has no target name at all and still opens every test target of every module it was
+    // pointed at, and a target-less build opens nothing while naming nothing either.
+    //
+    // read only through Parser::module_contribution_for, which is the one owner of what a module compiles
+    Parser::ActiveTargets active_targets;
 };
 
 // what an invocation settles once, before any program is compiled.
@@ -358,6 +374,11 @@ struct Program
 struct Invocation
 {
     Compiler::TargetFacts target_facts;
+
+    // **every manifest this project reaches**, in dependency order - which, since a `#[target: ...] { }`
+    // scope may declare a `#[depends:]`, is no longer the same set as the modules a given program
+    // compiles. FrontEnd::manifests() is that narrower answer, and carries a different type so the two
+    // cannot be mistaken for one another
     std::vector<Parser::ModuleManifest> manifests;
 
     // the user's roots only, never the standard library - this is what "which module is the program" is
@@ -388,6 +409,22 @@ struct Invocation
     std::vector<Program> programs;
 };
 
+// **does this manifest name a file of its own as a program?**
+//
+// The *executable* targets and not every target, which is the whole of the question: a `#[target: test]`
+// produces no artifact and names no entry, so a module declaring only those still is the one program its
+// module has always been - every file root of it, concatenated. Two readers, and they were two copies of
+// this predicate 900 lines apart before it had a name: resolve_programs, deciding whether there is a target
+// to build, and collect_shared_top_level_code, deciding whether "only an entry's top level runs" applies
+static bool module_declares_a_program(const Parser::ModuleManifest &manifest)
+{
+    return std::any_of(
+        manifest.targets.begin(), manifest.targets.end(),
+        [](const Parser::ModuleTarget &target) {
+            return target.kind == Parser::TargetKind::t_executable;
+        });
+}
+
 // **top-level code in a file no target claims**, collected once per file.
 //
 // only asked of a module that declares targets, because that is the only module with anything on record
@@ -398,12 +435,14 @@ struct Invocation
 // turns a full collector into output and an exit status - it flushes stdout ahead of stderr first, which
 // a second gate here got wrong, and it reports every issue under one summary rather than this file's
 // under one and the rest under another
-static void collect_shared_top_level_code(
-    const Parser::ModuleManifest &manifest,
-    AST::Bundle &bundle
-)
+static void collect_shared_top_level_code(const Parser::ModuleManifest &manifest, AST::Bundle &bundle)
 {
-    if (manifest.targets.empty()) {
+    // **asked of the programs, not of the targets.** The rule this function states is "a target's entry
+    // file becomes the program, so a shared file's top level never runs", and that only holds once
+    // something claims an entry. A test target claims none by construction, so a module declaring only
+    // those still gets the program its module has always been - and until this asked the right question
+    // every file of such a module holding top-level code was refused against a rule nobody wrote
+    if (!module_declares_a_program(manifest)) {
         return;
     }
 
@@ -419,7 +458,14 @@ static void collect_shared_top_level_code(
                 return target.entry == file.get_path();
             });
 
-        if (is_an_entry || file.root == nullptr) {
+        // **a file an active scope contributed is that target's own**, not code shared with the rest of
+        // the module, so this rule does not reach it. Answered by subtraction rather than carried: every
+        // file here came from the module's contribution, which is `manifest.sources` plus what the scopes
+        // added, and `manifest.sources` is sorted - so "not one of the module's own" is one lookup
+        const bool is_scoped = !std::binary_search(
+            manifest.sources.begin(), manifest.sources.end(), file.get_path());
+
+        if (is_an_entry || is_scoped || file.root == nullptr) {
             continue;
         }
 
@@ -458,6 +504,8 @@ static int build_bundle(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
     const Invocation &invocation,
+    const Program &program,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     AST::Bundle &bundle,
     Parser::ModuleParser &parser
 )
@@ -471,21 +519,21 @@ static int build_bundle(
     // the manifest modules first, in dependency order, and the loose sources after them - so a program on
     // the command line can name anything a manifest declared, and no manifest can name it back. That is
     // the same one-way rule that holds between two manifests, for the same reason
-    const std::vector<Parser::ModuleManifest> &manifests = invocation.manifests;
     const std::vector<std::filesystem::path> &source_files = invocation.sources;
 
-    if (parse_manifest_modules(diagnostics, manifests, invocation.roots, bundle, parser) != 0) {
+    if (parse_manifest_modules(
+            diagnostics, manifests, invocation.roots, program.active_targets, bundle, parser) != 0) {
         return 1;
     }
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
-        collect_shared_top_level_code(manifest, bundle);
+    for (const Parser::ModuleManifest *manifest : manifests) {
+        collect_shared_top_level_code(*manifest, bundle);
     }
 
     if (!source_files.empty()) {
         const bool manifest_is_the_program = std::any_of(
             manifests.begin(), manifests.end(),
-            [](const Parser::ModuleManifest &manifest) { return manifest.name == ECO_MAIN_MODULE_NAME; });
+            [](const Parser::ModuleManifest *manifest) { return manifest->name == ECO_MAIN_MODULE_NAME; });
 
         if (manifest_is_the_program) {
             std::cerr << "A manifest already declares the '" << ECO_MAIN_MODULE_NAME
@@ -678,14 +726,15 @@ struct ModulePlan
 // unmarked - see the call below. So this is where a build provisions, not only where it plans
 static ModulePlan plan_module_artifacts(
     const Compiler::BuildLayout &layout,
-    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
     const std::string &entry_module
 )
 {
     ModulePlan plan;
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
+    for (const Parser::ModuleManifest *entry : manifests) {
+        const Parser::ModuleManifest &manifest = *entry;
         if (manifest.name == entry_module) {
             continue;
         }
@@ -735,10 +784,11 @@ static ModulePlan plan_module_artifacts(
 static bool compute_cache_keys(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
-    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     const Compiler::CompilerOptions &options,
     const Compiler::TargetFacts &facts,
     const std::set<std::string> &test_modules,
+    const Parser::ActiveTargets &active_targets,
     std::map<std::string, Compiler::ModuleCacheKey> &out_keys
 )
 {
@@ -746,8 +796,8 @@ static bool compute_cache_keys(
 
     std::string error;
     if (!Compiler::compute_module_keys(
-            manifests, options, facts, test_modules, driver.optimize_is_whole_program(),
-            out_keys, error)) {
+            manifests, options, facts, test_modules, active_targets,
+            driver.optimize_is_whole_program(), out_keys, error)) {
         diagnostics.render_untyped("Module Cache Error", error);
         return false;
     }
@@ -762,7 +812,7 @@ static bool compute_cache_keys(
 // diagnostic exists to help find
 static void report_cache_plan(
     const Compiler::DriverOptions &driver,
-    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     const std::map<std::string, Compiler::ModuleCacheKey> &keys,
     const ModulePlan &plan,
     const std::string &entry_module_name,
@@ -780,7 +830,9 @@ static void report_cache_plan(
                      "reusable" << std::endl;
     }
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
+    for (const Parser::ModuleManifest *entry : manifests) {
+        const Parser::ModuleManifest &manifest = *entry;
+
         auto found = keys.find(manifest.name);
         if (found == keys.end()) {
             continue;
@@ -923,14 +975,108 @@ struct FrontEnd
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
 
+    // **the modules this program compiles, in dependency order** - which is not every module the project
+    // has: a dependency reached only through some other target's `#[target: ...] { #[depends:] }` is not
+    // one of them. Filled once, in run_front_end.
+    //
+    // pointers into the invocation's list rather than copies, and a *different type* from that list
+    // deliberately: a reader that means "everything this project reaches" and one that means "what this
+    // program is made of" are two questions, and the compiler is what keeps a new reader from picking the
+    // wrong one by writing the name it half-remembered
+    std::vector<const Parser::ModuleManifest *> compiled;
+
     // spellings over the two above, so a reader says what it wants rather than which carrier holds it
-    const std::vector<Parser::ModuleManifest> &manifests() const { return invocation->manifests; }
+    const std::vector<const Parser::ModuleManifest *> &manifests() const { return compiled; }
     const Compiler::TargetFacts &target_facts() const { return invocation->target_facts; }
     const std::set<std::string> &test_modules() const { return invocation->test_modules; }
     const Compiler::BuildLayout &layout() const { return invocation->layout; }
     const std::string &entry_module() const { return program->entry_module; }
     const std::filesystem::path &entry_file() const { return program->entry_file; }
+
+    // what one module contributes to *this* program - its sources, dependencies, link line and C build,
+    // with whatever scopes this program opened folded in. The one owner of that question, asked here
+    // rather than each reader picking a field off the manifest
+    Parser::ModuleContribution contribution(const Parser::ModuleManifest &manifest) const {
+        return Parser::module_contribution_for(manifest, program->active_targets);
+    }
 };
+
+// which of the project's modules this program is made of, in the order they were resolved.
+//
+// **a module the walk cannot reach is not compiled at all**, which is the whole of what a scoped
+// `#[depends:]` buys: a test-only dependency is parsed, keyed and linked by `echoc test` and is absent
+// from `echoc build` entirely. Reachability is asked of Parser::module_contribution_for, so what a scope
+// contributes is one answer here as it is everywhere else.
+//
+// **a reachability walk, and the deny-list is only what seeds it.**
+//
+// Seeding on the roots alone would be wrong: the standard library is added to every build and is
+// deliberately *not* one of the user's roots, and neither is a module a `-m` named. So the seed is asked
+// the other way round - a module no target's scope anywhere declares is part of every program this project
+// produces, exactly as it always was, and is in from the start.
+//
+// From there it has to be a **closure**, not one step. A module a scope names may be needed by another
+// module a scope names: dropping it because no *unconditional* manifest reaches it drops something the
+// build genuinely compiles, and the failure is an unresolved symbol in a module whose own manifest looks
+// fine. The list is dependency-first, so walking it backwards settles the closure in one pass - everything
+// that could name a module is decided before the module is
+static std::vector<const Parser::ModuleManifest *> compiled_manifests(
+    const Invocation &invocation,
+    const Program &program
+)
+{
+    std::set<std::filesystem::path> reached;
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        for (const Parser::ModuleTarget &target : manifest.targets) {
+            reached.insert(target.depends.begin(), target.depends.end());
+        }
+    }
+
+    std::vector<const Parser::ModuleManifest *> out;
+
+    // the common case and every project that existed before scopes did: no module is conditional at all,
+    // so the answer is the whole list and no walk happens
+    if (reached.empty()) {
+        for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+            out.push_back(&manifest);
+        }
+
+        return out;
+    }
+
+    // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
+    // walk adds - which is the set this function is actually computing
+    std::set<std::filesystem::path> conditional;
+    conditional.swap(reached);
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (conditional.find(manifest.path) == conditional.end()) {
+            reached.insert(manifest.path);
+        }
+    }
+
+    std::vector<std::filesystem::path> depends;
+
+    for (auto manifest = invocation.manifests.rbegin();
+            manifest != invocation.manifests.rend(); ++manifest) {
+        if (reached.find(manifest->path) == reached.end()) {
+            continue;
+        }
+
+        depends.clear();
+        Parser::append_active_depends(*manifest, program.active_targets, depends);
+        reached.insert(depends.begin(), depends.end());
+    }
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (reached.find(manifest.path) != reached.end()) {
+            out.push_back(&manifest);
+        }
+    }
+
+    return out;
+}
 
 // where an artifact goes when the program is a loose .eco file rather than a project: there is no manifest
 // to put one beside, so nothing here is worth keeping and nothing should be left behind. Per process, so
@@ -1167,12 +1313,27 @@ static bool resolve_programs(
             return false;
         }
 
-        out.programs.push_back(Program {
-            /*name=*/{},
-            entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
-            /*entry_file=*/{},
-            /*output=*/{}
-        });
+        Program test_program;
+        test_program.entry_module = entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name;
+
+        // **which scopes a test run opens is not which targets it selected.** `out.test_targets` is a
+        // *selection* and stays empty on a bare `echoc test` on purpose, one line above; the sources a
+        // test target declares are a different question and every test target of every module this
+        // invocation pointed at answers it. A module compiles its tests or it does not - `test_modules`
+        // is already that per-module answer, and the two must not drift apart into two readings
+        for (const Parser::ModuleManifest &manifest : out.manifests) {
+            if (out.test_modules.find(manifest.name) == out.test_modules.end()) {
+                continue;
+            }
+
+            for (const Parser::ModuleTarget &target : manifest.targets) {
+                if (target.kind == Parser::TargetKind::t_test) {
+                    test_program.active_targets[manifest.name].insert(target.name);
+                }
+            }
+        }
+
+        out.programs.push_back(std::move(test_program));
 
         return true;
     }
@@ -1182,13 +1343,7 @@ static bool resolve_programs(
     //
     // **the *executable* targets and not every target**, or a manifest declaring only `#[target: test]`
     // would fall through to the loop below and build no program at all, silently
-    const bool declares_a_program = entry != nullptr && std::any_of(
-        entry->targets.begin(), entry->targets.end(),
-        [](const Parser::ModuleTarget &target) {
-            return target.kind == Parser::TargetKind::t_executable;
-        });
-
-    if (!declares_a_program) {
+    if (entry == nullptr || !module_declares_a_program(*entry)) {
         if (!driver.targets.empty()) {
             diagnostics.render_untyped("No Such Target", entry == nullptr
                 ? "'--target' names a program a manifest declares, and this build's program is the source "
@@ -1247,12 +1402,19 @@ static bool resolve_programs(
     }
 
     for (const Parser::ModuleTarget &target : selected) {
-        out.programs.push_back(Program {
+        Program program {
             target.name,
             entry->name,
             target.entry,
             driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output
-        });
+        };
+
+        // **only the target being built, and only in the module that declared it.** Two targets of one
+        // module are two programs here, so each opens its own scope and neither sees the other's - which
+        // is what makes their module keys differ and stops the second linking the first's object
+        program.active_targets[entry->name].insert(target.name);
+
+        out.programs.push_back(std::move(program));
     }
 
     return true;
@@ -1338,6 +1500,7 @@ static bool run_front_end(
 {
     out.invocation = &invocation;
     out.program = &program;
+    out.compiled = compiled_manifests(invocation, program);
 
     // **after the facts and not before**, which is why the parser is built here rather than handed in: it
     // takes them at construction, so there is no window in which one exists that has not been told what
@@ -1346,7 +1509,7 @@ static bool run_front_end(
 
     {
         Compiler::ScopedPhase phase("parse");
-        if (build_bundle(driver, diagnostics, invocation, bundle, parser) != 0) {
+        if (build_bundle(driver, diagnostics, invocation, program, out.compiled, bundle, parser) != 0) {
             return false;
         }
     }
@@ -1366,7 +1529,7 @@ static bool run_front_end(
     if (needs_cache_keys(driver)
         && !compute_cache_keys(
             driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.test_modules(),
-            out.cache_keys)) {
+            program.active_targets, out.cache_keys)) {
         return false;
     }
 
@@ -1406,7 +1569,7 @@ static bool collect_link_requirements(
 )
 {
     for (auto manifest = front.manifests().rbegin(); manifest != front.manifests().rend(); ++manifest) {
-        Compiler::merge_link_requirements(manifest->link, out);
+        Compiler::merge_link_requirements(front.contribution(**manifest).link, out);
     }
 
     const std::vector<std::string> &spelled_on_command_line = driver.link;
@@ -1505,15 +1668,18 @@ static bool build_c_modules(
 
     std::vector<std::string> explain;
 
-    for (const Parser::ModuleManifest &manifest : front.manifests()) {
-        if (manifest.cc.empty()) {
+    for (const Parser::ModuleManifest *entry : front.manifests()) {
+        const Parser::ModuleManifest &manifest = *entry;
+        const Parser::ModuleContribution contribution = front.contribution(manifest);
+
+        if (contribution.cc.empty()) {
             continue;
         }
 
         Compiler::ProgressStep step(
             Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_cc, manifest.name);
 
-        const size_t sources = manifest.cc.sources.size();
+        const size_t sources = contribution.cc.sources.size();
         step.summary(fmt::format("{} source{}", sources, sources == 1 ? "" : "s"));
 
         const std::filesystem::path cache_dir = front.layout().module_cc_dir(manifest);
@@ -1522,7 +1688,7 @@ static bool build_c_modules(
         std::string error;
 
         if (!Compiler::build_c_sources(
-                manifest.cc, front.options, cache_dir, scratch_dir / manifest.name,
+                contribution.cc, front.options, cache_dir, scratch_dir / manifest.name,
                 explain, result, error)) {
             diagnostics.render_untyped("C Build Failed", error);
             return false;
@@ -1543,12 +1709,12 @@ static bool build_c_modules(
         // to do with it
         std::vector<std::filesystem::path> own_objects;
         std::vector<std::string> link_words;
-        Compiler::partition_link_requirements(manifest.link, own_objects, link_words);
+        Compiler::partition_link_requirements(contribution.link, own_objects, link_words);
 
         std::filesystem::path library;
 
         if (!Compiler::build_c_shared_library(
-                manifest.cc, result, link_words, cache_dir, scratch_dir / manifest.name,
+                contribution.cc, result, link_words, cache_dir, scratch_dir / manifest.name,
                 library, error)) {
             diagnostics.render_untyped("C Build Failed", error);
             return false;
@@ -2106,7 +2272,9 @@ static int build_one_program(
     // **a reused module gets a row and a rebuilt one does not.** Work that did not happen is the
     // surprising half; which input changed for the ones that did is `--explain-cache`'s question, and
     // answering it twice would put explain_miss's reasoning in two places
-    for (const Parser::ModuleManifest &manifest : front.manifests()) {
+    for (const Parser::ModuleManifest *manifest_ptr : front.manifests()) {
+        const Parser::ModuleManifest &manifest = *manifest_ptr;
+
         if (plan.cached.count(manifest.name) > 0) {
             Compiler::ProgressReporter::instance().row(
                 Compiler::ProgressPhase::t_cached, manifest.name, "reused",

@@ -7,23 +7,25 @@
  *
  * `#[sources: "src/*.eco"]` matches within `src/` only. Adding a file there needs no edit here.
  *
- * The second `#[sources:]` line accumulates rather than replacing the first, and it is the whole of what
- * puts the tests in `tests/` into this module - which is what lets them name everything in `src/` without
- * a `public` anywhere, the default visibility being the module's own. On every invocation that is not
- * `echoc test` those files have their `test` blocks dropped before they are parsed and contribute nothing
- * at all, so they cost the program neither a symbol nor a byte.
- *
  * `#[target:]` says which of those files is the program: `main.eco`'s file root becomes `main`, and every
  * other file contributes its declarations and nothing else. A second target would be another line naming
  * another entry - `echoc build` builds all of them, `echoc build --target clock` builds this one. The
  * binary goes to `ecobuild/clock`, beside the objects, where `echoc clean` can reach it.
+ *
+ * The `{ ... }` after `#[target: test]` is a scope: what it says belongs to that target rather than to
+ * the module. So `tests/` is part of this module when `echoc test` builds it - which is what lets the
+ * tests name everything in `src/` without a `public` anywhere, the default visibility being the module's
+ * own - and is not compiled at all by `echoc run` or `echoc build`.
  */
 
 #[module: "analog_clock"]
 #[version: "0.1.0"]
 
 #[sources: "src/*.eco"]
-#[sources: "tests/*.eco"]
 
 #[target: exe { name: "clock", entry: "src/main.eco" }]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}
 

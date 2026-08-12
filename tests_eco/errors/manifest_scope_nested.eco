@@ -1,0 +1,2 @@
+// the manifest named by this case writes a scope inside a scope
+echo 1;

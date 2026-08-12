@@ -103,10 +103,11 @@ uint64_t Compiler::fnv1a64(const std::string &text, uint64_t seed)
 }
 
 bool Compiler::compute_module_keys(
-    const std::vector<Parser::ModuleManifest> &manifests,
+    const std::vector<const Parser::ModuleManifest *> &manifests,
     const CompilerOptions &options,
     const TargetFacts &facts,
     const std::set<std::string> &modules_with_tests,
+    const Parser::ActiveTargets &active_targets,
     bool optimize,
     std::map<std::string, ModuleCacheKey> &out_keys,
     std::string &out_error
@@ -160,7 +161,9 @@ bool Compiler::compute_module_keys(
     // the digest of every module already keyed, in order - see the fold below
     uint64_t preceding = k_fnv_offset_basis;
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
+    for (const Parser::ModuleManifest *entry : manifests) {
+        const Parser::ModuleManifest &manifest = *entry;
+
         ModuleCacheKey key;
         uint64_t hash = environment;
 
@@ -192,8 +195,24 @@ bool Compiler::compute_module_keys(
         key.inputs.emplace_back(manifest.path, manifest_digest);
         hash = fnv1a64(&manifest_digest, sizeof(manifest_digest), hash);
 
-        // `sources` is already sorted by the manifest reader, so the order here is stable
-        for (const std::filesystem::path &source : manifest.sources) {
+        // **through the one owner of what this module compiles**, which is also what handed the parser its
+        // file list. Two merges of "the manifest's sources plus whichever scopes apply" would be a cache
+        // that serves one program the object built for another - the failure a second answer always is
+        // here, and the one that links silently
+        const Parser::ModuleContribution contribution =
+            Parser::module_contribution_for(manifest, active_targets);
+
+        // **stated only when a scope actually answered**, which is what an empty `active_targets` already
+        // says: a module whose targets carry none, or none this program opened, folds nothing here and so
+        // keys byte for byte what it always did - which is what keeps the standard library's object, and
+        // every existing project's, shared across every target of a build
+        for (const std::string &target : contribution.active_targets) {
+            hash = fnv1a64(target, hash);
+        }
+
+        // `sources` is already sorted by the manifest reader, and a scope's files follow the module's own
+        // in written order - so the order here is stable either way
+        for (const std::filesystem::path &source : contribution.sources) {
             const std::optional<std::string> bytes = read_whole_file(source);
             if (!bytes.has_value()) {
                 out_error = fmt::format("{}: cannot be read to compute a cache key.", source.string());
@@ -210,7 +229,7 @@ bool Compiler::compute_module_keys(
 
         // and every dependency's key. The topological order guarantees they are already computed - if one is
         // missing the graph was not ordered, which is a resolver bug rather than a user error
-        for (const std::filesystem::path &dependency : manifest.depends) {
+        for (const std::filesystem::path &dependency : contribution.depends) {
             auto found = digest_by_path.find(dependency);
             if (found == digest_by_path.end()) {
                 out_error = fmt::format(

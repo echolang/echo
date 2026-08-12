@@ -1,0 +1,7 @@
+// a `{ ... }` scope says what one target says for itself, so it hangs off a target and off nothing else -
+// refused at the attribute carrying the brace, which is where the line number is
+#[module: "scopednontarget"]
+#[sources: "src/*.eco"]
+#[sources: "src/*.eco"] {
+    #[sources: "src/*.eco"]
+}

@@ -27,6 +27,23 @@ namespace AST
         // types by hand. See AST::AttributeValue for why an expression is the wrong tool here
         std::optional<AttributeValue> value;
 
+        // the attribute this one was written inside - `#[target: test] { #[sources: "..."] }` - or null
+        // at file scope.
+        //
+        // **the sole record that a `{ }` grouped it, and the parser is its only writer.** An attribute
+        // node carries no parent edge and the manifest reads them out of the module's *arena*, in written
+        // order, so the braces are invisible by construction unless the grouping is on the node itself.
+        //
+        // only the declaration pass fills it. The body pass keeps reading `#[x] { }` inside a function as
+        // an attribute followed by a bare block, which is what it has always been - a manifest runs passes
+        // one and two only, so nothing there is left with a half-answer
+        AttributeNode *scope_owner = nullptr;
+
+        // and the other half: this attribute is the one a `{` followed. Recorded even for an empty scope,
+        // which is the whole reason it is a flag rather than "somebody named me as their owner" - a scope
+        // written on an attribute that cannot carry one has to be refused whether or not anyone is in it
+        bool opens_scope = false;
+
         AttributeNode(const TokenSlice &attribute_tokens, const TokenReference &attribute_id) :
             attribute_tokens(attribute_tokens),
             attribute_id(attribute_id)

@@ -1,0 +1,2 @@
+// the manifest named by this case hangs a '{ ... }' scope off something that is not a target
+echo 1;

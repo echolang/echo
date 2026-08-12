@@ -83,11 +83,18 @@ namespace Compiler
     // pointed at and not of the libraries below it. Passed rather than derived because that decision belongs
     // to the driver, and folded through TargetFacts::cache_signature so there is still one answer to "what
     // could the conditional filter see"
+    //
+    // `active_targets` is the second of those, and the one that made this key stop being per-*module*
+    // alone: a `#[target: ...] { ... }` scope adds sources to the module that declares it, for the program
+    // that opened it. What it contributes is read through Parser::module_contribution_for, the same
+    // function that hands the parser its file list - and a module with no active scope folds nothing
+    // extra, which is what keeps every key that ever existed exactly where it was
     bool compute_module_keys(
-        const std::vector<Parser::ModuleManifest> &manifests,
+        const std::vector<const Parser::ModuleManifest *> &manifests,
         const CompilerOptions &options,
         const TargetFacts &facts,
         const std::set<std::string> &modules_with_tests,
+        const Parser::ActiveTargets &active_targets,
         bool optimize,
         std::map<std::string, ModuleCacheKey> &out_keys,
         std::string &out_error);

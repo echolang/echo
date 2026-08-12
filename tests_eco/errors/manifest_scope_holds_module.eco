@@ -1,0 +1,2 @@
+// the manifest named by this case writes a module-wide attribute inside a target's scope
+echo 1;

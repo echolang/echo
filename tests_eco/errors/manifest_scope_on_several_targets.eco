@@ -1,0 +1,2 @@
+// the manifest named by this case hangs one scope off a '#[target:]' declaring several
+echo 1;

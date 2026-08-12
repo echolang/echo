@@ -38,7 +38,15 @@ namespace Parser
     // it *descends* rather than skipping, which is what makes a block-local declaration visible to a
     // call written above it: Parser::parse_funccall reports UnknownFunction and discards the node
     // immediately, so a name not yet registered when the body pass reaches the call is gone for good
-    void parse_declaration_surface(Payload &payload, std::optional<TokenReference> block_token = std::nullopt);
+    //
+    // `scope_owner` is the attribute this region was written inside, when the region opened at a `{` glued
+    // to an attribute's `]` rather than standing on its own. It is recorded on every attribute the region
+    // holds and read by nothing but the manifest - a `module.eco` is Echo, walked by this very function
+    void parse_declaration_surface(
+        Payload &payload,
+        std::optional<TokenReference> block_token = std::nullopt,
+        AST::AttributeNode *scope_owner = nullptr
+    );
 };
 
 

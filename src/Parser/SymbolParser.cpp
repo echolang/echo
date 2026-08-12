@@ -255,7 +255,11 @@ void Parser::parse_symbols(Parser::Payload &payload)
     payload.context.pop_scope();
 }
 
-void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<TokenReference> block_token)
+void Parser::parse_declaration_surface(
+    Parser::Payload &payload,
+    std::optional<TokenReference> block_token,
+    AST::AttributeNode *scope_owner
+)
 {
     auto &cursor = payload.cursor;
 
@@ -329,7 +333,16 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
             // already know: `#[core: string]` binds the type a string literal is, and a literal is
             // parsed in the body pass. binding it here is what makes that independent of file order,
             // since this pass completes over *every* file before the next one starts
-            parse_attribute(payload);
+            AST::AttributeNode *attribute = parse_attribute(payload, scope_owner);
+
+            // **an attribute scope**: a `{` on the heels of the `]` groups what follows *under* this
+            // attribute rather than opening a bare block. The grouping is recorded on each attribute
+            // inside and read by nothing but the manifest reader, so a source file is unaffected -
+            // its attributes still stage on the same stack the declaration after them drains
+            if (attribute != nullptr && cursor.is_type(Token::Type::t_open_brace)) {
+                attribute->opens_scope = true;
+                parse_declaration_surface(payload, cursor.current(), attribute);
+            }
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
@@ -359,8 +372,9 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
         }
         else if (cursor.is_type(Token::Type::t_open_brace)) {
             // a bare nested block, which is its own declaration scope - the body pass mirrors this in
-            // parse_scope, keyed on the same brace
-            parse_declaration_surface(payload, cursor.current());
+            // parse_scope, keyed on the same brace. the owner travels down: a block inside an attribute
+            // scope is still inside it
+            parse_declaration_surface(payload, cursor.current(), scope_owner);
         }
         else if (block_token.has_value() && cursor.is_type(Token::Type::t_close_brace)) {
             cursor.skip(); // the region's own closing brace

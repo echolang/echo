@@ -1,0 +1,7 @@
+modules: modules/scope_on_non_target
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:5: 'sources' cannot carry a '{ ... }' scope - only a '#[target: ...]' can, a scope being what one target says for itself.

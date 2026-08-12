@@ -1,0 +1,7 @@
+modules: modules/scope_nested
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:6: 'target' cannot be written inside a '{ ... }' scope - a scope is one target speaking for itself, so it holds no targets of its own.

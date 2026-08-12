@@ -9,7 +9,13 @@
 
 namespace Parser
 {
-    AST::AttributeNode *parse_attribute(Parser::Payload &payload);
+    // one `#[...]`, and only the brackets - a `{` that follows is the *caller's* to read, since what a
+    // brace after an attribute means is a question about the region being walked and not about the
+    // attribute. `scope_owner` is the attribute this one was written inside, recorded on the node
+    AST::AttributeNode *parse_attribute(
+        Parser::Payload &payload,
+        AST::AttributeNode *scope_owner = nullptr
+    );
 
     // the value an attribute carries, or null having reported that it carries none. every consumer of
     // a valued attribute starts here, and what it does with the value afterwards is

@@ -35,6 +35,29 @@ namespace AST
     // direction nothing catches
     bool is_known_manifest_attribute(const std::string &name);
     std::string known_manifest_attribute_list();
+
+    // what a manifest attribute may do with a `#[target: ...] { ... }` scope.
+    //
+    // **three answers and not a bool**, because "may be written inside one" and "may carry one" are two
+    // properties and exactly one attribute has the second. A `#[target:]` written *inside* a scope is the
+    // case a pair of booleans loses: it neither carries a brace of its own nor belongs to another target,
+    // and a reader asking only "is this scopable" accepts it and hangs a second module-level target off it
+    enum class AttributeScoping
+    {
+        // describes the module, so a scope has nothing to do with it: module, version, build_dir
+        t_module_only,
+
+        // may be written inside a scope, meaning there what it means at file scope: sources, depends,
+        // link, cc
+        t_scopable,
+
+        // the one that opens a scope, and therefore may not be written inside one either
+        t_opens_a_scope
+    };
+
+    // a column of the manifest table above rather than name comparisons at the point of use, so a ninth
+    // manifest attribute states this once instead of being silently absent from three tests in a reader
+    AttributeScoping manifest_attribute_scoping(const std::string &name);
 };
 
 #endif

@@ -37,6 +37,21 @@ namespace
     constexpr std::string_view k_manifest_attributes[] = {
         "module", "version", "depends", "sources", "target", "link", "cc", "build_dir" };
 
+    // and what each of them may do with a `{ ... }` scope. **A column of the table above rather than name
+    // comparisons at the point of use**: a ninth manifest attribute has to state this or it does not
+    // compile, where three `name == "..."` tests in a reader are three places a ninth name is simply
+    // absent from - and the one it is absent from accepts it in silence
+    constexpr std::pair<std::string_view, AST::AttributeScoping> k_manifest_scoping[] = {
+        { "module",    AST::AttributeScoping::t_module_only },
+        { "version",   AST::AttributeScoping::t_module_only },
+        { "build_dir", AST::AttributeScoping::t_module_only },
+        { "target",    AST::AttributeScoping::t_opens_a_scope },
+        { "depends",   AST::AttributeScoping::t_scopable },
+        { "sources",   AST::AttributeScoping::t_scopable },
+        { "link",      AST::AttributeScoping::t_scopable },
+        { "cc",        AST::AttributeScoping::t_scopable },
+    };
+
     template <size_t N>
     bool contains(const std::string_view (&names)[N], const std::string &name)
     {
@@ -71,4 +86,16 @@ bool AST::is_known_manifest_attribute(const std::string &name)
 std::string AST::known_manifest_attribute_list()
 {
     return fmt::format("{}", fmt::join(k_manifest_attributes, ", "));
+}
+
+AST::AttributeScoping AST::manifest_attribute_scoping(const std::string &name)
+{
+    const auto found = std::find_if(
+        std::begin(k_manifest_scoping), std::end(k_manifest_scoping),
+        [&name](const auto &row) { return row.first == name; });
+
+    // only asked of a name is_known_manifest_attribute already accepted, and the two lists are the same
+    // eight - so this is the arm that says a ninth was added to one of them and not to the other
+    return found == std::end(k_manifest_scoping)
+        ? AST::AttributeScoping::t_module_only : found->second;
 }

@@ -31,7 +31,10 @@ const AST::AttributeValue *Parser::attribute_value_of(
     return nullptr;
 }
 
-AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
+AST::AttributeNode *Parser::parse_attribute(
+    Parser::Payload &payload,
+    AST::AttributeNode *scope_owner
+)
 {
     if (!payload.cursor.is_type(Token::Type::t_hash)) {
         payload.collect_unexpected_token(Token::Type::t_hash);
@@ -94,6 +97,7 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
         // below. without the registration a valueless attribute parsed and was then dropped on
         // the floor, so `#[inline]` never reached the declaration that followed it
         auto &node = payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
+        node.scope_owner = scope_owner;
         payload.context.scope().add_attribute(node);
 
         return &node;
@@ -112,6 +116,7 @@ AST::AttributeNode *Parser::parse_attribute(Parser::Payload &payload)
     // build the attribute node
     auto &node = payload.context.emplace_node<AST::AttributeNode>(payload.cursor.slice(att_token_start, payload.cursor.snapshot()), name_token);
     node.value = std::move(value);
+    node.scope_owner = scope_owner;
 
     // next we expect a closing square bracket
     if (!payload.cursor.is_type(Token::Type::t_close_bracket)) {

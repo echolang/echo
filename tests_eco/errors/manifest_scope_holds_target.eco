@@ -1,0 +1,2 @@
+// the manifest named by this case writes a '#[target:]' inside another target's scope
+echo 1;

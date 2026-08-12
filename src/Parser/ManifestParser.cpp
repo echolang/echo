@@ -328,6 +328,14 @@ struct WrittenTarget
     std::vector<std::string> groups;
     std::vector<std::string> files;
     uint32_t line = 0;
+
+    // what this target's `{ ... }` said, in the same as-written shape the four fields above are in. The
+    // patterns go through the one expander after the module's own, for the same reason the module's do
+    bool has_scope = false;
+    std::vector<std::string> scoped_sources;
+    std::vector<std::string> scoped_depends;
+    std::vector<Compiler::LinkRequirement> scoped_link;
+    Compiler::CBuildSpec scoped_cc;
 };
 
 // `#[target: ...]`, in every shape it takes.
@@ -481,6 +489,11 @@ bool read_manifest_attributes(
     std::vector<WrittenTarget> &out_targets,
     std::string &out_error)
 {
+    // which `WrittenTarget` an attribute's `{ ... }` fills. **The arena order is what makes one pass
+    // enough**: an owner is parsed before anything written inside it, so its slot is always registered by
+    // the time a child asks for it
+    std::unordered_map<const AST::AttributeNode *, size_t> scope_of;
+
     // read from the arena rather than from the file root: the root is only built by the body pass, and the
     // arena preserves the order the attributes were written in
     for (AST::AttributeNode *attribute : module.nodes.of_type<AST::AttributeNode>()) {
@@ -491,6 +504,44 @@ bool read_manifest_attributes(
             out_error = locate(out.path, line, fmt::format(
                 "unknown manifest attribute '{}', expected one of: {}", name, AST::known_manifest_attribute_list()));
             return false;
+        }
+
+        // **every scope rule is this one table lookup**, asked of a name the vocabulary already accepted.
+        // Three name comparisons spread through the loop is what this replaced, and the fourth name they
+        // were missing was `target` itself: one written *inside* a scope carries no brace of its own, so
+        // the nesting rule never saw it and the arm below hung a second module-level target off it
+        const AST::AttributeScoping scoping = AST::manifest_attribute_scoping(name);
+
+        // asked of the attribute carrying the brace, and before its value is read: that is where the line
+        // number is, and it is the only place an *empty* scope is visible at all - nobody names the owner
+        // of a scope with nothing in it
+        if (attribute->opens_scope && scoping != AST::AttributeScoping::t_opens_a_scope) {
+            out_error = locate(out.path, line, fmt::format(
+                "'{}' cannot carry a '{{ ... }}' scope - only a '#[target: ...]' can, a scope being "
+                "what one target says for itself.", name));
+            return false;
+        }
+
+        // where this attribute's value goes: the module, or the target whose scope it was written in
+        std::optional<size_t> scope;
+
+        if (attribute->scope_owner != nullptr) {
+            if (scoping != AST::AttributeScoping::t_scopable) {
+                out_error = locate(out.path, line,
+                    scoping == AST::AttributeScoping::t_opens_a_scope
+                        ? fmt::format(
+                            "'{}' cannot be written inside a '{{ ... }}' scope - a scope is one target "
+                            "speaking for itself, so it holds no targets of its own.", name)
+                        : fmt::format(
+                            "'{}' describes the module, not one of its targets - write it at file scope.",
+                            name));
+                return false;
+            }
+
+            // `.at()` rather than a lookup with a refusal behind it: the owner opened a scope, and an
+            // attribute that opens one either registers a slot below or returns. That is an invariant of
+            // this walk, so it fails as one rather than as a sentence about somebody's manifest
+            scope = scope_of.at(attribute->scope_owner);
         }
 
         if (!attribute->value.has_value()) {
@@ -538,25 +589,53 @@ bool read_manifest_attributes(
             }
         }
         else if (name == "depends") {
-            read_manifest_depends(written, reader, out_depends);
+            read_manifest_depends(
+                written, reader,
+                scope.has_value() ? out_targets[scope.value()].scoped_depends : out_depends);
         }
         else if (name == "sources") {
+            std::vector<std::string> &into =
+                scope.has_value() ? out_targets[scope.value()].scoped_sources : out_sources;
+
             for (const AST::AttributeValue *pattern : AST::AttributeReader::each(written)) {
                 if (std::optional<std::string> value = reader.string(*pattern)) {
-                    out_sources.push_back(value.value());
+                    into.push_back(value.value());
                 }
             }
         }
         else if (name == "target") {
             // checked against `sources` after the patterns are expanded - resolve_manifest_targets, which
             // is the first moment there is anything to check an entry against
+            const size_t before = out_targets.size();
+
             read_manifest_targets(written, reader, line, out_targets);
+
+            // **a scope belongs to one target.** `#[target: [ {...}, {...} ]]` is a legal spelling and a
+            // scope on it would have to be copied into each, which is a rule about what two targets share
+            // that nobody wrote down - so it is refused where the alternative is one line of typing.
+            //
+            // guarded on the reader having nothing to say, because a target it turned down produced no
+            // entry either - and answering that with a sentence about scopes would bury the refusal that
+            // is already waiting to be drained
+            if (attribute->opens_scope && !reader.has_refusals()) {
+                if (out_targets.size() != before + 1) {
+                    out_error = locate(out.path, line, fmt::format(
+                        "a '{{ ... }}' scope belongs to one target, and this '#[target: ...]' declares "
+                        "{} - write each of them its own.", out_targets.size() - before));
+                    return false;
+                }
+
+                out_targets[before].has_scope = true;
+                scope_of[attribute] = before;
+            }
         }
         else if (name == "link") {
             // **the scheme is checked here, against this invocation's facts.** A `framework:` on a linux
             // build is a mistake in the manifest and refusing it needs the platform, which the reader has
             // and nothing downstream does - by link time there is only a word left
-            Compiler::parse_link_attribute(written, out.directory, facts, out.name, reader, out.link);
+            Compiler::parse_link_attribute(
+                written, out.directory, facts, out.name, reader,
+                scope.has_value() ? out_targets[scope.value()].scoped_link : out.link);
         }
         else if (name == "build_dir") {
             if (!out.build_dir.empty()) {
@@ -580,7 +659,9 @@ bool read_manifest_attributes(
         else if (name == "cc") {
             // **which member of the spec a scheme fills is CBuild's question**, not this reader's - so a
             // scheme added there does not need a second arm here
-            Compiler::apply_cc_attribute(written, out.directory, reader, out.cc);
+            Compiler::apply_cc_attribute(
+                written, out.directory, reader,
+                scope.has_value() ? out_targets[scope.value()].scoped_cc : out.cc);
         }
 
         // **drained once, after every arm.** A refusal the reader accumulated is what makes an arm's value
@@ -671,6 +752,36 @@ bool expand_manifest_patterns(
     return true;
 }
 
+// canonical dependency manifests, from the paths as written. An entry may name the manifest or the
+// directory holding it - see manifest_at.
+//
+// takes its destination, because a `#[depends:]` inside a target's scope resolves by exactly this rule and
+// lands somewhere else - the split every scoped attribute makes, and the reason none of them needed a
+// second reading of what they mean
+bool resolve_manifest_depend_paths(
+    const std::vector<std::string> &written,
+    const Parser::ModuleManifest &out,
+    std::vector<std::filesystem::path> &into,
+    std::string &out_error
+)
+{
+    for (const std::string &spelled : written) {
+        const std::filesystem::path target = out.directory / spelled;
+        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(target);
+
+        if (!resolved.has_value()) {
+            out_error = locate(out.path, fmt::format(
+                "the dependency '{}' resolves to '{}', which is neither a manifest nor a directory "
+                "holding a 'module.eco'.", spelled, target.string()));
+            return false;
+        }
+
+        into.push_back(Compiler::canonical_or_absolute(resolved.value()));
+    }
+
+    return true;
+}
+
 // out.sources, from the patterns as written.
 //
 // **a manifest is never one of its own sources.** It is an Echo file living in the directory it describes,
@@ -689,6 +800,38 @@ bool expand_manifest_sources(
     return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, out_error);
 }
 
+// spec.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
+// in a manifest and there is no second grammar for a pattern.
+//
+// **an `include:`, `define:` or `flag:` with no `sources:` is refused**, rather than being a spec that
+// describes a build of nothing. Those three only ever mean something to a translation unit, so a manifest
+// carrying one and no source has said something it cannot have meant - the rule a `#[sources:]` pattern
+// matching no files already follows.
+//
+// takes the spec and who owns it, because a `#[cc:]` inside a target's scope is the same spec answering the
+// same rule - the split every scoped attribute makes, and what keeps the fifth `#[cc:]` scheme from needing
+// a second arm here
+bool expand_cc_sources(
+    Compiler::CBuildSpec &spec,
+    const Parser::ModuleManifest &out,
+    const std::string &owner,
+    std::string &out_error
+)
+{
+    if (spec.source_patterns.empty()) {
+        if (spec.includes.empty() && spec.defines.empty() && spec.flags.empty()) {
+            return true;
+        }
+
+        out_error = locate(out.path, fmt::format(
+            "{} has '#[cc: ...]' options but no '#[cc: \"sources:...\"]' to apply them to.", owner));
+        return false;
+    }
+
+    return expand_manifest_patterns(
+        spec.source_patterns, out, "C sources", /*exclude=*/{}, spec.sources, out_error);
+}
+
 // out.targets, with every entry resolved against the manifest and proved to be one of this module's own
 // sources.
 //
@@ -702,6 +845,35 @@ bool resolve_manifest_targets(
     std::string &out_error
 )
 {
+    // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
+    // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
+    const auto expand_scope = [&out, &out_error](
+        const WrittenTarget &target, Parser::ModuleTarget &settled) {
+        if (!target.scoped_sources.empty()
+            && !expand_manifest_patterns(
+                target.scoped_sources, out, "sources", out.path, settled.sources, out_error)) {
+            return false;
+        }
+
+        if (!resolve_manifest_depend_paths(target.scoped_depends, out, settled.depends, out_error)) {
+            return false;
+        }
+
+        settled.link = target.scoped_link;
+        settled.cc = target.scoped_cc;
+
+        // credited exactly as the module's own are, and here rather than in the reader for the same
+        // reason: `#[module:]` is only conventionally the first line
+        for (Compiler::LinkRequirement &requirement : settled.link) {
+            requirement.declared_by = out.name;
+        }
+
+        settled.cc.module_name = out.name;
+
+        return expand_cc_sources(
+            settled.cc, out, fmt::format("target '{}'", target.name), out_error);
+    };
+
     for (const WrittenTarget &target : written) {
         // **the name becomes a file name**, unlike a module's, which only has to be spellable - a target
         // is written into the build directory under exactly this word, and BuildLayout::target_binary
@@ -735,6 +907,11 @@ bool resolve_manifest_targets(
         settled.name = target.name;
         settled.kind = target.kind;
         settled.groups = target.groups;
+        settled.has_scope = target.has_scope;
+
+        if (!expand_scope(target, settled)) {
+            return false;
+        }
 
         // **a test target names no file**, so every path it does name is a *selection* - resolved against
         // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
@@ -753,8 +930,14 @@ bool resolve_manifest_targets(
         const std::filesystem::path resolved = Compiler::settled_path(out.directory, target.entry);
 
         // one sentence for both "no such file" and "not in `sources`", because the remedy is the same
-        // one either way: the pattern has to match the file, or the file has to move under one that does
-        if (std::find(out.sources.begin(), out.sources.end(), resolved) == out.sources.end()) {
+        // one either way: the pattern has to match the file, or the file has to move under one that does.
+        //
+        // **its own scope counts as sources**, which is the one place the check widened: a target whose
+        // scope declares the files it is made of has named a file the module *does* compile whenever that
+        // target is the one being built, which is every build in which the entry means anything
+        if (std::find(out.sources.begin(), out.sources.end(), resolved) == out.sources.end()
+            && std::find(settled.sources.begin(), settled.sources.end(), resolved)
+                == settled.sources.end()) {
             out_error = locate(out.path, target.line, fmt::format(
                 "'{}' is target '{}'s entry but is not one of this module's sources - a target's entry "
                 "has to be a file the module is made of.", target.entry, target.name));
@@ -769,48 +952,20 @@ bool resolve_manifest_targets(
     return true;
 }
 
-// out.cc.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
-// in a manifest and there is no second grammar for a pattern.
+// every manifest this one names, at file scope and inside any target's scope.
 //
-// **an `include:`, `define:` or `flag:` with no `sources:` is refused**, rather than being a spec that
-// describes a build of nothing. Those three only ever mean something to a translation unit, so a manifest
-// carrying one and no source has said something it cannot have meant - the rule a `#[sources:]` pattern
-// matching no files already follows
-bool expand_manifest_cc_sources(Parser::ModuleManifest &out, std::string &out_error)
+// **the graph is target-independent on purpose.** Reachability, the duplicate-name check, the cycle report
+// and the emit order are all facts about the project rather than about the program being built, and a walk
+// that changed shape with `--target` would report a cycle on one target and not on another. Which of these
+// a given program actually *compiles* is a later and separate question, answered by module_contribution_for
+std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest &manifest)
 {
-    if (out.cc.source_patterns.empty()) {
-        if (out.cc.includes.empty() && out.cc.defines.empty() && out.cc.flags.empty()) {
-            return true;
-        }
+    // **through the one merger, with every scope opened.** A hand-rolled union here would be a third place
+    // that knows what a scope contributes, and the one that a fifth scoped attribute is not added to
+    std::vector<std::filesystem::path> all;
+    Parser::append_active_depends(manifest, Parser::all_targets_active({ manifest }), all);
 
-        out_error = locate(out.path,
-            "this module has '#[cc: ...]' options but no '#[cc: \"sources:...\"]' to apply them to.");
-        return false;
-    }
-
-    return expand_manifest_patterns(
-        out.cc.source_patterns, out, "C sources", /*exclude=*/{}, out.cc.sources, out_error);
-}
-
-// out.depends, canonical. An entry may name the manifest or the directory holding it - see manifest_at
-bool resolve_manifest_depends(
-    const std::vector<std::string> &written, Parser::ModuleManifest &out, std::string &out_error)
-{
-    for (const std::string &spelled : written) {
-        const std::filesystem::path target = out.directory / spelled;
-        const std::optional<std::filesystem::path> resolved = Parser::manifest_at(target);
-
-        if (!resolved.has_value()) {
-            out_error = locate(out.path, fmt::format(
-                "the dependency '{}' resolves to '{}', which is neither a manifest nor a directory "
-                "holding a 'module.eco'.", spelled, target.string()));
-            return false;
-        }
-
-        out.depends.push_back(Compiler::canonical_or_absolute(resolved.value()));
-    }
-
-    return true;
+    return all;
 }
 
 // the body of the read, taking the scratch state so a graph walk can reuse it
@@ -892,11 +1047,121 @@ bool read_manifest_with(
     // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
     return expand_manifest_sources(sources_written, out, out_error)
         && resolve_manifest_targets(targets_written, out, out_error)
-        && expand_manifest_cc_sources(out, out_error)
-        && resolve_manifest_depends(depends_written, out, out_error);
+        && expand_cc_sources(out.cc, out, "this module", out_error)
+        && resolve_manifest_depend_paths(depends_written, out, out.depends, out_error);
 }
 
 };
+
+Parser::ModuleContribution Parser::module_contribution_for(
+    const Parser::ModuleManifest &manifest,
+    const Parser::ActiveTargets &active
+)
+{
+    Parser::ModuleContribution out;
+
+    out.sources = manifest.sources;
+    out.depends = manifest.depends;
+    out.link = manifest.link;
+    out.cc = manifest.cc;
+
+    const auto opened = active.find(manifest.name);
+
+    if (opened == active.end()) {
+        return out;
+    }
+
+    // **the early exit is the load-bearing half.** A manifest whose targets carry no scope, or none this
+    // program activates, has to come back holding exactly what it stated at file scope and an empty
+    // `active_targets` - that is what keeps its cache key from moving and its object shared across targets
+    for (const Parser::ModuleTarget &target : manifest.targets) {
+        if (!target.has_scope || opened->second.find(target.name) == opened->second.end()) {
+            continue;
+        }
+
+        out.active_targets.push_back(target.name);
+
+        // appended after the module's own and deduplicated against them, so a file matched by both a
+        // file-scope pattern and a scoped one is compiled once. Order is the module's, then each scope's
+        // in written order - the sort inside one list is the expander's and stays where it was
+        for (const std::filesystem::path &source : target.sources) {
+            if (std::find(out.sources.begin(), out.sources.end(), source) != out.sources.end()) {
+                continue;
+            }
+
+            out.sources.push_back(source);
+        }
+
+        for (const std::filesystem::path &depend : target.depends) {
+            if (std::find(out.depends.begin(), out.depends.end(), depend) == out.depends.end()) {
+                out.depends.push_back(depend);
+            }
+        }
+
+        // **through the one merger**, which is what `--link` and every manifest below this one already go
+        // through: a requirement a scope repeats after the module stated it is one library, and a raw
+        // append would send the duplicate to the link line and to `runtime_library_of` twice
+        Compiler::merge_link_requirements(target.link, out.link);
+
+        out.cc.sources.insert(
+            out.cc.sources.end(), target.cc.sources.begin(), target.cc.sources.end());
+        out.cc.includes.insert(
+            out.cc.includes.end(), target.cc.includes.begin(), target.cc.includes.end());
+        out.cc.defines.insert(
+            out.cc.defines.end(), target.cc.defines.begin(), target.cc.defines.end());
+        out.cc.flags.insert(out.cc.flags.end(), target.cc.flags.begin(), target.cc.flags.end());
+    }
+
+    return out;
+}
+
+void Parser::append_active_depends(
+    const Parser::ModuleManifest &manifest,
+    const Parser::ActiveTargets &active,
+    std::vector<std::filesystem::path> &into
+)
+{
+    const auto add = [&into](const std::filesystem::path &dependency) {
+        if (std::find(into.begin(), into.end(), dependency) == into.end()) {
+            into.push_back(dependency);
+        }
+    };
+
+    for (const std::filesystem::path &dependency : manifest.depends) {
+        add(dependency);
+    }
+
+    const auto opened = active.find(manifest.name);
+
+    if (opened == active.end()) {
+        return;
+    }
+
+    for (const Parser::ModuleTarget &target : manifest.targets) {
+        if (!target.has_scope || opened->second.find(target.name) == opened->second.end()) {
+            continue;
+        }
+
+        for (const std::filesystem::path &dependency : target.depends) {
+            add(dependency);
+        }
+    }
+}
+
+Parser::ActiveTargets Parser::all_targets_active(const std::vector<Parser::ModuleManifest> &manifests)
+{
+    Parser::ActiveTargets active;
+
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        for (const Parser::ModuleTarget &target : manifest.targets) {
+            if (target.has_scope) {
+                active[manifest.name].insert(target.name);
+            }
+        }
+    }
+
+    return active;
+}
 
 bool Parser::read_module_manifest(
     const std::filesystem::path &path,
@@ -955,7 +1220,7 @@ bool Parser::resolve_module_graph(
             return false;
         }
 
-        for (const std::filesystem::path &dependency : manifest.depends) {
+        for (const std::filesystem::path &dependency : every_dependency(manifest)) {
             pending.push_back(dependency);
         }
 
@@ -1003,7 +1268,7 @@ bool Parser::resolve_module_graph(
 
             in_progress.push_back(path);
 
-            for (const std::filesystem::path &dependency : loaded.at(path).depends) {
+            for (const std::filesystem::path &dependency : every_dependency(loaded.at(path))) {
                 if (!visit(dependency)) {
                     return false;
                 }

@@ -1,0 +1,7 @@
+modules: modules/scope_on_several_targets
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:5: a '{ ... }' scope belongs to one target, and this '#[target: ...]' declares 2 - write each of them its own.

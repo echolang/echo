@@ -1,0 +1,8 @@
+// a scope is one target speaking for itself, so it holds no targets of its own. The refusal that is easy
+// to lose: a `#[target:]` written inside a scope carries no brace, so a rule keyed on the brace never sees
+// it - and the arm below would hang a second module-level target off it in silence
+#[module: "scopedtarget"]
+#[sources: "src/*.eco"]
+#[target: test] {
+    #[target: exe { name: "sneaky", entry: "src/main.eco" }]
+}

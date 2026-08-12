@@ -1,0 +1,10 @@
+// a library whose test target carries a scope. Nothing here opens it - a module reached with `-m` is a
+// library to the case, so its `tests/` never joins the build - which is what this fixture pins: a manifest
+// declaring a scope parses, and the token filter's test-block lookahead does not mistake the `{` after
+// `#[target: test]` for the start of one
+#[module: "libscoped"]
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

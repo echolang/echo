@@ -592,11 +592,15 @@ Node *TypeDeclNode::clone(CloneContext &cc) const
 // attributes
 // ---------------------------------------------------------------------------
 
-// an attribute value is a plain value holding no node edges, so the shallow copy is the whole clone -
-// unlike every other node here, which owes its children a visit
+// an attribute value is a plain value holding no node edges, so the shallow copy is nearly the whole
+// clone - unlike every other node here, which owes its children a visit. `scope_owner` is the one edge,
+// and it is a cross-reference: a clone of a scoped attribute belongs to the clone of its owner when both
+// travelled together, and to the original otherwise, which is exactly what rebind answers
 Node *AttributeNode::clone(CloneContext &cc) const
 {
-    return cc.shallow(this);
+    AttributeNode *c = cc.shallow(this);
+    c->scope_owner = cc.rebind(scope_owner);
+    return c;
 }
 
 };  // namespace AST

@@ -1,0 +1,8 @@
+// one level, and the refusal is asked of the inner brace: a scope inside a scope would need a rule about
+// what the two contribute together that nobody wrote down
+#[module: "scopednested"]
+#[sources: "src/*.eco"]
+#[target: test] {
+    #[target: test] {
+    }
+}

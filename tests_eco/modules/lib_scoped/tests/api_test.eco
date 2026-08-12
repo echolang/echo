@@ -1,0 +1,8 @@
+// never compiled by the case that names this module: it is a library there, so nothing opens the scope
+// this file belongs to. A statement at top level is what would refuse were it read as a shared source
+echo "THE SCOPE WAS OPENED";
+
+test the_answer_is_seven
+{
+    assert(scoped_answer() == 7);
+}

@@ -1,0 +1,4 @@
+public function scoped_answer() : int32
+{
+    return 7;
+}

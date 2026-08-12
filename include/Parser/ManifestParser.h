@@ -8,6 +8,8 @@
 #include "Compiler/TargetFacts.h"
 
 #include <filesystem>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -60,8 +62,9 @@ namespace Parser
     // only see the rest of the project through `public`, so a project growing a second binary would have
     // to mark up all of its internals; that is the design this one replaced.
     //
-    // consequently the module's source list is *identical* whichever target is being built, and nothing
-    // here enters a cache key
+    // A target that carries **no scope** costs the module nothing: its source list is identical whichever
+    // target is built and its cache key does not move. A target that carries one is the exception, and
+    // `ModuleContribution` below is where the two readings meet
     struct ModuleTarget
     {
         std::string name;
@@ -81,6 +84,24 @@ namespace Parser
         // declared target is a saved filter and deliberately not a second selection engine
         std::vector<std::string> groups;
         std::vector<std::filesystem::path> files;
+
+        // what this target's `{ ... }` scope contributed - the four things a manifest also says at file
+        // scope, said for one target instead of for the module:
+        //
+        //     #[target: test] {
+        //         #[sources: "tests/*.eco"]
+        //         #[depends: "../mocklib"]
+        //     }
+        //
+        // **held on the target rather than merged into the manifest above.** Whether they apply is a
+        // question about the program being built, and a manifest is read long before the invocation knows
+        // which target that is - merging here would settle it at the wrong moment, in the one direction
+        // that compiles. `module_contribution_for` is what settles it, per program
+        bool has_scope = false;
+        std::vector<std::filesystem::path> sources;
+        std::vector<std::filesystem::path> depends;
+        std::vector<Compiler::LinkRequirement> link;
+        Compiler::CBuildSpec cc;
     };
 
     struct ModuleManifest
@@ -136,6 +157,58 @@ namespace Parser
         // own bytes are already folded into the key, so editing this line rebuilds the module anyway
         std::filesystem::path build_dir;
     };
+
+    // **what this module compiles, depends on and links, for one program.**
+    //
+    // The sole owner of that question. It has three readers - the parser's input list, the module cache
+    // key and the shared-top-level-code check - and they are three *readings of one answer* rather than
+    // three merges of the same two lists. A merge each would be the drift `TargetFacts::tests` already
+    // documents between its own two readers, where disagreement is not merely wrong but unsound: the
+    // cache would hand one target the object built for another.
+    struct ModuleContribution
+    {
+        // the module's own files, then every active scope's, deduplicated and in that order
+        std::vector<std::filesystem::path> sources;
+        std::vector<std::filesystem::path> depends;
+        std::vector<Compiler::LinkRequirement> link;
+        Compiler::CBuildSpec cc;
+
+        // the scopes that answered, in written order. **Empty is what keeps a module's cache key byte for
+        // byte what it was** - a module whose targets carry no scope, or whose scopes this program does
+        // not activate, folds nothing new and so still shares one object across every target
+        std::vector<std::string> active_targets;
+    };
+
+    // which of each module's targets a program opens the scopes of, by module name.
+    //
+    // **keyed by module because a target name is manifest-local.** Two modules may each call a target
+    // `tests`, and a flat set of names would have the entry module's `--target` reach into a dependency
+    // and change what that dependency compiles - which is the one thing a consumer cannot see coming
+    typedef std::map<std::string, std::set<std::string>> ActiveTargets;
+
+    // resolves the above against the targets this program activates. A module named by nothing in the map,
+    // or whose targets carry no scope, comes back stating exactly what its manifest states
+    ModuleContribution module_contribution_for(
+        const ModuleManifest &manifest,
+        const ActiveTargets &active
+    );
+
+    // just the dependencies of the above, appended to `into` without duplicating what it holds.
+    //
+    // **the same rule, without building the four lists a caller was going to throw away.** Two readers ask
+    // only this - the reachability walk that decides which modules a program compiles at all, and the graph
+    // loader, which passes an "everything is active" map because reachability is a fact about the project
+    // rather than about the program
+    void append_active_depends(
+        const ModuleManifest &manifest,
+        const ActiveTargets &active,
+        std::vector<std::filesystem::path> &into
+    );
+
+    // an `ActiveTargets` opening every scope of every module, for the questions that are about the project
+    // rather than about one program: the graph has to load and order a module a scope names whether or not
+    // this invocation would compile it, or a cycle would be a cycle only on some targets
+    ActiveTargets all_targets_active(const std::vector<ModuleManifest> &manifests);
 
     // the paths one source pattern names, in no particular order and unfiltered - a directory can come back,
     // exactly as it can from a glob. **one owner for "what files does this pattern name"**, asked by the

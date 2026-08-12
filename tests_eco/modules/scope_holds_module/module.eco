@@ -1,0 +1,7 @@
+// three of the eight attributes describe the module and nothing else, so a scope has nothing to do with
+// them - refused at the word rather than read into a target that would ignore it
+#[module: "scopedmodule"]
+#[sources: "src/*.eco"]
+#[target: test] {
+    #[version: "9.9.9"]
+}

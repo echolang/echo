@@ -1,0 +1,7 @@
+// `#[target: [ ... ]]` is a legal spelling and a scope on it would have to be copied into each, which is a
+// rule about what two targets share that nobody wrote down
+#[module: "scopedseveral"]
+#[sources: "src/*.eco"]
+#[target: [ test, exe { name: "tool", entry: "src/main.eco" } ]] {
+    #[sources: "src/*.eco"]
+}

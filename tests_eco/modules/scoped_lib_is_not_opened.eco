@@ -1,0 +1,3 @@
+// a library's `#[target: test] { ... }` scope belongs to that library's own test run, never to a consumer's
+// build - so `tests/` is not part of this program and its top-level echo never runs
+echo scoped_answer();

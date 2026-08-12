@@ -728,3 +728,188 @@ echo $class instanceof A; // false
 
 echo $struct instanceof A; // error 
 ```
+
+
+### Static functions and properties
+
+Static function in echo can only be defined inside a class or struct. They are called on the class or struct itself and not on an instance of the class or struct.
+
+```echo
+class Session {
+    static int32 $count = 0;
+
+    public string $user;
+
+    construct(string $user) {
+        $this->user = $user;
+        Session::$count = Session::$count + 1;
+    }
+
+    static function active(): int32 {
+        return Session::$count;
+    }
+}
+
+$a = Session('mario');
+$b = Session('ada');
+
+echo Session.active(); // 2
+```
+
+### Shorthand Constructors
+
+In echo `.` is not used for concatenation, instead it is used to call a constructor when the required type can be inferred from the context.
+
+```echo
+struct Point {
+    public float $x;
+    public float $y;
+
+    static function norm(float $x, float $y): Point {
+        // create a normalized point
+        $length = std::math::sqrt($x * $x + $y * $y);
+        return Point($x / $length, $y / $length);
+    }
+}
+
+function draw(Point $point) : void {
+    // ...
+}
+
+draw(.norm(10, 20)); // calls Point::norm(10, 20) and passes the result to draw()
+```
+
+This also applies to return values 
+
+```echo
+struct Response {
+    public int $statusCode;
+    public string $body;
+
+    static function ok(string $body): Response {
+        return Response(200, $body);
+    }
+
+    static function notFound(string $body): Response {
+        return Response(404, $body);
+    }
+}
+
+function handleRequest(string $url): Response {
+    if ($url == "/") {
+        return .ok("Hello World");
+    } else {
+        return .notFound("Not Found");
+    }
+}
+```
+
+### Enums
+
+A enum is what you expect a enum to be:
+
+```php
+enum DistanceUnit {
+    case meter;
+    case kilometer;
+    case mile;
+}
+```
+
+A enum can extend a type / associate a value with each case:
+
+```php
+enum DistanceUnit : string {
+    case meter = "m";
+    case kilometer = "km";
+    case mile = "mi";
+}
+```
+
+A enum can be compared.
+
+```php
+$unit = DistanceUnit::meter;
+if ($unit == DistanceUnit::meter) {
+    echo "Unit is meter\n";
+}
+if ($unit != DistanceUnit::kilometer) {
+    echo "Unit is not kilometer\n";
+}
+```
+
+You can use the enums value if needed
+
+```php
+$unit = DistanceUnit::meter;
+echo $unit->value; // m
+```
+
+A enum can carry a value beyond the case value. 
+
+```php
+enum DistanceUnit {
+    case meter(int $value);
+    case kilometer(int $value);
+    case mile(int $value);
+}
+
+$unit = DistanceUnit::meter(100);
+match ($unit) {
+    DistanceUnit::meter($value) => echo "Unit is meter with value {$value}\n",
+    DistanceUnit::kilometer($value) => echo "Unit is kilometer with value {$value}\n",
+    DistanceUnit::mile($value) => echo "Unit is mile with value {$value}\n",
+}
+```
+
+A `match` is an expression, so the arms can produce a value instead of doing the
+work themselves:
+
+```php
+$meters = match ($unit) {
+    DistanceUnit::meter($value) => $value,
+    DistanceUnit::kilometer($value) => $value * 1000,
+    DistanceUnit::mile($value) => $value * 1609,
+};
+```
+
+Or, when you already know which case you are holding, you can read the payload
+directly:
+
+```php
+$unit = DistanceUnit::meter(100);
+echo $unit->value; // 100
+```
+
+Reading it off the wrong case is a compile error, so a case you are not sure
+about has to go through `match` — or a single-case check, which binds the
+payload only where it is known to exist:
+
+```php
+if ($unit is DistanceUnit::kilometer($km)) {
+    echo "{$km} km\n";
+}
+```
+
+
+### Errors & Error Handling
+
+```php
+enum CurlError : error {
+    case cannot_resolve_host;
+    case cannot_connect;
+    case timeout(int $after_seconds);
+    case unknown;
+}
+
+struct CurlResult : result<CurlResponse, CurlError> {}
+
+function request(string $url): CurlResult {
+    // ...
+    if (...) {
+        return .error(.timeout(30));
+    }
+
+    return .ok($response);
+}
+```
