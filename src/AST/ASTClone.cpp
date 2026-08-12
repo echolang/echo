@@ -39,6 +39,7 @@
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/StringInterpolationNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
@@ -62,6 +63,19 @@ Node *LiteralFloatExprNode::clone(CloneContext &cc) const { return cc.shallow(th
 Node *LiteralIntExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralBoolExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralStringExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+
+Node *StringInterpolationExprNode::clone(CloneContext &cc) const
+{
+    // the chunks and the specs are plain strings on the node, so the shallow copy carries them; only
+    // the hole expressions are owned edges
+    StringInterpolationExprNode *c = cc.shallow(this);
+
+    for (auto &hole : c->holes) {
+        hole.expr = cc.child(hole.expr);
+    }
+
+    return c;
+}
 Node *NamespaceDeclNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *NamespaceNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 

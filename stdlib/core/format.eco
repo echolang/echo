@@ -1,0 +1,461 @@
+/**
+ * Turning values into text.
+ *
+ * `str::from` is the whole surface, and it is an **overload set** rather than an interface - for the
+ * reason `hash::of` is one: a primitive cannot declare a conformance, so an interface could never
+ * cover `int32`. A type joins the set by declaring one function and nothing else:
+ *
+ *     namespace str;
+ *
+ *     public function from(const Point& $p) : string
+ *     {
+ *         return "({$p->x}, {$p->y})";
+ *     }
+ *
+ * from which point `"{$p}"` works, because **that is all string interpolation is**: every `{$x}` in
+ * a double-quoted literal becomes `str::from($x)`, and every `{$x:spec}` becomes
+ * `str::from($x, "spec")`. The compiler mints the calls and knows nothing else about formatting -
+ * so a type that renders but does not honour specs simply has no two-argument overload, and
+ * `"{$p:>8}"` says so by name.
+ *
+ * A `'`-quoted literal never interpolates. That is the escape hatch, and the reason this file's own
+ * format strings are written with single quotes.
+ *
+ * **Why this is not `str::fmt(...)`.** A function taking a format string and the values after it is
+ * variadic, and `AST::match_function` matches arity exactly. Interpolation removes the need
+ * entirely: each hole is a *unary* call, so nothing here asks the language for a feature it does
+ * not have. See `notes/interpolation.md`.
+ */
+
+namespace str;
+
+extern {
+    // **the first user of `variadic_args`**, and the reason it exists. correctly rounded
+    // binary-to-decimal conversion is a hard problem libc has already solved on every platform this
+    // compiler targets, and going through it is also what makes `str::from(3.5)` agree with `dprint`
+    // and with `echo` about which digits a `float` has
+    function snprintf as c_snprintf(ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+}
+
+/**
+ * How a value should be written: what a `{$x:...}` hole spells out.
+ *
+ * A parsed spec rather than the text of one, so every `str::from` overload asks the same questions
+ * of the same fields instead of re-reading a string each. `str::spec_of` is the parser and the one
+ * place the grammar is written down.
+ *
+ * ```
+ * [align][width][.precision][type]
+ * ```
+ *
+ * - **align** is `<` left, `>` right, `^` centred. Absent means right for numbers, left for text.
+ * - **width** is a minimum in *bytes*. Wider text is never truncated.
+ * - **precision** is decimals for `f` and `e`, significant digits for `g`, and a maximum length
+ *   for text.
+ * - **type** is `d` `x` `X` `b` `o` for integers, `f` `e` `g` for floats, `s` for text.
+ *
+ * Everything is optional, so `{$x:8}` is a width alone and `{$x:.2f}` a precision and a type.
+ */
+public struct spec
+{
+    // `<`, `>`, `^`, or 0 for "whatever the type prefers"
+    uint8 $align;
+
+    // `d`, `x`, `X`, `b`, `o`, `f`, `e`, `g`, `s`, or 0 for the type's own default
+    uint8 $kind;
+
+    usize $width;
+
+    // -1 when none was written, which is not the same as 0 - `{$x:.0f}` asks for no decimals
+    int32 $precision;
+
+    /**
+     * The byte an over-narrow value is padded with. Always a space: a `0` fill has to go *after* a
+     * minus sign rather than before it, which is a rule about numbers rather than about padding,
+     * and no spec here asks for one.
+     */
+    const function fill() : uint8
+    {
+        return CH_SPACE;
+    }
+}
+
+/**
+ * The spec `$text` spells.
+ *
+ * Anything it does not understand is skipped rather than refused, and that is deliberate: a spec is
+ * written inside a string literal where a diagnostic cannot point at much, and silently ignoring an
+ * unknown letter is a smaller surprise than a compile error in the middle of a sentence.
+ */
+public function spec_of(const string& $text) : spec
+{
+    spec $out = spec(0, 0, 0, -1);
+
+    usize $n = $text->size();
+    usize $i = 0;
+
+    if ($n == 0) {
+        return $out;
+    }
+
+    uint8 $first = $text->byte_at(0);
+
+    if ($first == CH_LT || $first == CH_GT || $first == CH_CARET) {
+        $out->align = $first;
+        $i = 1;
+    }
+
+    while ($i < $n) {
+        uint8 $b = $text->byte_at($i);
+
+        if ($b == CH_DOT) {
+            $i = $i + 1;
+            $out->precision = 0;
+
+            while ($i < $n) {
+                int32 $digit = digit_value($text->byte_at($i));
+
+                if ($digit < 0) {
+                    break;
+                }
+
+                $out->precision = $out->precision * 10 + $digit;
+                $i = $i + 1;
+            }
+
+            continue;
+        }
+
+        int32 $digit = digit_value($b);
+
+        if ($digit >= 0) {
+            usize $place = $digit;
+            $out->width = $out->width * 10 + $place;
+            $i = $i + 1;
+            continue;
+        }
+
+        // whatever is left is the type letter, and there is only ever one
+        $out->kind = $b;
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * `$text` padded to the spec's width, on the side the spec asked for.
+ *
+ * One function, so every overload below pads the same way - and so the "wider text is never
+ * truncated" promise lives in one place.
+ */
+function align_to(const string& $text, const spec& $s, uint8 $default_align) : string
+{
+    if ($text->size() >= $s->width) {
+        return $text->sub(0, $text->size());
+    }
+
+    uint8 $align = $s->align;
+
+    if ($align == 0) {
+        $align = $default_align;
+    }
+
+    if ($align == CH_LT) {
+        return pad_end($text, $s->width, $s->fill());
+    }
+
+    if ($align == CH_GT) {
+        return pad_start($text, $s->width, $s->fill());
+    }
+
+    // centred: the odd byte goes on the right, which is what every other implementation of this
+    // does and the only half of the choice anybody notices
+    usize $total = $s->width - $text->size();
+    usize $left = $total / 2;
+
+    return pad_end(pad_start($text, $text->size() + $left, $s->fill()), $s->width, $s->fill());
+}
+
+/**
+ * The digits of `$value` in `$base`, with no sign and no padding.
+ *
+ * `$value` is a `uint64` and the sign is the caller's, which is what makes this correct for
+ * `int64`'s minimum: that value has no positive counterpart, so a signed implementation would have
+ * to negate it and wrap.
+ */
+function digits_of(uint64 $value, uint64 $base, bool $upper) : string
+{
+    if ($value == 0) {
+        return '0';
+    }
+
+    // built backwards, because the last digit is the one arithmetic hands over first.
+    //
+    // sized once up front: 64 is the widest this can be - a `uint64` in base 2 - so no `push` below
+    // ever grows the buffer. Every `"{$n}"` in every program lands here, and a `int32` printed from
+    // an empty array reallocated five times on its way to ten digits
+    array<uint8> $reversed = array<uint8>();
+    $reversed->reserve(64);
+
+    while ($value > 0) {
+        uint64 $digit = $value % $base;
+        $value = $value / $base;
+
+        // narrowed by assignment, every value here being under 128 by construction
+        if ($digit < 10) {
+            uint8 $decimal = $digit + CH_ZERO;
+            $reversed->push($decimal);
+            continue;
+        }
+
+        if ($upper) {
+            uint8 $upper_letter = $digit - 10 + CH_UPPER_A;
+            $reversed->push($upper_letter);
+            continue;
+        }
+
+        uint8 $lower_letter = $digit - 10 + CH_LOWER_A;
+        $reversed->push($lower_letter);
+    }
+
+    string $out = '';
+    $out->reserve($reversed->count());
+
+    usize $i = $reversed->count();
+
+    while ($i > 0) {
+        $i = $i - 1;
+        $out->push_byte($reversed[$i]);
+    }
+
+    return $out;
+}
+
+/**
+ * The base `$s` asks for, and whether its digits are upper case.
+ */
+function base_of(const spec& $s) : uint64
+{
+    if ($s->kind == CH_X || $s->kind == CH_UPPER_X) {
+        return 16;
+    }
+
+    if ($s->kind == CH_B) {
+        return 2;
+    }
+
+    if ($s->kind == CH_O) {
+        return 8;
+    }
+
+    return 10;
+}
+
+/**
+ * A signed integer, spec applied. Every signed overload funnels here, so the sign rule and the
+ * minimum-value rule are written once.
+ */
+function signed_to_string(int64 $value, const spec& $s) : string
+{
+    if ($value >= 0) {
+        uint64 $positive = $value;
+        return align_to(digits_of($positive, base_of($s), $s->kind == CH_UPPER_X), $s, CH_GT);
+    }
+
+    // negated in *unsigned* space, so `int64`'s minimum survives: negating it as an int64 wraps
+    // straight back to itself, where the two's complement bits subtracted from zero are the
+    // magnitude. `mem::bit_cast` rather than an assignment, so the reinterpretation is written down
+    uint64 $bits = mem::bit_cast<uint64, int64>($value);
+    uint64 $magnitude = 0 - $bits;
+
+    string $out = '-';
+    $out->append(digits_of($magnitude, base_of($s), $s->kind == CH_UPPER_X));
+
+    return align_to($out, $s, CH_GT);
+}
+
+/**
+ * An unsigned integer, spec applied.
+ */
+function unsigned_to_string(uint64 $value, const spec& $s) : string
+{
+    return align_to(digits_of($value, base_of($s), $s->kind == CH_UPPER_X), $s, CH_GT);
+}
+
+/**
+ * A float, spec applied, through `snprintf`.
+ *
+ * The default is `%g` for a `float` and `%.15g` for a `float64` - `FLT_DIG` and `DBL_DIG`, the same
+ * two the debugger's `dprint` uses. That is deliberately **not** what the `echo` statement prints:
+ * `echo 3.5` writes `3.500000` because its `%f` is pinned by several hundred golden files, where
+ * `str::from(3.5)` writes `3.5` because that is what a reader wants inside a sentence.
+ *
+ * Round-tripping through `str::parse_float` is not promised at the default precision. Ask for
+ * `{$x:.17g}` when it matters.
+ */
+function float_to_string(float64 $value, const spec& $s, int32 $default_precision) : string
+{
+    int32 $precision = $s->precision;
+
+    if ($precision < 0) {
+        $precision = $default_precision;
+    }
+
+    // the conversion is chosen here rather than passed through, so an unknown letter falls back to
+    // the default instead of reaching C as one
+    string $format = '%.*g';
+
+    if ($s->kind == CH_F) {
+        $format = '%.*f';
+    }
+    else if ($s->kind == CH_E) {
+        $format = '%.*e';
+    }
+
+    // `snprintf` answers how much room it needed, so the first call sizes the second. asking for one
+    // byte on the first pass would be cheaper and is not worth the second call in the common case
+    usize $capacity = 32;
+
+    while (true) {
+        buf $owner = buf($capacity, 0, mem::alloc<uint8>($capacity + 1));
+
+        int32 $needed = c_snprintf($owner->bytes, $capacity + 1, $format->c_str(), [$precision, $value]);
+
+        if ($needed < 0) {
+            return align_to('', $s, CH_GT);
+        }
+
+        usize $written = $needed;
+
+        if ($written <= $capacity) {
+            $owner->used = $written;
+            return align_to(string(string::view($owner->bytes, $written), $owner), $s, CH_GT);
+        }
+
+        $capacity = $written;
+    }
+
+    return '';
+}
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * `str::from` - one overload per primitive, plus the two text types.
+ *
+ * Each is two functions rather than one with a default argument: `{$x}` and `{$x:}` are different
+ * questions, and a default would make them the same one.
+ * ---------------------------------------------------------------------------------------------
+ */
+
+#[inline]
+public function from(int8 $v) : string { int64 $wide = $v; return signed_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(int16 $v) : string { int64 $wide = $v; return signed_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(int32 $v) : string { int64 $wide = $v; return signed_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(int64 $v) : string { return signed_to_string($v, spec(0, 0, 0, -1)); }
+
+#[inline]
+public function from(uint8 $v) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(uint16 $v) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(uint32 $v) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec(0, 0, 0, -1)); }
+#[inline]
+public function from(uint64 $v) : string { return unsigned_to_string($v, spec(0, 0, 0, -1)); }
+
+#[inline]
+public function from(int8 $v, const string& $spec) : string { int64 $wide = $v; return signed_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(int16 $v, const string& $spec) : string { int64 $wide = $v; return signed_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(int32 $v, const string& $spec) : string { int64 $wide = $v; return signed_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(int64 $v, const string& $spec) : string { return signed_to_string($v, spec_of($spec)); }
+
+#[inline]
+public function from(uint8 $v, const string& $spec) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(uint16 $v, const string& $spec) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(uint32 $v, const string& $spec) : string { uint64 $wide = $v; return unsigned_to_string($wide, spec_of($spec)); }
+#[inline]
+public function from(uint64 $v, const string& $spec) : string { return unsigned_to_string($v, spec_of($spec)); }
+
+/**
+ * A float, at `FLT_DIG` significant digits.
+ */
+#[inline]
+public function from(float $v) : string { float64 $wide = $v; return float_to_string($wide, spec(0, 0, 0, -1), 6); }
+
+/**
+ * A double, at `DBL_DIG` significant digits.
+ */
+#[inline]
+public function from(float64 $v) : string { return float_to_string($v, spec(0, 0, 0, -1), 15); }
+
+#[inline]
+public function from(float $v, const string& $spec) : string { float64 $wide = $v; return float_to_string($wide, spec_of($spec), 6); }
+#[inline]
+public function from(float64 $v, const string& $spec) : string { return float_to_string($v, spec_of($spec), 15); }
+
+/**
+ * `true` or `false`, spelled out.
+ *
+ * Deliberately not `1` and `0`, which is what the `echo` statement prints - `echo` has no `string`
+ * to hand back and reaches printf's `%d`, where this is text meant to be read.
+ */
+public function from(bool $v) : string
+{
+    if ($v) {
+        return 'true';
+    }
+
+    return 'false';
+}
+
+public function from(bool $v, const string& $spec) : string
+{
+    return align_to(from($v), spec_of($spec), CH_LT);
+}
+
+/**
+ * A string renders as itself.
+ *
+ * The identity overload, and it has to exist: interpolation calls `str::from` for **every** hole,
+ * with no arm for "this one is already text". One rule is worth an inlined copy.
+ */
+#[inline]
+public function from(const string& $v) : string
+{
+    return $v->sub(0, $v->size());
+}
+
+public function from(const string& $v, const string& $spec) : string
+{
+    spec $s = spec_of($spec);
+
+    // a precision truncates text, which is the one place it is not about decimals
+    if ($s->precision >= 0) {
+        usize $limit = $s->precision;
+
+        if ($limit < $v->size()) {
+            return align_to($v->sub(0, $limit), $s, CH_LT);
+        }
+    }
+
+    return align_to($v, $s, CH_LT);
+}
+
+#[inline]
+public function from(const string::view& $v) : string
+{
+    return from_bytes($v->bytes, $v->size);
+}
+
+public function from(const string::view& $v, const string& $spec) : string
+{
+    return from(from_bytes($v->bytes, $v->size), $spec);
+}

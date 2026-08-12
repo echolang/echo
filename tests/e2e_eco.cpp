@@ -89,7 +89,8 @@ namespace
             ? std::string()
             : " --" + test.argument_suffix();
 
-        return test.environment_prefix()
+        return test.stdin_prefix()
+            + test.environment_prefix()
             + "\"" ECHOC_BINARY "\" "
             + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
             + (dump.empty() ? "" : dump + " ")
@@ -310,7 +311,7 @@ namespace
                 // the environment goes on both spawns and the arguments only on this one: a linked binary
                 // is the program, so its argv *is* the program's, with no `--` needed to say so
                 outcome.program = run_capturing(
-                    entry.test.environment_prefix() + quoted(entry.binary)
+                    entry.test.stdin_prefix() + entry.test.environment_prefix() + quoted(entry.binary)
                     + entry.test.argument_suffix() + " 2>&1");
             }
         }

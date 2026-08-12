@@ -1,0 +1,7 @@
+// an interpolated literal needs `string` to concatenate and `str` to render through, and
+// `--no-stdlib` has neither. one sentence naming the standard library, rather than three about
+// functions that could not be found
+int32 $n = 3;
+
+// what is left in its place is the chunks as a plain literal, so nothing cascades underneath
+ptr<const uint8> $text = "value {$n}";

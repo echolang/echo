@@ -79,6 +79,17 @@ namespace Compiler::LLVM
         return it->second;
     }
 
+    bool CodegenContext::file_is_entry(const AST::File &file) const
+    {
+        // **no target named one, so all of them are.** A program's `main` is the concatenation of every
+        // file root of its entry module unless a `#[target:]` says which single file it is
+        if (entry_file.empty()) {
+            return true;
+        }
+
+        return file.get_path() == entry_file;
+    }
+
     std::string CodegenContext::llvm_err_str()
     {
         std::string error;

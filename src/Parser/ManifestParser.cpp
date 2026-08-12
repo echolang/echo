@@ -1,6 +1,7 @@
 #include "Parser/ManifestParser.h"
 
 #include "Compiler/BuildLayout.h"
+#include "Compiler/LinkRequirement.h"
 #include "Compiler/PhaseTimings.h"
 #include "Compiler/SettledPath.h"
 
@@ -18,6 +19,7 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <map>
 #include <optional>
@@ -258,6 +260,92 @@ void read_manifest_depends(
     }
 }
 
+// the kinds a target may produce. **one row per spelling**, read through AttributeReader::tag, so a
+// misspelled kind refuses in the same words a misspelled `#[link:]` scheme does.
+//
+// one row today, and the table is what keeps a second from costing a grammar: `lib` and `test` are the
+// obvious ones, and neither needs the common case to grow a word - which is the whole reason the kind is
+// the tag rather than a `kind:` inside the record
+const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table()
+{
+    static const std::vector<std::pair<std::string, Parser::TargetKind>> table = {
+        { "exe", Parser::TargetKind::t_executable },
+    };
+
+    return table;
+}
+
+// a target as written, before `#[sources:]` has been expanded to check its entry against
+struct WrittenTarget
+{
+    std::string name;
+    std::string entry;
+    Parser::TargetKind kind = Parser::TargetKind::t_executable;
+    uint32_t line = 0;
+};
+
+// `#[target: ...]`, in every shape it takes.
+//
+//     #[target: { name: "clock", entry: "src/main.eco" }]       untagged, which is an executable
+//     #[target: exe { name: "clock", entry: "src/main.eco" }]   the same, said out loud
+//     #[target: [ { ... }, { ... } ]]                           several
+//
+// **the tag is the kind and the record is the fields**, which is the shape `#[link: lib { ... }]` already
+// has. It is also why a target's *name* is a string in a field rather than the tag: a bare name means
+// itself, and the names that may be spelled bare are the closed vocabularies the compiler knows - which a
+// program's name is not.
+//
+// refuses through `reader` rather than answering, exactly as read_manifest_depends does
+void read_manifest_targets(
+    const AST::AttributeValue &written,
+    AST::AttributeReader &reader,
+    uint32_t line,
+    std::vector<WrittenTarget> &out_targets)
+{
+    for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
+        Parser::TargetKind kind = Parser::TargetKind::t_executable;
+
+        // **an untagged target is an executable**, so the tag is what a second kind will cost rather than
+        // what the first one already does - the rule `#[depends:]`'s bare path follows
+        if (entry->has_tag()
+            && !reader.tag(*entry, target_kind_table(), "target kind",
+                Compiler::scheme_list_of(target_kind_table()), kind)) {
+            continue;
+        }
+
+        for (const AST::AttributeValue *record : AST::AttributeReader::payload(*entry)) {
+            if (!reader.record(*record)) {
+                continue;
+            }
+
+            // a **fixed** record: both keys are ours, so a third one is refused at the key rather than
+            // ignored - the format's "understood or an error, never a no-op" rule, per field
+            const AST::AttributeValue *name = reader.require_field(*record, "name");
+            const AST::AttributeValue *entry_file = reader.require_field(*record, "entry");
+
+            reader.reject_unknown_fields(*record, { "name", "entry" });
+
+            if (name == nullptr || entry_file == nullptr) {
+                continue;
+            }
+
+            std::optional<std::string> spelled_name = reader.string(*name);
+            std::optional<std::string> spelled_entry = reader.string(*entry_file);
+
+            if (!spelled_name.has_value() || !spelled_entry.has_value()) {
+                continue;
+            }
+
+            out_targets.push_back(WrittenTarget {
+                spelled_name.value(),
+                spelled_entry.value(),
+                kind,
+                record->span.is_valid() ? record->span.line() : line
+            });
+        }
+    }
+}
+
 //
 // takes the payload rather than the module alone: it reports through the collector, so the values have
 // to be read while it is alive
@@ -268,6 +356,7 @@ bool read_manifest_attributes(
     Parser::ModuleManifest &out,
     std::vector<std::string> &out_sources,
     std::vector<std::string> &out_depends,
+    std::vector<WrittenTarget> &out_targets,
     std::string &out_error)
 {
     // read from the arena rather than from the file root: the root is only built by the body pass, and the
@@ -335,6 +424,11 @@ bool read_manifest_attributes(
                     out_sources.push_back(value.value());
                 }
             }
+        }
+        else if (name == "target") {
+            // checked against `sources` after the patterns are expanded - resolve_manifest_targets, which
+            // is the first moment there is anything to check an entry against
+            read_manifest_targets(written, reader, line, out_targets);
         }
         else if (name == "link") {
             // **the scheme is checked here, against this invocation's facts.** A `framework:` on a linux
@@ -473,6 +567,67 @@ bool expand_manifest_sources(
     return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, out_error);
 }
 
+// out.targets, with every entry resolved against the manifest and proved to be one of this module's own
+// sources.
+//
+// **after expand_manifest_sources, because that is what there is to check against.** A target's entry is a
+// file *of* this module rather than one beside it: its declarations are shared with every other target of
+// the module, and only its root becomes the program. An entry the module is not made of would be a program
+// the rest of the module cannot see, so it is refused where the line number still is
+bool resolve_manifest_targets(
+    const std::vector<WrittenTarget> &written,
+    Parser::ModuleManifest &out,
+    std::string &out_error
+)
+{
+    for (const WrittenTarget &target : written) {
+        // **the name becomes a file name**, unlike a module's, which only has to be spellable - a target
+        // is written into the build directory under exactly this word, and BuildLayout::target_binary
+        // joins it there on the strength of this refusal.
+        //
+        // **an allow-list, because the deny-list a binary name needs is not writable**: `..` holds no
+        // character worth forbidding and still climbs out of the build directory, and `.`, `*` and a
+        // newline are each a name some shell or some filesystem reads as something other than a word
+        if (target.name.empty() || !std::all_of(target.name.begin(), target.name.end(),
+                [](unsigned char c) {
+                    return std::isalnum(c) != 0 || c == '_' || c == '-';
+                })) {
+            out_error = locate(out.path, target.line, fmt::format(
+                "'{}' is not a usable target name - it becomes the name of a binary, so it may hold "
+                "only letters, digits, '_' and '-'.", target.name));
+            return false;
+        }
+
+        for (const Parser::ModuleTarget &earlier : out.targets) {
+            if (earlier.name != target.name) {
+                continue;
+            }
+
+            out_error = locate(out.path, target.line, fmt::format(
+                "'{}' is declared twice - two targets of one module cannot share a name, because the "
+                "name is the binary.", target.name));
+            return false;
+        }
+
+        // through the one owner of "a path written relative to something", as `#[link: object]` and
+        // `#[cc: include]` are - a manifest's own directory is the base for everything it declares
+        const std::filesystem::path resolved = Compiler::settled_path(out.directory, target.entry);
+
+        // one sentence for both "no such file" and "not in `sources`", because the remedy is the same
+        // one either way: the pattern has to match the file, or the file has to move under one that does
+        if (std::find(out.sources.begin(), out.sources.end(), resolved) == out.sources.end()) {
+            out_error = locate(out.path, target.line, fmt::format(
+                "'{}' is target '{}'s entry but is not one of this module's sources - a target's entry "
+                "has to be a file the module is made of.", target.entry, target.name));
+            return false;
+        }
+
+        out.targets.push_back(Parser::ModuleTarget { target.name, resolved, target.kind });
+    }
+
+    return true;
+}
+
 // out.cc.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
 // in a manifest and there is no second grammar for a pattern.
 //
@@ -568,6 +723,7 @@ bool read_manifest_with(
 
     std::vector<std::string> sources_written;
     std::vector<std::string> depends_written;
+    std::vector<WrittenTarget> targets_written;
 
     {
         Parser::Payload payload =
@@ -586,12 +742,15 @@ bool read_manifest_with(
 
         if (!read_manifest_attributes(
                 payload, module, scratch.parser.target_facts, out, sources_written, depends_written,
-                out_error)) {
+                targets_written, out_error)) {
             return false;
         }
     }
 
+    // targets after the sources they name, and before everything else - an entry has to be checked
+    // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
     return expand_manifest_sources(sources_written, out, out_error)
+        && resolve_manifest_targets(targets_written, out, out_error)
         && expand_manifest_cc_sources(out, out_error)
         && resolve_manifest_depends(depends_written, out, out_error);
 }

@@ -1,0 +1,14 @@
+// **the property that makes interpolation invisible to every program written before it**: a `"`
+// string with no `{$` in it still lexes to exactly one token and means exactly what it always did.
+// asserted here rather than only in the strings suite, because this is the compilation with no
+// `string` type at all - where a literal is a bare `ptr<const uint8>` and any second token would
+// have nowhere to go
+ptr<const uint8> $a = "plain double quoted";
+ptr<const uint8> $b = 'plain single quoted';
+ptr<const uint8> $c = "a { brace, a } brace, and a \{ escape";
+
+echo $a:$[0];
+echo $b:$[0];
+echo $c:$[0];
+// the `\{` escape decoded to one byte, so the literal is 36 bytes and not 37
+echo $c:$[28];

@@ -104,6 +104,131 @@ std::optional<size_t> AST::utf8_first_invalid(const std::string &bytes)
     return std::nullopt;
 }
 
+namespace
+{
+    // the escape vocabulary, and the only place it is written. both spellings of a string's text go
+    // through here - a whole quoted token, and one chunk of an interpolated one - which is what keeps
+    // `"a\nb{$x}"` and `"a\nb"` agreeing about what `\n` means.
+    //
+    // `begin` and `end` bound the *interior*; every offset in an error is an offset into `quoted`, so
+    // a caller can point at the escape whichever of the two shapes it handed over
+    std::optional<AST::StringLiteralError> decode_escapes(
+        const std::string &quoted,
+        size_t begin,
+        size_t end,
+        std::string &out_bytes
+    )
+    {
+        size_t i = begin;
+
+        while (i < end) {
+            const char c = quoted[i];
+
+            if (c != '\\') {
+                out_bytes += c;
+                i += 1;
+                continue;
+            }
+
+            if (i + 1 >= end) {
+                return AST::StringLiteralError { "string literal ends with a trailing '\\'", i };
+            }
+
+            const char escape = quoted[i + 1];
+            i += 2;
+
+            switch (escape) {
+                case 'n':  out_bytes += '\n'; continue;
+                case 't':  out_bytes += '\t'; continue;
+                case 'r':  out_bytes += '\r'; continue;
+                case '0':  out_bytes += '\0'; continue;
+                case '\\': out_bytes += '\\'; continue;
+                case '"':  out_bytes += '"';  continue;
+                case '\'': out_bytes += '\''; continue;
+
+                // a literal `{`, which only a `"` string ever needs: `{$` opens an interpolation
+                // hole there, and `\{$` is how you write the two characters instead. legal in a `'`
+                // string too, since one escape vocabulary is easier to hold than two
+                case '{':  out_bytes += '{';  continue;
+
+                case 'x': {
+                    // exactly two hex digits, so `"\x41z"` cannot quietly swallow the `z`
+                    if (i + 1 >= end || !is_hex_digit(quoted[i]) || !is_hex_digit(quoted[i + 1])) {
+                        return AST::StringLiteralError {
+                            "'\\x' needs exactly two hex digits, as in '\\x41'", i - 2 };
+                    }
+
+                    // a raw byte, deliberately not a codepoint: `\xNN` is how a specific byte is
+                    // written, and the UTF-8 check at the end is what decides whether the result is
+                    // a legal string
+                    out_bytes += static_cast<char>((hex_value(quoted[i]) << 4) | hex_value(quoted[i + 1]));
+                    i += 2;
+                    continue;
+                }
+
+                case 'u': {
+                    const size_t escape_start = i - 2;
+
+                    if (i >= end || quoted[i] != '{') {
+                        return AST::StringLiteralError {
+                            "'\\u' needs a braced codepoint, as in '\\u{1F600}'", escape_start };
+                    }
+
+                    i += 1; // the `{`
+
+                    uint32_t codepoint = 0;
+                    size_t digits = 0;
+
+                    while (i < end && is_hex_digit(quoted[i])) {
+                        // capped at six digits, which is every legal codepoint, so a long run cannot
+                        // silently overflow the accumulator on its way to being rejected
+                        if (digits == 6) {
+                            return AST::StringLiteralError {
+                                "'\\u{...}' takes at most six hex digits", escape_start };
+                        }
+
+                        codepoint = (codepoint << 4) | hex_value(quoted[i]);
+                        digits += 1;
+                        i += 1;
+                    }
+
+                    if (digits == 0) {
+                        return AST::StringLiteralError {
+                            "'\\u{...}' needs at least one hex digit", escape_start };
+                    }
+
+                    if (i >= end || quoted[i] != '}') {
+                        return AST::StringLiteralError { "'\\u{...}' is missing its closing '}'", escape_start };
+                    }
+
+                    i += 1; // the `}`
+
+                    if (!AST::utf8_encode(codepoint, out_bytes)) {
+                        return AST::StringLiteralError {
+                            fmt::format("U+{:04X} is not a valid unicode scalar value", codepoint),
+                            escape_start };
+                    }
+
+                    continue;
+                }
+
+                default:
+                    return AST::StringLiteralError {
+                        fmt::format("unknown escape sequence '\\{}'", escape), i - 2 };
+            }
+        }
+
+        // last, on the decoded bytes: `\xNN` can build an invalid sequence out of individually fine
+        // escapes, and a literal pasted from a broken source can be invalid with no escape in it at all
+        if (auto invalid = AST::utf8_first_invalid(out_bytes)) {
+            return AST::StringLiteralError {
+                fmt::format("string literal is not valid UTF-8 (at byte {})", invalid.value()), 0 };
+        }
+
+        return std::nullopt;
+    }
+}
+
 std::optional<AST::StringLiteralError> AST::decode_string_literal(const std::string &quoted, std::string &out_bytes)
 {
     out_bytes.clear();
@@ -116,107 +241,15 @@ std::optional<AST::StringLiteralError> AST::decode_string_literal(const std::str
 
     out_bytes.reserve(quoted.size() - 2);
 
-    // walk the token's interior; `i` stays a token offset throughout so an error can be pointed at
-    size_t i = 1;
-    const size_t end = quoted.size() - 1;
+    // the interior only; `i` stays a *token* offset throughout so an error can be pointed at
+    return decode_escapes(quoted, 1, quoted.size() - 1, out_bytes);
+}
 
-    while (i < end) {
-        const char c = quoted[i];
+std::optional<AST::StringLiteralError> AST::decode_string_chunk(const std::string &raw, std::string &out_bytes)
+{
+    out_bytes.clear();
+    out_bytes.reserve(raw.size());
 
-        if (c != '\\') {
-            out_bytes += c;
-            i += 1;
-            continue;
-        }
-
-        if (i + 1 >= end) {
-            return AST::StringLiteralError { "string literal ends with a trailing '\\'", i };
-        }
-
-        const char escape = quoted[i + 1];
-        i += 2;
-
-        switch (escape) {
-            case 'n':  out_bytes += '\n'; continue;
-            case 't':  out_bytes += '\t'; continue;
-            case 'r':  out_bytes += '\r'; continue;
-            case '0':  out_bytes += '\0'; continue;
-            case '\\': out_bytes += '\\'; continue;
-            case '"':  out_bytes += '"';  continue;
-            case '\'': out_bytes += '\''; continue;
-
-            case 'x': {
-                // exactly two hex digits, so `"\x41z"` cannot quietly swallow the `z`
-                if (i + 1 >= end || !is_hex_digit(quoted[i]) || !is_hex_digit(quoted[i + 1])) {
-                    return AST::StringLiteralError {
-                        "'\\x' needs exactly two hex digits, as in '\\x41'", i - 2 };
-                }
-
-                // a raw byte, deliberately not a codepoint: `\xNN` is how a specific byte is written,
-                // and the UTF-8 check at the end is what decides whether the result is a legal string
-                out_bytes += static_cast<char>((hex_value(quoted[i]) << 4) | hex_value(quoted[i + 1]));
-                i += 2;
-                continue;
-            }
-
-            case 'u': {
-                const size_t escape_start = i - 2;
-
-                if (i >= end || quoted[i] != '{') {
-                    return AST::StringLiteralError {
-                        "'\\u' needs a braced codepoint, as in '\\u{1F600}'", escape_start };
-                }
-
-                i += 1; // the `{`
-
-                uint32_t codepoint = 0;
-                size_t digits = 0;
-
-                while (i < end && is_hex_digit(quoted[i])) {
-                    // capped at six digits, which is every legal codepoint, so a long run cannot
-                    // silently overflow the accumulator on its way to being rejected
-                    if (digits == 6) {
-                        return AST::StringLiteralError {
-                            "'\\u{...}' takes at most six hex digits", escape_start };
-                    }
-
-                    codepoint = (codepoint << 4) | hex_value(quoted[i]);
-                    digits += 1;
-                    i += 1;
-                }
-
-                if (digits == 0) {
-                    return AST::StringLiteralError {
-                        "'\\u{...}' needs at least one hex digit", escape_start };
-                }
-
-                if (i >= end || quoted[i] != '}') {
-                    return AST::StringLiteralError { "'\\u{...}' is missing its closing '}'", escape_start };
-                }
-
-                i += 1; // the `}`
-
-                if (!AST::utf8_encode(codepoint, out_bytes)) {
-                    return AST::StringLiteralError {
-                        fmt::format("U+{:04X} is not a valid unicode scalar value", codepoint),
-                        escape_start };
-                }
-
-                continue;
-            }
-
-            default:
-                return AST::StringLiteralError {
-                    fmt::format("unknown escape sequence '\\{}'", escape), i - 2 };
-        }
-    }
-
-    // last, on the decoded bytes: `\xNN` can build an invalid sequence out of individually fine
-    // escapes, and a literal pasted from a broken source can be invalid with no escape in it at all
-    if (auto invalid = AST::utf8_first_invalid(out_bytes)) {
-        return AST::StringLiteralError {
-            fmt::format("string literal is not valid UTF-8 (at byte {})", invalid.value()), 0 };
-    }
-
-    return std::nullopt;
+    // no quotes to strip - the lexer already cut this out from between two holes
+    return decode_escapes(raw, 0, raw.size(), out_bytes);
 }

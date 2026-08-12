@@ -115,6 +115,75 @@ public class buf
 
 extern {
     function strlen as c_strlen(ptr<const uint8> $s) : usize;
+
+    // the inverse of `str::from(float64)`, and the reason it is C's rather than this file's: correctly
+    // rounded decimal-to-binary conversion is the same hard problem as its inverse, and libc has
+    // already solved it on every platform this compiler targets
+    function strtod as c_strtod(ptr<const uint8> $s, ptr<ptr<uint8>> $end) : float64;
+}
+
+// **the ASCII bytes this namespace compares against, by name.** written out rather than spelled
+// `0x2E` at each site for the reason `str::buf`'s `+ 1` lives in three places: a byte compared
+// against a number is unreadable, and a name is checkable against the table below where a magic
+// number is not.
+//
+// A constant is its expression copied into every use site, so each of these costs nothing and
+// takes its type from where it lands - which is why they are `uint8` here and still fine on the
+// right of an `int32` subtraction.
+const uint8 CH_TAB = 9;
+const uint8 CH_LF = 10;
+const uint8 CH_CR = 13;
+const uint8 CH_SPACE = 32;
+const uint8 CH_PLUS = 43;
+const uint8 CH_MINUS = 45;
+const uint8 CH_DOT = 46;
+const uint8 CH_ZERO = 48;
+const uint8 CH_LT = 60;
+const uint8 CH_GT = 62;
+const uint8 CH_UPPER_A = 65;
+const uint8 CH_UPPER_X = 88;
+const uint8 CH_CARET = 94;
+const uint8 CH_LOWER_A = 97;
+const uint8 CH_B = 98;
+const uint8 CH_E = 101;
+const uint8 CH_F = 102;
+const uint8 CH_O = 111;
+const uint8 CH_X = 120;
+
+/**
+ * Is this byte one of the four ASCII whitespace characters?
+ *
+ * Bytes are compared with `==` and never with `<`, which is this file's rule as much as
+ * `string`'s: integer comparison lowers signed, so `$b >= CH_TAB` is a question about a number
+ * that a `uint8` is not.
+ *
+ * Deliberately ASCII only. There is no Unicode table here and `trim` promises none.
+ */
+function is_ascii_space(uint8 $b) : bool
+{
+    return $b == CH_SPACE || $b == CH_TAB || $b == CH_LF || $b == CH_CR;
+}
+
+/**
+ * The value of an ASCII digit byte, or `-1` when it is not one.
+ *
+ * One answer for the three places that read a number out of text - `parse_int`, and a format spec's
+ * width and precision. `-1` rather than an optional because every caller is already inside a loop
+ * that stops on the first byte that is not a digit.
+ *
+ * The subtraction widens to `int32` by landing in one, Echo having no cast operator: a `uint8`
+ * difference would wrap to 255 for anything below `'0'` and read as a digit that is merely large.
+ */
+function digit_value(uint8 $b) : int32
+{
+    int32 $wide = $b;
+    int32 $digit = $wide - CH_ZERO;
+
+    if ($digit < 0 || $digit > 9) {
+        return -1;
+    }
+
+    return $digit;
 }
 
 /**
@@ -138,18 +207,359 @@ public function view_of_c_str(ptr<const uint8> $s) : string::view
 /**
  * An owning copy of a NUL-terminated C string.
  *
- * `view_of_c_str` with the bytes taken along, for when the source will not outlive the result. The
- * copy goes through `buf::append_bytes` rather than by hand so this file's two invariants are
- * maintained where they are declared, and the block is sized up front so that append does not grow
- * it - the same bargain `string::clone_reserving` makes.
+ * `view_of_c_str` with the bytes taken along, for when the source will not outlive the result.
+ *
+ * The terminator is the only thing this knows that `from_bytes` does not, so that is the whole of
+ * what it contributes: `c_strlen` answers the count and the copy is the same one.
  */
 public function from_c_str(ptr<const uint8> $s) : string
 {
-    usize $n = c_strlen($s);
+    return from_bytes($s, c_strlen($s));
+}
 
+/**
+ * An owning copy of `$count` bytes at `$b`, with no terminator required.
+ *
+ * `from_c_str` for text whose length you already know - a `read` that answered how many bytes it
+ * wrote, a slice of a larger buffer. The block is sized up front so the append does not grow it,
+ * the bargain `string::clone_reserving` makes.
+ */
+public function from_bytes(ptr<const uint8> $b, usize $count) : string
+{
     // `+ 1` is the NUL slot `$capacity` does not count
-    buf $owner = buf($n, 0, mem::alloc<uint8>($n + 1));
-    $owner->append_bytes($s, $n);
+    buf $owner = buf($count, 0, mem::alloc<uint8>($count + 1));
+    $owner->append_bytes($b, $count);
 
-    return string(string::view($owner->bytes, $n), $owner);
+    return string(string::view($owner->bytes, $count), $owner);
+}
+
+/**
+ * `$a` followed by `$b`, as a new string.
+ *
+ * The free-function spelling of `string::concat`, and the one **string interpolation lowers to**:
+ * `"a{$x}b"` becomes `str::concat(str::concat("a", str::from($x)), "b")`. A free function rather
+ * than the method because the compiler mints these, and a method call needs its receiver
+ * addressed - where two borrowed arguments are what call resolution already knows how to fit.
+ *
+ * Neither operand is touched, and the result is a fresh buffer sized for both.
+ */
+#[inline]
+public function concat(const string& $a, const string& $b) : string
+{
+    return $a->concat($b);
+}
+
+/**
+ * `$text` with leading ASCII whitespace removed.
+ *
+ * A window, not a copy: the result shares `$text`'s buffer, which is what makes trimming free. Call
+ * `->clone()` on it if you want the parent's bytes released.
+ */
+public function trim_start(const string& $text) : string
+{
+    usize $n = $text->size();
+    usize $i = 0;
+
+    while ($i < $n) {
+        if (!is_ascii_space($text->byte_at($i))) {
+            break;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $text->sub($i, $n - $i);
+}
+
+/**
+ * `$text` with trailing ASCII whitespace removed. A window, for `trim_start`'s reason.
+ */
+public function trim_end(const string& $text) : string
+{
+    usize $n = $text->size();
+
+    while ($n > 0) {
+        if (!is_ascii_space($text->byte_at($n - 1))) {
+            break;
+        }
+
+        $n = $n - 1;
+    }
+
+    return $text->sub(0, $n);
+}
+
+/**
+ * `$text` with ASCII whitespace removed from both ends. A window, for `trim_start`'s reason.
+ */
+public function trim(const string& $text) : string
+{
+    return trim_start(trim_end($text));
+}
+
+/**
+ * `$text` cut at every occurrence of `$sep`.
+ *
+ * Always answers at least one part, and `n` separators give `n + 1` of them - so an empty text
+ * splits to one empty part and `",a,"` on `","` gives three. That is the rule that makes
+ * `str::join(str::split($t, $s), $s)` give `$t` back, which is the only rule worth promising here.
+ *
+ * An empty separator would match everywhere and nowhere, so it answers the whole text unsplit
+ * rather than one part per byte.
+ */
+public function split(const string& $text, const string& $sep) : array<string>
+{
+    array<string> $parts = array<string>();
+
+    if ($sep->is_empty()) {
+        $parts->push($text->sub(0, $text->size()));
+        return $parts;
+    }
+
+    usize $size = $text->size();
+    usize $start = 0;
+
+    while (true) {
+        string $rest = $text->sub($start, $size - $start);
+        usize $at = $rest->index_of($sep);
+
+        // `index_of` answers the haystack's own size when there is no match - there is no `Option`
+        // to hand back, and the size is the one value always to hand and never a valid index
+        if ($at >= $rest->size()) {
+            $parts->push($rest);
+            break;
+        }
+
+        $parts->push($rest->sub(0, $at));
+        $start = $start + $at + $sep->size();
+    }
+
+    return $parts;
+}
+
+/**
+ * Every part of `$parts` in order, with `$sep` between them.
+ *
+ * The inverse of `split`, and sized in one pass so a long list is one allocation rather than one
+ * per part.
+ */
+public function join(const array<string>& $parts, const string& $sep) : string
+{
+    usize $count = $parts->count();
+
+    if ($count == 0) {
+        return '';
+    }
+
+    usize $total = $sep->size() * ($count - 1);
+    usize $i = 0;
+
+    while ($i < $count) {
+        $total = $total + $parts[$i]->size();
+        $i = $i + 1;
+    }
+
+    string $out = '';
+    $out->reserve($total);
+
+    $i = 0;
+
+    while ($i < $count) {
+        if ($i > 0) {
+            $out->append($sep);
+        }
+
+        $out->append($parts[$i]);
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * `$text` written `$times` over. `0` answers the empty string.
+ */
+public function repeat(const string& $text, usize $times) : string
+{
+    string $out = '';
+    $out->reserve($text->size() * $times);
+
+    usize $i = 0;
+
+    while ($i < $times) {
+        $out->append($text);
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * `$text` with `$fill` bytes added on the left until it is `$width` bytes wide.
+ *
+ * **Bytes, not characters.** A width is what a column of a terminal counts and what a format spec
+ * asks for, and neither of those is a codepoint count either - so counting bytes is at least a
+ * rule that can be stated. Text already that wide is answered unchanged rather than truncated.
+ */
+public function pad_start(const string& $text, usize $width, uint8 $fill) : string
+{
+    usize $size = $text->size();
+
+    if ($size >= $width) {
+        return $text->sub(0, $size);
+    }
+
+    string $out = '';
+    $out->reserve($width);
+
+    usize $i = $size;
+
+    while ($i < $width) {
+        $out->push_byte($fill);
+        $i = $i + 1;
+    }
+
+    $out->append($text);
+    return $out;
+}
+
+/**
+ * `$text` with `$fill` bytes added on the right until it is `$width` bytes wide. Bytes, for
+ * `pad_start`'s reason.
+ */
+public function pad_end(const string& $text, usize $width, uint8 $fill) : string
+{
+    usize $size = $text->size();
+
+    if ($size >= $width) {
+        return $text->sub(0, $size);
+    }
+
+    string $out = '';
+    $out->reserve($width);
+    $out->append($text);
+
+    usize $i = $size;
+
+    while ($i < $width) {
+        $out->push_byte($fill);
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+// int64's minimum divided by ten, its last digit, and the minimum itself. at file scope because a
+// constant is its expression copied into each use site and so cannot be declared inside a body -
+// which is the whole difference between a constant and a `const` variable
+const int64 PARSE_INT_FLOOR = -922337203685477580;
+const int64 PARSE_INT_FLOOR_DIGIT = 8;
+const int64 INT64_MIN = -9223372036854775808;
+
+/**
+ * The integer `$text` spells, or `null` when it does not spell one.
+ *
+ * Base ten, an optional leading `+` or `-`, and nothing else - no whitespace, no separators, no
+ * trailing characters. `str::trim` first if the text came from a line of input.
+ *
+ * **The digits accumulate negative**, which is not a stylistic choice: `-9223372036854775808` has
+ * no positive counterpart, so accumulating positive and negating at the end cannot parse the one
+ * value most likely to be tested. Overflow answers `null` rather than wrapping.
+ */
+public function parse_int(const string& $text) : int64?
+{
+    usize $n = $text->size();
+
+    if ($n == 0) {
+        return null;
+    }
+
+    usize $i = 0;
+    bool $negative = false;
+
+    uint8 $first = $text->byte_at(0);
+
+    if ($first == CH_MINUS) {
+        $negative = true;
+        $i = 1;
+    }
+    else if ($first == CH_PLUS) {
+        $i = 1;
+    }
+
+    // a lone sign is not a number
+    if ($i >= $n) {
+        return null;
+    }
+
+    int64 $value = 0;
+
+    while ($i < $n) {
+        int64 $digit = digit_value($text->byte_at($i));
+
+        if ($digit < 0) {
+            return null;
+        }
+
+        if ($value < PARSE_INT_FLOOR) {
+            return null;
+        }
+
+        if ($value == PARSE_INT_FLOOR && $digit > PARSE_INT_FLOOR_DIGIT) {
+            return null;
+        }
+
+        $value = $value * 10 - $digit;
+        $i = $i + 1;
+    }
+
+    if ($negative) {
+        return $value;
+    }
+
+    // the one value with no positive counterpart, which negating would wrap straight back to
+    if ($value == INT64_MIN) {
+        return null;
+    }
+
+    return -$value;
+}
+
+/**
+ * The number `$text` spells, or `null` when it does not spell one.
+ *
+ * Through C's `strtod`, and the whole text has to be consumed - so `"1.5"` parses and `"1.5kg"`
+ * does not, which is the difference between this and calling `strtod` yourself. Accepts what
+ * `strtod` accepts, `inf` and `nan` included.
+ *
+ * It clones, always: `strtod` reads to a NUL and a `string` need not have one - a substring shares
+ * its parent's buffer and simply stops early. Trading an allocation for that is the honest price
+ * of a C boundary.
+ */
+public function parse_float(const string& $text) : float64?
+{
+    if ($text->is_empty()) {
+        return null;
+    }
+
+    string $owned = $text->clone();
+
+    ptr<uint8> $stop = null;
+    float64 $value = c_strtod($owned->c_str(), &$stop);
+
+    if ($stop:$ == null) {
+        return null;
+    }
+
+    // compared as integers rather than as pointers: `mem::bit_cast` is how an address becomes a
+    // number here, and a subtraction of two of them is the length `strtod` consumed
+    usize $begin = mem::bit_cast<usize, ptr<const uint8>>($owned->c_str());
+    usize $end = mem::bit_cast<usize, ptr<uint8>>($stop);
+
+    // nothing parsed, or something left over
+    if ($end - $begin != $owned->size()) {
+        return null;
+    }
+
+    return $value;
 }

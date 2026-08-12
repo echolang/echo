@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] variadic_args_on_an_echo_function.eco:3:10
+
+  'variadic_args' is only allowed on an 'extern' declaration - it describes C's calling convention, and an Echo function has no variable argument list. Take an 'array<T>' or a 'slice<T>' instead.
+
+  2 | // function this compiler emits
+  3 | function takes_a_tail(int32 $first, variadic_args $rest) : void
+    :          ^^^^^^^^^^^^
+  4 | {
+
+1 error, nothing was compiled.

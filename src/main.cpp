@@ -9,6 +9,8 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTFileRoot.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ASTDiagnosticRenderer.h"
 #include "AST/ASTModuleEmbedder.h"
 #include "AST/ASTConstantExpander.h"
@@ -317,17 +319,122 @@ static int parse_manifest_modules(
     return 0;
 }
 
-// builds the bundle both `run` and `build` compile: the stdlib module, then the main module with
-// the user's sources. one function rather than two copies, because the copies had already drifted
-// - `build` never created a stdlib module at all, so any program calling `mem::` or `std::math::`
-// compiled under `run` and failed under `build`
+// one program this invocation produces.
+//
+// **there is one of these whether or not a target was declared.** A module declaring no `#[target:]` is
+// one program whose entry is every file root of it and whose path came from `-o` - which is what every
+// program compiled before targets existed was - so nothing downstream has an arm for "no targets"
+struct Program
+{
+    // the declaring target's name, empty when no target declared this program. what the checklist calls
+    // it, and what `argv[0]` reads under `run`
+    std::string name;
+
+    std::string entry_module;
+
+    // the one file of that module whose root is the program. **empty means every file root of it**, and
+    // that is the shape a target-less program has always had
+    std::filesystem::path entry_file;
+
+    std::filesystem::path output;
+};
+
+// what an invocation settles once, before any program is compiled.
+//
+// **the split is the whole of what a target costs.** Which modules there are, what platform they are read
+// for, and where their artifacts go are facts about the *invocation*; parsing them and generating code is
+// work done per *program*. Resolving the module graph a second time to find out what a manifest declares
+// would be a second answer to a question that already has an owner, so it is resolved here, once, and
+// handed down to every program built from it
+struct Invocation
+{
+    Compiler::TargetFacts target_facts;
+    std::vector<Parser::ModuleManifest> manifests;
+
+    // the user's roots only, never the standard library - this is what "which module is the program" is
+    // asked of, and being told "the standard library" would answer it wrongly
+    std::vector<std::filesystem::path> roots;
+
+    // the loose `.eco` files named on the command line, expanded
+    std::vector<std::filesystem::path> sources;
+
+    Compiler::BuildLayout layout;
+
+    std::vector<Program> programs;
+};
+
+// **top-level code in a file no target claims**, collected once per file.
+//
+// only asked of a module that declares targets, because that is the only module with anything on record
+// saying which of its files are programs. A file that *is* some other target's entry is left alone: its
+// code belongs to that program and not being part of this one is the point of declaring both.
+//
+// **collects and returns, never renders.** the gate at the end of run_semantic_passes is the one that
+// turns a full collector into output and an exit status - it flushes stdout ahead of stderr first, which
+// a second gate here got wrong, and it reports every issue under one summary rather than this file's
+// under one and the rest under another
+static void collect_shared_top_level_code(
+    const Parser::ModuleManifest &manifest,
+    AST::Bundle &bundle
+)
+{
+    if (manifest.targets.empty()) {
+        return;
+    }
+
+    AST::Module *module = bundle.modules.find_module_ptr(manifest.name);
+
+    if (module == nullptr) {
+        return;
+    }
+
+    for (AST::File &file : module->files()) {
+        const bool is_an_entry = std::any_of(manifest.targets.begin(), manifest.targets.end(),
+            [&file](const Parser::ModuleTarget &target) {
+                return target.entry == file.get_path();
+            });
+
+        if (is_an_entry || file.root == nullptr) {
+            continue;
+        }
+
+        AST::Node *statement = AST::first_top_level_statement(*file.root);
+
+        if (statement == nullptr) {
+            continue;
+        }
+
+        const TokenReference *token = AST::source_token_of(*statement);
+
+        // **null is a real answer from source_token_of**, and a statement it cannot place is one this
+        // cannot underline. Refusing it with no location at all would be worse than the silent drop it
+        // replaced, so the file keeps its old behaviour in the one case there is nothing to point at
+        if (token == nullptr) {
+            continue;
+        }
+
+        // through the collector rather than through the manifest's own `<file>:<line>:` channel: this is
+        // a mistake in a *source* file, so it gets the underline and the note every other one gets
+        bundle.collector.collect_issue<AST::Issue::TopLevelCodeOutsideEntry>(
+            AST::CodeRef{ module, &file, token->make_slice() },
+            manifest.name,
+            file.get_path().filename().string());
+    }
+}
+
+// builds the bundle both `run` and `build` compile: the stdlib module, the manifest modules, then the
+// main module with the user's sources. one function rather than two copies, because the copies had
+// already drifted - `build` never created a stdlib module at all, so any program calling `mem::` or
+// `std::math::` compiled under `run` and failed under `build`
+//
+// **the manifests arrive resolved.** Which modules there are is an invocation-wide fact and this runs once
+// per program - see Invocation
 static int build_bundle(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation,
     AST::Bundle &bundle,
-    Parser::ModuleParser &parser,
-    std::vector<Parser::ModuleManifest> &out_manifests,
-    std::string &out_entry_module
+    Parser::ModuleParser &parser
 )
 {
 #if ECO_USE_EMBEDDED_STDLIB
@@ -339,75 +446,15 @@ static int build_bundle(
     // the manifest modules first, in dependency order, and the loose sources after them - so a program on
     // the command line can name anything a manifest declared, and no manifest can name it back. That is
     // the same one-way rule that holds between two manifests, for the same reason
-    std::vector<Parser::ModuleManifest> &manifests = out_manifests;
-    std::vector<std::filesystem::path> roots;
-    {
-        Compiler::ScopedPhase phase("resolve manifests");
+    const std::vector<Parser::ModuleManifest> &manifests = invocation.manifests;
+    const std::vector<std::filesystem::path> &source_files = invocation.sources;
 
-        // the parser's own facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
-        // list of files and the conditions inside those files have to be decided by the same answer
-        if (!resolve_manifests(
-                driver.modules,
-                !driver.no_stdlib,
-                driver.sources.empty(),
-                diagnostics, parser.target_facts, manifests, roots)) {
-            return 1;
-        }
-    }
-
-    if (parse_manifest_modules(diagnostics, manifests, roots, bundle, parser) != 0) {
+    if (parse_manifest_modules(diagnostics, manifests, invocation.roots, bundle, parser) != 0) {
         return 1;
     }
 
-    size_t missing_files = 0;
-    auto source_files = get_file_list_from_args(driver.sources, missing_files);
-
-    // a named file that is not there fails the build, even when others compiled. it is an input the
-    // user asked for, so carrying on would produce a binary missing whatever was in it - reported by
-    // name above, so nothing more is owed here
-    if (missing_files > 0) {
-        return 1;
-    }
-
-    // an entry point has to come from somewhere, and there are two natural spellings because there are two
-    // natural shapes of program: a script is a file, an application is a project.
-    //
-    // loose sources on the command line become the `main` module. Otherwise the program is *the manifest
-    // this invocation pointed at* - the one `-m`, or the module.eco in the working directory - whatever it
-    // happens to call itself. A build that points at several roots and gives no sources has no answer to
-    // "which of these is the program", and guessing would pick one silently
-    out_entry_module = ECO_MAIN_MODULE_NAME;
-
-    if (source_files.empty()) {
-        if (roots.size() != 1) {
-            if (roots.empty()) {
-                std::cerr << "No source files provided, and no 'module.eco' in the working directory."
-                          << std::endl;
-            }
-            else {
-                std::cerr << "Several manifests were given and no source files, so it is ambiguous which "
-                             "module is the program. Name its sources on the command line, or build one "
-                             "manifest at a time." << std::endl;
-            }
-            return 1;
-        }
-
-        // the root's own name, resolved through the loaded set rather than from the path - the manifest
-        // decides what its module is called. Through manifest_is_a_root and not a comparison of its own,
-        // which is what taught it that `-m lib` and `-m lib/module.eco` are one root
-        const std::filesystem::path &root = roots.front();
-        auto found = std::find_if(manifests.begin(), manifests.end(),
-            [&roots](const Parser::ModuleManifest &manifest) {
-                return manifest_is_a_root(manifest, roots);
-            });
-
-        if (found == manifests.end()) {
-            std::cerr << "Internal: the root manifest '" << root.string()
-                      << "' is not among the resolved modules." << std::endl;
-            return 1;
-        }
-
-        out_entry_module = found->name;
+    for (const Parser::ModuleManifest &manifest : manifests) {
+        collect_shared_top_level_code(manifest, bundle);
     }
 
     if (!source_files.empty()) {
@@ -832,22 +879,29 @@ static int report_compiler_exception(
 // that legitimately differ - `run` merges and JITs, `build` emits objects and links.
 struct FrontEnd
 {
-    std::vector<Parser::ModuleManifest> manifests;
-    std::string entry_module;
+    // **borrowed, not copied.** Which modules there are, what platform they were read for and where
+    // artifacts go are the invocation's answers, settled before the first program is compiled - see
+    // Invocation. Holding them again here made two live answers to each, and a build of several targets
+    // deep-copied the whole manifest graph once per target to do it. The Invocation outlives every
+    // FrontEnd built from it, both being locals of the subcommand
+    const Invocation *invocation = nullptr;
+
+    // which of that invocation's programs this front end is for. **the only thing here that differs
+    // between two of them**, which is why it is a pointer rather than five copied fields: a per-program
+    // fact forgotten on the way in is one that silently reads as the previous program's
+    const Program *program = nullptr;
+
     Compiler::CompilerOptions options;
-
-    // what the conditional filter was evaluated against. Carried here rather than re-resolved because the
-    // module cache folds it into every key, and a key derived from a second resolution is a key that could
-    // disagree with the one the parse actually used
-    Compiler::TargetFacts target_facts;
-
-    // where every artifact this invocation produces goes. **resolved once**, here, because a second
-    // resolution is a second answer and the two can disagree about a directory one of them has already
-    // written into
-    Compiler::BuildLayout layout;
 
     // empty unless something downstream reads one - see needs_cache_keys
     std::map<std::string, Compiler::ModuleCacheKey> cache_keys;
+
+    // spellings over the two above, so a reader says what it wants rather than which carrier holds it
+    const std::vector<Parser::ModuleManifest> &manifests() const { return invocation->manifests; }
+    const Compiler::TargetFacts &target_facts() const { return invocation->target_facts; }
+    const Compiler::BuildLayout &layout() const { return invocation->layout; }
+    const std::string &entry_module() const { return program->entry_module; }
+    const std::filesystem::path &entry_file() const { return program->entry_file; }
 };
 
 // where an artifact goes when the program is a loose .eco file rather than a project: there is no manifest
@@ -865,11 +919,217 @@ static bool needs_cache_keys(const Compiler::DriverOptions &driver)
     return !driver.whole_program || driver.explains(Compiler::ExplainKind::t_cache);
 }
 
-static bool run_front_end(
+// the target names a refusal quotes back, joined the one way.
+//
+// two refusals here name a set of targets - the one for a `--target` nothing declares, and the one for a
+// `run` given several - and they are the two a user compares side by side, so they read alike by sharing
+// this rather than by both being got right
+static std::string target_name_list(const std::vector<Parser::ModuleTarget> &targets)
+{
+    std::string list;
+
+    for (const Parser::ModuleTarget &target : targets) {
+        list += list.empty() ? target.name : ", " + target.name;
+    }
+
+    return list;
+}
+
+// the declared targets this invocation builds, or a refusal naming what there was to choose from.
+//
+// **`--target` has no checker on its option row**, deliberately: the names belong to the manifest and not
+// to echoc, so this is the first point at which one can be wrong, and it is the only one that can say what
+// the right ones were
+static bool select_targets(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
-    AST::Bundle &bundle,
-    FrontEnd &out
+    const Parser::ModuleManifest &entry,
+    std::vector<Parser::ModuleTarget> &out
+)
+{
+    if (driver.targets.empty()) {
+        out = entry.targets;
+        return true;
+    }
+
+    for (const std::string &named : driver.targets) {
+        auto found = std::find_if(entry.targets.begin(), entry.targets.end(),
+            [&named](const Parser::ModuleTarget &target) { return target.name == named; });
+
+        if (found == entry.targets.end()) {
+            diagnostics.render_untyped("No Such Target", fmt::format(
+                "'{}' declares no target called '{}'. It declares: {}.",
+                entry.name, named, target_name_list(entry.targets)));
+            return false;
+        }
+
+        // a name written twice is one program, not two links over one path
+        if (std::none_of(out.begin(), out.end(),
+                [&named](const Parser::ModuleTarget &target) { return target.name == named; })) {
+            out.push_back(*found);
+        }
+    }
+
+    return true;
+}
+
+// **which programs this invocation produces, and where each one goes.**
+//
+// the one owner of a question `build_bundle` used to answer in one sentence - *"a build that points at
+// several roots and gives no sources has no answer to which of these is the program"*. A manifest naming
+// its targets is that answer written down, so this is where the two meet
+static bool resolve_programs(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    Invocation &out
+)
+{
+    // an entry point has to come from somewhere, and there are two natural spellings because there are two
+    // natural shapes of program: a script is a file, an application is a project.
+    //
+    // loose sources on the command line become the `main` module. Otherwise the program is *the manifest
+    // this invocation pointed at* - the one `-m`, or the module.eco in the working directory - whatever it
+    // happens to call itself. A build that points at several roots and gives no sources has no answer to
+    // "which of these is the program", and guessing would pick one silently
+    const Parser::ModuleManifest *entry = nullptr;
+
+    if (out.sources.empty()) {
+        if (out.roots.size() != 1) {
+            if (out.roots.empty()) {
+                std::cerr << "No source files provided, and no 'module.eco' in the working directory."
+                          << std::endl;
+            }
+            else {
+                std::cerr << "Several manifests were given and no source files, so it is ambiguous which "
+                             "module is the program. Name its sources on the command line, or build one "
+                             "manifest at a time." << std::endl;
+            }
+            return false;
+        }
+
+        // the root's own name, resolved through the loaded set rather than from the path - the manifest
+        // decides what its module is called. Through manifest_is_a_root and not a comparison of its own,
+        // which is what taught it that `-m lib` and `-m lib/module.eco` are one root
+        auto found = std::find_if(out.manifests.begin(), out.manifests.end(),
+            [&out](const Parser::ModuleManifest &manifest) {
+                return manifest_is_a_root(manifest, out.roots);
+            });
+
+        if (found == out.manifests.end()) {
+            std::cerr << "Internal: the root manifest '" << out.roots.front().string()
+                      << "' is not among the resolved modules." << std::endl;
+            return false;
+        }
+
+        entry = &*found;
+    }
+    else {
+        const bool manifest_is_the_program = std::any_of(
+            out.manifests.begin(), out.manifests.end(),
+            [](const Parser::ModuleManifest &manifest) { return manifest.name == ECO_MAIN_MODULE_NAME; });
+
+        if (manifest_is_the_program) {
+            std::cerr << "A manifest already declares the '" << ECO_MAIN_MODULE_NAME
+                      << "' module, so the source files on the command line have nowhere to go."
+                      << std::endl;
+            return false;
+        }
+    }
+
+    // **the layout before the programs**, because a target's binary is a path this owns. It is a function
+    // of the entry manifest and `--build-dir`, both of which are settled by here, and resolving it once is
+    // what stops two answers disagreeing about a directory one of them has written into
+    out.layout = Compiler::BuildLayout::resolve(driver.build_dir, entry, fallback_scratch_dir());
+
+    // **the one refusal a build directory can earn, and it is asked before anything is built.** An
+    // unwritable store is never fatal - it is an optimization - but a directory that is somebody else's
+    // is a build pointed at the wrong place, and writing into it and reporting nothing is how a later
+    // `echoc clean` would delete their work
+    const std::string foreign = out.layout.first_foreign_directory(out.manifests);
+
+    if (!foreign.empty()) {
+        diagnostics.render_untyped("Build Directory In Use", foreign);
+        return false;
+    }
+
+    // loose sources are the program, so a manifest reached with `-m` is a library to them however many
+    // programs it declares for its own sake
+    if (entry == nullptr || entry->targets.empty()) {
+        if (!driver.targets.empty()) {
+            diagnostics.render_untyped("No Such Target", entry == nullptr
+                ? "'--target' names a program a manifest declares, and this build's program is the source "
+                  "files on the command line."
+                : fmt::format(
+                    "'{}' declares no targets, so it produces the one program its module is. Add "
+                    "'#[target: exe {{ name: ..., entry: ... }}]' to its manifest to give it more.",
+                    entry->name));
+            return false;
+        }
+
+        if (driver.subcommand == Compiler::Subcommand::t_build && driver.output.empty()) {
+            // **the refusal the `-o` row used to make from argv alone.** It moved here the moment a
+            // manifest could name its own binaries: this is the function that knows whether one did
+            diagnostics.render_untyped("No Output File", fmt::format(
+                "'build' needs '-o, --output <file>' - nothing here names the binary. {}",
+                entry == nullptr
+                    ? "A program built from loose source files has no other name to take."
+                    : fmt::format("'{}' declares no targets, so its manifest does not name one either.",
+                        entry->name)));
+            return false;
+        }
+
+        out.programs.push_back(Program {
+            /*name=*/{},
+            entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
+            /*entry_file=*/{},
+            driver.output
+        });
+
+        return true;
+    }
+
+    std::vector<Parser::ModuleTarget> selected;
+
+    if (!select_targets(driver, diagnostics, *entry, selected)) {
+        return false;
+    }
+
+    // **one invocation runs one program**, so `run` is where several is a refusal rather than a loop.
+    // Named rather than guessed at: picking the first would run something nobody asked for
+    if (driver.subcommand == Compiler::Subcommand::t_run && selected.size() > 1) {
+        diagnostics.render_untyped("Which Program", fmt::format(
+            "'{}' declares {} programs and 'run' runs one. Name it with '--target': {}.",
+            entry->name, selected.size(), target_name_list(selected)));
+        return false;
+    }
+
+    // `-o` is one path, so it can only mean something when one binary is being written
+    if (!driver.output.empty() && selected.size() > 1) {
+        diagnostics.render_untyped("Too Many Targets For One Output", fmt::format(
+            "'-o' names one file and {} targets are being built. Name the one you meant with "
+            "'--target', or drop '-o' and let each go to its own binary under '{}'.",
+            selected.size(), out.layout.module_dir(*entry).string()));
+        return false;
+    }
+
+    for (const Parser::ModuleTarget &target : selected) {
+        out.programs.push_back(Program {
+            target.name,
+            entry->name,
+            target.entry,
+            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output
+        });
+    }
+
+    return true;
+}
+
+// everything settled before the first program is compiled: the platform, the module graph, where artifacts
+// go, and which programs there are to build
+static bool resolve_invocation(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    Invocation &out
 )
 {
     if (!resolve_target_facts(driver, diagnostics, out.target_facts)) {
@@ -896,40 +1156,60 @@ static bool run_front_end(
         }
     }
 
-    // **after the facts and not before**, which is why the parser is built here rather than handed in: it
-    // takes them at construction, so there is no window in which one exists that has not been told what
-    // platform it is reading for. Neither subcommand touches it once the front end is done
-    Parser::ModuleParser parser(out.target_facts);
-
     {
-        Compiler::ScopedPhase phase("parse");
-        if (build_bundle(driver, diagnostics, bundle, parser, out.manifests, out.entry_module) != 0) {
+        Compiler::ScopedPhase phase("resolve manifests");
+
+        // the invocation's facts, not a second resolution: a manifest may gate its `#[sources:]`, so the
+        // list of files and the conditions inside those files have to be decided by the same answer
+        if (!resolve_manifests(
+                driver.modules,
+                !driver.no_stdlib,
+                driver.sources.empty(),
+                diagnostics, out.target_facts, out.manifests, out.roots)) {
             return false;
         }
     }
 
-    // **after build_bundle**, which is where the manifests and the entry module first exist - the layout is
-    // a function of both. Deliberately not part of CompilerOptions: everything in there is folded into the
-    // module cache key, and a *location* in a key makes the cache go cold for nothing
+    size_t missing_files = 0;
+    out.sources = get_file_list_from_args(driver.sources, missing_files);
+
+    // a named file that is not there fails the build, even when others compiled. it is an input the
+    // user asked for, so carrying on would produce a binary missing whatever was in it - reported by
+    // name above, so nothing more is owed here
+    if (missing_files > 0) {
+        return false;
+    }
+
+    return resolve_programs(driver, diagnostics, out);
+}
+
+// the front end for **one program**: parse the whole bundle, then run the semantic passes over it.
+//
+// what it is handed rather than deriving is exactly what a second program would derive identically - the
+// platform, the module graph, the layout - and what it settles is what differs between two of them, which
+// today is nothing but the entry file. That it *could* therefore run once for every target is true and is
+// not this: `compile_bundle` builds the LLVMContext its units live in, so proving it re-entrant over one
+// AST::Bundle is a separate piece of work with its own way of going quietly wrong
+static bool run_front_end(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation,
+    const Program &program,
+    AST::Bundle &bundle,
+    FrontEnd &out
+)
+{
+    out.invocation = &invocation;
+    out.program = &program;
+
+    // **after the facts and not before**, which is why the parser is built here rather than handed in: it
+    // takes them at construction, so there is no window in which one exists that has not been told what
+    // platform it is reading for. Neither subcommand touches it once the front end is done
+    Parser::ModuleParser parser(out.target_facts());
+
     {
-        auto entry = std::find_if(out.manifests.begin(), out.manifests.end(),
-            [&out](const Parser::ModuleManifest &manifest) {
-                return manifest.name == out.entry_module;
-            });
-
-        out.layout = Compiler::BuildLayout::resolve(
-            driver.build_dir,
-            entry != out.manifests.end() ? &*entry : nullptr,
-            fallback_scratch_dir());
-
-        // **the one refusal a build directory can earn, and it is asked before anything is built.** An
-        // unwritable store is never fatal - it is an optimization - but a directory that is somebody else's
-        // is a build pointed at the wrong place, and writing into it and reporting nothing is how a later
-        // `echoc clean` would delete their work
-        const std::string foreign = out.layout.first_foreign_directory(out.manifests);
-
-        if (!foreign.empty()) {
-            diagnostics.render_untyped("Build Directory In Use", foreign);
+        Compiler::ScopedPhase phase("parse");
+        if (build_bundle(driver, diagnostics, invocation, bundle, parser) != 0) {
             return false;
         }
     }
@@ -948,7 +1228,7 @@ static bool run_front_end(
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(
-            driver, diagnostics, out.manifests, out.options, out.target_facts, out.cache_keys)) {
+            driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.cache_keys)) {
         return false;
     }
 
@@ -987,7 +1267,7 @@ static bool collect_link_requirements(
     std::vector<Compiler::LinkRequirement> &out
 )
 {
-    for (auto manifest = front.manifests.rbegin(); manifest != front.manifests.rend(); ++manifest) {
+    for (auto manifest = front.manifests().rbegin(); manifest != front.manifests().rend(); ++manifest) {
         Compiler::merge_link_requirements(manifest->link, out);
     }
 
@@ -1008,7 +1288,7 @@ static bool collect_link_requirements(
         std::string error;
 
         if (!Compiler::parse_link_requirement(
-                spelled, here, front.target_facts, /*declared_by=*/"", requirement, error)) {
+                spelled, here, front.target_facts(), /*declared_by=*/"", requirement, error)) {
             diagnostics.render_untyped("Invalid Link Requirement", error);
             return false;
         }
@@ -1083,11 +1363,11 @@ static bool build_c_modules(
 {
     const bool explaining = driver.explains(Compiler::ExplainKind::t_cache);
 
-    const std::filesystem::path scratch_dir = front.layout.scratch_cc_dir();
+    const std::filesystem::path scratch_dir = front.layout().scratch_cc_dir();
 
     std::vector<std::string> explain;
 
-    for (const Parser::ModuleManifest &manifest : front.manifests) {
+    for (const Parser::ModuleManifest &manifest : front.manifests()) {
         if (manifest.cc.empty()) {
             continue;
         }
@@ -1098,7 +1378,7 @@ static bool build_c_modules(
         const size_t sources = manifest.cc.sources.size();
         step.summary(fmt::format("{} source{}", sources, sources == 1 ? "" : "s"));
 
-        const std::filesystem::path cache_dir = front.layout.module_cc_dir(manifest);
+        const std::filesystem::path cache_dir = front.layout().module_cc_dir(manifest);
 
         Compiler::CBuildResult result;
         std::string error;
@@ -1229,12 +1509,18 @@ static bool load_native_libraries(
 // its own has to a path it was started from. `echoc` is emphatically the wrong answer: it is the
 // process but not the program, and handing it over would have `env::exe()` name the compiler. A
 // manifest-only invocation names no source file, and then the module root is the best there is - and
-// `fallback` covers the last case, a manifest discovered rather than asked for
-std::string program_name(const Compiler::DriverOptions &driver, const std::string &fallback)
+// the program's own name covers the last case, a manifest discovered rather than asked for
+std::string program_name(const Compiler::DriverOptions &driver, const Program &program)
 {
     const std::vector<std::string> &sources = driver.sources;
     if (!sources.empty()) {
         return sources.front();
+    }
+
+    // **a declared target is asked before the module root**, because it is the more specific answer and
+    // the only one that tells two programs of one module apart
+    if (!program.name.empty()) {
+        return program.name;
     }
 
     const std::vector<std::string> &modules = driver.modules;
@@ -1242,7 +1528,7 @@ std::string program_name(const Compiler::DriverOptions &driver, const std::strin
         return modules.front();
     }
 
-    return fallback;
+    return program.entry_module;
 }
 
 // the whole-program optimizer, run iff `-O` asked for it - the same answer for both subcommands.
@@ -1296,15 +1582,23 @@ int main_run(
     // `run` reuses nothing: the JIT is handed one module, so every unit is merged and there are no per-module
     // objects to store or load. Feeding it stored objects instead would mean handing the JIT one per cached
     // module beside main's, which is a question about duplicate weak symbols rather than about caching
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    // resolve_programs already refused several, so this is the one it settled on
+    const Program &program = invocation.programs.front();
+
     FrontEnd front;
-    if (!run_front_end(driver, diagnostics, bundle, front)) {
+    if (!run_front_end(driver, diagnostics, invocation, program, bundle, front)) {
         return 1;
     }
 
     const Compiler::CompilerOptions options = front.options;
-    const std::string &entry_module = front.entry_module;
+    const std::string &entry_module = front.entry_module();
 
-    report_cache_plan(driver, front.manifests, front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
+    report_cache_plan(driver, front.manifests(), front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
 
     // **before codegen**, because a C source that does not compile is a build that is going to fail either
     // way, and finding out after the whole Echo program has been lowered wastes the wait. It also puts the
@@ -1330,7 +1624,7 @@ int main_run(
     }
 
     LLVMCompiler compiler(options);
-    compiler.set_entry_module(entry_module);
+    compiler.set_entry(entry_module, front.entry_file());
 
     try {
         Compiler::ScopedPhase phase("codegen");
@@ -1359,7 +1653,7 @@ int main_run(
     // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
     // entry module was read from - not `echoc`, which is the process but not the program. So the tail
     // the driver split off a `--` is prepended with it rather than used as-is
-    std::vector<std::string> argv = { program_name(driver, entry_module) };
+    std::vector<std::string> argv = { program_name(driver, program) };
     argv.insert(argv.end(), driver.program_arguments.begin(), driver.program_arguments.end());
 
     // the JIT prunes the module to what the entry point reaches before it runs anything - see
@@ -1387,7 +1681,7 @@ int main_run(
     std::cout << Compiler::PhaseTimings::instance().report();
 
     // after the program, because a C module's loadable library lives there and was open for the whole of it
-    front.layout.discard_temporary_scratch();
+    front.layout().discard_temporary_scratch();
 
     // the program's own status, so `echoc run` exits the way it did. Today that is always 0 on this
     // path - the entry point's epilogue returns 0 and every other ending goes through libc's `exit`
@@ -1395,37 +1689,42 @@ int main_run(
     return status;
 }
 
-int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+// compiles and links **one** program: its own bundle, its own entry point, its own binary.
+//
+// a fresh AST::Bundle and a fresh LLVMCompiler per program, so nothing about building two of them is a
+// question about re-entrancy - the whole-program merge, the one `@main` symbol and the single LLVMContext
+// each stay exactly as true of one program as they ever were. What that costs is the shared code being
+// parsed and lowered once per target; what it buys is that none of the invariants below had to move
+static int build_one_program(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation,
+    const Program &program
+)
 {
-    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
-    const auto started = std::chrono::steady_clock::now();
-
     auto bundle = AST::Bundle();
 
-    // **the missing -o is refused by the parser now**, off the option row's `required_by`, so this
-    // function is reached only by an invocation that named one. It used to be a hand-written check here,
-    // which was a second opinion about whether the flag was optional
     const bool whole_program = driver.whole_program;
 
     FrontEnd front;
-    if (!run_front_end(driver, diagnostics, bundle, front)) {
+    if (!run_front_end(driver, diagnostics, invocation, program, bundle, front)) {
         return 1;
     }
 
     const Compiler::CompilerOptions options = front.options;
-    const std::string &entry_module = front.entry_module;
+    const std::string &entry_module = front.entry_module();
 
     // an optimized or dumped build reuses nothing and stores nothing - see wants_whole_program_module
     const ModulePlan plan = whole_program
         ? ModulePlan{}
-        : plan_module_artifacts(front.layout, front.manifests, front.cache_keys, entry_module);
+        : plan_module_artifacts(front.layout(), front.manifests(), front.cache_keys, entry_module);
 
-    report_cache_plan(driver, front.manifests, front.cache_keys, plan, entry_module, whole_program);
+    report_cache_plan(driver, front.manifests(), front.cache_keys, plan, entry_module, whole_program);
 
     // **a reused module gets a row and a rebuilt one does not.** Work that did not happen is the
     // surprising half; which input changed for the ones that did is `--explain-cache`'s question, and
     // answering it twice would put explain_miss's reasoning in two places
-    for (const Parser::ModuleManifest &manifest : front.manifests) {
+    for (const Parser::ModuleManifest &manifest : front.manifests()) {
         if (plan.cached.count(manifest.name) > 0) {
             Compiler::ProgressReporter::instance().row(
                 Compiler::ProgressPhase::t_cached, manifest.name, "reused",
@@ -1433,7 +1732,7 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
         }
     }
 
-    const std::string output = driver.output.string();
+    const std::string output = program.output.string();
 
     // before codegen, for the reason `run` states: a C source that does not compile fails this build
     // whatever the Echo half does, and the wait is the same either way
@@ -1458,7 +1757,7 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     }
 
     LLVMCompiler compiler(options);
-    compiler.set_entry_module(entry_module);
+    compiler.set_entry(entry_module, front.entry_file());
 
     try {
         Compiler::ScopedPhase phase("codegen");
@@ -1494,10 +1793,10 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
     // **unlike a store, this one is not optional.** A cache that cannot be written costs a rebuild; a
     // scratch directory that cannot be written is an object with nowhere to go, so it is worth a sentence
     // here rather than an ofstream failure from inside the backend
-    if (front.layout.prepare_scratch_dir() != Compiler::BuildDirState::t_ready) {
+    if (front.layout().prepare_scratch_dir() != Compiler::BuildDirState::t_ready) {
         diagnostics.render_untyped("Cannot Build Here", fmt::format(
             "'{}' could not be created, and the objects on the way to '{}' have nowhere to go.",
-            front.layout.scratch_dir().string(), output));
+            front.layout().scratch_dir().string(), output));
         return 1;
     }
 
@@ -1512,8 +1811,8 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
         // because `-O` depends on it. Either way the tool that failed has already said what it could, and
         // what it could not say is which manifest asked for each requirement
         const bool linked = whole_program
-            ? compiler.make_exec(output, front.layout.scratch_object(entry_module), link)
-            : emit_and_link_modules(compiler, front.layout, output, plan, link);
+            ? compiler.make_exec(output, front.layout().scratch_object(entry_module), link)
+            : emit_and_link_modules(compiler, front.layout(), output, plan, link);
 
         // closed before the failure is reported rather than by the destructor after it, so the row sits
         // above the sentence that explains it - the order every other step reaches deliberately
@@ -1533,12 +1832,51 @@ int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
 
     // **after the link succeeded, and only then.** A failed build is one somebody is about to look at, and
     // the objects it got as far as producing are part of what there is to look at
-    front.layout.discard_temporary_scratch();
+    front.layout().discard_temporary_scratch();
+
+    return 0;
+}
+
+int main_build(const Compiler::DriverOptions &driver, const AST::DiagnosticRenderer &diagnostics)
+{
+    // see main_run: the checklist's own clock, and the only one on this path when `-t` is off
+    const auto started = std::chrono::steady_clock::now();
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    const bool several = invocation.programs.size() > 1;
+
+    for (const Program &program : invocation.programs) {
+        // **only when there is more than one**, which no invocation that predates targets can be: the
+        // e2e corpus byte-compares merged stdout and stderr for six hundred cases, so a line printed
+        // unconditionally here would rewrite essentially all of them. It is what makes the `-p` dumps
+        // below attributable when a build produces several programs
+        if (several) {
+            Compiler::ProgressReporter::instance().suspend();
+            std::cout << "[target " << program.name << "]" << std::endl;
+        }
+
+        if (build_one_program(driver, diagnostics, invocation, program) != 0) {
+            // **the first failure stops the build.** run_semantic_passes renders one summary per program
+            // and `--diagnostics json` promises diagnostics then *one* of them - and an error in code the
+            // targets share would otherwise be reported once per target, which is the same mistake said
+            // several times rather than more help
+            return 1;
+        }
+    }
 
     Compiler::ProgressReporter::instance().close(
-        fmt::format("built '{}'", std::filesystem::path(output).filename().string()),
+        several
+            ? fmt::format("built {} targets", invocation.programs.size())
+            : fmt::format("built '{}'",
+                std::filesystem::path(invocation.programs.front().output).filename().string()),
         Compiler::progress_elapsed_ms(started));
 
+    // once for the invocation rather than once per program: the tree is cumulative, so what it reports is
+    // where the whole compile went - which is the question somebody timing a multi-target build has
     std::cout << Compiler::PhaseTimings::instance().report();
 
     return 0;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] variadic_args_not_last.eco:3:24
+
+  'variadic_args' must be the last parameter - C's variadic tail is what follows the arguments it can name, so nothing can follow it.
+
+  2 | extern {
+  3 |     function printf as c_printf(ptr<const uint8> $format, variadic_args $args, int32 $after) : int32;
+    :                        ^^^^^^^^
+  4 | }
+
+1 error, nothing was compiled.

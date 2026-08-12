@@ -1,0 +1,9 @@
+# the `stdin:` setting feeds one line per word. without it a case that reads standard input is
+# attached to whatever the terminal running the suite happens to be, which is a hang under CI
+
+stdin: hello second
+
+--- OUT --->
+first: hello (5 bytes)
+second: second
+end of input

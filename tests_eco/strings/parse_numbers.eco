@@ -1,0 +1,40 @@
+// `parse_int` and `parse_float` answer a nullable, so the absence case is `guard ... else` rather
+// than a sentinel
+guard int64 $a = str::parse_int('42') else { die('42'); }
+echo $a;
+
+guard int64 $b = str::parse_int('-42') else { die('-42'); }
+echo $b;
+
+guard int64 $c = str::parse_int('+7') else { die('+7'); }
+echo $c;
+
+// the two boundaries, which is what accumulating negative buys
+guard int64 $min = str::parse_int('-9223372036854775808') else { die('min'); }
+echo $min;
+
+guard int64 $max = str::parse_int('9223372036854775807') else { die('max'); }
+echo $max;
+
+// and what overflow answers: null, never a wrapped value
+echo str::parse_int('9223372036854775808') ?? -1;
+echo str::parse_int('-9223372036854775809') ?? -1;
+
+// nothing else is accepted - no whitespace, no separators, no trailing text
+echo str::parse_int('') ?? -1;
+echo str::parse_int('-') ?? -1;
+echo str::parse_int(' 4') ?? -1;
+echo str::parse_int('4 ') ?? -1;
+echo str::parse_int('4kg') ?? -1;
+echo str::parse_int('0x10') ?? -1;
+
+guard float64 $f = str::parse_float('1.25') else { die('1.25'); }
+echo $f;
+
+guard float64 $neg = str::parse_float('-0.5') else { die('-0.5'); }
+echo $neg;
+
+// the whole text has to be consumed, which is the difference between this and calling strtod
+echo str::parse_float('1.5kg') ?? -1.0;
+echo str::parse_float('') ?? -1.0;
+echo str::parse_float('nonsense') ?? -1.0;

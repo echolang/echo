@@ -49,14 +49,11 @@ function append_glyph(string& $out, uint8 $id) : void
 // twice. It is built once, as a local, and every function that draws takes a `Canvas&`.
 struct Canvas
 {
-    // nothing outside these braces reads either dimension: a caller asks for a frame, or plots a point
-    // and lets `set` clip it
+    // nothing outside these braces reads any of this: a caller asks for a frame, or plots a point and
+    // lets `set` clip it
     private usize $width;
     private usize $height;
-
-    // this one wants to be private too, and cannot be: a private property that owns something makes its
-    // struct unusable at every use site today
-    array<array<uint8>> $rows;
+    private array<array<uint8>> $rows;
 
     constructor(usize $width, usize $height)
     {

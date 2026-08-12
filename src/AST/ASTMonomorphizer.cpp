@@ -35,7 +35,7 @@ namespace AST
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
         : _bundle(bundle), _collector(bundle.collector), _ownership(bundle),
-          _const_folding(bundle), _operators(bundle), _foreach(bundle)
+          _const_folding(bundle), _operators(bundle), _foreach(bundle), _interpolation(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -551,6 +551,18 @@ namespace AST
         // answers false while an unlowered foreach is in the body, which is what makes that safe rather
         // than merely fast
         progressed |= _foreach.run_round();
+
+            // beside the loop lowering, and for two of its three reasons. **before settle_calls**,
+            // because the `str::from` and `str::concat` calls it mints are exactly what that has to
+            // finish - one of them may name a user's own overload, or a generic the next round still
+            // has to instantiate. **before the ownership pass**, because every one of those calls
+            // returns an owning `string` and a body is walked exactly once, ever;
+            // OwnershipPass::body_is_concrete answers false while an unlowered literal is in it.
+            //
+            // it needs nothing from the rewriter above, unlike the loop lowering: which overload
+            // `str::from` picks is AST::CallResolver's question, asked whenever the hole settles, so
+            // this pass never has to wait for a type and never has a pending state to finalize
+            progressed |= _interpolation.run_round();
 
             progressed |= rederive_stale_variable_types();
             progressed |= rederive_stale_capture_types();

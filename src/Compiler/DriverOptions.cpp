@@ -32,6 +32,7 @@ bool Compiler::resolve_driver_options(
     out.modules = cli.list(Opt::t_module);
     out.link = cli.list(Opt::t_link);
     out.defines = cli.list(Opt::t_define);
+    out.targets = cli.list(Opt::t_target);
     out.program_arguments = cli.program_arguments;
 
     out.target_os = cli.value(Opt::t_target_os);

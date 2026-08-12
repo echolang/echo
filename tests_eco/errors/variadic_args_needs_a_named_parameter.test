@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] variadic_args_needs_a_named_parameter.eco:4:24
+
+  'variadic_args' needs at least one parameter before it - C has no way to find the start of a variadic tail that follows nothing.
+
+  3 | extern {
+  4 |     function printf as c_printf(variadic_args $args) : int32;
+    :                        ^^^^^^^^
+  5 | }
+
+1 error, nothing was compiled.

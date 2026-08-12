@@ -24,3 +24,4 @@
 #[sources: "core/*.eco"]
 #[sources: "std/math/*.eco"]
 #[sources: "std/env/*.eco"]
+#[sources: "std/io/*.eco"]

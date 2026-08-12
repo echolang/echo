@@ -18,6 +18,7 @@
 #include <llvm/IR/Value.h>
 
 #include <cassert>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <stack>
@@ -412,8 +413,23 @@ namespace Compiler::LLVM
         // the compiler's internals in every user's manifest
         std::string entry_module_name = ECO_MAIN_MODULE_NAME;
 
+        // the one file of that module whose root is the program, when a target named one.
+        //
+        // **empty means every file root of the entry module is**, which is what loose sources on the
+        // command line and a manifest declaring no target both get - and what every program compiled
+        // before targets existed got. A target narrows it to one file, so a module holding two entries
+        // produces two programs rather than one concatenation of both in filename order.
+        //
+        // a path rather than an AST::File*, because it is settled from the manifest before the bundle
+        // that would hold the file exists. Absolute, as AST::File::get_path() is
+        std::filesystem::path entry_file;
+
         // the main compilation unit, or nullptr if the bundle has no main module yet
         CmpUnit *main_cmp_unit();
+
+        // is this file the one whose root becomes `main`. **true for every file when no target named
+        // one**, which is what keeps a target-less program the concatenation it has always been
+        bool file_is_entry(const AST::File &file) const;
 
         std::string llvm_err_str();
 

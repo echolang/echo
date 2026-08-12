@@ -1,0 +1,12 @@
+# a `"` string with no `{$` in it still lexes to exactly one token and behaves exactly as it did
+# before interpolation existed - which is what keeps the rest of this corpus intact
+
+--- OUT --->
+Ronon is 3 years old.
+33
+Ronon
+before 3
+3 after
+{$name} stays put
+a { brace and a } brace
+not a hole: {$name}

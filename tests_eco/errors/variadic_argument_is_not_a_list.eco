@@ -1,0 +1,12 @@
+// a C variadic call places each argument from its type *at the call site*, so the tail has to be
+// written there. a value handed over instead could only be expanded through a `va_list` builder
+extern {
+    function snprintf as c_snprintf(
+        ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+}
+
+ptr<uint8> $buf = mem::alloc<uint8>(16);
+string $format = 'x';
+int32 $n = 1;
+
+c_snprintf($buf, 16, $format->c_str(), $n);

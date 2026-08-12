@@ -63,6 +63,11 @@ namespace Compiler
         std::vector<std::string> link;
         std::vector<std::string> defines;
 
+        // the targets named on the command line, and **stated only**: which targets exist is the
+        // manifest's answer, so nothing here has been checked against one. Empty means "whatever the
+        // manifest declares", which for a manifest declaring none is the one program it always was
+        std::vector<std::string> targets;
+
         // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what they
         // mean, asked in run_front_end and in main_clean as it is today
         std::string target_os;
@@ -71,7 +76,8 @@ namespace Compiler
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order
         std::filesystem::path build_dir;
 
-        // `build` only, and the parser has already refused an invocation without it
+        // `build` only, and **empty is legitimate**: a project whose manifest declares targets names its
+        // own binaries. Whether an invocation that gave none needed one is settled where the manifest is
         std::filesystem::path output;
 
         bool no_stdlib = false;

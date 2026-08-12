@@ -289,6 +289,16 @@ AST::ScopeNode & Parser::parse_scope(
             }
         }
 
+        // a chain rooted in a **constant** rather than in a name or a call. one expression parse,
+        // because the root and everything after it is what parse_expr already reads - and then the
+        // same tail the call-rooted branch below uses, which is what makes `stdout->write($t);` and
+        // `first(&$o)->bump(1);` one statement form with two roots
+        else if (starts_constant_chain_statement(payload)) {
+            if (auto *root = parse_expr(payload, nullptr)) {
+                finish_place_statement(payload, scope_node, root);
+            }
+        }
+
         // a call used as a statement. ordered after the vardecl branch above so that
         // `a::b::Foo $foo` still reads as a declaration rather than a qualified call
         else if (starts_call_statement(payload)) {

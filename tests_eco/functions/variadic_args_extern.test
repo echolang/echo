@@ -1,0 +1,23 @@
+# **the IR is the point of this case, and the OUT section is not enough.** measured: with the
+# promotion suppressed the program still printed `<7|hi|1.50>` here, LLVM's AArch64 lowering having
+# promoted the variadic tail itself. that is one backend being generous down a path no C compiler
+# generates, so the `sext`/`fpext` this compiler emits - the same ones Clang emits - are asserted
+# directly rather than inferred from a value that survives either way
+
+--- OUT --->
+11
+<7|hi|1.50>
+5
+plain
+--- IR --->
+# the declaration is variadic, which is the whole of what `variadic_args` buys - the tail parameter
+# is no parameter at all in LLVM
+CHECK: declare i32 @snprintf(ptr, i64, ptr, ...)
+
+# C's default argument promotions, applied by AST::CallResolver and emitted with no second opinion
+# from codegen
+CHECK: fpext float
+CHECK: call i32 (ptr, i64, ptr, ...) @snprintf(ptr
+
+# and an empty list really is no arguments at all
+CHECK: call i32 (ptr, i64, ptr, ...) @snprintf(ptr

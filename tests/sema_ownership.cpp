@@ -254,7 +254,7 @@ TEST_CASE("an owning property is destroyed inside a synthesized deinit", "[owner
 {
     // "a struct that contains an owner is itself an owner, and nothing needs to be declared for that" -
     // but the *reaching inside* happens in a body the type owns rather than at the use site, and that is
-    // and that is the rule: a member access minted in the scope holding the local is the compiler reaching
+    // the rule: a member access minted in the scope holding the local is the compiler reaching
     // into a type from outside it, which `private` refuses against a line nobody wrote
     auto bundle = EchoTests::tests_make_parsed_bundle(
         std::string(k_buffer) +

@@ -1,0 +1,4 @@
+// C's variadic tail is what follows the arguments it can name, so nothing may follow it
+extern {
+    function printf as c_printf(ptr<const uint8> $format, variadic_args $args, int32 $after) : int32;
+}

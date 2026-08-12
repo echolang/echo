@@ -1,5 +1,8 @@
 #include "AST/ASTTypeChecker.h"
 
+#include "AST/ASTArrayLiteral.h"
+#include "AST/ASTVariadic.h"
+
 
 #include "AST/ASTConstFold.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -210,6 +213,7 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     // it has no instance for the return to hand the check to: nothing instantiates a body that is not
     // there
     check_has_implementation(node);
+    check_variadic_args_position(node);
 
     // a generic template's body legitimately mentions its type parameters; it is only
     // meaningful once cloned into a concrete instance, which is checked separately
@@ -351,6 +355,72 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
         visibility_refusal(decl->visibility, decl->declared_in, from, decl->signature_description()),
         decl->declared_in,
         std::optional<TokenReference>(decl->declaration_site_token()));
+}
+
+void TypeChecker::check_variadic_argument(FunctionCallExprNode &node)
+{
+    if (node.decl == nullptr || !has_variadic_tail(*node.decl, _collector.core_types)) {
+        return;
+    }
+
+    const size_t tail = node.decl->args.size() - 1;
+
+    if (node.arguments.size() != node.decl->args.size() || node.arguments[tail] == nullptr) {
+        return;
+    }
+
+    ExprNode *written = node.arguments[tail];
+    ArrayLiteralExprNode *pack = array_literal_of(written);
+
+    // **the list has to be written at the call site, and this is where that is said.** it is not a
+    // restriction for its own sake: a C variadic call places its arguments per the C convention
+    // *there*, so their types have to be known there. a collection built at runtime could only be
+    // expanded through a `va_list` builder, which is not something this compiler can write portably
+    if (pack == nullptr) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_function_name),
+            fmt::format(
+                "'{}' takes a C variadic tail, which has to be written as a list right here - "
+                "'{}(..., [$a, $b])'. A value cannot be handed over instead, because C decides where "
+                "each argument goes from its type at the call site.",
+                node.decl->func_name(), node.decl->func_name()));
+
+        return;
+    }
+
+    for (auto *element : pack->elements) {
+        if (element == nullptr) {
+            continue;
+        }
+
+        // asked of what the author wrote, under the promotion cast AST::CallResolver put on it - or
+        // the message names `int32` for a `bool` the reader can see
+        auto refusal = variadic_argument_refusal(strip_implicit_casts(element)->result_type());
+
+        if (!refusal.has_value()) {
+            continue;
+        }
+
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(location_of_expression(element)),
+            std::move(refusal.value()));
+    }
+}
+
+void TypeChecker::check_variadic_args_position(FunctionDeclNode &node)
+{
+    // **one sweep over every declaration, rather than a check wherever a type gets bound.** a
+    // `variadic_args` can be written as a return type, a parameter that is not the last, a parameter
+    // of an ordinary Echo function - and each of those is a different parser. asking here means the
+    // four sentences are written together and cannot drift
+    auto refusal = variadic_args_refusal(node, _collector.core_types);
+
+    if (!refusal.has_value() || !node.name_token.has_value()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.name_token.value()), std::move(refusal.value()));
 }
 
 void TypeChecker::check_has_implementation(FunctionDeclNode &node)
@@ -1226,6 +1296,14 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     continue;
                 }
 
+                // **the variadic tail is check_variadic_argument's**, and only its. nothing is
+                // implicitly convertible to `variadic_args` and nothing ever will be, so the generic
+                // "expects 'variadic_args' but got 'int32'" is true and says nothing about the one
+                // edit that fixes it - the same split check_receiver_const is taken out of the loop for
+                if (is_variadic_args(params[i]->type(), _collector.core_types)) {
+                    continue;
+                }
+
                 check_call_argument(
                     node.arguments[i],
                     params[i]->type(),
@@ -1239,6 +1317,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_abort_message(node);
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
+        check_variadic_argument(node);
     }
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and

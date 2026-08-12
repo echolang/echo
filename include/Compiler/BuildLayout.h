@@ -116,6 +116,18 @@ namespace Compiler
         std::filesystem::path module_dir(const Parser::ModuleManifest &manifest) const;
         std::filesystem::path module_cc_dir(const Parser::ModuleManifest &manifest) const;
 
+        // a declared target's executable, when `-o` did not say otherwise.
+        //
+        // **beside the module's own artifacts rather than beside its sources**, which is the one thing a
+        // project with several binaries needs decided for it: one `.gitignore` line still covers a
+        // project however many it produces, and `echoc clean` reaches what a build made. Here rather
+        // than joined together at the point of use, because the two string concatenations against the
+        // `-o` path are precisely what this class was created to abolish
+        std::filesystem::path target_binary(
+            const Parser::ModuleManifest &manifest,
+            const std::string &target_name
+        ) const;
+
         // the objects nothing may keep: the entry module's, the merged whole-program one, and a C build
         // whose own store could not be written
         std::filesystem::path scratch_dir() const {

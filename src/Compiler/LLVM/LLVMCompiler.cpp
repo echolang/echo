@@ -48,9 +48,10 @@ LLVMCompiler::~LLVMCompiler()
 {
 }
 
-void LLVMCompiler::set_entry_module(const std::string &module_name)
+void LLVMCompiler::set_entry(const std::string &module_name, const std::filesystem::path &entry_file)
 {
     _ctx.entry_module_name = module_name;
+    _ctx.entry_file = entry_file;
 }
 
 void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std::string> &cached_modules)
@@ -193,6 +194,12 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     {
     Compiler::ScopedPhase entry_phase("entry point");
 
+    // **the narrowing below needs a failure mode**, and this is it: an `entry_file` that matches no file
+    // of the entry module would otherwise leave `main` holding the prologue and a `ret 0`, and the build
+    // would succeed. Counted rather than asked ahead of the walk, so the one answer to "is this file the
+    // program" stays CodegenContext::file_is_entry's
+    size_t entry_files_emitted = 0;
+
     // visit all nodes in the main module
     for (auto &file : main_cmp_unit->ast_module->files()) {
         // a file whose top level stopped the program - a `die` at module scope - leaves the block
@@ -203,7 +210,16 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
             break;
         }
 
+        // **a target names the one file that is the program.** Every other file of the entry module is
+        // shared with the module's other targets, so it contributes what the declaration walk above
+        // already emitted from it and nothing more - which is exactly what a *non-entry module's* files
+        // get, rather than a rule of its own. With no target the answer is yes for all of them
+        if (!_ctx.file_is_entry(file)) {
+            continue;
+        }
+
         _ctx.current_file = &file;
+        entry_files_emitted += 1;
 
         // **`main`'s body is the concatenation of every file root of the entry module**, so a location
         // from the second file would otherwise sit inside a subprogram whose file is the first - which
@@ -214,6 +230,12 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         file.root->accept(*this);
 
         _debug_info.pop_file_scope();
+    }
+
+    if (entry_files_emitted == 0 && !_ctx.entry_file.empty()) {
+        throw Compiler::InternalCompilerException(fmt::format(
+            "the entry file '{}' is not one of module '{}'s files, so the program has no body",
+            _ctx.entry_file.string(), _ctx.entry_module_name), nullptr);
     }
 
     // terminate the function, unless the program already stopped itself
@@ -726,6 +748,15 @@ void LLVMCompiler::visit_foreach(AST::ForeachNode &node)
 {
     throw _ctx.error("a 'foreach' survived the monomorphizer's fixpoint - it should have been lowered "
         "into an iterator and a while " + _ctx.function_context());
+}
+
+// the same bargain for the other lowered-away literal shape: AST::InterpolationLowering replaces every
+// interpolation with the `str::from` calls and the concatenation it stands for, so there is no such
+// thing to emit here and answering with the chunks alone would silently print the holes away
+void LLVMCompiler::visit_string_interpolation(AST::StringInterpolationExprNode &node)
+{
+    throw _ctx.error("a string interpolation survived the monomorphizer's fixpoint - it should have "
+        "been lowered into a concatenation " + _ctx.function_context());
 }
 
 // **both unreachable in practice, and written for that reason.** AST::PointerAdjuster throws for either

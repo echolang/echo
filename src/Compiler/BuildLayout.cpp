@@ -302,6 +302,18 @@ std::filesystem::path Compiler::BuildLayout::module_cc_dir(const Parser::ModuleM
     return module_dir(manifest) / "cc";
 }
 
+std::filesystem::path Compiler::BuildLayout::target_binary(
+    const Parser::ModuleManifest &manifest,
+    const std::string &target_name
+) const
+{
+    // the module directory itself and not a `bin` under it: the manifest reader has already refused a
+    // target name holding a path separator, so the name is one component and the directory stays flat -
+    // and a build's output being one `ls` away from the objects it was made of is worth more than the
+    // tidiness of a level nobody asked for
+    return module_dir(manifest) / target_name;
+}
+
 std::filesystem::path Compiler::BuildLayout::scratch_cc_dir() const
 {
     return _scratch / "cc";

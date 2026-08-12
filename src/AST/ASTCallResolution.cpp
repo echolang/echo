@@ -1,5 +1,7 @@
 #include "AST/ASTCallResolution.h"
 
+#include "AST/ASTVariadic.h"
+
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCollector.h"
@@ -164,7 +166,7 @@ namespace AST
         // against the literal would fit the wrong node - it is `t_addressless`, and a borrow parameter
         // would get a cast where an address belongs. So the call waits a round, exactly as an
         // undetermined argument does
-        bool bind_destination_typed_arguments(FunctionCallExprNode &call)
+        bool bind_destination_typed_arguments(FunctionCallExprNode &call, const CoreTypes &core)
         {
             bool waiting_on_a_literal = false;
 
@@ -177,7 +179,7 @@ namespace AST
 
                 bind_null_to(call.arguments[i], expected);
 
-                if (bind_array_literal_to(call.arguments[i], expected)) {
+                if (bind_array_literal_to(call.arguments[i], expected, core)) {
                     waiting_on_a_literal = true;
                 }
             }
@@ -189,11 +191,25 @@ namespace AST
         // than premature
         bool arguments_are_determined(const FunctionCallExprNode &call)
         {
-            for (const auto *arg : call.arguments) {
+            for (auto *arg : call.arguments) {
                 // a hole left by a failed parse cannot be waited on - there is nothing coming that
                 // would give it a type, and the diagnostic for it was already reported where it was
                 // read
                 if (arg == nullptr) {
+                    continue;
+                }
+
+                // **a variadic pack is answered by its elements**, not by itself. an array literal's
+                // result_type() is unknown by design and stays unknown here - nothing expands a pack
+                // into a declaration the way a collection literal is expanded - so asking the node
+                // would leave every call to a C variadic function pending forever
+                if (auto *pack = variadic_pack_of(arg)) {
+                    for (const auto *element : pack->elements) {
+                        if (element != nullptr && is_undetermined_type(element->result_type())) {
+                            return false;
+                        }
+                    }
+
                     continue;
                 }
 
@@ -446,6 +462,36 @@ namespace AST
             const ValueType expected = call.decl->args[i]->type();
             ExprNode *argument = call.arguments[i];
 
+            // **a variadic tail is coerced element by element, and to nothing the declaration said.**
+            // there is no parameter on the other side of one, so what each element is coerced to is
+            // C's own answer for an argument that has none - AST::variadic_promotion_of. done here
+            // because this is the only thing that coerces arguments, which is what keeps codegen from
+            // carrying a second, differing copy of the promotion table
+            // and a tail position that did *not* receive a list is left exactly as written. there is
+            // no conversion to a `variadic_args` and never will be - AST::TypeChecker reports the
+            // shape, and a cast minted here would bury that under "cannot implicitly convert"
+            if (is_variadic_args(expected, _collector.core_types)
+                && array_literal_of(argument) == nullptr) {
+                continue;
+            }
+
+            if (auto *pack = variadic_pack_of(argument)) {
+                for (auto *&element : pack->elements) {
+                    if (element == nullptr) {
+                        continue;
+                    }
+
+                    const ValueType from = element->result_type();
+                    const ValueType promoted = variadic_promotion_of(from);
+
+                    if (!(from == promoted)) {
+                        element = &nodes.emplace_back<TypeCastNode>(promoted, element, true);
+                    }
+                }
+
+                continue;
+            }
+
             // the one fit rule, asked once and handed to both wrappers below rather than re-asked by
             // each - it is the same question about the same pair, and asking it twice let the two
             // answers differ in principle while costing a full member-function walk in practice
@@ -554,7 +600,7 @@ namespace AST
         // an array literal argument is typed here too, and unlike a null it also makes the call wait:
         // what finally reaches the parameter is the declaration AST::OperatorRewriter hoists, not the
         // literal itself, and that rewrite happens at the top of the next round
-        if (!bind_destination_typed_arguments(call)) {
+        if (!bind_destination_typed_arguments(call, _collector.core_types)) {
             return Result::t_pending;
         }
 

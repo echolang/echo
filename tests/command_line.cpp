@@ -201,7 +201,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // free text: a value nothing in this subsystem is entitled to judge. an explicit list, so adding a
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
-        Opt::t_output, Opt::t_module, Opt::t_build_dir, Opt::t_link, Opt::t_define,
+        Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_link, Opt::t_define,
         Opt::t_target_os, Opt::t_target_arch, Opt::t_target_cpu, Opt::t_target_features
     };
 
@@ -477,11 +477,14 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({ "build", "-o", "--silent", "a.eco" })
         == "'-o, --output' needs a value, and '--silent' is an option.");
 
-    // sources are optional - a build with none is the manifest this invocation points at - so the
-    // required option is the only thing missing here
-    REQUIRE(refusal({ "build", "a.eco" }) == "'build' needs '-o, --output <file>'.");
+    // **a missing '-o' is not a parse refusal any more, and that is the assertion.** It was, off the
+    // row's `required_by`, for as long as argv held the whole answer - but a manifest declaring targets
+    // names its own binaries, so whether one was needed is a question about the project. The parser
+    // accepts the words and resolve_programs refuses the invocation, where the manifest is known
+    REQUIRE(refusal({ "build", "a.eco" }) == "<accepted>");
     REQUIRE(refusal({ "build", "-o", "out", "a.eco" }) == "<accepted>");
     REQUIRE(refusal({ "build", "-o", "out" }) == "<accepted>");
+    REQUIRE(refusal({ "build", "--target", "clock" }) == "<accepted>");
 
     REQUIRE(refusal({ "clean", "app.eco" })
         == "'clean' takes no source files. It parses none and runs no pass.");
@@ -610,7 +613,11 @@ TEST_CASE("a page shows every option its subcommand accepts and no other", "[cli
         const std::string text = page(info.id, TerminalCapabilities::plain());
 
         for (const CommandLineOption &option : Compiler::command_line_options()) {
-            const std::string heading = "  " + Compiler::option_flag_names(option);
+            // **the trailing space is load-bearing**: one option's spelling can be a prefix of
+            // another's, and a page carrying `--target-os` would otherwise read as one carrying
+            // `--target`. A heading is always followed by one - by its metavar, or by the padding
+            // before its summary - so this is the terminator rather than a hopeful guess
+            const std::string heading = "  " + Compiler::option_flag_names(option) + " ";
             const bool accepted = (option.subcommands & info.bit) != 0;
 
             INFO(info.name << " / --" << option.name);
@@ -770,12 +777,15 @@ TEST_CASE("the usage line is built from the table", "[cli]")
     std::ostringstream out;
     CommandLineHelp(out, TerminalCapabilities::plain()).render_usage(Subcommand::t_none);
 
+    // **`build` carries no required option any more**, and this line reading the table is how that shows:
+    // `-o` stopped being answerable from argv alone the moment a manifest could declare its own targets
+    // and name its own binaries, so the row's `required_by` went to zero and the usage line followed
     REQUIRE(out.str() ==
         "Usage\n"
         "  echoc <command> [options] [sources...]\n"
         "\n"
         "  echoc run [options] <sources...> [-- <program arguments>]\n"
-        "  echoc build [options] -o <file> <sources...>\n"
+        "  echoc build [options] <sources...>\n"
         "  echoc clean [options]\n");
 }
 
@@ -789,7 +799,7 @@ TEST_CASE("a refusal is the sentence, the usage and where to read more", "[cli]"
         "error: 'build' needs '-o, --output <file>'.\n"
         "\n"
         "Usage\n"
-        "  echoc build [options] -o <file> <sources...>\n"
+        "  echoc build [options] <sources...>\n"
         "\n"
         "Run 'echoc build --help' for what this command accepts.\n");
 }

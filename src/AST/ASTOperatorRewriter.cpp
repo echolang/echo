@@ -10,6 +10,7 @@
 #include "AST/ASTNullability.h"
 #include "AST/GuardNode.h"
 #include "AST/ASTOperatorSemantics.h"
+#include "AST/ASTVariadic.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
@@ -738,6 +739,14 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
     //
     // the hoist answers null while it is waiting, and the literal is then left exactly as written -
     // the three-state shape expansion_decided exists for. only finalize() turns waiting into a refusal
+    // **a variadic pack is the one bracket that is not a collection**, so it is left alone by the
+    // question rather than by the state: `expansion_decided` says "the rewriter is finished with this
+    // one", which a pack also happens to be, and resting the C variadic path on that coincidence puts
+    // it one re-reading of a three-state flag away from being expanded into an `array<E>` and appends
+    if (variadic_pack_of(expr) != nullptr) {
+        return expr;
+    }
+
     if (auto *literal = array_literal_of(expr)) {
         if (literal->expansion_decided) {
             return expr;

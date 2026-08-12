@@ -79,6 +79,16 @@ namespace AST
         // `interface contract::keyed<K>` - the orthogonal capability that makes `$k => $v` spellable. an
         // iterator that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
         t_keyed,
+
+        // `struct variadic_args` - the C variadic bridge, and a marker rather than a type with a
+        // shape: it is legal only as the *last parameter of an extern declaration*, and the only
+        // thing that may arrive at one is a list written at the call site.
+        //
+        // bound for `t_array`'s reason and with less scope than any of the others - the compiler
+        // needs to **recognise** one to know that `snprintf(...)`'s LLVM type is variadic and that
+        // the bracket at its last argument is a pack rather than an array. it knows no method and no
+        // property of it, and there is nothing to know: the declaration has no body
+        t_variadic_args,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that

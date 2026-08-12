@@ -107,6 +107,15 @@ namespace EchoTests
         std::vector<std::string> environment;
         std::vector<std::string> arguments;
 
+        // the lines to feed the program on standard input, **one word per line**. it exists for
+        // `std::io::read_line`, which can otherwise only be tested against whatever the terminal
+        // running the suite happens to be attached to - which is a hang under CI rather than an
+        // assertion.
+        //
+        // whitespace separated for `args`' reason, and with `args`' limit: a line cannot contain a
+        // space. no loss for a corpus fixture, and it is what keeps this out of shell quoting
+        std::vector<std::string> stdin_lines;
+
         // the OUT section, mandatory. may be empty: a program that prints nothing is a legitimate
         // case, "output not asserted" is not
         std::string expected_output;
@@ -129,6 +138,14 @@ namespace EchoTests
         //
         // trailing space when non-empty, the convention compiler_flags already follows
         std::string environment_prefix() const;
+
+        // `printf 'alpha\nbeta\n' | ` to prefix a command with, empty when the case feeds nothing.
+        //
+        // a pipe rather than a temporary file for `environment_prefix`'s reason: every spawn here goes
+        // through `popen`, so one spelling reaches a JIT'd program and a linked binary by the same
+        // route. it goes **ahead of** the environment prefix, so the assignments still belong to the
+        // program and not to the `printf`
+        std::string stdin_prefix() const;
 
         // ` alpha beta` to append to a program invocation, empty when the case passes none.
         //

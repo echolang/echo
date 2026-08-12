@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] variadic_argument_is_a_struct.eco:18:41
+
+  'Point' is a struct, and how C's variadic convention unpacks one is platform specific. Pass the fields it wants, or a pointer to it.
+
+  17 | 
+  18 | c_snprintf($buf, 16, $format->c_str(), [$p, $format]);
+     :                                         ^^
+  19 | 
+
+[error] variadic_argument_is_a_struct.eco:18:45
+
+  'string' is a struct, and how C's variadic convention unpacks one is platform specific. Pass the fields it wants, or a pointer to it.
+
+  17 | 
+  18 | c_snprintf($buf, 16, $format->c_str(), [$p, $format]);
+     :                                             ^^^^^^^
+  19 | 
+
+2 errors, nothing was compiled.

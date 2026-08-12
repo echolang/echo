@@ -1,14 +1,21 @@
 /*
  * A terminal analog clock, as an ordinary Echo application.
  *
- * There is nothing here beyond the four attributes a manifest has: the module's name, its version,
- * and the files it is made of. The stdlib is not named as a dependency - `echoc` adds it as the first
- * root of every build, so writing `#[depends: "stdlib"]` would be wrong rather than redundant.
+ * The module's name, its version, the files it is made of, and the one program it produces. The stdlib is
+ * not named as a dependency - `echoc` adds it as the first root of every build, so writing
+ * `#[depends: "stdlib"]` would be wrong rather than redundant.
  *
  * `#[sources: "src/*.eco"]` matches within `src/` only. Adding a file there needs no edit here.
+ *
+ * `#[target:]` says which of those files is the program: `main.eco`'s file root becomes `main`, and every
+ * other file contributes its declarations and nothing else. A second target would be another line naming
+ * another entry - `echoc build` builds all of them, `echoc build --target clock` builds this one. The
+ * binary goes to `ecobuild/clock`, beside the objects, where `echoc clean` can reach it.
  */
 
 #[module: "analog_clock"]
 #[version: "0.1.0"]
 
 #[sources: "src/*.eco"]
+
+#[target: exe { name: "clock", entry: "src/main.eco" }]

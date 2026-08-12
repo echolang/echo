@@ -89,7 +89,8 @@ namespace AST
                    parent_type == NodeType::n_literal_float ||
                    parent_type == NodeType::n_literal_int ||
                    parent_type == NodeType::n_literal_bool ||
-                   parent_type == NodeType::n_literal_string;
+                   parent_type == NodeType::n_literal_string ||
+                   parent_type == NodeType::n_string_interpolation;
             // **n_const_if is deliberately absent**, beside n_scope, n_if_statement and n_foreach: a
             // `const if` is a statement. its sibling n_expr_const *is* here, because `const(...)` is an
             // expression - the two spellings share a keyword and nothing else

@@ -1,0 +1,7 @@
+modules: modules/target_duplicate_name
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:5: 'tool' is declared twice - two targets of one module cannot share a name, because the name is the binary.

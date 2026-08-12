@@ -1,0 +1,20 @@
+# join(split(t, s), s) == t is the only rule worth promising about splitting, and the third line
+# is what pins it
+
+--- OUT --->
+3
+a-b-c
+,a,
+1
+1
+1
+a|b|c
+0
+|hi|
+|hi  |
+|  hi|
+||
+ababab
+0
+|0007|
+|7...|

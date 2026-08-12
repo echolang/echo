@@ -1,0 +1,41 @@
+/**
+ * The bridge to C's variadic functions.
+ *
+ * C has functions whose argument list does not end - `printf`, `snprintf`, `open`, `ioctl`. Echo has
+ * no variadic functions of its own and is not getting any: `AST::match_function` matches arity
+ * exactly, and a call site whose arity you have to look up in a declaration is worse than one you can
+ * read. So the bridge is spelled as a **type** rather than as a `...`:
+ *
+ * ```
+ * extern {
+ *     function snprintf as c_snprintf(ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+ * }
+ *
+ * c_snprintf($buf, $size, '%.*f'->c_str(), [$precision, $value]);
+ * ```
+ *
+ * Four parameters, four arguments. The brackets are what the C side receives as its variadic tail,
+ * and the arity rule never bends.
+ *
+ * **The argument has to be written as a list, right there.** That is not fussiness: a C variadic call
+ * places its arguments per the C convention at the call site, so their types have to be known there.
+ * A collection built at runtime could not be expanded without a `va_list` builder, which is not
+ * something a portable compiler can write.
+ *
+ * What may be in the list: primitives and pointers. Each one is promoted the way C promotes an
+ * argument that has no parameter to match - a `float` becomes a `float64`, anything narrower than 32
+ * bits becomes an `int32` or a `uint32`. The compiler does that rather than each declaration, which
+ * is also where a C compiler does it.
+ *
+ * What may not: a struct, a class, an interface or a callable. Pass a `string`'s `->c_str()` rather
+ * than the `string`.
+ *
+ * **This type has no values.** It is never constructed, never stored, never returned, and it is legal
+ * in exactly one position - the last parameter of an `extern` declaration. Everywhere else is a
+ * compile error naming the position.
+ */
+
+#[core: variadic_args]
+public struct variadic_args
+{
+}

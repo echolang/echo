@@ -169,6 +169,21 @@ bool Parser::starts_call_statement(Parser::Payload &payload)
         || cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
 }
 
+bool Parser::starts_constant_chain_statement(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    // the same namespace walk starts_call_statement does, so `std::io::stdout->` is recognised as
+    // readily as a bare `stdout->`
+    const size_t offset = peek_past_namespace_prefix(payload);
+
+    if (!cursor.peek_is_type(offset, Token::Type::t_identifier)) {
+        return false;
+    }
+
+    return cursor.peek_is_type(offset + 1, Token::Type::t_accessorlr);
+}
+
 AST::IndirectCallExprNode *Parser::parse_indirect_call(
     Parser::Payload &payload,
     AST::ExprNode *callee,
@@ -407,7 +422,15 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     // spelled as the one taxonomy rather than as two of its three predicates negated: place,
     // materializable and addressless are exhaustive, so "neither of the first two" *is* the third,
     // and saying so keeps this readable against AST::storage_of when a class is added
-    if (AST::storage_of(*self_arg) == AST::StorageClass::t_addressless) {
+    //
+    // **a constant reference is the one thing this may not ask about**, and that is a statement about
+    // *when* rather than about what: AST::ConstantExpander replaces it with a clone of the constant's
+    // expression before anything else in the compiler runs, and whatever that expression is answers
+    // for it. this check is the only storage question asked while one is still in the tree, so it is
+    // the only place that has to say so - `std::io::stdout->write($t)` is `stream(1)->write($t)` by
+    // the time storage means anything, which is an ordinary temporary receiver
+    if (self_arg->get_node_type() != AST::NodeType::n_expr_const_ref
+        && AST::storage_of(*self_arg) == AST::StorageClass::t_addressless) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(member_token),
             fmt::format(

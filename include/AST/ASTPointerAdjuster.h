@@ -64,6 +64,7 @@ namespace AST
         void visit_const_if(ConstIfNode &node) override;
         void visit_const_expr(ConstExprNode &node) override;
         void visit_foreach(ForeachNode &node) override;
+        void visit_string_interpolation(StringInterpolationExprNode &node) override;
 
     protected:
         ExprNode *rewrite_value_edge(ExprNode *expr) override;

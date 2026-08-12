@@ -1,0 +1,55 @@
+/**
+ * Writing text out.
+ *
+ * Four one-line functions over `std::io::stdout` and `std::io::stderr`. They exist because
+ * `print($text)` is what a reader reaches for, and because a function can be passed and wrapped
+ * where the `echo` statement cannot.
+ *
+ * **`echo` is still a statement and is staying one.** It is the only output a program has with
+ * `--no-stdlib`, where there is no `string` type at all - so it cannot be sugar for a call to any
+ * of these. It also renders differently on purpose: `echo 3.5` prints `3.500000` and
+ * `print("{$x}")` prints `3.5`, because one is pinned by several hundred golden files and the
+ * other is text meant to be read inside a sentence.
+ *
+ * Everything here takes a `string`, and string interpolation is how a value becomes one:
+ *
+ *     std::io::println("{$name} rolled {$total} on {$dice} dice.");
+ */
+
+namespace std::io;
+
+/**
+ * Writes `$text` to standard output, with no newline.
+ */
+#[inline]
+public function print(const string& $text) : void
+{
+    stdout->write($text);
+}
+
+/**
+ * Writes `$text` to standard output, followed by a newline.
+ */
+#[inline]
+public function println(const string& $text) : void
+{
+    stdout->write_line($text);
+}
+
+/**
+ * Writes `$text` to standard error, with no newline.
+ */
+#[inline]
+public function eprint(const string& $text) : void
+{
+    stderr->write($text);
+}
+
+/**
+ * Writes `$text` to standard error, followed by a newline.
+ */
+#[inline]
+public function eprintln(const string& $text) : void
+{
+    stderr->write_line($text);
+}

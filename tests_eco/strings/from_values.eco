@@ -1,0 +1,30 @@
+// `str::from` is an overload set covering every primitive and both text types
+echo str::from(0);
+echo str::from(42);
+echo str::from(-42);
+
+// the boundary values, which is where accumulating negative pays for itself: int64's minimum has no
+// positive counterpart, so a digit loop that negates first cannot spell it
+int64 $min = -9223372036854775808;
+int64 $max = 9223372036854775807;
+echo str::from($min);
+echo str::from($max);
+
+uint64 $umax = 18446744073709551615;
+echo str::from($umax);
+
+echo str::from(true);
+echo str::from(false);
+
+// a `string` renders as itself - the identity overload interpolation leans on, since it calls
+// `str::from` for every hole with no arm for "this one is already text"
+echo str::from('already text');
+
+float $f = 1.5f;
+float64 $d = 1.5;
+echo str::from($f);
+echo str::from($d);
+
+// the default is `%g` for a float and `%.15g` for a double, which is what `dprint` uses - and
+// deliberately not what `echo` prints, whose `%f` is pinned by this corpus
+echo $d;

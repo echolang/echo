@@ -1,0 +1,2 @@
+// the manifest named by this case tags a target with a kind that is not one
+echo 1;

@@ -1,0 +1,5 @@
+// the kind is the *tag*, and the vocabulary is closed - which is what lets `lib` and `test` be added
+// later without the common case growing a word
+#[module: "badkind"]
+#[sources: "src/*.eco"]
+#[target: binary { name: "tool", entry: "src/main.eco" }]

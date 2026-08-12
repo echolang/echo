@@ -988,6 +988,16 @@ namespace AST
         // generic bodies - a template's literal is therefore always still false when it is cloned
         bool expansion_decided = false;
 
+        // **is this list a C variadic tail rather than a collection?** set by AST::bind_array_literal_to
+        // when the parameter it arrived at is `#[core: variadic_args]`, and by nothing else - so it is
+        // a property of the *position*, exactly as `bound_type` is.
+        //
+        // it changes three answers and no others: the elements keep their own types instead of being
+        // unified into one `E`, AST::OperatorRewriter must not expand this into an `array<E>()` and a
+        // run of appends, and codegen writes the elements out after the fixed arguments of a variadic
+        // call. everything else about the node stays what it was
+        bool is_variadic_pack = false;
+
         ArrayLiteralExprNode(std::vector<ExprNode *> elements, TokenReference token_bracket) :
             elements(std::move(elements)), token_bracket(token_bracket)
         {

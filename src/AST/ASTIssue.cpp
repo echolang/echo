@@ -185,6 +185,21 @@ std::vector<AST::IssueNote> AST::Issue::UnsafePromotion::notes() const
         "assert that the borrow is the only one" } };
 }
 
+ISSUE_MESSAGE_FNC(TopLevelCodeOutsideEntry)
+{
+    return fmt::format(
+        "'{}' declares targets, so '{}' is shared by all of them and the code at its top level would "
+        "never run. Only a target's entry file becomes a program.",
+        module_name, file_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::TopLevelCodeOutsideEntry::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "move it into the entry file of the target it belongs to, or into a function this one calls. "
+        "Declarations are what a shared file is for, and every target already sees all of them" } };
+}
+
 ISSUE_MESSAGE_FNC(PrivateMember)
 {
     return fmt::format(

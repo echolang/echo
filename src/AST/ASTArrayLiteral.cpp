@@ -5,6 +5,7 @@
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/ASTVariadic.h"
 #include "AST/ExprNode.h"
 
 #include <fmt/core.h>
@@ -34,11 +35,26 @@ AST::ArrayLiteralExprNode *AST::array_literal_of(AST::ExprNode *expr)
     return static_cast<ArrayLiteralExprNode *>(expr);
 }
 
-bool AST::bind_array_literal_to(AST::ExprNode *expr, const AST::ValueType &destination)
+bool AST::bind_array_literal_to(
+    AST::ExprNode *expr,
+    const AST::ValueType &destination,
+    const AST::CoreTypes &core
+)
 {
     AST::ArrayLiteralExprNode *literal = array_literal_of(expr);
 
     if (literal == nullptr) {
+        return false;
+    }
+
+    // **the variadic tail, ahead of every other reading of a bracket.** nothing is built here: the
+    // elements are the call's own trailing arguments, so there is no `E` to unify them into and
+    // nothing for AST::OperatorRewriter to expand. answering false is the point - the call is not
+    // waiting on a literal, it already has everything it needs
+    if (AST::is_variadic_args(destination, core)) {
+        literal->is_variadic_pack = true;
+        literal->expansion_decided = true;
+        literal->bound_type = destination;
         return false;
     }
 

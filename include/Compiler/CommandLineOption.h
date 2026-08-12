@@ -42,6 +42,7 @@ namespace Compiler
     {
         t_output,
         t_module,
+        t_target,
         t_build_dir,
         t_link,
         t_debug,
@@ -197,9 +198,12 @@ namespace Compiler
         // which subcommands accept it at all
         unsigned int subcommands;
 
-        // which subcommands refuse an invocation that omits it. `build`'s `-o`, and nothing else today. in
-        // the table rather than as a hand-written check in main_build, so the usage line and the refusal
-        // cannot disagree about whether it is optional
+        // which subcommands refuse an invocation that omits it. **zero on every row today**: `build`'s
+        // `-o` was the one that had it, and the question stopped being answerable from argv alone the
+        // moment a manifest could name its own binaries - see that row, and resolve_programs, which
+        // refuses it where the manifest is known. Kept because it is the table's answer to "is this
+        // option optional" and the usage line reads it, so a future required option is a row and not a
+        // hand-written check in a subcommand
         unsigned int required_by;
 
         ExclusionGroup exclusion;

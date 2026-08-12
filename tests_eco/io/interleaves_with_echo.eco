@@ -1,0 +1,12 @@
+// **the flush contract.** `echo` writes scalars through `printf`, which is buffered, and text
+// through `write(2)`, which is not. every `std::io` write flushes stdio first, so the two paths stay
+// in order - without it this whole case reorders the moment output is a pipe rather than a terminal,
+// which is exactly how the corpus runs it
+echo 1;
+std::io::println('two');
+echo 3;
+std::io::println('four');
+echo 'five';
+std::io::println('six');
+echo 7.5;
+std::io::println('eight');

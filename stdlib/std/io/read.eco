@@ -1,0 +1,25 @@
+/**
+ * Reading text in.
+ */
+
+namespace std::io;
+
+/**
+ * The next line of standard input, without its newline - or `null` at end of input.
+ *
+ * `std::io::stdin->read_line()` written the short way, and the same bargain: one `read(2)` per
+ * byte, and the `null` means "there was nothing at all" rather than "the line was empty". See
+ * `std::io::stream::read_line` for why it is unbuffered.
+ *
+ *     guard string $line = std::io::read_line() else {
+ *         std::io::println('nothing on stdin');
+ *         return 0;
+ *     }
+ *
+ *     std::io::println("read: {$line}");
+ */
+#[inline]
+public function read_line() : string?
+{
+    return stdin->read_line();
+}

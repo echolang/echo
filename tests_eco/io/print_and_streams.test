@@ -1,0 +1,10 @@
+# a stream is a value, which is what makes `std::io::stdout` a constant rather than a function -
+# it can be copied into a variable and handed on, exactly as the ticket asked for
+
+--- OUT --->
+written and a line
+through a copy
+print then println
+to stderr
+and again
+17 on 4 dice

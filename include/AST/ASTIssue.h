@@ -230,6 +230,14 @@ namespace AST
         MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type,
             std::vector<IssueNote> notes() const override;);
 
+        // top-level code in a file that is no target's entry. its own kind because it is the diagnostic
+        // that makes `#[target:]` mean something: a module declaring targets shares every non-entry file
+        // between all of them, so code at the root of one would be checked and then emitted into no
+        // program at all. That is what a non-entry *module's* file root has always silently got, and a
+        // manifest naming its entries is the one place there is enough said to refuse it instead
+        MAKE_ISSUE_DEF2(TopLevelCodeOutsideEntry, IssueSeverity::Error, const std::string, module_name, const std::string, file_name,
+            std::vector<IssueNote> notes() const override;);
+
         // a `private` property reached from outside the type that declared it. its own kind because it
         // is the diagnostic that makes an invariant enforceable rather than merely documented - every
         // aliasing conclusion `mem::buffer<T>` licenses rests on this refusal existing

@@ -1,0 +1,36 @@
+// `n` separators give `n + 1` parts, which is the rule that makes join(split(t, s), s) == t
+array<string> $parts = str::split('a,b,c', ',');
+echo $parts->count();
+echo str::join($parts, '-');
+
+echo str::join(str::split(',a,', ','), ',');
+echo str::split('', ',')->count();
+echo str::split('nosep', ',')->count();
+
+// an empty separator would match everywhere and nowhere, so it answers the text unsplit
+echo str::split('abc', '')->count();
+
+// a multi-byte separator
+echo str::join(str::split('a::b::c', '::'), '|');
+
+echo str::join(array<string>(), '-')->size();
+
+// bound first, because a hole opens on `{$` and a free call does not start with one
+string $trimmed = str::trim("  \t hi \n ");
+string $start = str::trim_start('  hi  ');
+string $end = str::trim_end('  hi  ');
+string $blank = str::trim('     ');
+
+echo "|{$trimmed}|";
+echo "|{$start}|";
+echo "|{$end}|";
+echo "|{$blank}|";
+
+echo str::repeat('ab', 3);
+echo str::repeat('ab', 0)->size();
+// the fill is a byte: 48 is '0' and 46 is '.'
+string $padded_start = str::pad_start('7', 4, 48);
+string $padded_end = str::pad_end('7', 4, 46);
+
+echo "|{$padded_start}|";
+echo "|{$padded_end}|";

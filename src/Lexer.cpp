@@ -81,23 +81,60 @@ void sort_functiontree(LexerFunction::TreeNode &node)
     });
 }
 
-void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, LexerCursor &cursor)
+LexerEngine::LexerEngine(FunctionList &functions)
 {
     // we build a tree like structure based on the "must_match" string of each function
     // we simply take the first N chars of the must match
     // im sure there is a better way to do this but works for now
-    auto fnc_tree_root = std::make_unique<LexerFunction::TreeNode>("root");
+    _root = std::make_unique<LexerFunction::TreeNode>("root");
 
-    size_t prefix_limit = 3;
     for (auto &func : functions) {
         auto machter_stringns = func->must_match();
         for (auto &match : machter_stringns) {
-            insert_function_into_tree(*fnc_tree_root.get(), match, func.get(), prefix_limit);
+            insert_function_into_tree(*_root.get(), match, func.get(), MAX_PREFIX_LENGTH);
         }
     }
 
-    sort_functiontree(*fnc_tree_root.get());
+    sort_functiontree(*_root.get());
 
+    // **after the trie, and that order is the whole reason this is a call rather than a
+    // constructor argument**: the function being handed the engine is one of the functions the
+    // trie was just built out of
+    for (auto &func : functions) {
+        func->bind_engine(*this);
+    }
+}
+
+bool LexerEngine::step(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    auto node = _root.get();
+    auto peek_offset = 0;
+    while (!cursor.is_eof() && node->children.find(cursor.peek(peek_offset)) != node->children.end()) {
+        node = node->children[cursor.peek(peek_offset)].get();
+        peek_offset++;
+    }
+
+    // the trie's own functions first, then the root's - and **the root's exactly once**, where a leading
+    // "this node has none, so try the root" block ran them a second time for every character the trie
+    // walked to a node that declares nothing
+    for (auto &func : node->functions) {
+        if (func->parse(tokens, cursor)) {
+            return true;
+        }
+    }
+
+    // if still nothing matched retry with the root functions
+    for (auto &func : _root->functions) {
+        if (func->parse(tokens, cursor)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void LexerEngine::run(TokenCollection &tokens, LexerCursor &cursor) const
+{
     while (!cursor.is_eof()) {
         // formatting aka whitespace, tabs, newlines
         if (cursor.is_formatting()) {
@@ -107,44 +144,8 @@ void Lexer::execute_functions(FunctionList &functions, TokenCollection &tokens, 
             }
         }
 
-        auto node = fnc_tree_root.get();
-        auto peek_offset = 0;
-        while (!cursor.is_eof() && node->children.find(cursor.peek(peek_offset)) != node->children.end()) {
-            node = node->children[cursor.peek(peek_offset)].get();
-            peek_offset++;
-        }
-
-        bool matched = false;
-
-        if (node->functions.empty()) {
-            // run root functions
-            for (auto &func : fnc_tree_root->functions) {
-                if (func->parse(tokens, cursor)) {
-                    matched = true;
-                    break;
-                }
-            }
-        }
-
-        for (auto &func : node->functions) {
-            if (func->parse(tokens, cursor)) {
-                matched = true;
-                break;
-            }
-        }
-
-        // if still nothing matched retry with the root functions
-        if (!matched) {
-            for (auto &func : fnc_tree_root->functions) {
-                if (func->parse(tokens, cursor)) {
-                    matched = true;
-                    break;
-                }
-            }
-        }
-
-        if (!matched) {
-            throw UnknownTokenException("Unexpected", cursor.line, cursor.char_offset );
+        if (!step(tokens, cursor)) {
+            throw Lexer::UnknownTokenException("Unexpected", cursor.line, cursor.char_offset);
         }
     }
 }
@@ -282,7 +283,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     lx_functions.push_back(std::make_unique<LexerFunction::Identifier>());
     lx_functions.push_back(std::make_unique<LexerFunction::ReferenceFrom>());
 
-    execute_functions(lx_functions, tokens, cursor);
+    LexerEngine(lx_functions).run(tokens, cursor);
 }
 
 void LexerCursor::reset()
@@ -458,17 +459,36 @@ const std::vector<std::string> LexerFunction::StringLiteral::must_match() const
     return { "\"", "'" };
 }
 
-bool LexerFunction::StringLiteral::parse(TokenCollection &tokens, LexerCursor &cursor) const
+bool LexerFunction::StringLiteral::holds_a_hole(const LexerCursor &cursor, char quote) const
 {
-    if (!cursor.is_quote()) {
-        return false;
+    // from the opening quote, under the same escape rule the verbatim scan uses - so `"a\"{$x}"`
+    // finds the hole and `"a" . "b"` does not go looking past the first literal's end
+    auto it = cursor.current() + 1;
+    const auto end = cursor.end();
+
+    while (it != end && *it != quote) {
+        if (*it == '\\') {
+            it++;
+            if (it == end) {
+                break;
+            }
+        }
+        else if (*it == '{' && (it + 1) != end && *(it + 1) == '$') {
+            return true;
+        }
+
+        it++;
     }
 
+    return false;
+}
+
+void LexerFunction::StringLiteral::lex_verbatim(TokenCollection &tokens, LexerCursor &cursor, char quote) const
+{
     const auto string_start_offset = cursor.char_offset;
     const auto string_start_line = cursor.line;
 
     const auto start = cursor.current();
-    const auto quote = cursor.peek();
     cursor.skip();
 
     while (true) {
@@ -490,6 +510,150 @@ bool LexerFunction::StringLiteral::parse(TokenCollection &tokens, LexerCursor &c
     }
 
     tokens.push(std::string(start, cursor.current()), Token::Type::t_string_literal, string_start_line, string_start_offset);
+}
+
+void LexerFunction::StringLiteral::lex_hole(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    const auto hole_start = cursor.current();
+    const auto hole_line = cursor.line;
+    const auto hole_offset = cursor.char_offset;
+
+    // braces the hole's own expression opened, so the `}` that closes the hole is the one found at
+    // depth zero. counted off the *tokens* rather than the characters, which is what keeps a brace
+    // inside a nested string literal from being counted at all
+    size_t depth = 0;
+
+    while (true) {
+        cursor.skip_formatting();
+
+        if (cursor.is_eof()) {
+            const auto sample = cursor.get_code_sample(hole_start, 20);
+            throw Lexer::UnterminatedInterpolationException(sample, hole_line, hole_offset);
+        }
+
+        const char c = cursor.peek();
+
+        if (c == '}' && depth == 0) {
+            cursor.skip();
+            return;
+        }
+
+        // **the format spec, and the reason the split is decided here rather than on the raw text.**
+        // `::` and `:$` are their own tokens and neither introduces a spec, so two characters of
+        // look-ahead separate `{$std::io::stdout->fd}` and `{$p:$}` from `{$x:>8}`. what follows is
+        // taken raw - `.2f` is not Echo and must never be lexed as any
+        if (c == ':' && depth == 0 && cursor.peek(1) != ':' && cursor.peek(1) != '$') {
+            cursor.skip();
+
+            const auto spec_line = cursor.line;
+            const auto spec_offset = cursor.char_offset;
+            std::string spec;
+
+            while (!cursor.is_eof() && cursor.peek() != '}') {
+                spec += cursor.peek();
+                cursor.skip();
+            }
+
+            if (cursor.is_eof()) {
+                const auto sample = cursor.get_code_sample(hole_start, 20);
+                throw Lexer::UnterminatedInterpolationException(sample, hole_line, hole_offset);
+            }
+
+            cursor.skip();
+            tokens.push(spec, Token::Type::t_string_interp_spec, spec_line, spec_offset);
+            return;
+        }
+
+        const size_t before = tokens.size();
+
+        if (!_engine->step(tokens, cursor)) {
+            const auto sample = cursor.get_code_sample(cursor.current(), 20);
+            throw Lexer::UnknownTokenException(sample, cursor.line, cursor.char_offset);
+        }
+
+        for (size_t index = before; index < tokens.size(); index++) {
+            const Token::Type type = tokens.tokens[index].type;
+
+            if (type == Token::Type::t_open_brace) {
+                depth++;
+            }
+            else if (type == Token::Type::t_close_brace && depth > 0) {
+                depth--;
+            }
+        }
+    }
+}
+
+bool LexerFunction::StringLiteral::parse(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    if (!cursor.is_quote()) {
+        return false;
+    }
+
+    const auto quote = cursor.peek();
+
+    // **a `'` string never interpolates and a `"` string without a `{$` never grows a second
+    // token.** the first half is the language rule; the second is what makes this change invisible
+    // to every program written before it - and `_engine` being unset only happens in a lexer built
+    // by hand, where the verbatim shape is the only one that can be produced anyway
+    if (quote == MHP_VOCAB_SNGQUOTE || _engine == nullptr || !holds_a_hole(cursor, quote)) {
+        lex_verbatim(tokens, cursor, quote);
+        return true;
+    }
+
+    const auto string_start_offset = cursor.char_offset;
+    const auto string_start_line = cursor.line;
+    const auto start = cursor.current();
+
+    cursor.skip();
+
+    std::string chunk;
+    Token::Type chunk_type = Token::Type::t_string_interp_begin;
+    size_t chunk_line = string_start_line;
+    size_t chunk_offset = string_start_offset;
+
+    while (true) {
+        if (cursor.is_eof()) {
+            const auto sample = cursor.get_code_sample(start, 20);
+            throw Lexer::UnterminatedStringException(sample, string_start_line, string_start_offset);
+        }
+
+        if (cursor.peek() == quote) {
+            cursor.skip();
+            break;
+        }
+
+        // only `{$` opens one, so a lone brace is text and needs no escape
+        if (cursor.peek() == '{' && cursor.peek(1) == '$') {
+            tokens.push(chunk, chunk_type, chunk_line, chunk_offset);
+            chunk.clear();
+
+            cursor.skip();
+            lex_hole(tokens, cursor);
+
+            chunk_type = Token::Type::t_string_interp_middle;
+            chunk_line = cursor.line;
+            chunk_offset = cursor.char_offset;
+            continue;
+        }
+
+        // the escape is carried through undecoded, exactly as the verbatim shape carries it -
+        // AST::decode_string_chunk is the one place a `\n` becomes a newline
+        if (cursor.peek() == '\\') {
+            chunk += cursor.peek();
+            cursor.skip();
+
+            if (cursor.is_eof()) {
+                const auto sample = cursor.get_code_sample(start, 20);
+                throw Lexer::UnterminatedStringException(sample, string_start_line, string_start_offset);
+            }
+        }
+
+        chunk += cursor.peek();
+        cursor.skip();
+    }
+
+    tokens.push(chunk, Token::Type::t_string_interp_end, chunk_line, chunk_offset);
     return true;
 }
 

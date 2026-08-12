@@ -1,0 +1,12 @@
+# ordering, not content: a missing fflush leaves every printf until process exit and the numbers
+# all arrive at the end
+
+--- OUT --->
+1
+two
+3
+four
+five
+six
+7.500000
+eight

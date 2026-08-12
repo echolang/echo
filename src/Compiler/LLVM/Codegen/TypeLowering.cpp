@@ -1,4 +1,6 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
+
+#include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
@@ -294,17 +296,26 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
     auto func_name = AST::mangle_function_name(node);
     auto func_type = node->get_return_type();
 
+    // **the C variadic tail is a parameter here and no parameter at all in LLVM.** a declaration
+    // ending in `#[core: variadic_args]` lowers to a function type over the parameters *before* it,
+    // marked variadic - which is what makes the call ABI-correct: a variadic parameter is passed by a
+    // different convention from a named one on several targets, and `isVarArg` is how the backend is
+    // told which arguments are which
+    const bool is_c_variadic = AST::has_variadic_tail(*node, _ctx.core_types());
+    const size_t fixed_count = is_c_variadic ? node->args.size() - 1 : node->args.size();
+
     // function arguments
     // @TODO support complex types
     std::vector<llvm::Type *> arg_types;
-    for (auto &arg : node->args) {
+    for (size_t i = 0; i < fixed_count; i++) {
         // one lowering path for every parameter shape: get_llvm_type already handles structs,
         // primitives and pointers. the old split called get_primitive_type() on anything
         // non-struct, which for a pointer would answer t_void and then assert inside LLVM
-        arg_types.push_back(get_llvm_type(arg->type_node()->type, cmp_unit));
+        arg_types.push_back(get_llvm_type(node->args[i]->type_node()->type, cmp_unit));
     }
 
-    llvm::FunctionType *requested_type = llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, false);
+    llvm::FunctionType *requested_type =
+        llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, is_c_variadic);
 
     // handle intrinsic functions
     //

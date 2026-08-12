@@ -27,10 +27,18 @@ namespace AST
     // returns nullopt on success, having filled `out_bytes`. on failure `out_bytes` holds whatever was
     // decoded up to the error, which keeps a caller that reports and continues from reading garbage
     //
-    // recognised: \n \t \r \\ \" \' \0 \xNN \u{...}. an unrecognised escape is an error rather than
+    // recognised: \n \t \r \\ \" \' \0 \{ \xNN \u{...}. an unrecognised escape is an error rather than
     // silently the character itself - that is the difference between a typo you are told about and one
     // that ships
     std::optional<StringLiteralError> decode_string_literal(const std::string &quoted, std::string &out_bytes);
+
+    // the same, for one chunk of an *interpolated* literal: the text between two holes, which the
+    // lexer already cut out and which therefore carries no quotes.
+    //
+    // a second entry point rather than a second decoder - the escape vocabulary is shared, and it has
+    // to be, or `"a\nb"` and `"a\nb{$x}"` would disagree about what `\n` means. `offset` in an error
+    // is an offset into the chunk
+    std::optional<StringLiteralError> decode_string_chunk(const std::string &raw, std::string &out_bytes);
 
     // is this a well-formed UTF-8 sequence? answers the byte offset of the first problem, or nullopt.
     // rejects overlong encodings, surrogate halves and anything above U+10FFFF, not merely bad

@@ -1,0 +1,7 @@
+modules: modules/target_stray_entry
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:6: 'elsewhere.eco' is target 'tool's entry but is not one of this module's sources - a target's entry has to be a file the module is made of.

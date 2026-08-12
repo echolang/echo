@@ -11,6 +11,7 @@
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ASTStringLiteral.h"
+#include "AST/StringInterpolationNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/ASTMemberLookup.h"
@@ -68,6 +69,82 @@ bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const s
     }
 
     return true;
+}
+
+// an interpolated string literal, cursor on its `t_string_interp_begin`. answers null having reported
+// when the token run does not close, which cannot happen for a run this lexer produced but can for one
+// a conditional filter cut in half.
+//
+// the shape it reads is exactly what LexerFunction::StringLiteral emits:
+//
+//     begin("a")  <hole tokens>  [spec(">4")]  middle("b")  <hole tokens>  end("c")
+//
+// so the loop is "chunk, then a hole, then the chunk that closed it", and the `end` chunk is the one
+// that stops it. that keeps `chunks.size() == holes.size() + 1` true by construction rather than by
+// a check afterwards
+AST::StringInterpolationExprNode *parse_string_interpolation(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    const auto begin_token = cursor.current();
+    auto &node = payload.context.emplace_node<AST::StringInterpolationExprNode>(begin_token);
+
+    // the type the literal *is*, stamped for LiteralStringExprNode's reason. with no stdlib there is
+    // nothing to stamp and AST::InterpolationLowering is what says so, in a sentence about the
+    // standard library rather than about this token
+    if (payload.collector.core_types.has(AST::CoreTypeKind::t_string)) {
+        node.core_string_type = payload.collector.core_types.string_type();
+    }
+
+    // decoded through AST::decode_string_chunk rather than decode_string_literal: the lexer already
+    // cut the quotes off, and there is no second escape vocabulary
+    auto take_chunk = [&payload, &node](const TokenReference &token) {
+        std::string bytes;
+
+        if (auto error = AST::decode_string_chunk(token.value(), bytes)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(token), error->message);
+        }
+
+        node.chunks.push_back(std::move(bytes));
+    };
+
+    take_chunk(begin_token);
+    cursor.skip();
+
+    while (true) {
+        AST::StringInterpolationExprNode::Hole hole { nullptr, std::nullopt, cursor.current() };
+
+        hole.expr = Parser::parse_expr(payload, nullptr);
+
+        if (hole.expr == nullptr) {
+            return nullptr;
+        }
+
+        if (cursor.is_type(Token::Type::t_string_interp_spec)) {
+            hole.spec = cursor.current().value();
+            cursor.skip();
+        }
+
+        node.holes.push_back(hole);
+
+        if (cursor.is_type(Token::Type::t_string_interp_middle)) {
+            take_chunk(cursor.current());
+            cursor.skip();
+            continue;
+        }
+
+        if (cursor.is_type(Token::Type::t_string_interp_end)) {
+            take_chunk(cursor.current());
+            cursor.skip();
+            break;
+        }
+
+        payload.collect_unexpected_token(Token::Type::t_string_interp_end);
+        return nullptr;
+    }
+
+    return &node;
 }
 
 // the comma separated expressions between a `[` and its `]`, cursor already past the opening bracket
@@ -768,6 +845,10 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            cursor.is_type(Token::Type::t_identifier) ||
            cursor.is_type(Token::Type::t_namespace_sep) ||
            cursor.is_type(Token::Type::t_string_literal) ||
+           // **only the opening chunk.** the middle, end and spec tokens are what *close* a hole, and
+           // an expression must stop dead at one - a hole holding `$a` has to end there rather than
+           // reading the chunk after it as a second operand
+           cursor.is_type(Token::Type::t_string_interp_begin) ||
            cursor.is_type(Token::Type::t_ref) ||
            cursor.is_type(Token::Type::t_ptr_of) ||
            cursor.is_type(Token::Type::t_null) ||
@@ -1340,6 +1421,16 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
         cursor.skip();
         return AST::make_ref(node);
+    }
+
+    else if (cursor.is_type(Token::Type::t_string_interp_begin)) {
+        auto *node = parse_string_interpolation(payload);
+
+        if (node == nullptr) {
+            return AST::NodeReference();
+        }
+
+        return AST::make_ref(*node);
     }
 
     // `mv E` - take the value out of E. one parse site covers every position a move can appear in

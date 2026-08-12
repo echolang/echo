@@ -21,6 +21,7 @@ namespace Parser
     //     #[version: "0.1.0"]
     //     #[depends: "../geom/module.eco"]
     //     #[sources: "src/*.eco"]
+    //     #[target: exe { name: "clock", entry: "src/main.eco" }]
     //     #[link: lib "m"]
     //     #[cc: sources "c/*.c"]
     //     #[build_dir: "target"]
@@ -35,6 +36,37 @@ namespace Parser
     // repeated `depends` and `sources` accumulate, because AST::AttributeList is already a multimap -
     // and so does a list inside one, because AST::AttributeReader::each reads a lone value as a list of
     // it. The two spellings are one rule and not two arms.
+    // what a target produces.
+    //
+    // a **closed vocabulary, tagged in the grammar** rather than spelled into a field of the record, which
+    // is what lets a `lib` or a `test` be added later without the common case growing a word - the same
+    // shape, and the same reason, as `#[link: lib "m"]`
+    enum class TargetKind
+    {
+        t_executable
+    };
+
+    // one program a module produces.
+    //
+    // **a target is not a module.** It names one file of this module as the program: that file's root is
+    // the C `main`, and every other file of the module contributes its declarations and nothing else -
+    // which is exactly what a non-entry module's files already get. An entry in a module of its own could
+    // only see the rest of the project through `public`, so a project growing a second binary would have
+    // to mark up all of its internals; that is the design this one replaced.
+    //
+    // consequently the module's source list is *identical* whichever target is being built, and nothing
+    // here enters a cache key
+    struct ModuleTarget
+    {
+        std::string name;
+
+        // absolute, and always one of the declaring manifest's own `sources` - a file has to belong to the
+        // module for its declarations to be shared with the rest of it
+        std::filesystem::path entry;
+
+        TargetKind kind = TargetKind::t_executable;
+    };
+
     struct ModuleManifest
     {
         // the manifest file itself, absolute and canonical - this is the identity two `depends` paths
@@ -58,6 +90,15 @@ namespace Parser
 
         // the manifests this module needs parsed before it, absolute and canonical
         std::vector<std::filesystem::path> depends;
+
+        // the programs this module produces, in the order they were written - empty for a module that
+        // declares none, which is every module that existed before targets did and still means "every
+        // file root of this module is the program".
+        //
+        // **not an input to the module's cache key**, the same statement `link` and `build_dir` make below
+        // and for a stronger reason: which target is being built changes nothing about this module's
+        // sources at all, so no key varies between two targets of one module
+        std::vector<ModuleTarget> targets;
 
         // what this module needs linked, in the order it was written. **not an input to the module's cache
         // key**, and that is a statement rather than an omission: a link requirement changes no object, only

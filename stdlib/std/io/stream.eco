@@ -1,0 +1,141 @@
+/**
+ * A byte stream, named by its file descriptor.
+ *
+ * Small enough to be a value - one `int32` - which is what makes `std::io::stdout` a constant
+ * rather than a function: it is passed, stored and copied like any other number.
+ *
+ *     std::io::stdout->write('hello');
+ *
+ *     stream $out = std::io::stdout;
+ *     $out->write('hello');
+ *
+ * **Every write flushes stdio first**, and that is not a performance oversight. The `echo`
+ * statement writes scalars through `printf`, which is buffered, and text through `write(2)`, which
+ * is not. Without the flush the two interleave wrongly the moment output is a pipe rather than a
+ * terminal - which is exactly where anybody notices.
+ */
+
+namespace std::io;
+
+public struct stream
+{
+    int32 $fd;
+
+    /**
+     * Writes `$count` bytes at `$b`, and nothing else - no terminator is read and none is written.
+     *
+     * The seam every other method here goes through.
+     */
+    const function write_bytes(ptr<const uint8> $b, usize $count) : void
+    {
+        if ($count == 0) {
+            return;
+        }
+
+        // stdio first, for the reason in this type's own documentation
+        $this->flush();
+
+        c_write($this->fd, $b, $count);
+    }
+
+    /**
+     * Writes `$text`'s bytes.
+     *
+     * The window's length, never a terminator: a substring shares its parent's buffer and simply
+     * stops early, so `%s` or `strlen` would run off the end of one.
+     */
+    const function write(const string& $text) : void
+    {
+        $this->write_bytes($text->view()->bytes, $text->size());
+    }
+
+    /**
+     * Writes `$text` followed by a newline.
+     *
+     * Two writes rather than one, deliberately: appending the newline to the bytes would mean
+     * copying them, and they may be a shared substring with nowhere to put a longer copy.
+     */
+    const function write_line(const string& $text) : void
+    {
+        $this->write($text);
+        $this->write_bytes(NEWLINE->c_str(), 1);
+    }
+
+    /**
+     * Flushes every buffered stdio stream, so anything `echo` has written appears before what this
+     * stream writes next.
+     */
+    const function flush() : void
+    {
+        c_fflush(null);
+    }
+
+    /**
+     * The next line, without its newline - or `null` at end of input with nothing read.
+     *
+     * **Unbuffered: one `read(2)` per byte.** That is slow and it is the only correct choice here.
+     * A buffered reader would need somewhere to keep what it read past the newline, and a library
+     * module has no mutable state of its own - so the buffer would have to be a value you hold,
+     * which is a different type with a different name. It would also over-read, so anything else
+     * reading the same descriptor would find its bytes gone.
+     *
+     * A final line with no newline is answered in full; the `null` is reserved for "there was
+     * nothing at all", which is what makes `guard ... else` the right shape to read one with:
+     *
+     *     guard string $line = std::io::stdin->read_line() else { return 0; }
+     */
+    const function read_line() : string?
+    {
+        str::buf $owner = str::buf(64, 0, mem::alloc<uint8>(65));
+
+        uint8 $byte = 0;
+        bool $any = false;
+
+        while (true) {
+            isize $got = c_read($this->fd, &$byte, 1);
+
+            if ($got < 1) {
+                break;
+            }
+
+            $any = true;
+
+            if ($byte == NEWLINE_BYTE) {
+                break;
+            }
+
+            $owner->push($byte);
+        }
+
+        if (!$any) {
+            return null;
+        }
+
+        return string(string::view($owner->bytes, $owner->used), $owner);
+    }
+}
+
+// the byte and the one-byte string, so `write_line` needs no allocation and `read_line` no magic
+// number. a constant is its expression copied into each use site, so neither costs anything
+const NEWLINE = '\n';
+const uint8 NEWLINE_BYTE = 10;
+
+/**
+ * Standard output, file descriptor 1.
+ *
+ * A **constant**, so it is written without parentheses and can be handed around like the number it
+ * is. A constant in Echo is its expression copied into every use site, and this one's expression is
+ * `stream(1)` - one `int32`, so copying it is free and there is no shared object to keep alive.
+ */
+public const stdout = stream(1);
+
+/**
+ * Standard error, file descriptor 2. Where diagnostics go, so that piping a program's output
+ * somewhere does not swallow them.
+ */
+public const stderr = stream(2);
+
+/**
+ * Standard input, file descriptor 0.
+ */
+public const stdin = stream(0);

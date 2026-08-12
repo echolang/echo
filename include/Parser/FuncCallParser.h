@@ -88,6 +88,18 @@ namespace Parser
     // statement form of every qualified and every explicitly-parameterised call unparseable
     bool starts_call_statement(Parser::Payload &payload);
 
+    // **a statement rooted in a compile-time constant**: `std::io::stdout->write('hi');`.
+    //
+    // its own predicate for starts_indirect_call_statement's reason - the two above are anchored on
+    // an identifier followed by `(` or `<`, and this one is an identifier followed by `->`. it became
+    // spellable when a constant became an expression rather than a folded value: `stdout` is
+    // `stream(1)` copied in here, and what follows it is an ordinary member chain, the same one the
+    // `$var ->` statement form already reads.
+    //
+    // deliberately only `->`. `LIST[0] = 1;` would be a write into a copy of the constant's
+    // expression that nothing can observe afterwards, which is worth refusing rather than accepting
+    bool starts_constant_chain_statement(Parser::Payload &payload);
+
     // true when the cursor sits on `$f(...)` used as a statement - a call through a callable *value*.
     // its own predicate rather than an arm of starts_call_statement, which is anchored on an identifier
     // because a *name* is what a direct call begins with; named so the statement dispatch reads as a

@@ -161,6 +161,23 @@ std::string EcoTestFile::environment_prefix() const
     return result;
 }
 
+std::string EcoTestFile::stdin_prefix() const
+{
+    if (stdin_lines.empty()) {
+        return std::string();
+    }
+
+    // single quoted, so the `\n` reaches printf rather than the shell - and nothing else needs
+    // escaping, a line here being one whitespace-free word
+    std::string result = "printf '";
+
+    for (const std::string &line : stdin_lines) {
+        result += line + "\\n";
+    }
+
+    return result + "' | ";
+}
+
 std::string EcoTestFile::argument_suffix() const
 {
     std::string result;
@@ -259,7 +276,7 @@ namespace
     // name. a key added to the dispatch and forgotten here would leave the error telling an author
     // that a valid key is invalid
     constexpr std::string_view k_setting_keys[] = {
-        "flags", "modules", "stdlib", "expect", "mode", "env", "args" };
+        "flags", "modules", "stdlib", "expect", "mode", "env", "args", "stdin" };
 
     // whitespace separated into `out_list`. the shape `modules`, `env` and `args` share - three settings
     // that each mean a list because the header forbids a repeated key
@@ -388,6 +405,11 @@ namespace
         // means. A path holding a space is not supported and does not need to be: these are corpus fixtures
         if (key == "modules") {
             read_list(value, out_file.modules);
+            return true;
+        }
+
+        if (key == "stdin") {
+            read_list(value, out_file.stdin_lines);
             return true;
         }
 

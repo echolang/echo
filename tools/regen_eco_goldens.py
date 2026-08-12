@@ -77,6 +77,14 @@ def parse_test(path: Path):
     return lines, settings, out_start, out_end
 
 
+def stdin_prefix(settings: dict) -> str:
+    """Mirrors EcoTestFile::stdin_prefix - the `stdin:` words as one line each, piped in."""
+    lines = settings.get("stdin", "").split()
+    if not lines:
+        return ""
+    return "printf '" + "".join(line + "\\n" for line in lines) + "' | "
+
+
 def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None) -> str:
     """The same command line tests/e2e_eco.cpp:echoc_command produces, in the same order."""
     mode = settings.get("mode", "run")
@@ -95,10 +103,15 @@ def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None)
 
     environment = "".join(pair + " " for pair in settings.get("env", "").split())
 
+    # mirrors EcoTestFile::stdin_prefix - one word per line, ahead of the environment assignments so
+    # those still belong to the program rather than to the printf
+    feed = stdin_prefix(settings)
+
     subcommand = f"build -o {shlex.quote(str(binary))} " if is_build else "run "
 
     return (
-        environment
+        feed
+        + environment
         + shlex.quote(str(ECHOC))
         + " "
         + subcommand
@@ -137,7 +150,8 @@ def regenerate(path: Path, eco: Path, write: bool) -> bool:
             environment = "".join(pair + " " for pair in settings.get("env", "").split())
             arguments = settings.get("args", "")
             output = capture(
-                environment
+                stdin_prefix(settings)
+                + environment
                 + shlex.quote(str(binary))
                 + (" " + arguments if arguments else "")
                 + " 2>&1")

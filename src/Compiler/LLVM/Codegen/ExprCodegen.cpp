@@ -1,4 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
+
+#include "AST/ASTArrayLiteral.h"
+#include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
 #include "AST/ASTNullability.h"
@@ -680,6 +683,19 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
         // so no per-argument kind sniffing is needed here
         std::vector<llvm::Value *> args;
         for (auto &arg : node.arguments) {
+            // **a variadic pack is not one argument, it is the tail.** the list written at the call
+            // site becomes the arguments after the fixed ones, in order. every element already
+            // carries the C promotion AST::CallResolver applied, so there is nothing to decide here -
+            // which is the point: the promotion table is written once, in AST::variadic_promotion_of
+            if (auto *pack = AST::variadic_pack_of(arg)) {
+                for (auto *element : pack->elements) {
+                    element->accept(*_ctx.visitor);
+                    args.push_back(_ctx.pop());
+                }
+
+                continue;
+            }
+
             arg->accept(*_ctx.visitor);
             args.push_back(_ctx.value_stack.top());
             _ctx.value_stack.pop();

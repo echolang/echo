@@ -1,0 +1,7 @@
+// `variadic_args` describes C's calling convention, so there is nothing for it to describe on a
+// function this compiler emits
+function takes_a_tail(int32 $first, variadic_args $rest) : void
+{
+}
+
+takes_a_tail(1, []);

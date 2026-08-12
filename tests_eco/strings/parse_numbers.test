@@ -1,0 +1,22 @@
+# the digits accumulate negative so that int64's minimum - the one value with no positive
+# counterpart - parses, and overflow answers null rather than a wrapped number
+
+--- OUT --->
+42
+-42
+7
+-9223372036854775808
+9223372036854775807
+-1
+-1
+-1
+-1
+-1
+-1
+-1
+-1
+1.250000
+-0.500000
+-1.000000
+-1.000000
+-1.000000

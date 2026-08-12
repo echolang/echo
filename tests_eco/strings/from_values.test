@@ -1,0 +1,16 @@
+# the last two lines are the point: `str::from(1.5)` is `1.5` and `echo 1.5` is `1.500000`, and the
+# difference is deliberate - `echo`'s `%f` is what several hundred goldens here already say
+
+--- OUT --->
+0
+42
+-42
+-9223372036854775808
+9223372036854775807
+18446744073709551615
+true
+false
+already text
+1.5
+1.5
+1.500000

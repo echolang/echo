@@ -1,0 +1,4 @@
+public function greet() : void
+{
+    echo "hi";
+}

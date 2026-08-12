@@ -15,6 +15,7 @@ namespace AST
     class LiteralIntExprNode;
     class LiteralBoolExprNode;
     class LiteralStringExprNode;
+    class StringInterpolationExprNode;
     class FunctionCallExprNode;
     class AddrOfExprNode;
     class DerefExprNode;
@@ -71,6 +72,7 @@ namespace AST
         virtual void visitLiteralIntExpr(LiteralIntExprNode &node) = 0;
         virtual void visitLiteralBoolExpr(LiteralBoolExprNode &node) = 0;
         virtual void visitLiteralStringExpr(LiteralStringExprNode &node) = 0;
+        virtual void visit_string_interpolation(StringInterpolationExprNode &node) = 0;
         virtual void visitFunctionCallExpr(FunctionCallExprNode &node) = 0;
         virtual void visit_addr_of_expr(AddrOfExprNode &node) = 0;
         virtual void visit_deref_expr(DerefExprNode &node) = 0;

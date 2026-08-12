@@ -200,6 +200,18 @@ namespace
             RecursiveVisitor::visit_foreach(node);
         }
 
+        // **an unlowered interpolation is never answerable**, and this is the second arm whose absence
+        // is silent. it stands for a chain of calls none of which exist yet - each one allocating a
+        // `string` that owes a drop - so a walk now would decide the ownership of a statement whose
+        // owning values have not been minted. AST::InterpolationLowering runs earlier in the same
+        // round; once it has, what is left is ordinary calls
+        void visit_string_interpolation(StringInterpolationExprNode &node) override
+        {
+            answerable = false;
+
+            RecursiveVisitor::visit_string_interpolation(node);
+        }
+
         // a nested declaration is resolved as its own body, from the file root's children. whether
         // *it* is ready says nothing about whether this one is
         void visitFunctionDecl(FunctionDeclNode &) override

@@ -38,9 +38,10 @@ public:
     LLVMCompiler(Compiler::CompilerOptions options);
     ~LLVMCompiler();
 
-    // names the module whose file-scope statements become the program's entry point. Must be set before
-    // compile_bundle; defaults to ECO_MAIN_MODULE_NAME
-    void set_entry_module(const std::string &module_name);
+    // names the program: the module whose file-scope statements become the entry point, and - when a
+    // `#[target:]` named one - the single file of it that they come from. Must be set before
+    // compile_bundle; defaults to ECO_MAIN_MODULE_NAME and every file root of it
+    void set_entry(const std::string &module_name, const std::filesystem::path &entry_file = {});
 
     // `cached_modules` names the modules whose compiled object is being reused, so no code is generated for
     // them at all - see TypeLowering::create_cmp_units for why that is the only place it has to be said
@@ -109,6 +110,7 @@ public:
     void visit_for_statement(AST::ForStatementNode &node);
     void visit_loop_control(AST::LoopControlNode &node);
     void visit_foreach(AST::ForeachNode &node);
+    void visit_string_interpolation(AST::StringInterpolationExprNode &node);
     void visit_assign(AST::AssignNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);

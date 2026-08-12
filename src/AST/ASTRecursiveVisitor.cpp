@@ -32,6 +32,7 @@
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/StringInterpolationNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
@@ -230,6 +231,16 @@ void RecursiveVisitor::visit_loop_control(LoopControlNode &node)
     // AST::TypeChecker never validates them - and "every drop is an ordinary call node in the tree" is
     // the whole reason they are nodes rather than a codegen side effect
     statement_edges(node.unwind);
+}
+
+void RecursiveVisitor::visit_string_interpolation(StringInterpolationExprNode &node)
+{
+    // only the holes: the chunks are decoded text on the node, not nodes of their own. a hole is a
+    // value position and nothing else - there is no place among them, which is why an interpolated
+    // literal can hold a call and still never hand out an address
+    for (auto &hole : node.holes) {
+        value_edge(hole.expr);
+    }
 }
 
 void RecursiveVisitor::visit_foreach(ForeachNode &node)

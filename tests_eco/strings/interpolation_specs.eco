@@ -1,0 +1,26 @@
+// `{$x:spec}` calls the two-argument `str::from`, and the spec is `[align][width][.precision][type]`
+int32 $n = 42;
+float64 $pi = 3.14159265358979;
+string $name = 'Ronon';
+
+echo "plain {$n}";
+echo "hex {$n:x} upper {$n:X} binary {$n:b} octal {$n:o}";
+echo "right |{$n:>8}|";
+echo "left  |{$n:<8}|";
+echo "mid   |{$n:^8}|";
+
+echo "default {$pi}";
+echo "fixed {$pi:.2f}";
+echo "sci {$pi:.3e}";
+echo "sig {$pi:.4g}";
+
+echo "text |{$name:>10}|";
+echo "cut |{$name:.3}|";
+
+// a negative number keeps its sign in front of the padding
+int32 $neg = -7;
+echo "neg |{$neg:>6}|";
+
+// an empty spec asks the spec-taking overload for its default, which is not the same call as
+// writing no spec at all - and answers the same text
+echo "empty {$n:}";

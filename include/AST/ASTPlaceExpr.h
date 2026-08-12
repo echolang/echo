@@ -88,7 +88,13 @@ namespace AST
 
             // a call, an indirect call, every literal, an arithmetic result, a cast, `strong($w)`,
             // `??`, `?->`, a closure, an `instanceof` - all the same thing, a value the program
-            // computed and did not name
+            // computed and did not name.
+            //
+            // **an interpolated string literal is here on purpose**, unlike the two transient nodes
+            // above: it stands for a concatenation, so it is a computed value and can be *given*
+            // storage. answering addressless instead was silently wrong in one direction - a
+            // `const string&` parameter stopped ranking as a temporary borrow, so `println("{$x}")`
+            // was refused as an impossible conversion rather than bound to a slot
             default:
                 return StorageClass::t_materializable;
         }

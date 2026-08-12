@@ -1,0 +1,14 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] interpolation_without_stdlib.eco:7:26
+
+  string interpolation needs the standard library's 'string' type and its 'str' namespace. Write the value out with a single quoted string and 'echo' instead.
+
+  6 | // what is left in its place is the chunks as a plain literal, so nothing cascades underneath
+  7 | ptr<const uint8> $text = "value {$n}";
+    :                          ^^^^^^
+  8 | 
+
+1 error, nothing was compiled.

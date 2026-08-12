@@ -1,0 +1,29 @@
+// **Echo has no variadic functions, and this is not one.** the last parameter's *type* says the C
+// side takes a variadic tail, and the call site passes a written list - so the call has exactly the
+// declared arity and the exact-arity rule never bends
+extern {
+    function snprintf as c_snprintf(
+        ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+}
+
+ptr<uint8> $buf = mem::alloc<uint8>(64);
+
+string $format = '<%d|%s|%.2f>';
+string $word = 'hi';
+
+// a `float` in the list arrives as a `double`, an `int16` as an `int` - C's own promotions, applied
+// by the compiler rather than by this declaration, which is where a C compiler applies them too
+float $ratio = 1.5f;
+int16 $small = 7;
+
+int32 $n = c_snprintf($buf, 64, $format->c_str(), [$small, $word->c_str(), $ratio]);
+echo $n;
+echo str::view_of_c_str($buf);
+
+// an empty list is legal and means no varargs at all
+string $plain = 'plain';
+int32 $m = c_snprintf($buf, 64, $plain->c_str(), []);
+echo $m;
+echo str::view_of_c_str($buf);
+
+mem::free($buf);

@@ -1,0 +1,25 @@
+/**
+ * Every C symbol this module binds, in one file.
+ *
+ * A C symbol may only be declared once per module - two `extern` blocks naming `write` with
+ * different signatures are two declarations of one thing that nothing checks against each other -
+ * so they are gathered here rather than sitting beside the code that calls them. The `c_` prefix
+ * is a reader's convention and nothing more.
+ *
+ * Nothing here is `public`. What a program reaches is `std::io::stdout` and the functions beside
+ * it; the syscalls are this module's own business.
+ */
+
+namespace std::io;
+
+extern {
+    // the raw, unbuffered writes and reads. deliberately **not** `fwrite`/`fread`: a `string` need
+    // not be NUL-terminated, its length is always known, and a second layer of buffering under one
+    // that already exists is two places for output to be sitting when a program dies
+    function write as c_write(int32 $fd, ptr<const uint8> $buf, usize $count) : isize;
+    function read as c_read(int32 $fd, ptr<uint8> $buf, usize $count) : isize;
+
+    // `fflush(null)` flushes every stdio stream, which is the one thing this module needs from
+    // stdio: the `echo` statement writes through `printf`, and printf is buffered
+    function fflush as c_fflush(ptr<uint8> $stream) : int32;
+}

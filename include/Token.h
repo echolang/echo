@@ -58,7 +58,16 @@ public:
         t_open_bracket,             // [
         t_close_bracket,            // ]
         t_hash,                     // #
-        t_string_literal,           // "..."
+        t_string_literal,           // "..." or '...', quotes kept, escapes undecoded
+
+        // the four an interpolated `"..."` lexes to. the three chunk types carry the raw text
+        // *between* holes, unquoted; the hole's own tokens sit between them and are ordinary Echo.
+        // so `"a{$x:>4}b"` is begin("a") varname($x) spec(">4") end("b")
+        t_string_interp_begin,      // the chunk before the first hole
+        t_string_interp_middle,     // the chunk between two holes
+        t_string_interp_end,        // the chunk after the last hole
+        t_string_interp_spec,       // a hole's format spec, the raw text after its top level `:`
+
         t_integer_literal,          // 123
         t_hex_literal,              // 0x123
         t_binary_literal,           // 0b101

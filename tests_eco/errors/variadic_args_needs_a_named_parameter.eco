@@ -1,0 +1,5 @@
+// C has no way to find the start of a variadic tail that follows nothing - `va_start` needs a
+// parameter to start from
+extern {
+    function printf as c_printf(variadic_args $args) : int32;
+}

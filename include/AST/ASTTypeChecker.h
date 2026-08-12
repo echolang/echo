@@ -168,6 +168,13 @@ namespace AST
         // template is exactly one of the cases - see the note there
         void check_has_implementation(FunctionDeclNode &node);
 
+        // where a `#[core: variadic_args]` may be written, asked of the declaration as a whole -
+        // see AST::variadic_args_refusal for why it is one question rather than four
+        void check_variadic_args_position(FunctionDeclNode &node);
+
+        // what may arrive at one: a list written right here, holding primitives and addresses
+        void check_variadic_argument(FunctionCallExprNode &node);
+
         // does this value conform but still fail to be *storable* as `to`? reports and answers true when
         // so. see the implementation for why it runs ahead of the ordinary conversion check
         bool check_interface_erasure(const ValueType &to, const ExprNode &value, const TokenReference &at);

@@ -1,0 +1,5 @@
+// the name is the binary, so two targets sharing one would be two programs written to one path
+#[module: "duptarget"]
+#[sources: "src/*.eco"]
+#[target: exe { name: "tool", entry: "src/one.eco" }]
+#[target: exe { name: "tool", entry: "src/two.eco" }]

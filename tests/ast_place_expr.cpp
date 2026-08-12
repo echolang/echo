@@ -183,6 +183,12 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_literal_int, StorageClass::t_materializable },
         { NodeType::n_literal_bool, StorageClass::t_materializable },
         { NodeType::n_literal_string, StorageClass::t_materializable },
+
+        // **an interpolated literal, though it is transient like the two `const` nodes above.** the
+        // difference is what it stands for: a `const(...)` is transparent and its operand answers,
+        // where this one is a concatenation the program computes and does not name - a value, and one
+        // a `const string&` parameter has to be able to bind a slot for
+        { NodeType::n_string_interpolation, StorageClass::t_materializable },
         { NodeType::n_expr_binary, StorageClass::t_materializable },
         { NodeType::n_expr_unary, StorageClass::t_materializable },
         { NodeType::n_type_cast, StorageClass::t_materializable },

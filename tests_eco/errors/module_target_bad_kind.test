@@ -1,0 +1,7 @@
+modules: modules/target_bad_kind
+expect: fail
+
+--- OUT --->
+[error] Module Manifest Error
+
+  module.eco:5: 'binary' is not a target kind, expected one of: exe.

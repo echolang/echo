@@ -1,0 +1,36 @@
+// a hole holds an *expression*, not just a name: its tokens are lexed by the ordinary lexer over the
+// ordinary source, so anything that reads as a value reads here
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+function twice(int32 $n) : int32
+{
+    return $n * 2;
+}
+
+Point $p = Point(3, 4);
+string $name = 'Ronon';
+array<int32> $xs = [10, 20, 30];
+
+echo "sum {$p->x + $p->y}";
+echo "index {$xs[1]}";
+echo "method {$name->size()}";
+echo "chained {$name->sub(0, 2)->size()}";
+
+// a nested string literal inside a hole does not end the outer one
+echo "nested {$name->concat(' Dex')}";
+echo "quoted {$name->equals('Ronon')}";
+
+// two holes with nothing between them
+echo "{$p->x}{$p->y}";
+
+// **a hole opens on `{$` and on nothing else**, so a free call has to start from a value:
+// `{twice($p->x)}` is text, and `{$p->x}` fed to one is not
+echo "not a hole: {twice($p->x)}";
+echo "so write it as {$xs[0]} or bind it first";
+
+int32 $doubled = twice($p->x);
+echo "bound {$doubled}";

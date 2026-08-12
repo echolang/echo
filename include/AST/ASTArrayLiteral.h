@@ -76,7 +76,12 @@ namespace AST
     // refuses an undetermined destination rather than recording one: a literal typed `unknown` is
     // indistinguishable from one nothing has typed, and the expansion would then be decided against a
     // type the next round was going to replace
-    bool bind_array_literal_to(ExprNode *expr, const ValueType &destination);
+    //
+    // **`#[core: variadic_args]` is the one destination that does not want a collection at all.** the
+    // brackets are C's variadic tail there, so the literal is marked as a pack and left otherwise
+    // untouched: its elements keep their own types instead of being unified into one `E`, nothing
+    // expands it, and this answers *false* - the call is not waiting on anything
+    bool bind_array_literal_to(ExprNode *expr, const ValueType &destination, const CoreTypes &core);
 };
 
 #endif

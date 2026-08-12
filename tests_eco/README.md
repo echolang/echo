@@ -54,18 +54,23 @@ test that quietly asserts less than its author wrote.
 | `mode` | `run` (default) / `build` | JIT the module, or link a native binary and execute it |
 | `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
 | `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
+| `stdin` | space-separated words | fed to the program on standard input, **one line per word** |
 
 `expect` takes an **exact status** as well as `ok`/`fail`, and that exists because `std::env::exit($code)`
 made the status something a program *chooses*: pinned as `fail`, a case asserting `exit(3)` would pass just
 as well if the compiler crashed. In `mode: build` an exact status is the *program's* — a build that fails
 before producing a binary is reported as a build failure, not matched against it.
 
-`env` and `args` exist for the same reason: without them `std::env` can only be tested against whatever the
-machine running the suite inherited, which differs between a developer and CI and asserts almost nothing.
-Both are shell-level — a `KEY=VALUE` prefix and an argument suffix on the spawned command — so they reach a
-JIT'd program and a linked binary by the same route, and neither can leak into the suite's own environment
-or into a parallel case. Neither a value nor an argument may contain a space; a pair without an `=` is a
-located error rather than a word the shell would try to run.
+`env`, `args` and `stdin` exist for the same reason: without them `std::env` and `std::io::read_line` can
+only be tested against whatever the machine running the suite inherited — which differs between a developer
+and CI and asserts almost nothing, and in `stdin`'s case is a hang. All three are shell-level — a
+`KEY=VALUE` prefix, an argument suffix, and a `printf ... |` ahead of the whole command — so they reach a
+JIT'd program and a linked binary by the same route, and none can leak into the suite's own environment or
+into a parallel case. Neither a value, an argument nor a line may contain a space; a pair without an `=` is
+a located error rather than a word the shell would try to run.
+
+`stdin` is **one line per word**, so `stdin: hello second` feeds two lines. That is what a `read_line` case
+wants and it is the only shape that fits the whitespace-separated header the other two already use.
 
 ### Testing another platform
 

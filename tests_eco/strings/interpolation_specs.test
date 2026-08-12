@@ -1,0 +1,17 @@
+# the float conversions go through `snprintf`, which is the first user of `#[core: variadic_args]` -
+# so this case is also what pins that the pack reaches C correctly
+
+--- OUT --->
+plain 42
+hex 2a upper 2A binary 101010 octal 52
+right |      42|
+left  |42      |
+mid   |   42   |
+default 3.14159265358979
+fixed 3.14
+sci 3.142e+00
+sig 3.142
+text |     Ronon|
+cut |Ron|
+neg |    -7|
+empty 42

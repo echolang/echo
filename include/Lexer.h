@@ -148,6 +148,8 @@ private:
     std::string::const_iterator it;
 };
 
+class LexerEngine;
+
 namespace LexerFunction
 {
     class Base
@@ -166,6 +168,13 @@ namespace LexerFunction
 
         // lex tha stuff
         virtual bool parse(TokenCollection &tokens, LexerCursor &cursor) const = 0;
+
+        // handed the engine that owns this function, once its trie is built. a no-op for every
+        // function that lexes a flat run of characters, which is all of them but one: a hole
+        // inside an interpolated string literal is ordinary Echo and needs the whole vocabulary
+        // back. handed over rather than constructed with, since the function has to be in the
+        // list the trie is built from
+        virtual void bind_engine(const LexerEngine &engine) { (void)engine; }
     };
 
     struct TreeNode
@@ -246,6 +255,10 @@ namespace LexerFunction
         bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
     };
 
+    // **the two quote characters are not interchangeable.** a `'` string is verbatim and lexes to
+    // exactly one t_string_literal; a `"` string interpolates `{$...}` and lexes to a *run* of
+    // tokens when it holds one. a `"` string with no `{$` in it takes the verbatim path too, which
+    // is what keeps every program written before interpolation existed byte for byte the same
     class StringLiteral : public Base
     {
     public:
@@ -255,6 +268,25 @@ namespace LexerFunction
 
         const std::vector<std::string> must_match() const override;
         bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+
+        void bind_engine(const LexerEngine &engine) override {
+            _engine = &engine;
+        }
+
+    private:
+        // does this literal hold a `{$` before the quote that would close it? answered by a
+        // look-ahead rather than by lexing, because the answer decides which of the two shapes the
+        // whole literal takes and there is no way back once a token has been pushed
+        bool holds_a_hole(const LexerCursor &cursor, char quote) const;
+
+        // the verbatim shape: quotes kept, escapes untouched, one token
+        void lex_verbatim(TokenCollection &tokens, LexerCursor &cursor, char quote) const;
+
+        // one hole, from just after its `{$` through the `}` that closes it. pushes the hole's own
+        // tokens, and a t_string_interp_spec when a top level `:` introduced a format spec
+        void lex_hole(TokenCollection &tokens, LexerCursor &cursor) const;
+
+        const LexerEngine *_engine = nullptr;
     };
 
     class VariableName : public Base
@@ -313,12 +345,38 @@ namespace LexerFunction
     };
 };
 
-class Lexer
+// the lexer function list and the character trie built out of it, as one object that can be asked
+// for **one token** rather than only for a whole file.
+//
+// it exists because lexing is no longer flat: a hole inside an interpolated string literal holds
+// ordinary Echo, and the only thing that can lex ordinary Echo is the vocabulary the top level uses.
+// so `LexerFunction::StringLiteral` is handed this engine and steps it, which keeps the hole's
+// tokens carrying **real source positions** - the thing a re-lex of the token's text afterwards
+// could never do, and what every diagnostic and the `-g` line table read
+class LexerEngine
 {
+public:
     typedef std::vector<std::unique_ptr<LexerFunction::Base>> FunctionList;
 
-    const uint32_t MAX_PREFIX_LENGTH = 3;
+    static constexpr size_t MAX_PREFIX_LENGTH = 3;
 
+    // builds the trie over `functions` and binds itself into every one of them. the list must
+    // outlive the engine - it holds the functions, this only points at them
+    LexerEngine(FunctionList &functions);
+
+    // to end of input
+    void run(TokenCollection &tokens, LexerCursor &cursor) const;
+
+    // one token, chosen the way `run` chooses it. false when no function matched, which is the
+    // caller's to report - `run` says "unknown token", a hole says where the hole was
+    bool step(TokenCollection &tokens, LexerCursor &cursor) const;
+
+private:
+    std::unique_ptr<LexerFunction::TreeNode> _root;
+};
+
+class Lexer
+{
 public:
     struct TokenException : public std::exception
     {
@@ -373,13 +431,15 @@ public:
         {}
     };
 
+    struct UnterminatedInterpolationException : public TokenException
+    {
+        UnterminatedInterpolationException(const std::string &snippet, size_t line, size_t char_offset) :
+            TokenException("Unterminated interpolation at line " + std::to_string(line) + " offset " + std::to_string(char_offset) + " near: " + snippet, snippet, line, char_offset)
+        {}
+    };
+
     Lexer() {}
     ~Lexer() {}
-
-    /**
-     * Executes the given function list
-     */
-    void execute_functions(FunctionList &functions, TokenCollection &tokens, LexerCursor &cursor);
 
     /**
      * Parses the given input string into a collection of tokens

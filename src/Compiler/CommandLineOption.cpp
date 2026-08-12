@@ -123,15 +123,24 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
 {
     static const std::vector<CommandLineOption> table = {
         {
+            // **no `required_by`, and that is a change rather than an omission.** The question this row
+            // used to answer from argv alone - does this invocation name its output - stopped being
+            // answerable there the moment a manifest could name it: a project declaring targets names its
+            // binaries itself, and one declaring several has no single path to give. So the refusal moved
+            // to the one place that already owns "which of these is the program", where the manifest is
+            // known, and it is still raised before anything is compiled
             Opt::t_output, "output", nullptr, 'o',
             OptionArity::t_value, OptionCategory::t_inputs,
-            accepts::build, accepts::build, ExclusionGroup::t_none,
+            accepts::build, 0, ExclusionGroup::t_none,
             "<file>", "",
             "where the executable is written",
             "Where to write the executable.\n"
             "  echoc build -o app src/*.eco\n"
             "If you forget it you hear about it before the compile rather than after: a build with "
-            "nowhere to put what it made has wasted every second it spent.",
+            "nowhere to put what it made has wasted every second it spent.\n"
+            "A project whose manifest declares targets names its own binaries, one per target, under the "
+            "module's build directory - so '-o' is not needed there, and means 'put this one somewhere "
+            "else'. It takes one path, so it is refused when more than one target is being built.",
             {}, nullptr
         },
         {
@@ -149,6 +158,25 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "have to spell out a dependency yourself.\n"
             "When you do name several, the order you write them in is the order they are parsed, never "
             "the order they happen to sit in on disk.",
+            {}, nullptr
+        },
+        {
+            Opt::t_target, "target", nullptr, '\0',
+            OptionArity::t_repeated_value, OptionCategory::t_inputs,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            "<name>", "",
+            "the program to build, of the ones declared",
+            "Build one of the programs a manifest declares, rather than all of them:\n"
+            "  echoc build --target clock\n"
+            "  echoc run --target clock\n"
+            "A manifest says what its module produces with '#[target: exe { name: ..., entry: ... }]', "
+            "naming one of the module's own files as the entry point. That file's top level is the "
+            "program; every other file of the module contributes its declarations to all of them.\n"
+            "'echoc build' with no target builds every one declared, each into its own binary under the "
+            "module's build directory. Name one and only that one is built, and then '-o' may put it "
+            "wherever you like. 'echoc run' takes exactly one, since one invocation runs one program.\n"
+            "There is no checker on this flag, because the names belong to the manifest rather than to "
+            "echoc - a name no target carries is refused with the ones that are.",
             {}, nullptr
         },
         {

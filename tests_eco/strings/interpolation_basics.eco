@@ -1,0 +1,21 @@
+// a `"` string interpolates `{$...}`; a `'` string is verbatim. that is the whole difference
+// between the two quote characters, and the only place in the language where it matters
+string $name = 'Ronon';
+int32 $age = 3;
+
+echo "{$name} is {$age} years old.";
+
+// the chunks around the holes are ordinary text, empty ones included
+echo "{$age}{$age}";
+echo "{$name}";
+echo "before {$age}";
+echo "{$age} after";
+
+// a `'` string never interpolates, whatever is in it
+echo '{$name} stays put';
+
+// a lone brace is text - only `{$` opens a hole, so nothing had to be escaped here
+echo "a { brace and a } brace";
+
+// and `\{` is how you write the two characters that would have opened one
+echo "not a hole: \{$name}";

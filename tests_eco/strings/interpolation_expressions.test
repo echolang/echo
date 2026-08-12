@@ -1,0 +1,14 @@
+# the hole's tokens come from the real lexer over the real source, so a nested string literal inside
+# one does not close the outer literal and every position keeps its true line and column
+
+--- OUT --->
+sum 7
+index 20
+method 5
+chained 2
+nested Ronon Dex
+quoted true
+34
+not a hole: {twice($p->x)}
+so write it as 10 or bind it first
+bound 6

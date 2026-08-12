@@ -1,0 +1,6 @@
+// a target's entry is a file *of* this module rather than one beside it: its declarations are shared with
+// every other target, and only its root becomes the program. `#[sources:]` here matches `src/` only, so
+// the entry named below belongs to no module at all
+#[module: "straytarget"]
+#[sources: "src/*.eco"]
+#[target: exe { name: "tool", entry: "elsewhere.eco" }]
