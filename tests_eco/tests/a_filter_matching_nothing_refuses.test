@@ -1,0 +1,8 @@
+mode: test
+expect: fail
+flags: --filter nosuchtest
+
+--- OUT --->
+[error] No Tests Selected
+
+  nothing this run compiled matches those filters. It declares 1 test: main/a_filter_matching_nothing_refuses.eco::the_only_one.

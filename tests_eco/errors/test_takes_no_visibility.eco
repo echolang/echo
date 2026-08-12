@@ -1,0 +1,5 @@
+// a test is in no overload set and under no name any program can write, so there is nobody for a visibility
+// modifier to describe. Refused at the word that is wrong, by the one gate every dispatch loop reads
+public test named {
+    assert(true);
+}

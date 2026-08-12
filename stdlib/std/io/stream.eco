@@ -19,7 +19,20 @@ namespace std::io;
 
 public struct stream
 {
-    int32 $fd;
+    // **`private`, which is what the constructor below is for.** the field-wise constructor a struct gets
+    // for free is suppressed by a private property, so the one that used to seat this field is written out
+    // - identically, so `stream(1)` and a `stream($fd)` over a descriptor of your own both still read as
+    // they did. what is closed is `$s->fd = 7`, which re-aimed a stream something else was holding
+    private int32 $fd;
+
+    /**
+     * A stream over `$fd`. The descriptor is not checked and not owned: closing it is whoever opened it's
+     * business, and this type never does.
+     */
+    constructor(int32 $fd)
+    {
+        $this->fd = $fd;
+    }
 
     /**
      * Writes `$count` bytes at `$b`, and nothing else - no terminator is read and none is written.
@@ -116,9 +129,10 @@ public struct stream
 }
 
 // the byte and the one-byte string, so `write_line` needs no allocation and `read_line` no magic
-// number. a constant is its expression copied into each use site, so neither costs anything
-const NEWLINE = '\n';
-const uint8 NEWLINE_BYTE = 10;
+// number. a constant is its expression copied into each use site, so neither costs anything.
+// `private`: `write_line` and `read_line` just below are the only things that read them
+private const NEWLINE = '\n';
+private const uint8 NEWLINE_BYTE = 10;
 
 /**
  * Standard output, file descriptor 1.

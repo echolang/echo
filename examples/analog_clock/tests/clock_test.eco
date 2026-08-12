@@ -1,0 +1,91 @@
+/*
+ * Tests for `src/clock.eco` - where each hand points, and reading a time off the command line.
+ *
+ * These are the example's pure functions: a `Time` in, a number out, no clock and no terminal anywhere
+ * near them. `now()` is the one thing in that file that cannot be tested, being the wall clock itself,
+ * and `time_from_args` is the second - it reads `std::env::arg(1)`, and a test runs in a forked process
+ * with no arguments of its own. What it does with those bytes is `two_digits_at`, which is tested here.
+ */
+
+namespace clock;
+
+// float equality is not a thing anybody wants to assert, and the geometry below is all divisions and
+// trigonometry. `#[if: tests]` is what keeps this out of every other build - it is a condition like any
+// other, true exactly when the invocation is compiling tests.
+//
+// it lives here rather than in each test file because the four of them are one module: a second copy
+// next door would be a duplicate signature, and `face_test.eco` simply calls this one
+#[if: tests]
+function close(float64 $a, float64 $b) : bool
+{
+    // both sides go through a local: a `<` straight after a call to a generic starts a type argument
+    // list rather than a comparison, and a literal in a `return`ed comparison is typed at the `bool` the
+    // function returns
+    float64 $delta = std::math::abs($a - $b);
+    float64 $epsilon = 0.000001;
+
+    return $delta < $epsilon;
+}
+#[end]
+
+test the_hour_hand_points_at_the_hour
+{
+    Time $noon = Time(12, 0, 0);
+    Time $three = Time(3, 0, 0);
+
+    assert(close(hour_turns(&$noon), 0.0), 'noon is straight up');
+    assert(close(hour_turns(&$three), 0.25), 'three is a quarter turn round');
+}
+
+test the_hour_hand_folds_the_afternoon_back
+{
+    Time $three = Time(3, 0, 0);
+    Time $fifteen = Time(15, 0, 0);
+
+    // `% 12` is the whole of the twelve-hour dial
+    assert(close(hour_turns(&$three), hour_turns(&$fifteen)), 'the dial has no afternoon');
+}
+
+test the_hour_hand_creeps
+{
+    Time $noon = Time(12, 0, 0);
+    Time $twenty_past = Time(12, 20, 0);
+
+    // a third of the way to one o'clock at twenty past, which is what makes the hand creep rather than
+    // jump. 720 is twelve hours of minutes
+    assert(close(hour_turns(&$twenty_past), 20.0 / 720.0), 'twenty past is a third of an hour along');
+    assert(hour_turns(&$twenty_past) > hour_turns(&$noon), 'and it moved forward');
+}
+
+test the_minute_hand_folds_the_seconds_in
+{
+    Time $quarter_past = Time(0, 15, 0);
+    Time $and_a_half = Time(0, 15, 30);
+
+    assert(close(minute_turns(&$quarter_past), 0.25), 'a quarter past is a quarter turn round');
+    assert(close(minute_turns(&$and_a_half), 0.25 + 30.0 / 3600.0), 'half a minute further on');
+}
+
+test the_second_hand_is_the_plain_one
+{
+    Time $midnight = Time(0, 0, 0);
+    Time $quarter = Time(0, 0, 15);
+
+    assert(close(second_turns(&$midnight), 0.0), 'nothing yet');
+    assert(close(second_turns(&$quarter), 0.25), 'a quarter of a minute');
+}
+
+test two_digits_at_reads_a_pair_of_bytes
+{
+    // a `string` literal reaches the `string::view` parameter through the implicit conversion the
+    // standard library declares on `string`, so there is no `->view()` to write
+    assert(two_digits_at('18:15:34', 0) == 18, 'the hour');
+    assert(two_digits_at('18:15:34', 3) == 15, 'the minute');
+    assert(two_digits_at('18:15:34', 6) == 34, 'the second');
+}
+
+test two_digits_at_reads_a_leading_zero
+{
+    assert(two_digits_at('00:00:00', 0) == 0, 'midnight is zero, not eight hundred');
+    assert(two_digits_at('01:02:03', 6) == 3,'and so is a single digit anywhere else');
+}

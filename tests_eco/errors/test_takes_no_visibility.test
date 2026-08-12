@@ -1,0 +1,14 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] test_takes_no_visibility.eco:3:1
+
+  'public' cannot be written here. A test is in no overload set and under no name any program can write, so there is nobody for a visibility modifier to be describing.
+
+  2 | // modifier to describe. Refused at the word that is wrong, by the one gate every dispatch loop reads
+  3 | public test named {
+    : ^^^^^^
+  4 |     assert(true);
+
+1 error, nothing was compiled.

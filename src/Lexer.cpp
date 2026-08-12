@@ -274,6 +274,11 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_public);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_operator);
 
+    // a keyword even in a build that will drop every test block, because the token filter that drops one
+    // has to recognise it - and a word that lexes differently depending on a flag is a word whose meaning
+    // no reader can settle
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_test);
+
     lx_functions.push_back(std::make_unique<LexerFunction::NumericLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::VariableName>());

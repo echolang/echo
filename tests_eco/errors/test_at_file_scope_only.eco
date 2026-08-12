@@ -1,0 +1,8 @@
+// a test is a top-level declaration a runner calls, so one nested in a body would be a program somebody meant
+// to call. Refused by the declaration pass, which is where "inside a body or a block" is already answered
+function outer() : void
+{
+    test inner {
+        assert(true);
+    }
+}

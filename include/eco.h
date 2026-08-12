@@ -78,7 +78,7 @@
 // automatically - this constant covers the one input nothing can detect: a change to this compiler's own
 // lowering. Forgetting it means a stale object silently linked into a new build, which is the single failure
 // mode in the cache with no diagnostic
-#define ECO_MODULE_CACHE_VERSION "27"
+#define ECO_MODULE_CACHE_VERSION "28"
 
 // the same knob for the C object cache, and a separate one because the two caches are separate stores
 // keyed on unrelated inputs: a codegen change moves every Echo object and no C one, and a change to how

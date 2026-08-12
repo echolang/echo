@@ -77,6 +77,9 @@ AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_
         case AST::MemberKind::t_method:
         case AST::MemberKind::t_operator:
         case AST::MemberKind::t_constructor:
+        // a **test** is as absent from this as a constructor is, and for a stronger reason: it takes no
+        // arguments at all, so there is no index 0 for this to be asked about
+        case AST::MemberKind::t_test:
             return AST::receiver_is_const(decl) ? AST::AccessEffect::t_read : AST::AccessEffect::t_inout;
         }
     }

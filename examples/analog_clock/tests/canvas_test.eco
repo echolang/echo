@@ -1,0 +1,110 @@
+/*
+ * Tests for `src/canvas.eco` - the character grid, its clipping, and one printable frame.
+ *
+ * A `Canvas` keeps its width, its height and its rows `private`, so there is nothing here to read a cell
+ * out of - which is the point. Every assertion below goes through `to_frame()`, the same string the
+ * program prints, and that is the whole of the type's surface: what a caller can see is a picture.
+ *
+ * The canvases are tiny on purpose. A 3x2 grid frames as twelve bytes, so a whole picture fits in an
+ * assertion and a wrong one is readable at a glance.
+ */
+
+namespace clock;
+
+// what an untouched canvas of this size looks like: `GLYPH_EMPTY` is a space, and `to_frame` ends every
+// row with a newline
+#[if: tests]
+function blank_3x2() : string
+{
+    return "   \n   \n";
+}
+#[end]
+
+test a_fresh_canvas_is_empty
+{
+    Canvas $c = Canvas(3, 2);
+
+    assert($c->to_frame() == blank_3x2(), 'a new canvas is spaces and newlines');
+}
+
+test a_set_cell_shows_up_in_the_frame
+{
+    Canvas $c = Canvas(3, 2);
+
+    // an id of 32 or above is that ASCII byte, so 65 is an `A` - which is what lets the readout be plain
+    // arithmetic rather than a table
+    $c->set(1, 0, 65);
+
+    assert($c->to_frame() == " A \n   \n", 'the second cell of the first row');
+}
+
+test filling_replaces_every_cell
+{
+    Canvas $c = Canvas(3, 2);
+
+    $c->fill(GLYPH_PIN);
+
+    assert($c->to_frame() == "┼┼┼\n┼┼┼\n", 'six pins and two newlines');
+}
+
+test a_glyph_is_not_a_byte
+{
+    Canvas $c = Canvas(3, 2);
+
+    $c->fill(GLYPH_PIN);
+
+    string $frame = $c->to_frame();
+
+    // eight bytes of picture would be one per cell plus the newlines. `┼` is three, which is the reason a
+    // cell holds a glyph id and ids become bytes only here
+    assert($frame->size() == 20, 'three bytes a pin, one a newline');
+}
+
+test out_of_range_is_a_no_op
+{
+    Canvas $c = Canvas(3, 2);
+
+    // the coordinates are `int32` rather than `usize` precisely so a negative one arrives as a negative
+    // one: rounding a hand that lands off the dial gives both signs, and a `usize` would have wrapped
+    // the low side into an enormous high one that both upper bounds then let through
+    $c->set(-1, 0, 65);
+    $c->set(0, -1, 65);
+    $c->set(3, 0, 65);
+    $c->set(0, 2, 65);
+
+    assert($c->to_frame() == blank_3x2(), 'nothing landed anywhere');
+}
+
+test plotting_rounds_to_the_nearest_cell
+{
+    Canvas $rounded = Canvas(3, 2);
+    Canvas $exact = Canvas(3, 2);
+
+    // 0.6 and 0.4 round to 1 and 0, so this is the same cell the other canvas is handed outright
+    $rounded->plot(0.6, 0.4, 65);
+    $exact->set(1, 0, 65);
+
+    assert($rounded->to_frame() == $exact->to_frame(), 'a plot is a rounded set');
+}
+
+test text_lands_byte_by_byte
+{
+    Canvas $c = Canvas(3, 2);
+    string $text = 'AB';
+
+    $c->write_text(0, 1, &$text);
+
+    assert($c->to_frame() == "   \nAB \n", 'both bytes, on the second row');
+}
+
+test text_running_off_the_edge_is_clipped
+{
+    Canvas $c = Canvas(3, 2);
+    string $text = 'AB';
+
+    // `write_text` clips through `set` like everything else, one cell at a time rather than refusing the
+    // whole string
+    $c->write_text(2, 0, &$text);
+
+    assert($c->to_frame() == "  A\n   \n", 'the A fits and the B does not');
+}

@@ -1,0 +1,10 @@
+mode: test
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/a_die_is_a_failure.eco::gives_up  (exited 1)
+1 test, 1 failed
+
+x main/a_die_is_a_failure.eco::gives_up  exited 1
+    fatal error: nothing to do here
+      at a_die_is_a_failure.eco:4

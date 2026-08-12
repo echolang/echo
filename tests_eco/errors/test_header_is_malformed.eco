@@ -1,0 +1,6 @@
+// the filter reads a test's *header* whether or not it is going to keep the block, because the header is the
+// only thing that says where the block ends. So a malformed one is a located error even in a build that drops
+// every test - and a malformed *body* is invisible, which is the price every excluded region pays
+test {
+    assert(true);
+}

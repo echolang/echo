@@ -17,6 +17,7 @@
 #include <glob.hpp>
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cctype>
@@ -260,19 +261,62 @@ void read_manifest_depends(
     }
 }
 
+// what one kind's *record* is read against, so the shape rules are stated once per kind rather than
+// re-derived at each field. `exe` owes an entry file and a `test` is refused for writing one
+struct TargetKindShape
+{
+    // the fields this kind understands, in the order a refusal lists them
+    std::vector<std::string> fields;
+
+    // the fields it cannot do without
+    std::vector<std::string> required;
+
+    // what a record-less `#[target: <kind>]` means, or nothing when the kind needs one written
+    std::optional<std::string> default_name;
+};
+
 // the kinds a target may produce. **one row per spelling**, read through AttributeReader::tag, so a
 // misspelled kind refuses in the same words a misspelled `#[link:]` scheme does.
 //
-// one row today, and the table is what keeps a second from costing a grammar: `lib` and `test` are the
-// obvious ones, and neither needs the common case to grow a word - which is the whole reason the kind is
-// the tag rather than a `kind:` inside the record
+// the table is what keeps a second kind from costing a grammar: neither needs the common case to grow a
+// word, which is the whole reason the kind is the tag rather than a `kind:` inside the record
 const std::vector<std::pair<std::string, Parser::TargetKind>> &target_kind_table()
 {
     static const std::vector<std::pair<std::string, Parser::TargetKind>> table = {
         { "exe", Parser::TargetKind::t_executable },
+        { "test", Parser::TargetKind::t_test },
     };
 
     return table;
+}
+
+// what each kind's record may say. **one row per kind**, because "which fields are these" is a question
+// per kind and answering it inside the field loop is how one kind's rule ends up applied to another's
+const TargetKindShape &target_kind_shape(Parser::TargetKind kind)
+{
+    static const TargetKindShape executable = {
+        { "name", "entry" },
+        { "name", "entry" },
+        std::nullopt
+    };
+
+    // **a test target needs no record at all**, and `#[target: test]` is the shape that says so: it runs
+    // every test the module has. `groups` and `files` narrow it, and are the same selection `--filter`
+    // states - one selection engine, two spellings, the call `#[link:]` and `--link` already make
+    static const TargetKindShape test = {
+        { "name", "groups", "files" },
+        {},
+        std::string("tests")
+    };
+
+    switch (kind) {
+    case Parser::TargetKind::t_executable:
+        return executable;
+    case Parser::TargetKind::t_test:
+        return test;
+    }
+
+    return executable;
 }
 
 // a target as written, before `#[sources:]` has been expanded to check its entry against
@@ -281,6 +325,8 @@ struct WrittenTarget
     std::string name;
     std::string entry;
     Parser::TargetKind kind = Parser::TargetKind::t_executable;
+    std::vector<std::string> groups;
+    std::vector<std::string> files;
     uint32_t line = 0;
 };
 
@@ -289,6 +335,8 @@ struct WrittenTarget
 //     #[target: { name: "clock", entry: "src/main.eco" }]       untagged, which is an executable
 //     #[target: exe { name: "clock", entry: "src/main.eco" }]   the same, said out loud
 //     #[target: [ { ... }, { ... } ]]                           several
+//     #[target: test]                                           a kind with nothing to configure
+//     #[target: test { name: "fast", groups: ["unit"] }]         and one narrowed
 //
 // **the tag is the kind and the record is the fields**, which is the shape `#[link: lib { ... }]` already
 // has. It is also why a target's *name* is a string in a field rather than the tag: a bare name means
@@ -313,35 +361,109 @@ void read_manifest_targets(
             continue;
         }
 
+        // **a bare name that is a kind is that kind with nothing configured.** `#[target: test]` has no
+        // record to hang a tag on, so the name has to be the kind - and reading it here rather than as an
+        // untagged value is what keeps it from being taken for a nameless executable. A bare name that is
+        // *not* a kind falls through to the record arm, where it is refused as not being one
+        if (!entry->has_tag() && entry->is(AST::AttributeValueKind::t_name)) {
+            const auto found = std::find_if(
+                target_kind_table().begin(), target_kind_table().end(),
+                [entry](const auto &row) { return row.first == entry->text; });
+
+            if (found != target_kind_table().end()) {
+                const TargetKindShape &shape = target_kind_shape(found->second);
+
+                if (!shape.default_name.has_value()) {
+                    reader.refuse(entry->span, fmt::format(
+                        "a '{}' target has nothing it can default - write its fields: {}.",
+                        entry->text, fmt::join(shape.fields, ", ")));
+                    continue;
+                }
+
+                WrittenTarget bare;
+                bare.name = shape.default_name.value();
+                bare.kind = found->second;
+                bare.line = entry->span.is_valid() ? entry->span.line() : line;
+
+                out_targets.push_back(std::move(bare));
+                continue;
+            }
+        }
+
+        const TargetKindShape &shape = target_kind_shape(kind);
+
         for (const AST::AttributeValue *record : AST::AttributeReader::payload(*entry)) {
             if (!reader.record(*record)) {
                 continue;
             }
 
-            // a **fixed** record: both keys are ours, so a third one is refused at the key rather than
-            // ignored - the format's "understood or an error, never a no-op" rule, per field
-            const AST::AttributeValue *name = reader.require_field(*record, "name");
-            const AST::AttributeValue *entry_file = reader.require_field(*record, "entry");
+            // a **fixed** record: the keys are ours, so one that is not is refused at the key rather than
+            // ignored - the format's "understood or an error, never a no-op" rule, per field. Which keys
+            // those are is the *kind's* answer, so a `test` is refused for writing an `entry:` at the word
+            // rather than being handed one it has no use for
+            bool complete = true;
 
-            reader.reject_unknown_fields(*record, { "name", "entry" });
+            for (const std::string &required : shape.required) {
+                if (reader.require_field(*record, required) == nullptr) {
+                    complete = false;
+                }
+            }
 
-            if (name == nullptr || entry_file == nullptr) {
+            reader.reject_unknown_fields(*record, shape.fields);
+
+            if (!complete) {
                 continue;
             }
 
-            std::optional<std::string> spelled_name = reader.string(*name);
-            std::optional<std::string> spelled_entry = reader.string(*entry_file);
+            WrittenTarget target;
+            target.kind = kind;
+            target.line = record->span.is_valid() ? record->span.line() : line;
 
-            if (!spelled_name.has_value() || !spelled_entry.has_value()) {
-                continue;
+            if (const AST::AttributeValue *name = reader.field(*record, "name")) {
+                std::optional<std::string> spelled = reader.string(*name);
+
+                if (!spelled.has_value()) {
+                    continue;
+                }
+
+                target.name = spelled.value();
+            }
+            else {
+                // only a kind with a default can get here - `required` held "name" otherwise
+                target.name = shape.default_name.value_or("");
             }
 
-            out_targets.push_back(WrittenTarget {
-                spelled_name.value(),
-                spelled_entry.value(),
-                kind,
-                record->span.is_valid() ? record->span.line() : line
-            });
+            if (const AST::AttributeValue *entry_file = reader.field(*record, "entry")) {
+                std::optional<std::string> spelled = reader.string(*entry_file);
+
+                if (!spelled.has_value()) {
+                    continue;
+                }
+
+                target.entry = spelled.value();
+            }
+
+            // both selections read through AttributeReader::each, so one value and a list of them are the
+            // same thing written two ways - the rule every other list-valued field here follows
+            const auto read_strings = [&reader, record](
+                const std::string &key, std::vector<std::string> &into) {
+                const AST::AttributeValue *field = reader.field(*record, key);
+
+                if (field == nullptr) {
+                    return;
+                }
+
+                for (const AST::AttributeValue *item : AST::AttributeReader::each(*field)) {
+                    if (std::optional<std::string> spelled = reader.string(*item)) {
+                        into.push_back(spelled.value());
+                    }
+                }
+            };
+
+            read_strings("groups", target.groups);
+            read_strings("files", target.files);
+
+            out_targets.push_back(std::move(target));
         }
     }
 }
@@ -609,6 +731,23 @@ bool resolve_manifest_targets(
             return false;
         }
 
+        Parser::ModuleTarget settled;
+        settled.name = target.name;
+        settled.kind = target.kind;
+        settled.groups = target.groups;
+
+        // **a test target names no file**, so every path it does name is a *selection* - resolved against
+        // the manifest like any other, and deliberately not checked against `sources`: a file: filter that
+        // matches nothing is a refusal the runner makes, where it can say what there was to choose from
+        if (target.kind == Parser::TargetKind::t_test) {
+            for (const std::string &file : target.files) {
+                settled.files.push_back(Compiler::settled_path(out.directory, file));
+            }
+
+            out.targets.push_back(std::move(settled));
+            continue;
+        }
+
         // through the one owner of "a path written relative to something", as `#[link: object]` and
         // `#[cc: include]` are - a manifest's own directory is the base for everything it declares
         const std::filesystem::path resolved = Compiler::settled_path(out.directory, target.entry);
@@ -622,7 +761,9 @@ bool resolve_manifest_targets(
             return false;
         }
 
-        out.targets.push_back(Parser::ModuleTarget { target.name, resolved, target.kind });
+        settled.entry = resolved;
+
+        out.targets.push_back(std::move(settled));
     }
 
     return true;

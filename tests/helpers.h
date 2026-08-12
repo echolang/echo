@@ -65,6 +65,14 @@ namespace EchoTests
     // symbols are collected before any of them is fully parsed
     std::unique_ptr<AST::Bundle> tests_make_parsed_bundle(const std::vector<std::string> &file_contents);
 
+    // the same, with this module's `test` blocks compiled - which no other helper does, and no other helper
+    // should: a parser nobody told otherwise drops every test block before pass 1, and that default is what
+    // every case here but the ones *about* tests wants. One or several files, because a test's name being
+    // unique per file is only assertable over two of them
+    std::unique_ptr<AST::Bundle> tests_make_parsed_bundle_with_tests(std::string content);
+    std::unique_ptr<AST::Bundle> tests_make_parsed_bundle_with_tests(
+        const std::vector<std::string> &file_contents);
+
     std::string tests_make_node_description(std::string content);
 
     std::string tests_make_node_description_expr(std::string content);

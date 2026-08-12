@@ -110,6 +110,8 @@ const char *Compiler::progress_phase_label(ProgressPhase phase)
         return "optimize";
     case ProgressPhase::t_emit:
         return "emit + link";
+    case ProgressPhase::t_test:
+        return "test";
     }
 
     return "";
@@ -344,7 +346,11 @@ void Compiler::ProgressReporter::suspend()
     erase_live_row();
 }
 
-void Compiler::ProgressReporter::close(const std::string &what, unsigned int milliseconds)
+void Compiler::ProgressReporter::close(
+    const std::string &what,
+    unsigned int milliseconds,
+    ProgressState state
+)
 {
     if (!enabled()) {
         return;
@@ -356,8 +362,15 @@ void Compiler::ProgressReporter::close(const std::string &what, unsigned int mil
 
     erase_live_row();
 
-    *_out << "\n  " << styled(_theme.done, sgr::success, _capabilities.color) << "  "
-          << fmt::format("{} in {} ms", what, milliseconds) << "\n\n"
+    // the mark states the outcome of what is being closed rather than of the closing. A compile that
+    // produced a binary and a test run in which one test failed are both "over", and signing the second with
+    // a `✓` would make the summary disagree with the rows above it
+    const bool ok = state != ProgressState::t_failed;
+
+    *_out << "\n  "
+          << styled(ok ? _theme.done : _theme.failed, ok ? sgr::success : sgr::error,
+                _capabilities.color)
+          << "  " << fmt::format("{} in {} ms", what, milliseconds) << "\n\n"
           << std::flush;
 }
 

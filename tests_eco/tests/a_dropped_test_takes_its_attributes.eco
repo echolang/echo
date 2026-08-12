@@ -1,0 +1,14 @@
+// an attribute left behind by a dropped test attaches to whatever declaration follows it, silently - which is
+// why the filter looks *ahead* from the `#` rather than rewinding over attributes it has already kept. Here
+// `#[group:]` would land on `later`, where it means nothing and is refused
+#[group: "arithmetic"]
+test dropped {
+    assert(true);
+}
+
+function later() : int32
+{
+    return 7;
+}
+
+echo later();

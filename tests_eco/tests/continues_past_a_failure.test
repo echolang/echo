@@ -1,0 +1,12 @@
+mode: test
+expect: fail
+
+--- OUT --->
+FAIL 1/3  main/continues_past_a_failure.eco::fails_first  (exited 1)
+ok   2/3  main/continues_past_a_failure.eco::passes_second
+ok   3/3  main/continues_past_a_failure.eco::passes_third
+3 tests, 1 failed
+
+x main/continues_past_a_failure.eco::fails_first  exited 1
+    assertion failed: one is not two
+      at continues_past_a_failure.eco:5

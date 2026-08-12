@@ -7,6 +7,7 @@
 #include "AST/ASTNode.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTNodeReference.h"
+#include "AST/ASTTest.h"
 #include "AST/ScopeNode.h"
 
 #include <filesystem>
@@ -29,6 +30,14 @@ namespace AST
 
         const std::string name;
         const module_handle_t handle;
+
+        // the `test` blocks this module declared, in the order they were parsed. **empty unless the token
+        // filter kept them**, which is every invocation but `echoc test`.
+        //
+        // a plain vector on the module rather than anything in AST::Collector, because a test is not a
+        // symbol: nothing resolves to one, so there is no set to join and no lookup to serve - only a list
+        // to walk. The driver is the only reader
+        std::vector<TestDeclaration> tests;
 
         Module(const std::string &name, module_handle_t handle) :
             name(name), handle(handle)

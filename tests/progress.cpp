@@ -8,6 +8,7 @@
 #include <string>
 
 #include "subprocess.h"
+#include "terminal_fixture.h"
 
 // what the e2e corpus cannot assert, and for the opposite reason to tests/diagnostics.cpp: the corpus
 // pins what a *pipe* gets, and a pipe gets nothing at all from this - which is the property the whole
@@ -20,22 +21,10 @@ using Compiler::ProgressPhase;
 using Compiler::ProgressReporter;
 using Compiler::ProgressState;
 using Compiler::TerminalCapabilities;
+using EchoTests::a_terminal;
 
 namespace
 {
-    // a terminal, as far as the reporter is concerned. Colour is off in most cases below so an assertion
-    // reads as the row rather than as a sequence of escapes
-    TerminalCapabilities a_terminal(bool unicode = true, unsigned int width = 80, bool color = false)
-    {
-        TerminalCapabilities capabilities;
-        capabilities.color = color;
-        capabilities.unicode = unicode;
-        capabilities.width = width;
-        capabilities.interactive = true;
-
-        return capabilities;
-    }
-
     constexpr const char *ERASE = "\r\x1b[K";
 };
 
@@ -264,6 +253,23 @@ TEST_CASE("every phase has a word", "[progress]")
     REQUIRE(std::string(progress_phase_label(ProgressPhase::t_codegen)) == "codegen");
     REQUIRE(std::string(progress_phase_label(ProgressPhase::t_optimize)) == "optimize");
     REQUIRE(std::string(progress_phase_label(ProgressPhase::t_emit)) == "emit + link");
+    REQUIRE(std::string(progress_phase_label(ProgressPhase::t_test)) == "test");
+}
+
+// **the closing line says the outcome of what it closed, not of the closing.** A compile that got as far as
+// this line succeeded by definition, which is why the mark defaults - but a test run can do everything it was
+// asked and still have failed, and signing that with a `✓` would make the summary disagree with the rows
+// above it
+TEST_CASE("the closing line can report a failure", "[progress]")
+{
+    std::ostringstream done;
+    ProgressReporter(done, a_terminal()).close("3 tests passed", 12);
+
+    std::ostringstream failed;
+    ProgressReporter(failed, a_terminal()).close("3 tests, 1 failed", 12, ProgressState::t_failed);
+
+    REQUIRE(done.str() == "\n  ✓  3 tests passed in 12 ms\n\n");
+    REQUIRE(failed.str() == "\n  ✗  3 tests, 1 failed in 12 ms\n\n");
 }
 
 TEST_CASE("colour wraps the mark and nothing that is measured", "[progress]")

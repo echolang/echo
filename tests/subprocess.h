@@ -93,6 +93,15 @@ namespace EchoTests
         out << content;
     }
 
+    // did a build actually produce this. **Beside write_file and not per suite**, because "the binary is
+    // there" is the assertion every target case ends on and two spellings of it is two suites that can
+    // disagree about whether a directory counts
+    inline bool file_exists(const std::filesystem::path &path)
+    {
+        std::error_code ec;
+        return std::filesystem::is_regular_file(path, ec);
+    }
+
     // a scratch project directory, removed when the test leaves. Named after the *suite* and then the
     // case, so a failure leaves something identifiable behind when the removal is commented out to
     // inspect it - and so two suites cannot collide on a case name

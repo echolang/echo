@@ -51,7 +51,7 @@ test that quietly asserts less than its author wrote.
 | `modules` | space-separated paths | module manifests to build alongside the case, each passed as `-m`. Paths are relative to `tests_eco/` |
 | `stdlib` | `on` (default) / `off` | `off` passes `--no-stdlib`: `die`, `assert` and `mem::` / `std::` become undeclared names |
 | `expect` | `ok` (default) / `fail` / an exit status like `3` | the exit status the case must produce |
-| `mode` | `run` (default) / `build` | JIT the module, or link a native binary and execute it |
+| `mode` | `run` (default) / `build` / `test` | JIT the module, link a native binary and execute it, or run the case's `test` blocks |
 | `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
 | `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
 | `stdin` | space-separated words | fed to the program on standard input, **one line per word** |
@@ -306,6 +306,28 @@ So write build-mode cases *for* build mode rather than converting existing ones.
 the **program's** output only — the build step is asserted through its exit code alone, because its
 stdout carries absolute object and executable paths that no golden could hold. Compile-time
 diagnostics are `mode: run`'s business.
+
+## `mode: test`
+
+Runs `echoc test` over the case, which is **the only mode that compiles a `test` block at all**: every other
+invocation drops one before pass 1, so a case's tests are invisible unless it says so. That is not a quirk of
+the harness, it is the feature — [`tests/a_normal_run_never_parses_one`](tests/a_normal_run_never_parses_one.eco)
+is a `mode: run` case whose test body would not compile and which passes for that reason.
+
+The `OUT` golden is the **runner's** output: one line per test, then a summary, then every failure quoted in
+full. That is what a non-terminal gets, and it is the whole reason the runner has a plain rendering at all -
+`Compiler::ProgressReporter` writes nothing through a pipe, so a corpus case would otherwise assert an empty
+stream. The live rendering is asserted from C++ instead, in [`tests/progress.cpp`](../tests/progress.cpp).
+
+`expect: fail` is how a case says a test failed, because that is what the exit status means: `1` when any test
+failed, was killed by a signal, or when a `--filter` matched nothing.
+
+Two things a `mode: test` case cannot express, both for the reason `#[target:]` cases cannot either - every
+case appends its own `.eco` as a positional, so the harness always takes the "loose sources become the main
+module" branch:
+
+- a `#[target: test]`, which is a thing a manifest declares. [`tests/test_targets.cpp`](../tests/test_targets.cpp) covers those.
+- a **dependency's** tests being excluded, which needs two manifests and no loose source. Same suite.
 
 ## Adding a test
 

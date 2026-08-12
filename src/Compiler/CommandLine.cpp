@@ -23,6 +23,26 @@ namespace
         return Compiler::subcommand_info(subject).name;
     }
 
+    // every command echoc has, joined the way a refusal quotes them back: `'run', 'build' or 'clean'`.
+    //
+    // **read off the table rather than spelled here**, which is what the table is for - this was the one
+    // sentence in the command line that knew the list by heart, and adding a command left it lying
+    std::string command_word_list()
+    {
+        const std::vector<Compiler::SubcommandInfo> &table = Compiler::subcommand_table();
+        std::string joined;
+
+        for (size_t index = 0; index < table.size(); index++) {
+            if (index > 0) {
+                joined += index + 1 == table.size() ? " or " : ", ";
+            }
+
+            joined += fmt::format("'{}'", table[index].name);
+        }
+
+        return joined;
+    }
+
     // **a word that begins with two dashes is never a value.** `-` alone is, so `--target-features -crc`
     // works, and so does a relative path. Without this, `echoc build -o --silent` writes a file called
     // --silent and the missing output is reported by clang
@@ -271,7 +291,7 @@ bool Compiler::parse_command_line(
 
                 if (info == nullptr) {
                     out_error = fmt::format(
-                        "'{}' is not an echoc command. Write 'run', 'build' or 'clean'.", word);
+                        "'{}' is not an echoc command. Write {}.", word, command_word_list());
 
                     return false;
                 }

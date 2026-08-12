@@ -1,0 +1,16 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] DuplicateTestName  test_duplicate_name.eco:8:6
+
+  This file already declares a test called 'twice'.
+
+  7 | 
+  8 | test twice {
+    :      ^^^^^
+  9 |     assert(true);
+
+  help: a test's name has to be unique within its own file and nowhere wider, so another file of this module may well have one of the same name
+
+1 error, nothing was compiled.

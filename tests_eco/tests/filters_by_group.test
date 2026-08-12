@@ -1,0 +1,6 @@
+mode: test
+flags: --filter group:arithmetic
+
+--- OUT --->
+ok   1/1  main/filters_by_group.eco::in_the_group
+1 test passed

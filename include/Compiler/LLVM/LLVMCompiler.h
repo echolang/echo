@@ -43,6 +43,11 @@ public:
     // compile_bundle; defaults to ECO_MAIN_MODULE_NAME and every file root of it
     void set_entry(const std::string &module_name, const std::filesystem::path &entry_file = {});
 
+    // **this compile is for a test run, so no file root becomes the program at all.** Beside set_entry
+    // because it is the other half of the same question and both have to be answered before
+    // compile_bundle - see CodegenContext::test_mode
+    void set_test_mode(bool test_mode);
+
     // `cached_modules` names the modules whose compiled object is being reused, so no code is generated for
     // them at all - see TypeLowering::create_cmp_units for why that is the only place it has to be said
     void compile_bundle(const AST::Bundle &bundle, const std::set<std::string> &cached_modules = {});
@@ -129,13 +134,19 @@ public:
     void printIR(bool toFile);
     void print_unit_ir();
 
-    // JITs the program, after dropping everything the entry point cannot reach - so the module that runs
-    // is smaller than the one printIR prints. See Backend::prune_to_entry for why that belongs here and
-    // nowhere a `build` could reach it
+    // **the JIT, with the seam between preparing it and calling into it left open** - what a test run
+    // needs, since it calls a definition of its own once per test instead of running a program.
     //
-    // `arguments` and `environment` are the *program's*, and returns what it returned - see
-    // Backend::run_code, which owns both of those decisions
-    int run_code(const std::vector<std::string> &arguments, const char *const *environment);
+    // preparing drops everything the roots cannot reach, so the module that runs is smaller than the one
+    // printIR prints. `arguments` and `environment` are the *program's*, and run_main returns what it
+    // returned - see Backend::prepare_execution and Backend::run_main, which own all of those decisions
+    bool prepare_execution();
+    int run_main(const std::vector<std::string> &arguments, const char *const *environment);
+    uint64_t function_address(const std::string &mangled) const;
+
+    // the symbols the prune keeps besides the entry point - a test run's tests. Must be set before
+    // prepare_execution, which is when the prune happens
+    void set_jit_roots(std::vector<std::string> roots);
 
     // what that prune dropped, for `--explain-prune`. Empty on any path that has not run one
     const std::string &prune_report() const;

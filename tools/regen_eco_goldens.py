@@ -89,6 +89,7 @@ def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None)
     """The same command line tests/e2e_eco.cpp:echoc_command produces, in the same order."""
     mode = settings.get("mode", "run")
     is_build = mode == "build"
+    is_test = mode == "test"
 
     flags = "--track-allocations "
     if settings.get("stdlib", "on") == "off":
@@ -99,7 +100,7 @@ def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None)
         flags += settings["flags"] + " "
 
     arguments = settings.get("args", "")
-    program_arguments = "" if (is_build or not arguments) else " -- " + arguments
+    program_arguments = "" if (is_build or is_test or not arguments) else " -- " + arguments
 
     environment = "".join(pair + " " for pair in settings.get("env", "").split())
 
@@ -107,7 +108,13 @@ def build_command(eco: Path, settings: dict, scratch: Path, binary: Path | None)
     # those still belong to the program rather than to the printf
     feed = stdin_prefix(settings)
 
-    subcommand = f"build -o {shlex.quote(str(binary))} " if is_build else "run "
+    if is_build:
+        subcommand = f"build -o {shlex.quote(str(binary))} "
+    elif is_test:
+        # `test` takes no -o and no `--`: it runs no program of the case's, so neither is about anything
+        subcommand = "test "
+    else:
+        subcommand = "run "
 
     return (
         feed

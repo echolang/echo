@@ -1,0 +1,9 @@
+// `#[group:]` is a tag for a runner to select on and the compiler reads nothing else out of it
+#[group: "arithmetic"]
+test in_the_group {
+    assert(1 + 1 == 2);
+}
+
+test not_in_the_group {
+    assert(true);
+}

@@ -26,6 +26,7 @@
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/OperatorDeclParser.h"
+#include "Parser/TestDeclParser.h"
 #include "Parser/VisibilityParser.h"
 
 void Parser::finish_call_statement(Parser::Payload &payload, AST::ScopeNode &scope, AST::ExprNode *call)
@@ -184,6 +185,13 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (starts_typedecl(cursor)) {
             parse_typedecl(payload);
+        }
+        else if (starts_testdecl(cursor)) {
+            // the body, and the declaration node with it. the declaration pass refused a test nested in a
+            // block already, so this arm parses one either way rather than refusing it twice - the tokens
+            // have to be consumed identically by both walks, and a second copy of that sentence would be a
+            // diagnostic that appears twice
+            parse_testdecl(payload, /*symbol_only=*/false);
         }
         else if (cursor.is_type(Token::Type::t_extern)) {
             parse_extern_block(payload, visibility);

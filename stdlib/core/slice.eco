@@ -190,11 +190,14 @@ operator<T> (const slice<T>& $s)[usize $index] : const T&
  */
 public struct slice_iterator<T> : contract::iterator<T>, contract::keyed<usize>
 {
-    slice<T> $window;
+    // both fields `private`, which the window above could not be: `slice<T>`'s own two are read by the
+    // element operators, and an operator is a free declaration rather than a member of either operand.
+    // a cursor has none, so its state is reachable from the four bodies below and nowhere else
+    private slice<T> $window;
 
     // the index one *past* the element `current()` names, so the cursor starts before the first one
     // without needing a signed type or a "have we started" flag
-    usize $pos;
+    private usize $pos;
 
     constructor(slice<T> $window)
     {

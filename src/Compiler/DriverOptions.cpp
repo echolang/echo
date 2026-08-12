@@ -33,6 +33,7 @@ bool Compiler::resolve_driver_options(
     out.link = cli.list(Opt::t_link);
     out.defines = cli.list(Opt::t_define);
     out.targets = cli.list(Opt::t_target);
+    out.filters = cli.list(Opt::t_filter);
     out.program_arguments = cli.program_arguments;
 
     out.target_os = cli.value(Opt::t_target_os);
@@ -43,6 +44,7 @@ bool Compiler::resolve_driver_options(
     out.no_stdlib = cli.flag(Opt::t_no_stdlib);
     out.emit_stdlib_header = cli.flag(Opt::t_emit_stdlib_header);
     out.silent = cli.flag(Opt::t_silent);
+    out.verbose = cli.flag(Opt::t_verbose);
     out.dry_run = cli.flag(Opt::t_dry_run);
     out.with_stdlib = cli.flag(Opt::t_with_stdlib);
 
@@ -65,9 +67,10 @@ bool Compiler::resolve_driver_options(
         }
     }
 
-    // **the subcommand's default, then what was written over it.** One rule and not two, because the two
+    // **the subcommand's default, then what was written over it.** One rule and not several, because the
     // subcommands disagree about nothing else: `build` hands somebody a binary and so drops the checks,
-    // `run` is somebody trying something and so keeps them
+    // `run` is somebody trying something and so keeps them - and `test` keeps them for a stronger reason
+    // than either, `assert` being the whole of how a test says it failed
     out.options.mode = out.subcommand == Subcommand::t_build
         ? BuildMode::t_release
         : BuildMode::t_debug;
@@ -110,10 +113,12 @@ bool Compiler::resolve_driver_options(
     // dump can each only look at one module, so both force the merge - but a dump changes no emitted
     // byte, and letting it reach compute_module_keys would make every module's key react to a `--print`.
     //
-    // `run` is the third and is unconditional: the JIT holds one module in memory and emits no object, so
+    // the JIT is the third and is unconditional: it holds one module in memory and emits no object, so
     // there is never a per-module artifact for it to store or reuse. It used to be a `true` written at
-    // the one call site, which is the same fact with nowhere to be asked
+    // the one call site, which is the same fact with nowhere to be asked. `test` is the second subcommand
+    // that JITs and answers here for exactly that reason rather than as a second rule
     out.whole_program = out.subcommand == Subcommand::t_run
+        || out.subcommand == Subcommand::t_test
         || out.optimize_is_whole_program()
         || out.prints(PrintKind::t_ir);
 

@@ -185,6 +185,18 @@ std::vector<AST::IssueNote> AST::Issue::UnsafePromotion::notes() const
         "assert that the borrow is the only one" } };
 }
 
+ISSUE_MESSAGE_FNC(DuplicateTestName)
+{
+    return fmt::format("This file already declares a test called '{}'.", test_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::DuplicateTestName::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "a test's name has to be unique within its own file and nowhere wider, so another file of this "
+        "module may well have one of the same name" } };
+}
+
 ISSUE_MESSAGE_FNC(TopLevelCodeOutsideEntry)
 {
     return fmt::format(

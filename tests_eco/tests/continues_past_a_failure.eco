@@ -1,0 +1,14 @@
+// the whole of what a process boundary per test buys: the first test aborts inside `assert`, and the two
+// after it still run. Nothing in this compiler or in the standard library can unwind, so `assert` really does
+// end the process it is in - it is just no longer the process the runner is in
+test fails_first {
+    assert(1 == 2, 'one is not two');
+}
+
+test passes_second {
+    assert(true);
+}
+
+test passes_third {
+    assert(true);
+}

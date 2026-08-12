@@ -2,6 +2,7 @@
 
 #include "Parser/FuncDeclParser.h"
 #include "Parser/OperatorDeclParser.h"
+#include "Parser/TestDeclParser.h"
 #include "Parser/TypeDeclParser.h"
 #include "Parser/TypeParser.h"
 
@@ -13,6 +14,10 @@
 const char *const Parser::k_operator_visibility_refusal =
     "An operator's symbol is global wherever it is declared - one entry in one table that every module "
     "reads - so there is no scope for it to be narrowed to.";
+
+const char *const Parser::k_test_visibility_refusal =
+    "A test is in no overload set and under no name any program can write, so there is nobody for a "
+    "visibility modifier to be describing.";
 
 Parser::VisibilityPrefix Parser::parse_visibility_prefix(
     Parser::Payload &payload,
@@ -95,6 +100,9 @@ Parser::VisibilityPrefix Parser::consume_declaration_visibility(
 
     if (starts_operatordecl(payload.cursor)) {
         refuse_visibility_prefix(payload, prefix, k_operator_visibility_refusal);
+    }
+    else if (starts_testdecl(payload.cursor)) {
+        refuse_visibility_prefix(payload, prefix, k_test_visibility_refusal);
     }
     else if (!starts_funcdecl(payload.cursor) && !starts_typedecl(payload.cursor)
         && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)) {

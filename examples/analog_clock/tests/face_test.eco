@@ -1,0 +1,77 @@
+/*
+ * Tests for `src/face.eco` - the dial's geometry and the digits under it.
+ *
+ * The polar arithmetic is the part of the drawing that is worth pinning down, because it is the part that
+ * is silently wrong rather than visibly wrong: a dial that is off by an aspect ratio is still a picture.
+ * `close` comes from `clock_test.eco` - one module, so nothing here needs a `public` or a second copy.
+ *
+ * The three layers themselves are not tested here. What they do is draw, and what they draw is a frame,
+ * so they are tested through the `Renderer` next door.
+ */
+
+namespace clock;
+
+test a_dial_is_as_wide_as_it_is_round
+{
+    Dial $d = Dial(11.0, 2.0);
+
+    // eleven rows of radius, twice as many columns as rows, and the centre cell in each direction
+    assert($d->columns() == 45, 'twenty two either side of the middle');
+    assert($d->rows() == 23, 'eleven above and eleven below');
+}
+
+test the_centre_is_a_radius_in_from_each_edge
+{
+    Dial $d = Dial(11.0, 2.0);
+
+    assert(close($d->cx, 22.0), 'the aspect stretches x and nothing else');
+    assert(close($d->cy, 11.0), 'y is in rows, so it is the radius');
+}
+
+test twelve_o_clock_is_straight_up
+{
+    Dial $d = Dial(11.0, 2.0);
+
+    // clockwise from 12, so no turns at all is the top of the ring: x is the centre and y is row zero
+    assert(close($d->x(0.0, 1.0), 22.0), 'directly above the middle');
+    assert(close($d->y(0.0, 1.0), 0.0), 'the top row');
+}
+
+test three_o_clock_is_the_right_hand_edge
+{
+    Dial $d = Dial(11.0, 2.0);
+
+    // a quarter turn round, so all of the reach is in x - and stretched by the aspect, which is why the
+    // clock comes out round in a terminal instead of an egg
+    assert(close($d->x(0.25, 1.0), 44.0), 'the far right column');
+    assert(close($d->y(0.25, 1.0), 11.0), 'level with the middle');
+}
+
+test no_reach_is_the_middle_whatever_the_turn
+{
+    Dial $d = Dial(11.0, 2.0);
+
+    assert(close($d->x(0.375, 0.0), $d->cx), 'x stays put');
+    assert(close($d->y(0.375, 0.0), $d->cy), 'and so does y');
+}
+
+test the_readout_is_two_digits_at_a_time
+{
+    string $out = '';
+
+    two_digits(&$out, 7);
+    two_digits(&$out, 34);
+
+    // it appends rather than replacing, which is what lets `clock_text` build the whole thing with the
+    // colons in between
+    assert($out == '0734', 'a leading zero below ten, and no separator of its own');
+}
+
+test the_clock_text_is_hh_mm_ss
+{
+    Time $evening = Time(18, 15, 34);
+    Time $midnight = Time(0, 0, 0);
+
+    assert(clock_text(&$evening) == '18:15:34', 'the picture in the README');
+    assert(clock_text(&$midnight) == '00:00:00', 'and every field zero padded');
+}

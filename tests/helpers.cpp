@@ -91,28 +91,59 @@ std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(
     return bundle;
 }
 
+namespace
+{
+    // several files into one module, parsed the way a real multi file compile parses them. `test_modules` is
+    // **the one thing that makes a test block survive to pass 1**, and it is a parameter rather than two
+    // copies of this function: the parser drops every test block unless it is named, and which of the two
+    // helpers below is being called is the whole of the difference
+    std::unique_ptr<AST::Bundle> make_parsed_bundle(
+        const std::vector<std::string> &file_contents,
+        std::set<std::string> test_modules
+    )
+    {
+        auto bundle = std::make_unique<AST::Bundle>();
+        auto module_handle = bundle->modules.add_module("test");
+
+        std::vector<Parser::ModuleParser::InputFile> files;
+        for (size_t i = 0; i < file_contents.size(); i++) {
+            files.push_back(Parser::ModuleParser::InputFile(
+                "/tmp/testfile" + std::to_string(i) + ".eco", file_contents[i]));
+        }
+
+        auto input = Parser::ModuleParser::InputPayload {
+            .files = files,
+            .module = bundle->modules.get_module(module_handle),
+            .collector = bundle->collector
+        };
+
+        auto module_parser = Parser::ModuleParser(
+            Compiler::TargetFacts::host(), std::move(test_modules));
+        module_parser.parse_input(input);
+
+        EchoTests::run_test_semantic_passes(*bundle, EchoTests::tests_compiler_options());
+
+        return bundle;
+    }
+};
+
 std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle(const std::vector<std::string> &file_contents)
 {
-    auto bundle = std::make_unique<AST::Bundle>();
-    auto module_handle = bundle->modules.add_module("test");
+    return make_parsed_bundle(file_contents, {});
+}
 
-    std::vector<Parser::ModuleParser::InputFile> files;
-    for (size_t i = 0; i < file_contents.size(); i++) {
-        files.push_back(Parser::ModuleParser::InputFile("/tmp/testfile" + std::to_string(i) + ".eco", file_contents[i]));
-    }
+std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle_with_tests(std::string content)
+{
+    return tests_make_parsed_bundle_with_tests(std::vector<std::string> { std::move(content) });
+}
 
-    auto input = Parser::ModuleParser::InputPayload {
-        .files = files,
-        .module = bundle->modules.get_module(module_handle),
-        .collector = bundle->collector
-    };
-
-    auto module_parser = Parser::ModuleParser(Compiler::TargetFacts::host());
-    module_parser.parse_input(input);
-
-    run_test_semantic_passes(*bundle, EchoTests::tests_compiler_options());
-
-    return bundle;
+std::unique_ptr<AST::Bundle> EchoTests::tests_make_parsed_bundle_with_tests(
+    const std::vector<std::string> &file_contents
+)
+{
+    // named exactly as the driver names it - resolve_test_modules' answer reaches the token filter through
+    // the module names the parser was built with
+    return make_parsed_bundle(file_contents, { "test" });
 }
 
 std::string EchoTests::tests_make_node_description(std::string content)

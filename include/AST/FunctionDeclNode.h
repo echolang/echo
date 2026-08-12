@@ -37,6 +37,20 @@ namespace AST
         // tag is what the two readers that must know it apart read: the mangler, whose name has to
         // survive being a symbol, and the diagnostics, which say "operator" rather than "function"
         t_operator,
+
+        // declared `test my_cool_test { ... }`. a free function of no arguments returning `void`, and
+        // structurally nothing else - which is what lets it inherit every semantic pass and every codegen
+        // arm without one of them growing a case for it.
+        //
+        // what the tag is for is that it is **not in any overload set**: unlike an operator, a test is not
+        // registered with FunctionRegistry at all, so no call can ever resolve to one and nothing needs a
+        // rule saying so.
+        //
+        // **deliberately not how a test is discovered** - that is AST::Module::tests, a flat list the
+        // parser fills, which is why Compiler::TestCase holds no pointer into the tree. So this tag is
+        // what a pass reads to tell one apart when it already has the declaration in hand, and the
+        // switches it makes total are the reason a pass cannot meet one without having said so
+        t_test,
     };
 
     class FunctionDeclNode : public Node
@@ -93,6 +107,10 @@ namespace AST
 
         inline bool is_operator() const {
             return member_kind == MemberKind::t_operator;
+        }
+
+        inline bool is_test() const {
+            return member_kind == MemberKind::t_test;
         }
 
         // **the symbol an operator declaration was written with**, recovered from its decorated name.

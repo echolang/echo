@@ -1,0 +1,10 @@
+// **a test run compiles the module and runs no program of it.** The `echo` below is the module's own top
+// level, which `echoc run` would print first - here nothing runs it, because a test asked for is a test and
+// not a test after the application it sits beside
+echo "this line belongs to the program, not to the tests";
+
+test adds_up {
+    $a = 22;
+    $b = 20;
+    assert($a + $b == 42);
+}

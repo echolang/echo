@@ -8,6 +8,7 @@
 #include "Parser/AttributeParser.h"
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/ConstDeclParser.h"
+#include "Parser/TestDeclParser.h"
 #include "Parser/VisibilityParser.h"
 
 #include "AST/ASTSymbol.h"
@@ -294,6 +295,24 @@ void Parser::parse_declaration_surface(Parser::Payload &payload, std::optional<T
             // this pass started. that is what lets the declarations below name a type from any file -
             // and its *visibility* was settled there too, off the same modifier this walk just consumed
             parse_typedecl(payload);
+        }
+        else if (starts_testdecl(cursor)) {
+            // no signature is published and no node is minted here - a test is in no overload set. What
+            // this pass is for is the body's *declarations*, so a fixture `struct` written inside one
+            // joins the body's lexical namespace before the body pass reads a use of it
+            //
+            // **and this is the one owner of the scope refusal.** `block_token.has_value()` is exactly
+            // "inside a body or a block", the same reading the constant arm below takes: a test is a
+            // top-level declaration, and one nested in a function would be a program somebody meant to
+            // call. The body pass defers to this arm having spoken
+            if (block_token.has_value()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(cursor.current()),
+                    "A test cannot be declared inside a body or a block - it is a top-level declaration "
+                    "that a test runner calls, so it belongs at file or namespace scope.");
+            }
+
+            parse_testdecl(payload, /*symbol_only=*/true);
         }
         else if (cursor.is_type(Token::Type::t_extern)) {
             // walked in this pass too, so the node it produces already knows it is extern. otherwise

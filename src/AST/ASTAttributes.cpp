@@ -17,8 +17,9 @@ namespace
     //   builtin     FuncDeclParser  -> FunctionDeclNode::builtin, checked by AST::is_known_builtin
     //   core        TypeDeclParser  -> bind_core_type_attribute, checked by AST::core_type_kind_for
     //   unique      TypeDeclParser  -> bind_unique_attribute, read by AST::classify_copy
+    //   group       TestDeclParser  -> AST::TestDeclaration::group, read by Compiler::select_tests
     constexpr std::string_view k_declaration_attributes[] = {
-        "inline", "implicit", "intrinsic", "builtin", "core", "unique" };
+        "inline", "implicit", "intrinsic", "builtin", "core", "unique", "group" };
 
     // and the manifest's eight, which reach this parser too: a `module.eco` is **Echo**, read by the real
     // lexer and the real attribute parser into a scratch bundle. Leaving them out of the union made every

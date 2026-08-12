@@ -60,15 +60,21 @@
 #[core: map]
 public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const V>
 {
-    ptr<uint64> $hashes;
-    ptr<K> $keys;
+    // **four of the six are `private`, and which two are not is decided by the operators below rather
+    // than by this type.** an operator is a *free* declaration and not a member of either operand, so it
+    // sits outside the type in exactly the sense `private` means - and the three brackets read `$values`
+    // and `$cap`. that is the same seam that keeps `find` and `seat` reachable, and the same fact that
+    // makes an operator take no visibility modifier of its own
+    private ptr<uint64> $hashes;
+    private ptr<K> $keys;
+
     ptr<V> $values;
 
     // live entries
-    usize $len;
+    private usize $len;
 
     // dead slots a probe still has to walk past
-    usize $tombs;
+    private usize $tombs;
 
     // slots. always a power of two, or 0
     usize $cap;
@@ -1014,14 +1020,17 @@ operator<K, V> (const map<K, V>& $m)[const K& $key] : const V&
  */
 public struct map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
 {
-    ptr<uint64> $hashes;
-    ptr<K> $keys;
-    ptr<V> $values;
-    usize $cap;
+    // **every field `private`, where the map's own four could not be**: no operator is declared over a
+    // cursor, so the constructor below and the three protocol methods are the whole of how one is reached.
+    // the type stays `public` because a caller may name it - it is what `map<K, V>::iterate()` hands back
+    private ptr<uint64> $hashes;
+    private ptr<K> $keys;
+    private ptr<V> $values;
+    private usize $cap;
 
     // the slot one *past* the entry `current()` names, so the cursor starts before the first one without
     // needing a signed type or a "have we started" flag - slice_iterator's convention
-    usize $pos;
+    private usize $pos;
 
     constructor(ptr<uint64> $hashes, ptr<K> $keys, ptr<V> $values, usize $cap)
     {

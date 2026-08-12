@@ -6,13 +6,15 @@
  * so they are gathered here rather than sitting beside the code that calls them. The `c_` prefix
  * is a reader's convention and nothing more.
  *
- * Nothing here is `public`. What a program reaches is `std::io::stdout` and the functions beside
- * it; the syscalls are this module's own business.
+ * **`internal` on the block, which belongs to every declaration in it.** What a program reaches is
+ * `std::io::stdout` and the functions beside it; the syscalls are this module's own business. Not
+ * `private`, because that is the file axis and the whole point of this file is that stream.eco calls
+ * them - `internal` is the level they always had, said out loud.
  */
 
 namespace std::io;
 
-extern {
+internal extern {
     // the raw, unbuffered writes and reads. deliberately **not** `fwrite`/`fread`: a `string` need
     // not be NUL-terminated, its length is always known, and a second layer of buffering under one
     // that already exists is two places for output to be sitting when a program dies

@@ -49,6 +49,12 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     // it. what that buys is a fact no type-based rule could give: two live arrays are two buffers,
     // even when both are `array<usize>`. `$len` stays here because how much of the buffer is live is
     // *this* type's business - a buffer has a capacity and deliberately no length
+    //
+    // **neither can be `private`, and the element operators are why**: an operator is a *free* declaration
+    // rather than a member of either operand, so it sits outside this type in exactly the sense `private`
+    // means - and all three of them read `$storage` and write `$len`. That is the same seam that keeps
+    // `map<K, V>::find` and `seat` reachable, and the reason the uniqueness argument above rests on
+    // `mem::buffer<T>`'s own private fields rather than on these two
     mem::buffer<T> $storage;
     usize $len;
 

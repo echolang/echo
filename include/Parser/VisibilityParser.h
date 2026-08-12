@@ -96,6 +96,11 @@ namespace Parser
     // and a namespace, and a reason worded three ways is three rules as far as a reader is concerned
     extern const char *const k_operator_visibility_refusal;
 
+    // **and a test takes none either**, for a stronger version of the same reason. Spelled beside the
+    // operator's because the two are the shapes the whitelist above has to name by hand, and a reader
+    // comparing them should find them in one place
+    extern const char *const k_test_visibility_refusal;
+
     // **may the file being parsed name this type?** asked at every site that turns a type *name* into a
     // declaration, which is three: Parser::parse_value_type's own lookup, the head of an `Owner::Nested`
     // chain, and a generic constraint atom.

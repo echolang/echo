@@ -1,0 +1,4 @@
+// the module beside this one is what the case is about - this file is only what the runner is pointed at
+test the_entry_files_own {
+    assert(true);
+}

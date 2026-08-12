@@ -25,6 +25,10 @@ namespace
     constexpr const char *k_axis_os = "os";
     constexpr const char *k_axis_arch = "arch";
 
+    // the one flag the compiler sets itself. it reads like any other flag to a condition, and is reserved
+    // against `--define` for the reason an axis is: writing it would be believing something false
+    constexpr const char *k_flag_tests = "tests";
+
     // LLVM's triple vocabulary is not ours, and the mapping is the point of this function: `macosx` and
     // `ios` are both Darwin as far as which libc calls exist, and `aarch64` is what LLVM calls the
     // architecture Apple calls `arm64`. Echo's names are the ones a person would write
@@ -90,6 +94,18 @@ bool TargetFacts::is_axis(const std::string &name)
 std::string TargetFacts::axis_names()
 {
     return fmt::format("{}, {}", k_axis_os, k_axis_arch);
+}
+
+TargetFacts TargetFacts::for_module(
+    const TargetFacts &base,
+    const std::string &module_name,
+    const std::set<std::string> &modules_with_tests
+)
+{
+    TargetFacts facts = base;
+    facts.tests = modules_with_tests.find(module_name) != modules_with_tests.end();
+
+    return facts;
 }
 
 bool TargetFacts::axis_equals(
@@ -178,6 +194,15 @@ bool TargetFacts::resolve(
             return false;
         }
 
+        // reserved for the same reason, and for one more: what compiles a module's `test` blocks has to be
+        // the thing that also runs them, or a build could carry tests nothing ever calls
+        if (define == k_flag_tests) {
+            out_error = fmt::format(
+                "'{}' is set by `echoc test`, not by --define - a build that defined it would compile "
+                "every test block and run none of them", define);
+            return false;
+        }
+
         out_facts.defines.insert(define);
     }
 
@@ -199,12 +224,22 @@ TargetFacts TargetFacts::host()
 
 bool TargetFacts::has_define(const std::string &name) const
 {
+    // `tests` is answered from the field rather than from the set, so there is one place that knows whether
+    // this module compiles its tests and `#[if: tests]` cannot disagree with the token filter beside it
+    if (name == k_flag_tests) {
+        return tests;
+    }
+
     return defines.find(name) != defines.end();
 }
 
 std::string TargetFacts::cache_signature() const
 {
     std::string result = "os=" + operating_system + ";arch=" + architecture + ";";
+
+    // stated either way rather than only when set: a module compiled with its tests holds function bodies a
+    // module compiled without them does not, so the two cannot be allowed to share an object
+    result += std::string("tests=") + (tests ? "1" : "0") + ";";
 
     // the set is ordered, so this is stable across two invocations that typed the flags differently
     for (const std::string &define : defines) {

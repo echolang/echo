@@ -43,14 +43,18 @@
  */
 public struct range<T> : contract::iterable<T>, contract::const_iterable<T>
 {
-    T $from;
-    T $to;
+    // **`private`, all three.** the two operators below build one through the constructor rather than by
+    // filling fields, so nothing outside this type reads them - and the bounds staying inside is what lets
+    // a step field arrive later without being a change to anybody's code. it also suppresses the field-wise
+    // constructor, which for this type was a second spelling of the declared one
+    private T $from;
+    private T $to;
 
     // **a field rather than a second type.** the alternative - lowering `$a ..= $b` to `range($a, $b + 1)`
     // - is branch-free and silently wrong at `T`'s maximum, where `0 ..= 255` over a `uint8` becomes an
     // empty loop. this is a constant once the constructor inlines, so a release build pays nothing for it,
     // and it is where a step field goes the day somebody wants `0 .. 10 by 2`
-    bool $inclusive;
+    private bool $inclusive;
 
     constructor(T $from, T $to, bool $inclusive)
     {
@@ -79,6 +83,9 @@ public struct range<T> : contract::iterable<T>, contract::const_iterable<T>
  *
  * It holds its bound by value, for `slice_iterator<T>`'s reason: the end is then an ordinary local
  * the optimiser can prove loop-invariant, which is what gives the loop a computable trip count.
+ *
+ * Every field is `private`, `range<T>`'s being so for the same reason: the six below are one step's
+ * worth of bookkeeping, and the three methods are the whole of what a cursor is for.
  */
 public struct range_iterator<T> : contract::iterator<T>, contract::keyed<usize>
 {
@@ -87,21 +94,21 @@ public struct range_iterator<T> : contract::iterator<T>, contract::keyed<usize>
     // one means there is no "has this started" test in the loop, and a loop with no such test has a
     // trip count the optimiser can compute - which is the difference between a vectorised loop and a
     // scalar one. `current()` borrows `$value`, so the step may run ahead of it freely
-    T $cursor;
-    T $value;
+    private T $cursor;
+    private T $value;
 
-    T $end;
-    bool $inclusive;
+    private T $end;
+    private bool $inclusive;
 
     // **only the closed form needs state**, and only at `T`'s maximum. it folds away entirely in an
     // exclusive instance, where `$inclusive` is a constant and nothing reads this
     //
     // it starts true for a closed range that is already empty, which is the whole of what an
     // `$from > $end` test would have said - answered once here rather than on every step
-    bool $spent;
+    private bool $spent;
 
     // how many values have been handed out, which is what `key()` answers
-    usize $produced;
+    private usize $produced;
 
     constructor(T $from, T $end, bool $inclusive)
     {

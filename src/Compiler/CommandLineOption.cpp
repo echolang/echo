@@ -1,6 +1,7 @@
 #include "Compiler/CommandLineOption.h"
 
 #include "Compiler/TerminalCapabilities.h"
+#include "Compiler/TestSelection.h"
 
 #include <cassert>
 #include <cstddef>
@@ -21,6 +22,15 @@ namespace
     {
         Compiler::DiagnosticFormat format = Compiler::DiagnosticFormat::t_auto;
         return Compiler::parse_diagnostic_format(value, format, out_error);
+    }
+
+    // and a third, for the same reason and unlike `--link`: a filter's grammar is a tag and a word, needing
+    // no working directory and no TargetFacts, so its refusal can happen at the argv word rather than after
+    // the module graph has been read
+    bool check_filter(const std::string &value, std::string &out_error)
+    {
+        Compiler::TestFilter filter;
+        return Compiler::parse_test_filter(value, filter, out_error);
     }
 
     unsigned int code_of(Compiler::PrintKind kind)
@@ -71,6 +81,8 @@ unsigned int Compiler::bit_of(Subcommand id)
         return accepts::run;
     case Subcommand::t_build:
         return accepts::build;
+    case Subcommand::t_test:
+        return accepts::test;
     case Subcommand::t_clean:
         return accepts::clean;
     case Subcommand::t_none:
@@ -178,6 +190,27 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "There is no checker on this flag, because the names belong to the manifest rather than to "
             "echoc - a name no target carries is refused with the ones that are.",
             {}, nullptr
+        },
+        {
+            Opt::t_filter, "filter", nullptr, '\0',
+            OptionArity::t_repeated_value, OptionCategory::t_inputs,
+            accepts::test, 0, ExclusionGroup::t_none,
+            "<spec>", "",
+            "which tests to run, of the ones there are",
+            "Run some of the tests rather than all of them:\n"
+            "  echoc test --filter adds_up\n"
+            "  echoc test --filter group:parsing --filter group:lexing\n"
+            "  echoc test --filter file:src/math.eco\n"
+            "A bare word is a test's name. Tag it to select by something else - 'group:', 'file:' or "
+            "'module:' - which is the same tagged vocabulary '--link' reads, for the same reason: a "
+            "misspelled tag is refused at the word that is wrong rather than read as a name nothing "
+            "carries.\n"
+            "Written more than once the filters add up, so two '--filter group:' words run both groups. A "
+            "'file:' matches any path ending in what you wrote, so you need only enough of it to be "
+            "unambiguous.\n"
+            "A filter that matches no test at all is a refusal rather than a run of nothing - a test suite "
+            "that reports success having executed nothing is the one failure it must not have.",
+            {}, check_filter
         },
         {
             Opt::t_build_dir, "build-dir", nullptr, '\0',
@@ -523,11 +556,12 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "it had cached."
                 },
                 {
-                    "prune", accepts::run, code_of(ExplainKind::t_prune),
+                    "prune", accepts::jitting, code_of(ExplainKind::t_prune),
                     "what the JIT prune dropped",
                     "How many function definitions the JIT threw away before running, and which ones your entry "
-                    "point still reaches. 'run' only, because only the JIT prunes. Written on a 'build' it is a "
-                    "refusal that names 'run', rather than a flag quietly doing nothing."
+                    "point still reaches. 'run' and 'test' only, because only the JIT prunes - and on a 'test' "
+                    "the roots it keeps are the tests being run. Written on a 'build' it is a refusal that names "
+                    "them, rather than a flag quietly doing nothing."
                 },
                 {
                     "memory", accepts::compiling, code_of(ExplainKind::t_memory),
@@ -591,6 +625,25 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "You may not need it: the checklist is only ever drawn when stderr is a terminal that can be "
             "redrawn, so a pipe, a redirect and a CI log are silent already. There is no --progress on "
             "the other side either, because nobody wants a carriage return in a stored log.",
+            {}, nullptr
+        },
+        {
+            Opt::t_verbose, "verbose", nullptr, '\0',
+            OptionArity::t_flag, OptionCategory::t_report,
+            accepts::test, 0, ExclusionGroup::t_none,
+            nullptr, "",
+            "list every test, with how long each one took",
+            "List every test under the file it is written in, with how long it took:\n"
+            "  echoc test --verbose\n"
+            "Without it a run reports a counter and its failures, which is the right answer for a suite "
+            "you expect to pass. Ask for this when you want the transcript: every test that ran, passes "
+            "included, the milliseconds each one cost, and a count and a total under each file.\n"
+            "It also keeps a passing test's own output, indented under its line. That is thrown away "
+            "otherwise, and it is the one thing a 'dprint' in a green test has no other way of reaching "
+            "you.\n"
+            "It replaces the live counter rather than adding to it, so what you read on a terminal is what "
+            "a pipe and a CI log record. A failure still gets its full block under the summary, where it "
+            "is worth looking twice.",
             {}, nullptr
         },
         {
@@ -808,6 +861,32 @@ const std::vector<Compiler::SubcommandInfo> &Compiler::subcommand_table()
             "cannot find fails the build rather than being quietly left out.\n"
             "Name none at all and your program is whatever manifest this invocation points at: the one "
             "--module names, or the 'module.eco' in your working directory.",
+            false
+        },
+        {
+            Subcommand::t_test, "test", accepts::test,
+            "compile and run this project's tests",
+            "Run the 'test' blocks of the modules this invocation points at, each one in a process of its "
+            "own so that a failure stops that test and nothing else:\n"
+            "  echoc test\n"
+            "  echoc test --filter group:parsing\n"
+            "  echoc test math.eco\n"
+            "Like 'run' it goes through the JIT, so it needs no linker and writes nothing beside your "
+            "sources. Assertions are on unless you say --release - and a test run without them asserts "
+            "nothing at all, which is worth knowing before you ask for one.\n"
+            "A 'test' block is compiled only by this command. Every other invocation drops one before it "
+            "is ever parsed, so tests cost a normal build nothing and cannot end up in a binary.\n"
+            "Only the modules you pointed at are searched. A library you depend on keeps its own tests, "
+            "and running them is a matter of pointing at it instead.",
+            true,
+            "<sources...>",
+            "the .eco files whose tests to run",
+            "The .eco files to compile and take the tests of. Loose files like these become the 'main' "
+            "module, exactly as they do under 'run'.\n"
+            "Name none at all and the tests are those of whatever manifest this invocation points at: the "
+            "one --module names, or the 'module.eco' in your working directory.\n"
+            "To run *some* of what is there, this is not the flag - use --filter, which selects by name, "
+            "by group, by file or by module.",
             false
         },
         {

@@ -33,7 +33,13 @@ namespace Compiler
         t_cc,
         t_codegen,
         t_optimize,
-        t_emit
+        t_emit,
+
+        // running a test, which is the one phase that is not a step of a compile - what `echoc test` does
+        // *after* every other row has been committed. It shares this vocabulary rather than having one of
+        // its own because it shares the line: Compiler::ProgressReporter is the only thing allowed to move
+        // this cursor, so a test run reports through it or beside it, and beside it is two writers again
+        t_test
     };
 
     // a switch with no default, so a phase added above does not compile until it has a word
@@ -157,8 +163,15 @@ namespace Compiler
         void suspend();
 
         // the closing line, and the end of the checklist. After this the stream belongs to whatever comes
-        // next - under `run` that is the program itself
-        void close(const std::string &what, unsigned int milliseconds);
+        // next - under `run` that is the program itself.
+        //
+        // `state` is the outcome of what is being *closed*, and the only reason it is a parameter is that a
+        // test run can end having done everything it was asked and still have failed. A compile that got
+        // this far succeeded by definition, which is why it defaults
+        void close(
+            const std::string &what,
+            unsigned int milliseconds,
+            ProgressState state = ProgressState::t_done);
 
     private:
 

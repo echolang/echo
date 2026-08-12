@@ -41,11 +41,14 @@ namespace EchoTests
         DumpKind::t_ir, DumpKind::t_unit_ir, DumpKind::t_ast, DumpKind::t_resolved_ast };
 
     // how the program is put in front of its output. `run` is the JIT; `build` links a native binary
-    // and executes it, which is the only thing that exercises LLVMCompiler::make_exec
+    // and executes it, which is the only thing that exercises LLVMCompiler::make_exec; `test` runs the
+    // case's `test` blocks, which is the only thing that compiles one at all - every other mode drops them
+    // before pass 1, so a case's tests are invisible unless it says so
     enum class RunMode
     {
         t_run,
-        t_build
+        t_build,
+        t_test
     };
 
     // what the case asserts about the exit status of the processes it spawns

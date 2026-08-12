@@ -1,0 +1,10 @@
+/*
+ * A test's name is unique per *file* and nowhere wider, which is what lets a file's tests be named without
+ * prefixing every one of them with where it lives. The runner tells two of one name apart by the file, which
+ * is also one of the three things a test is tagged by.
+ */
+
+#[module: "samename"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

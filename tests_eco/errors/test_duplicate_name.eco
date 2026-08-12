@@ -1,0 +1,10 @@
+// a test's name is unique within its own file. Its own diagnostic rather than DuplicateFunctionSignature's,
+// because a test is in no overload set: that message talks about a signature and a candidate, and here there
+// is neither - only a name, and the *somewhere* it has to be unique in
+test twice {
+    assert(true);
+}
+
+test twice {
+    assert(true);
+}

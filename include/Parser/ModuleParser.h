@@ -13,6 +13,8 @@
 
 #include <memory>
 #include <exception>
+#include <set>
+#include <string>
 
 namespace Parser
 {
@@ -72,8 +74,22 @@ namespace Parser
         // so at the call site
         const Compiler::TargetFacts target_facts;
 
-        explicit ModuleParser(Compiler::TargetFacts facts);
+        // the modules whose `test` blocks are compiled, by name. **empty is the meaningful default**: a
+        // parser nobody told otherwise drops every test block, which is what the manifest reader, the unit
+        // tests and every non-test invocation want.
+        //
+        // a set of names rather than a bool on `target_facts`, because the answer is per module - an
+        // invocation compiles the tests of what it pointed at and not of the libraries below it - and
+        // make_tokenized_file is the one place that knows which module a file belongs to
+        const std::set<std::string> test_modules;
+
+        explicit ModuleParser(Compiler::TargetFacts facts, std::set<std::string> test_modules = {});
         ~ModuleParser() {};
+
+        // the facts `module`'s files are filtered against: the invocation's, with `tests` answered for this
+        // module. Composed by Compiler::TargetFacts::for_module, which is what Compiler::compute_module_keys
+        // asks too - the two have to agree or the cache is unsound
+        Compiler::TargetFacts facts_for(const AST::Module &module) const;
 
         AST::TokenizedFile make_tokenized_file(AST::Module &module, AST::File &file) const;
 

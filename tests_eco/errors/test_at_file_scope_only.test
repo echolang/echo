@@ -1,0 +1,14 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] test_at_file_scope_only.eco:5:5
+
+  A test cannot be declared inside a body or a block - it is a top-level declaration that a test runner calls, so it belongs at file or namespace scope.
+
+  4 | {
+  5 |     test inner {
+    :     ^^^^
+  6 |         assert(true);
+
+1 error, nothing was compiled.

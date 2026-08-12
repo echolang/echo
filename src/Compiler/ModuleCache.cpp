@@ -106,6 +106,7 @@ bool Compiler::compute_module_keys(
     const std::vector<Parser::ModuleManifest> &manifests,
     const CompilerOptions &options,
     const TargetFacts &facts,
+    const std::set<std::string> &modules_with_tests,
     bool optimize,
     std::map<std::string, ModuleCacheKey> &out_keys,
     std::string &out_error
@@ -153,12 +154,6 @@ bool Compiler::compute_module_keys(
     environment = fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), environment);
 
-    // **what the conditional filter saw**, which decides which declarations a module even has. The triple
-    // above is not enough on its own: `--target-os` and `--define` change the answer without changing the
-    // host, so two builds differing only in a define would otherwise share one object. The signature is
-    // TargetFacts' own, so a fact added there reaches this key without an edit here
-    environment = fnv1a64(facts.cache_signature(), environment);
-
     // by canonical manifest path, because that is what `depends` holds
     std::map<std::filesystem::path, uint64_t> digest_by_path;
 
@@ -171,6 +166,19 @@ bool Compiler::compute_module_keys(
 
         hash = fnv1a64(manifest.name, hash);
         hash = fnv1a64(manifest.version, hash);
+
+        // **what the conditional filter saw for this module**, which decides which declarations it even has.
+        // The triple above is not enough on its own: `--target-os` and `--define` change the answer without
+        // changing the host, so two builds differing only in a define would otherwise share one object. The
+        // signature is TargetFacts' own, so a fact added there reaches this key without an edit here.
+        //
+        // per module rather than folded into the environment above, because one of those facts is: an
+        // invocation compiles the `test` blocks of the modules it pointed at and of nothing below them, so
+        // `echoc test` and `echoc build` differ in the application's object and in no library's
+        // composed by TargetFacts::for_module, which is what the parser asks for the same module - the two
+        // answers being the same one is what makes this key describe the tokens that were actually parsed
+        hash = fnv1a64(
+            TargetFacts::for_module(facts, manifest.name, modules_with_tests).cache_signature(), hash);
 
         // the manifest's own bytes: its source list, its dependencies and its comments are all part of what
         // the module is. Hashing the expanded file list instead would miss a pattern that stopped matching

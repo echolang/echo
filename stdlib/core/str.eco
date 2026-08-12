@@ -29,8 +29,13 @@ namespace str;
  *
  * Nothing but `string` should construct one, and that stays a convention rather than a rule - `public`, and
  * it has to be: `string::owner` is a property of this type, so anyone holding a `string` can already name it.
- * Hiding the type while exposing a property of it would be incoherent. What *is* enforced is the shape:
- * every mutator is `private` on `string`'s side, so no caller reaches one through the owner it holds.
+ * Hiding the type while exposing a property of it would be incoherent.
+ *
+ * **The four mutators below cannot be narrowed either, and the reason is a hole rather than a choice.**
+ * `private` on a member is the *owner type* axis, and what these want is the module one - string.eco,
+ * format.eco and str.eco all call them - but `internal` is refused on a member, a member having no module
+ * of its own. So the shape is what is enforced instead: every mutator is `private` on `string`'s side, so
+ * no caller reaches one through the owner it holds. See notes/visibility.md.
  */
 public class buf
 {
@@ -113,7 +118,10 @@ public class buf
     }
 }
 
-extern {
+// **`private` on the block, which belongs to every declaration in it.** `view_of_c_str` and
+// `parse_float` are what this file offers over these two; a C symbol bound here is not a surface,
+// and a consumer wanting `strlen` declares its own `extern` rather than borrowing ours
+private extern {
     function strlen as c_strlen(ptr<const uint8> $s) : usize;
 
     // the inverse of `str::from(float64)`, and the reason it is C's rather than this file's: correctly
@@ -130,25 +138,31 @@ extern {
 // A constant is its expression copied into every use site, so each of these costs nothing and
 // takes its type from where it lands - which is why they are `uint8` here and still fine on the
 // right of an `int32` subtraction.
-const uint8 CH_TAB = 9;
-const uint8 CH_LF = 10;
-const uint8 CH_CR = 13;
-const uint8 CH_SPACE = 32;
-const uint8 CH_PLUS = 43;
-const uint8 CH_MINUS = 45;
-const uint8 CH_DOT = 46;
-const uint8 CH_ZERO = 48;
-const uint8 CH_LT = 60;
-const uint8 CH_GT = 62;
-const uint8 CH_UPPER_A = 65;
-const uint8 CH_UPPER_X = 88;
-const uint8 CH_CARET = 94;
-const uint8 CH_LOWER_A = 97;
-const uint8 CH_B = 98;
-const uint8 CH_E = 101;
-const uint8 CH_F = 102;
-const uint8 CH_O = 111;
-const uint8 CH_X = 120;
+//
+// **Split by who reads them, not by what they spell.** The four this file alone compares against are
+// `private`; the rest are `internal` because format.eco is written on them too - a spec's letters and
+// its digits are the same table. Neither group is a surface: a program spelling `str::CH_DOT` is
+// reading this file's implementation, and `'.'->byte_at(0)` is what it should write instead.
+private const uint8 CH_TAB = 9;
+private const uint8 CH_LF = 10;
+private const uint8 CH_CR = 13;
+private const uint8 CH_PLUS = 43;
+private const uint8 CH_MINUS = 45;
+
+internal const uint8 CH_SPACE = 32;
+internal const uint8 CH_DOT = 46;
+internal const uint8 CH_ZERO = 48;
+internal const uint8 CH_LT = 60;
+internal const uint8 CH_GT = 62;
+internal const uint8 CH_UPPER_A = 65;
+internal const uint8 CH_UPPER_X = 88;
+internal const uint8 CH_CARET = 94;
+internal const uint8 CH_LOWER_A = 97;
+internal const uint8 CH_B = 98;
+internal const uint8 CH_E = 101;
+internal const uint8 CH_F = 102;
+internal const uint8 CH_O = 111;
+internal const uint8 CH_X = 120;
 
 /**
  * Is this byte one of the four ASCII whitespace characters?
@@ -158,8 +172,10 @@ const uint8 CH_X = 120;
  * that a `uint8` is not.
  *
  * Deliberately ASCII only. There is no Unicode table here and `trim` promises none.
+ *
+ * `private`: the three `trim` functions are what it is for.
  */
-function is_ascii_space(uint8 $b) : bool
+private function is_ascii_space(uint8 $b) : bool
 {
     return $b == CH_SPACE || $b == CH_TAB || $b == CH_LF || $b == CH_CR;
 }
@@ -173,8 +189,12 @@ function is_ascii_space(uint8 $b) : bool
  *
  * The subtraction widens to `int32` by landing in one, Echo having no cast operator: a `uint8`
  * difference would wrap to 255 for anything below `'0'` and read as a digit that is merely large.
+ *
+ * `internal` and not `private`, because two of those three places are in format.eco: a format spec's
+ * width and its precision are read with this, and one answer to "what number does this byte spell" is
+ * the whole point.
  */
-function digit_value(uint8 $b) : int32
+internal function digit_value(uint8 $b) : int32
 {
     int32 $wide = $b;
     int32 $digit = $wide - CH_ZERO;
@@ -451,10 +471,11 @@ public function pad_end(const string& $text, usize $width, uint8 $fill) : string
 
 // int64's minimum divided by ten, its last digit, and the minimum itself. at file scope because a
 // constant is its expression copied into each use site and so cannot be declared inside a body -
-// which is the whole difference between a constant and a `const` variable
-const int64 PARSE_INT_FLOOR = -922337203685477580;
-const int64 PARSE_INT_FLOOR_DIGIT = 8;
-const int64 INT64_MIN = -9223372036854775808;
+// which is the whole difference between a constant and a `const` variable. `private`, since the one
+// thing that reads them is `parse_int` below
+private const int64 PARSE_INT_FLOOR = -922337203685477580;
+private const int64 PARSE_INT_FLOOR_DIGIT = 8;
+private const int64 INT64_MIN = -9223372036854775808;
 
 /**
  * The integer `$text` spells, or `null` when it does not spell one.

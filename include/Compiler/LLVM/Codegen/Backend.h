@@ -14,6 +14,7 @@
 
 namespace llvm
 {
+    class ExecutionEngine;
     class TargetMachine;
 };
 
@@ -42,7 +43,7 @@ namespace Compiler::LLVM
         void init_target();
 
         // which CPU everything downstream compiles for, resolved off the options rather than held: the
-        // two callers are init_target, which builds the one TargetMachine, and run_code, whose JIT
+        // two callers are init_target, which builds the one TargetMachine, and the JIT, which
         // builds a second one it will not take from us. See Compiler::resolve_subtarget for why this
         // is asked twice rather than stored once
         Compiler::Subtarget subtarget() const;
@@ -59,8 +60,27 @@ namespace Compiler::LLVM
         // the per-unit dump, for the build path that has no merge - see the implementation
         void print_unit_ir();
 
-        // JIT-executes the main module, having first pruned it to what the entry point reaches - see
-        // prune_to_entry. So the module that runs is smaller than the one print_ir printed
+        // **the JIT in two halves, and the seam between them is the interface.** A program is preparing and
+        // then calling `main`; a test run is preparing once and then calling a definition of its own per
+        // test, each in a forked child - which is not spellable as "run the program", so there is no
+        // combined entry point for either of them to be the odd one out of.
+        //
+        // `prepare_execution` prunes the module to what its roots reach - see prune_to_entry, so what runs
+        // is smaller than what print_ir printed - then builds the engine and finalizes the objects:
+        // everything up to the moment machine code could be called. It is idempotent, and false with a
+        // message already printed. Nothing may be called before it has returned true, and the module is
+        // gone afterwards - the engine owns it.
+        //
+        // **every native library this program needs is already open by the time this is called**, and the
+        // driver is what opened them: MCJIT resolves an external out of the running process and nothing
+        // else ever puts one there, so a `#[link:]` becomes a
+        // llvm::sys::DynamicLibrary::LoadLibraryPermanently before the engine exists. Deliberately not a
+        // parameter here - the registry it loads into is process-global either way, and refusing over one
+        // that will not open needs the requirement's declaring module and the diagnostic renderer, neither
+        // of which the backend has. A missing one is not survivable: MCJIT hangs rather than reporting
+        bool prepare_execution();
+
+        // calls the entry point.
         //
         // `arguments` is the program's whole `argv`, its own name at index 0 included, and `environment`
         // is a null-terminated block in `envp` shape. Both are the *program's*, not echoc's: under `run`
@@ -71,18 +91,26 @@ namespace Compiler::LLVM
         // returns what the entry point returned, so `echoc run` exits the way the program did. A
         // module-scope `die` or `env::exit` never reaches this - both call libc's `exit` from inside the
         // JIT'd code, which takes echoc down with them, and that is already the right exit status
+        int run_main(const std::vector<std::string> &arguments, const char *const *environment);
+
+        // the address of a finalized definition, or 0 when the engine holds no such symbol.
         //
-        // **every native library this program needs is already open by the time this is called**, and the
-        // driver is what opened them: MCJIT resolves an external out of the running process and nothing
-        // else ever puts one there, so a `#[link:]` becomes a
-        // llvm::sys::DynamicLibrary::LoadLibraryPermanently before the engine exists. Deliberately not a
-        // parameter here - the registry it loads into is process-global either way, and refusing over one
-        // that will not open needs the requirement's declaring module and the diagnostic renderer, neither
-        // of which the backend has. A missing one is not survivable: MCJIT hangs rather than reporting
-        int run_code(const std::vector<std::string> &arguments, const char *const *environment);
+        // **0 is a real answer and a caller must refuse on it**: the prune deletes anything its root set
+        // does not reach, so a symbol asked for without being named a root is not there - which is a
+        // mistake in the root set, and calling through a null pointer is how it would present
+        uint64_t function_address(const std::string &mangled) const;
+
+        // the symbols the JIT's prune keeps besides the entry point.
+        //
+        // empty for a program, whose one root is `main` by definition. A test run's roots are the tests it
+        // was asked to run, and stating them here rather than keeping every definition is what makes
+        // `--filter` narrow the machine code as well as the run
+        void set_jit_roots(std::vector<std::string> roots) {
+            _jit_roots = std::move(roots);
+        }
 
         // what the prune dropped and what survived it: the `[prune]` section `--explain-prune` asks for,
-        // empty until run_code has pruned - which is what makes it print nothing on a `build`.
+        // empty until prepare_execution has pruned - which is what makes it print nothing on a `build`.
         //
         // a string rather than a print, the shape PhaseTimings::report() already uses: which diagnostics
         // a compile prints is the driver's question, and the driver is the only place that sees the flag
@@ -133,16 +161,17 @@ namespace Compiler::LLVM
         // linker puts the DWARF in the executable itself
         void gen_debug_symbols(const std::string &executable_name);
 
-        // drops everything the entry point cannot reach, by internalizing the module and running
-        // GlobalDCE over what is left. The root set is ECO_ENTRY_SYMBOL_NAME and nothing else, so it
-        // is not a parameter: there is exactly one legal answer and it is the same one run_code looks up.
+        // drops everything the roots cannot reach, by internalizing the module and running GlobalDCE over
+        // what is left. The root set is ECO_ENTRY_SYMBOL_NAME plus set_jit_roots' names, so it is read off
+        // the backend rather than passed: what a caller will look up by name is the same list it already
+        // stated, and two spellings of it are how one gets deleted and then asked for.
         //
-        // **`run` only, and sound only there** - which is why it is private and run_code is its one
-        // caller. It merges every unit into one module because the JIT can only be handed one, and the
-        // sole thing ever looked up by name in that module is the entry symbol - which makes it the
-        // complete root set. A `build` must not do this: its per-module objects are the cache contract,
-        // and a library's object may not depend on which application consumes it. Reachable only from
-        // the JIT, it cannot be asked for anywhere that would be unsound.
+        // **the JIT only, and sound only there** - which is why it is private and prepare_execution is its
+        // one caller. It merges every unit into one module because the JIT can only be handed one, and the
+        // only things ever looked up by name in that module are the entry symbol and those roots - which
+        // makes them the complete root set. A `build` must not do this: its per-module objects are the
+        // cache contract, and a library's object may not depend on which application consumes it.
+        // Reachable only from the JIT, it cannot be asked for anywhere that would be unsound.
         //
         // without it a `return 0;` program still machine-codes the whole of core/string.eco,
         // core/mem.eco and core/panic.eco - 54 definitions to reach two. Nothing else prunes them:
@@ -171,6 +200,13 @@ namespace Compiler::LLVM
         // of the function list, and a diagnostic that only computes itself when asked for is a second
         // code path through the thing it is meant to describe
         std::string _prune_report;
+
+        // the roots the prune keeps beside the entry point - see set_jit_roots
+        std::vector<std::string> _jit_roots;
+
+        // the live JIT, from prepare_execution until this Backend is destroyed. **it owns the main module**
+        // from the moment EngineBuilder takes it, which is why nothing may print or emit IR afterwards
+        llvm::ExecutionEngine *_engine = nullptr;
     };
 };
 

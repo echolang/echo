@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -76,10 +77,17 @@ namespace Compiler
     //
     // conservative on purpose. With no visibility modifiers a module's entire source is its interface, so
     // any edit to a dependency rebuilds its dependents - even one to a function body nothing else can name
+    //
+    // `modules_with_tests` names the modules that compiled their `test` blocks, which is the one input here
+    // that is genuinely **per module** rather than per build: an invocation compiles the tests of what it
+    // pointed at and not of the libraries below it. Passed rather than derived because that decision belongs
+    // to the driver, and folded through TargetFacts::cache_signature so there is still one answer to "what
+    // could the conditional filter see"
     bool compute_module_keys(
         const std::vector<Parser::ModuleManifest> &manifests,
         const CompilerOptions &options,
         const TargetFacts &facts,
+        const std::set<std::string> &modules_with_tests,
         bool optimize,
         std::map<std::string, ModuleCacheKey> &out_keys,
         std::string &out_error);

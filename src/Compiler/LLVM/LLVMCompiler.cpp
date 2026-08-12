@@ -54,6 +54,11 @@ void LLVMCompiler::set_entry(const std::string &module_name, const std::filesyst
     _ctx.entry_file = entry_file;
 }
 
+void LLVMCompiler::set_test_mode(bool test_mode)
+{
+    _ctx.test_mode = test_mode;
+}
+
 void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std::string> &cached_modules)
 {
     _ctx.llvm_context = std::make_unique<llvm::LLVMContext>();
@@ -194,48 +199,57 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
     {
     Compiler::ScopedPhase entry_phase("entry point");
 
-    // **the narrowing below needs a failure mode**, and this is it: an `entry_file` that matches no file
-    // of the entry module would otherwise leave `main` holding the prologue and a `ret 0`, and the build
-    // would succeed. Counted rather than asked ahead of the walk, so the one answer to "is this file the
-    // program" stays CodegenContext::file_is_entry's
-    size_t entry_files_emitted = 0;
+    // **a test run has no program**, so the file roots are not walked at all rather than walked and
+    // narrowed to nothing: `main` keeps the prologue - a test may read `std::env::args()` - and ends there.
+    // Whatever program the module is does not run, because a test asked for is a test and not a test after
+    // the application it sits in.
+    //
+    // the tests themselves are ordinary functions the declaration walk above already emitted, and
+    // Compiler::TestRunner calls each one by its own symbol, so nothing has to reach them from here
+    if (!_ctx.test_mode) {
+        // **the narrowing below needs a failure mode**, and this is it: an `entry_file` that matches no
+        // file of the entry module would otherwise leave `main` holding the prologue and a `ret 0`, and
+        // the build would succeed. Counted rather than asked ahead of the walk, so the one answer to
+        // "is this file the program" stays CodegenContext::file_is_entry's
+        size_t entry_files_emitted = 0;
 
-    // visit all nodes in the main module
-    for (auto &file : main_cmp_unit->ast_module->files()) {
-        // a file whose top level stopped the program - a `die` at module scope - leaves the block
-        // terminated, and everything after it, including the next file, is unreachable. the same
-        // question StmtCodegen::gen_scope asks after every statement, asked across files because
-        // this is the one function body not emitted through gen_function_decl
-        if (_ctx.block_is_terminated()) {
-            break;
+        // visit all nodes in the main module
+        for (auto &file : main_cmp_unit->ast_module->files()) {
+            // a file whose top level stopped the program - a `die` at module scope - leaves the block
+            // terminated, and everything after it, including the next file, is unreachable. the same
+            // question StmtCodegen::gen_scope asks after every statement, asked across files because
+            // this is the one function body not emitted through gen_function_decl
+            if (_ctx.block_is_terminated()) {
+                break;
+            }
+
+            // **a target names the one file that is the program.** Every other file of the entry module is
+            // shared with the module's other targets, so it contributes what the declaration walk above
+            // already emitted from it and nothing more - which is exactly what a *non-entry module's* files
+            // get, rather than a rule of its own. With no target the answer is yes for all of them
+            if (!_ctx.file_is_entry(file)) {
+                continue;
+            }
+
+            _ctx.current_file = &file;
+            entry_files_emitted += 1;
+
+            // **`main`'s body is the concatenation of every file root of the entry module**, so a location
+            // from the second file would otherwise sit inside a subprogram whose file is the first - which
+            // is not describable with a plain scope and fails the verifier. This is the shape that does
+            // describe it, and the same one a C compiler emits for an #included body
+            _debug_info.push_file_scope(&file);
+
+            file.root->accept(*this);
+
+            _debug_info.pop_file_scope();
         }
 
-        // **a target names the one file that is the program.** Every other file of the entry module is
-        // shared with the module's other targets, so it contributes what the declaration walk above
-        // already emitted from it and nothing more - which is exactly what a *non-entry module's* files
-        // get, rather than a rule of its own. With no target the answer is yes for all of them
-        if (!_ctx.file_is_entry(file)) {
-            continue;
+        if (entry_files_emitted == 0 && !_ctx.entry_file.empty()) {
+            throw Compiler::InternalCompilerException(fmt::format(
+                "the entry file '{}' is not one of module '{}'s files, so the program has no body",
+                _ctx.entry_file.string(), _ctx.entry_module_name), nullptr);
         }
-
-        _ctx.current_file = &file;
-        entry_files_emitted += 1;
-
-        // **`main`'s body is the concatenation of every file root of the entry module**, so a location
-        // from the second file would otherwise sit inside a subprogram whose file is the first - which
-        // is not describable with a plain scope and fails the verifier. This is the shape that does
-        // describe it, and the same one a C compiler emits for an #included body
-        _debug_info.push_file_scope(&file);
-
-        file.root->accept(*this);
-
-        _debug_info.pop_file_scope();
-    }
-
-    if (entry_files_emitted == 0 && !_ctx.entry_file.empty()) {
-        throw Compiler::InternalCompilerException(fmt::format(
-            "the entry file '{}' is not one of module '{}'s files, so the program has no body",
-            _ctx.entry_file.string(), _ctx.entry_module_name), nullptr);
     }
 
     // terminate the function, unless the program already stopped itself
@@ -250,7 +264,13 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         // `printf` calls, which must carry a location like every other call here
         _debug_info.set_function_scope_location();
 
-        _memory.gen_report();
+        // **no report on a test run**, because the moment it describes has not happened: the report is what
+        // a program prints as it ends, and what ends here is a prologue that ran no statement of anybody's.
+        // A test that wants the number asks `mem::live_allocations()` inside itself
+        if (!_ctx.test_mode) {
+            _memory.gen_report();
+        }
+
         _ctx.builder->CreateRet(_ctx.builder->getInt32(0));
     }
 
@@ -899,9 +919,18 @@ bool LLVMCompiler::link_executable(
 void LLVMCompiler::optimize() { _backend.optimize(); }
 void LLVMCompiler::printIR(bool toFile) { _backend.print_ir(toFile); }
 void LLVMCompiler::print_unit_ir() { _backend.print_unit_ir(); }
-int LLVMCompiler::run_code(const std::vector<std::string> &arguments, const char *const *environment)
+bool LLVMCompiler::prepare_execution() { return _backend.prepare_execution(); }
+int LLVMCompiler::run_main(const std::vector<std::string> &arguments, const char *const *environment)
 {
-    return _backend.run_code(arguments, environment);
+    return _backend.run_main(arguments, environment);
+}
+uint64_t LLVMCompiler::function_address(const std::string &mangled) const
+{
+    return _backend.function_address(mangled);
+}
+void LLVMCompiler::set_jit_roots(std::vector<std::string> roots)
+{
+    _backend.set_jit_roots(std::move(roots));
 }
 const std::string &LLVMCompiler::prune_report() const { return _backend.prune_report(); }
 bool LLVMCompiler::make_exec(

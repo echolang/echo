@@ -1,0 +1,15 @@
+// **the whole point of the token filter owning the skip, as a thing a test can see.**
+//
+// this body names a function nobody declared, declares a struct with a property of an unknown type, and holds
+// a statement that is not one. `echoc run` compiles this file without a word about any of it - the tokens are
+// dropped between lexing and pass 1, so nothing ever resolves them. `echoc test` would report all three.
+//
+// what a dropped body still has to be is *lexable*, which is inherent to a token filter and the same price
+// an `#[if:]` region pays: the filter drops tokens, so a body has to have produced some.
+test never_compiled_here {
+    $a = no_such_function(no_such_argument);
+    struct Fixture { NoSuchType $x; }
+    $b = ;
+}
+
+echo "compiled anyway";

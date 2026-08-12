@@ -6,6 +6,7 @@
 #include "Compiler/TargetFacts.h"
 #include "Compiler/TargetSubtarget.h"
 
+#include <llvm/ADT/StringSet.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
@@ -42,7 +43,13 @@ Backend::Backend(CodegenContext &ctx) : _ctx(ctx)
 {
 }
 
-Backend::~Backend() = default;
+Backend::~Backend()
+{
+    // the engine outlives every call into the code it holds, which is why it is not deleted where it was
+    // used: a test run calls one definition per forked child and only knows it is done when the last child
+    // has been reaped
+    delete _engine;
+}
 
 void Backend::print_ir(bool to_file)
 {
@@ -78,8 +85,12 @@ void Backend::print_unit_ir()
     }
 }
 
-int Backend::run_code(const std::vector<std::string> &arguments, const char *const *environment)
+bool Backend::prepare_execution()
 {
+    if (_engine != nullptr) {
+        return true;
+    }
+
     Compiler::ensure_native_target_registered();
 
     auto main_cmp_unit = _ctx.main_cmp_unit();
@@ -106,7 +117,7 @@ int Backend::run_code(const std::vector<std::string> &arguments, const char *con
 
     std::string errorStr;
     const llvm::TargetOptions opts;
-    llvm::ExecutionEngine *EE = llvm::EngineBuilder(std::move(_ctx.main_cmp_unit()->llvm_module))
+    _engine = llvm::EngineBuilder(std::move(_ctx.main_cmp_unit()->llvm_module))
         .setErrorStr(&errorStr)
         .setEngineKind(llvm::EngineKind::JIT)
         .setTargetOptions(opts)
@@ -116,16 +127,33 @@ int Backend::run_code(const std::vector<std::string> &arguments, const char *con
 
     _ctx.main_cmp_unit()->llvm_module = nullptr;
 
-    if (!EE) {
+    if (!_engine) {
         llvm::errs() << "Failed to create ExecutionEngine: " << errorStr << '\n';
-        return 1;
+        return false;
     }
 
-    // enable debugging
+    _engine->finalizeObject();
 
-    EE->finalizeObject();
+    return true;
+}
 
-    auto *func = EE->FindFunctionNamed(ECO_ENTRY_SYMBOL_NAME);
+uint64_t Backend::function_address(const std::string &mangled) const
+{
+    if (_engine == nullptr) {
+        return 0;
+    }
+
+    return _engine->getFunctionAddress(mangled);
+}
+
+int Backend::run_main(const std::vector<std::string> &arguments, const char *const *environment)
+{
+    if (_engine == nullptr) {
+        throw Compiler::InternalCompilerException(
+            "run_main was called before prepare_execution built the engine", nullptr);
+    }
+
+    auto *func = _engine->FindFunctionNamed(ECO_ENTRY_SYMBOL_NAME);
     if (!func) {
         llvm::errs() << "Function '" ECO_ENTRY_SYMBOL_NAME "' not found in module.\n";
         return 1;
@@ -135,12 +163,7 @@ int Backend::run_code(const std::vector<std::string> &arguments, const char *con
     // marshal argc/argv/envp into a call, and the entry point now takes all three. It dispatches on the
     // parameter count and report_fatal_error()s on a shape it does not recognise, so the agreement with
     // LLVMCompiler's FunctionType is load-bearing and pinned by tests_eco/env
-    int status = EE->runFunctionAsMain(func, arguments, environment);
-
-    delete EE;
-    // llvm::llvm_shutdown();
-
-    return status;
+    return _engine->runFunctionAsMain(func, arguments, environment);
 }
 
 Compiler::Subtarget Backend::subtarget() const
@@ -586,14 +609,32 @@ void Backend::prune_to_entry()
 
     // the machine is inert for these two - neither Internalize nor GlobalDCE consults a cost model - and
     // is passed anyway so there is one spelling of "how a pipeline is built" rather than two
-    run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
+    // **the root set, and it is the whole of what makes this sound.** `main` always, plus whatever the
+    // caller said it will look up by name - which for a test run is the tests being run and nothing else,
+    // so `--filter` narrows the machine code as well as the run. A symbol asked for and not named here is
+    // deleted, and Backend::function_address answers 0 for it rather than something callable
+    //
+    // a set of StringRefs rather than the vector itself, because the predicate below is asked of *every*
+    // global of the merged module - the stdlib's included - so a linear scan comparing against a
+    // freshly-heap-allocated `std::string` is one allocation per global on every `run` as well
+    llvm::StringSet<> roots;
+
+    for (const std::string &name : _jit_roots) {
+        roots.insert(name);
+    }
+
+    run_module_passes(*_ctx.current_module(), _target_machine.get(), [&roots](llvm::PassBuilder &, llvm::ModulePassManager &modulePM) {
         // internalize first: GlobalDCE can only delete what nothing outside the module could call, and
         // codegen hands it a module in which almost everything is externally linked.
         //
         // declarations are left alone by InternalizePass, which is what keeps the JIT able to resolve
         // printf, malloc, free and every `extern` symbol out of the host process
-        modulePM.addPass(llvm::InternalizePass([](const llvm::GlobalValue &gv) {
-            return gv.getName() == ECO_ENTRY_SYMBOL_NAME;
+        modulePM.addPass(llvm::InternalizePass([&roots](const llvm::GlobalValue &gv) {
+            if (gv.getName() == ECO_ENTRY_SYMBOL_NAME) {
+                return true;
+            }
+
+            return roots.contains(gv.getName());
         }));
 
         modulePM.addPass(llvm::GlobalDCEPass());
@@ -604,9 +645,15 @@ void Backend::prune_to_entry()
     std::vector<std::string> survivors = definition_names(_ctx.current_module());
     std::sort(survivors.begin(), survivors.end());
 
-    // the symbol names, so a survivor lines up with what a `-p` dump calls it
+    // the symbol names, so a survivor lines up with what a `-p` dump calls it. the roots are named rather
+    // than only counted: on a test run the interesting number is which tests were kept, and "reachable from
+    // main" alone would describe a root set that is no longer only main
     _prune_report = fmt::format("[prune]\n  {} function definitions, {} reachable from {}\n",
-        before, survivors.size(), ECO_ENTRY_SYMBOL_NAME);
+        before, survivors.size(),
+        _jit_roots.empty()
+            ? std::string(ECO_ENTRY_SYMBOL_NAME)
+            : fmt::format("{} and {} root{}", ECO_ENTRY_SYMBOL_NAME, _jit_roots.size(),
+                _jit_roots.size() == 1 ? "" : "s"));
 
     for (const std::string &name : survivors) {
         _prune_report += fmt::format("    {}\n", name);

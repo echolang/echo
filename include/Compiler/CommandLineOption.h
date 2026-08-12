@@ -16,6 +16,7 @@ namespace Compiler
         t_none,
         t_run,
         t_build,
+        t_test,
         t_clean
     };
 
@@ -25,12 +26,18 @@ namespace Compiler
     {
         constexpr unsigned int run = 1u << 0;
         constexpr unsigned int build = 1u << 1;
-        constexpr unsigned int clean = 1u << 2;
+        constexpr unsigned int test = 1u << 2;
+        constexpr unsigned int clean = 1u << 3;
 
-        // the two shapes that recur. `compiling` is the pair that turns source into code, and is what
-        // replaced the second `for (auto &command : {...})` registration loop this table exists to delete
-        constexpr unsigned int compiling = run | build;
-        constexpr unsigned int all = run | build | clean;
+        // the shapes that recur. `compiling` is the set that turns source into code, and is what replaced
+        // the second `for (auto &command : {...})` registration loop this table exists to delete.
+        //
+        // `test` is one of them and that is the whole of why the row it added is small: every flag about
+        // *how* a program is compiled means the same thing for a test run. `jitting` is the narrower pair
+        // that runs what it compiled in this process, which is what `--explain prune` is about
+        constexpr unsigned int compiling = run | build | test;
+        constexpr unsigned int jitting = run | test;
+        constexpr unsigned int all = run | build | test | clean;
     };
 
     unsigned int bit_of(Subcommand id);
@@ -43,6 +50,7 @@ namespace Compiler
         t_output,
         t_module,
         t_target,
+        t_filter,
         t_build_dir,
         t_link,
         t_debug,
@@ -63,6 +71,7 @@ namespace Compiler
         t_diagnostics,
         t_color,
         t_silent,
+        t_verbose,
         t_with_stdlib,
         t_dry_run,
         t_help,

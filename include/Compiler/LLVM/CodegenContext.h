@@ -424,6 +424,18 @@ namespace Compiler::LLVM
         // that would hold the file exists. Absolute, as AST::File::get_path() is
         std::filesystem::path entry_file;
 
+        // is this compile for a test run, in which case **no file root becomes the program at all**.
+        //
+        // `main` is still emitted and is still the three-argument C one - the process globals have to be
+        // captured, or `std::env::args()` inside a test reads a global nothing filled in - but its body is
+        // the prologue and a `ret 0`. Whatever program the module happens to be does not run: a test asked
+        // for is a test, not a test after the application it sits in.
+        //
+        // deliberately **not** a fourth answer inside file_is_entry, which owns *narrowing* - "which of
+        // these files is the program" and "is there a program at all" are two questions, and folding the
+        // second into the first is how a target-less module would have started answering false
+        bool test_mode = false;
+
         // the main compilation unit, or nullptr if the bundle has no main module yet
         CmpUnit *main_cmp_unit();
 

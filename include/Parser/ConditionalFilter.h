@@ -33,6 +33,13 @@ namespace Parser
     //
     // locations survive, because tokens are dropped rather than text - each token already carries its own
     // line, so a diagnostic after a filtered region still names the line the author sees in the file.
+    //
+    // **`test <name> { ... }` is the second thing it drops**, and it is here for the same reasons rather
+    // than as a second feature: a test block is a region this build may not compile, the question is
+    // answerable from Compiler::TargetFacts alone (`facts.tests`), and every alternative - a rule in each
+    // of the three passes - is the plumbing the paragraph above rejects. Attributes written above a test
+    // are dropped with it, which is what a lookahead from the `#` is for: a `#[group: "..."]` left behind
+    // attaches to whatever declaration follows it and does so in silence.
 
     // the directive names, spelled once.
     //
@@ -63,7 +70,9 @@ namespace Parser
     //
     // false with a `line N: ...` sentence in `out_error` on any of: an unknown axis, an unknown value for
     // a known axis, a malformed condition, `#[elif]` or `#[else]` after an `#[else]`, an `#[elif]` /
-    // `#[else]` / `#[end]` with no open `#[if]`, or an `#[if]` left unterminated at end of file.
+    // `#[else]` / `#[end]` with no open `#[if]`, an `#[if]` left unterminated at end of file, or - when
+    // `facts.tests` is false - a `test` whose *header* is malformed, that being the only thing that says
+    // where the block it is about to drop ends.
     //
     // **every one of those is an error rather than a no-op**, for the reason the manifest reader refuses
     // an unknown attribute: a region that silently vanishes is the one failure mode this feature could

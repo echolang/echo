@@ -1,0 +1,5 @@
+// a suite that reports success having run nothing is the one failure mode a test runner must not have, so a
+// filter matching no test is a refusal naming what there was to choose from
+test the_only_one {
+    assert(true);
+}

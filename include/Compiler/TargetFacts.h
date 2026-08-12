@@ -74,12 +74,38 @@ namespace Compiler
         // did: the facts were always present, so nothing was ever unset enough to notice
         static TargetFacts host();
 
+        // these facts as one module's files are read against them: everything the invocation settled, with
+        // `tests` answered for `module_name`.
+        //
+        // **the one place the per-module half of these facts is composed.** Two callers, and they have to
+        // agree or the module cache is unsound rather than merely ineffective:
+        // Parser::ModuleParser::facts_for, which decides what the token filter keeps, and
+        // Compiler::compute_module_keys, which decides what object those tokens are stored under. Which
+        // modules are in that set is `resolve_test_modules`' answer and stays outside this type - it is a
+        // question about the invocation, not about what a condition can see
+        static TargetFacts for_module(
+            const TargetFacts &base,
+            const std::string &module_name,
+            const std::set<std::string> &modules_with_tests
+        );
+
         std::string operating_system;
         std::string architecture;
 
         // sorted, because this is folded into the module cache key and a key that depends on the order
         // two flags were typed in is a key that misses for no reason
         std::set<std::string> defines;
+
+        // does this module compile its `test` blocks at all? **Per module, not per invocation**: only the
+        // modules an invocation pointed at include their tests, so a project's `echoc test` neither parses
+        // nor type-checks the standard library's. Which modules those are is the driver's answer and
+        // for_module above is where it becomes a fact, which is the only way this flag is ever set.
+        //
+        // **a flag rather than an axis**, because there are two states and no vocabulary, so `#[if: tests]`
+        // is the whole of what a program needs to say - a test-only fixture function lives behind one.
+        // `--define tests` is refused at resolve() so that what turns tests on has exactly one spelling,
+        // `echoc test`
+        bool tests = false;
 
         // is `name` a flag this invocation declared? **false rather than an error when it is not** - a
         // condition has to be able to ask about a flag nobody set, or `#[if: TRACE]` could only ever be

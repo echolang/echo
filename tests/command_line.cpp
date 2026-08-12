@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "subprocess.h"
+#include "terminal_fixture.h"
 
 // what the e2e corpus cannot assert about the command line, and it is most of it: the corpus only ever
 // writes invocations that work, so every refusal, every retired spelling and the whole of the help page
@@ -36,6 +37,7 @@ using Compiler::OptionCategory;
 using Compiler::PrintKind;
 using Compiler::Subcommand;
 using Compiler::TerminalCapabilities;
+using EchoTests::a_terminal;
 
 namespace
 {
@@ -74,18 +76,6 @@ namespace
         REQUIRE(Compiler::resolve_driver_options(cli, driver, error));
 
         return driver;
-    }
-
-    // a terminal, as far as the help renderer is concerned - the same shape tests/progress.cpp uses
-    TerminalCapabilities a_terminal(unsigned int width, bool color)
-    {
-        TerminalCapabilities capabilities;
-        capabilities.color = color;
-        capabilities.unicode = true;
-        capabilities.width = width;
-        capabilities.interactive = true;
-
-        return capabilities;
     }
 
     std::string page(Subcommand subject, TerminalCapabilities capabilities)
@@ -461,7 +451,7 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
     REQUIRE(refusal({}) == "No command given.");
 
     REQUIRE(refusal({ "compile", "a.eco" })
-        == "'compile' is not an echoc command. Write 'run', 'build' or 'clean'.");
+        == "'compile' is not an echoc command. Write 'run', 'build', 'test' or 'clean'.");
 
     REQUIRE(refusal({ "run", "--nonsense", "a.eco" }) == "Unknown option '--nonsense'.");
 
@@ -659,13 +649,15 @@ TEST_CASE("a page lists every value, marking the ones this subcommand cannot wri
         REQUIRE(contains(run, value));
     }
 
-    REQUIRE(contains(build, "(run only)"));
-    REQUIRE_FALSE(contains(run, "(run only)"));
+    // **every command that can answer it, named** - the marker is the remedy and not only a refusal, so
+    // opening `prune` up to `test` changed this word rather than needing a second marker
+    REQUIRE(contains(build, "(run/test only)"));
+    REQUIRE_FALSE(contains(run, "(run/test only)"));
 
     // the marker is on the value it is about, not merely somewhere on the page
     const size_t at = build.find("prune");
     REQUIRE(at != std::string::npos);
-    REQUIRE(contains(build.substr(at, build.find('\n', at) - at), "(run only)"));
+    REQUIRE(contains(build.substr(at, build.find('\n', at) - at), "(run/test only)"));
 
     // and the default is named on the value row itself - located by its connector, because "module"
     // also appears in `-m, --module` further up the page
@@ -678,7 +670,7 @@ TEST_CASE("a page lists every value, marking the ones this subcommand cannot wri
 // may be unable to draw - so they are a theme, the way AST::DiagnosticTheme already is
 TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
 {
-    const std::string unicode = page(Subcommand::t_run, a_terminal(80, false));
+    const std::string unicode = page(Subcommand::t_run, a_terminal(true, 80, false));
     const std::string ascii = page(Subcommand::t_run, TerminalCapabilities::plain());
 
     REQUIRE(contains(unicode, "\u251c\u2500 ast"));
@@ -736,7 +728,7 @@ TEST_CASE("a page wraps to its width and never trails whitespace", "[cli]")
         const unsigned int limit = width == 0 ? 80 : (width > 100 ? 100 : width);
 
         for (const Compiler::SubcommandInfo &info : Compiler::subcommand_table()) {
-            for (const std::string &line : lines_of(page(info.id, a_terminal(width, false)))) {
+            for (const std::string &line : lines_of(page(info.id, a_terminal(true, width, false)))) {
                 INFO(info.name << " @" << width << ": " << line);
 
                 REQUIRE((line.empty() || line.back() != ' '));
@@ -761,8 +753,8 @@ TEST_CASE("a page wraps to its width and never trails whitespace", "[cli]")
 TEST_CASE("colour adds escapes and changes nothing else", "[cli]")
 {
     for (const Compiler::SubcommandInfo &info : Compiler::subcommand_table()) {
-        const std::string plain = page(info.id, a_terminal(80, false));
-        const std::string colored = page(info.id, a_terminal(80, true));
+        const std::string plain = page(info.id, a_terminal(true, 80, false));
+        const std::string colored = page(info.id, a_terminal(true, 80, true));
 
         INFO(info.name);
 
@@ -786,6 +778,7 @@ TEST_CASE("the usage line is built from the table", "[cli]")
         "\n"
         "  echoc run [options] <sources...> [-- <program arguments>]\n"
         "  echoc build [options] <sources...>\n"
+        "  echoc test [options] <sources...>\n"
         "  echoc clean [options]\n");
 }
 
@@ -857,7 +850,7 @@ TEST_CASE("one option's page is that option and nothing else", "[cli]")
     }
 
     // the facts the prose must not have to repeat, because they are on the row and would go stale
-    REQUIRE(contains(text, "Accepted by: run, build."));
+    REQUIRE(contains(text, "Accepted by: run, build, test."));
     REQUIRE(contains(text, "Defaults to 'module'."));
 
     // and no other option leaks onto it

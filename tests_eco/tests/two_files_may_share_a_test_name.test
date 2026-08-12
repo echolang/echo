@@ -1,0 +1,8 @@
+mode: test
+modules: tests/same_name_in_two_files
+
+--- OUT --->
+ok   1/3  samename/one.eco::adds_up
+ok   2/3  samename/two.eco::adds_up
+ok   3/3  main/two_files_may_share_a_test_name.eco::the_entry_files_own
+3 tests passed

@@ -28,16 +28,18 @@ namespace mem;
  * funnels through, so a different allocator - an arena, a pool - is still a change to three
  * function bodies. What moved is only where the bytes underneath those three come from.
  *
- * Nothing outside this file should call them. `usize` stands in for C's `size_t`.
+ * **`private`, so nothing outside this file can call them** - which used to be a sentence here asking
+ * politely. The typed `alloc`/`realloc`/`free` below are the surface, and they are the same memory with
+ * the arithmetic done for you. `usize` stands in for C's `size_t`.
  */
 #[builtin: alloc_bytes]
-public function alloc_bytes(usize $bytes) : ptr<uint8>;
+private function alloc_bytes(usize $bytes) : ptr<uint8>;
 
 #[builtin: realloc_bytes]
-public function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
+private function realloc_bytes(ptr<uint8> $p, usize $bytes) : ptr<uint8>;
 
 #[builtin: free_bytes]
-public function free_bytes(ptr<uint8> $p) : void;
+private function free_bytes(ptr<uint8> $p) : void;
 
 /**
  * The three byte-level operations that move memory around without ever asking for any.
@@ -49,9 +51,13 @@ public function free_bytes(ptr<uint8> $p) : void;
  * is here beside `copy_bytes` rather than folded into it: `copy_bytes` promises they do not, and a
  * container shifting a tail down by one element is exactly the case that breaks the promise.
  *
+ * **`private` on the block, which belongs to every declaration in it**: the typed `copy`/`move`/`zero`
+ * below are the surface, and a caller reaching past them counts bytes where the rest of this namespace
+ * counts elements.
+ *
  * `int32` stands in for C's `int`; it agrees on every target currently supported.
  */
-extern {
+private extern {
     function memcpy as copy_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memmove as move_bytes(ptr<uint8> $dst, ptr<uint8> $src, usize $bytes) : ptr<uint8>;
     function memset as set_bytes(ptr<uint8> $p, int32 $value, usize $bytes) : ptr<uint8>;

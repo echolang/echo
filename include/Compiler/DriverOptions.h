@@ -68,6 +68,12 @@ namespace Compiler
         // manifest declares", which for a manifest declaring none is the one program it always was
         std::vector<std::string> targets;
 
+        // `test` only, and **stated only**: what a filter spells is Compiler::parse_test_filter's question
+        // and what it selects is Compiler::select_tests'. Not on `options` and deliberately so - narrowing
+        // which tests run changes no emitted byte of any module that is compiled, so a cache key that
+        // reacted to one would go cold for a flag the objects never saw
+        std::vector<std::string> filters;
+
         // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what they
         // mean, asked in run_front_end and in main_clean as it is today
         std::string target_os;
@@ -83,6 +89,11 @@ namespace Compiler
         bool no_stdlib = false;
         bool emit_stdlib_header = false;
         bool silent = false;
+
+        // `test` only, and it is a *detail level* rather than a second `silent`: what a run reports through
+        // is the terminal's answer, and how much of it is reported is this one. Compiler::TestDetail is the
+        // vocabulary, settled at the one call site that builds a reporter
+        bool verbose = false;
 
         // `clean` only
         bool dry_run = false;

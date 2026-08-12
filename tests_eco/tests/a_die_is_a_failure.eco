@@ -1,0 +1,5 @@
+// a `die` ends its process with a message on stderr and status 1, exactly as it does in a program - so a
+// test needs no separate way of giving up, and the runner needs no arm for one
+test gives_up {
+    die('nothing to do here');
+}

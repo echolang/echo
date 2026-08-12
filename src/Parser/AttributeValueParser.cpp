@@ -25,6 +25,21 @@ namespace
         return cursor.is_done() ? cursor.last() : cursor.current();
     }
 
+    // is the token `offset` ahead a bare word - an identifier, or a keyword spelled like one.
+    //
+    // **the three places this grammar reads a name all go through it**: whether a value starts here, whether
+    // a name is a *tag* on the value behind it, and the bare-name atom itself. They have to agree, or
+    // `#[target: test { ... }]` reads its tag as an atom and then meets a '{' it has no arm for - which is
+    // exactly what a keyword being added to the lexer did to it
+    bool at_a_word(const Parser::Cursor &cursor, size_t offset = 0)
+    {
+        if (!cursor.is_valid_offset(offset)) {
+            return false;
+        }
+
+        return token_spells_a_word(cursor.peek(offset).value());
+    }
+
     bool parse_atom(Parser::Payload &payload, AST::AttributeValue &out);
 
     bool parse_list(Parser::Payload &payload, AST::AttributeValue &out)
@@ -191,7 +206,11 @@ namespace
             return parse_number(payload, out, true);
         }
 
-        if (cursor.is_type(Token::Type::t_identifier)) {
+        // **a bare name, and a keyword spelled like a word is one.** `#[target: test]` names a target kind
+        // with a word Echo also keeps as a keyword, and inside `#[ ]` there is nothing for that keyword's
+        // meaning to collide with: the region resolves to no declaration. token_spells_a_word is the one
+        // answer to that, shared with the attribute *name* the conditional filter reads
+        if (at_a_word(cursor)) {
             out.kind = AST::AttributeValueKind::t_name;
             out.text = cursor.current().value();
             cursor.skip();
@@ -223,7 +242,7 @@ bool Parser::starts_attribute_value(const Parser::Cursor &cursor, size_t offset)
         || cursor.peek_is_type(offset, Token::Type::t_hex_literal)
         || cursor.peek_is_type(offset, Token::Type::t_floating_literal)
         || cursor.peek_is_type(offset, Token::Type::t_bool_literal)
-        || cursor.peek_is_type(offset, Token::Type::t_identifier)
+        || at_a_word(cursor, offset)
         || cursor.peek_is_type(offset, Token::Type::t_op_sub)
         || cursor.peek_is_type(offset, Token::Type::t_open_bracket)
         || cursor.peek_is_type(offset, Token::Type::t_open_brace);
@@ -256,7 +275,7 @@ bool Parser::parse_attribute_value(Parser::Payload &payload, AST::AttributeValue
 
     // `name atom` is a tag applied to a payload; a name with nothing that starts a value after it is
     // just a name. that is the whole of the lookahead, and the reason `#[core: array]` reads as one
-    const bool is_tagged = cursor.is_type(Token::Type::t_identifier)
+    const bool is_tagged = at_a_word(cursor)
         && Parser::starts_attribute_value(cursor, 1);
 
     TokenSpan tag_span;

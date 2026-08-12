@@ -1,0 +1,123 @@
+/*
+ * Tests for `src/renderer.eco` - and, through it, for the three layers.
+ *
+ * This is the one test file here that draws a whole picture. It is also where the compositing rule the
+ * README describes gets pinned down: the layers are drawn in the order they were added, the `Renderer`
+ * never names one of them, and a frame is a function of the time and nothing else.
+ *
+ * A small dial throughout - six rows of radius rather than eleven - so a frame is a few hundred bytes
+ * instead of a couple of thousand.
+ */
+
+namespace clock;
+
+#[if: tests]
+function small_dial() : Dial
+{
+    return Dial(6.0, 2.0);
+}
+#[end]
+
+// a fourth layer, and the README's claim that adding one is one `add` and no change anywhere else. it puts
+// one glyph in the top left corner and ignores the time, which makes it the one layer whose drawing can be
+// read out of a frame by index
+#[if: tests]
+class Stamp : Renderable
+{
+    private uint8 $id;
+
+    constructor(uint8 $id)
+    {
+        $this->id = $id;
+    }
+
+    function render(Canvas& $c, Time& $t) : void
+    {
+        $c->set(0, 0, $this->id);
+    }
+}
+#[end]
+
+test a_frame_covers_the_whole_canvas
+{
+    Dial $dial = small_dial();
+    Renderer $r = Renderer($dial);
+    Time $t = Time(18, 15, 34);
+
+    string $frame = $r->frame(&$t);
+
+    // the canvas is two rows taller than the dial - a blank one, then the readout - and every row ends in
+    // a newline. no layer has been added, so this is the empty picture at its full size
+    assert($frame->size() == $dial->columns() * ($dial->rows() + 2) + $dial->rows() + 2,
+           'one byte a cell and one a row');
+}
+
+test a_layer_draws
+{
+    Renderer $bare = Renderer(small_dial());
+    Renderer $with_face = Renderer(small_dial());
+    Time $t = Time(18, 15, 34);
+
+    $with_face->add(Face(small_dial()));
+
+    assert($bare->frame(&$t) != $with_face->frame(&$t), 'the ring is on one of them and not the other');
+}
+
+test the_readout_puts_the_time_in_the_picture
+{
+    Renderer $r = Renderer(small_dial());
+    Time $t = Time(18, 15, 34);
+
+    $r->add(Readout(small_dial()));
+
+    // the layer arrived as a `Renderable` and the call went through the erasure, so this is also the test
+    // that the interface dispatch works at all
+    assert($r->frame(&$t)->contains('18:15:34'), 'the digits are under the dial');
+}
+
+test a_frame_is_a_function_of_the_time
+{
+    Renderer $r = Renderer(small_dial());
+    Time $t = Time(18, 15, 34);
+
+    $r->add(Face(small_dial()));
+    $r->add(Hands(small_dial()));
+    $r->add(Readout(small_dial()));
+
+    // `frame` fills the canvas before it draws, so the second one is not the first one drawn over. that is
+    // the whole reason a fixed `HH:MM:SS` on the command line is worth having: two runs of it compare
+    assert($r->frame(&$t) == $r->frame(&$t), 'nothing carries over between frames');
+}
+
+test the_time_reaches_every_layer_that_wants_it
+{
+    Renderer $r = Renderer(small_dial());
+    Time $morning = Time(3, 0, 0);
+    Time $noon = Time(12, 0, 0);
+
+    $r->add(Hands(small_dial()));
+
+    // a quarter of the dial apart. `Face` is left out of this one because it is the layer that ignores the
+    // time - a picture of just the ring would be identical whatever it was handed
+    assert($r->frame(&$morning) != $r->frame(&$noon), 'the hands moved');
+}
+
+test layers_are_drawn_in_the_order_they_were_added
+{
+    Renderer $a_first = Renderer(small_dial());
+    Renderer $b_first = Renderer(small_dial());
+    Time $t = Time(18, 15, 34);
+
+    // the same two layers, both writing the same cell, the other way round
+    $a_first->add(Stamp(65));
+    $a_first->add(Stamp(66));
+
+    $b_first->add(Stamp(66));
+    $b_first->add(Stamp(65));
+
+    // whichever went in last is the one in the corner, and that is the whole of the compositing rule. the
+    // three real layers never overlap - the hands reach 0.95 of the radius and the ring is at 1.0 - so it
+    // takes a layer written for the purpose to see it
+    assert($a_first->frame(&$t)->byte_at(0) == 66, 'the later stamp won');
+    assert($b_first->frame(&$t)->byte_at(0) == 65, 'and it wins the other way round too');
+}

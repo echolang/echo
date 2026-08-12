@@ -106,6 +106,7 @@ public:
         t_internal,                 // internal
         t_public,                   // public
         t_operator,                 // operator
+        t_test,                     // test
         t_unknown
     };
 
@@ -139,6 +140,19 @@ const std::string token_type_string(Token::Type type);
 // returns a string representation of the literal symbol
 // used for lexing and parsing, only available for literals
 const std::string token_lit_symbol_string(const Token::Type type);
+
+// **is this token's spelling a bare word** - `test`, `darwin`, `size_of`, `if`.
+//
+// asked by the two grammars that read a word where no declaration can follow, and it has to be one answer
+// for both: an attribute's *name*, which Parser::filter_conditional_tokens reads to find its directives, and
+// an attribute's *value*, where AST::AttributeValueKind::t_name means itself. `#[if: os == darwin]` and
+// `#[target: test]` each hold a word Echo also keeps as a keyword, and inside `#[ ]` there is nothing for a
+// keyword's meaning to collide with - the region is compile-time data and resolves to no declaration.
+//
+// answered from the **spelling** rather than from a list of keyword types, so a keyword added to the lexer is
+// a word here with no edit: a list would be a second registry that goes stale, and its going stale reads as
+// an attribute value being refused for no reason a user could see
+bool token_spells_a_word(const std::string &value);
 
 class TokenReference;
 struct TokenSlice;

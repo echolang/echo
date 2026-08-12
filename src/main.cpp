@@ -18,6 +18,8 @@
 #include "AST/ASTAccessPass.h"
 #include "AST/ASTPointerAdjuster.h"
 #include "AST/ASTTypeChecker.h"
+#include "AST/ASTMangler.h"
+#include "AST/FunctionDeclNode.h"
 #include "Parser/ManifestParser.h"
 #include "Parser/ModuleParser.h"
 #include "Compiler/BuildLayout.h"
@@ -33,6 +35,9 @@
 #include "Compiler/ProgressReporter.h"
 #include "Compiler/SettledPath.h"
 #include "Compiler/TargetSubtarget.h"
+#include "Compiler/TestReporter.h"
+#include "Compiler/TestRunner.h"
+#include "Compiler/TestSelection.h"
 #include "Compiler/LLVM/LLVMCompiler.h"
 
 #include <llvm/Support/DynamicLibrary.h>
@@ -98,7 +103,11 @@ int handle_parse(
 {
     // **caught whatever ECO_DONT_CATCH_EXCEPTIONS says**, unlike the tokenization error inside. That macro
     // exists to let a *compiler bug* crash with a stack trace, and a malformed `#[if: ...]` is not one - it
-    // is a mistake in the source being compiled, and reporting it as a crash would blame echoc for it
+    // is a mistake in the source being compiled, and reporting it as a crash would blame echoc for it.
+    //
+    // the banner names conditional compilation and covers a malformed `test` header too, that being the
+    // other thing Parser::filter_conditional_tokens decides: a test block is a region compiled under one
+    // condition, and the filter has to read its header to know where the region it is dropping ends
     try {
         parser.parse_input(input);
     }
@@ -359,6 +368,22 @@ struct Invocation
     std::vector<std::filesystem::path> sources;
 
     Compiler::BuildLayout layout;
+
+    // the modules whose `test` blocks this invocation compiles, by name. **empty for everything but
+    // `echoc test`**, so a normal build's tokens never reach a parser that would keep one.
+    //
+    // settled here beside `roots` because it is derived from them and from nothing else: an invocation
+    // compiles the tests of the modules it pointed at, which is the same separation `roots` exists for
+    std::set<std::string> test_modules;
+
+    // the `#[target: test]`s this invocation selected, empty when the entry manifest declares none or when
+    // this is not a test invocation.
+    //
+    // **beside `programs` rather than inside one**, because a test target is not a program: a test run
+    // compiles the module exactly once whichever targets were named, and what a target contributes is a
+    // *selection* over the tests that come out. Several of them therefore mean one compile and a union,
+    // where several `exe` targets mean several builds
+    std::vector<Parser::ModuleTarget> test_targets;
 
     std::vector<Program> programs;
 };
@@ -713,6 +738,7 @@ static bool compute_cache_keys(
     const std::vector<Parser::ModuleManifest> &manifests,
     const Compiler::CompilerOptions &options,
     const Compiler::TargetFacts &facts,
+    const std::set<std::string> &test_modules,
     std::map<std::string, Compiler::ModuleCacheKey> &out_keys
 )
 {
@@ -720,7 +746,8 @@ static bool compute_cache_keys(
 
     std::string error;
     if (!Compiler::compute_module_keys(
-            manifests, options, facts, driver.optimize_is_whole_program(), out_keys, error)) {
+            manifests, options, facts, test_modules, driver.optimize_is_whole_program(),
+            out_keys, error)) {
         diagnostics.render_untyped("Module Cache Error", error);
         return false;
     }
@@ -899,6 +926,7 @@ struct FrontEnd
     // spellings over the two above, so a reader says what it wants rather than which carrier holds it
     const std::vector<Parser::ModuleManifest> &manifests() const { return invocation->manifests; }
     const Compiler::TargetFacts &target_facts() const { return invocation->target_facts; }
+    const std::set<std::string> &test_modules() const { return invocation->test_modules; }
     const Compiler::BuildLayout &layout() const { return invocation->layout; }
     const std::string &entry_module() const { return program->entry_module; }
     const std::filesystem::path &entry_file() const { return program->entry_file; }
@@ -919,20 +947,35 @@ static bool needs_cache_keys(const Compiler::DriverOptions &driver)
     return !driver.whole_program || driver.explains(Compiler::ExplainKind::t_cache);
 }
 
-// the target names a refusal quotes back, joined the one way.
+// what a refusal quotes back when it has to name a set, joined the one way.
 //
-// two refusals here name a set of targets - the one for a `--target` nothing declares, and the one for a
-// `run` given several - and they are the two a user compares side by side, so they read alike by sharing
-// this rather than by both being got right
-static std::string target_name_list(const std::vector<Parser::ModuleTarget> &targets)
+// four refusals here name one - the targets a `--target` could have meant, the programs a `run` was handed
+// several of, the tests a `--filter` matched none of - and they are the ones a user compares side by side,
+// so they read alike by sharing this rather than by each being got right
+template <typename T, typename Spell>
+static std::string comma_list(const std::vector<T> &items, Spell spell)
 {
     std::string list;
 
-    for (const Parser::ModuleTarget &target : targets) {
-        list += list.empty() ? target.name : ", " + target.name;
+    for (const T &item : items) {
+        if (!list.empty()) {
+            list += ", ";
+        }
+
+        list += spell(item);
     }
 
     return list;
+}
+
+static std::string target_name_list(const std::vector<Parser::ModuleTarget> &targets)
+{
+    return comma_list(targets, [](const Parser::ModuleTarget &target) { return target.name; });
+}
+
+static std::string test_name_list(const std::vector<Compiler::TestCase> &tests)
+{
+    return comma_list(tests, Compiler::test_display_name);
 }
 
 // the declared targets this invocation builds, or a refusal naming what there was to choose from.
@@ -947,19 +990,34 @@ static bool select_targets(
     std::vector<Parser::ModuleTarget> &out
 )
 {
+    // **the subcommand decides which kinds it is even looking at**, and without this arm `echoc build`
+    // starts building the test targets a manifest declares: they are in the same list, and a target with no
+    // entry file would then be handed to codegen as a program whose body is every file root
+    const Parser::TargetKind wanted = driver.subcommand == Compiler::Subcommand::t_test
+        ? Parser::TargetKind::t_test
+        : Parser::TargetKind::t_executable;
+
+    std::vector<Parser::ModuleTarget> candidates;
+
+    for (const Parser::ModuleTarget &target : entry.targets) {
+        if (target.kind == wanted) {
+            candidates.push_back(target);
+        }
+    }
+
     if (driver.targets.empty()) {
-        out = entry.targets;
+        out = candidates;
         return true;
     }
 
     for (const std::string &named : driver.targets) {
-        auto found = std::find_if(entry.targets.begin(), entry.targets.end(),
+        auto found = std::find_if(candidates.begin(), candidates.end(),
             [&named](const Parser::ModuleTarget &target) { return target.name == named; });
 
-        if (found == entry.targets.end()) {
+        if (found == candidates.end()) {
             diagnostics.render_untyped("No Such Target", fmt::format(
                 "'{}' declares no target called '{}'. It declares: {}.",
-                entry.name, named, target_name_list(entry.targets)));
+                entry.name, named, target_name_list(candidates)));
             return false;
         }
 
@@ -971,6 +1029,40 @@ static bool select_targets(
     }
 
     return true;
+}
+
+// **the modules whose `test` blocks this build compiles**, and the sole answer to that question.
+//
+// two readers, and they have to agree or the cache is unsound rather than merely ineffective:
+// Parser::ModuleParser, which decides what the token filter keeps, and Compiler::compute_module_keys, which
+// decides what object those tokens are stored under.
+//
+// only the roots, never a dependency - a project's `echoc test` runs the project's tests, and a library it
+// depends on is somebody else's module with somebody else's tests. That is the separation `Invocation::roots`
+// already exists for, applied to a second question
+static std::set<std::string> resolve_test_modules(
+    const Compiler::DriverOptions &driver,
+    const Invocation &invocation
+)
+{
+    std::set<std::string> result;
+
+    if (driver.subcommand != Compiler::Subcommand::t_test) {
+        return result;
+    }
+
+    for (const Parser::ModuleManifest &manifest : invocation.manifests) {
+        if (manifest_is_a_root(manifest, invocation.roots)) {
+            result.insert(manifest.name);
+        }
+    }
+
+    // loose `.eco` files are a module of their own, and the one an invocation pointed at most directly
+    if (!invocation.sources.empty()) {
+        result.insert(ECO_MAIN_MODULE_NAME);
+    }
+
+    return result;
 }
 
 // **which programs this invocation produces, and where each one goes.**
@@ -1052,15 +1144,57 @@ static bool resolve_programs(
         return false;
     }
 
+    // **a test run is one compile, whatever it was pointed at.** There is no entry file - in test mode no
+    // file root becomes the program at all - so there is nothing here for a target to vary, and every
+    // declared one it selected narrows which tests run instead. That is why this arm is ahead of all of the
+    // executable reasoning below rather than a case inside it: none of "which of these is the program",
+    // "run runs one" or "-o is one path" is a question a test invocation has
+    if (driver.subcommand == Compiler::Subcommand::t_test) {
+        // **a declared test target narrows only when it is asked for by name.** `echoc test` runs every test
+        // the module has, which is what a person means by it - so an unnamed target is a *saved* selection
+        // rather than one in force. Selecting all of them instead would make two targets mean the union of
+        // their narrowings, and a module declaring a bare `#[target: test]` beside a narrow one would then
+        // run the narrow one's tests and call that everything
+        if (entry != nullptr && !driver.targets.empty()
+            && !select_targets(driver, diagnostics, *entry, out.test_targets)) {
+            return false;
+        }
+
+        if (entry == nullptr && !driver.targets.empty()) {
+            diagnostics.render_untyped("No Such Target",
+                "'--target' names a test target a manifest declares, and this run's tests are those of "
+                "the source files on the command line. Narrow them with '--filter' instead.");
+            return false;
+        }
+
+        out.programs.push_back(Program {
+            /*name=*/{},
+            entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
+            /*entry_file=*/{},
+            /*output=*/{}
+        });
+
+        return true;
+    }
+
     // loose sources are the program, so a manifest reached with `-m` is a library to them however many
-    // programs it declares for its own sake
-    if (entry == nullptr || entry->targets.empty()) {
+    // programs it declares for its own sake.
+    //
+    // **the *executable* targets and not every target**, or a manifest declaring only `#[target: test]`
+    // would fall through to the loop below and build no program at all, silently
+    const bool declares_a_program = entry != nullptr && std::any_of(
+        entry->targets.begin(), entry->targets.end(),
+        [](const Parser::ModuleTarget &target) {
+            return target.kind == Parser::TargetKind::t_executable;
+        });
+
+    if (!declares_a_program) {
         if (!driver.targets.empty()) {
             diagnostics.render_untyped("No Such Target", entry == nullptr
                 ? "'--target' names a program a manifest declares, and this build's program is the source "
                   "files on the command line."
                 : fmt::format(
-                    "'{}' declares no targets, so it produces the one program its module is. Add "
+                    "'{}' declares no programs, so it produces the one its module is. Add "
                     "'#[target: exe {{ name: ..., entry: ... }}]' to its manifest to give it more.",
                     entry->name));
             return false;
@@ -1073,7 +1207,7 @@ static bool resolve_programs(
                 "'build' needs '-o, --output <file>' - nothing here names the binary. {}",
                 entry == nullptr
                     ? "A program built from loose source files has no other name to take."
-                    : fmt::format("'{}' declares no targets, so its manifest does not name one either.",
+                    : fmt::format("'{}' declares no programs, so its manifest does not name one either.",
                         entry->name)));
             return false;
         }
@@ -1180,6 +1314,9 @@ static bool resolve_invocation(
         return false;
     }
 
+    // after the graph and the sources, both of which it reads, and before anything parses
+    out.test_modules = resolve_test_modules(driver, out);
+
     return resolve_programs(driver, diagnostics, out);
 }
 
@@ -1205,7 +1342,7 @@ static bool run_front_end(
     // **after the facts and not before**, which is why the parser is built here rather than handed in: it
     // takes them at construction, so there is no window in which one exists that has not been told what
     // platform it is reading for. Neither subcommand touches it once the front end is done
-    Parser::ModuleParser parser(out.target_facts());
+    Parser::ModuleParser parser(out.target_facts(), out.test_modules());
 
     {
         Compiler::ScopedPhase phase("parse");
@@ -1228,7 +1365,8 @@ static bool run_front_end(
 
     if (needs_cache_keys(driver)
         && !compute_cache_keys(
-            driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.cache_keys)) {
+            driver, diagnostics, out.manifests(), out.options, out.target_facts(), out.test_modules(),
+            out.cache_keys)) {
         return false;
     }
 
@@ -1343,7 +1481,7 @@ static void report_link_failure(
 // on a `build` each object joins the link as an `object:` requirement, which is the whole of the wiring: it
 // then flows through Compiler::partition_link_requirements into the object group ahead of every library,
 // and a failed link names the module that brought it. On a `run` there is no link at all, so the objects go
-// into a loadable library instead and the JIT opens it - see Backend::run_code
+// into a loadable library instead and the JIT opens it - see Backend::prepare_execution
 //
 // exactly one of the two is filled, which is what `for_jit` selects - returned together rather than as two
 // out-parameters, so neither caller has to name a variable it is going to throw away
@@ -1435,7 +1573,7 @@ static bool build_c_modules(
 
 // the human half of a library that would not open.
 //
-// **the whole of why this is in the driver rather than in Backend::run_code.** The backend can call
+// **the whole of why this is in the driver rather than in Backend::prepare_execution.** The backend can
 // LoadLibraryPermanently perfectly well - the registry it loads into is process-global, so where it happens
 // does not matter - but it has neither the requirement's declaring module nor the renderer, and this
 // message needs both
@@ -1493,7 +1631,7 @@ static bool load_native_libraries(
 
         // LoadLibraryPermanently puts the symbols into the process's own search list, which is the only
         // list MCJIT's resolver consults - so this has to happen before the engine finalizes, and being
-        // ahead of run_code entirely is the version of that ordering nobody can get wrong
+        // ahead of prepare_execution entirely is the version of that ordering nobody can get wrong
         if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(library.path.string().c_str(), &reason)) {
             report_unloadable_library(diagnostics, library, reason);
             refused = true;
@@ -1550,6 +1688,85 @@ static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompile
     step.finish(true);
 }
 
+// **everything between a parsed bundle and a JIT that can be asked for an address**, shared by the two
+// subcommands that run one: the cache plan, the link requirements, the C modules, the native libraries the
+// JIT must have open before it resolves a symbol, then codegen and the whole-program optimizer.
+//
+// `run` and `test` do the same work here and differ only in what they do with the compiler afterwards - one
+// runs the program, the other calls one definition at a time - so this is one function rather than the two
+// copies it was, which is what keeps a change to the JIT path from having to be remembered twice.
+//
+// nullopt is success; anything else is the exit status the subcommand owes its caller
+static std::optional<int> prepare_jit(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    FrontEnd &front,
+    AST::Bundle &bundle,
+    bool test_mode,
+    LLVMCompiler &compiler
+)
+{
+    // the JIT is handed one module, so every unit is merged and there are no per-module objects to store or
+    // load - the plan is reported as bypassed rather than not reported at all
+    report_cache_plan(
+        driver, front.manifests(), front.cache_keys, ModulePlan{}, front.entry_module(),
+        /*bypassed=*/true);
+
+    // **before codegen**, because a C source that does not compile is a build that is going to fail either
+    // way, and finding out after the whole Echo program has been lowered wastes the wait. It also puts the
+    // `cc` phase where `-t` reads naturally: beside `parse`, not inside `jit`
+    std::vector<Compiler::LinkRequirement> link;
+    CModuleBuilds c_builds;
+
+    if (!collect_link_requirements(driver, diagnostics, front, link)) {
+        return 1;
+    }
+
+    {
+        Compiler::ScopedPhase phase("cc");
+
+        if (!build_c_modules(driver, diagnostics, front, /*for_jit=*/true, c_builds)) {
+            return 1;
+        }
+    }
+
+    if (!load_native_libraries(diagnostics, link, c_builds.libraries)) {
+        return 1;
+    }
+
+    compiler.set_entry(front.entry_module(), front.entry_file());
+
+    // **no file root becomes the program.** Whatever application this module is does not run: a test asked
+    // for is a test, not a test after the program it sits beside
+    compiler.set_test_mode(test_mode);
+
+    try {
+        Compiler::ScopedPhase phase("codegen");
+
+        // **inside the try, deliberately.** Unwinding destroys it before the catch below runs, so the
+        // failed row is committed ahead of the diagnostic that explains it - which is the order every
+        // other step reaches by calling finish() and this one gets for nothing
+        Compiler::ProgressStep step(
+            Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_codegen);
+
+        compiler.compile_bundle(bundle);
+
+        // the JIT can only be handed one module, so both of these paths always merge
+        compiler.link_into_main();
+        step.finish(true);
+    } catch (Compiler::ASTCompilerException &e) {
+        return report_compiler_exception(diagnostics, e);
+    }
+
+    optimize_if_asked(driver, compiler);
+
+    if (driver.prints(Compiler::PrintKind::t_ir)) {
+        compiler.printIR(false);
+    }
+
+    return std::nullopt;
+}
+
 int main_run(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -1595,59 +1812,13 @@ int main_run(
         return 1;
     }
 
-    const Compiler::CompilerOptions options = front.options;
     const std::string &entry_module = front.entry_module();
 
-    report_cache_plan(driver, front.manifests(), front.cache_keys, ModulePlan{}, entry_module, /*bypassed=*/true);
+    LLVMCompiler compiler(front.options);
 
-    // **before codegen**, because a C source that does not compile is a build that is going to fail either
-    // way, and finding out after the whole Echo program has been lowered wastes the wait. It also puts the
-    // `cc` phase where `-t` reads naturally: beside `parse`, not inside `jit`
-    std::vector<Compiler::LinkRequirement> link;
-    CModuleBuilds c_builds;
-
-    if (!collect_link_requirements(driver, diagnostics, front, link)) {
-        return 1;
-    }
-
-    {
-        Compiler::ScopedPhase phase("cc");
-
-        if (!build_c_modules(
-                driver, diagnostics, front, /*for_jit=*/true, c_builds)) {
-            return 1;
-        }
-    }
-
-    if (!load_native_libraries(diagnostics, link, c_builds.libraries)) {
-        return 1;
-    }
-
-    LLVMCompiler compiler(options);
-    compiler.set_entry(entry_module, front.entry_file());
-
-    try {
-        Compiler::ScopedPhase phase("codegen");
-
-        // **inside the try, deliberately.** Unwinding destroys it before the catch below runs, so the
-        // failed row is committed ahead of the diagnostic that explains it - which is the order every
-        // other step reaches by calling finish() and this one gets for nothing
-        Compiler::ProgressStep step(
-            Compiler::ProgressReporter::instance(), Compiler::ProgressPhase::t_codegen);
-
-        compiler.compile_bundle(bundle);
-
-        // the JIT can only be handed one module, so `run` always merges
-        compiler.link_into_main();
-        step.finish(true);
-    } catch (Compiler::ASTCompilerException &e) {
-        return report_compiler_exception(diagnostics, e);
-    }
-
-    optimize_if_asked(driver, compiler);
-
-    if (driver.prints(Compiler::PrintKind::t_ir)) {
-        compiler.printIR(false);
+    if (const std::optional<int> failed = prepare_jit(
+            driver, diagnostics, front, bundle, /*test_mode=*/false, compiler)) {
+        return failed.value();
     }
 
     // `argv[0]` is the program's own name, and under `run` the honest answer is the source file the
@@ -1669,7 +1840,7 @@ int main_run(
     int status = 0;
     {
         Compiler::ScopedPhase phase("jit");
-        status = compiler.run_code(argv, environment);
+        status = compiler.prepare_execution() ? compiler.run_main(argv, environment) : 1;
     }
 
     // after the program, because the prune happened inside the run - the same position `[timings]` takes,
@@ -1687,6 +1858,217 @@ int main_run(
     // path - the entry point's epilogue returns 0 and every other ending goes through libc's `exit`
     // from inside the JIT, which never comes back here at all
     return status;
+}
+
+// **every test the bundle declared, in the order the modules were parsed.**
+//
+// only the modules whose tests were compiled have any, so this needs no filter of its own: the token filter
+// already dropped every test block of every module the invocation did not point at, which is what makes
+// `Module::tests` empty for the rest.
+//
+// the symbol is mangled here rather than carried on the record, because AST::mangle_function_name is the one
+// thing that knows how - and a symbol stored at parse time would be stored before the mangler had run
+static std::vector<Compiler::TestCase> collect_tests(const AST::Bundle &bundle)
+{
+    std::vector<Compiler::TestCase> tests;
+
+    for (const auto &module_ptr : bundle.modules) {
+        for (const AST::TestDeclaration &declared : module_ptr->tests) {
+            if (declared.decl == nullptr) {
+                continue;
+            }
+
+            const AST::File *file = declared.decl->declared_in.file;
+
+            tests.push_back(Compiler::TestCase {
+                module_ptr->name,
+                file != nullptr ? file->get_path() : std::filesystem::path{},
+                declared.group,
+                declared.name,
+                AST::mangle_function_name(declared.decl)
+            });
+        }
+    }
+
+    return tests;
+}
+
+// what this invocation asked to run, from the command line and from any `#[target: test]` it selected.
+//
+// **both spellings build one selection**, which is what keeps a declared target a saved filter rather than a
+// second engine: `--filter group:x` and `#[target: test { groups: ["x"] }]` become the same TestFilter, and a
+// run naming both gets the union - the same way two `--filter` words do
+static bool resolve_test_selection(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Invocation &invocation,
+    Compiler::TestSelection &out
+)
+{
+    for (const std::string &spelled : driver.filters) {
+        Compiler::TestFilter filter;
+        std::string error;
+
+        if (!Compiler::parse_test_filter(spelled, filter, error)) {
+            diagnostics.render_untyped("Invalid Test Filter", error);
+            return false;
+        }
+
+        out.filters.push_back(filter);
+    }
+
+    for (const Parser::ModuleTarget &target : invocation.test_targets) {
+        out.add_declared(target.groups, target.files);
+    }
+
+    return true;
+}
+
+// **compiles the module and runs its tests, each in a process of its own.**
+//
+// down to the codegen step this is main_run, and it has to be: a test run is the JIT, so it needs the same
+// link requirements resolved, the same C modules built and the same native libraries open - which is why
+// both go through prepare_jit rather than each spelling it. What differs begins after the compile: there is
+// no program to run, only a list of definitions to call one at a time
+int main_test(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics,
+    const Compiler::TerminalCapabilities &capabilities,
+    const char *const *environment)
+{
+    // **refused here rather than at the first test**, which is the call `#[link: framework]` makes about
+    // Darwin: a platform that cannot do the thing is told so where the thing was asked for, and every test
+    // "failing" for the same reason is not a report anybody can act on
+    if (!Compiler::test_isolation_available()) {
+        diagnostics.render_untyped("Tests Cannot Be Isolated",
+            "'echoc test' runs each test in a process of its own, and this platform has no fork. Every "
+            "other subcommand is unaffected.");
+        return 1;
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+
+    auto bundle = AST::Bundle();
+
+    Invocation invocation;
+    if (!resolve_invocation(driver, diagnostics, invocation)) {
+        return 1;
+    }
+
+    // resolve_programs pushes exactly one for a test run: a test run is one compile whatever it was
+    // pointed at, the targets it selected being a selection rather than a program each
+    const Program &program = invocation.programs.front();
+
+    FrontEnd front;
+    if (!run_front_end(driver, diagnostics, invocation, program, bundle, front)) {
+        return 1;
+    }
+
+    Compiler::TestSelection selection;
+    if (!resolve_test_selection(driver, diagnostics, invocation, selection)) {
+        return 1;
+    }
+
+    const std::vector<Compiler::TestCase> declared = collect_tests(bundle);
+    const std::vector<Compiler::TestCase> selected = Compiler::select_tests(declared, selection);
+
+    // **a filter that matched nothing is a refusal, and a module with no tests is not.** The two are
+    // different news: one is a mistake in what was typed, where naming what there was to choose from is the
+    // whole of the help - and the other is a project that has not written a test yet, which is a fact rather
+    // than an error. A suite reporting success having run nothing is the failure mode this exists to prevent
+    if (selected.empty()) {
+        if (declared.empty()) {
+            Compiler::ProgressReporter::instance().close(
+                fmt::format("'{}' declares no tests", front.entry_module()),
+                Compiler::progress_elapsed_ms(started));
+
+            std::cout << Compiler::PhaseTimings::instance().report();
+            front.layout().discard_temporary_scratch();
+
+            return 0;
+        }
+
+        diagnostics.render_untyped("No Tests Selected", fmt::format(
+            "nothing this run compiled matches those filters. It declares {} test{}: {}.",
+            declared.size(), declared.size() == 1 ? "" : "s", test_name_list(declared)));
+        return 1;
+    }
+
+    LLVMCompiler compiler(front.options);
+
+    if (const std::optional<int> failed = prepare_jit(
+            driver, diagnostics, front, bundle, /*test_mode=*/true, compiler)) {
+        return failed.value();
+    }
+
+    // **the selected tests are the prune's roots**, beside `main`. Without this the JIT deletes every one of
+    // them - nothing reaches a test from the entry point, that being the whole of what a test is - and
+    // function_address answers 0 for each. It also means `--filter` narrows the machine code and not only
+    // the run
+    std::vector<std::string> roots;
+    for (const Compiler::TestCase &test : selected) {
+        roots.push_back(test.symbol);
+    }
+
+    compiler.set_jit_roots(std::move(roots));
+
+    if (!compiler.prepare_execution()) {
+        return 1;
+    }
+
+    // the prologue, once, so `std::env::args()` inside a test reads the process the tests were started from.
+    // `main` in test mode is that capture and a `ret 0`, so this runs no statement anybody wrote
+    {
+        Compiler::ScopedPhase phase("jit");
+
+        std::vector<std::string> argv = { program_name(driver, program) };
+
+        if (compiler.run_main(argv, environment) != 0) {
+            diagnostics.render_untyped("Test Prologue Failed",
+                "the compiled entry point did not return 0, so the tests were not started.");
+            return 1;
+        }
+    }
+
+    // **the facts main() settled, never a second resolve.** Two places deciding independently whether to
+    // emit an escape sequence is how a redirected stream ends up with half of them in it - and these are
+    // the same facts the diagnostics and the checklist were built from
+    Compiler::TestReporter reporter(
+        std::cout,
+        Compiler::ProgressReporter::instance(),
+        capabilities,
+        driver.verbose ? Compiler::TestDetail::t_listing : Compiler::TestDetail::t_counter);
+
+    reporter.begin(selected.size());
+
+    for (const Compiler::TestCase &test : selected) {
+        const uint64_t address = compiler.function_address(test.symbol);
+
+        // **loud rather than a call through null.** A test the prune dropped is a mistake in the root set
+        // above, and there is no version of it that reads as a test failing
+        if (address == 0) {
+            diagnostics.render_untyped("Test Not Emitted", fmt::format(
+                "internal: '{}' has no compiled body under '{}', so it cannot be run.",
+                Compiler::test_display_name(test), test.symbol));
+            return 1;
+        }
+
+        reporter.result(Compiler::run_test_isolated(test, [address]() {
+            reinterpret_cast<void (*)()>(address)();
+        }));
+    }
+
+    const bool passed = reporter.finish();
+
+    if (driver.explains(Compiler::ExplainKind::t_prune)) {
+        std::cout << compiler.prune_report();
+    }
+
+    std::cout << Compiler::PhaseTimings::instance().report();
+
+    front.layout().discard_temporary_scratch();
+
+    return passed ? 0 : 1;
 }
 
 // compiles and links **one** program: its own bundle, its own entry point, its own binary.
@@ -2119,6 +2501,9 @@ int main(int argc, char *argv[], char *envp[])
 
     case Compiler::Subcommand::t_build:
         return main_build(driver, diagnostics);
+
+    case Compiler::Subcommand::t_test:
+        return main_test(driver, diagnostics, capabilities, envp);
 
     // unreachable: the parser refuses an invocation with no command, so this is here to make the switch
     // total rather than to be taken

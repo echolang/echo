@@ -13,10 +13,15 @@
 #include <sstream>
 #include <memory>
 
-Parser::ModuleParser::ModuleParser(Compiler::TargetFacts facts) :
-    target_facts(std::move(facts))
+Parser::ModuleParser::ModuleParser(Compiler::TargetFacts facts, std::set<std::string> test_modules) :
+    target_facts(std::move(facts)), test_modules(std::move(test_modules))
 {
     _lexer = std::make_unique<Lexer>();
+}
+
+Compiler::TargetFacts Parser::ModuleParser::facts_for(const AST::Module &module) const
+{
+    return Compiler::TargetFacts::for_module(target_facts, module.name, test_modules);
 }
 
 Parser::Payload Parser::ModuleParser::make_parser_payload(
@@ -82,9 +87,11 @@ AST::TokenizedFile Parser::ModuleParser::make_tokenized_file(AST::Module &module
 {
     // the conditional filter is handed *in* rather than called by Module::tokenize, so that AST knows only
     // that something may shorten the range before the slice is taken - see AST::Module::TokenFilter
+    const Compiler::TargetFacts facts = facts_for(module);
+
     return module.tokenize(*_lexer.get(), file,
-        [this](TokenCollection &tokens, size_t from, std::string &out_error) {
-            return Parser::filter_conditional_tokens(tokens, from, target_facts, out_error);
+        [&facts](TokenCollection &tokens, size_t from, std::string &out_error) {
+            return Parser::filter_conditional_tokens(tokens, from, facts, out_error);
         });
 }
 

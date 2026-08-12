@@ -29,7 +29,9 @@
 
 namespace str;
 
-extern {
+// `private` on the block, which belongs to every declaration in it: what this file offers is
+// `str::from`, and a program wanting `snprintf` declares its own `extern`
+private extern {
     // **the first user of `variadic_args`**, and the reason it exists. correctly rounded
     // binary-to-decimal conversion is a hard problem libc has already solved on every platform this
     // compiler targets, and going through it is also what makes `str::from(3.5)` agree with `dprint`
@@ -58,6 +60,13 @@ extern {
  */
 public struct spec
 {
+    // **the four fields stay reachable, and that is deliberate rather than an omission.** Everything that
+    // reads them - `align_to`, `base_of`, `float_to_string`, the `from` overloads - is a free function in
+    // this file rather than a method here, so `private` would refuse all of them; and a `str::from` of your
+    // own is written the same way and needs the same reading. Those six functions are the ones that are
+    // `private`. The field-wise constructor is part of it too: `spec(0, 0, 0, -1)` is how every overload
+    // below spells "no spec was written"
+    //
     // `<`, `>`, `^`, or 0 for "whatever the type prefers"
     uint8 $align;
 
@@ -148,8 +157,13 @@ public function spec_of(const string& $text) : spec
  *
  * One function, so every overload below pads the same way - and so the "wider text is never
  * truncated" promise lives in one place.
+ *
+ * **The six functions from here down to `float_to_string` are `private`**, and that is the file's own
+ * shape said out loud: `spec`, `spec_of` and the `from` overloads are the surface, and everything
+ * between them is how a spec becomes bytes. `str::pad_start` and `str::pad_end` are the public
+ * spellings of what this one does.
  */
-function align_to(const string& $text, const spec& $s, uint8 $default_align) : string
+private function align_to(const string& $text, const spec& $s, uint8 $default_align) : string
 {
     if ($text->size() >= $s->width) {
         return $text->sub(0, $text->size());
@@ -184,7 +198,7 @@ function align_to(const string& $text, const spec& $s, uint8 $default_align) : s
  * `int64`'s minimum: that value has no positive counterpart, so a signed implementation would have
  * to negate it and wrap.
  */
-function digits_of(uint64 $value, uint64 $base, bool $upper) : string
+private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
 {
     if ($value == 0) {
         return '0';
@@ -235,7 +249,7 @@ function digits_of(uint64 $value, uint64 $base, bool $upper) : string
 /**
  * The base `$s` asks for, and whether its digits are upper case.
  */
-function base_of(const spec& $s) : uint64
+private function base_of(const spec& $s) : uint64
 {
     if ($s->kind == CH_X || $s->kind == CH_UPPER_X) {
         return 16;
@@ -256,7 +270,7 @@ function base_of(const spec& $s) : uint64
  * A signed integer, spec applied. Every signed overload funnels here, so the sign rule and the
  * minimum-value rule are written once.
  */
-function signed_to_string(int64 $value, const spec& $s) : string
+private function signed_to_string(int64 $value, const spec& $s) : string
 {
     if ($value >= 0) {
         uint64 $positive = $value;
@@ -278,7 +292,7 @@ function signed_to_string(int64 $value, const spec& $s) : string
 /**
  * An unsigned integer, spec applied.
  */
-function unsigned_to_string(uint64 $value, const spec& $s) : string
+private function unsigned_to_string(uint64 $value, const spec& $s) : string
 {
     return align_to(digits_of($value, base_of($s), $s->kind == CH_UPPER_X), $s, CH_GT);
 }
@@ -294,7 +308,7 @@ function unsigned_to_string(uint64 $value, const spec& $s) : string
  * Round-tripping through `str::parse_float` is not promised at the default precision. Ask for
  * `{$x:.17g}` when it matters.
  */
-function float_to_string(float64 $value, const spec& $s, int32 $default_precision) : string
+private function float_to_string(float64 $value, const spec& $s, int32 $default_precision) : string
 {
     int32 $precision = $s->precision;
 

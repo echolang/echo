@@ -51,12 +51,6 @@ void write_two_target_project(const ScopedProject &project)
     write_file(project.root() / "src/serve_main.eco", "banner(\"SERVE\");\n");
 }
 
-bool binary_exists(const fs::path &path)
-{
-    std::error_code ec;
-    return fs::is_regular_file(path, ec);
-}
-
 };
 
 TEST_CASE("a build with no target named builds every one the manifest declares", "[targets]")
@@ -68,8 +62,8 @@ TEST_CASE("a build with no target named builds every one the manifest declares",
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    REQUIRE(binary_exists(project.root() / "ecobuild/clock"));
-    REQUIRE(binary_exists(project.root() / "ecobuild/serve"));
+    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild/clock"));
+    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild/serve"));
 }
 
 TEST_CASE("each target runs its own entry file and nothing of the other's", "[targets]")
@@ -102,8 +96,8 @@ TEST_CASE("--target builds the one named and leaves the others alone", "[targets
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    REQUIRE(binary_exists(project.root() / "ecobuild/clock"));
-    REQUIRE_FALSE(binary_exists(project.root() / "ecobuild/serve"));
+    REQUIRE(EchoTests::file_exists(project.root() / "ecobuild/clock"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/serve"));
 }
 
 TEST_CASE("-o overrides where one target's binary goes", "[targets]")
@@ -115,8 +109,8 @@ TEST_CASE("-o overrides where one target's binary goes", "[targets]")
     INFO(built.output);
     REQUIRE(built.exit_code == 0);
 
-    REQUIRE(binary_exists(project.root() / "elsewhere"));
-    REQUIRE_FALSE(binary_exists(project.root() / "ecobuild/clock"));
+    REQUIRE(EchoTests::file_exists(project.root() / "elsewhere"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/clock"));
 }
 
 TEST_CASE("one path cannot name several binaries", "[targets]")
@@ -129,7 +123,7 @@ TEST_CASE("one path cannot name several binaries", "[targets]")
 
     REQUIRE(built.exit_code != 0);
     REQUIRE(built.output.find("names one file") != std::string::npos);
-    REQUIRE_FALSE(binary_exists(project.root() / "everything"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "everything"));
 }
 
 TEST_CASE("run takes exactly one program, and says which there were", "[targets]")
@@ -184,7 +178,7 @@ TEST_CASE("top level code in a file no target claims is refused", "[targets]")
     REQUIRE(built.exit_code != 0);
     REQUIRE(built.output.find("TopLevelCodeOutsideEntry") != std::string::npos);
     REQUIRE(built.output.find("shared.eco") != std::string::npos);
-    REQUIRE_FALSE(binary_exists(project.root() / "ecobuild/clock"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/clock"));
 }
 
 TEST_CASE("the other target's entry file is not refused for holding its own program", "[targets]")
@@ -258,9 +252,9 @@ TEST_CASE("a dependency's targets are its own and reach no consumer", "[targets]
     REQUIRE(built.exit_code == 0);
 
     // the consumer built its own target and not the library's
-    REQUIRE(binary_exists(project.root() / "app/ecobuild/app"));
-    REQUIRE_FALSE(binary_exists(project.root() / "app/ecobuild/tool"));
-    REQUIRE_FALSE(binary_exists(project.root() / "lib/ecobuild/tool"));
+    REQUIRE(EchoTests::file_exists(project.root() / "app/ecobuild/app"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "app/ecobuild/tool"));
+    REQUIRE_FALSE(EchoTests::file_exists(project.root() / "lib/ecobuild/tool"));
 
     const ProcessResult ran = EchoTests::run_capturing(
         EchoTests::quoted(project.root() / "app/ecobuild/app") + " 2>&1");

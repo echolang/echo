@@ -79,24 +79,36 @@ namespace hash;
  */
 
 /**
- * The FNV-1a 64 offset basis and prime.
+ * The FNV-1a 64 offset basis - **the value a byte run starts from**, and the reason this one is
+ * `public` where the three multipliers below are not.
  *
- * The canonical constants. Note that the compiler's own `fnv1a64` - which hashes module cache keys -
+ * `bytes` takes a seed rather than starting from a basis itself, so a hand-written `of` folding several
+ * byte runs into one hash needs somewhere to begin: `bytes($p, $n, hash::OFFSET_BASIS)` is that call,
+ * and it is what `of_bytes` and the `string::view` overload below do. A multiplier is not that - it is
+ * a step of the algorithm, and nothing outside this file can do anything with one.
+ *
+ * The canonical constant. Note that the compiler's own `fnv1a64` - which hashes module cache keys -
  * carries a basis one digit short of this one; the two are unrelated uses that never compare a value,
  * so this file spells the real thing rather than mirroring that.
  */
 public const uint64 OFFSET_BASIS = 14695981039346656037;
-public const uint64 PRIME = 1099511628211;
 
 /**
- * The two multipliers `mix` stirs with - SplitMix64's finalizer, in Stafford's variant 13.
+ * The FNV-1a prime, which is `step`'s multiplier and nothing else's. `private`.
+ */
+private const uint64 PRIME = 1099511628211;
+
+/**
+ * The two multipliers `mix` stirs with - SplitMix64's finalizer, in Stafford's variant 13. `private`,
+ * for `PRIME`'s reason: a caller composes hashes out of `mix`, `step`, `bytes` and `combine`, never out
+ * of the numbers inside them.
  *
  * Odd, which is the whole of what makes each multiply a bijection on 64 bits: an odd multiplier has an
  * inverse modulo 2^64, so no two keys are ever merged by one. Everything `mix` promises rests on that,
  * and on nothing about the particular digits.
  */
-public const uint64 MIX_A = 13787848793156543929;
-public const uint64 MIX_B = 10723151780598845931;
+private const uint64 MIX_A = 13787848793156543929;
+private const uint64 MIX_B = 10723151780598845931;
 
 /**
  * One machine word, stirred so that every output bit depends on every input bit.

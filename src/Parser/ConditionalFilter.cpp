@@ -1,5 +1,7 @@
 #include "Parser/ConditionalFilter.h"
 
+#include "Parser/ParserCursor.h"
+
 #include <fmt/core.h>
 
 #include <string>
@@ -47,6 +49,121 @@ namespace
         }
 
         return tokens.token_values[index + 2];
+    }
+
+    // the index one past the token closing the balanced `open ... close` group that starts at `index`, or
+    // npos when it is never closed.
+    //
+    // **Parser::Cursor::skip_balanced_group does the counting**, which is the one place in this compiler
+    // that knows how - a Cursor is constructible straight over a TokenCollection, so it is reachable from
+    // here with no parse payload to build. It lands *past* the closing token or at the end of the
+    // collection, and only the first of those is a group, which is what the token check below asks
+    size_t balanced_group_end(
+        const TokenCollection &tokens, size_t index, Token::Type open, Token::Type close)
+    {
+        Parser::Cursor cursor(tokens, index);
+        cursor.skip_balanced_group(open, close);
+
+        const size_t after = cursor.snapshot().index;
+
+        if (after <= index || !tokens.tokens[after - 1].is_a(close)) {
+            return std::string::npos;
+        }
+
+        return after;
+    }
+
+    // the index one past the `]` closing the `#[...]` at `index`, or npos when it is never closed.
+    //
+    // brackets are **counted**, where read_directive below scans to the first `]`. Both are right: a
+    // condition's grammar has no bracket in it, and a general attribute's value may be a list, so
+    // `#[sources: ["a", "b"]]` closes three of them
+    size_t attribute_end(const TokenCollection &tokens, size_t index)
+    {
+        return balanced_group_end(
+            tokens, index + 1, Token::Type::t_open_bracket, Token::Type::t_close_bracket);
+    }
+
+    // could a `#[...]* test <name> { ... }` begin at this token at all - the two token types locate_test_block
+    // below can answer anything but `t_absent` for. Its own predicate so the walk asks the cheap question
+    // before the scan, and so the two cannot disagree about which they are
+    bool starts_a_test_block(const Token &token)
+    {
+        return token.is_one_of({ Token::Type::t_hash, Token::Type::t_test });
+    }
+
+    // three answers, so "there is no test here" and "there is one and it is malformed" are not one value
+    enum class TestBlockScan
+    {
+        t_absent,
+        t_located,
+        t_malformed
+    };
+
+    // is `#[...]* test <name> { ... }` what starts at `index`, and where does it end?
+    //
+    // **the attributes are found by scanning forward from the `#`**, never by rewinding the write cursor
+    // back over ones already kept. That is not only cheaper - a `#[group: "..."]` left behind by a dropped
+    // test does not go missing, it attaches to whatever declaration follows and does so in silence, which
+    // is the failure this lookahead exists to prevent.
+    //
+    // a malformed *header* is a located error even in a build that drops the block, because the header is
+    // the only thing that says where the block ends. A malformed *body* is invisible, which is the same
+    // price every excluded region pays
+    TestBlockScan locate_test_block(
+        const TokenCollection &tokens, size_t index, size_t &out_after, std::string &out_error)
+    {
+        size_t cursor = index;
+
+        // the attribute run. a directive stops it - `#[if: ...]` belongs to the frame stack and is the
+        // outer loop's business, not this block's
+        while (true) {
+            const std::string name = attribute_name_at(tokens, cursor);
+
+            if (name.empty() || Parser::ConditionalDirective::is_directive(name)) {
+                break;
+            }
+
+            const size_t after = attribute_end(tokens, cursor);
+
+            if (after == std::string::npos) {
+                return TestBlockScan::t_absent;
+            }
+
+            cursor = after;
+        }
+
+        if (cursor >= tokens.size() || !tokens.tokens[cursor].is_a(Token::Type::t_test)) {
+            return TestBlockScan::t_absent;
+        }
+
+        const uint32_t line = tokens.tokens[cursor].line;
+        cursor++;
+
+        if (cursor >= tokens.size() || !tokens.tokens[cursor].is_a(Token::Type::t_identifier)) {
+            out_error = locate(line, "'test' must be followed by the test's name");
+            return TestBlockScan::t_malformed;
+        }
+
+        cursor++;
+
+        if (cursor >= tokens.size() || !tokens.tokens[cursor].is_a(Token::Type::t_open_brace)) {
+            out_error = locate(line, "a test's name must be followed by its body, '{'");
+            return TestBlockScan::t_malformed;
+        }
+
+        // counting braces is sound at token level: an interpolated string's holes never produce one, the
+        // lexer having consumed them itself while lexing the literal
+        const size_t after = balanced_group_end(
+            tokens, cursor, Token::Type::t_open_brace, Token::Type::t_close_brace);
+
+        if (after == std::string::npos) {
+            out_error = locate(line, "this test's body is never closed - add '}'");
+            return TestBlockScan::t_malformed;
+        }
+
+        out_after = after;
+        return TestBlockScan::t_located;
     }
 
     // reads the directive at `index`, which the caller has already established is one.
@@ -340,17 +457,60 @@ bool Parser::filter_conditional_tokens(
         const std::string name = attribute_name_at(tokens, index);
 
         if (!ConditionalDirective::is_directive(name)) {
-            if (emitting()) {
-                // `write <= index` always, so this only ever reads tokens the walk has passed
-                if (write != index) {
-                    tokens.tokens[write] = tokens.tokens[index];
-                    tokens.token_values[write] = std::move(tokens.token_values[index]);
-                }
+            // **a test block this build does not compile never reaches pass 1.** Asked only while emitting,
+            // so a test inside a region another platform owns is dropped by that region and the conditions
+            // inside it are still evaluated - which is what keeps a typo in one reportable.
+            //
+            // the two cheap questions first, and the token one is why: this branch is every token of every
+            // file, and a test block starts with one of exactly two token types. `emitting()` walks the
+            // frame stack, so asking it per token for a scan that could not have matched is the one cost
+            // this loop cannot afford
+            if (!facts.tests && starts_a_test_block(tokens.tokens[index]) && emitting()) {
+                size_t after = 0;
 
-                write++;
+                switch (locate_test_block(tokens, index, after, out_error)) {
+                case TestBlockScan::t_malformed:
+                    return false;
+
+                case TestBlockScan::t_located:
+                    index = after;
+                    continue;
+
+                case TestBlockScan::t_absent:
+                    break;
+                }
             }
 
-            index++;
+            // **an attribute is one step, interior included.** Its tokens are compile-time data rather than
+            // statements, so nothing in this loop may read one as a keyword: `#[target: test]` in a manifest
+            // holds a `t_test` that is a word naming a target kind, and examining it token by token had this
+            // filter refuse every manifest declaring one.
+            //
+            // an attribute whose `]` is missing falls back to a single token, so a malformed one is still
+            // reported by the parser rather than swallowing the rest of the file here
+            size_t next = index + 1;
+
+            if (!name.empty()) {
+                const size_t after = attribute_end(tokens, index);
+
+                if (after != std::string::npos) {
+                    next = after;
+                }
+            }
+
+            if (emitting()) {
+                // `write <= index` always, so this only ever reads tokens the walk has passed
+                for (size_t at = index; at < next; at++) {
+                    if (write != at) {
+                        tokens.tokens[write] = tokens.tokens[at];
+                        tokens.token_values[write] = std::move(tokens.token_values[at]);
+                    }
+
+                    write++;
+                }
+            }
+
+            index = next;
             continue;
         }
 

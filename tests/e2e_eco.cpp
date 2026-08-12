@@ -85,14 +85,21 @@ namespace
         // the driver where its command line stops and the program's begins. On the `build` path it
         // belongs to the binary instead, so it is appended where that is invoked and not here -
         // `echoc build -- foo` would be echoc's argument, not the program's
-        const std::string program_arguments = (is_build || test.arguments.empty())
+        const std::string program_arguments
+            = (is_build || test.mode == EchoTests::RunMode::t_test || test.arguments.empty())
             ? std::string()
             : " --" + test.argument_suffix();
+
+        // the subcommand, one word off the mode. `test` takes no `-o` and no `--`: it runs no program of the
+        // case's, so there is nothing for either to be about
+        const std::string subcommand = is_build
+            ? "build -o " + quoted(*binary) + " "
+            : (test.mode == EchoTests::RunMode::t_test ? std::string("test ") : std::string("run "));
 
         return test.stdin_prefix()
             + test.environment_prefix()
             + "\"" ECHOC_BINARY "\" "
-            + (is_build ? "build -o " + quoted(*binary) + " " : std::string("run "))
+            + subcommand
             + (dump.empty() ? "" : dump + " ")
             + "--build-dir " + quoted(scratch / "cache") + " "
             + test.compiler_flags(root)

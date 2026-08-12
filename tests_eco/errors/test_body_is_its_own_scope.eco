@@ -1,0 +1,7 @@
+// a test body is a function body: `is_function_boundary` stops a name at its frame, so a file-scope local is
+// as unreachable from inside one as it is from inside any other function
+$outer = 1;
+
+test reads_a_file_local {
+    assert($outer == 1);
+}

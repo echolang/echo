@@ -1,0 +1,25 @@
+// the standard library's own surface, from outside it. every name below is one a program could reach before
+// stdlib/ said what its levels were, and each is now refused at a different one of the three axes:
+//
+//  - `mem::alloc_bytes` is `private` - the *file* axis, inside the module that declares it
+//  - `str::CH_DOT` is `internal` - the *module* axis, which is the level a declaration has in silence
+//  - `map<K, V>::$len` is `private` on a member - the *owner type* axis
+//
+// what the case pins is that the surface is enforced rather than documented. the counterpart is
+// visibility/lib_internal_surface, which is the same question asked of a library that is not stdlib
+
+ptr<uint8> $raw = mem::alloc_bytes(4);
+
+echo str::CH_DOT;
+
+echo hash::MIX_A;
+
+ptr<ptr<uint8>> $block = std::env::raw_argv();
+
+map<int32, int32> $m = map<int32, int32>();
+
+echo $m->len;
+
+stream $out = std::io::stdout;
+
+echo $out->fd;

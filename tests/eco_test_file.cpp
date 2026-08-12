@@ -445,7 +445,8 @@ namespace
 
         if (key == "mode") {
             return read_enumerated<RunMode>(origin, record, key, value,
-                { { "run", RunMode::t_run }, { "build", RunMode::t_build } },
+                { { "run", RunMode::t_run }, { "build", RunMode::t_build },
+                  { "test", RunMode::t_test } },
                 out_file.mode, out_error);
         }
 

@@ -248,8 +248,12 @@ public struct ordered_map<K, V> : contract::iterable<V>, contract::const_iterabl
 
     /**
      * Drops `$key` out of the order, keeping everything else in place. O(n).
+     *
+     * `private`: `remove` and `take` are the two things that owe it, and both are methods here. The two
+     * properties above cannot be, for `map<K, V>`'s reason - the three brackets below reach them, and an
+     * operator is a free declaration rather than a member of either operand.
      */
-    function forget(const K& $key) : void
+    private function forget(const K& $key) : void
     {
         // read once: the loop returns on the removal, so nothing here outlives the count it was given
         usize $n = $this->order->count();
@@ -322,11 +326,13 @@ operator<K, V> (const ordered_map<K, V>& $m)[const K& $key] : const V&
  */
 public struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keyed<K>
 {
-    ptr<map<K, V>> $table;
-    slice<K> $order;
+    // every field `private`, for `map_iterator`'s reason: nothing outside the three methods below reads a
+    // cursor's state, and no operator is declared over one
+    private ptr<map<K, V>> $table;
+    private slice<K> $order;
 
     // one *past* the entry `current()` names, slice_iterator's convention
-    usize $pos;
+    private usize $pos;
 
     constructor(ptr<map<K, V>> $table, slice<K> $order)
     {
@@ -382,11 +388,11 @@ public struct ordered_map_iterator<K, V> : contract::iterator<V>, contract::keye
  */
 public struct ordered_map_const_iterator<K, V> : contract::iterator<const V>, contract::keyed<K>
 {
-    ptr<const map<K, V>> $table;
-    slice<const K> $order;
+    private ptr<const map<K, V>> $table;
+    private slice<const K> $order;
 
     // one *past* the entry `current()` names, slice_iterator's convention
-    usize $pos;
+    private usize $pos;
 
     constructor(ptr<const map<K, V>> $table, slice<const K> $order)
     {

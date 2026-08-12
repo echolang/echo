@@ -1,0 +1,64 @@
+expect: fail
+
+# the standard library states every one of its levels rather than defaulting them, and this is the half of
+# that which is observable: six names a program used to be able to write, refused at three different axes -
+# `private` on a declaration is the file, nothing written is the module, and `private` on a member is the
+# owner type. Two of them carry the sentence that used to be a comment asking nicely: mem.eco's byte
+# allocator said "nothing outside this file should call these" and process.eco's `raw_argv` said it was
+# public only because there were no modifiers yet
+--- OUT --->
+[error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:13:11
+
+  'CH_DOT' is internal to the module 'stdlib', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'stdlib' offers.
+
+  12 | 
+  13 | echo str::CH_DOT;
+     :           ^^^^^^
+  14 | 
+
+[error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:15:12
+
+  'MIX_A' is private to 'hash.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  14 | 
+  15 | echo hash::MIX_A;
+     :            ^^^^^
+  16 | 
+
+[error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:11:24
+
+  'mem::alloc_bytes(usize)' is private to 'mem.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  10 | 
+  11 | ptr<uint8> $raw = mem::alloc_bytes(4);
+     :                        ^^^^^^^^^^^
+  12 | 
+
+[error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:17:36
+
+  'std::env::raw_argv()' is private to 'process.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
+
+  16 | 
+  17 | ptr<ptr<uint8>> $block = std::env::raw_argv();
+     :                                    ^^^^^^^^
+  18 | 
+
+[error] PrivateMember  stdlib_internals_are_not_reachable.eco:21:10
+
+  '$len' is private to 'map<int32,int32>' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'map<int32,int32>' instead.
+
+  20 | 
+  21 | echo $m->len;
+     :          ^^^
+  22 | 
+
+[error] PrivateMember  stdlib_internals_are_not_reachable.eco:25:12
+
+  '$fd' is private to 'std::io::stream' and cannot be reached from here. Its type keeps an invariant that depends on nothing outside it writing that field - go through a method of 'std::io::stream' instead.
+
+  24 | 
+  25 | echo $out->fd;
+     :            ^^
+  26 | 
+
+6 errors, nothing was compiled.

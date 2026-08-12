@@ -43,7 +43,13 @@ namespace Parser
     // shape, and the same reason, as `#[link: lib "m"]`
     enum class TargetKind
     {
-        t_executable
+        t_executable,
+
+        // a named selection of this module's tests, run by `echoc test --target <name>`. **it produces no
+        // artifact at all**, which is what makes it unlike the kind above rather than a second flavour of
+        // it: there is no entry file, no binary and nothing in the build directory - only `groups` and
+        // `files`, which are the same selection `--filter` states on the command line
+        t_test
     };
 
     // one program a module produces.
@@ -61,10 +67,20 @@ namespace Parser
         std::string name;
 
         // absolute, and always one of the declaring manifest's own `sources` - a file has to belong to the
-        // module for its declarations to be shared with the rest of it
+        // module for its declarations to be shared with the rest of it.
+        //
+        // **empty for a `test` target**, which names no file: it selects among the tests the whole module
+        // already has. Refused rather than ignored when one is written, so `entry:` cannot look like it did
+        // something
         std::filesystem::path entry;
 
         TargetKind kind = TargetKind::t_executable;
+
+        // a `test` target's selection: the groups and the files whose tests it runs, empty meaning all of
+        // them. Read by Compiler::select_tests, which is the same function `--filter` goes through - a
+        // declared target is a saved filter and deliberately not a second selection engine
+        std::vector<std::string> groups;
+        std::vector<std::filesystem::path> files;
     };
 
     struct ModuleManifest

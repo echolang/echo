@@ -77,11 +77,12 @@ public function var(string::view $key, string::view $fallback) : string::view
  */
 public struct var_iterator : contract::iterator<string::view>, contract::keyed<string::view>
 {
-    ptr<ptr<uint8>> $block;
-    usize $pos;
+    // every field `private`, for `arg_iterator`'s reason
+    private ptr<ptr<uint8>> $block;
+    private usize $pos;
 
-    string::view $key;
-    string::view $value;
+    private string::view $key;
+    private string::view $value;
 
     constructor()
     {

@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+[error] Conditional Compilation Failed
+
+  line 4: 'test' must be followed by the test's name

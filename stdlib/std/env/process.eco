@@ -24,11 +24,13 @@ public function argc() : usize;
 /**
  * The raw `argv` block: `$argc` pointers to NUL-terminated strings.
  *
- * The low-level seam, here because `arg` and `args` are built on it and there are no visibility
- * modifiers yet. Prefer those - they do the bounds check and hand back a `string::view`.
+ * The low-level seam `arg` and `args` are built on. **`private`**: those two are what a caller wants -
+ * they do the bounds check and hand back a `string::view` - and the block itself is a pointer into a
+ * pointer with a count kept somewhere else, which is not a thing to hand anybody. It was `public` only
+ * for as long as there were no visibility modifiers to say otherwise.
  */
 #[builtin: process_argv]
-public function raw_argv() : ptr<ptr<uint8>>;
+private function raw_argv() : ptr<ptr<uint8>>;
 
 /**
  * The raw environment block: a null-terminated run of pointers to `KEY=VALUE` strings.
@@ -36,9 +38,12 @@ public function raw_argv() : ptr<ptr<uint8>>;
  * The seam `vars` is built on, and the reason this module needs no platform conditionals - the block
  * arrives as the entry point's third argument rather than through `environ`, which is a data symbol
  * an `extern` block has no way to bind and which Darwin does not export under that name anyway.
+ *
+ * **`internal` and not `private`**, which is the whole difference between this and `raw_argv` above:
+ * `var_iterator` walks it, and that lives in vars.eco.
  */
 #[builtin: process_envp]
-public function raw_envp() : ptr<ptr<uint8>>;
+internal function raw_envp() : ptr<ptr<uint8>>;
 
 /**
  * A cursor over the program's arguments, `argv[0]` included.
@@ -53,14 +58,16 @@ public function raw_envp() : ptr<ptr<uint8>>;
  */
 public struct arg_iterator : contract::iterator<string::view>, contract::keyed<usize>
 {
-    ptr<ptr<uint8>> $block;
-    usize $count;
+    // every field `private`, for `slice_iterator`'s reason: no operator is declared over a cursor, so the
+    // constructor and the three protocol methods below are the whole of how one is reached
+    private ptr<ptr<uint8>> $block;
+    private usize $count;
 
     // the index one *past* the element `current()` names, so the cursor starts before the first one
     // without needing a signed type or a "have we started" flag
-    usize $pos;
+    private usize $pos;
 
-    string::view $current;
+    private string::view $current;
 
     constructor()
     {

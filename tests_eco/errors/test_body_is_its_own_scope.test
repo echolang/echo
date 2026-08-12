@@ -1,0 +1,14 @@
+mode: test
+expect: fail
+
+--- OUT --->
+[error] test_body_is_its_own_scope.eco:6:12
+
+  '$outer' is declared at file scope, which is the implicit entry point's own frame - a function body cannot reach it. Pass it as a parameter, or write a closure.
+
+  5 | test reads_a_file_local {
+  6 |     assert($outer == 1);
+    :            ^^^^^^
+  7 | }
+
+1 error, nothing was compiled.

@@ -1,0 +1,5 @@
+mode: test
+
+--- OUT --->
+ok   1/1  main/runs_a_test.eco::adds_up
+1 test passed

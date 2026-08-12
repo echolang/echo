@@ -1,0 +1,11 @@
+// `#[group:]` describes a test and is read by nothing else, and a `#[group:]` written on a function is
+// **accepted and ignored** - which is what every misplaced attribute in this language does today, not a rule
+// of this one's. `todo/B24-orphan-attribute-is-silent.md` is that gap; this case is here so that closing it
+// moves a golden rather than going unnoticed
+#[group: "arithmetic"]
+function helper() : int32
+{
+    return 1;
+}
+
+echo helper();

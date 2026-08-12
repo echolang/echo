@@ -1,5 +1,8 @@
 #include "Token.h"
 
+#include <algorithm>
+#include <cctype>
+
 TokenReference TokenCollection::operator[](size_t index) const
 {
     return TokenReference(*this, index);
@@ -114,6 +117,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_internal: return "internal";
         case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
+        case Token::Type::t_test: return "test";
 
         default: return "[undefined]";
     }
@@ -195,6 +199,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_internal: return "internal";
         case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
+        case Token::Type::t_test: return "test";
 
         default:
             assert(false && "undefined operator type");
@@ -233,5 +238,25 @@ bool Token::is_operator_type() const
         // `!`, the one prefix-only symbol the language spells - see AST::Operator::is_prefix_only.
         // `!=` is its own token and the lexer trie takes the longest match, so this never splits one
         Token::Type::t_exclamation
+    });
+}
+
+bool token_spells_a_word(const std::string &value)
+{
+    if (value.empty()) {
+        return false;
+    }
+
+    const unsigned char first = static_cast<unsigned char>(value.front());
+
+    // a digit may not start one, so the first character is a different question from the rest
+    if (std::isalpha(first) == 0 && first != '_') {
+        return false;
+    }
+
+    return std::all_of(value.begin() + 1, value.end(), [](char c) {
+        const unsigned char at = static_cast<unsigned char>(c);
+
+        return std::isalnum(at) != 0 || at == '_';
     });
 }

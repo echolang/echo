@@ -223,6 +223,13 @@ namespace AST
         MAKE_ISSUE_DEF1(NoMatchingOverload, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(AmbiguousCall, IssueSeverity::Error, const std::string, _message);
 
+        // two `test` blocks of one name in one file. its own kind rather than DuplicateFunctionSignature's
+        // second reading, because a test is in no overload set: that message talks about a signature and a
+        // candidate, and here there is neither - only a name that has to be unique somewhere, and the
+        // *somewhere* is the file rather than the module, which is the half worth saying
+        MAKE_ISSUE_DEF1(DuplicateTestName, IssueSeverity::Error, const std::string, test_name,
+            std::vector<IssueNote> notes() const override;);
+
         // a `T&` formed from a raw address outside an `unsafe` block. its own kind because it is *the*
         // semantic boundary of the type model: a borrow's type is a contract every later access is
         // optimized against, and this is the one place a program can assert that contract over storage
