@@ -1,0 +1,39 @@
+// **`Drawable?` and `function<...>?` were compiler crashes**, and for the reason the whole tagged-optional
+// change is about: `is_wrapped_optional()` is true for both, but the drop walked the *interface* arm and the
+// *callable* arm, each of which read the two-field wrapper as if it were the two-word value it wraps. one
+// released `{ i1, %eco.iface }` as a class handle, the other passed it to the environment release. both were
+// LLVM verifier failures with no source location.
+//
+// the payload is a property now, so a wrapper is torn down by the layout's own teardown and the value inside
+// is reached at its own offset - which is to say neither arm sees a wrapper at all any more
+interface Drawable
+{
+    function draw() : int32;
+}
+
+class Circle : Drawable
+{
+    int32 $size;
+
+    function draw() : int32
+    {
+        return $this->size;
+    }
+}
+
+Drawable? $absent = null;
+Drawable? $present = Circle(4);
+
+echo $absent?->draw() ?? -1;
+echo $present?->draw() ?? -1;
+
+function<int32(int32)>? $no_fn = null;
+function<int32(int32)>? $a_fn = function(int32 $n) : int32 { return $n * 2; };
+
+echo $no_fn == null;
+echo $a_fn != null;
+
+// the erased handle is still counted: the class goes when the last reference does
+assert(mem::live_allocations() == 1, "the circle, and nothing for the two absent values");
+
+echo "balanced";

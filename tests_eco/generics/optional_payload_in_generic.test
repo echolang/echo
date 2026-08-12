@@ -1,0 +1,16 @@
+# one written `T? $slot`, three instances, and the answer to "does this own anything" taken per instance:
+# `Box<array<int32>>` holds a pair with a teardown, `Box<int32>` holds a pair with none, and `Box<int32>(null)`
+# is the same layout with its tag clear
+--- OUT --->
+1
+1
+0
+1
+0
+done
+--- IR --->
+# the payload is in the symbol, so the two instances are two teardowns and cannot share one
+CHECK: define linkonce_odr void @"_M5arrayIMLPiE_$deinitZZMRBMLC5arrayIMLPiE
+
+# and `Box<int32>` needs none at all - a tag and an int own nothing
+CHECK-NOT: _M3BoxIMLPiE_$deinit

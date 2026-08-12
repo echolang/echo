@@ -12,6 +12,7 @@
 #include "AST/ASTConformance.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTMangler.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTSourceToken.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -756,7 +757,7 @@ llvm::Value *TypeLowering::gen_has_value(llvm::Value *value, const AST::ValueTyp
     // the tag, for a `T?` whose `T` had no null value to donate. `is_wrapped_optional()` is the one
     // spelling of that question - see ValueType::has_null_representation
     if (type.is_wrapped_optional()) {
-        return _ctx.builder->CreateExtractValue(value, { OptionalBox::has_index }, "opt.has");
+        return _ctx.builder->CreateExtractValue(value, { AST::k_optional_has_index }, "opt.has");
     }
 
     // and otherwise the value *is* an address, so being present is being non-null. that covers a
@@ -768,7 +769,7 @@ llvm::Value *TypeLowering::gen_has_value(llvm::Value *value, const AST::ValueTyp
 llvm::Value *TypeLowering::gen_unwrapped(llvm::Value *value, const AST::ValueType &type)
 {
     if (type.is_wrapped_optional()) {
-        return _ctx.builder->CreateExtractValue(value, { OptionalBox::value_index }, "opt.val");
+        return _ctx.builder->CreateExtractValue(value, { AST::k_optional_value_index }, "opt.val");
     }
 
     // an address-like nullable is its own payload: `Foo?` and `Foo` are the same machine value, and the
@@ -791,28 +792,42 @@ llvm::StructType *TypeLowering::optional_llvm_type(
 {
     assert(type.is_wrapped_optional() && "optional_llvm_type over a type whose null value is its own");
 
-    if (auto cached = _optional_types.find(type); cached != _optional_types.end()) {
-        return cached->second;
+    // **the unit's structure table is the cache, exactly as it is for every other struct.** the pair is an
+    // ordinary layout now - AST::ComplexType::is_optional - so a member access reaches `__value` through
+    // gen_member_lvalue, which resolves a GEP index out of that table. a *second* cache beside it was
+    // worse than none: it is one per compiler while the table is one per unit, so the second unit to
+    // mention a `string?` took the early return and never registered the layout, which is the
+    // "is not declared in this compilation unit" throw from a synthesized teardown
+    const AST::ComplexType *layout = type.get_complex_type();
+
+    if (auto id = cmp_unit.structure_table->get_structure_id(layout); id != 0) {
+        return cmp_unit.structure_table->get_structure(id).llvm_struct;
     }
 
     // the mangled name of the *payload*, so `int32?` and `float64?` are two shapes and two names, and so
     // the same `int32?` reached from two units is one llvm::Type. name-first lookup for the reason
-    // class_header_llvm_type uses one
-    const AST::ValueType payload = AST::ValueType::make_non_nullable(type);
+    // class_header_llvm_type uses one - and unlike an ordinary struct, which is content to let each unit
+    // mint its own, an optional's synthesized deinit is `t_odr_shared` and verify_odr_consistency
+    // compares the rendered IR of the two copies
+    const AST::ValueType payload = type.optional_payload();
     const std::string name = "eco.optional." + payload.get_mangled_name();
 
     if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, name)) {
-        _optional_types[type] = existing;
+        cmp_unit.structure_table->push_structure(layout, existing);
         return existing;
     }
 
+    // opaque first and registered before the payload is lowered, exactly as create_llvm_struct_for_instance
+    // does and for its reason: a payload that mentions this same optional resolves to the in-progress type
+    llvm::StructType *minted = llvm::StructType::create(*_ctx.llvm_context, name);
+    cmp_unit.structure_table->push_structure(layout, minted);
+
     std::vector<llvm::Type *> members(2);
-    members[OptionalBox::has_index] = llvm::Type::getInt1Ty(*_ctx.llvm_context);
-    members[OptionalBox::value_index] = get_llvm_type(payload, cmp_unit);
+    members[AST::k_optional_has_index] = get_llvm_type(layout->get_property_type(AST::k_optional_has_index), cmp_unit);
+    members[AST::k_optional_value_index] = get_llvm_type(payload, cmp_unit);
 
     // by slot index rather than in written order, the rule every shape in Codegen/ClassLayout.h follows
-    llvm::StructType *minted = llvm::StructType::create(*_ctx.llvm_context, members, name);
-    _optional_types[type] = minted;
+    minted->setBody(members);
 
     return minted;
 }
@@ -1142,44 +1157,53 @@ llvm::Value *TypeLowering::coerce_value(llvm::Value *value, const AST::ValueType
     // the *unwrap* direction is not an implicit conversion - is_implicitly_convertible refuses it, and
     // deliberately - so it arrives here only from a site that has already proven the value is there:
     // `guard`, `??`, `?->`. this is the store, not the check
-    if (target.is_wrapped_optional() || source.is_wrapped_optional()) {
-        const AST::ValueType source_payload = AST::ValueType::make_non_nullable(source);
-        const AST::ValueType target_payload = AST::ValueType::make_non_nullable(target);
+    // asked once each: every arm below is about one side or the other being the tagged shape, and the
+    // question is a tag read through a ComplexType rather than a flag test
+    const bool target_is_tagged = target.is_wrapped_optional();
+    const bool source_is_tagged = source.is_wrapped_optional();
 
+    if (target_is_tagged || source_is_tagged) {
         // **an undetermined source is never wrapped as present.** it means a `null` that was never bound
         // to its destination, and wrapping one produces `{ i1 true, <garbage> }` - a value that claims to
         // be there and is not, which is the single worst thing this code could emit. a throw rather than a
         // guess: every path that legitimately reaches here knows its source type, so this firing is a
         // compiler bug and wants to say so rather than to be quietly absorbed
-        if (target.is_wrapped_optional() && AST::is_undetermined_type(source)) {
+        if (target_is_tagged && AST::is_undetermined_type(source)) {
             throw _ctx.error(fmt::format(
                 "an untyped value reached a '{}' destination - a null here was never bound to its type {}",
                 target.get_type_desciption(), _ctx.function_context()));
         }
 
-        if (target.is_wrapped_optional() && !source.is_nullable()) {
+        // asked of AST::arrival_wraps_optional, the same question AST::argument_fit ranked this arrival by
+        // and AST::CallResolver minted the cast from - this is the half that emits the wrap
+        if (AST::arrival_wraps_optional(source, target)) {
             // `T` -> `T?`: present, carrying the value. the payload is coerced first, so widening
             // `int32 -> int64?` is one conversion and one wrap rather than a shape mismatch
+            //
+            // the payload is built inside the arm that wants it: the two arms are mutually exclusive, and a
+            // ValueType is not a free thing to materialise twice for one of them to be thrown away
+            const AST::ValueType target_payload = AST::ValueType::make_non_nullable(target);
+
             llvm::Value *payload = coerce_value(value, source, target_payload, cmp_unit);
             llvm::Value *wrapped = llvm::UndefValue::get(optional_llvm_type(target, cmp_unit));
 
             wrapped = _ctx.builder->CreateInsertValue(
                 wrapped,
                 llvm::ConstantInt::getTrue(*_ctx.llvm_context),
-                { OptionalBox::has_index },
+                { AST::k_optional_has_index },
                 "opt.has");
 
             return _ctx.builder->CreateInsertValue(
-                wrapped, payload, { OptionalBox::value_index }, "opt.val");
+                wrapped, payload, { AST::k_optional_value_index }, "opt.val");
         }
 
-        if (source.is_wrapped_optional() && !target.is_nullable()) {
+        if (source_is_tagged && !target.is_nullable()) {
             // `T?` -> `T`: read the payload out. the tag is not tested here - whoever asked for this
             // narrowing tested it, and that is the whole reason the narrowing is not implicit
             llvm::Value *payload = _ctx.builder->CreateExtractValue(
-                value, { OptionalBox::value_index }, "opt.val");
+                value, { AST::k_optional_value_index }, "opt.val");
 
-            return coerce_value(payload, source_payload, target, cmp_unit);
+            return coerce_value(payload, AST::ValueType::make_non_nullable(source), target, cmp_unit);
         }
 
         // both sides nullable and not identical - `int32? -> int64?`. **passed through unconverted**: the

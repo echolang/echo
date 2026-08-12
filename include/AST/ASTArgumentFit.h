@@ -5,6 +5,7 @@
 
 #include "AST/ASTConformance.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTValueType.h"
 #include "AST/ExprNode.h"
@@ -294,6 +295,19 @@ namespace AST
 
         if (from == to) {
             return ArgumentFit::t_exact;
+        }
+
+        // **a tagged optional accepts whatever its payload accepts.** `f($circle)` against a `Drawable?`
+        // parameter widens twice - to the interface, then into the absence - and every arm below asks about
+        // one step. asked here, once, so the answer cannot differ per arm: the rank is the payload's,
+        // because the wrapping is a coerce_value AST::CallResolver inserts and costs the caller nothing.
+        //
+        // an argument that is *already* nullable is left to the arms below, where the equality above has
+        // already accepted the one shape that fits - which is AST::arrival_wraps_optional's second half,
+        // and asked through it because the cast AST::CallResolver mints and the `insertvalue` pair
+        // TypeLowering::coerce_value emits are the same decision made twice more
+        if (arrival_wraps_optional(from, to)) {
+            return argument_fit(from, expr, to.optional_payload());
         }
 
         // **a weak fits a weak of the same class and nothing else.** so the equality above is the only

@@ -42,18 +42,11 @@ namespace Compiler::LLVM
         static constexpr unsigned payload_index = 3;
     };
 
-    // the two slots of a wrapped `T?`, `{ i1 __has, T }` - the shape a nullable takes when `T` has no
-    // spare null value to mean "absent" with. see TypeLowering::optional_llvm_type
-    //
-    // here beside ClassBox rather than in TypeLowering for exactly ClassBox's reason: three subsystems
-    // reach into this shape - the lowering that mints it, the coercion that wraps and unwraps, and the
-    // comparison that tests one against `null` - and a slot index spelled 0 and 1 at each of them is a
-    // wrong load with no diagnostic
-    namespace OptionalBox
-    {
-        static constexpr unsigned has_index = 0;
-        static constexpr unsigned value_index = 1;
-    };
+    // **a wrapped `T?` has no entry here, and that is the point.** its two slots are `AST::ComplexType`
+    // properties - `AST::k_optional_has_index` / `k_optional_value_index` - because a tagged optional is an
+    // interned layout rather than a shape codegen invents. ClassBox exists precisely because the block
+    // around a class payload has *no* AST counterpart to read the order off; an optional does, and a
+    // second copy of it here would be the property order and the GEP order agreeing only by hand
 
     // what the typeinfo global *holds*.
     //

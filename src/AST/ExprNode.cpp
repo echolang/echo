@@ -230,25 +230,6 @@ const std::string AST::NullCoalesceExprNode::node_description()
         + lhs->node_description() + ", " + rhs->node_description() + ")";
 }
 
-AST::ValueType AST::OptionalChainExprNode::result_type() const
-{
-    if (continuation == nullptr) {
-        return ValueType::make_unknown();
-    }
-
-    const ValueType reached = continuation->result_type();
-
-    // a call that answers nothing has nothing to be absent. `$a?->save()` is a statement either way, and
-    // wrapping void would invent a value for the statement to discard
-    if (reached.is_void() || is_undetermined_type(reached)) {
-        return reached;
-    }
-
-    // **not wrapped twice.** there is one `null` in the language, so a continuation that is already
-    // nullable stays exactly as nullable - `$a?->maybeB()` is one `B?`, not an absence inside an absence
-    return ValueType::make_nullable(reached);
-}
-
 const std::string AST::OptionalChainExprNode::node_description()
 {
     return "optchain<" + result_type().get_type_desciption() + ">("

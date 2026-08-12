@@ -427,6 +427,14 @@ namespace AST
             const ValueType &type,
             std::vector<NodeReference> &out);
 
+        // `<base>-><name>` - one step of a path, and the one place this pass mints a member access. both
+        // spellings below go through it, so anything a synthesized access later has to carry is set once
+        ExprNode *member_place(ExprNode *base, const std::string &name, const TokenReference &at);
+
+        // `<place>->__value` - the payload of a tagged optional, as a place. one member access, because the
+        // pair is a layout and `__value` is one of its two properties
+        ExprNode *optional_payload_place(ExprNode *optional_place, const TokenReference &at);
+
         // a fresh `$root->a->b` place for one drop. rebuilt per drop rather than shared, so no node
         // sits in the tree twice
         ExprNode *make_place(VarDeclNode *root, const std::vector<std::string> &path);
@@ -483,6 +491,20 @@ namespace AST
             const std::vector<std::string> &path,
             const ComplexType *ct,
             std::vector<NodeReference> &out);
+
+        // `if ($tag_root->__has) { <body> }` - the one thing a tagged optional's teardown and its copy do
+        // that a struct's do not, and the *only* thing.
+        //
+        // minted here rather than at each drop and copy site, so it exists once per type inside the body
+        // that type owns - which is the whole point of the pair being a layout. shared by the two bodies
+        // because their `if` has to be the same `if`: build_deinit wraps everything it collected and reads
+        // the tag off `$this`, ensure_copy_constructor wraps the payload's write alone and reads it off
+        // `$other`, and those two differences are the whole of what they do not share
+        IfStatementNode &branch_when_present(
+            VarDeclNode *tag_root,
+            ScopeNode *body,
+            const TokenReference &at
+        );
 
         // each property of `ct` that needs destroying, in reverse declaration order.
         //

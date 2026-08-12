@@ -310,7 +310,7 @@ void DebugPrintCodegen::render_optional(
     _pending_block = nullptr;
 
     llvm::Value *value_address = _ctx.builder->CreateStructGEP(
-        box, place.address, OptionalBox::value_index, "dprint.some.ptr");
+        box, place.address, AST::k_optional_value_index, "dprint.some.ptr");
 
     render(LValue{value_address, AST::unwrapped_type_of(type)}, label, depth, &type);
     close_arm(join);

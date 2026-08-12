@@ -7,7 +7,6 @@
 #include "External/infint.h"
 
 #include <cassert>
-
 std::string AST::get_primitive_name(ValueTypePrimitive primitive)
 {
     switch (primitive) {
@@ -220,6 +219,14 @@ static std::string mangle_length_prefixed(const std::string &part)
 
 std::string AST::ComplexType::mangled_token() const
 {
+    // a tagged optional's name is a display string too ("string?"), and it instantiates no template to
+    // build one from - so it mangles through its payload, which is the only thing that identifies it.
+    // `Q` for the same reason ValueType::get_mangled_name uses it, and self-delimiting for free because
+    // the payload's own mangling is
+    if (is_optional) {
+        return "Q" + get_property_type(k_optional_value_index).get_mangled_name();
+    }
+
     // an instantiation's own name is the display string ("Box<int32>"), so the token is built
     // from the template plus the recursively mangled arguments instead
     if (is_instantiated() && template_ref) {
@@ -289,6 +296,14 @@ std::string AST::ValueType::get_mangled_name() const
         mangled_name += "Q";
     }
 
+    // **a tagged optional mangles through its payload, not as the named layout it is.** it is a structural
+    // type like a pointer or a callable - two `string?`s are one type because they are one shape, not
+    // because somebody declared a name - and its layout's name is a *display* string that carries a `?`.
+    // Mangling it as `C<name>` would put that `?` in a symbol and change every existing one
+    if (is_wrapped_optional()) {
+        return mangled_name + optional_payload().get_mangled_name();
+    }
+
     if (is_pointer()) {
         mangled_name += "R";
         mangled_name += is_nullable() ? "N" : "B";
@@ -347,7 +362,12 @@ std::string AST::ValueType::get_type_desciption() const
     // it has to be rendered *somewhere*: while it was not, a diagnostic about a nullable arriving where a
     // non-nullable was wanted read "cannot implicitly convert 'Node' to 'Node'", which names the one thing
     // the reader can already see and hides the only thing that differs
-    const std::string suffix = (is_nullable() && !is_pointer()) ? "?" : "";
+    //
+    // a **tagged** optional is excluded for the pointer's reason: the `?` is already in the layout's own
+    // name, which is what `string?` is called, so appending a second one renders `string??`. asked once and
+    // reused, is_nullable() falling through to the same question
+    const bool tagged = is_wrapped_optional();
+    const std::string suffix = (!tagged && is_nullable() && !is_pointer()) ? "?" : "";
 
     // recursive rather than a prefix/suffix accumulator: an accumulator cannot render
     // `const ptr<const int32>`, where two different levels are each const
@@ -426,6 +446,59 @@ AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
     // it could be interned under, and nothing will ever ask for it by (template, args) again. the caller
     // holds the only handle, which is exactly the ownership a closure's environment wants
     return type;
+}
+
+AST::ValueType AST::TypeRegistry::get_or_create_optional(const AST::ValueType &payload)
+{
+    // **the one entry point for "the type `payload?`", and it decides which of the two spellings that is.**
+    // three answers, and every caller gets all three by asking here rather than choosing for itself - which
+    // is what a `T?` over an outer generic's parameter got wrong while the choice was made at four sites.
+    //
+    // a payload whose own null value already means absent - a pointer, a class handle, a weak - is the flag
+    // spelling and needs no pair: `Foo?` is bit-identical to `Foo`.
+    //
+    // a **type parameter** is the flag too, and cannot be anything else: a pair over an unsubstituted `T`
+    // would be a layout whose payload is a name, and which spelling `T?` finally takes is
+    // AST::substitute_type's to decide once `T` is bound.
+    //
+    // one condition rather than two arms, because it is *literally* ValueType::make_nullable's own assert -
+    // the two ends of the split read as one sentence
+    if (payload.has_null_representation() || payload.is_type_param()) {
+        return ValueType::make_nullable(payload);
+    }
+
+    // idempotent, exactly as the flag was: `T??` is `T?`
+    if (payload.is_wrapped_optional()) {
+        return payload;
+    }
+
+    if (auto it = _optionals.find(payload); it != _optionals.end()) {
+        return ValueType::make_complex(it->second);
+    }
+
+    // named for the payload's *display*, so a diagnostic reads `string?` rather than a mangled shape.
+    // mangled_token() derives the symbol from this, and it has to be stable across compilations for the
+    // synthesized teardown and copy to be one ODR symbol - the payload's own name is, by construction
+    ComplexType *type = create_anonymous_type(
+        payload.get_type_desciption() + "?", ComplexTypeKind::t_struct, nullptr);
+
+    type->is_optional = true;
+
+    // **`__has` first, and it is a `bool` so that false is a zero bit.** the order is the layout: an
+    // absent optional is a zeroed value and nothing else, which is what `gen_absent` rests on
+    //
+    // **and deliberately not `private`, though they should be.** marking them so is one word here and it
+    // refuses a real program: `guard string $text = $note` fails with "'$__value' is private to 'string?'",
+    // because AST::OwnershipPass mints that payload read into the *enclosing function's* body rather than
+    // into one whose `owner_type` is this layout - the very thing
+    // AST::OwnershipPass::emit_property_drops exists in build_deinit to avoid. until a guard's payload copy
+    // is minted inside a body this type owns, `$maybe->__value` is reachable from a program
+    type->add_property(k_optional_has_name, ValueType(ValueTypePrimitive::t_bool));
+    type->add_property(k_optional_value_name, payload);
+
+    _optionals[payload] = type;
+
+    return ValueType::make_complex(type);
 }
 
 AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tmpl, const std::vector<ValueType> &args)
@@ -622,7 +695,11 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
     // `ptr<T>` / `T&` distinction, which already has a rule and a narrowing that emits a runtime trap
     if (!bare_from.is_pointer() && !bare_to.is_pointer()
         && bare_to.is_nullable() && !bare_from.is_nullable()) {
-        return ValueType::make_non_nullable(bare_to) == bare_from;
+        // **recursive, not an equality.** a value that converts to the payload converts to the optional -
+        // `Drawable? $d = Circle(4)` widens twice, once to the interface and once into the absence - and
+        // while this compared the payload exactly, the two steps could not be taken in one expression.
+        // one arm rather than a list of pairs, so any conversion the payload accepts an optional accepts
+        return is_implicitly_convertible(bare_from, ValueType::make_non_nullable(bare_to));
     }
 
     if (bare_from.is_pointer() && bare_to.is_pointer()) {
@@ -796,7 +873,7 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
         // the program had asked for
         //
         // OR'd rather than re-derived, so a bound type that is *already* nullable stays so - `T?` with
-        // T := Node? is a Node?, which is what make_nullable being idempotent means
+        // T := Node? is a Node?, which is idempotence, and both spellings of `T?` have it
         ValueType result = *bound;
         if (type.is_const()) {
             result = ValueType::make_const(result);
@@ -805,16 +882,43 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             // a pointer level spells this bit with its own two forms, `ptr<T>` and `T&`, so setting it on
             // one would silently turn a borrow into a nullable pointer - a promise laundered away rather
             // than a flag copied. `T?` with T := int32& is a case the grammar has no spelling for anyway
-            result = ValueType::make_nullable(result);
+            //
+            // and which of the two spellings the substituted type takes is the *bound* type's to decide,
+            // not the reference's: `T?` with T := Node is a flag, with T := string a tagged pair. that is
+            // the same question parse_nullable_suffix asks, asked again because only now is T known
+            result = registry.get_or_create_optional(result);
         }
 
         return result;
     }
 
-    // a generic application: recursively substitute its arguments, then re-intern
-    if (type.has_complex_type()) {
-        ComplexType *ct = type.get_complex_type();
-        if (ct && ct->is_instantiated()) {
+    // the two arms that substitute *through* a layout, sharing the one pointer they both need - and
+    // mutually exclusive, an optional carrying no template and an instantiation not being one. the null
+    // check is the instantiation arm's own, kept rather than dropped: has_complex_type() is a kind test
+    ComplexType *ct = type.has_complex_type() ? type.get_complex_type() : nullptr;
+
+    if (ct != nullptr) {
+        // **a tagged optional is substituted through its payload.** it has a ComplexType and no template, so
+        // the instantiation arm below cannot see it - and `optional<T>` has to become `optional<int32>` or a
+        // generic holding one would keep the template's payload forever
+        if (ct->is_optional) {
+            const ValueType payload = substitute_type(type.optional_payload(), subst, registry);
+
+            // **nothing to re-intern when nothing moved**, which is the common case rather than a corner: a
+            // concrete `int32?` written in a template body is substituted once per instantiation and comes
+            // back identical every time. the instantiation arm below is spared the same work by its
+            // `is_instantiated()` guard, and this is that guard's equivalent
+            if (payload == type.optional_payload()) {
+                return type;
+            }
+
+            const ValueType result = registry.get_or_create_optional(payload);
+
+            return type.is_const() ? ValueType::make_const(result) : result;
+        }
+
+        // a generic application: recursively substitute its arguments, then re-intern
+        if (ct->is_instantiated()) {
             std::vector<ValueType> resolved_args;
             resolved_args.reserve(ct->instantiation_args.size());
             for (const auto &arg : ct->instantiation_args) {

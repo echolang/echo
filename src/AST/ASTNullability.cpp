@@ -117,6 +117,43 @@ AST::ValueType AST::unwrapped_type_of(const AST::ValueType &type)
     return ValueType::make_non_nullable(type);
 }
 
+bool AST::arrival_wraps_optional(const AST::ValueType &from, const AST::ValueType &to)
+{
+    return to.is_wrapped_optional() && !from.is_nullable();
+}
+
+AST::ValueType AST::echo_printed_type_of(const AST::ValueType &type)
+{
+    if (type.is_wrapped_optional() && type.optional_payload().is_primitive()) {
+        return type.optional_payload();
+    }
+
+    return type;
+}
+
+AST::ValueType AST::optional_chain_result_type(const AST::ExprNode *continuation, AST::TypeRegistry &registry)
+{
+    // a chain with nothing after it is a parse the rest of this function cannot answer for, and the
+    // undetermined guard below is already the right answer for it
+    const ValueType reached = continuation != nullptr
+        ? continuation->result_type()
+        : ValueType::make_unknown();
+
+    // a call that answers nothing has nothing to be absent. `$a?->save()` is a statement either way, and
+    // wrapping void would invent a value for a statement to discard
+    //
+    // an undetermined type is a *not yet*: the continuation is still a bare `T`, and wrapping it would
+    // intern a pair around a type parameter that the next round is about to replace
+    //
+    // one question rather than three, because is_undetermined_type *is* unknown, void and
+    // still-mentions-a-parameter - the single spelling of "no information"
+    if (is_undetermined_type(reached)) {
+        return reached;
+    }
+
+    return registry.get_or_create_optional(reached);
+}
+
 std::string AST::null_operand_refusal(const std::string &operator_spelling)
 {
     return fmt::format(

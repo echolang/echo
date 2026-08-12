@@ -41,7 +41,9 @@ namespace
         ValueType boolean = ValueType(ValueTypePrimitive::t_bool);
         ValueType unknown = ValueType::make_unknown();
 
-        ValueType wrapped_i32 = ValueType::make_nullable(ValueType(ValueTypePrimitive::t_int32));
+        // a tagged `int32?` is an interned *layout*, so it comes from the bundle's registry below rather
+        // than from a static: wrapping a payload with no null value of its own is a type, not a flag
+        ValueType wrapped_i32;
         ValueType address = ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), true);
 
         ValueType structure;
@@ -64,6 +66,7 @@ namespace
         out.structure = EchoTests::type_named(module, "P")->value_type();
         out.handle = EchoTests::type_named(module, "C")->value_type();
         out.weak_handle = ValueType::make_weak(out.handle);
+        out.wrapped_i32 = out.bundle->collector.type_registry.get_or_create_optional(out.i32);
 
         return out;
     }

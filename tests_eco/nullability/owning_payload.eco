@@ -1,0 +1,105 @@
+// **`T?` where `T` owns something.** while a tagged optional was a per-level *flag*, every question about
+// one was answered about its payload instead - needs_destruction and the copy taxonomy read straight through
+// it, every synthesized teardown and copy stripped it, and no drop site branched on it - so a `string?` could
+// not be declared at all, let alone passed or returned.
+//
+// it is an interned layout now, two properties and one flag on it, which makes it an ordinary owning type:
+// one teardown call and one copy call, each branching on the tag inside the one body the type owns
+struct Grid
+{
+    private array<int32> $cells;
+
+    constructor(int32 $seed)
+    {
+        $this->cells = array<int32>();
+        $this->cells->push($seed);
+    }
+
+    const function head() : int32
+    {
+        return $this->cells[0];
+    }
+
+    // the observable half: a teardown that runs on an absent optional prints, and printing is what the
+    // golden counts. a leak or a double free is what the allocation assertions catch
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+function maybe(bool $yes) : Grid?
+{
+    if ($yes) {
+        return Grid(7);
+    }
+
+    return null;
+}
+
+// **present and absent, each torn down exactly as often as it should be.** one 900, not two and not none
+{
+    Grid? $present = maybe(true);
+    Grid? $absent = maybe(false);
+
+    echo $present?->head() ?? -1;
+    echo $absent?->head() ?? -1;
+
+    assert(mem::live_allocations() == 1, "only the present one holds a buffer");
+}
+
+assert(mem::live_allocations() == 0, "and it gave it back");
+
+// a `string?` through an argument and a return, which is the shape the whole change exists for: at the use
+// site a teardown is one call and a copy is one call, so neither position needs a branch
+function shout(string? $note) : usize
+{
+    guard string $text = $note else { return 0; }
+
+    $text->append('!');
+    return $text->size();
+}
+
+function note(bool $yes) : string?
+{
+    if ($yes) {
+        string $s = 'hello';
+        return $s;
+    }
+
+    return null;
+}
+
+echo shout(note(true));
+echo shout(note(false));
+
+assert(mem::live_allocations() == 0, "nothing is left over from either call");
+
+// a `T?` **property**, where the teardown is reached from inside the holder's own synthesized body
+struct Holder
+{
+    string? $note;
+    int32 $tag;
+}
+
+{
+    Holder $held = Holder(note(true), 3);
+    Holder $empty = Holder(note(false), 4);
+
+    echo $held->tag;
+    echo $empty->tag;
+}
+
+assert(mem::live_allocations() == 0, "a property is torn down like a local");
+
+// `mv` hands the whole pair over, tag and all
+{
+    Grid? $from = maybe(true);
+    Grid? $to = mv $from;
+
+    echo $to?->head() ?? -1;
+}
+
+assert(mem::live_allocations() == 0, "moved once, destroyed once");
+
+echo "balanced";

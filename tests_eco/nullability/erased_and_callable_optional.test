@@ -1,0 +1,9 @@
+# two shapes that were LLVM verifier failures - a *crash*, with no source location - because the drop walked
+# the interface arm and the callable arm over a value that was a two-field wrapper around one of those. the
+# payload is a property now, so neither arm ever sees a wrapper
+--- OUT --->
+-1
+4
+1
+1
+balanced

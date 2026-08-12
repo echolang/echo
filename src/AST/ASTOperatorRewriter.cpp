@@ -942,6 +942,17 @@ void OperatorRewriter::visit_optional_chain(OptionalChainExprNode &node)
 
     RecursiveVisitor::visit_optional_chain(node);
 
+    // **the stored result type, refreshed every round.** it cannot be derived at the ask - wrapping a
+    // payload with no null value of its own interns a layout and `result_type()` has no registry - so this
+    // is where a continuation that has since become concrete reaches the node that answers for it. a
+    // generic's `$box?->get()` is a bare `T` until the instance exists, and the round after that it is not
+    const ValueType refreshed = optional_chain_result_type(node.continuation, _collector.type_registry);
+
+    if (!(refreshed == node.result)) {
+        node.result = refreshed;
+        _changed = true;
+    }
+
     ExprNode *base = upgrade_optional_operand(node.base, node.token);
 
     if (base == node.base) {

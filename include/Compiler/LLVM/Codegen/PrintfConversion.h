@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTNullability.h"
 #include "AST/ASTValueType.h"
 
 namespace Compiler::LLVM
@@ -37,11 +38,17 @@ namespace Compiler::LLVM
     {
         constexpr PrintfConversion unsupported{nullptr, AST::ValueTypePrimitive::t_void};
 
-        if (!type.is_primitive()) {
+        // **a tagged optional prints its payload, and ignores whether it is there.** peeled through
+        // AST::echo_printed_type_of rather than tested here, because AST::TypeChecker's echo arm decides
+        // whether the program is *accepted* on the same question and the two must not be two conditions -
+        // a program the checker admits and this table refuses is an internal error thrown at a user
+        const AST::ValueType printed = AST::echo_printed_type_of(type);
+
+        if (!printed.is_primitive()) {
             return unsupported;
         }
 
-        switch (type.get_primitive_type()) {
+        switch (printed.get_primitive_type()) {
             case AST::ValueTypePrimitive::t_int8:
             case AST::ValueTypePrimitive::t_int16:
             case AST::ValueTypePrimitive::t_int32:

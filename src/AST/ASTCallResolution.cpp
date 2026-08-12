@@ -490,11 +490,11 @@ namespace AST
             // "implicitly convertible" says yes and nothing wraps it - but a `T?` with no spare null
             // value lowers to `{ i1 __has, T }`, a different machine value, so codegen was handed a bare
             // `i32` for a `{ i1, i32 }` parameter and the IR verifier caught it as an internal error.
-            // asked of AST::ValueType::is_wrapped_optional, the owner of "which shape does a `T?` have",
-            // because that is the whole of what distinguishes this from the borrow case above
-            const bool wraps_into_optional = expected.is_wrapped_optional() && !coerced.is_nullable();
-
-            if (!is_implicitly_convertible(coerced, expected) || wraps_into_optional) {
+            // asked of AST::arrival_wraps_optional, which is also what AST::argument_fit ranked this
+            // arrival by and what TypeLowering::coerce_value will emit the wrap from - three readers of
+            // one question, and a disagreement between them is exactly the internal error above
+            if (!is_implicitly_convertible(coerced, expected)
+                || arrival_wraps_optional(coerced, expected)) {
                 call.arguments[i] = &nodes.emplace_back<TypeCastNode>(expected, call.arguments[i], true);
             }
         }

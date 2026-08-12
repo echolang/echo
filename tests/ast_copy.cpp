@@ -151,6 +151,44 @@ TEST_CASE("classify_copy folds a struct's answer from its properties", "[copy]")
     REQUIRE(kind_of(m, "HoldsSays") == CopyKind::t_synthesizable);
 }
 
+TEST_CASE("a tagged optional folds its answer from its payload", "[copy]")
+{
+    // **`T?` is a layout with two properties**, so it needs no arm of its own here: the same fold that
+    // answers for a struct answers for it, from `__has` (a bool, always bytes) and `__value`.
+    //
+    // that is the whole reason the pair is a type rather than a per-level flag. while it was a flag, this
+    // function read straight through it and answered about the payload - so an `array<int32>?` claimed to
+    // copy the way an `array<int32>` does, over a value that was a tagged pair
+    auto bundle = EchoTests::tests_make_parsed_bundle(k_types);
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto &registry = bundle->collector.type_registry;
+
+    const auto optional_of = [&](const ValueType &payload) {
+        return classify_copy(registry.get_or_create_optional(payload));
+    };
+
+    // a payload that owns nothing keeps the byte copy, which is the no-regression story: `int32?` and
+    // `Point?` reach not one new line of the ownership pass
+    REQUIRE(optional_of(EchoTests::prim(ValueTypePrimitive::t_int32)) == CopyKind::t_bytes);
+    REQUIRE(optional_of(EchoTests::type_named(m, "Plain")->value_type()) == CopyKind::t_bytes);
+
+    // a payload with a rule needs the pair to be built rather than copied, because the payload's own
+    // copy has to be *called* - and only when the tag says there is one
+    REQUIRE(optional_of(EchoTests::type_named(m, "Says")->value_type()) == CopyKind::t_synthesizable);
+    REQUIRE(optional_of(EchoTests::type_named(m, "HoldsClass")->value_type()) == CopyKind::t_synthesizable);
+
+    // and a payload nobody gave a rule refuses, at the pair. this is what makes `Owns? $b = $a` a located
+    // error at the author's own line rather than a byte copy of an owner
+    REQUIRE(optional_of(EchoTests::type_named(m, "OwnsRaw")->value_type()) == CopyKind::t_none);
+
+    // a class handle is the *other* spelling of `T?` - the flag, where a null address already means absent -
+    // so it never reaches the fold at all and stays one retain
+    REQUIRE(classify_copy(
+        ValueType::make_nullable(EchoTests::type_named(m, "Handle")->value_type())) == CopyKind::t_retain);
+}
+
 TEST_CASE("classify_copy refuses what nobody has given a rule", "[copy]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(k_types);

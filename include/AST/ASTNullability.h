@@ -76,6 +76,51 @@ namespace AST
     // was handed rather than off the rewritten one is an easy and silent mistake
     ValueType unwrapped_type_of(const ValueType &type);
 
+    // **the mirror of the above is not here**: `T` -> `T?` is AST::TypeRegistry::get_or_create_optional,
+    // and it takes a registry rather than being a static on ValueType because a tagged optional is a *type*
+    // and a type has to be interned. That function is the one place the two spellings of a nullable are
+    // chosen between, so nothing else has to know that a `T?` is a flag over an address and an interned
+    // pair over anything else - and a second name in front of it would be a second answer to grep for
+    //
+    // **does a value arriving at `to` have to be wrapped into an absence?** the one question five sites
+    // used to ask in four vocabularies, and they have to agree or a program is accepted by resolution and
+    // mis-lowered by codegen: AST::argument_fit peels the destination to rank the arrival,
+    // AST::TypeChecker::check_destination_fits peels it to accept one, AST::CallResolver mints the cast and
+    // TypeLowering::coerce_value emits the two `insertvalue`s.
+    //
+    // an argument that is *already* nullable is excluded: there it is the pair itself that arrives, which
+    // an equality answers, and peeling would compare an absence against a payload.
+    //
+    // shaped like AST::implicit_conversion_target - its own rule with readers, rather than a peel spelled
+    // at each - and here rather than in ASTArgumentFit.h because codegen reads it too and must not depend
+    // on the overload ranking to do so
+    bool arrival_wraps_optional(const ValueType &from, const ValueType &to);
+
+    // **what `echo` prints when handed a `T?`** - the payload, and only when the payload is a primitive.
+    //
+    // the peel `echo` has always performed: the flag spelling made an `int32?` answer is_primitive() and
+    // coerce_value unboxed it, so this keeps the emitted IR the same now that the pair is a layout. a
+    // payload that is not a primitive is handed back untouched and refused by whoever asked, because the
+    // only other thing `echo` can print is a string and that path is a length-counted write over the
+    // value's own two words, which would read a tagged pair as one.
+    //
+    // **one owner because two halves read it**: AST::TypeChecker's echo arm decides whether the program is
+    // accepted and Compiler::LLVM::printf_conversion_for decides what is emitted. spelled twice, the
+    // permissive direction is an internal compiler error thrown at a user program rather than a diagnostic
+    ValueType echo_printed_type_of(const ValueType &type);
+
+    // what an `A?->b` answers, from the continuation the chain reaches.
+    //
+    // stored on the node rather than derived at every ask (AST::OptionalChainExprNode::result), because
+    // wrapping needs the registry and `result_type()` has no context. shared by the two that write it -
+    // the parser at construction and AST::OperatorRewriter each round - so the refresh cannot drift from
+    // the original
+    //
+    // takes the **node**, not its type, so the null-continuation case is answered here too rather than by
+    // a ternary each writer spells for itself - which is half a derivation living outside the function
+    // that exists to own it
+    ValueType optional_chain_result_type(const ExprNode *continuation, TypeRegistry &registry);
+
     // **"did the user write `null` here?"** - the entry condition every null rule shares, and the one
     // question about a null that is about the *node* rather than about a type: `null` has no type of its
     // own, so which operand was one cannot be read off a ValueType.

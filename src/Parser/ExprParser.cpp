@@ -1194,8 +1194,14 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
     // link's continuation, so unwinding in reverse puts each chain node around exactly the part of the
     // expression its base guards - and `$a?->b?->c` nests, stopping at whichever link is absent first
     for (auto link = optional_links.rbegin(); link != optional_links.rend(); ++link) {
+        auto *continuation = current_ref.unsafe_ptr<AST::ExprNode>();
+
         auto &chain = payload.context.emplace_node<AST::OptionalChainExprNode>(
-            link->base, current_ref.unsafe_ptr<AST::ExprNode>(), link->marker, link->token);
+            link->base,
+            continuation,
+            link->marker,
+            link->token,
+            AST::optional_chain_result_type(continuation, payload.collector.type_registry));
 
         current_ref = AST::make_ref(chain);
     }

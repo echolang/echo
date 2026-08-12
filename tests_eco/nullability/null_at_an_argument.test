@@ -13,11 +13,14 @@
 // tag - `zeroinitializer` over `{ i1 __has, T }` - and the free shape is a null handle. before the binding
 // the null had no type at all and every one of these was a `ptr null`, which for the two wrapped
 // parameters is not even the right *width*, let alone the right value
+//
+// `MQ` is the nullable level and what follows it is the payload's own mangling, so a wrapped one reads
+// `MQMLPi` where a class handle - whose `?` is a flag on one address rather than a pair - reads `MQLC4Node`
 CHECK: define i32 @main(
-CHECK: call i32 @_tag_ofZZMQLPi(%eco.optional.MLPi zeroinitializer)
-CHECK: call i32 @_x_ofZZMQLC5Point(%eco.optional.MLC5Point zeroinitializer)
+CHECK: call i32 @_tag_ofZZMQMLPi(%eco.optional.MLPi zeroinitializer)
+CHECK: call i32 @_x_ofZZMQMLC5Point(%eco.optional.MLC5Point zeroinitializer)
 CHECK: call i32 @_node_tagZZMQLC4Node(ptr null)
 // a member call's written null is argument 1, behind the receiver, and takes the same route
-CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQLPi(ptr %s, %eco.optional.MLPi zeroinitializer)
+CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQMLPi(ptr %s, %eco.optional.MLPi zeroinitializer)
 // and a constructor's, which is where this was first seen to crash
-CHECK: call %Row @_RowZZMQLPi(%eco.optional.MLPi zeroinitializer)
+CHECK: call %Row @_RowZZMQMLPi(%eco.optional.MLPi zeroinitializer)

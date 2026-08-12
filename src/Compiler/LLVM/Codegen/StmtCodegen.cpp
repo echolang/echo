@@ -412,6 +412,10 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
 
     // **evaluated exactly once.** the same value is tested and then stored, which is what makes
     // `guard $n = $cache->lookup($k) else {...}` call `lookup` once rather than once per path
+    //
+    // the `bound_value` path below stores a *copy* read back out of this same place instead. that re-reads
+    // the place, it does not re-evaluate a call: AST::OwnershipPass mints that path only for a place, and a
+    // call's result is a wrapper nobody owns whose payload it moves out of here
     node.decl->init_expr->accept(*_ctx.visitor);
     llvm::Value *optional = _ctx.pop();
 
@@ -424,13 +428,26 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // widening of the payload - `guard int64 $v = lookup($k)` over an `int32?`
     _ctx.set_insert_point(bound_block);
 
-    llvm::Value *value = _ctx.types->gen_unwrapped(optional, optional_type);
+    llvm::Value *bound = nullptr;
+    AST::ValueType bound_type;
+
+    if (node.bound_value != nullptr) {
+        // **the payload was copied rather than moved out**, because the tested value is a place somebody
+        // else still owns. AST::OwnershipPass built the copy over the `__value` place and hung it here
+        node.bound_value->accept(*_ctx.visitor);
+
+        bound = _ctx.pop();
+        bound_type = node.bound_value->result_type();
+    }
+    else {
+        bound = _ctx.types->gen_unwrapped(optional, optional_type);
+        bound_type = AST::unwrapped_type_of(optional_type);
+    }
+
+    // one store for both, because only the value and the type it comes from differ: what a guard's binding
+    // is *given* is the arm's question, how it is seated is the statement's
     _ctx.builder->CreateStore(
-        _ctx.types->coerce_value(
-            value,
-            AST::unwrapped_type_of(optional_type),
-            node.decl->type(),
-            *_ctx.current_cmp_unit),
+        _ctx.types->coerce_value(bound, bound_type, node.decl->type(), *_ctx.current_cmp_unit),
         slot);
 
     // and control falls out of the *bound* block into whatever follows the guard, which is the whole

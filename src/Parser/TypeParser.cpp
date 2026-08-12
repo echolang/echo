@@ -2,6 +2,7 @@
 #include "Parser/VisibilityParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/IfStatementParser.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTNamespace.h"
@@ -845,7 +846,15 @@ void Parser::declare_type_parameters(
 // would be two ways to write one type, which is the thing generalising the flag was meant to end
 static AST::ValueType parse_nullable_suffix(Parser::Payload &payload, AST::ValueType type)
 {
-    return skip_nullable_suffix(payload.cursor) ? AST::ValueType::make_nullable(type) : type;
+    if (!skip_nullable_suffix(payload.cursor)) {
+        return type;
+    }
+
+    // **the `?` is one spelling of two implementations**, and which one it is, is the payload's to decide.
+    // over an address whose null value already means absent it is a flag and costs nothing; over anything
+    // else it is a tagged pair, and a pair is a type this registry interns. AST::ValueType::has_null_representation
+    // owns that split, and both entry points assert their half of it
+    return payload.collector.type_registry.get_or_create_optional(type);
 }
 
 static AST::ValueType parse_ref_suffix(Parser::Payload &payload, AST::ValueType type)

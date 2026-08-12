@@ -154,6 +154,11 @@ Node *OptionalChainExprNode::clone(CloneContext &cc) const
     // TemporaryBindExprNode's header spells out, and for the same reason
     c->chain_base = cc.child(c->chain_base);
     c->continuation = cc.child(c->continuation);
+
+    // the stored result type, substituted like the marker's beside it. AST::OperatorRewriter refreshes it
+    // every round anyway, but a clone that carried the template's `T?` into an instance would be read once
+    // before that happens
+    c->result = cc.substitute(c->result);
     return c;
 }
 
@@ -411,6 +416,11 @@ Node *GuardNode::clone(CloneContext &cc) const
 {
     GuardNode *c = cc.shallow(this);
     c->decl = cc.child(c->decl);
+
+    // the copy the binding is given, when there is one. an instance whose payload became owning gets its
+    // own from AST::OwnershipPass, but a template that already had one must not hand the instance the
+    // template's nodes - the same rule every owned edge here follows
+    c->bound_value = cc.child(c->bound_value);
     c->else_scope = cc.child(c->else_scope);
     return c;
 }

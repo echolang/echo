@@ -67,6 +67,22 @@ namespace AST
         t_unknown
     };
 
+    // **the two properties of a tagged optional, by index.** `ComplexType::is_optional` says a layout is
+    // one; these say what is in it. one declaration for both ends, because the AST reaches them by name
+    // through find_property and codegen reaches them by index through a GEP, and the two agreeing is what
+    // makes a load land on the field it meant.
+    //
+    // `__has` is **first, and false is zero**, so an all-zero value is an absent one - which is what lets
+    // an absent optional be a `zeroinitializer` and nothing else.
+    //
+    // `unsigned` rather than `size_t` so that an index reaches an `llvm::ArrayRef<unsigned>` - a GEP and an
+    // `insertvalue` both take one, and a narrowing there would need a cast at every codegen site or a
+    // second pair of constants beside these, which is the drift this declaration exists to prevent
+    constexpr unsigned k_optional_has_index = 0;
+    constexpr unsigned k_optional_value_index = 1;
+    constexpr const char *k_optional_has_name = "__has";
+    constexpr const char *k_optional_value_name = "__value";
+
     // which of the three storage classes a named type was declared as. the distinction is one tag and
     // nearly everything else about them is identical - one parser, one declaration node, one member
     // store - so it is a tag rather than separate types. carried on ComplexType, since that is the
@@ -216,19 +232,40 @@ namespace AST
             return type;
         }
 
-        // `T?`. nullability is a per-level flag exactly as const is, so these are shaped like the two
-        // above and compose the same way: `make_nullable(make_pointer(t, false))` is `ptr<T>` and is
-        // *the same type* as the `T&?` a program could now write, because it is the same two bits
+        // `T?` **where the flag is the whole implementation** - a pointer, a class handle, a weak, whose
+        // null address already means absent. shaped like the two above and composing the same way:
+        // `make_nullable(make_pointer(t, false))` is `ptr<T>` and is *the same type* as the `T&?` a
+        // program could now write, because it is the same two bits.
         //
-        // **idempotent, unlike make_pointer.** `T??` is `T?` - there is one `null` in the language, so
-        // there is nothing for a second level of absence to mean. that is deliberately the opposite
-        // choice from a pointer, where a second level is a genuinely different type
+        // **it asserts, and the assert is the design.** over anything else `T?` is a tagged pair, and a
+        // pair is a *type* that has to be interned - AST::TypeRegistry::get_or_create_optional. A pure
+        // static cannot reach a registry, so the two cases cannot share one entry point, and the four
+        // sites in the compiler that build a nullable type all either hold a registry or are reaching for
+        // a class. A silent flag on a struct here is what the whole feature was broken by
+        //
+        // **idempotent** for the same reason it always was: `T??` is `T?`, there being one `null` in the
+        // language and nothing for a second level of absence to mean. deliberately the opposite choice
+        // from a pointer, where a second level is a genuinely different type
         static ValueType make_nullable(ValueType type) {
+            // **and a type parameter, which is the one case that is neither.** `T?` inside a template is
+            // nullable of *something*, and which of the two spellings it becomes cannot be known until `T`
+            // is bound - a layout over an unsubstituted parameter would be a pair whose payload is a name.
+            // So the flag carries it, is_wrapped_optional() says no because there is no layout, and
+            // AST::substitute_type asks this same question again at the instantiation, where it has an answer
+            assert((type.has_null_representation() || type.is_type_param())
+                && "a nullable non-address level is a type - use TypeRegistry::get_or_create_optional");
             type.type_flags |= static_cast<uint8_t>(ValueTypeFlags::t_nullable);
             return type;
         }
 
+        // **unwrapping needs no registry**, which is what keeps this pure and total: a tagged optional
+        // already holds its payload as a property, so `T?` -> `T` is a read rather than a construction.
+        // the asymmetry with make_nullable above is real and is the reason the change is as small as it is
         static ValueType make_non_nullable(ValueType type) {
+            if (type.is_wrapped_optional()) {
+                return type.optional_payload();
+            }
+
             type.type_flags &= ~static_cast<uint8_t>(ValueTypeFlags::t_nullable);
             return type;
         }
@@ -322,11 +359,19 @@ namespace AST
             return is_pointer() || is_class() || is_weak();
         }
 
-        // `T?` over something with no spare null value, so it lowers to a tagged pair rather than to
-        // itself. exactly the negation above, named because it reads better at the sites that branch on it
-        bool is_wrapped_optional() const {
-            return is_nullable() && !has_null_representation();
-        }
+        // `T?` over something with no spare null value, so it is a tagged pair rather than the payload
+        // itself.
+        //
+        // **it is a layout, and this is the one place that says so.** the pair is a real interned type
+        // with two properties (AST::TypeRegistry::get_or_create_optional), which is what lets every
+        // ownership question about it be answered by the machinery that answers them for any other struct.
+        // The two implementations of `T?` are still exactly the split has_null_representation() describes:
+        // a flag where the flag *is* the implementation, a type where it cannot be
+        bool is_wrapped_optional() const;
+
+        // the payload of a wrapped optional - `T` for a `T?`. asserts, so a reader who has not asked
+        // is_wrapped_optional() first cannot be handed a struct's first property by accident
+        const ValueType &optional_payload() const;
 
         // the class a weak reference names. a separate accessor from pointee() rather than a widening of
         // it, so that a reader who meant "one level down a pointer" cannot silently be handed a weak's
@@ -345,9 +390,17 @@ namespace AST
         // sit and `ptr<T>` versus `T&` was the whole of it. generalising the flag is what gives the
         // language `T?` over anything, and it makes `ptr<T>` fall out as the pointer level's spelling of
         // a question every level can now be asked - see book/concept/nullability.md
-        bool is_nullable() const {
-            return type_flags & static_cast<uint8_t>(ValueTypeFlags::t_nullable);
-        }
+        //
+        // **two encodings, one question.** where the flag *is* the implementation - a pointer, a class
+        // handle, a weak - it answers from the flag. where `T?` needs a tagged pair it answers from the
+        // layout, because there the optional is a type and the flag would be a second copy of the same
+        // fact for something to disagree with. asked here rather than at the 33 readers, every one of
+        // which means "may this be absent"
+        //
+        // the layout half is *not* paid for by most asks: `is_wrapped_optional()` returns at
+        // `has_complex_type()` for four calls in five, which is a tag comparison beside `type_flags`
+        // rather than a load. measured over a whole stdlib compile, ~7k asks against 0.28s of user time
+        bool is_nullable() const;
 
         // the type one level down. `ptr<ptr<int32>>::pointee()` is `ptr<int32>`
         const ValueType &pointee() const {
@@ -679,6 +732,24 @@ namespace AST
         // deliberately not on ValueType: it is a property of the declared type, identical for every
         // spelling of it, and a flag on the interning identity would fork `buffer<T>` in two
         bool is_unique = false;
+
+        // **this layout is a `T?` whose payload has no null value of its own** - two properties,
+        // `__has` then `__value`, minted by AST::TypeRegistry::get_or_create_optional.
+        //
+        // beside `kind` and `is_unique` and for their reason. an optional *is* a struct for every layout
+        // purpose - an aggregate with properties, member access, TBAA, debug info - and exactly one
+        // thing differs: its teardown and its copy have to test `__has` first, where a struct's walk
+        // every property unconditionally. so it is a flag on the layout rather than a fourth
+        // ComplexTypeKind, and the eleven `is_struct()` sites are untouched.
+        //
+        // **the point of it being a layout at all.** nullability is a per-level flag wherever that flag
+        // *is* the implementation - a pointer, a class handle, a weak, where a null address already means
+        // absent and `T?` costs nothing. over anything else `T?` is a tagged pair, and while that pair was
+        // a flag too, every question about it was answered about the payload instead: needs_destruction
+        // and classify_copy read through it, every synthesized teardown and copy declaration stripped it,
+        // and no call site branched on it - so a `string?` could not be declared, passed or returned.
+        // As a layout it is an ordinary owning type and all of that machinery applies unchanged
+        bool is_optional = false;
 
         // **who may name this type**, and where it was written to answer that against.
         //
@@ -1028,6 +1099,26 @@ namespace AST
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };
 
+    // the three that read the *layout*, so they sit here rather than in the class body: ComplexType is
+    // declared after ValueType, and a member function cannot reach into an incomplete type. still inline,
+    // for the reason operator== stays in the header - these are asked all over resolution and codegen, and
+    // out of line each ask would be a call to read one tag
+    inline bool ValueType::is_wrapped_optional() const
+    {
+        return has_complex_type() && get_complex_type()->is_optional;
+    }
+
+    inline const ValueType &ValueType::optional_payload() const
+    {
+        assert(is_wrapped_optional() && "optional_payload over a type that is not a tagged optional");
+        return get_complex_type()->get_property_type(k_optional_value_index);
+    }
+
+    inline bool ValueType::is_nullable() const
+    {
+        return (type_flags & static_cast<uint8_t>(ValueTypeFlags::t_nullable)) || is_wrapped_optional();
+    }
+
 };  // namespace AST
 
 // hash support for ValueType to be used in unordered containers
@@ -1167,6 +1258,23 @@ namespace AST
         // layout on the ComplexType and create_llvm_struct_for_instance builds it from the properties
         ComplexType *create_anonymous_type(const std::string &name, ComplexTypeKind kind, Namespace *ns);
 
+        // **`T?` where the payload has no null value of its own**, interned on the payload so the type is
+        // one type however many places spell it. Two properties, `__has` then `__value`, and
+        // `ComplexType::is_optional` set - see that flag for why an optional is a layout at all.
+        //
+        // Interned here rather than minted per spelling because ValueType equality is pointer identity on
+        // the ComplexType: two `string?`s that were not the same layout would be two unrelated types, and
+        // an argument would stop matching its parameter.
+        //
+        // **Idempotent**, like the flag it replaces: the payload of a `T?` is already a `T`, so asking for
+        // `T??` hands back `T?`. There is one `null` in the language and nothing for a second level of
+        // absence to mean.
+        //
+        // Refuses a payload that has a null representation of its own - that case is a flag and
+        // ValueType::make_nullable owns it. Two answers to "is this absent" is the bug this whole shape
+        // exists to remove, so the split is asserted at both ends
+        ValueType get_or_create_optional(const ValueType &payload);
+
         // the interned concrete instantiations (Box<int>, ...), excluding the bare templates that
         // register_template maps to themselves. used by the --print-instances dump
         std::vector<ComplexType*> instantiations() const {
@@ -1199,6 +1307,11 @@ namespace AST
         std::vector<std::unique_ptr<ComplexType>> _owned;
         std::unordered_map<std::tuple<ComplexType*, std::vector<ValueType>>, ComplexType*, TypeRegistryKeyHash> _instantiations;
         std::unordered_set<ComplexType *> _deriving;
+
+        // the tagged optionals, keyed on the payload. a separate map from `_instantiations` because an
+        // optional instantiates no template - there is nothing to substitute and nothing to go stale -
+        // and because the key is one type rather than a (template, args) pair
+        std::unordered_map<ValueType, ComplexType *> _optionals;
     };
 
     // the single, unified type-substitution routine, shared by struct and function generics

@@ -5,6 +5,7 @@
 
 #include "AST/ASTNode.h"
 #include "AST/ScopeNode.h"
+#include "AST/ExprNode.h"
 #include "AST/VarDeclNode.h"
 
 namespace AST
@@ -40,6 +41,19 @@ namespace AST
         // where control goes when the value is absent
         ScopeNode *else_scope = nullptr;
 
+        // **what the binding is given on the path that enters**, when unwrapping the tested value is not
+        // the whole of it.
+        //
+        // null is the common case and the whole no-regression story: a payload that copies as bytes, a
+        // class handle, a weak - every nullable in the tree before tagged optionals owned anything - leaves
+        // this unset and codegen stores the unwrapped value exactly as it always did.
+        //
+        // it is set for one shape: a tagged optional whose payload needs a real copy, read out of a
+        // *place*. There the binding and the optional are two owners of two values, so the payload has to
+        // be copied rather than moved out from under a value somebody else still holds - and the copy
+        // cannot live on `decl->init_expr`, because that edge is also the value being tested
+        ExprNode *bound_value = nullptr;
+
         // the `guard` keyword, for the diagnostics that are about the form rather than about its parts
         TokenReference token;
 
@@ -53,6 +67,11 @@ namespace AST
 
         const std::string node_description() override {
             std::string desc = "guard " + (decl != nullptr ? decl->node_description() : "<none>");
+
+            if (bound_value != nullptr) {
+                desc += " bound " + bound_value->node_description();
+            }
+
             desc += " else\n";
             desc += else_scope != nullptr ? else_scope->node_description() : "{}";
             return desc;

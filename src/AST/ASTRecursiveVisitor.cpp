@@ -320,6 +320,12 @@ void RecursiveVisitor::visit_guard(GuardNode &node)
     // its *name* is registered there - so a pass that walks statements and has no arm for this node
     // never sees the initializer at all. that was two silent bugs before this walk was shared
     statement_edge(node.decl);
+
+    // the copy the binding is given, when the payload needed one. a value edge: it produces the value the
+    // binding is initialized from, and every pass that rewrites one - the adjuster's deref, the checker's
+    // cast - has to reach it exactly as it reaches an initializer
+    value_edge(node.bound_value);
+
     statement_edge(node.else_scope);
 }
 

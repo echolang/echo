@@ -1,0 +1,35 @@
+// **`T?` inside a template, where which spelling it is cannot be known yet.** over an address whose null value
+// already means absent a `T?` is a flag and free; over anything else it is an interned pair. A template's `T`
+// is neither until it is bound, so it carries the flag - and AST::substitute_type asks the question again at
+// the instantiation, where `T := array<int32>` becomes a pair and `T := int32` becomes one too.
+//
+// the point of the test is that the answer is per *instance*: `Box<array<int32>>` owes a teardown and
+// `Box<int32>` owes none, out of one written body
+struct Box<T>
+{
+    private T? $slot;
+
+    constructor(T? $value) { $this->slot = mv $value; }
+
+    const function has() : bool { return $this->slot != null; }
+}
+
+function make_array() : array<int32>?
+{
+    array<int32> $a = array<int32>();
+    $a->push(7);
+    return $a;
+}
+
+{
+    Box<array<int32>> $owning = Box<array<int32>>(make_array());
+    Box<int32> $plain = Box<int32>(3);
+    Box<int32> $empty = Box<int32>(null);
+
+    echo $owning->has();
+    echo $plain->has();
+    echo $empty->has();
+    echo mem::live_allocations();
+}
+echo mem::live_allocations();
+echo "done";

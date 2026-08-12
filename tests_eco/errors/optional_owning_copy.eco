@@ -1,0 +1,22 @@
+// a copy of a value that may be absent is a *branch*, and the compiler writes that branch once, inside the
+// copy constructor it synthesizes for the pair. so `T?` is copyable exactly when `T` is - and when `T` owns
+// something it did not say how to copy, the refusal has to name what the author can actually do. it cannot be
+// "give 'Noisy?' a copy constructor": there is nowhere to write one, the pair being the compiler's layout
+struct Noisy
+{
+    private array<int32> $cells;
+
+    constructor()
+    {
+        $this->cells = array<int32>();
+        $this->cells->push(7);
+    }
+
+    destructor()
+    {
+        echo 900;
+    }
+}
+
+Noisy? $a = Noisy();
+Noisy? $b = $a;

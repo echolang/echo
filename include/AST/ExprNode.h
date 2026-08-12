@@ -735,22 +735,35 @@ namespace AST
 
         TokenReference token;
 
+        // the continuation's type made nullable - because the whole expression is absent whenever the base
+        // was. `void` stays `void`: a call that answers nothing has nothing to be absent, and wrapping it
+        // would invent a value for a statement to discard. an already-nullable continuation is **not**
+        // wrapped twice: there is one `null` in the language, so `$a?->maybeB()` is one `B?`.
+        //
+        // **stored rather than derived**, for ChainBaseNode's reason one step further on: wrapping a type
+        // that has no null value of its own interns a layout, and `result_type()` has no registry to intern
+        // in. AST::optional_chain_result_type is the shared derivation, written by the parser at
+        // construction and refreshed by AST::OperatorRewriter every round - which is what carries it
+        // through a generic, where the continuation's type is a bare `T` until the instance exists
+        ValueType result;
+
         OptionalChainExprNode(
-            ExprNode *base, ExprNode *continuation, ChainBaseNode *chain_base, TokenReference token) :
-            base(base), continuation(continuation), chain_base(chain_base), token(token)
+            ExprNode *base,
+            ExprNode *continuation,
+            ChainBaseNode *chain_base,
+            TokenReference token,
+            ValueType result
+        ) :
+            base(base), continuation(continuation), chain_base(chain_base), token(token), result(result)
         {
             assert(base != nullptr && "OptionalChainExprNode requires a base");
         };
 
         ~OptionalChainExprNode() {}
 
-        // the continuation's type made nullable - because the whole expression is absent whenever the base
-        // was. `void` stays `void`: a call that answers nothing has nothing to be absent, and wrapping it
-        // would invent a value for a statement to discard
-        //
-        // an already-nullable continuation is **not** wrapped twice. there is one `null` in the language,
-        // so `$a?->maybeB()` is one `B?` rather than a nested absence nobody could spell
-        ValueType result_type() const override;
+        ValueType result_type() const override {
+            return result;
+        }
 
         const std::string node_description() override;
 

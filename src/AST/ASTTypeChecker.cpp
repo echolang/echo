@@ -533,6 +533,14 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     // MemberAccessNode::result_type(), and the two drifted exactly as such pairs do: neither knew
     // an index base, so a typo'd member behind `$items:$[0]->` went unreported
     ValueType base_type = node.base_target_type();
+
+    // does the name denote a property of the **tagged optional itself** - `__has` or `__value` - rather
+    // than one the reader hoped was reachable through the absence? read by the nullable arm below.
+    //
+    // a *flag* nullable is deliberately not this: a `Node?` is one address, and the properties reached
+    // through it are the payload's own, so `$maybe->tag` must still be refused
+    bool names_own_property = false;
+
     if (base_type.has_complex_type()) {
         ComplexType *complex = base_type.get_complex_type();
         if (complex != nullptr) {
@@ -541,14 +549,19 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
             const std::string member = node.get_member_name().value();
             const ComplexType::Property *property = complex->find_property(member);
 
-            if (property == nullptr) {
+            if (property != nullptr) {
+                names_own_property = base_type.is_wrapped_optional();
+                check_private_member(node, *complex, *property);
+            }
+            // **an unknown member of a tagged optional is not an unknown member.** the two it has are the
+            // compiler's own, so anything else the author named is a member of the *payload* - and what
+            // they need to hear is that the value may not be there, which the nullable arm below says.
+            // reporting both would name the member as the mistake when the absence is
+            else if (!base_type.is_wrapped_optional()) {
                 _collector.collect_issue<Issue::UnknownMember>(
                     code_ref_for(node.get_member_name()),
                     member,
                     complex->name.value_or("<anonymous>"));
-            }
-            else {
-                check_private_member(node, *complex, *property);
             }
         }
     }
@@ -590,7 +603,17 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     // same flag, but `->` through one is the language's established auto-deref and
     // book/concept/pointers_and_refs_v2.md documents null-checking the *address* instead. changing that
     // is a separate decision about pointers, not part of introducing `T?`
-    else if (base_type.is_nullable() && !base_type.is_pointer()) {
+    //
+    // **a property the optional itself declares is not a reach *through* it.** a tagged `T?` is a layout
+    // with two of them, `__has` and `__value`, and the teardown, the copy and a guard's payload read that
+    // AST::OwnershipPass writes all reach `__value` as the field it is. What this rule protects is the
+    // *payload's* members, and those are not properties of the optional - `$maybe->x` still lands here,
+    // because the optional has no `x`.
+    //
+    // it does mean a program that names `__value` itself is read as the compiler's own access and admitted -
+    // the two are not `private`, and cannot be until a guard's payload copy is minted inside a body the
+    // type owns. see AST::TypeRegistry::get_or_create_optional, where trying it is written down
+    else if (base_type.is_nullable() && !base_type.is_pointer() && !names_own_property) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.get_member_name()),
             fmt::format(
@@ -1233,7 +1256,12 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                 continue;
             }
 
-            const ValueType type = arg->result_type();
+            // **a tagged optional over a primitive prints its payload**, whether or not it is there - the
+            // peel `echo` has always performed. asked of AST::echo_printed_type_of, which is also what
+            // Compiler::LLVM::printf_conversion_for asks: this arm decides what is *accepted* and that
+            // table what is *emitted*, so a second spelling of the condition is a program accepted here
+            // and thrown at by the other half
+            const ValueType type = echo_printed_type_of(arg->result_type());
 
             // the one complex type `echo` prints, so it is admitted ahead of the blanket refusal below.
             // ExprCodegen::gen_echo_string is the other half of this rule and the two have to agree, or
@@ -1675,12 +1703,19 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     // **an interface destination takes a class that conforms.** asked through AST::argument_fit, which is
     // already the one answer to "does this value reach that type" and where the widening's rank lives -
     // so a declaration, an assignment and a return accept exactly what an argument position does
-    if (to.is_interface()) {
-        if (check_interface_erasure(to, value, at)) {
+    //
+    // asked of the *payload* when the destination is a tagged optional and the value is not itself one:
+    // `Drawable? $d = Circle(4)` is two widenings, and an optional accepts whatever its payload accepts.
+    // one peel here rather than an arm per question, and through AST::arrival_wraps_optional so it is the
+    // same peel AST::argument_fit and TypeLowering::coerce_value make
+    const ValueType destination = arrival_wraps_optional(from, to) ? to.optional_payload() : to;
+
+    if (destination.is_interface()) {
+        if (check_interface_erasure(destination, value, at)) {
             return;
         }
 
-        if (arg_assignable_to(from, &value, to)) {
+        if (arg_assignable_to(from, &value, destination)) {
             return;
         }
     }

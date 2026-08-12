@@ -292,6 +292,55 @@ TEST_CASE("an owning property is destroyed inside a synthesized deinit", "[owner
     REQUIRE(static_cast<AddrOfExprNode *>(addr)->operand->get_node_type() == NodeType::n_member_access);
 }
 
+TEST_CASE("a tagged optional's teardown is a branch on its tag", "[ownership]")
+{
+    // **the one thing a tagged optional's teardown does that a struct's does not**, and the reason the pair
+    // is a layout: the branch is written once, into the body the type owns, so at every drop site there is
+    // nothing conditional - which is what makes a `T?` argument, return and property ordinary.
+    //
+    // asserted on the *shape* rather than on output because output cannot see it: a payload that tolerates
+    // being destroyed twice, or a zeroed one that frees nothing, hides a missing branch completely
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "function f() : void {\n"
+        "    Buffer? $maybe = Buffer(1, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    ValueType optional = bundle->collector.type_registry.get_or_create_optional(
+        type_named(m, "Buffer")->value_type());
+
+    ComplexType *layout = optional.get_complex_type();
+
+    REQUIRE(layout->is_optional);
+    REQUIRE(layout->property_count() == 2);
+    REQUIRE(layout->get_property(AST::k_optional_has_index).name == AST::k_optional_has_name);
+    REQUIRE(layout->get_property(AST::k_optional_value_index).name == AST::k_optional_value_name);
+
+    // the use site owes one unconditional call, over the whole pair
+    auto drops = drops_in(body_of(m, "f"));
+
+    REQUIRE(drops.size() == 1);
+    REQUIRE(drops[0]->decl == layout->deinit());
+
+    // and the body is the branch, with the payload's teardown inside it and nothing beside it
+    REQUIRE(layout->deinit() != nullptr);
+    REQUIRE(layout->deinit()->body != nullptr);
+
+    const auto &children = layout->deinit()->body->children;
+
+    REQUIRE(children.size() == 1);
+    REQUIRE(children[0].has_type<IfStatementNode>());
+
+    auto &branch = children[0].get<IfStatementNode>();
+
+    REQUIRE(branch.else_scope == nullptr);
+    REQUIRE(branch.if_scope != nullptr);
+    REQUIRE(drops_in(*branch.if_scope).size() == 1);
+}
+
 TEST_CASE("a declared destructor is the whole teardown, and no deinit is synthesized", "[ownership]")
 {
     // the other answer AST::OwnershipPass::ensure_deinit can give. `Buffer`'s fields are a `usize` and a

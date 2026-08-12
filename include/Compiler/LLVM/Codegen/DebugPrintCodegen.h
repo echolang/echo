@@ -147,7 +147,7 @@ namespace Compiler::LLVM
             const LValue &place, const AST::ValueType &type, std::string_view type_name,
             std::string_view label, size_t depth);
 
-        // a `T?` that had to be tagged - `{ i1 __has, T }`, see OptionalBox - which is every optional
+        // a `T?` that had to be tagged - `{ i1 __has, T }`, see AST::k_optional_has_index - which is every optional
         // except the ones with a null representation of their own. the same branch shape as a class
         // handle over a different condition, which is why that shape is a helper
         void render_optional(

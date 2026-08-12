@@ -808,21 +808,37 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             auto *stmt = static_cast<GuardNode *>(node);
             VarDeclNode *decl = stmt->decl;
 
+            // the *declared* type - the non-null one - because that is what the binding holds. derived
+            // once: the arrival below and the frame push at the end of this arm are the same question
+            const ValueType type = decl != nullptr && decl->has_type()
+                ? decl->type()
+                : ValueType::make_unknown();
+
             // **the binding is an ordinary value arrival**, and that is the whole reason `guard` needed no
             // ownership rule of its own: `guard Res $r = $maybe` is a copy of a place, so it retains, and
             // `$r` joins the frame's locals and is released at the scope's end like any other
-            //
-            // asked at the *declared* type - the non-null one - because that is what `$r` holds. the
-            // initializer is one level more nullable, which classify_copy answers identically for: a
-            // `Res?` and a `Res` are both one reference to one object
             if (decl != nullptr) {
-                const ValueType type = decl->has_type() ? decl->type() : ValueType::make_unknown();
+                // **a tagged optional's payload is copied out of the pair, not out of the pair's own
+                // address.** the initializer stays exactly as written, because it is also the value
+                // codegen *tests* - so the copy hangs off `bound_value` instead, over the `__value` place.
+                //
+                // only for a **place**: a call result is a wrapper nobody owns, so moving the payload out
+                // of it is right and is what codegen has always done. asking arrival at the payload here
+                // is also what makes an owning payload with no copy at all a located error at the guard,
+                // in the same words `$b = $a` gets
+                ExprNode *tested = decl->init_expr;
 
-                decl->init_expr = resolve_value_arrival(
-                    decl->init_expr, type, nullptr, ValueDestination::t_declaration);
-
-                if (needs_destruction(type)) {
-                    _frames.back().locals.push_back(decl);
+                if (tested != nullptr && tested->result_type().is_wrapped_optional()
+                    && is_place_expression(*tested)) {
+                    stmt->bound_value = resolve_value_arrival(
+                        optional_payload_place(tested, stmt->token),
+                        type,
+                        nullptr,
+                        ValueDestination::t_declaration);
+                }
+                else {
+                    decl->init_expr = resolve_value_arrival(
+                        decl->init_expr, type, nullptr, ValueDestination::t_declaration);
                 }
             }
 
@@ -844,6 +860,15 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
 
                 _moved = before;
                 _maybe_moved = maybe_before;
+            }
+
+            // **the binding joins the frame after the else arm, not before it.** Parser::parse_guard
+            // refuses an else arm that can fall through, so the binding is unreachable there - and while it
+            // was pushed first, a `return` inside that arm collected a drop of it. For a class that was a
+            // release of a null slot and survivable; for a payload with a written destructor it ran one,
+            // on the path that never bound anything
+            if (decl != nullptr && needs_destruction(type)) {
+                _frames.back().locals.push_back(decl);
             }
 
             break;
@@ -1958,14 +1983,40 @@ void OwnershipPass::reject_uncopyable(
     ValueDestination destination
 )
 {
+    // **the one way out that is not about this type at all**, so it is spelled once ahead of the two arms
+    // that offer it: whether the whole value can be moved instead is a property of `source` and of nothing
+    // else
+    const std::string transfer = source != nullptr
+        ? fmt::format("Write 'mv {}' to transfer it", source->name_full())
+        : std::string("Move the whole value rather than a part of it");
+
+    // **a tagged optional gets its own wording, because the general one names something unspellable.**
+    // the refusal below ends in "give '{}' a copy constructor", and there is nowhere to write one for a
+    // `string?` - the pair is the compiler's layout. what its author can do is give the *payload* one, or
+    // bind the value with `guard` and copy that
+    if (wanted.is_wrapped_optional()) {
+        const ValueType payload = wanted.optional_payload();
+
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(location_of_expression(expr)), fmt::format(
+                "'{}' may hold a '{}', which owns a resource and cannot be copied. {}, bind it with "
+                "'guard' and copy what that gives you, or give '{}' a copy constructor "
+                "('constructor({}& $other)') to say what a copy of the value inside is.",
+                wanted.get_type_desciption(),
+                payload.get_type_desciption(),
+                transfer,
+                payload.get_type_desciption(),
+                payload.get_type_desciption()
+            )
+        );
+
+        return;
+    }
+
     // **a `#[unique]` type gets its own wording, and it is the opposite advice.** the general
     // refusal below ends in "give it a copy constructor", which for a type whose whole claim is that
     // one value names its storage is the one thing its author must never do
     if (wanted.is_struct() && wanted.get_complex_type()->is_unique) {
-        const std::string transfer = source != nullptr
-            ? fmt::format("Write 'mv {}' to transfer it", source->name_full())
-            : std::string("Move the whole value rather than a part of it");
-
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' is unique: exactly one value may name its storage, so it is moved and never "
@@ -2205,6 +2256,29 @@ void OwnershipPass::emit_destructor_call(
     emit_teardown_call(dtor, root, path, out);
 }
 
+IfStatementNode &OwnershipPass::branch_when_present(
+    VarDeclNode *tag_root,
+    ScopeNode *body,
+    const TokenReference &at
+)
+{
+    // the tag, read as the `bool` property it is. no comparison against `null` is minted: `$this->__has`
+    // *is* the question, and an operator lookup plus a bound null node would be two more nodes saying the
+    // same thing.
+    //
+    // no else arm: an absent optional owes nothing, and AST::scope_exit_kind reads a branch with no else as
+    // leaving nothing - which is what keeps this out of every control-flow rule
+    ExprNode *condition = make_place(tag_root, std::vector<std::string>{ k_optional_has_name });
+
+    auto &branch = _current_module->nodes.emplace_back<IfStatementNode>(condition, body, nullptr);
+
+    // emplace rather than assign: a TokenReference holds its collection by reference and so has no copy
+    // assignment
+    branch.token_if.emplace(virtual_token("if", Token::Type::t_if, at));
+
+    return branch;
+}
+
 void OwnershipPass::emit_property_drops(
     VarDeclNode *root,
     std::vector<std::string> &path,
@@ -2428,8 +2502,28 @@ FunctionDeclNode *OwnershipPass::build_deinit(ComplexType &type, const TokenRefe
     // value itself owns and may well read a field while doing so
     std::vector<NodeReference> statements;
     std::vector<std::string> path;
+
     emit_destructor_call(&this_decl, path, ct, statements);
     emit_property_drops(&this_decl, path, ct, statements);
+
+    // **a tagged optional destroys its payload only when it has one**, which is the one thing its teardown
+    // does that a struct's does not - and the only reason the pair is a layout at all is that it is
+    // expressible here, once per type, instead of at every drop site.
+    //
+    // the work itself needs no arm: `__has` is a `bool` so emit_property_drops skips it, `__value` drops
+    // through the ordinary recursion, and the anonymous layout has no destructor for emit_destructor_call
+    // to find. so this collects what a struct would and *wraps* it, which is also why a payload that owns
+    // nothing reaches no new code at all - there is nothing to wrap
+    if (ct->is_optional && !statements.empty()) {
+        auto &then_scope = _current_module->nodes.emplace_back<ScopeNode>();
+
+        for (const auto &statement : statements) {
+            then_scope.children.push_back(statement);
+        }
+
+        statements.clear();
+        statements.push_back(make_ref(branch_when_present(&this_decl, &then_scope, this_decl.token_varname)));
+    }
 
     for (const auto &statement : statements) {
         body.children.push_back(statement);
@@ -2519,6 +2613,19 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     auto &this_decl = declare_constructor_this(*_current_module, self_type, site);
     body.add_vardecl(this_decl);
 
+    // **a tagged optional copies its payload only when it has one.** the tag is copied either way, and the
+    // payload's copy - which for an owning payload is a call to *its* copy constructor - is guarded by the
+    // tag, or an absent optional would copy-construct out of storage nothing ever wrote. that reads as a
+    // crash inside a library's copy constructor, with the absence nowhere in sight.
+    //
+    // the same shape build_deinit's optional arm has, and for the same reason: the branch belongs in the
+    // one body the type owns rather than at each of the sites that copy one
+    ScopeNode *present = nullptr;
+
+    if (ct->is_optional) {
+        present = &_current_module->nodes.emplace_back<ScopeNode>();
+    }
+
     for (size_t i = 0; i < ct->property_count(); i++) {
         const ComplexType::Property &prop = ct->get_property(i);
 
@@ -2545,7 +2652,19 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
 
         // and deliberately *not* hands_over_value: `$other` is a borrow this constructor does not own,
         // so its fields are copied - which is the whole point - rather than moved out of it
-        body.children.push_back(make_ref(assign));
+        if (present != nullptr && i == k_optional_value_index) {
+            present->children.push_back(make_ref(assign));
+        }
+        else {
+            body.children.push_back(make_ref(assign));
+        }
+    }
+
+    // the guard, appended after the tag's own write so the two read in the order they run. the same
+    // branch build_deinit's optional arm makes, and the tag is read off `$other` because it is `$other`'s
+    // payload the write inside reads
+    if (present != nullptr) {
+        body.children.push_back(make_ref(branch_when_present(&other_decl, present, site)));
     }
 
     close_constructor_body(*_current_module, decl, this_decl);
@@ -2555,14 +2674,26 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     return &decl;
 }
 
+ExprNode *OwnershipPass::member_place(ExprNode *base, const std::string &name, const TokenReference &at)
+{
+    return &_current_module->nodes.emplace_back<MemberAccessNode>(
+        make_ref(base), virtual_token(name, Token::Type::t_identifier, at));
+}
+
+ExprNode *OwnershipPass::optional_payload_place(ExprNode *optional_place, const TokenReference &at)
+{
+    // an ordinary member access, which is the whole dividend of the pair being a layout: `__value` is a
+    // property, so nothing here needs a node kind of its own and every pass already knows what this is
+    return member_place(optional_place, k_optional_value_name, at);
+}
+
 ExprNode *OwnershipPass::make_place(VarDeclNode *root, const std::vector<std::string> &path)
 {
     auto &var = _current_module->nodes.emplace_back<VarNode>(root, root->token_varname);
     ExprNode *place = &_current_module->nodes.emplace_back<VarRefNode>(&var);
 
     for (const auto &name : path) {
-        place = &_current_module->nodes.emplace_back<MemberAccessNode>(
-            make_ref(place), virtual_token(name, Token::Type::t_identifier, root->token_varname));
+        place = member_place(place, name, root->token_varname);
     }
 
     return place;

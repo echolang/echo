@@ -135,7 +135,7 @@ namespace Compiler::LLVM
         //
         // `Constant::getNullValue` covers both shapes at once: a null pointer for an address-like nullable,
         // and an all-zero `{ i1 __has, T }` for a wrapped one, the two agreeing because
-        // OptionalBox::has_index is field 0 and false is zero
+        // AST::k_optional_has_index is field 0 and false is zero
         llvm::Value *gen_absent(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
 
         // the shape a `T?` takes when `T` has no spare null value of its own: `{ i1 __has, T }`. asked only
@@ -235,13 +235,6 @@ namespace Compiler::LLVM
             const std::function<llvm::Constant *()> &build,
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
-
-        // the wrapped optionals this compiler has already lowered. the named-type lookup in
-        // optional_llvm_type is the interning, and this is only what keeps it from re-mangling the
-        // payload's name to perform it: get_llvm_type routes every `T?` through there, so it is asked
-        // once per alloca, per load, per coerce_value and per parameter of every signature that
-        // mentions one. safe as a member because there is exactly one llvm::LLVMContext for the program
-        std::unordered_map<AST::ValueType, llvm::StructType *> _optional_types;
 
         CodegenContext &_ctx;
     };
