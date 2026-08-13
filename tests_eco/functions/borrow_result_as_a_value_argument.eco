@@ -1,0 +1,39 @@
+// **AST::argument_fit's t_read_through rank, over a call.**
+//
+// the rank scores "read one level through a borrow to fill a value parameter", and it used to require
+// a *place* - so a borrow-returning call was `t_none` at every value parameter. with one candidate
+// that was invisible, matching rule 2 winning without consulting types at all; with two it was a hard
+// "no overload accepts these arguments". so adding an unrelated overload broke a call, which is the
+// same shape as the bug that made this rank necessary in the first place
+//
+// **the overload pair is the assertion**, not merely that the call resolves: it says the rank is
+// scored rather than the single candidate being waved through
+
+function show(int32 $n) : void
+{
+    echo 'int';
+    echo $n;
+}
+
+function show(float64 $f) : void
+{
+    echo 'float';
+    echo $f;
+}
+
+array<int32> $a = [7, 9];
+
+show($a->at(0));
+
+// the same read at a generic parameter, which is where AST::unify_type's decay arm and this rank had
+// to be made to agree
+function twice<T>(T $v) : T
+{
+    return $v + $v;
+}
+
+echo twice($a->at(1));
+
+// and through the standard library, which is the spelling an author actually reaches for
+echo str::from($a->at(0));
+echo "the gate has {$a->at(1)} chevrons";

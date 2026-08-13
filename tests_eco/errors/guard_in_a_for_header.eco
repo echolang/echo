@@ -1,0 +1,21 @@
+// **`allows_guard` is asked of the walk, not of the declaration.** a guard statement ends in a block, so
+// it may only appear where a statement may - and Parser::parse_varexpr has five callers, of which
+// exactly one reads a body. the other four are a parameter list, a struct body, and a `for` header's
+// init and its step, none of which can be followed by a block
+//
+// so the `for` header's declaration never takes the guard branch, and the `guard` reaches
+// Parser::parse_expr_ref - which says what a guard is and where it goes. the same shape the
+// `static`-in-a-body refusal has: the caller is what knows where it is
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+for (int32 $i = guard halve(10) else { break; }; $i < 10; $i++) {
+    echo $i;
+}

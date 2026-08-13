@@ -1,0 +1,38 @@
+// **a `const` subject cannot be guarded**, because `unwrap()` is not declared const: taking the value
+// out hands back a borrow that may be written, and a const place promised nobody would.
+//
+// refused in AST::unwrap_plan_for rather than at the synthesized `unwrap()` call, which would report
+// against a token the author never wrote - the same call AST::iteration_plan_for makes about a const
+// cursor. this is where a future `#[core: const_unwrappable]` would attach
+
+struct Box : contract::unwrappable<int32>
+{
+    private int32 $v;
+    private bool $ok;
+
+    constructor(int32 $v, bool $ok)
+    {
+        $this->v = $v;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->v;
+    }
+}
+
+function peek(const Box& $b) : int32
+{
+    $v = guard $b else { return -1; }
+    return $v;
+}
+
+Box $b = Box(7, true);
+
+echo peek(&$b);

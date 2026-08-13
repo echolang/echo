@@ -88,6 +88,18 @@ namespace AST
     std::optional<ValueType> conformance_matching_template(
         const ComplexType *ct, const ComplexType *interface_template);
 
+    // **the one type argument a single-parameter conformance carries** - `contract::keyed<K>`'s K,
+    // `contract::failable<E>`'s E - or nothing.
+    //
+    // four distinct absences collapse to nullopt and **none of them is a refusal**: the template is
+    // unbound (`--no-stdlib`, or a program declaring its own protocol), the type has no complex type,
+    // no conformance matches, or the application has the wrong arity. that is what makes it the shape
+    // an *optional* side channel wants - AST::iteration_plan_for's key and AST::unwrap_plan_for's
+    // failure are both absent-is-fine until a `=>` or an `else ($e)` asks, and each of those refusals
+    // belongs at the asker's token rather than here
+    std::optional<ValueType> sole_conformance_argument(
+        const ValueType &type, const ComplexType *interface_template);
+
     // a conformance as the *template* spells it, and the way back to the instance
     struct TemplateConformance
     {

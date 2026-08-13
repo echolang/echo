@@ -4,8 +4,8 @@
 #
 # three findings this case records, each of which cost a debugging round:
 #   - `as` is a keyword, so `$as` is not a spellable property name
-#   - a borrow may be forwarded (`return $this->at(0);`) or bound (`int32& $s = ...`), but
-#     bind-then-return is refused, and a borrow-returning call cannot be read as a value
+#   - a borrow may be forwarded (`return $this->at(0);`), bound (`int32& $s = ...`) or read as a
+#     value (`echo $p->first();`), but bind-then-return is refused
 #   - a two-parameter owner needs `contract::iterable<...>` on itself, not only on its cursor
 
 expect: ok
@@ -13,6 +13,7 @@ expect: ok
 --- OUT --->
 2
 20
+10
 10
 11
 99

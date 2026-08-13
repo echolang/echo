@@ -1,0 +1,30 @@
+// **a `T&` a call returned is read as a value.** `at()` is documented as the spelling to prefer over
+// the bracket, and until AST::read_reaches_storage was the shared answer it could not be read at all:
+// only a place got the deref AST::PointerAdjuster writes, and a call is not a place. so
+// `int32 $v = $a->at(0);` was "cannot implicitly convert 'int32&' to 'int32'" - a documented API that
+// worked in four positions and not in the obvious fifth
+//
+// the sharper half was silent. with no deref the operand stayed a pointer, so `$a->at(1) + 1` reached
+// the *pointer* arm of AST::binary_has_builtin_meaning and emitted a getelementptr - an address one
+// element along, printed as a number
+
+array<int32> $a = [4, 8, 15];
+
+int32 $v = $a->at(0);
+echo $v;
+
+echo $a->at(1);
+
+// **the number is the assertion.** a GEP by one element over an int32 would print the address plus
+// four, so 9 is the whole of what says this is an integer add
+echo $a->at(1) + 1;
+
+// a borrow destination still binds rather than reads - as_value_for's pointer-shaped arm, untouched -
+// and writing through it still writes into the array
+int32& $b = $a->at(2);
+$b = 99;
+echo $a[2];
+
+// and the read is a read: the array is unchanged by taking a value out of it
+echo $a->at(0);
+echo $a->count();

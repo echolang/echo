@@ -1,0 +1,42 @@
+// **the ownership half of reading a borrow-returning call, and the one that fails silently.**
+//
+// the deref AST::PointerAdjuster writes is only one of four answers to "does this read reach
+// storage". AST::OwnershipPass owes another: a read that reaches storage is *copied*, because what it
+// found still belongs to whoever named it, while a value the program computed is moved. a call used to
+// answer "computed" at that question, so a value read of an owning element was a bitwise copy of the
+// element's handle with no copy constructor - and then two owners of one buffer, freed twice
+//
+// the element is an `array<int32>` rather than a `string`, and that choice is the test: `string`
+// declares no destructor deliberately, so a missing copy of one is invisible. an inner array owns a
+// buffer and destroys it, so a shared handle is a double free at the two scope exits
+//
+// **the allocation counts are the assertion.** the echoes below pass either way - reassigning a
+// shared handle does not mutate what it shared - so what says the copy constructor ran is the fourth
+// buffer appearing and going away again
+
+array<array<int32>> $rows = [];
+
+$rows->push([1, 2, 3]);
+$rows->push([4, 5]);
+
+// the outer buffer and one per row
+assert(mem::live_allocations() == 3, "one buffer for the rows and one per row");
+
+{
+    array<int32> $copy = $rows->at(0);
+
+    // **the fourth buffer is the whole point.** three here means the copy shared the row's storage
+    assert(mem::live_allocations() == 4, "the copy owns a buffer of its own");
+
+    // and it is independent: growing the copy does not grow the row
+    $copy->push(99);
+
+    echo $copy->count();
+    echo $rows[0]->count();
+}
+
+// the copy gave its buffer back, and the row still has its own
+assert(mem::live_allocations() == 3, "the copy is gone, the rows are not");
+
+echo $rows[0]->count();
+echo $rows->at(1)->count();

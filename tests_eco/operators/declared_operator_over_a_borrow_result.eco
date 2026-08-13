@@ -1,0 +1,40 @@
+// **the dispatch half of reading a borrow-returning call**, and the one that was silently wrong
+// rather than merely refused.
+//
+// AST::binary_has_builtin_meaning is asked through AST::value_result_type, which used to answer
+// `Vec2&` for a call - so the operands hit the *pointer* arm, the operator was given a built-in
+// meaning it has no business having, and the declared `operator +` below was never minted at all.
+// what came out was a getelementptr: an address one element along, dressed as a sum
+//
+// AST::PointerAdjuster's deref alone would not have fixed this. it runs after the whole fixpoint,
+// while AST::OperatorRewriter mints operator calls *inside* it - so the two have to read one answer,
+// which is why the predicate is shared rather than the deref being written twice
+
+struct Vec2
+{
+    int32 $x;
+    int32 $y;
+}
+
+operator (Vec2& $a) + (Vec2& $b) : Vec2
+{
+    return Vec2($a->x + $b->x, $a->y + $b->y);
+}
+
+array<Vec2> $vs = [];
+
+$vs->push(Vec2(1, 2));
+$vs->push(Vec2(10, 20));
+
+// both operands are calls handing back a borrow of an element
+Vec2 $sum = $vs->at(0) + $vs->at(1);
+
+echo $sum->x;
+echo $sum->y;
+
+// and mixed with a place operand, which always worked
+Vec2 $first = $vs[0];
+Vec2 $mixed = $first + $vs->at(1);
+
+echo $mixed->x;
+echo $mixed->y;

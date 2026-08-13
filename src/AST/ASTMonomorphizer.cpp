@@ -35,7 +35,8 @@ namespace AST
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
         : _bundle(bundle), _collector(bundle.collector), _ownership(bundle),
-          _const_folding(bundle), _operators(bundle), _foreach(bundle), _interpolation(bundle)
+          _const_folding(bundle), _operators(bundle), _guards(bundle), _foreach(bundle),
+          _interpolation(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -261,6 +262,15 @@ namespace AST
                 // void, so a variable initialized from one is stale in exactly the same way as one
                 // that captured a `T`, and reads as undetermined for exactly the same reason
                 if (!is_undetermined_type(decl->type())) {
+                    continue;
+                }
+
+                // **a guard's binding is not this sweep's to derive**, and the flag says exactly why:
+                // `binds_unwrapped` *means* "this declaration's type is not its initializer's type", so
+                // deriving it from the initializer is guaranteed to be one level wrong. a deferred one
+                // carries an unknown placeholder that would look like an invitation - AST::GuardLowering
+                // is what types it, from the payload the plan gave
+                if (decl->binds_unwrapped) {
                     continue;
                 }
 
@@ -575,16 +585,28 @@ namespace AST
             // is attached - and behind the instantiation above, because it needs that round's types
             progressed |= _operators.run_round();
 
-        // **after the rewriter, before the re-derivation.** after, because `foreach ($grid[0] as $row)`
-        // has no source type until the bracket has become an `operator []` call - the very reason the
-        // rewriter is itself ahead of the sweep. before, because `$__it` is declared with no type node
-        // and that sweep is what types it, so lowering here saves a whole round.
-        //
-        // and before the ownership pass below, which walks a body **exactly once, ever**: the round a
-        // loop lowers in has to be the round its body becomes eligible. OwnershipPass::body_is_concrete
-        // answers false while an unlowered foreach is in the body, which is what makes that safe rather
-        // than merely fast
-        progressed |= _foreach.run_round();
+            // **after the rewriter and ahead of the loop lowering.** after, for two reasons that are the
+            // rewriter's own: it performs the weak upgrade that turns a substituted `weak<Node>` into a
+            // `Node?` - so the plan's nullable arm answers it rather than looking for a conformance - and
+            // `$v = guard $slots[$i] else {...}` has no subject type until the bracket has become an
+            // `operator []` call. ahead of the loop lowering, so a `foreach` over a guard's binding sees a
+            // typed binding in this same round.
+            //
+            // and before the ownership pass below for its exact reason: OwnershipPass::body_is_concrete
+            // answers false while GuardNode::plan_decided is false, so the round a guard's plan lands in is
+            // the round its body becomes eligible
+            progressed |= _guards.run_round();
+
+            // **after the rewriter, before the re-derivation.** after, because `foreach ($grid[0] as $row)`
+            // has no source type until the bracket has become an `operator []` call - the very reason the
+            // rewriter is itself ahead of the sweep. before, because `$__it` is declared with no type node
+            // and that sweep is what types it, so lowering here saves a whole round.
+            //
+            // and before the ownership pass below, which walks a body **exactly once, ever**: the round a
+            // loop lowers in has to be the round its body becomes eligible. OwnershipPass::body_is_concrete
+            // answers false while an unlowered foreach is in the body, which is what makes that safe rather
+            // than merely fast
+            progressed |= _foreach.run_round();
 
             // beside the loop lowering, and for two of its three reasons. **before settle_calls**,
             // because the `str::from` and `str::concat` calls it mints are exactly what that has to
@@ -628,6 +650,7 @@ namespace AST
         // compiled
         _const_folding.finalize();
         _operators.finalize();
+        _guards.finalize();
         _foreach.finalize();
 
         finalize_calls();

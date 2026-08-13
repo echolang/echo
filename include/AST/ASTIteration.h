@@ -30,6 +30,13 @@ namespace AST
         // with the two calls dispatched through the vtable, and it costs the lowering nothing to permit:
         // find_member_functions finds a requirement in the same `_methods` list, and gen_function_call
         // already routes on FunctionDeclNode::is_interface_requirement()
+        //
+        // **that was true of the lowering and not of the dispatch, and for a long time nothing said so.**
+        // this arm had no corpus case, and a call through an erased *generic* interface had no vtable
+        // slot at all - AST::interface_method_slot matched the requirement by pointer identity against
+        // the template's methods while the call carries the instantiation's - so every program that
+        // reached here died with an internal error. `todo/B53`, found from the unwrapping protocol's
+        // identical arm; `tests_eco/iteration/erased_iterator` is this one, and it exists now
         t_erased_iterator,
     };
 

@@ -365,8 +365,15 @@ namespace AST
         // dereference, and the one narrowing that does emit a check goes the other way
         // (book/concept/pointers_and_refs_v2.md, "Nullability"). A nullable argument stays t_none,
         // which is what it already was
+        //
+        // asked of AST::read_reaches_storage rather than of is_place_expression, so a **call**
+        // returning a borrow ranks here too - `f($a->at(0))` at an `int32` parameter. that predicate
+        // draws the same non-nullable line this arm does, which is why the two compose without a
+        // second spelling of it. before it was shared, a borrow-returning call was t_none at every
+        // value parameter, so `str::from($a->at(0))` and `"{$a->at(0)}"` were "no overload accepts
+        // these arguments"
         if (from.is_pointer() && !from.is_nullable() && !to.is_pointer()
-            && expr != nullptr && is_place_expression(*expr)) {
+            && expr != nullptr && read_reaches_storage(*expr, from)) {
             if (ValueType::make_mutable(value_type_of(from)) == ValueType::make_mutable(to)) {
                 return ArgumentFit::t_read_through;
             }

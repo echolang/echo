@@ -1,0 +1,15 @@
+// a struct that is neither nullable nor unwrappable. the message owes the author **both** remedies,
+// which is why this arm writes its own sentence rather than composing
+// AST::certainly_present_refusal's - that one ends on "or drop the guard", and appending a second "or"
+// to it read as a sentence nobody wrote
+
+struct Plain
+{
+    int32 $x;
+}
+
+Plain $p = Plain(1);
+
+$v = guard $p else { die('unreachable'); }
+
+echo $v;

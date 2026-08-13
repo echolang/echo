@@ -1,0 +1,13 @@
+--- OUT --->
+4
+8
+9
+99
+4
+3
+--- RAST --->
+CHECK: Module: [main]
+// the deref the adjuster now writes over the call. one, not two - the operand is not a place, so
+// nothing else peels it
+CHECK: deref<int32>(call at(
+CHECK-NOT: deref<int32>(deref<

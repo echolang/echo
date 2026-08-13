@@ -205,10 +205,10 @@ namespace Parser
         std::vector<std::filesystem::path> &into
     );
 
-    // an `ActiveTargets` opening every scope of every module, for the questions that are about the project
-    // rather than about one program: the graph has to load and order a module a scope names whether or not
-    // this invocation would compile it, or a cycle would be a cycle only on some targets
-    ActiveTargets all_targets_active(const std::vector<ModuleManifest> &manifests);
+    // an `ActiveTargets` opening every scope this manifest declares, for the questions that are about the
+    // project rather than about one program: the graph has to load and order a module a scope names whether
+    // or not this invocation would compile it, or a cycle would be a cycle only on some targets
+    ActiveTargets all_targets_active(const ModuleManifest &manifest);
 
     // the paths one source pattern names, in no particular order and unfiltered - a directory can come back,
     // exactly as it can from a glob. **one owner for "what files does this pattern name"**, asked by the

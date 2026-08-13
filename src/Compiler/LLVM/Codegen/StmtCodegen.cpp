@@ -410,19 +410,44 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // entry block, so where the declaration sits among its siblings decides nothing
     llvm::AllocaInst *slot = ensure_var_slot(*node.decl);
 
-    // **evaluated exactly once.** the same value is tested and then stored, which is what makes
-    // `guard $n = $cache->lookup($k) else {...}` call `lookup` once rather than once per path
-    //
-    // the `bound_value` path below stores a *copy* read back out of this same place instead. that re-reads
-    // the place, it does not re-evaluate a call: AST::OwnershipPass mints that path only for a place, and a
-    // call's result is a wrapper nobody owns whose payload it moves out of here
-    node.decl->init_expr->accept(*_ctx.visitor);
-    llvm::Value *optional = _ctx.pop();
+    // **exactly one of `init_expr` and `presence_test` is the value evaluated before the branch**, and it
+    // is evaluated exactly once. that is GuardNode's stated invariant, and the branch below is the whole
+    // of what this function knows about which protocol answered
+    llvm::Value *condition = nullptr;
 
-    const AST::ValueType optional_type = node.decl->init_expr->result_type();
+    // the tested optional, on the builtin path only. the protocol path leaves both unset and always
+    // carries a `bound_value`, so the unwrap arm below never reads them
+    llvm::Value *optional = nullptr;
+    AST::ValueType optional_type;
 
-    _ctx.builder->CreateCondBr(
-        _ctx.types->gen_has_value(optional, optional_type), bound_block, else_block);
+    if (node.presence_test != nullptr) {
+        // **the type answered the presence question**, through `contract::unwrappable<V>::has_value()`.
+        // there is no optional here to unwrap: AST::GuardLowering hoisted the subject into an ordinary
+        // declaration ahead of this statement, so what the binding is given hangs off `bound_value`
+        // below - which is the path a tagged optional read out of a place has always taken
+        node.presence_test->accept(*_ctx.visitor);
+
+        condition = _ctx.types->coerce_value(
+            _ctx.pop(),
+            node.presence_test->result_type(),
+            AST::ValueType(AST::ValueTypePrimitive::t_bool),
+            *_ctx.current_cmp_unit);
+    }
+    else {
+        // **evaluated exactly once.** the same value is tested and then stored, which is what makes
+        // `$n = guard $cache->lookup($k) else {...}` call `lookup` once rather than once per path
+        //
+        // the `bound_value` path below stores a *copy* read back out of this same place instead. that
+        // re-reads the place, it does not re-evaluate a call: AST::OwnershipPass mints that path only for
+        // a place, and a call's result is a wrapper nobody owns whose payload it moves out of here
+        node.decl->init_expr->accept(*_ctx.visitor);
+        optional = _ctx.pop();
+        optional_type = node.decl->init_expr->result_type();
+
+        condition = _ctx.types->gen_has_value(optional, optional_type);
+    }
+
+    _ctx.builder->CreateCondBr(condition, bound_block, else_block);
 
     // the bound path: unwrap and store. `coerce_value` is still asked, because the declared type may be a
     // widening of the payload - `guard int64 $v = lookup($k)` over an `int32?`

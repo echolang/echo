@@ -1,0 +1,18 @@
+// **a pre-existing gap, pinned rather than fixed.** an inferred declaration reads its initializer's
+// type at *parse* time, where BinaryExprNode::result_type()'s raw-pointer arm still describes the
+// un-adjusted operands - so `$x` here infers `int32&` and then cannot hold the `int32` the adjusted
+// expression yields
+//
+// not created by AST::read_reaches_storage: `int32& $b = ...; $x = $b + 1;` has always done this, for
+// the same reason and with the same message. what changed is only which way it fails - before the
+// predicate was shared, this spelling was a silent getelementptr instead of a diagnostic, which is
+// strictly worse
+//
+// that arm must stay as written: after AST::strip_peel, `$p:$ - $q:$` is two bare pointer varrefs and
+// is indistinguishable from a `$p - $q` that was derefed, so there is no node shape to narrow it by
+
+array<int32> $a = [4, 8];
+
+$x = $a->at(1) + 1;
+
+echo $x;

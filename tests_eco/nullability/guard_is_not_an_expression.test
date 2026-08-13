@@ -1,0 +1,31 @@
+expect: fail
+
+--- OUT --->
+[error] guard_is_not_an_expression.eco:21:18
+
+  'guard' is not an expression - it is how a declaration's initializer is written, so it may only follow the '=' of a declaration. Write 'T $x = guard <value> else { ... }' above this statement and read '$x' here.
+
+  20 |     // a value position
+  21 |     return halve(guard halve($n) else { return -1; });
+     :                  ^^^^^
+  22 | }
+
+[error] UnexpectedToken  guard_is_not_an_expression.eco:21:53
+
+  Unexpected token 'close_paren ')'' found
+
+  20 |     // a value position
+  21 |     return halve(guard halve($n) else { return -1; });
+     :                                                     ^ unexpected here
+  22 | }
+
+[error] UnexpectedToken  guard_is_not_an_expression.eco:22:1
+
+  Unexpected token 'close_brace '}'' found
+
+  21 |     return halve(guard halve($n) else { return -1; });
+  22 | }
+     : ^ unexpected here
+  23 | 
+
+3 errors, nothing was compiled.

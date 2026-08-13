@@ -118,6 +118,33 @@ std::optional<AST::ValueType> AST::conformance_matching_template(
     return found;
 }
 
+std::optional<AST::ValueType> AST::sole_conformance_argument(
+    const AST::ValueType &type,
+    const AST::ComplexType *interface_template
+)
+{
+    if (interface_template == nullptr || !type.has_complex_type()) {
+        return std::nullopt;
+    }
+
+    const auto conformance =
+        AST::conformance_matching_template(type.get_complex_type(), interface_template);
+
+    if (!conformance.has_value()) {
+        return std::nullopt;
+    }
+
+    const AST::ComplexType *applied = conformance->get_complex_type();
+
+    // the arity is part of the question: a protocol that grew a second parameter is a different
+    // protocol, and reading `[0]` off it would answer with a straight face
+    if (applied == nullptr || applied->instantiation_args.size() != 1) {
+        return std::nullopt;
+    }
+
+    return applied->instantiation_args[0];
+}
+
 std::optional<AST::TemplateConformance> AST::template_conformance_for(
     AST::ComplexType *ct,
     const AST::ValueType &applied
@@ -168,6 +195,24 @@ std::optional<size_t> AST::interface_method_slot(
     const AST::FunctionDeclNode *requirement
 )
 {
+    // **the requirement takes the same redirect the list does.** AST::interface_requirements answers
+    // through `template_or_self()`, so the entries are always the *template's* - while a call site
+    // reaching a **generic** interface holds an instance of the requirement, because the monomorphizer
+    // instantiates one per application (`contract::iterator::advance() [advance<V = int32>]`).
+    //
+    // matching those two by pointer identity could never succeed, and the miss was not a wrong slot but
+    // an InternalCompilerException at the dispatch site - so `foreach` over an erased
+    // `contract::iterator<V>` took the compiler down, which is why IterationSource::t_erased_iterator had
+    // never actually run. a non-generic interface has no instantiation step, and that is the whole of why
+    // erasing to a plain `Drawable` always worked.
+    //
+    // asked of `template_ref` rather than by name and signature: the slot *order* is the order the
+    // requirements are declared in, which is a coupling no reader of the interface can see, and
+    // Compiler::LLVM::TypeLowering builds the table from this same list - so both sides stay one answer
+    if (requirement != nullptr && requirement->is_instantiated()) {
+        requirement = requirement->template_ref;
+    }
+
     const std::vector<AST::FunctionDeclNode *> &requirements = AST::interface_requirements(interface);
 
     for (size_t slot = 0; slot < requirements.size(); slot++) {

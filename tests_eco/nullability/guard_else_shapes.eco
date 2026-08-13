@@ -15,14 +15,14 @@ function lookup(int32 $k) : int32?
 // a plain `return`, which always worked
 function simple(int32 $k) : int32
 {
-    guard int32 $v = lookup($k) else { return -1; }
+    int32 $v = guard lookup($k) else { return -1; }
     return $v;
 }
 
 // **an `if` whose arms both leave.** neither arm alone says anything, and together they say everything
 function branching(int32 $k, bool $flag) : int32
 {
-    guard int32 $v = lookup($k) else {
+    int32 $v = guard lookup($k) else {
         if ($flag) { return -2; } else { return -3; }
     }
 
@@ -32,7 +32,7 @@ function branching(int32 $k, bool $flag) : int32
 // **a `die`**, which does not come back either
 function fatal(int32 $k) : int32
 {
-    guard int32 $v = lookup($k) else { die("no value"); }
+    int32 $v = guard lookup($k) else { die("no value"); }
     return $v;
 }
 
@@ -40,7 +40,7 @@ function fatal(int32 $k) : int32
 // the thing that left is unreachable rather than a way back out
 function trailing(int32 $k) : int32
 {
-    guard int32 $v = lookup($k) else {
+    int32 $v = guard lookup($k) else {
         return -4;
         echo 0;
     }

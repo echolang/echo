@@ -50,5 +50,5 @@ echo chain($live, &$two);
 echo chain(null, &$two);
 
 // **`strong`**: its operand is a bracket, so the upgrade is over what the declared operator returned
-guard Node $up = strong($h[0]) else { die("the object is gone"); }
+Node $up = guard strong($h[0]) else { die("the object is gone"); }
 echo $up->value;

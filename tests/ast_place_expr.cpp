@@ -285,7 +285,80 @@ TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
     REQUIRE_FALSE(is_assignable_target(*call));
 }
 
-TEST_CASE("value_result_type reads through a place and leaves a non-place alone", "[AST][pointer]")
+TEST_CASE("read_reaches_storage admits a place and a borrow-returning call, and nothing else",
+    "[AST][pointer]")
+{
+    // **the one answer behind all four mirrors of the auto-deref**, and a different question from
+    // storage_of beside it: a call has no address of its own - `&get()` is still refused - but the
+    // value a *borrow*-returning one hands back *is* an address into somebody else's storage, so
+    // reading it reads through and owes a copy of what it found
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "$a = 5;\n"
+        "int& $r = &$a;\n"
+        "function borrow(int& $v) : int& { return $v; }\n"
+        "function maybe(int& $v) : ptr<int> { return $v; }\n"
+        "function plain(int $v) : int { return $v; }\n"
+        "echo borrow(&$a);\n"
+        "ptr<int> $p = maybe(&$a);\n"
+        "echo plain(1);\n"
+        "$addr = &$a;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+
+    // a place: yes, by definition
+    auto *var_ref = first_of<VarRefNode>(*bundle);
+    REQUIRE(var_ref != nullptr);
+    REQUIRE(read_reaches_storage(*var_ref));
+
+    // an address-of is already the value it means, so it reads through nothing
+    auto *addr = first_of<AddrOfExprNode>(*bundle);
+    REQUIRE(addr != nullptr);
+    REQUIRE_FALSE(read_reaches_storage(*addr));
+
+    auto *literal = first_of<LiteralIntExprNode>(*bundle);
+    REQUIRE(literal != nullptr);
+    REQUIRE_FALSE(read_reaches_storage(*literal));
+
+    size_t seen_borrow = 0;
+    size_t seen_maybe = 0;
+    size_t seen_plain = 0;
+
+    for (auto *call : module.nodes.of_type<FunctionCallExprNode>()) {
+        const std::string name = call->token_function_name.value();
+
+        if (name == "borrow") {
+            // the headline: a call whose result is a non-nullable pointer
+            REQUIRE(read_reaches_storage(*call));
+            seen_borrow++;
+        }
+        else if (name == "maybe") {
+            // **a `ptr<T>` a call returned is deliberately not one** - reading through an address
+            // that may be absent is something the program has to say
+            REQUIRE_FALSE(read_reaches_storage(*call));
+            seen_maybe++;
+        }
+        else if (name == "plain") {
+            // an ordinary value a call computed
+            REQUIRE_FALSE(read_reaches_storage(*call));
+            seen_plain++;
+        }
+    }
+
+    REQUIRE(seen_borrow == 1);
+    REQUIRE(seen_maybe == 1);
+    REQUIRE(seen_plain == 1);
+
+    // and storage_of is untouched by all of it: a call still has no address, which is what keeps
+    // `&get()` refused and a call off the left of an assignment
+    for (auto *call : module.nodes.of_type<FunctionCallExprNode>()) {
+        REQUIRE_FALSE(is_place_expression(*call));
+        REQUIRE_FALSE(is_assignable_target(*call));
+    }
+}
+
+TEST_CASE("value_result_type reads through a place and leaves a computed value alone",
+    "[AST][pointer]")
 {
     // the rule behind two inferences that look alike but are not: `$copy = $r` over an `int32&`
     // infers int32 because reading a place auto-derefs, while `$ref = &$var` infers int32&

@@ -16,6 +16,7 @@ namespace AST
     class FunctionCallExprNode;
     class FunctionDeclNode;
     class Module;
+    class VarDeclNode;
 
     // the candidate member functions a name denotes on `ct`, as an overload set - the member
     // counterpart of FunctionRegistry::overloads, and the only place that answers "which
@@ -185,6 +186,26 @@ namespace AST
         FunctionDeclNode *callee,
         const TokenReference &at,
         ExprNode *place
+    );
+
+    // **a member call a pass synthesizes on a local it just minted, with the callee named rather than
+    // chosen.** the receiver is `$local`, addressed through the rule above, and the call is left
+    // **unresolved with `lookup_namespace` null** - which is the whole of what makes it a member call:
+    // CallResolver::candidates_for reads the receiver's type off argument 0, and the fixpoint's own
+    // settle_calls finishes it. A local a lowering declared is not typed until later in the round, and
+    // an untyped receiver is exactly what receiver_for_member_call's `unknown` arm is for.
+    //
+    // it is also what makes an *erased* receiver work with no arm anywhere: find_member_functions finds
+    // the requirement in the interface's own `_methods`, and ExprCodegen::gen_function_call routes on
+    // FunctionDeclNode::is_interface_requirement().
+    //
+    // two readers, AST::ForeachLowering and AST::GuardLowering, both minting a protocol call on a
+    // hoisted local - the two halves that must not drift being the receiver rule and the settlement
+    FunctionCallExprNode &make_unresolved_member_call(
+        Module &module,
+        VarDeclNode &local,
+        const std::string &name,
+        const TokenReference &at
     );
 };
 

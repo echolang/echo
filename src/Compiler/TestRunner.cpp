@@ -85,15 +85,26 @@ Compiler::TestResult Compiler::run_test_isolated(
         return progress_elapsed_ms(started);
     };
 
+    // **the isolation itself failing is a failed test, not a failed compiler** - three moments word it,
+    // and each one owes the timing stamp a reader of the summary would otherwise see as a zero. one
+    // spelling, so a fourth cannot forget it. `why` is empty where the outcome speaks for itself:
+    // reaping tells us nothing a message could add
+    const auto failed = [&result, &elapsed](const char *why) {
+        result.outcome = TestOutcome::t_failed;
+        result.status = -1;
+        result.milliseconds = elapsed();
+
+        if (why != nullptr) {
+            result.output = why;
+        }
+
+        return result;
+    };
+
     int pipe_ends[2] = { -1, -1 };
 
     if (pipe(pipe_ends) != 0) {
-        result.outcome = TestOutcome::t_failed;
-        result.status = -1;
-        result.output = "echoc could not open a pipe to capture this test's output.\n";
-        result.milliseconds = elapsed();
-
-        return result;
+        return failed("echoc could not open a pipe to capture this test's output.\n");
     }
 
     // **before the fork, and this is not a nicety.** Anything still buffered in this process is copied into
@@ -107,12 +118,7 @@ Compiler::TestResult Compiler::run_test_isolated(
         close(pipe_ends[0]);
         close(pipe_ends[1]);
 
-        result.outcome = TestOutcome::t_failed;
-        result.status = -1;
-        result.output = "echoc could not fork a process to run this test in.\n";
-        result.milliseconds = elapsed();
-
-        return result;
+        return failed("echoc could not fork a process to run this test in.\n");
     }
 
     if (child == 0) {
@@ -139,12 +145,10 @@ Compiler::TestResult Compiler::run_test_isolated(
 
     int status = 0;
 
+    // the drained output is already on the result and is kept: what the test managed to say before the
+    // wait went wrong is the only evidence there is
     if (!reap(child, status)) {
-        result.outcome = TestOutcome::t_failed;
-        result.status = -1;
-        result.milliseconds = elapsed();
-
-        return result;
+        return failed(nullptr);
     }
 
     result.milliseconds = elapsed();

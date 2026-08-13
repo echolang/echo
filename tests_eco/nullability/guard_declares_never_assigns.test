@@ -1,0 +1,40 @@
+expect: fail
+
+--- OUT --->
+[error] guard_declares_never_assigns.eco:27:13
+
+  'guard' can only introduce a new declaration, and this name already holds storage. Writing to it would have to end the value it holds on the path that binds and leave it alone on the path that leaves. Declare a new name instead.
+
+  26 | 
+  27 | $existing = guard halve(10) else { die('unreachable'); }
+     :             ^^^^^
+  28 | 
+
+[error] UnexpectedToken  guard_declares_never_assigns.eco:27:56
+
+  Unexpected token 'close_brace '}'' found
+
+  26 | 
+  27 | $existing = guard halve(10) else { die('unreachable'); }
+     :                                                        ^ unexpected here
+  28 | 
+
+[error] guard_declares_never_assigns.eco:29:12
+
+  'guard' can only introduce a new declaration, and this name already holds storage. Writing to it would have to end the value it holds on the path that binds and leave it alone on the path that leaves. Declare a new name instead.
+
+  28 | 
+  29 | $b->slot = guard halve(20) else { die('unreachable'); }
+     :            ^^^^^
+  30 | 
+
+[error] UnexpectedToken  guard_declares_never_assigns.eco:29:55
+
+  Unexpected token 'close_brace '}'' found
+
+  28 | 
+  29 | $b->slot = guard halve(20) else { die('unreachable'); }
+     :                                                       ^ unexpected here
+  30 | 
+
+4 errors, nothing was compiled.

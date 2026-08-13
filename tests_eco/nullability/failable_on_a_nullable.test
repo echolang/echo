@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] failable_on_a_nullable.eco:17:28
+
+  a 'int32?' records only that the value is absent, so there is no reason to bind to '$e'. 'else ($e)' needs a subject declaring 'contract::failable<E>' - drop the '($e)' to guard a 'T?'.
+
+  16 | 
+  17 | $v = guard halve(10) else ($e) { die('unreachable'); }
+     :                            ^^
+  18 | 
+
+1 error, nothing was compiled.

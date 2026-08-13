@@ -319,7 +319,7 @@ TEST_CASE("A guard's initializer is adjusted, and so is its else arm", "[sema][p
         "function halve(int32 $n) : int32? { if ($n < 0) { return null; } return $n / 2; }\n"
         "function unwrap(int32& $n, int32& $fb) : int32\n"
         "{\n"
-        "    guard int32 $v = halve($n) else { return $fb; }\n"
+        "    int32 $v = guard halve($n) else { return $fb; }\n"
         "    return $v;\n"
         "}\n");
 
@@ -328,4 +328,51 @@ TEST_CASE("A guard's initializer is adjusted, and so is its else arm", "[sema][p
 
     // and the else arm, which is an ordinary scope hanging off the same node
     REQUIRE(contains(d, "return(deref<int32>(varref<int32&>(var($fb))))"));
+}
+
+TEST_CASE("A borrow a call returned is read as a value", "[sema][pointer]")
+{
+    // **the fourth mirror of one question.** a place holding a pointer got the deref and a call
+    // handing one back did not, so `int32 $v = borrow(...)` was refused as an impossible conversion
+    // while `int32 $v = $r` compiled - the same read, spelled two ways.
+    //
+    // AST::read_reaches_storage is the shared answer now. it deliberately does *not* move
+    // AST::storage_of: a call still has no address, so `&borrow(...)` is still refused
+    auto d = desc(
+        "function borrow(int32& $v) : int32& { return $v; }\n"
+        "$a = 5;\n"
+        "int32 $read = borrow(&$a);\n");
+
+    REQUIRE(contains(d, "vardecl<type<int32>>($read) = deref<int32>(call borrow("));
+
+    // exactly one - a second would read through the int32 the first produced
+    REQUIRE_FALSE(contains(d, "deref<int32>(deref<"));
+}
+
+TEST_CASE("A ptr<T> a call returned keeps its address", "[sema][pointer]")
+{
+    // the line the predicate draws. a borrow promises there is something there; a `ptr<T>` does not,
+    // and reading through an address that may be absent is something the program has to say - the
+    // same line AST::argument_fit's t_read_through rank and LValue::provenance already drew
+    auto d = desc(
+        "function maybe(int32& $v) : ptr<int32> { return $v; }\n"
+        "$a = 5;\n"
+        "ptr<int32> $p = maybe(&$a);\n");
+
+    REQUIRE(contains(d, "vardecl<type<ptr<int32>>>($p) = call maybe("));
+    REQUIRE_FALSE(contains(d, "deref<int32>(call maybe("));
+}
+
+TEST_CASE("A borrow destination still binds a borrow-returning call", "[sema][pointer]")
+{
+    // as_value_for's pointer-shaped arm, which runs ahead of the read and is untouched: a destination
+    // that wants the address gets it, which is what makes writing through the binding reach the
+    // caller's storage
+    auto d = desc(
+        "function borrow(int32& $v) : int32& { return $v; }\n"
+        "$a = 5;\n"
+        "int32& $bound = borrow(&$a);\n");
+
+    REQUIRE(contains(d, "vardecl<type<int32&>>($bound) = call borrow("));
+    REQUIRE_FALSE(contains(d, "deref<int32>(call borrow("));
 }

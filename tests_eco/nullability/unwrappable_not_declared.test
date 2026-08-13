@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] unwrappable_not_declared.eco:13:6
+
+  'Plain' cannot be guarded: it is not nullable, and it declares no 'contract::unwrappable'. write 'Plain?' if the value may be absent, or declare 'struct Plain : contract::unwrappable<V>' to make the type itself unwrappable.
+
+  12 | 
+  13 | $v = guard $p else { die('unreachable'); }
+     :      ^^^^^
+  14 | 
+
+[error] unwrappable_not_declared.eco:13:6
+
+  'guard' needs a value that may be absent, and 'Plain' always is one - write 'Plain?' if it may not be, or drop the guard
+
+  12 | 
+  13 | $v = guard $p else { die('unreachable'); }
+     :      ^^^^^
+  14 | 
+
+2 errors, nothing was compiled.

@@ -1,0 +1,58 @@
+// **`guard` is an initializer form on an ordinary declaration**, not a statement head. so the name it
+// binds sits on the left of the `=`, where every other binding in the language sits, and the whole
+// declaration grammar applies to it: a written type, an inferred one, or a `const`.
+//
+// what stays true from the old spelling: the binding lands in the **enclosing** scope, so it is an
+// ordinary local from the guard onwards - assignable, readable by every statement after it, and dropped
+// at the scope's end by the frame machinery with no rule of its own. and the else arm still has to
+// leave, which is what makes that soundness
+//
+// there is no trailing `;`: the statement ends in a block, like an `if`
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+// a written type
+function written(int32 $n) : int32
+{
+    int32 $v = guard halve($n) else { return -1; }
+    return $v;
+}
+
+// inferred from the payload, which is one level less nullable than the initializer
+function inferred(int32 $n) : int32
+{
+    $v = guard halve($n) else { return -2; }
+    return $v;
+}
+
+// `const` with the type inferred - the modifier survives onto the binding
+function constant(int32 $n) : int32
+{
+    const $v = guard halve($n) else { return -3; }
+    return $v;
+}
+
+// an ordinary local from the guard onwards, so it can be written to
+function rebound(int32 $n) : int32
+{
+    $v = guard halve($n) else { return -4; }
+
+    $v = $v + 100;
+
+    return $v;
+}
+
+echo written(10);
+echo written(-1);
+echo inferred(20);
+echo inferred(-1);
+echo constant(30);
+echo constant(-1);
+echo rebound(40);

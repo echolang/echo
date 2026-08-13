@@ -95,7 +95,7 @@ public struct stream
      * A final line with no newline is answered in full; the `null` is reserved for "there was
      * nothing at all", which is what makes `guard ... else` the right shape to read one with:
      *
-     *     guard string $line = std::io::stdin->read_line() else { return 0; }
+     *     string $line = guard std::io::stdin->read_line() else { return 0; }
      */
     const function read_line() : string?
     {

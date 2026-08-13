@@ -1,0 +1,14 @@
+--- OUT --->
+20
+-1
+42
+-2
+8
+-3
+--- RAST --->
+CHECK: Module: [main]
+// the hoisted subject, then the guard branching on the protocol's own presence question rather than on
+// a machine null test - and the binding filled from a deref of `unwrap()`
+CHECK: vardecl<type<parsed_int>>($__guard0)
+CHECK: guard vardecl<type<int32>>($v) if call has_value(
+CHECK: bound deref<int32>(call unwrap(

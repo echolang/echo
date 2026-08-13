@@ -14,7 +14,7 @@ function lookup(int32 $k) : int32?
 
 function report(int32 $k) : int32
 {
-    guard int32 $v = lookup($k) else {
+    int32 $v = guard lookup($k) else {
         array<int32> $codes;
         $codes->push(7);
         $codes->push(8);

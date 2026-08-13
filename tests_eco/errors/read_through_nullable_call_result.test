@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  read_through_nullable_call_result.eco:13:7
+
+  Invalid type conversion: cannot implicitly convert 'ptr<int32>' to 'int32'
+
+  12 | 
+  13 | int32 $v = maybe($a);
+     :       ^^
+  14 | 
+
+1 error, nothing was compiled.

@@ -5,6 +5,9 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/VarDeclNode.h"
+#include "AST/VarNode.h"
+#include "AST/VarRefNode.h"
 
 namespace
 {
@@ -232,4 +235,19 @@ AST::FunctionCallExprNode &AST::make_resolved_member_call(
     call.settlement = AST::CallSettlement::t_uncoerced;
 
     return call;
+}
+
+AST::FunctionCallExprNode &AST::make_unresolved_member_call(
+    AST::Module &module,
+    AST::VarDeclNode &local,
+    const std::string &name,
+    const TokenReference &at
+)
+{
+    auto &var = module.nodes.emplace_back<AST::VarNode>(&local, local.token_varname);
+    auto &var_ref = module.nodes.emplace_back<AST::VarRefNode>(&var);
+
+    return module.nodes.emplace_back<AST::FunctionCallExprNode>(
+        module.make_virtual_token(name, Token::Type::t_identifier, at),
+        std::vector<AST::ExprNode *>{ receiver_for_member_call(module, &var_ref) });
 }

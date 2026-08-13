@@ -7,6 +7,7 @@
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTOperatorRewriter.h"
 #include "AST/ASTForeachLowering.h"
+#include "AST/ASTGuardLowering.h"
 #include "AST/ASTInterpolationLowering.h"
 #include "AST/ASTConstFolding.h"
 #include "AST/ASTOwnership.h"
@@ -66,6 +67,12 @@ namespace AST
         // and an operator over a bare type parameter. driven from inside here for the ownership
         // pass's exact reason, and see its header for the ordering the round depends on
         OperatorRewriter _operators;
+
+        // a `guard` over a type of the author's own, rewritten into the hoisted subject and the two
+        // protocol calls it stands for. driven from inside here because minting `has_value()` on a
+        // generic subject *creates a generic call site*, which is the ownership pass's exact reason -
+        // see its header for the ordering the round depends on. a `T?` never reaches it
+        GuardLowering _guards;
 
         // `foreach`, rewritten into the iterator declaration and the `while` it stands for. driven from
         // inside here because the element type is only knowable after resolution, and it must run before

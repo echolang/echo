@@ -1,0 +1,9 @@
+--- OUT --->
+11
+22
+11
+22
+--- RAST --->
+CHECK: Module: [main]
+// the declared operator, reached rather than the built-in pointer arm
+CHECK: call operator +(

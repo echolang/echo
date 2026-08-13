@@ -1,10 +1,16 @@
 /**
  * The language-level interfaces.
  *
- * A contract is a capability a type declares, and nothing more - no storage, no behaviour of its own. The
- * three below are the iteration protocol: `foreach` knows these and nothing else, and there is no arm
- * anywhere in the compiler that knows what an `array<T>` is. A type of your own conforms exactly the way
- * `array<T>` does, and loops exactly as well. See book/concept/iteration.md.
+ * A contract is a capability a type declares, and nothing more - no storage, no behaviour of its own.
+ * There are two protocols here. The first four are the iteration one: `foreach` knows these and nothing
+ * else, and there is no arm anywhere in the compiler that knows what an `array<T>` is. A type of your own
+ * conforms exactly the way `array<T>` does, and loops exactly as well. See book/concept/iteration.md.
+ *
+ * The last two are the **unwrapping** protocol, which is to `guard` what iteration is to `foreach`. It
+ * has one asymmetry worth knowing: a `T?` is answered by the compiler directly, so `guard` over a
+ * nullable never consults `unwrappable` at all and keeps working under `--no-stdlib`. What these two are
+ * for is everything else - a result, a parse outcome, a cache lookup - types that mean "maybe a value"
+ * and could not previously reach `guard` at all.
  *
  * They sit in `contract` rather than at the root because they are not vocabulary you write every line -
  * you name one where you declare a conformance or constrain a type parameter, and `array`, `string` and
@@ -102,4 +108,60 @@ public interface keyed<K>
      * Where the current element sits. Only valid after `advance()` answered true.
      */
     function key() : K;
+}
+
+/**
+ * Something that may or may not be holding a value - and that `guard` can therefore read.
+ *
+ * This is the unwrapping protocol, and what it buys is that `guard` is no longer a feature of `T?`. A
+ * result, a parse outcome, a lazily filled cache slot - anything that means "maybe a value" - conforms
+ * and is guarded exactly the way a nullable is:
+ *
+ *     $n = guard parse_int($text) else { return 0; }
+ *
+ * `has_value()` is called first and its answer gates the unwrap, so `unwrap()` is only ever reached
+ * after a `true`. That is the whole contract, and it is what lets `unwrap()` skip the check
+ * `has_value()` already performed - the same bargain `iterator<V>` makes between `advance` and
+ * `current`. A misuse by hand is yours to catch with an `assert`.
+ *
+ * **`has_value()` is const and `unwrap()` is not**, and that split is a decision rather than an
+ * oversight: reading *whether* a value is there promises nothing about the storage, while taking it out
+ * hands back a borrow that may be written. A `const` subject is therefore refused at the `guard`, which
+ * is where a future `const_unwrappable<const V>` would attach - the shape `const_iterable` already has.
+ *
+ * A `T?` does **not** conform, and cannot: over a pointer, a class handle or a weak it is a per-level
+ * flag with no declaration anywhere, and the tagged spelling is a layout the compiler interns. The
+ * compiler answers for it directly instead, ahead of this interface being consulted at all.
+ */
+#[core: unwrappable]
+public interface unwrappable<V>
+{
+    /**
+     * Is there a value to take? Asked first, and its answer gates `unwrap()`.
+     */
+    const function has_value() : bool;
+
+    /**
+     * The value. Only valid after `has_value()` answered true.
+     */
+    function unwrap() : V&;
+}
+
+/**
+ * The orthogonal capability that makes `else ($e)` spellable - the reason the value was not there.
+ *
+ * Deliberately apart from `unwrappable<V>` for `keyed<K>`'s reason: a subject that does not declare one
+ * simply has no reason to bind, which is a refusal at the `$e` rather than a hole in the protocol. That
+ * is what lets a plain `T?` be refused an `else ($e)` with no arm anywhere in the compiler - a nullable
+ * records that a value is absent and nothing at all about why.
+ *
+ *     $r = guard request($url) else ($error) { return .error($error); }
+ */
+#[core: failable]
+public interface failable<E>
+{
+    /**
+     * Why there was no value. Only valid after `has_value()` answered false.
+     */
+    function failure() : E&;
 }

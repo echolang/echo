@@ -14,20 +14,20 @@ struct Point { int32 $x; int32 $y; }
 // the tagged shapes
 function tag_of(int32? $v) : int32
 {
-    guard int32 $n = $v else { return -1; }
+    int32 $n = guard $v else { return -1; }
     return $n;
 }
 
 function x_of(Point? $p) : int32
 {
-    guard Point $q = $p else { return -2; }
+    Point $q = guard $p else { return -2; }
     return $q->x;
 }
 
 // and the free one
 function node_tag(Node? $n) : int32
 {
-    guard Node $m = $n else { return -3; }
+    Node $m = guard $n else { return -3; }
     return $m->tag;
 }
 
@@ -59,7 +59,7 @@ struct Store
 
     function reading(int32? $v) : int32
     {
-        guard int32 $n = $v else { return $this->seed; }
+        int32 $n = guard $v else { return $this->seed; }
         return $n;
     }
 }

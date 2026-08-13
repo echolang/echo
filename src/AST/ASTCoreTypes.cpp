@@ -21,6 +21,8 @@ namespace
             { "iterable", AST::CoreTypeKind::t_iterable },
             { "const_iterable", AST::CoreTypeKind::t_const_iterable },
             { "keyed", AST::CoreTypeKind::t_keyed },
+            { "unwrappable", AST::CoreTypeKind::t_unwrappable },
+            { "failable", AST::CoreTypeKind::t_failable },
             { "variadic_args", AST::CoreTypeKind::t_variadic_args },
         };
 

@@ -1,0 +1,12 @@
+--- OUT --->
+20
+7
+42
+-1
+42
+-2
+--- RAST --->
+CHECK: Module: [main]
+// the failure declaration is the else arm's own first child, with its initializer filled in by the
+// lowering - which is why it needs no ownership rule of its own
+CHECK: failure vardecl<type<parse_error>>($e) = deref<parse_error>(call failure(

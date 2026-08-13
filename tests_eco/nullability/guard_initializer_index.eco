@@ -16,7 +16,7 @@ operator (Slots& $s)[usize $i] : int32?&
 
 function pick(Slots& $s, usize $i) : int32
 {
-    guard int32 $v = $s[$i] else { return -1; }
+    int32 $v = guard $s[$i] else { return -1; }
     return $v;
 }
 

@@ -10,7 +10,7 @@ function pick(int32 $i) : int32?
 
 int32 $i = 0;
 while ($i < 10) {
-    guard int32 $v = pick($i) else { break; }
+    int32 $v = guard pick($i) else { break; }
     echo $v;
     $i = $i + 1;
 }

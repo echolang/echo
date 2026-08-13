@@ -11,7 +11,7 @@ namespace std::io;
  * byte, and the `null` means "there was nothing at all" rather than "the line was empty". See
  * `std::io::stream::read_line` for why it is unbuffered.
  *
- *     guard string $line = std::io::read_line() else {
+ *     string $line = guard std::io::read_line() else {
  *         std::io::println('nothing on stdin');
  *         return 0;
  *     }

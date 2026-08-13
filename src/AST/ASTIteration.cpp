@@ -24,29 +24,12 @@ namespace
     }
 
     // `contract::keyed<K>` on the cursor, if it declares one. absent is not an error here - only a `=>`
-    // asking for it makes it one, and that refusal belongs at the `=>`
+    // asking for it makes it one, and that refusal belongs at the `=>`, which is exactly the shape
+    // AST::sole_conformance_argument answers in
     std::optional<AST::ValueType> key_type_of(const AST::ValueType &iterator, const AST::CoreTypes &core)
     {
-        const AST::ComplexType *keyed = core.declared_template(AST::CoreTypeKind::t_keyed);
-
-        if (keyed == nullptr || !iterator.has_complex_type()) {
-            return std::nullopt;
-        }
-
-        const auto conformance =
-            AST::conformance_matching_template(iterator.get_complex_type(), keyed);
-
-        if (!conformance.has_value()) {
-            return std::nullopt;
-        }
-
-        const AST::ComplexType *applied = conformance->get_complex_type();
-
-        if (applied == nullptr || applied->instantiation_args.size() != 1) {
-            return std::nullopt;
-        }
-
-        return applied->instantiation_args[0];
+        return AST::sole_conformance_argument(
+            iterator, core.declared_template(AST::CoreTypeKind::t_keyed));
     }
 }
 

@@ -458,7 +458,20 @@ Node *GuardNode::clone(CloneContext &cc) const
     // own from AST::OwnershipPass, but a template that already had one must not hand the instance the
     // template's nodes - the same rule every owned edge here follows
     c->bound_value = cc.child(c->bound_value);
+
+    // the `has_value()` call, on the same terms and for the same reason
+    c->presence_test = cc.child(c->presence_test);
+
+    // **before the rebind below**, because the else scope is what owns the failure declaration: it was
+    // seeded as that scope's first child, so cloning the scope clones the declaration and `cc.rebind`
+    // then finds it
     c->else_scope = cc.child(c->else_scope);
+
+    // **a cross-reference, not an owned edge.** `cc.child` here would be a *second* clone of a
+    // declaration the else scope already cloned - two slots with half the reads bound to each, which is
+    // the failure mode a rebind exists to prevent
+    c->failure = cc.rebind(c->failure);
+
     return c;
 }
 

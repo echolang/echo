@@ -4,6 +4,6 @@
 
 function lookup(int32 $k) : int32? { return null; }
 
-guard int32 $v = lookup(1) else { echo 0; }
+int32 $v = guard lookup(1) else { echo 0; }
 
 echo $v;

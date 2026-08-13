@@ -11,7 +11,16 @@
 
 namespace Parser
 {
-    AST::VarDeclNode *parse_varexpr(Payload &payload, AST::ScopeNode *scope = nullptr);
+    // **`allows_guard` is asked of the walk, not of the declaration.** `T $x = guard <v> else { ... }`
+    // is a statement that *ends in a block*, so it may only appear where a statement may - which is one
+    // of this function's five callers. the other four read a declaration in a position no block can
+    // follow: a parameter list, a struct body, and a `for` header's init and step. the same shape the
+    // `static`-in-a-body refusal has, and for the same reason - the caller is what knows where it is
+    AST::VarDeclNode *parse_varexpr(
+        Payload &payload,
+        AST::ScopeNode *scope = nullptr,
+        bool allows_guard = false
+    );
 
     // **the value an assignment writes into `target`.** called with the `=` seen but not consumed, and
     // answers null when either question below refuses - having already left the cursor at the next

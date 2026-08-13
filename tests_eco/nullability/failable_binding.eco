@@ -1,0 +1,86 @@
+// **`else ($e)` binds the reason the value was not there**, when the subject declares
+// `contract::failable<E>` beside `contract::unwrappable<V>`.
+//
+// two interfaces and not one, for `contract::keyed<K>`'s reason: a subject that declares no `failable`
+// simply has no reason to bind, which is a refusal at the `$e` rather than a hole in the protocol. that
+// is what lets a plain `T?` be refused an `else ($e)` with no arm anywhere - a nullable records that a
+// value is absent and nothing at all about why.
+//
+// the binding is **seeded into the else arm's scope**, which is the whole answer to its lifetime: it is
+// registered before the arm's first statement so `$e` resolves while they are parsed, and it lands as
+// that scope's first child so the ordinary frame machinery ends it at the arm's exit. no ownership rule,
+// no codegen and no drop rule - the mechanism a `foreach`'s `$k` and `$el` already use.
+
+struct parse_error
+{
+    public usize $at;
+    public int32 $code;
+}
+
+struct parsed_int : contract::unwrappable<int32>, contract::failable<parse_error>
+{
+    private int32 $value;
+    private bool $ok;
+    private parse_error $error;
+
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+        $this->ok = true;
+        $this->error = parse_error(0, 0);
+    }
+
+    constructor(parse_error $error)
+    {
+        $this->value = 0;
+        $this->ok = false;
+        $this->error = $error;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->value;
+    }
+
+    public function failure() : parse_error&
+    {
+        return &$this->error;
+    }
+}
+
+function parse(int32 $n) : parsed_int
+{
+    if ($n < 0) {
+        return parsed_int(parse_error(7, 42));
+    }
+
+    return parsed_int($n * 2);
+}
+
+function reported(int32 $n) : int32
+{
+    $v = guard parse($n) else ($e) {
+        echo $e->at;
+        echo $e->code;
+        return -1;
+    }
+
+    return $v;
+}
+
+// and the arm may ignore the reason, which is the ordinary form - `else` with no `($e)` at all
+function quiet(int32 $n) : int32
+{
+    $v = guard parse($n) else { return -2; }
+    return $v;
+}
+
+echo reported(10);
+echo reported(-1);
+echo quiet(21);
+echo quiet(-1);

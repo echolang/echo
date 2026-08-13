@@ -1,13 +1,13 @@
 expect: fail
 
 --- OUT --->
-[error] generic_form_certainly_present.eco:12:5
+[error] generic_form_certainly_present.eco:12:12
 
   'guard' needs a value that may be absent, and 'int32' always is one - write 'int32?' if it may not be, or drop the guard
 
   11 | {
-  12 |     guard T $v = $maybe else { return $fallback; }
-     :     ^^^^^
+  12 |     T $v = guard $maybe else { return $fallback; }
+     :            ^^^^^
   13 |     return $v;
 
 1 error, nothing was compiled.

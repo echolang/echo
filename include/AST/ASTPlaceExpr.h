@@ -121,6 +121,48 @@ namespace AST
         return storage_of(expr) == StorageClass::t_place;
     }
 
+    // **does a read of this expression reach storage, rather than a value it computed?**
+    //
+    // every place does, by definition. the one shape that names no storage and still hands one back is a
+    // **call returning a borrow**: `$a->at(0)`'s value *is* the address of the container's element, so a
+    // value-position read of it reads *through* it and owes a copy of what it found, exactly as a place's
+    // read does. four mirrors of that one answer - the deref AST::PointerAdjuster writes, the type
+    // value_result_type yields below, AST::argument_fit's t_read_through rank, and the copy
+    // AST::OwnershipPass owes - and they used to be four spellings of is_place_expression, which left
+    // three of them wrong for a call. two of those three failed silently
+    //
+    // a *different* question from AST::storage_of, which stays a deny-list about the address an
+    // expression **has**: a call has none, so `&$o->get()` is still refused, a call is still not an
+    // assignment target, and a call result can still be *given* storage as a temporary
+    //
+    // **a `ptr<T>` a call returned is not one.** reading through an address that may be absent is
+    // something the program has to say - `:$`, an explicit cast, a `guard` - which is the line
+    // AST::argument_fit's t_read_through rank, LValue::provenance and AST::access_path_of already draw
+    // for this very expression. a `ptr<T>` *place* is still read through, because that read is of the
+    // slot and the slot is certainly there
+    //
+    // the place test comes first because it is the cheap one and what almost everything answers, and the
+    // node test sits ahead of result_type() so a literal, a binary or a cast never pays for the
+    // derivation. an unsettled call answers `void`, so this is false until the call settles - which is
+    // what makes it safe to ask from inside the monomorphizer's fixpoint
+    inline bool read_reaches_storage(const ExprNode &expr, const ValueType &result_type)
+    {
+        if (is_place_expression(expr)) {
+            return true;
+        }
+
+        if (!is_call_expression(expr)) {
+            return false;
+        }
+
+        return result_type.is_pointer() && !result_type.is_nullable();
+    }
+
+    inline bool read_reaches_storage(const ExprNode &expr)
+    {
+        return read_reaches_storage(expr, expr.result_type());
+    }
+
     // **the expression the author wrote, under whatever the compiler wrapped around it.** an implicit
     // cast is inserted to reconcile a type, never to change a value the program can observe, so every
     // question about *what this expression is* has to be asked underneath one. an **explicit** cast
@@ -176,7 +218,7 @@ namespace AST
             return inner;
         }
 
-        return is_place_expression(*cast->expr) ? cast : nullptr;
+        return read_reaches_storage(*cast->expr) ? cast : nullptr;
     }
 
     // **may this expression be *given* storage?** asked in the parser, which is where a receiver is
@@ -321,15 +363,22 @@ namespace AST
     // the type an expression yields when it is *read*, which is what an inferred declaration
     // and an assignment target both want
     //
-    // reading a place that holds a pointer auto-dereferences it once, so `$copy = $r` over an
-    // `int32&` infers int32 and copies the value. an expression that is not a place is already
-    // the value it means - `&$x` yields an address, so `$ref = &$var` still infers a pointer
+    // reading something that holds a pointer auto-dereferences it once, so `$copy = $r` over an
+    // `int32&` infers int32 and copies the value - and so does `$copy = $a->at(0)`, a call whose
+    // value *is* an address. an expression that computed its value is already the value it means:
+    // `&$x` yields an address, so `$ref = &$var` still infers a pointer
+    //
+    // read_reaches_storage above is the whole of which is which, and it being shared is what stops
+    // this from disagreeing with the deref AST::PointerAdjuster writes over the same expression -
+    // they were two spellings, and this one answered `int32&` for a call while a declared
+    // `operator +` over that operand was never minted at all
+    //
     // the overload taking a `result_type()` the caller already has, for a site that wants both the
     // read type and the raw one - result_type() walks the expression's subtree, so a caller holding
     // the answer passes it rather than provoking it again. the place rule stays in one place
     inline ValueType value_result_type(const ExprNode &expr, const ValueType &result_type)
     {
-        return is_place_expression(expr) ? value_type_of(result_type) : result_type;
+        return read_reaches_storage(expr, result_type) ? value_type_of(result_type) : result_type;
     }
 
     inline ValueType value_result_type(const ExprNode &expr)

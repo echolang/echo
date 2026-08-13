@@ -10,7 +10,7 @@ echo std::env::has('ECO_CORPUS_EMPTY');
 echo std::env::has('ECO_CORPUS_SURELY_UNSET');
 
 // set, so the guard binds and the non-null type is what the body reads
-guard string::view $found = std::env::var('ECO_CORPUS_KEY') else { die('ECO_CORPUS_KEY was unset'); }
+string::view $found = guard std::env::var('ECO_CORPUS_KEY') else { die('ECO_CORPUS_KEY was unset'); }
 echo $found;
 
 // unset, so `??` takes the right side

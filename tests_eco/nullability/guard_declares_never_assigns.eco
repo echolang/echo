@@ -1,0 +1,31 @@
+// **`guard` declares, it never assigns.** writing into a name that already holds storage would owe
+// that value an end on the path that binds and leave it alone on the path that leaves, which are two
+// different programs - and the binding's whole meaning is that it certainly has a value from here on,
+// which a name declared above the guard cannot promise
+//
+// refused in Parser::parse_assigned_value, which is the sole owner of "the value an assignment writes
+// into `target`" - so one sentence covers `$x =`, `$s->x =`, `$a[$i] =` and `Type::$p =` rather than
+// four spellings that could drift. this case takes the first two
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+struct Box
+{
+    int32 $slot;
+}
+
+int32 $existing = 5;
+Box $b = Box(0);
+
+$existing = guard halve(10) else { die('unreachable'); }
+
+$b->slot = guard halve(20) else { die('unreachable'); }
+
+echo $existing;

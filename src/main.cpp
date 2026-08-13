@@ -1035,18 +1035,13 @@ static std::vector<const Parser::ModuleManifest *> compiled_manifests(
 
     std::vector<const Parser::ModuleManifest *> out;
 
-    // the common case and every project that existed before scopes did: no module is conditional at all,
-    // so the answer is the whole list and no walk happens
-    if (reached.empty()) {
-        for (const Parser::ModuleManifest &manifest : invocation.manifests) {
-            out.push_back(&manifest);
-        }
-
-        return out;
-    }
-
     // `reached` holds the conditional ones until here, where it becomes its complement plus whatever the
-    // walk adds - which is the set this function is actually computing
+    // walk adds - which is the set this function is actually computing.
+    //
+    // no fast path for "nothing is conditional", deliberately: an empty `conditional` makes the
+    // complement the whole list and the walk can only add what is already in it, so the general path
+    // already answers that case with the same set in the same order - and a second path a reader has to
+    // prove equivalent is the one that eventually stops being
     std::set<std::filesystem::path> conditional;
     conditional.swap(reached);
 

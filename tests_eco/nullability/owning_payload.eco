@@ -54,7 +54,7 @@ assert(mem::live_allocations() == 0, "and it gave it back");
 // site a teardown is one call and a copy is one call, so neither position needs a branch
 function shout(string? $note) : usize
 {
-    guard string $text = $note else { return 0; }
+    string $text = guard $note else { return 0; }
 
     $text->append('!');
     return $text->size();

@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] failable_not_declared.eco:27:31
+
+  'Box' unwraps, but it declares no 'contract::failable' - so there is no '$e' to bind. declare one on it, or drop the '($e)'.
+
+  26 | 
+  27 | $v = guard Box(7, true) else ($e) { die('unreachable'); }
+     :                               ^^
+  28 | 
+
+[error] failable_not_declared.eco:27:6
+
+  'guard' needs a value that may be absent, and 'Box' always is one - write 'Box?' if it may not be, or drop the guard
+
+  26 | 
+  27 | $v = guard Box(7, true) else ($e) { die('unreachable'); }
+     :      ^^^^^
+  28 | 
+
+2 errors, nothing was compiled.

@@ -1,0 +1,29 @@
+// the second half of the `else ($e)` rule, and a different mistake from the first: this subject *does*
+// unwrap, so the author plausibly meant to give it a reason and did not. two sentences rather than one,
+// because "a nullable has no reason to give" and "you did not declare one" are not the same advice
+
+struct Box : contract::unwrappable<int32>
+{
+    private int32 $v;
+    private bool $ok;
+
+    constructor(int32 $v, bool $ok)
+    {
+        $this->v = $v;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->v;
+    }
+}
+
+$v = guard Box(7, true) else ($e) { die('unreachable'); }
+
+echo $v;

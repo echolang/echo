@@ -1,0 +1,15 @@
+// the refusal side of the line AST::read_reaches_storage draws: a borrow a call returned is read as a
+// value, a `ptr<T>` it returned is not. reading through an address that may be absent is something the
+// program has to say - `:$`, an explicit cast, a `guard` - so this stays the conversion error it
+// always was rather than becoming an unchecked dereference
+
+array<int32> $a = [4];
+
+function maybe(array<int32>& $c) : ptr<int32>
+{
+    return &$c[0];
+}
+
+int32 $v = maybe($a);
+
+echo $v;

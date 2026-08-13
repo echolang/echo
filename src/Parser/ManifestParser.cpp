@@ -963,7 +963,7 @@ std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest
     // **through the one merger, with every scope opened.** A hand-rolled union here would be a third place
     // that knows what a scope contributes, and the one that a fifth scoped attribute is not added to
     std::vector<std::filesystem::path> all;
-    Parser::append_active_depends(manifest, Parser::all_targets_active({ manifest }), all);
+    Parser::append_active_depends(manifest, Parser::all_targets_active(manifest), all);
 
     return all;
 }
@@ -1148,15 +1148,13 @@ void Parser::append_active_depends(
     }
 }
 
-Parser::ActiveTargets Parser::all_targets_active(const std::vector<Parser::ModuleManifest> &manifests)
+Parser::ActiveTargets Parser::all_targets_active(const Parser::ModuleManifest &manifest)
 {
     Parser::ActiveTargets active;
 
-    for (const Parser::ModuleManifest &manifest : manifests) {
-        for (const Parser::ModuleTarget &target : manifest.targets) {
-            if (target.has_scope) {
-                active[manifest.name].insert(target.name);
-            }
+    for (const Parser::ModuleTarget &target : manifest.targets) {
+        if (target.has_scope) {
+            active[manifest.name].insert(target.name);
         }
     }
 

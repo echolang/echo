@@ -1,0 +1,11 @@
+--- OUT --->
+6
+5
+--- IR --->
+// the table, in requirement order: slot 0 is the implementor's release thunk, then `advance` and
+// `current` - which is the order AST::interface_requirements answers, and the order the dispatch site
+// agrees with now that an instantiated requirement resolves through its template_ref
+CHECK: .vtable" = linkonce_odr constant [3 x ptr] [ptr @__eco_release_7Counter, ptr @_M7Counter_advance
+CHECK: ptr @_M7Counter_current
+// and the two calls go through the table rather than to a symbol
+CHECK: %iface.callee = load ptr, ptr %iface.slot

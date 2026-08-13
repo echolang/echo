@@ -1,0 +1,19 @@
+// a nullable records that a value is **absent** and nothing at all about why, so there is no reason for
+// an `else ($e)` to bind. refused at the `$e` - the token that asked - which is the rule
+// AST::ForeachLowering already follows for a `=>` over a cursor declaring no key contract.
+//
+// this is also why a guard writing `else ($e)` never takes the parser's fast path even over a `T?`:
+// the sentence lives in exactly one place, beside the failable-but-not-declared refusal it belongs with
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+$v = guard halve(10) else ($e) { die('unreachable'); }
+
+echo $v;

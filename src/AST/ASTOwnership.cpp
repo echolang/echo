@@ -202,6 +202,24 @@ namespace
             RecursiveVisitor::visit_foreach(node);
         }
 
+        // **an undecided guard is never answerable**, and this arm's absence is silent in the one way
+        // that matters: the binding is *typed* and its initializer resolves, so nothing here looks
+        // unfinished. what is unfinished is how the binding gets filled - a question about the subject's
+        // conformance that only AST::GuardLowering can answer, in the fixpoint - so a walk now would
+        // resolve the arrival of a value about to be replaced by an `unwrap()` read. permanently: this
+        // pass walks a body exactly once, ever.
+        //
+        // a `T?` guard is decided by the parser and never reaches this, so no existing program's
+        // ownership answer moves by taking this arm
+        void visit_guard(GuardNode &node) override
+        {
+            if (!node.plan_decided) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visit_guard(node);
+        }
+
         // **an unlowered interpolation is never answerable**, and this is the second arm whose absence
         // is silent. it stands for a chain of calls none of which exist yet - each one allocating a
         // `string` that owes a drop - so a walk now would decide the ownership of a statement whose
@@ -1808,6 +1826,12 @@ ExprNode *OwnershipPass::arrive_value(
     // a `mv` parameter given a place the caller did not mark. the error is the point of the
     // annotation: a function that quietly swallowed its argument would be indistinguishable at the
     // call site from one that borrowed it
+    //
+    // **deliberately is_place_expression and not AST::read_reaches_storage**, which would read as
+    // catching a borrow-returning call and does not: an argument whose type needs reconciling arrives
+    // here already wrapped in the implicit cast AST::CallResolver inserted, and this gate is asked of
+    // the cast. so `consume($rows->at(0))` is not refused - it is *copied*, by the ordinary arrival
+    // one level down, which is sound if less strict than the place case beside it
     if (param != nullptr && param->takes_ownership && is_place_expression(*expr)) {
         // reported at the *argument*, not at the parameter: the annotation is the declaration's, but
         // the `mv` that has to be written is the caller's
@@ -1853,15 +1877,22 @@ ExprNode *OwnershipPass::arrive_value(
 
     expr = walk_expression(expr);
 
-    // "a place is copied, a non-place is moved". a non-place - a call result, a constructor call -
-    // is a value nobody else holds, so it needs no annotation and leaves nothing behind
+    // "a read that reaches storage is copied, a computed value is moved". a value the program
+    // computed - a constructor call, a call returning `T` - is one nobody else holds, so it needs no
+    // annotation and leaves nothing behind
     //
-    // and a copy of a place is only this pass's business when it is not a copy of bytes. which copy
-    // this is, is AST::classify_copy - decided once here and dispatched on below, because the arms are
-    // separated by the move analysis in between and re-deciding them there is what used to make this
-    // ladder a second implementation of the one in ASTCopy.cpp. every other copy in the language still
-    // happens the way it always did, with nothing inserted and nothing tracked
-    if (!is_place_expression(*expr)) {
+    // **a call returning a borrow is on the copying side**, which is the whole of why this asks
+    // AST::read_reaches_storage rather than is_place_expression: `string $s = $a->at(0);` reads
+    // through the address the call handed back, and what it found is still the array's. answering
+    // "non-place, so moved" there is a bitwise copy of a buffer handle with no retain, and the
+    // local's scope-exit drop then frees storage the container still names
+    //
+    // and a copy is only this pass's business when it is not a copy of bytes. which copy this is, is
+    // AST::classify_copy - decided once here and dispatched on below, because the arms are separated
+    // by the move analysis in between and re-deciding them there is what used to make this ladder a
+    // second implementation of the one in ASTCopy.cpp. every other copy in the language still happens
+    // the way it always did, with nothing inserted and nothing tracked
+    if (!read_reaches_storage(*expr)) {
         return expr;
     }
 

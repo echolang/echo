@@ -15,8 +15,6 @@
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
-#include "AST/VarNode.h"
-#include "AST/VarRefNode.h"
 #include "AST/WhileStatementNode.h"
 
 #include <fmt/core.h>
@@ -91,27 +89,12 @@ FunctionCallExprNode &ForeachLowering::iterator_call(
     const TokenReference &at
 )
 {
-    auto &var = _current_module->nodes.emplace_back<VarNode>(&iterator, iterator.token_varname);
-    auto &var_ref = _current_module->nodes.emplace_back<VarRefNode>(&var);
-
-    // through AST::receiver_for_member_call, which owns "addressed only if it is not already an address".
-    // `lower`'s middle arm binds `$__it` as a borrow of a cursor the caller owns, and `ptr<C>` is what a
-    // receiver wants already - wrapping it again yields `C&&`, which unifies against nothing. the third
-    // arm deliberately leaves `$__it` untyped for the re-derivation sweep, and an untyped one answers
-    // `unknown` here and gets the address it needs
-    auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
-        _current_module->make_virtual_token(name, Token::Type::t_identifier, at),
-        std::vector<ExprNode *>{ receiver_for_member_call(*_current_module, &var_ref) });
-
-    // **left unresolved on purpose, and `lookup_namespace` left null** - that is what makes it a member
-    // call: CallResolver::candidates_for reads the receiver's type off argument 0, and `$__it` is not
-    // typed until the re-derivation sweep later this round. the fixpoint's own settle_calls finishes
-    // it, exactly as it finishes every call AST::OperatorRewriter builds
-    //
-    // this is also the whole of what makes an erased iterator work: find_member_functions finds the
-    // requirement in the interface's own `_methods`, and ExprCodegen::gen_function_call routes on
-    // FunctionDeclNode::is_interface_requirement(). no arm anywhere
-    return call;
+    // AST::make_unresolved_member_call owns both halves of this. the receiver rule matters here in
+    // particular: `lower`'s middle arm binds `$__it` as a borrow of a cursor the caller owns, and
+    // `ptr<C>` is what a receiver wants already - wrapping it again yields `C&&`, which unifies against
+    // nothing. the third arm deliberately leaves `$__it` untyped for the re-derivation sweep, and an
+    // untyped one answers `unknown` there and gets the address it needs
+    return make_unresolved_member_call(*_current_module, iterator, name, at);
 }
 
 void ForeachLowering::refuse(
@@ -311,11 +294,12 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
         element_type = ValueType::make_pointer(ValueType::make_const(plan.element_type), false);
     }
     else {
-        // **the by-value binding derefs explicitly**, because nothing else will: `current()` hands back
-        // `V&` and AST::PointerAdjuster only auto-derefs a *place*, which a call is not - the same
-        // limitation that makes `echo $a->at(0)` an error today. so the read is written
-        // here rather than hoped for, and the adjuster leaves it alone: as_value_for over an operand
-        // that already answers `V` has nothing left to peel
+        // **the by-value binding derefs explicitly**, and does so where the binding is made rather
+        // than leaving it to the adjuster: `current()` hands back `V&`, and this is the round in which
+        // OwnershipPass decides the element's copy - so the edge it reads has to be the one that will
+        // actually be read. AST::PointerAdjuster would write the same deref now that
+        // AST::read_reaches_storage covers a borrow-returning call, and it leaves this one alone:
+        // as_value_for over an operand that already answers `V` has nothing left to peel
         //
         // the copy itself is not foreach-specific and is not written here either - OwnershipPass's
         // ordinary declaration arrival inserts the copy constructor when V owns something

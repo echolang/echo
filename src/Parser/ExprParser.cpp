@@ -2319,6 +2319,24 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
 {
     auto &cursor = payload.cursor;
 
+    // **`guard` is not an expression, and is deliberately not an `is_expr_token` either.** so the loop
+    // below never enters and the single-part reporter at the end would say "this expression could not
+    // be read as a single value", which describes the shape and not the mistake. reported here instead,
+    // ahead of everything, because this is the one function every value position routes through
+    //
+    // it is not an expression on purpose: a guard's else arm may hold a bare `return` precisely because
+    // AST::scope_always_exits refuses an arm that rejoins, so the arm can never produce a value. an
+    // expression form would make that `return` read two ways at once
+    if (cursor.is_type(Token::Type::t_guard)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "'guard' is not an expression - it is how a declaration's initializer is written, so it "
+            "may only follow the '=' of a declaration. Write 'T $x = guard <value> else { ... }' above "
+            "this statement and read '$x' here.");
+        cursor.try_skip_to_next_statement();
+        return AST::make_void_ref();
+    }
+
     std::vector<ExprPart> expr_parts;
 
     int depth = 0;

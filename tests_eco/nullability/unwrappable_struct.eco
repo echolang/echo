@@ -1,0 +1,85 @@
+// **`guard` over a type of the author's own.** the unwrapping protocol is to `guard` what the iteration
+// one is to `foreach`: a type declares `contract::unwrappable<V>` and is guarded exactly the way a `T?`
+// is, with no arm anywhere in the compiler that knows what a `parsed_int` is.
+//
+// what makes it work is one owner - AST::unwrap_plan_for - asked by AST::GuardLowering inside the
+// monomorphizer's fixpoint, once the subject's type has settled. a `T?` never reaches either of them:
+// Parser::parse_guard decides that one, which is what keeps every program written before this byte for
+// byte and keeps `guard` working under `--no-stdlib`.
+//
+// the two subject shapes below are the two arms of the hoist the lowering performs: a **place** becomes
+// a borrow (so `unwrap()` writes through to the value the author named), a **call result** is owned by
+// the hoisted declaration and dropped by the ordinary frame machinery.
+
+struct parsed_int : contract::unwrappable<int32>
+{
+    private int32 $value;
+    private bool $ok;
+
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+        $this->ok = true;
+    }
+
+    // no value. a second constructor rather than a flag argument, so the two are an overload set and
+    // the call site says which it meant
+    constructor(bool $ok)
+    {
+        $this->value = 0;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    // **`has_value()` is const and this is not**, which is the protocol's own split: reading whether a
+    // value is there promises nothing about the storage, while taking it out hands back a borrow that
+    // may be written
+    public function unwrap() : int32&
+    {
+        return &$this->value;
+    }
+}
+
+function parse(int32 $n) : parsed_int
+{
+    if ($n < 0) {
+        return parsed_int(false);
+    }
+
+    return parsed_int($n * 2);
+}
+
+// the subject is a **call result** - the hoisted declaration owns it
+function doubled(int32 $n) : int32
+{
+    $v = guard parse($n) else { return -1; }
+    return $v;
+}
+
+// the subject is a **place** - the hoisted declaration borrows it, so the unwrap reaches this storage
+function from_place(int32 $n) : int32
+{
+    parsed_int $p = parse($n);
+
+    $v = guard $p else { return -2; }
+
+    return $v;
+}
+
+// a written type, checked against the payload the conformance gave rather than against the subject
+function written(int32 $n) : int32
+{
+    int32 $v = guard parse($n) else { return -3; }
+    return $v;
+}
+
+echo doubled(10);
+echo doubled(-1);
+echo from_place(21);
+echo from_place(-1);
+echo written(4);
+echo written(-1);

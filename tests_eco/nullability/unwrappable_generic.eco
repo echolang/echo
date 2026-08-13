@@ -1,0 +1,57 @@
+// **one generic body, instantiated at a `T?` and at an unwrappable**, which is the case that says the
+// round ordering and `GuardNode::plan_decided` are right.
+//
+// inside a template the subject is a bare `T`, so no parse could decide how it unwraps - and neither
+// could the first round of the fixpoint. AST::unwrap_plan_for answers `t_pending` for exactly that
+// operand and AST::GuardLowering asks again next round; `plan_decided` staying false is what makes
+// OwnershipPass::body_is_concrete answer false in the meantime, so the body is not walked with an answer
+// it would keep forever.
+//
+// **the two instances take different arms of the same statement**: `T = int32?` is decided by the
+// plan's nullable arm and mints nothing at all, while `T = Box` hoists the subject and mints two calls.
+// nothing in the source says which.
+
+struct Box : contract::unwrappable<int32>
+{
+    private int32 $v;
+    private bool $ok;
+
+    constructor(int32 $v, bool $ok)
+    {
+        $this->v = $v;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->v;
+    }
+}
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+function firstOr<T>(T $maybe, int32 $fallback) : int32
+{
+    $v = guard $maybe else { return $fallback; }
+    return $v;
+}
+
+// T = int32?
+echo firstOr(halve(10), -1);
+echo firstOr(halve(-1), -2);
+
+// T = Box
+echo firstOr(Box(7, true), -3);
+echo firstOr(Box(0, false), -4);

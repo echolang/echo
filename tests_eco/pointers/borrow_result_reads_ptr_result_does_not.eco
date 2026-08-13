@@ -1,0 +1,36 @@
+// **the line AST::read_reaches_storage draws, from the side that keeps its address.**
+//
+// a call returning `T&` is read through, because a borrow promises there is something there. a call
+// returning `ptr<T>` is *not*, because reading through an address that may be absent is something the
+// program has to say - which is the same line AST::argument_fit's t_read_through rank and
+// LValue::provenance already drew for this very expression
+//
+// the asymmetry with a *place* is deliberate and worth seeing side by side: a `ptr<T>` variable is
+// read through, because that read is of the slot and the slot is certainly there. only the address it
+// held may be absent, which is why `:$` exists
+
+array<int32> $a = [4, 8];
+
+function borrow(array<int32>& $c) : int32&
+{
+    return &$c[0];
+}
+
+function maybe(array<int32>& $c) : ptr<int32>
+{
+    return &$c[1];
+}
+
+// a borrow a call returned: read as a value
+int32 $v = borrow($a);
+echo $v;
+
+echo borrow($a) + 1;
+
+// a `ptr<T>` a call returned: the address, kept
+ptr<int32> $p = maybe($a);
+
+// and a `ptr<T>` *place* is still read through, so the null test needs the peel - the spelling
+// stdlib/core/str.eco uses throughout
+echo $p:$ == null;
+echo $p;

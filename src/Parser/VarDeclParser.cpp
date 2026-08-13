@@ -4,6 +4,7 @@
 #include "AST/ASTPlaceExpr.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
+#include "AST/GuardNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/OperatorNode.h"
@@ -12,6 +13,7 @@
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/GuardParser.h"
 #include "Parser/ScopeParser.h"
 
 #include <fmt/core.h>
@@ -107,6 +109,23 @@ AST::ExprNode *Parser::parse_assigned_value(
 
     cursor.skip(); // the '='
 
+    // **`guard` declares, it never assigns.** writing into a name that already exists would owe the
+    // value it holds an end on the path that binds and leave it alone on the path that leaves, which
+    // are two different programs - and the binding's whole meaning is that it certainly has a value
+    // from here on, which a name declared above the guard cannot promise
+    //
+    // one site for all four assignment shapes, because this function is the sole owner of "the value an
+    // assignment writes into `target`": `$x =`, `$s->x =`, `$a[$i] =` and `Type::$p =` all pass here
+    if (cursor.is_type(Token::Type::t_guard)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "'guard' can only introduce a new declaration, and this name already holds storage. "
+            "Writing to it would have to end the value it holds on the path that binds and leave it "
+            "alone on the path that leaves. Declare a new name instead.");
+        cursor.try_skip_to_next_statement();
+        return nullptr;
+    }
+
     // the value is expected at the type the *storage* holds. for a pointer target that is the pointee,
     // because assigning to a pointer writes through it - `$p = 20` never changes where $p points
     auto &expected = payload.context.emplace_node<AST::TypeNode>(AST::value_result_type(*target));
@@ -121,7 +140,11 @@ AST::ExprNode *Parser::parse_assigned_value(
     return value;
 }
 
-AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode *scope)
+AST::VarDeclNode *Parser::parse_varexpr(
+    Parser::Payload &payload,
+    AST::ScopeNode *scope,
+    bool allows_guard
+)
 {
     auto &cursor = payload.cursor;
 
@@ -323,9 +346,29 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
         vardecl->static_token.emplace(static_token.value());
     }
 
+    // **`= guard` is a declaration whose initializer runs inside a branch**, and that changes exactly
+    // two things about the ordinary declaration read below: how the name is registered, and who parses
+    // the initializer. two tokens of look-ahead rather than a snapshot, because the answer is entirely
+    // local - nothing before the `=` differs
+    const bool guard_initializer = allows_guard
+        && cursor.is_type_sequence(0, { Token::Type::t_assign, Token::Type::t_guard });
+
     // if we have a scope we add the variable to it
     if (scope != nullptr) {
-        scope->add_vardecl(*vardecl);
+        // **the name only, for a guard.** the declaration is the guard statement's own - its
+        // initializer runs once, inside the branch that found a value - so appending it here as well
+        // would emit that initializer a second time as an ordinary statement. that is what
+        // AST::ScopeNode::declare_variable exists for, and the bug it was minted to fix was a leaked
+        // retain from exactly this double emit
+        //
+        // a fork rather than an add-then-take-back: the child list *is* the statement order, and an
+        // invariant that only holds between two lines nobody reads together is not one
+        if (guard_initializer) {
+            scope->declare_variable(*vardecl);
+        }
+        else {
+            scope->add_vardecl(*vardecl);
+        }
     }
 
     // if next token is a semicolon or comma we are done for now
@@ -343,6 +386,28 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     }
 
     cursor.skip();
+
+    // **the guard form, and the initializer is deliberately parsed with no expected type.** that falls
+    // out of taking this branch ahead of the parse_expr below rather than being a rule stated in a
+    // comment: the declared type of a guard binding is the *unwrapped* one - `Node $n = guard <Node?>`
+    // - so handing `vardecl->optional_type_node()` down as the expectation would bind a written `null`
+    // to the wrong shape and tell `&$obj` to produce a borrow where a weak was meant
+    //
+    // Parser::parse_guard owns everything from the `guard` keyword to the else arm's `}` and appends
+    // the statement itself; the declaration is handed back the way any other is, so the caller that
+    // knows it is reading a body can still refuse a `static` on it
+    if (guard_initializer) {
+        AST::GuardNode *guard = parse_guard(payload, *vardecl, is_const);
+
+        // appended to the same scope the *name* went into above, so the two halves of the statement
+        // cannot end up in different blocks. `scope` is non-null here by construction:
+        // `guard_initializer` is only true for the one caller that reads a body
+        if (guard != nullptr && scope != nullptr) {
+            scope->children.push_back(AST::make_ref(*guard));
+        }
+
+        return vardecl;
+    }
 
     // parse the expression
     auto expr = parse_expr(payload, vardecl->optional_type_node());

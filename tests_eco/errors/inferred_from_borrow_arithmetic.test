@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  inferred_from_borrow_arithmetic.eco:16:1
+
+  Invalid type conversion: cannot implicitly convert 'int32' to 'int32&'
+
+  15 | 
+  16 | $x = $a->at(1) + 1;
+     : ^^
+  17 | 
+
+1 error, nothing was compiled.

@@ -341,11 +341,18 @@ void RecursiveVisitor::visit_guard(GuardNode &node)
     // never sees the initializer at all. that was two silent bugs before this walk was shared
     statement_edge(node.decl);
 
+    // the `has_value()` call, in the position it is evaluated: before the branch, so before both arms.
+    // a value edge, because it is read as a bool
+    value_edge(node.presence_test);
+
     // the copy the binding is given, when the payload needed one. a value edge: it produces the value the
     // binding is initialized from, and every pass that rewrites one - the adjuster's deref, the checker's
     // cast - has to reach it exactly as it reaches an initializer
     value_edge(node.bound_value);
 
+    // **one edge for the else arm and not two.** the `failure` declaration is that scope's own first
+    // child, so walking the scope walks it - descending into it here as well would visit it twice, and a
+    // rewriter that inserts a deref per visit would insert two
     statement_edge(node.else_scope);
 }
 

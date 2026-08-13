@@ -186,11 +186,14 @@ struct holder
     echo $p->count();
     echo $p[1];
 
-    // **bound to a name, not echoed directly.** a borrow-returning call hands back a `B&`, and reading
-    // one in a value position is refused - `echo $p->first()` is "cannot echo an address of type
-    // 'int32&'". binding it to a `B&` is the spelling, and writing through it reaches the buffer
+    // **both spellings, and the difference between them is the destination.** a borrow-returning call
+    // hands back a `B&`: bound to a `B&` it stays the address, so writing through it reaches the
+    // buffer, and read in a value position AST::read_reaches_storage puts a deref over it and the
+    // value is copied out. this used to be one spelling, the read being refused outright
     int32& $slot = $p->first();
     echo $slot;
+
+    echo $p->first();
 
     $slot = 11;
     echo $p[0];

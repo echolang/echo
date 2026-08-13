@@ -1,0 +1,24 @@
+// **`guard` is not an expression and must not become one.** it is a statement whose shape happens to
+// be a declaration, and the whole reason its else arm may hold a bare `return` is that the arm can
+// never produce a value - AST::scope_always_exits refuses one that rejoins. an expression form would
+// make `return 42;` inside the arm read two ways at once
+//
+// so the old statement head is now a located refusal that says where the name goes, and a `guard` in a
+// value position says that it has none. neither mints a node
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+function inside_a_call(int32 $n) : int32
+{
+    // a value position
+    return halve(guard halve($n) else { return -1; });
+}
+
+echo inside_a_call(10);

@@ -212,11 +212,16 @@ AST::ScopeNode & Parser::parse_scope(
         else if (cursor.is_type(Token::Type::t_if)) {
             scope_node.children.push_back(AST::make_ref(parse_ifstatement(payload)));
         }
-        // `guard T $x = <nullable> else { ... }`. ahead of the declaration branch below rather than part
-        // of it: `guard` is a statement whose *shape* contains a declaration, and starts_vardecl scans a
-        // type at the statement head - which `guard` is not
+        // **`guard` is no longer a statement head**, it is an initializer form on an ordinary
+        // declaration - `T $x = guard <nullable> else { ... }`. so this arm reports and recovers rather
+        // than parsing: the declaration branch below claims the new spelling through starts_vardecl,
+        // and a `guard` reaching the head of a statement can only be the old one
         else if (cursor.is_type(Token::Type::t_guard)) {
-            scope_node.children.push_back(AST::make_ref(parse_guard(payload, &scope_node)));
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(cursor.current()),
+                "'guard' introduces a declaration's initializer, so the name it binds goes on the left "
+                "of the '=' - write 'T $x = guard <value> else { ... }'");
+            cursor.try_skip_to_next_statement();
         }
         else if (cursor.is_type(Token::Type::t_while)) {
             scope_node.children.push_back(AST::make_ref(parse_whilestatement(payload)));
@@ -286,7 +291,10 @@ AST::ScopeNode & Parser::parse_scope(
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
         ) {
-            AST::VarDeclNode *var = parse_varexpr(payload, &scope_node);
+            // **the one walk that permits a `= guard` initializer.** the four other callers of
+            // parse_varexpr read a declaration where no block may follow - a parameter list, a struct
+            // body, a `for` header's init and its step - and a guard statement ends in one
+            AST::VarDeclNode *var = parse_varexpr(payload, &scope_node, true);
 
             // **`static` says which type owns storage, and a body has no type to own it.** a local's
             // storage is its frame's, which is the one thing the modifier would be denying - refused
@@ -308,10 +316,6 @@ AST::ScopeNode & Parser::parse_scope(
             }
         }
 
-        // a chain rooted in a **constant** rather than in a name or a call. one expression parse,
-        // because the root and everything after it is what parse_expr already reads - and then the
-        // same tail the call-rooted branch below uses, which is what makes `stdout->write($t);` and
-        // `first(&$o)->bump(1);` one statement form with two roots
         // a statement rooted in a **static property**: `Session::$count = 1;`, `Type::$p->x = 2;`.
         // ahead of the two branches below because both are anchored on an identifier and would consume
         // the prefix as a namespace, leaving a `$name` neither of them accepts
@@ -332,6 +336,10 @@ AST::ScopeNode & Parser::parse_scope(
             }
         }
 
+        // a chain rooted in a **constant** rather than in a name or a call. one expression parse,
+        // because the root and everything after it is what parse_expr already reads - and then the
+        // same tail the call-rooted branch below uses, which is what makes `stdout->write($t);` and
+        // `first(&$o)->bump(1);` one statement form with two roots
         else if (starts_constant_chain_statement(payload)) {
             if (auto *root = parse_expr(payload, nullptr)) {
                 finish_place_statement(payload, scope_node, root);

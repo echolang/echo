@@ -1,0 +1,51 @@
+// **`IterationSource::t_erased_iterator`, actually running.** the arm was written when the loop lowering
+// was built and documented as costing nothing to permit - which was true of the lowering, and the reason
+// nothing noticed that one layer down it could not dispatch at all.
+//
+// `AST::interface_method_slot` matches a requirement by pointer identity against
+// `AST::interface_requirements`, which answers through `template_or_self()` and so always hands back the
+// *template's* declarations. a call reaching a **generic** interface holds an *instance* of the
+// requirement instead - the monomorphizer makes one per application, `advance<V = int32>` - so the two
+// could never match and the dispatch site threw. erasing to a non-generic interface has no instantiation
+// step, which is why `tests_eco/interfaces/interface_value.eco` always worked and this did not.
+//
+// the fix is one redirect in the slot lookup, taking the same `template_ref` the list already takes.
+
+class Counter : contract::iterator<int32>
+{
+    int32 $at;
+
+    public function advance() : bool
+    {
+        $this->at = $this->at + 1;
+
+        if ($this->at < 4) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public function current() : int32&
+    {
+        return &$this->at;
+    }
+}
+
+// the cursor arrives **erased**, so both `advance()` and `current()` go through the vtable and neither
+// call site knows what a `Counter` is
+function total(contract::iterator<int32> $it) : int32
+{
+    int32 $sum = 0;
+
+    foreach ($it as $v) {
+        $sum = $sum + $v;
+    }
+
+    return $sum;
+}
+
+echo total(Counter(0));
+
+// and again, so the table is reached twice rather than only on the miss that builds it
+echo total(Counter(1));

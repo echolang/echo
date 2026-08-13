@@ -1,0 +1,50 @@
+// **a `guard` whose subject arrives erased behind `contract::unwrappable<V>`.**
+//
+// this needs no arm anywhere: AST::GuardLowering mints `has_value()` and `unwrap()` **unresolved with a
+// null lookup_namespace**, so CallResolver reads the receiver's type off argument 0 -
+// `find_member_functions` then finds the *requirement* in the interface's own `_methods` list, exactly
+// where an implementation would be, and ExprCodegen::gen_function_call routes on
+// FunctionDeclNode::is_interface_requirement(). AST::UnwrapSource has one protocol kind and not two for
+// that reason: whether the two calls dispatch directly or through a vtable is codegen's question.
+//
+// it was blocked on the same slot-lookup bug `tests_eco/iteration/erased_iterator` describes, which
+// predates the unwrapping protocol by the whole of the loop lowering.
+
+class Cell : contract::unwrappable<int32>
+{
+    int32 $v;
+    bool $ok;
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->v;
+    }
+}
+
+// the subject is erased, so nothing in this function knows what a `Cell` is
+function report(contract::unwrappable<int32> $any) : int32
+{
+    $n = guard $any else { return -1; }
+
+    return $n;
+}
+
+echo report(Cell(7, true));
+echo report(Cell(0, false));
+
+// and the same value guarded twice, so the hoisted subject is a fresh declaration each time
+function twice(contract::unwrappable<int32> $any) : int32
+{
+    $a = guard $any else { return -2; }
+    $b = guard $any else { return -3; }
+
+    return $a + $b;
+}
+
+echo twice(Cell(5, true));
+echo twice(Cell(0, false));

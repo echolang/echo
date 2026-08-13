@@ -73,6 +73,15 @@ public:
     // build_function_maps has already finished
     void drain_pending_definitions();
 
+    // **`main`'s body: the entry module's file roots, concatenated.** Which of them is the program is
+    // CodegenContext::file_is_entry's question, asked per file rather than ahead of the walk.
+    //
+    // **a test run has no program**, so it returns having emitted nothing rather than walking and
+    // narrowing to nothing: `main` keeps the prologue its caller emitted - a test may read
+    // `std::env::args()` - and ends there. The tests themselves are ordinary functions the declaration
+    // walk already emitted, and Compiler::TestRunner calls each by its own symbol
+    void emit_entry_file_roots(Compiler::LLVM::CmpUnit &main_cmp_unit);
+
     void visitScope(AST::ScopeNode &node);
     void visitType(AST::TypeNode &node);
     void visitTypeCast(AST::TypeCastNode &node);

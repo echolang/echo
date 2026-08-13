@@ -275,3 +275,78 @@ TEST_CASE("a generic application is a legal constraint atom", "[conformance]")
     // the spelling is the rendered type, since an applied atom has no single token to quote
     REQUIRE(param->constraint_spelling == "Sized<int32>");
 }
+
+TEST_CASE("a requirement's vtable slot survives instantiation", "[conformance]")
+{
+    // **the slot lookup and the list it searches have to take the same redirect.**
+    // AST::interface_requirements answers through `template_or_self()`, so its entries are always the
+    // *template's* declarations - while a call site reaching a **generic** interface holds an instance of
+    // the requirement, the monomorphizer making one per application. matching those by pointer identity
+    // could never succeed, and the miss was not a wrong slot but an InternalCompilerException at the
+    // dispatch site: `foreach` over an erased `contract::iterator<V>` took the compiler down, which is why
+    // that arm had never actually run.
+    //
+    // a non-generic interface has no instantiation step, which is the whole of why erasing to a plain
+    // `Drawable` always worked - so both shapes are asserted here, not only the one that was broken
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "interface Plain\n"
+        "{\n"
+        "    function ping() : int32;\n"
+        "    function pong() : int32;\n"
+        "}\n"
+        "interface Boxed<T>\n"
+        "{\n"
+        "    function first() : T;\n"
+        "    function second() : T;\n"
+        "}\n"
+        "class Both : Plain, Boxed<int32>\n"
+        "{\n"
+        "    int32 $v;\n"
+        "    public function ping() : int32 { return 1; }\n"
+        "    public function pong() : int32 { return 2; }\n"
+        "    public function first() : int32 { return 3; }\n"
+        "    public function second() : int32 { return 4; }\n"
+        "}\n"
+        "function take_plain(Plain $p) : int32 { return $p->pong(); }\n"
+        "function take_boxed(Boxed<int32> $b) : int32 { return $b->second(); }\n"
+        "echo take_plain(Both(0));\n"
+        "echo take_boxed(Both(0));\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+
+    AST::TypeDeclNode *plain = EchoTests::type_named(module, "Plain");
+    AST::TypeDeclNode *boxed = EchoTests::type_named(module, "Boxed");
+
+    REQUIRE(plain != nullptr);
+    REQUIRE(boxed != nullptr);
+
+    // **every declaration a call could be carrying resolves to a slot**, including the instantiated
+    // requirements the monomorphizer minted for `Boxed<int32>` - which are not the template's pointers
+    size_t checked = 0;
+
+    for (auto *decl : module.nodes.of_type<AST::FunctionDeclNode>()) {
+        if (decl->owner_type == nullptr || !decl->owner_type->is_interface_kind()) {
+            continue;
+        }
+
+        const std::optional<size_t> slot =
+            AST::interface_method_slot(decl->owner_type, decl);
+
+        REQUIRE(slot.has_value());
+        REQUIRE(slot.value() < 2);
+        checked++;
+    }
+
+    // the four requirements plus whatever instances were minted for the generic one; if this ever drops
+    // to the two non-generic ones the case has stopped covering what it is named for
+    REQUIRE(checked >= 4);
+
+    // and the second requirement of each really is slot 1 - the order is declaration order, which is what
+    // Compiler::LLVM::TypeLowering builds the table in
+    const std::vector<AST::FunctionDeclNode *> &plain_reqs =
+        AST::interface_requirements(&plain->complex_type());
+
+    REQUIRE(plain_reqs.size() == 2);
+    REQUIRE(AST::interface_method_slot(&plain->complex_type(), plain_reqs[1]).value() == 1);
+}

@@ -34,7 +34,7 @@ function balanced() : void
 
     // and `guard`, whose binding is a declared local - so it owns the upgrade for its scope, and the
     // count is legitimately one higher *inside* it
-    guard Res $up = $w else { return; }
+    Res $up = guard $w else { return; }
     echo mem::ref_count($r);
 }
 

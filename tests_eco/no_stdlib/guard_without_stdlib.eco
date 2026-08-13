@@ -1,0 +1,29 @@
+// **a `T?` still guards with no standard library at all**, and that is the whole reason
+// AST::unwrap_plan_for asks `subject.is_nullable()` as its *first* arm - ahead of the unbound-core check
+// that AST::iteration_plan_for puts first.
+//
+// the two are the opposite way round on purpose. `foreach` has no meaning without the iteration
+// protocol, so a missing `#[core: iterator]` has to be a located refusal. `guard` had a meaning before
+// the unwrapping protocol existed and keeps it: a nullable's payload is a property of the type, needs
+// nobody's conformance, and is decided in the parser.
+//
+// it is also what keeps `stdlib/core/contract.eco` compilable - it is parsed by the very compiler that
+// would otherwise be asking about the interfaces it is in the middle of reading.
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+function unwrap(int32 $n) : int32
+{
+    $v = guard halve($n) else { return -1; }
+    return $v;
+}
+
+echo unwrap(10);
+echo unwrap(-1);

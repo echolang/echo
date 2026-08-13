@@ -54,6 +54,42 @@ namespace AST
         // cannot live on `decl->init_expr`, because that edge is also the value being tested
         ExprNode *bound_value = nullptr;
 
+        // **the presence question, when the type answers it rather than the machine.**
+        //
+        // null is the common case and the whole no-regression story: a `T?` is tested with one
+        // extractvalue or one null compare, which is TypeLowering::gen_has_value, and nothing about that
+        // path moves.
+        //
+        // non-null for a subject declaring `contract::unwrappable<V>`: it is the `has_value()` call
+        // AST::GuardLowering minted, and it is the value codegen branches on. **`decl->init_expr` is
+        // then null** - there is no optional left to evaluate, the subject having been hoisted into an
+        // ordinary declaration ahead of this statement - and what the binding is given hangs off
+        // `bound_value`, which is the same edge a tagged optional read out of a place already uses.
+        //
+        // the invariant, stated once: **exactly one of `decl->init_expr` and `presence_test` is the
+        // value evaluated before the branch, and it is evaluated exactly once**
+        ExprNode *presence_test = nullptr;
+
+        // `else ($e)` - the reason the subject was not holding a value, when it declares
+        // `contract::failable<E>`.
+        //
+        // **not an owned edge.** the declaration is `else_scope->children[0]`, seeded there by the
+        // parser exactly as a `foreach`'s bindings are, so it is the else arm's own local and the
+        // ordinary frame machinery ends it - no ownership rule, no codegen and no drop rule. this
+        // pointer is the cross-reference AST::GuardLowering fills the initializer of, which is why
+        // `clone` rebinds it rather than cloning it
+        VarDeclNode *failure = nullptr;
+
+        // **has the fixpoint answered how this is unwrapped?** true straight from the parser for a `T?`,
+        // whose payload is a property of the type and needs nobody's conformance.
+        //
+        // false is what makes `OwnershipPass::body_is_concrete` answer false for the body holding it, and
+        // that arm is load-bearing: this pass walks a body exactly once, ever, so a walk taken before
+        // the plan landed would resolve the arrival of a value about to be replaced by an `unwrap()`
+        // read - permanently, and with nothing reporting it. the same shape
+        // `IndexExprNode::resolution_decided` and `ArrayLiteralExprNode::expansion_decided` already own
+        bool plan_decided = false;
+
         // the `guard` keyword, for the diagnostics that are about the form rather than about its parts
         TokenReference token;
 
@@ -65,11 +101,22 @@ namespace AST
 
         ~GuardNode() {}
 
+        // **the existing text is byte for byte what it was**, and the new clauses append only when the
+        // new edges are non-null - which is what keeps four RAST goldens intact across a syntax change
+        // and a protocol. a `T?` guard renders exactly as it always did
         const std::string node_description() override {
             std::string desc = "guard " + (decl != nullptr ? decl->node_description() : "<none>");
 
+            if (presence_test != nullptr) {
+                desc += " if " + presence_test->node_description();
+            }
+
             if (bound_value != nullptr) {
                 desc += " bound " + bound_value->node_description();
+            }
+
+            if (failure != nullptr) {
+                desc += " failure " + failure->node_description();
             }
 
             desc += " else\n";

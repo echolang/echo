@@ -80,6 +80,19 @@ namespace AST
         // iterator that does not declare it simply has no keys, which is a refusal at the `=>` and not a hole
         t_keyed,
 
+        // `interface contract::unwrappable<V>` - what makes `guard` read a type of the author's own. the
+        // unwrapping protocol is to `guard` what the iteration one is to `foreach`, with one asymmetry
+        // that matters: a `T?` is answered by the *compiler*, ahead of this binding being consulted at
+        // all, so a program that guards a nullable still compiles with `--no-stdlib`. only a subject
+        // that is not already nullable needs a conformance, and that is what this names
+        t_unwrappable,
+
+        // `interface contract::failable<E>` - the orthogonal capability that makes `else ($e)` spellable,
+        // and it is `t_keyed`'s shape exactly: a subject that does not declare one simply has no reason
+        // to bind, which is a refusal at the `$e` and not a hole. so a `T?` - which records that a value
+        // is absent and nothing about why - needs no arm anywhere to be refused one
+        t_failable,
+
         // `struct variadic_args` - the C variadic bridge, and a marker rather than a type with a
         // shape: it is legal only as the *last parameter of an extern declaration*, and the only
         // thing that may arrive at one is a list written at the call site.

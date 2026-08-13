@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] guard_in_a_for_header.eco:19:17
+
+  'guard' is not an expression - it is how a declaration's initializer is written, so it may only follow the '=' of a declaration. Write 'T $x = guard <value> else { ... }' above this statement and read '$x' here.
+
+  18 | 
+  19 | for (int32 $i = guard halve(10) else { break; }; $i < 10; $i++) {
+     :                 ^^^^^
+  20 |     echo $i;
+
+[error] guard_in_a_for_header.eco:19:47
+
+  this expression could not be read as a single value.
+
+  18 | 
+  19 | for (int32 $i = guard halve(10) else { break; }; $i < 10; $i++) {
+     :                                               ^
+  20 |     echo $i;
+
+2 errors, nothing was compiled.

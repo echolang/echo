@@ -1,0 +1,39 @@
+// **the declaration pass and the body pass have to consume the same tokens**, and when they do not the
+// failure is silent: the rest of the file is simply never parsed, with a clean exit status.
+//
+// moving `guard` from the head of a statement to the right of a declaration's `=` is exactly the kind
+// of change that can break that. the declaration pass has no vardecl arm at all - it skips token by
+// token until a `{`, which its own brace arm then claims - so both spellings skip the same tokens in a
+// different order and claim the same brace. this case is what turns that argument into a test
+//
+// the guard sits at the **file root**, and a `function` declaration follows it. if the two walks
+// diverge over the else arm's braces, that declaration is never collected and the call below it is an
+// unknown function
+
+function halve(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n / 2;
+}
+
+int32 $first = guard halve(20) else { die('unreachable'); }
+
+echo $first;
+
+// **declared after the guard, called after it.** the declaration pass has to have seen this while the
+// body pass was still inside the else arm's braces
+function afterwards(int32 $n) : int32
+{
+    return $n * 2;
+}
+
+echo afterwards($first);
+
+// and a second guard, so the walk has to survive doing it twice
+$second = guard halve($first) else { die('unreachable'); }
+
+echo $second;
+echo afterwards($second);

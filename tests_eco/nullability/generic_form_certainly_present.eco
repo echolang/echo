@@ -9,7 +9,7 @@
 
 function firstOr<T>(T $maybe, T $fallback) : T
 {
-    guard T $v = $maybe else { return $fallback; }
+    T $v = guard $maybe else { return $fallback; }
     return $v;
 }
 
