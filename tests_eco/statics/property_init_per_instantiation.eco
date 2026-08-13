@@ -1,0 +1,21 @@
+// **each instantiation clones the initializer; it is not shared.** the declaration lives on the
+// template, so `Box<int32>` and `Box<bool>` reach one written expression between them - and consuming
+// it would leave every instantiation after the first seated with nothing at all. silently: the
+// storage is zero-initialized, so it reads as a plausible value rather than as a missing one
+function pick() : int32 {
+    return 4;
+}
+
+struct Box<T> {
+    static int32 $made = pick();
+    public T $v;
+}
+
+echo Box<int32>::$made;
+echo Box<bool>::$made;
+
+Box<int32>::$made = 11;
+
+// still its own storage, and still initialized independently
+echo Box<int32>::$made;
+echo Box<bool>::$made;

@@ -252,7 +252,7 @@ void AccessPass::report_conflict(
         "a value cannot be both written and read by one call - read the source into a separate "
         "value first";
 
-    if (owner == 0 && node.decl->is_member() && owner_param->has_type()) {
+    if (owner == 0 && node.decl->has_receiver() && owner_param->has_type()) {
         remedy = fmt::format(
             "a value cannot be both written and read by one call. copy the source first, or use an "
             "operation of '{}' that names the part of the receiver to read instead of taking a "

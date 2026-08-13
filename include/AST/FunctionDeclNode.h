@@ -51,6 +51,25 @@ namespace AST
         // what a pass reads to tell one apart when it already has the declaration in hand, and the
         // switches it makes total are the reason a pass cannot meet one without having said so
         t_test,
+
+        // declared `static function make(int32 $v) : Box`. a function its type owns and that takes no
+        // receiver - so it is the one kind for which `owner_type` is set and `args[0]` is *not* `$this`.
+        // read has_receiver(), never is_member(), anywhere that offset matters.
+        //
+        // **this is why it does not follow the constructor's null owner_type**, which is the other
+        // "owned by a type, no $this" shape:
+        //
+        //  - a constructor is in FunctionRegistry::_by_name under its struct's name. a static is in no
+        //    namespace overload set at all, so owner_type is the *only* thing separating `result::ok`
+        //    from `option::ok` in AST::mangle_function_name
+        //  - AST::enclosing_type_of recovers a constructor's owner from its return type. a static's
+        //    return type is not its owner - `result<T, E>::describe() : string` - so without the field
+        //    a static could not reach its own type's private members
+        //
+        // the owner is also what a *call* to one has to carry, and for a reason a method never has:
+        // AST::can_instantiate binds an owner's type parameters by unifying `args[0]` against the
+        // receiver, and `result<T, E>::ok(T $v)` mentions E nowhere. See FunctionCallExprNode::static_owner
+        t_static_method,
     };
 
     class FunctionDeclNode : public Node
@@ -113,6 +132,10 @@ namespace AST
             return member_kind == MemberKind::t_test;
         }
 
+        inline bool is_static_method() const {
+            return member_kind == MemberKind::t_static_method;
+        }
+
         // **the symbol an operator declaration was written with**, recovered from its decorated name.
         //
         // an operator's name token holds `AST::operator_function_name`'s answer - "operator +",
@@ -140,6 +163,22 @@ namespace AST
 
         inline bool is_member() const {
             return owner_type != nullptr;
+        }
+
+        // **is `args[0]` a receiver?** - which is a different question from is_member() ever since a
+        // static method existed, and the one every offset must be taken against.
+        //
+        // is_member() answers "does a type own this declaration", which is what the mangler and the
+        // owner's type-parameter prefix want. this answers "did the caller not write args[0]", which is
+        // what an argument index, a const-receiver rule and a drop want. they were the same predicate
+        // while every owned declaration had a `$this`, and the five sites that read it for the second
+        // meaning are the ones a static silently breaks: an off-by-one there is a lost drop, a skipped
+        // implicit cast, or a `const function` in a golden nobody wrote
+        //
+        // deliberately not folded into implicit_arg_count(), which counts a closure's environment too -
+        // see the note at AST::access_effect_of, whose receiver rule must not fire for one
+        inline bool has_receiver() const {
+            return owner_type != nullptr && member_kind != MemberKind::t_static_method;
         }
 
         // **who may call this**, and where it was written to answer that against.
@@ -179,7 +218,7 @@ namespace AST
         // environment. never both, since a closure is not a member - spelled as a count rather than a
         // bool because every consumer wants to offset an index by it
         inline size_t implicit_arg_count() const {
-            return (is_member() || is_closure) ? 1 : 0;
+            return (has_receiver() || is_closure) ? 1 : 0;
         }
 
         // the callable type a value of this function has. the environment parameter is *not* part of it:

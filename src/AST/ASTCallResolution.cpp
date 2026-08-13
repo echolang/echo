@@ -179,12 +179,34 @@ namespace AST
 
                 bind_null_to(call.arguments[i], expected);
 
+                // **the one destination a shorthand cannot reach at parse time**, which is why it is
+                // here rather than only in the expression parser: a parameter's type sits on a
+                // declaration nobody had chosen yet when the argument was read
+                //
+                // nothing is returned into `waiting_on_a_literal`: an unbound shorthand answers `void`
+                // from result_type(), so arguments_are_determined below already holds the call for it
+                bind_shorthand_to(call.arguments[i], expected);
+
                 if (bind_array_literal_to(call.arguments[i], expected, core)) {
                     waiting_on_a_literal = true;
                 }
             }
 
             return !waiting_on_a_literal;
+        }
+
+        // the first argument that is a shorthand nothing has named an owner for, or null. what a tie
+        // needs to know before it words itself: an argument with no type of its own is why the
+        // candidates could not be told apart, and it is not one a cast can fix
+        FunctionCallExprNode *first_unbound_shorthand_argument(const FunctionCallExprNode &call)
+        {
+            for (auto *arg : call.arguments) {
+                if (auto *shorthand = unbound_shorthand_call_of(arg)) {
+                    return shorthand;
+                }
+            }
+
+            return nullptr;
         }
 
         // true when every argument's type is known, so a decision made about them is final rather
@@ -224,6 +246,22 @@ namespace AST
 
     std::vector<FunctionDeclNode *> CallResolver::candidates_for(const FunctionCallExprNode &call) const
     {
+        // a **static** call: the type names the overload set. asked ahead of the namespace arm because
+        // `Type::f()` carries both a written owner and the namespace the parser was standing in, and
+        // the owner is the one that decides - falling through would let the registry's outward walk
+        // answer with a free `f` from an enclosing scope
+        if (call.static_owner.has_complex_type()) {
+            return find_static_functions(call.static_owner.get_complex_type(), call.token_function_name.value());
+        }
+
+        // a shorthand whose destination has not named an owner yet. empty rather than falling through
+        // to either arm below: `.ok(5)`'s arguments are not a receiver, and reading argument 0 as one
+        // is what reported "int32 has no member ok". CallResolver::settle turns an empty set into the
+        // retryable t_unknown_name, which is exactly the not-yet this is
+        if (call.is_shorthand_static_call()) {
+            return {};
+        }
+
         // a free call: the namespace it was written in, searched outward by the registry
         if (call.lookup_namespace != nullptr) {
             return _collector.functions.overloads(call.token_function_name.value(), *call.lookup_namespace);
@@ -284,7 +322,13 @@ namespace AST
                 // a candidate that may be discarded - so only `fit` is read. the blame fields are
                 // deliberately ignored: a constraint that rejects a template filters it out of the
                 // set, and reporting it here would turn an overload the user never meant into an error
-                const Instantiation inst = can_instantiate(candidate, argument_types, explicit_type_args);
+                //
+                // **the owner goes in here too, not only at the monomorphizer's ask.** a static
+                // overload set over a generic owner is scored against these substituted parameters,
+                // and without the seed every candidate is still holding a bare `T` - so they all
+                // rank undetermined and tie, and the call never resolves
+                const Instantiation inst =
+                    can_instantiate(candidate, argument_types, explicit_type_args, call.static_owner);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set
@@ -326,6 +370,28 @@ namespace AST
             // a caller waiting on *this* call is undecidable in turn rather than wrongly decided
             if (!report) {
                 return Result::t_pending;
+            }
+
+            // **an unbound shorthand argument is a different sentence**, and the remedy is why: the
+            // message below tells the reader to cast the argument, and a `.f(...)` has no type to cast
+            // *from*. the same shape as the t_no_viable arm below asking is_written_null before it
+            // words its own refusal
+            if (auto *shorthand = first_unbound_shorthand_argument(call)) {
+                _collector.collect_issue<Issue::AmbiguousShorthandCall>(
+                    at_token(at, shorthand->token_shorthand_dot),
+                    fmt::format(
+                        "The overload of '{}' cannot be chosen: '.{}(...)' has no type of its own, so "
+                        "nothing here separates these:{}",
+                        name, shorthand->token_function_name.value(), describe_candidates(match.tied)));
+
+                // **the shorthand is finished too, and saying so is what keeps this one diagnostic.**
+                // it is still unresolved, so the monomorphizer's finalizing sweep would reach it and
+                // report that nothing named its owner - true, and already the whole content of the
+                // sentence above. `t_failed` is terminal, which is exactly the "some round already
+                // reported this" that sweep skips on
+                shorthand->settlement = CallSettlement::t_failed;
+
+                return Result::t_failed;
             }
 
             _collector.collect_issue<Issue::AmbiguousCall>(at, fmt::format(

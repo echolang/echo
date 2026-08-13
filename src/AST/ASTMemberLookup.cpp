@@ -1,5 +1,6 @@
 #include "AST/ASTMemberLookup.h"
 
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTModule.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -36,6 +37,100 @@ std::vector<AST::FunctionDeclNode *> AST::find_member_functions(const AST::Compl
     }
 
     return candidates;
+}
+
+std::vector<AST::FunctionDeclNode *> AST::find_static_functions(const AST::ComplexType *ct, const std::string &name)
+{
+    std::vector<AST::FunctionDeclNode *> candidates;
+
+    const AST::ComplexType *owner = member_owner_of(ct);
+
+    if (owner == nullptr) {
+        return candidates;
+    }
+
+    // deliberately not asking what *kind* `owner` is. a lookup is a retrieval, and whether a `static`
+    // may be declared on a given kind was already answered where it was written - which is what will
+    // let an enum's case constructors be read out of this list with nothing here to change
+    for (auto *fn : owner->static_methods()) {
+        if (fn->name_token.has_value() && fn->name_token.value().value() == name) {
+            candidates.push_back(fn);
+        }
+    }
+
+    return candidates;
+}
+
+bool AST::destination_names_a_static_owner(const AST::ValueType &destination)
+{
+    return static_owner_of_destination(destination).has_complex_type();
+}
+
+AST::ValueType AST::static_owner_of_destination(const AST::ValueType &destination)
+{
+    // the borrow peel is AST::parameter_auto_borrows', the one predicate that owns "does this
+    // parameter position take an address", and the nullable one follows it: what a `result<T, E>& $r`
+    // parameter receives is a `result<T, E>` the caller materialises, and what a `result<T, E>? $r`
+    // receives is the payload's - the optional's own wrapper declares nothing.
+    //
+    // deliberately not AST::implicit_conversion_target, which is those same peels plus a make_mutable:
+    // this answer is a call's `static_owner` rather than a comparison, so the const it was written
+    // with is part of the type it names
+    ValueType wanted = destination;
+
+    if (parameter_auto_borrows(wanted)) {
+        wanted = wanted.pointee();
+    }
+
+    if (wanted.is_nullable()) {
+        wanted = ValueType::make_non_nullable(wanted);
+    }
+
+    // a type parameter, a `void`, an `unknown` - nothing has said what this is yet, and answering
+    // "no owner" for one would turn a not-yet into a refusal
+    if (!wanted.has_complex_type()) {
+        return ValueType::make_unknown();
+    }
+
+    return wanted;
+}
+
+AST::FunctionCallExprNode *AST::unbound_shorthand_call_of(AST::ExprNode *expr)
+{
+    if (expr == nullptr || expr->get_node_type() != AST::NodeType::n_expr_call) {
+        return nullptr;
+    }
+
+    auto *call = static_cast<AST::FunctionCallExprNode *>(expr);
+
+    if (!call->is_shorthand_static_call() || call->static_owner.has_complex_type()) {
+        return nullptr;
+    }
+
+    return call;
+}
+
+bool AST::bind_shorthand_to(AST::ExprNode *expr, const AST::ValueType &destination)
+{
+    auto *call = unbound_shorthand_call_of(expr);
+
+    if (call == nullptr) {
+        return false;
+    }
+
+    const ValueType owner = static_owner_of_destination(destination);
+
+    if (!owner.has_complex_type()) {
+        return false;
+    }
+
+    call->static_owner = owner;
+
+    // back to unresolved so the next round looks the name up against the owner it now has. the earlier
+    // rounds answered t_unknown_name, which settle() deliberately leaves non-terminal for exactly this
+    call->settlement = CallSettlement::t_unresolved;
+
+    return true;
 }
 
 AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from, const AST::ValueType &to)

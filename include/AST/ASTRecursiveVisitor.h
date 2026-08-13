@@ -49,6 +49,7 @@ namespace AST
         void visitLiteralBoolExpr(LiteralBoolExprNode &node) override;
         void visitLiteralStringExpr(LiteralStringExprNode &node) override;
         void visit_string_interpolation(StringInterpolationExprNode &node) override;
+        void visit_static_property(StaticPropertyExprNode &node) override;
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_addr_of_expr(AddrOfExprNode &node) override;
         void visit_deref_expr(DerefExprNode &node) override;

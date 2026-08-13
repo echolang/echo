@@ -4,6 +4,7 @@
 
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
+#include "AST/VarDeclNode.h"
 #include "External/infint.h"
 
 #include <cassert>
@@ -631,6 +632,21 @@ void AST::ComplexType::add_associated_type(TypeParamDecl *decl)
     decl->ordinal = type_parameters.size() + _associated_types.size();
 
     _associated_types.push_back(decl);
+}
+
+std::optional<std::pair<size_t, AST::VarDeclNode *>> AST::ComplexType::find_static_property(
+    const std::string &name
+) const
+{
+    // a linear walk rather than a name map, as the method lookups beside it are: a type declares a
+    // handful of these at most, and the index has to come back with the declaration anyway
+    for (size_t i = 0; i < _static_properties.size(); i++) {
+        if (_static_properties[i]->name_full() == name) {
+            return std::make_pair(i, _static_properties[i]);
+        }
+    }
+
+    return std::nullopt;
 }
 
 AST::TypeParamDecl *AST::ComplexType::find_associated_type(const std::string &name) const

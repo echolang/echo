@@ -1,0 +1,28 @@
+// a `static function` is a function its type owns and that takes no receiver, called by naming the
+// type. it is an ordinary FunctionDeclNode in every other respect - the owner in the mangled name, a
+// body, a return type - which is why nothing downstream of the parser has an arm for one
+struct Point {
+    public float64 $x;
+    public float64 $y;
+
+    static function origin() : Point {
+        return Point(0.0, 0.0);
+    }
+
+    static function square(float64 $v) : Point {
+        return Point($v, $v);
+    }
+
+    // a static and a method of one name are two declarations, told apart at every call site - so they
+    // do not collide, and each is reached only by the syntax that names it
+    function square() : float64 {
+        return $this->x * $this->y;
+    }
+}
+
+$o = Point::origin();
+echo $o->x;
+
+$s = Point::square(3.0);
+echo $s->y;
+echo $s->square();

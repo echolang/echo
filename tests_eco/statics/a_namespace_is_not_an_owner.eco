@@ -1,0 +1,21 @@
+// the static-call arm is tried ahead of the namespace walk, so every qualified free call in the
+// language passes through it first. it must hand them back untouched *and silently*: the owner is
+// resolved by a symbol lookup before Parser::parse_type is ever called, because parse_type reports an
+// unresolved qualified name - and `std::math` is not a type, which is not an error
+float64 $root = std::math::sqrt(16.0);
+echo $root;
+
+namespace app;
+
+struct Session {
+    public int32 $id;
+
+    static function first() : Session {
+        return Session(1);
+    }
+}
+
+// a type inside a namespace: the *last* `::` splits, so the owner is `app::Session` rather than a
+// namespace of that name
+$s = app::Session::first();
+echo $s->id;

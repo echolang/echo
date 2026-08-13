@@ -1,0 +1,13 @@
+// a shorthand takes its type from where its value goes, so a position that says nothing leaves it
+// with nothing. reported at the `.`, which is where the missing information is - the name is not the
+// mistake, and pointing at it sends a reader hunting for a typo
+struct Point {
+    public float64 $x;
+
+    static function origin() : Point {
+        return Point(0.0);
+    }
+}
+
+$x = .origin();
+echo $x->x;

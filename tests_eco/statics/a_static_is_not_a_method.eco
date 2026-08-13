@@ -1,0 +1,15 @@
+// a static is in neither the namespace overload set nor the method table, so neither spelling that
+// reaches those can find one: a bare `origin()` is an unknown function, and `$p->origin()` is an
+// unknown member. that is what keeps `Type::f()` the only way to say it
+struct Point {
+    public float64 $x;
+
+    static function origin() : Point {
+        return Point(0.0);
+    }
+}
+
+$p = Point::origin();
+echo $p->x;
+
+$q = $p->origin();

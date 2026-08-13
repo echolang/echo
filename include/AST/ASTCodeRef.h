@@ -5,6 +5,7 @@
 
 #include "AST/ASTModule.h"
 
+#include <optional>
 #include <tuple>
 
 namespace AST
@@ -42,6 +43,18 @@ namespace AST
             return token_slice.startt().char_offset == token_slice.endt().char_offset;
         }
     };
+
+    // **the same place in the source, at a different token.** a CodeRef is a module, a file and a token
+    // range, so moving a diagnostic to a token the caller already holds is rebasing the range onto the
+    // one it was handed - there is nothing else in it to get wrong.
+    //
+    // it lives beside CodeRef rather than once per pass because the token is routinely optional: a
+    // diagnostic that would rather point at the `.` a shorthand was written with still has to be
+    // reportable when nothing recorded one, and every caller's fallback is the ref it started from
+    inline CodeRef at_token(const CodeRef &at, const std::optional<TokenReference> &token)
+    {
+        return CodeRef { at.module, at.file, token.has_value() ? token.value().make_slice() : at.token_slice };
+    }
 };
 
 #endif

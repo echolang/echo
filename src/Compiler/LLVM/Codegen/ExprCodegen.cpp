@@ -1,5 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 
+#include "AST/StaticPropertyExprNode.h"
+
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
@@ -91,6 +93,11 @@ void ExprCodegen::gen_var_ref(AST::VarRefNode &node)
     // DerefExprNode above it, put there by the pointer adjustment pass. so a bare pointer
     // variable here means the pointer itself was asked for - which is what `$p:$` compiles to
     _ctx.value_stack.push(_ctx.lvalues->gen_load(node, node.is_var() ? node.get_var().decl().name().c_str() : "load"));
+}
+
+void ExprCodegen::gen_static_property(AST::StaticPropertyExprNode &node)
+{
+    _ctx.value_stack.push(_ctx.lvalues->gen_load(node, node.token_name.value().c_str()));
 }
 
 void ExprCodegen::gen_literal_float(AST::LiteralFloatExprNode &node)

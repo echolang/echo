@@ -1,0 +1,24 @@
+// a `static` property is storage the *type* owns rather than storage each value carries: one global
+// per (type, property), so every value of the type reads and writes the same one. it is deliberately
+// not in ComplexType's layout at all - no offset, no index, no part in a field-wise constructor
+struct Session {
+    static int32 $count = 0;
+    public int32 $id;
+
+    static function open() : Session {
+        Session::$count = Session::$count + 1;
+        return Session(Session::$count);
+    }
+
+    static function active() : int32 {
+        return Session::$count;
+    }
+}
+
+$a = Session::open();
+$b = Session::open();
+
+echo $a->id;
+echo $b->id;
+echo Session::active();
+echo Session::$count;

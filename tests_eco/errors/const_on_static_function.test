@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] ConstOnStaticFunction  const_on_static_function.eco:7:5
+
+  'origin' is static, so it has no receiver for 'const' to qualify
+
+  6 | 
+  7 |     const static function origin() : Point {
+    :     ^^^^^
+  8 |         return Point(0);
+
+  help: 'const function' says the method only reads the value it was called on. a static is called on the type and never on a value, so write 'const' on the parameters that are read-only instead
+
+1 error, nothing was compiled.

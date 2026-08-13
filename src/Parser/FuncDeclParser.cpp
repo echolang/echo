@@ -185,11 +185,22 @@ bool Parser::parse_parameter_list(
 
 bool Parser::starts_funcdecl(Parser::Cursor &cursor)
 {
-    // the member modifier prefix, currently one keyword long. it is *optional* here rather than a
+    // the member modifier prefix, one keyword of each kind. it is *optional* here rather than a
     // second predicate so a struct body has one arm for "this is a method" however it was written -
     // and so `const` at the head of a property declaration, which reaches the same loop, is told
     // apart by the `function` behind it rather than by an ordering the two arms have to agree on
-    const size_t offset = cursor.is_type(Token::Type::t_const) ? 1 : 0;
+    //
+    // the prefix is *walked* rather than enumerated, which is what keeps this predicate and the loop
+    // in parse_funcdecl that consumes it accepting the same token runs. both orders reach here even
+    // though `const static` is refused there, and deliberately: a predicate that did not recognise it
+    // would send the declaration to the *property* scanner, and the refusal a reader gets would be
+    // about a type name rather than about the two modifiers they wrote
+    size_t offset = 0;
+
+    while (cursor.peek_is_type(offset, Token::Type::t_static)
+        || cursor.peek_is_type(offset, Token::Type::t_const)) {
+        offset++;
+    }
 
     return cursor.is_type_sequence(offset, { Token::Type::t_function, Token::Type::t_identifier });
 }
@@ -617,10 +628,18 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // the member modifier prefix. `const` is read here, before the `function` keyword, because that is
     // where starts_funcdecl already looks; the visibility arrived from the dispatch that got here, which
     // had to consume it before it could tell a method from a property - see MemberModifiers
-    MemberModifiers modifiers { visibility, std::nullopt };
+    MemberModifiers modifiers { visibility, std::nullopt, std::nullopt };
 
-    if (cursor.is_type(Token::Type::t_const)) {
-        modifiers.const_token.emplace(cursor.current());
+    // both orders, because starts_funcdecl accepts both - a refusal about the pair is worth more than
+    // one about whichever of them happened to be second
+    while (cursor.is_type({ Token::Type::t_const, Token::Type::t_static })) {
+        if (cursor.is_type(Token::Type::t_static)) {
+            modifiers.static_token.emplace(cursor.current());
+        }
+        else {
+            modifiers.const_token.emplace(cursor.current());
+        }
+
         cursor.skip();
     }
 
@@ -721,7 +740,44 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // context, and it is the only thing that distinguishes this from a free function
     AST::TypeDeclNode *owner_struct = payload.context.self_struct_ptr;
     AST::TypeNode *self_type = payload.context.receiver_type(modifiers.is_const());
-    const bool is_method = owner_struct != nullptr && self_type != nullptr;
+
+    // **two questions, not one**, ever since `static function` existed. is_owned decides what carries
+    // the declaration - the owner's method table, the mangled name's owner segment, the inherited type
+    // parameters. has_receiver decides whether a `$this` is pushed ahead of what the user wrote.
+    //
+    // they were one predicate while every function written in a struct body had a receiver, and the
+    // sites below that need the second are exactly the ones a static would silently break - see
+    // FunctionDeclNode::has_receiver, which is this same split on the declaration
+    const bool is_owned = owner_struct != nullptr;
+    const bool has_receiver = is_owned && self_type != nullptr && !modifiers.is_static();
+
+    // `static` is a member modifier: there is no type for the function to belong to at file scope,
+    // and no receiver to have suppressed. reported and then ignored, so the declaration still
+    // registers as the free function it was written as and calls to it get ordinary diagnostics
+    if (modifiers.is_static() && !is_owned) {
+        payload.collector.collect_issue<AST::Issue::StaticOutsideType>(
+            payload.context.code_ref(modifiers.static_token.value()),
+            nametoken.value()
+        );
+
+        modifiers.static_token.reset();
+    }
+
+    // `const` says what a receiver may do, and a static has none - so the pair is not a redundancy to
+    // drop but a question about a parameter that is not there. reported at the `const`, which is the
+    // modifier that does not apply, and then dropped so the declaration still registers as the static
+    // it was written as
+    //
+    // asked here rather than where the two were read, so the message can name the function: at the
+    // modifiers the cursor has not reached the name yet. `has_receiver` above already accounts for it
+    if (modifiers.is_const() && modifiers.is_static()) {
+        payload.collector.collect_issue<AST::Issue::ConstOnStaticFunction>(
+            payload.context.code_ref(modifiers.const_token.value()),
+            nametoken.value()
+        );
+
+        modifiers.const_token.reset();
+    }
 
     // `const` qualifies a *receiver*, so there is nothing for it to say about a free function or an
     // extern one - their parameters carry their own const, where the caller can see it. reported and
@@ -729,8 +785,8 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // to it gets an ordinary diagnostic instead of "unknown function"
     //
     // no reset is needed to ignore it: outside a struct body there is no const receiver
-    // node to have bound, which is what `is_method` being false above already says
-    if (modifiers.is_const() && !is_method) {
+    // node to have bound, which is what `has_receiver` being false above already says
+    if (modifiers.is_const() && !has_receiver) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(modifiers.const_token.value()),
             fmt::format(
@@ -743,8 +799,12 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // TypeSubstitution binds both: the owner's T from the receiver argument, its own U from the rest
     // declare_type_parameters owns that shape - what is shared, what is re-declared, and where the
     // split falls
+    //
+    // is_owned rather than has_receiver: a **static** of a generic owner carries them too, and has to.
+    // `result<T, E>::ok` names T and E in its signature and its body with no receiver to bind them
+    // from - the call site's owner is what binds them instead, through AST::static_owner_bindings
     std::vector<AST::TypeParamDecl *> inherited_params;
-    if (is_method && owner_struct->is_generic()) {
+    if (is_owned && owner_struct->is_generic()) {
         inherited_params = owner_struct->type_parameters();
     }
 
@@ -763,9 +823,15 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
 
     // the receiver is a real parameter, ahead of everything the caller wrote - see
     // Parser::push_receiver_param, shared with the destructor arm
-    if (is_method) {
+    if (has_receiver) {
         funcdecl->member_kind = AST::MemberKind::t_method;
         push_receiver_param(payload, *funcdecl, funcscope, self_type, nametoken);
+    }
+    else if (modifiers.is_static()) {
+        // the whole of what `static` does to the shape: the kind is set and no receiver is pushed, so
+        // args[0] is whatever the user wrote first. everything else about the declaration - the owner,
+        // the inherited type parameters, the mangled name - is a method's
+        funcdecl->member_kind = AST::MemberKind::t_static_method;
     }
 
     // parse the function arguments
@@ -805,14 +871,23 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
     // overload set. registering in *both* passes is intentional and cheap: the symbol pass makes
     // the declaration visible to calls written above it and in other files, and the full pass
     // finds its own declaration site already present and returns the same handle
-    if (is_method) {
+    if (is_owned) {
         // a method joins its owner's method table instead, so it is reachable through a receiver
         // and not as a free function of the enclosing namespace. owner_type is what tells the
         // mangler and every diagnostic that the first parameter is not one the user wrote
         funcdecl->owner_type = &owner_struct->complex_type();
 
-        payload.collector.functions.register_member_function(
-            payload.collector, payload.context.code_ref(nametoken), funcdecl, owner_struct->complex_type());
+        // **two tables, because there are two ways to reach one and they must not overlap.** a static
+        // is reached by naming its type and never through a receiver, so putting it in the method
+        // table would make `$box->make(1)` resolve - a call whose args[0] the callee never declared
+        if (funcdecl->is_static_method()) {
+            payload.collector.functions.register_static_function(
+                payload.collector, payload.context.code_ref(nametoken), funcdecl, owner_struct->complex_type());
+        }
+        else {
+            payload.collector.functions.register_member_function(
+                payload.collector, payload.context.code_ref(nametoken), funcdecl, owner_struct->complex_type());
+        }
     }
     else {
         payload.collector.functions.register_function(

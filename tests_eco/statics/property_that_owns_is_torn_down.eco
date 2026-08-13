@@ -1,0 +1,30 @@
+// **a static that owns something gets the same teardown every other owning value gets** - the drop is
+// AST::emit_drop_of_place's, over a place that happens to be a global rather than a frame slot. what
+// a static needs beyond that is only a *moment*: the init pushes its teardown onto an intrusive chain
+// as the value is seated, and `main`'s epilogue walks it, LIFO, so reverse of initialization
+//
+// the epilogue is inside the terminated-block guard, so `die`, a failed `assert` and `std::env::exit`
+// skip it - which is what module-scope releases already do
+struct Tracked {
+    public int32 $id;
+
+    constructor(int32 $i) {
+        $this->id = $i;
+    }
+
+    destructor() {
+        echo 900;
+    }
+}
+
+struct Reg {
+    static Tracked $first = Tracked(1);
+    static Tracked $second = Tracked(2);
+    public int32 $x;
+}
+
+echo Reg::$first->id;
+echo Reg::$second->id;
+
+// the last statement of the program - both teardowns run after it
+echo 5;

@@ -124,6 +124,44 @@ namespace AST
         // argument 0, so a member call needs nothing stored at all
         const Namespace *lookup_namespace = nullptr;
 
+        // **the type a static call names**, and the third way a call finds its candidates - beside a
+        // namespace for a free one and argument 0 for a member one. `unknown` for both of those, and
+        // `is_undetermined_type` is the test rather than an optional, that already being how every
+        // other reader spells "nothing has said yet".
+        //
+        // set at parse time for `Type::f(...)`, and by AST::bind_shorthand_to for the shorthand
+        // `.f(...)`, whose owner its *destination* names. so a shorthand sits here unset, answering
+        // `void` from result_type() - honestly undetermined, which is what stops it from being ranked
+        // against an overload set it cannot choose between.
+        //
+        // **it is also the substitution seed**, and that is the half easy to miss: AST::can_instantiate
+        // binds an owner's type parameters by unifying `args[0]` against the receiver, and a static has
+        // no args[0]. `result<T, E>::ok(T $v)` mentions E nowhere in its signature, so without this the
+        // instantiation is undecidable - and both the monomorphizer's still-generic skip and
+        // determine_type_args' undecided arm report nothing, so the call would compile to nothing at
+        // all. See AST::static_owner_bindings
+        //
+        // **CloneContext::shallow copy-constructs, so this needs substituting on a clone** - see
+        // FunctionCallExprNode::clone. A static call written inside a generic body that kept its
+        // template's `result<T, E>` is undecidable in every instance, silently
+        ValueType static_owner = ValueType::make_unknown();
+
+        // the `.` a shorthand was written with, which is where its diagnostics point. the name token is
+        // the wrong place for them: "nothing here says what type this is" is about the leading dot, not
+        // about the name, and a reader looking at the name would go looking for a typo
+        std::optional<TokenReference> token_shorthand_dot;
+
+        // **is this the shorthand `.f(...)`, whose owner nothing has named yet?** distinct from "the
+        // owner is unknown", which is also true of a plain free call - so a call that never had an
+        // owner to find is not reported as a shorthand that failed to be given one.
+        //
+        // it stays true after binding: what it answers is how the call was *written*, which is what a
+        // diagnostic has to know to word a remedy the reader can act on. read off the `.` rather than
+        // stored beside it, since a shorthand is exactly a call that was written with one
+        bool is_shorthand_static_call() const {
+            return token_shorthand_dot.has_value();
+        }
+
         FunctionCallExprNode(TokenReference token_function_name, std::vector<ExprNode*> arguments) :
             token_function_name(token_function_name), arguments(arguments)
         {};

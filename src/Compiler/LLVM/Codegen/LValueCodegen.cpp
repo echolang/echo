@@ -1,4 +1,7 @@
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
+
+#include "AST/StaticPropertyExprNode.h"
+#include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Instructions.h>
@@ -42,6 +45,23 @@ LValue LValueCodegen::gen_lvalue(AST::ExprNode &expr)
 
             // the alloca is the slot; the declared type is what the slot holds
             return LValue{ it->second, var_node.decl().type_node()->type };
+        }
+
+        // **storage the type owns, with its initializer already run.** the address is a global
+        // rather than a frame slot, and the one thing this arm does beyond handing it over is emit
+        // the call that seats the value - once, here, so a read and a write do not emit two
+        //
+        // **typed provenance**: the address never left the compiler's accounting, so an access
+        // through it carries its type's tbaa node exactly as a local's does
+        case AST::NodeType::n_expr_static_property:
+        {
+            auto &static_property = static_cast<AST::StaticPropertyExprNode &>(expr);
+
+            return LValue{
+                _ctx.statics->gen_address(static_property),
+                static_property.result_type(),
+                Provenance::t_typed
+            };
         }
 
         case AST::NodeType::n_member_access:

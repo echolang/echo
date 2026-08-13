@@ -1,0 +1,12 @@
+// `const` qualifies a receiver and a static has none, so the pair is not a redundancy to drop but a
+// question about a parameter that is not there. one diagnostic, not two: the `const` is dropped
+// before the "not a method, so it cannot be const" rule beside it is asked
+struct Point {
+    public int32 $x;
+
+    const static function origin() : Point {
+        return Point(0);
+    }
+}
+
+echo Point::origin()->x;

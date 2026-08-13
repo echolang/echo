@@ -225,10 +225,21 @@ namespace Parser
         // guard
         std::optional<TokenReference> const_token;
 
+        // where the `static` was written, on the same "present *is* the modifier" terms as `const`
+        // above. the two are mutually exclusive and parse_funcdecl refuses the pair: `const` says what
+        // the receiver may do and a static has none, so `const static function` asks a question about
+        // a parameter that is not there
+        std::optional<TokenReference> static_token;
+
         // `const function get() : int32` - the method only reads, so its `$this` is `const Foo&`.
         // it goes no further than picking that TypeNode: from there the receiver's *type* is the
         // whole of the feature (AST::receiver_is_const), and nothing downstream carries a flag
         bool is_const() const { return const_token.has_value(); }
+
+        // `static function make(int32 $v) : Box` - the function is owned by the type and takes no
+        // receiver. unlike `const` this one does not pick a TypeNode, it suppresses one: the whole of
+        // what it does is skip push_receiver_param and set MemberKind::t_static_method
+        bool is_static() const { return static_token.has_value(); }
     };
 
     // the implicit `$this` receiver, typed `self_type` - the non-nullable borrow `Foo&` (or `Foo<T>&`),

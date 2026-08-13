@@ -21,6 +21,7 @@
 #include "AST/ReleaseNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
+#include "AST/StaticPropertyExprNode.h"
 #include "AST/StringInterpolationNode.h"
 #include "AST/TemporaryBindExprNode.h"
 #include "AST/TypeCastNode.h"
@@ -205,6 +206,9 @@ const TokenReference *source_token_of(const Node &node)
         // the holes inside it - a hole that wants to be located carries its own token
         case NodeType::n_string_interpolation:
             return &static_cast<const StringInterpolationExprNode &>(node).token_string;
+
+        case NodeType::n_expr_static_property:
+            return &static_cast<const StaticPropertyExprNode &>(node).token_name;
 
         // an operator carries the token, not the expression - so `$a + $b` locates at the `+`, which
         // is the one character that names the whole result

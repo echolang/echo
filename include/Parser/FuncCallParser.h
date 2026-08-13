@@ -19,10 +19,35 @@ namespace Parser
     // name, nothing is reported, and the caller reads the tokens as whatever else they are. Without it the
     // `<` is committed to and a missing `>` is an error - which is right at a statement head, where nothing
     // else could have been meant
+    // **how a call finds its candidates** - the one thing that differs between the three spellings, and
+    // the reason they are one production rather than three. a call is otherwise a name, an argument
+    // list and a settlement whichever way it was written
+    struct CallLookup
+    {
+        // a free call, `foo(...)` or `a::b::foo(...)`: the namespace written before the name, or null
+        // for the one the call is written in. the registry searches outward from it
+        const AST::Namespace *ns = nullptr;
+
+        // `Type::f(...)`: the type whose *static* overload set answers, and nothing walks outward from
+        // it. that omission is what stops a static call from quietly meaning an enclosing free function
+        AST::ValueType static_owner = AST::ValueType::make_unknown();
+
+        // `.f(...)`: nothing names the owner yet - the destination will. so there is no lookup to do,
+        // no candidates to find, and **no unknown name to report**: an empty set here is a not-yet that
+        // AST::CallResolver::settle answers with the retryable t_unknown_name, and the diagnostic if it
+        // never resolves belongs to the monomorphizer's finalizing sweep, which knows it ran out of rounds
+        //
+        // **the `.` itself rather than a flag beside it**: it is where every diagnostic about a
+        // shorthand points, and it is also what the node answers `is_shorthand_static_call()` from - so
+        // there is no window in which a call is known to be one and has no token to be reported at
+        std::optional<TokenReference> shorthand_dot;
+    };
+
     AST::FunctionCallExprNode *parse_funccall(
         Parser::Payload &payload,
         const AST::Namespace *requested_namespace = nullptr,
-        bool *out_is_call = nullptr
+        bool *out_is_call = nullptr,
+        const CallLookup &lookup = {}
     );
 
     // the call a user operator lowers to: an ordinary FunctionCallExprNode over the root namespace's
@@ -99,6 +124,11 @@ namespace Parser
     // deliberately only `->`. `LIST[0] = 1;` would be a write into a copy of the constant's
     // expression that nothing can observe afterwards, which is worth refusing rather than accepting
     bool starts_constant_chain_statement(Parser::Payload &payload);
+
+    // **`Session::$count = 1;` at a statement head** - a `$name` behind a namespace-or-type prefix,
+    // which is the one operand shape no other statement branch is anchored on. it answers on the
+    // *shape* only; whether the prefix names a type is settled inside the expression parse
+    bool starts_static_property_statement(Parser::Payload &payload);
 
     // true when the cursor sits on `$f(...)` used as a statement - a call through a callable *value*.
     // its own predicate rather than an arm of starts_call_statement, which is anchored on an identifier

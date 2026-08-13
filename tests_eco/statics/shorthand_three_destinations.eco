@@ -1,0 +1,36 @@
+// `.f(...)` takes its owner from where its value goes. three positions can say, and they are the
+// three that carry a destination type the compiler already knows: a return type, a declared
+// variable's type, and the parameter of a call that has already been chosen
+struct Point {
+    public float64 $x;
+    public float64 $y;
+
+    static function origin() : Point {
+        return Point(0.0, 0.0);
+    }
+
+    static function square(float64 $v) : Point {
+        return Point($v, $v);
+    }
+}
+
+function draw(Point $p) : float64 {
+    return $p->x + $p->y;
+}
+
+function make() : Point {
+    // the return type
+    return .square(2.0);
+}
+
+// the parameter of a chosen call - the one destination the parser cannot reach, since the parameter
+// sits on a declaration nobody had picked when the argument was read
+echo draw(.origin());
+echo draw(.square(3.0));
+
+$m = make();
+echo $m->x;
+
+// a declared variable's type
+Point $d = .square(5.0);
+echo $d->y;

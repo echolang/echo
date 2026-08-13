@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnboundShorthandCall  shorthand_without_a_destination.eco:12:6
+
+  '.origin(...)' takes its type from where its value goes, and nothing here says what that is
+
+  11 | 
+  12 | $x = .origin();
+     :      ^
+  13 | echo $x->x;
+
+  help: name the type - 'SomeType::origin(...)' - or give the destination a declared type. a shorthand reads its owner from a return type, a declared variable's type, or the parameter it is passed to
+
+1 error, nothing was compiled.

@@ -1,0 +1,18 @@
+// **a shorthand may never take part in choosing an overload**, and it cannot: it has no type until a
+// parameter is picked, and a parameter cannot be picked without one. so it scores t_undetermined,
+// which the matcher treats as neutral, and the tie is refused with a sentence a reader can act on -
+// AmbiguousCall's "an explicit cast on the argument picks one" is the one thing that cannot work here
+struct Point {
+    public float64 $x;
+    static function norm(float64 $a) : Point { return Point($a); }
+}
+
+struct Circle {
+    public float64 $r;
+    static function norm(float64 $a) : Circle { return Circle($a); }
+}
+
+function draw(Point $p) : float64 { return $p->x; }
+function draw(Circle $c) : float64 { return $c->r; }
+
+echo draw(.norm(2.0));

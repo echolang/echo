@@ -1421,6 +1421,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 refuse_interface_member(
                     var != nullptr ? var->token_varname : cursor.current(), "a property");
             }
+            // **a static is storage the type owns, so it is not in the layout at all** - no offset, no
+            // index, no part in a field-wise constructor or a copy. a separate list rather than a flag
+            // on the property vector, for the reason ComplexType::add_static_property gives: every
+            // reader of properties() means "the fields a value carries", and a filter each of them had
+            // to remember is the shape of bug that only shows up in the one that forgot
+            else if (var && var->is_static() && collect_members) {
+                struct_node->complex_type().add_static_property(var);
+            }
             // append the var as a property of the struct
             else if (var && collect_members) {
                 struct_node->add_property(var);

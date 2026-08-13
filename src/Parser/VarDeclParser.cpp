@@ -129,6 +129,18 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     AST::VarDeclNode *vardecl = nullptr;
     bool is_const = false;
 
+    // **`static` is storage the type owns rather than storage each value carries**, and that is the
+    // whole of what it changes about the declaration read below: the same type grammar, the same name,
+    // the same initializer. where the storage comes from is Compiler::LLVM::StaticStorageCodegen's
+    // question, and whether a `static` is legal *here* is the caller's - a local is refused by the
+    // statement dispatch, which is the only place that knows it was reading a body
+    std::optional<TokenReference> static_token;
+
+    if (cursor.is_type(Token::Type::t_static)) {
+        static_token.emplace(cursor.current());
+        cursor.skip();
+    }
+
     // when we have an identifier we assume it to be the variable type
     // the `&` suffix is part of the type grammar now, so parse_type returns the borrow already
     // built and there is nothing to patch up here
@@ -304,6 +316,12 @@ AST::VarDeclNode *Parser::parse_varexpr(Parser::Payload &payload, AST::ScopeNode
     }
 
     vardecl = &payload.context.emplace_node<AST::VarDeclNode>(nametoken, type);
+
+    // emplace rather than assign: TokenReference has no copy assignment, which is why every optional
+    // of one in the tree is filled this way
+    if (static_token.has_value()) {
+        vardecl->static_token.emplace(static_token.value());
+    }
 
     // if we have a scope we add the variable to it
     if (scope != nullptr) {

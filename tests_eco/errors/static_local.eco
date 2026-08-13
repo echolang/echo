@@ -1,0 +1,8 @@
+// `static` says which type owns storage, and a body has no type to own it - a local's storage is its
+// frame's, which is the one thing the modifier would be denying
+function f() : int32 {
+    static int32 $x = 1;
+    return $x;
+}
+
+echo f();

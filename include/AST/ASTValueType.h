@@ -38,6 +38,7 @@ namespace AST
     // a type nested inside a ComplexType, stored the same way and for the same reason: this header
     // only ever stores and hands back the pointer
     class TypeDeclNode;
+    class VarDeclNode;
 
     enum class ValueTypeKind
     {
@@ -920,6 +921,50 @@ namespace AST
             return _methods;
         }
 
+        // the **static** functions declared on this type, in declaration order - the same flat
+        // overload set the methods above are, matched by AST::find_static_functions.
+        //
+        // **a second list rather than a flag on the first**, because the two are reached by different
+        // syntax and neither may answer for the other: a method is found through a receiver, a static
+        // by naming the type. sharing one list would make `$box->make(1)` resolve to a declaration
+        // that never declared an args[0], and the check that stopped it would be a filter every reader
+        // of methods() had to remember - which is the same reason a method is not in _by_name
+        //
+        // the template_ref story is identical: only a template holds these, and a lookup on
+        // `result<int32, string>` redirects through it. what differs is what binds the owner's type
+        // parameters at the call site - a method has a receiver, a static has AST::static_owner_bindings
+        void add_static_method(FunctionDeclNode *decl) {
+            _static_methods.push_back(decl);
+        }
+
+        const std::vector<FunctionDeclNode *> &static_methods() const {
+            return _static_methods;
+        }
+
+        // the **static** properties declared on this type, in declaration order - `static int32 $count`.
+        //
+        // **deliberately not in `_properties`**, which is the *layout*: every reader of that vector means
+        // "the fields a value of this type carries", and they are many - the field-wise constructor, the
+        // copy, the deinit, `size_of`, every codegen GEP. a static carries none of that, having one
+        // global for the whole type rather than a slot in each value, so a flag on the property would
+        // be a filter each of those readers had to remember. the one that forgot would seat a global
+        // into a struct's third field
+        //
+        // the *declaration* is stored, as a method is: it holds the initializer expression, and
+        // AST::OwnershipPass clones that per instantiation into the body it synthesizes
+        void add_static_property(VarDeclNode *decl) {
+            _static_properties.push_back(decl);
+        }
+
+        const std::vector<VarDeclNode *> &static_properties() const {
+            return _static_properties;
+        }
+
+        // this type's static property of that name, and its index, or nullopt. the index is half the
+        // identity of the global it names - see AST::static_property_symbol - so the two are answered
+        // together rather than by a lookup and then a search
+        std::optional<std::pair<size_t, VarDeclNode *>> find_static_property(const std::string &name) const;
+
         // the types declared *inside* this one, by name. `string::view` is reached through its owner
         // and lives in no namespace at all, which is the same decision that keeps a method out of
         // FunctionRegistry::_by_name: no namespace path a user can write reaches it, so two structs
@@ -1088,6 +1133,8 @@ namespace AST
         std::vector<Property> _properties;
         std::unordered_map<std::string, size_t> _property_map;
         std::vector<FunctionDeclNode *> _methods;
+        std::vector<FunctionDeclNode *> _static_methods;
+        std::vector<VarDeclNode *> _static_properties;
         std::unordered_map<std::string, TypeDeclNode *> _member_types;
         FunctionDeclNode *_destructor = nullptr;
         FunctionDeclNode *_copy_constructor = nullptr;

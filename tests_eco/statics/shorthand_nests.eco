@@ -1,0 +1,54 @@
+// **`return .error(.timeout(30), 0);` - the case the whole design is for.** it resolves strictly
+// outside-in, which is the direction arguments are already coerced in: the return type names the
+// outer's owner, settling the outer gives its parameter types, and the inner's owner is one of those.
+//
+// no step ever needs a type it is still computing, so there is no fixpoint over destinations and no
+// pending state to finalize - it is two ordinary rounds of the one the monomorphizer already runs
+struct err {
+    public int32 $code;
+
+    static function timeout(int32 $secs) : err {
+        return err($secs);
+    }
+
+    static function refused() : err {
+        return err(0);
+    }
+}
+
+struct result<T, E> {
+    public T $value;
+    public E $error;
+    public bool $is_ok;
+
+    static function ok(T $v, E $blank) : result<T, E> {
+        return result<T, E>($v, $blank, true);
+    }
+
+    static function error(E $e, T $blank) : result<T, E> {
+        return result<T, E>($blank, $e, false);
+    }
+}
+
+function request(int32 $mode) : result<int32, err> {
+    if ($mode == 0) {
+        return .error(.timeout(30), 0);
+    }
+
+    if ($mode == 1) {
+        return .error(.refused(), 0);
+    }
+
+    return .ok(200, err(0));
+}
+
+$a = request(0);
+echo $a->is_ok;
+echo $a->error->code;
+
+$b = request(1);
+echo $b->error->code;
+
+$c = request(2);
+echo $c->is_ok;
+echo $c->value;

@@ -16,6 +16,8 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/NullNode.h"
+#include "AST/TypeDeclNode.h"
+#include "AST/ASTConstness.h"
 
 #include "External/infint.h"
 
@@ -828,6 +830,14 @@ bool starts_declared_operator_in_expression(Parser::Payload &payload, Parser::Cu
         && (match.op->has_fixity(AST::OpFixity::t_prefix) || match.op->has_fixity(AST::OpFixity::t_infix));
 }
 
+bool Parser::starts_shorthand_call(Parser::Cursor &cursor)
+{
+    return cursor.is_type(Token::Type::t_dot)
+        && cursor.peek_is_type(1, Token::Type::t_identifier)
+        && (cursor.peek_is_type(2, Token::Type::t_open_paren)
+            || cursor.peek_is_type(2, Token::Type::t_open_angle));
+}
+
 bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
 {
     if (cursor.is_done()) {
@@ -869,6 +879,12 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // loop does not enter and the expression comes back empty. guarded on the `(` so the
            // callable *type* `function<...>` - which is not an expression - cannot get in here
            Parser::starts_closure_literal(cursor) ||
+           // `.ok(5)` - the shorthand static call, whose owner its destination names. exactly the trap
+           // `mv` and the closure literal above document: without this the loop never enters, expr_parts
+           // comes back empty and parse_expr_ref's sanity assert takes the compiler down with no
+           // location at all. guarded on the whole shape by the predicate, so `..` - two t_dot, matched
+           // as a declared infix symbol by the last arm - is untouched
+           Parser::starts_shorthand_call(cursor) ||
            // `$a instanceof Foo` continues an expression that already began, so the loop must not
            // stop at the keyword - parse_postfix_chain is what actually consumes it
            cursor.is_type(Token::Type::t_instanceof) ||
@@ -1021,6 +1037,331 @@ AST::ExprNode *Parser::parse_strong_expr(Parser::Payload &payload)
     // returned upgrades as readily as one in a variable, and the "is it a weak" question belongs to
     // AST::TypeChecker - which asks it after the monomorphizer has settled every type
     return &payload.context.emplace_node<AST::StrongExprNode>(operand, strong_token);
+}
+
+namespace
+{
+    // what the shape scan below found: where the owner's spelling ends, which identifier names the
+    // type, and the namespace segments written ahead of it. the last two are what let the owner be
+    // *resolved* before any of it is parsed - see try_parse_static_call
+    struct StaticCallShape
+    {
+        size_t split = 0;
+        size_t name_offset = 0;
+        std::vector<std::string> namespace_parts;
+    };
+
+    // **where the owner's spelling ends in `Type::f(`** - the index of the `::` that separates the type
+    // from the static's name, or nullopt when these tokens are not a static call at all.
+    //
+    // scanned rather than parsed because the two readings of one token run - `a::b::f()` as a namespaced
+    // free call and `A::B::f()` as a static on a nested type - are told apart by what the *names* denote
+    // and not by their shape. so the shape is measured first, cheaply, and only a run that could be either
+    // is looked up. the last `::` wins: everything before it is the owner, which is what makes
+    // `game::Session::active()` name a type in a namespace rather than a namespace of that name
+    std::optional<StaticCallShape> static_call_split(Parser::Cursor &cursor, bool want_property)
+    {
+        // the cheap early-out: an owner is a type name, so it opens with an identifier and continues
+        // with either a `::` or the `<` of a generic application. anything else cannot be one, and this
+        // runs at every operand position
+        if (!cursor.is_type(Token::Type::t_identifier)
+            || !(cursor.peek_is_type(1, Token::Type::t_namespace_sep)
+                || cursor.peek_is_type(1, Token::Type::t_open_angle))) {
+            return std::nullopt;
+        }
+
+        std::optional<StaticCallShape> found;
+        const size_t base = cursor.snapshot().index;
+
+        // every identifier walked so far. when a split is recorded, the one at that iteration names the
+        // owner and the ones before it are the namespace it is written in - which is what
+        // try_parse_static_call resolves before it parses anything
+        std::vector<std::string> walked;
+
+        // **walks the qualified name and stops where it ends** - it does not scan for a `::` anywhere
+        // ahead. an unbounded search reads the next statement's `::` as this expression's, which turns
+        // any `a::b()` in a file that later mentions a type into a mis-split
+        size_t offset = 0;
+
+        while (cursor.peek_is_type(offset, Token::Type::t_identifier)) {
+            const std::string name = cursor.peek(offset).value();
+            const size_t name_offset = base + offset;
+            // a generic owner: `result<int32, E>::ok(...)`. the angles are counted rather than matched
+            // by a parser, this being a shape measurement - and `>>` closes two, which is the same
+            // token the type grammar splits by hand
+            if (cursor.peek_is_type(offset + 1, Token::Type::t_open_angle)) {
+                size_t depth = 0;
+                size_t scan = offset + 1;
+
+                // **bounded by the statement, not by the file.** a `<` that opens no type argument list
+                // is the common case here - `MAX < $n` reaches this on exactly the shape an owner does,
+                // a compile-time constant being a bare identifier - and an unbounded scan for a closer
+                // that is not coming walks every remaining token in the file, once per such comparison.
+                // parse_explicit_type_args already had this and was already fixed; a type argument list
+                // cannot span a `;`, so that is the honest bound
+                for (; cursor.is_valid_offset(scan) && !cursor.peek_is_type(scan, Token::Type::t_semicolon); scan++) {
+                    if (cursor.peek_is_type(scan, Token::Type::t_open_angle)) {
+                        depth++;
+                    }
+                    else if (cursor.peek_is_type(scan, Token::Type::t_close_angle)) {
+                        depth--;
+                        if (depth == 0) break;
+                    }
+                    else if (cursor.peek_is_type(scan, Token::Type::t_op_shr)) {
+                        if (depth <= 2) { depth = 0; break; }
+                        depth -= 2;
+                    }
+                }
+
+                if (depth != 0 || !cursor.is_valid_offset(scan)) {
+                    break;
+                }
+
+                offset = scan + 1;
+            }
+            else {
+                offset++;
+            }
+
+            // not a `::`, so the qualified name ended at the identifier before it - and this was a
+            // plain call, a constant or a comparison rather than anything with an owner
+            if (!cursor.peek_is_type(offset, Token::Type::t_namespace_sep)) {
+                break;
+            }
+
+            // **what may follow the `::` is the whole of what tells the two forms apart**: a `$name` is
+            // a static property and there is nothing else it could be, while a call's name is an
+            // identifier and then a `(` or the `<` of a type argument list. the angle is enough to
+            // record the split - whether the list closes is parse_funccall's speculation to run, and it
+            // puts the tokens back untouched when it declines
+            //
+            // the *last* such `::` in the run wins, which is what lets `game::Session::active()` name
+            // a type inside a namespace rather than a namespace called Session
+            const bool follows = want_property
+                ? cursor.peek_is_type(offset + 1, Token::Type::t_varname)
+                : (cursor.peek_is_type(offset + 1, Token::Type::t_identifier)
+                    && (cursor.peek_is_type(offset + 2, Token::Type::t_open_paren)
+                        || cursor.peek_is_type(offset + 2, Token::Type::t_open_angle)));
+
+            if (follows) {
+                found = StaticCallShape { base + offset, name_offset, walked };
+            }
+
+            walked.push_back(name);
+            offset++; // past the `::`
+        }
+
+        return found;
+    }
+}
+
+bool Parser::starts_static_property(Parser::Cursor &cursor)
+{
+    return static_call_split(cursor, /*want_property=*/true).has_value();
+}
+
+namespace
+{
+    // **the owner both static forms are written after**, or nothing - with the cursor left just past
+    // the `::` on success and exactly as it was found on every failure.
+    //
+    // one function because `Type::f(...)` and `Type::$x` differ only in what comes *after* the `::`:
+    // the owner is the same grammar, resolved the same way, and speculating on it has the same rule -
+    // report nothing, since a name that turns out to be a namespace is not a mistake
+    std::optional<AST::ValueType> parse_static_owner(Parser::Payload &payload, const StaticCallShape &shape)
+    {
+        auto &cursor = payload.cursor;
+
+        // **the owner is resolved before it is parsed**, and that order is the whole of what keeps this
+        // speculation silent. Parser::parse_type *reports* an unresolved qualified name - it has to,
+        // since parse_namespace mints what it does not find and a quiet failure there would be an
+        // unknown type nobody mentioned - so handing it `std::math` out of `std::math::sqrt(16.0)`
+        // costs a diagnostic for a spelling that is not an error at all
+        //
+        // one symbol lookup instead, on exactly the name the shape scan says is the owner: outward
+        // from the enclosing namespace for a bare name, the way every use site resolves one, and exact
+        // within a written namespace path for a qualified one. a path that does not exist answers null
+        // rather than being created, which is the second half of staying silent
+        {
+            const auto &parts = shape.namespace_parts;
+            const std::string owner_name = cursor.tokens[shape.name_offset].value();
+
+            const AST::Namespace *in = payload.context.current_namespace;
+
+            if (!parts.empty()) {
+                in = payload.collector.namespaces.get(parts);
+
+                if (in == nullptr) {
+                    return std::nullopt;
+                }
+            }
+
+            auto *symbol = parts.empty()
+                ? payload.collector.namespaces.find_symbol_in_scope(owner_name, *in)
+                : payload.collector.namespaces.find_symbol(owner_name, *in);
+
+            if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+                return std::nullopt;
+            }
+        }
+
+        const auto start = cursor.snapshot();
+
+        // **the owner is read by the real type grammar, bounded to its own tokens.** narrowing the
+        // cursor's end is what lets parse_type answer here at all: unbounded it would read
+        // `Point::norm` as a nested type, report that `Point` has no nested `norm`, and leave a
+        // diagnostic behind for a spelling that is not an error. bounded, the `::` is simply past the
+        // end and the type ends where it should
+        //
+        // and it is parse_type rather than a walk of identifiers because the owner is a *type*:
+        // `Box<int32>`, `game::Session`, `string::view` are all one grammar, and a second one here
+        // would drift from it
+        auto narrowed = start;
+        narrowed.end = shape.split;
+        cursor.restore(narrowed);
+
+        if (!Parser::can_parse_type(payload)) {
+            cursor.restore(start);
+            return std::nullopt;
+        }
+
+        AST::TypeNode *owner_node = Parser::parse_type(payload);
+
+        // the owner did not parse, or did not consume its whole run - `a::b` where those are
+        // namespaces reaches here, and must go back untouched for the namespace walk to read. nothing
+        // is reported: this is speculation, and a name that is not a type is not yet a mistake
+        const bool consumed_owner = cursor.is_done();
+
+        if (owner_node == nullptr || !consumed_owner || !owner_node->type.has_complex_type()) {
+            cursor.restore(start);
+            return std::nullopt;
+        }
+
+        // back to the real range, keeping the position: the owner is behind us, the `::` is next
+        auto resumed = cursor.snapshot();
+        resumed.end = start.end;
+        cursor.restore(resumed);
+
+        cursor.skip(); // the `::` the split named
+
+        return owner_node->type;
+    }
+}
+
+AST::FunctionCallExprNode *Parser::try_parse_static_call(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    const auto shape = static_call_split(cursor, /*want_property=*/false);
+
+    if (!shape.has_value()) {
+        return nullptr;
+    }
+
+    const auto start = cursor.snapshot();
+    const auto resolved = parse_static_owner(payload, shape.value());
+
+    if (!resolved.has_value()) {
+        return nullptr;
+    }
+
+    const AST::ValueType owner = resolved.value();
+
+    // **a nested type wins over a static of the same name**, and it has to be asked before committing:
+    // `string::view($b, $n)` is a *constructor* call, which resolves through the member surface
+    // namespace exactly as it always has. the two spellings are identical, so the only thing that can
+    // tell them apart is what the owner declares - and a nested type is the older meaning
+    //
+    // asked of the template, a nested type inside a generic owner being refused where it is declared
+    if (cursor.is_type(Token::Type::t_identifier)
+        && owner.get_complex_type()->template_or_self()->find_member_type_decl(cursor.current().value()) != nullptr) {
+        cursor.restore(start);
+        return nullptr;
+    }
+
+    // **committed.** from here the owner is known to be a type, so a name it does not declare is a
+    // real diagnostic and not a reason to try the namespace path - falling through at this point is
+    // what would recreate the outward walk that lets `Foo::f()` mean an enclosing free `f`
+    bool is_call = false;
+    auto *call = parse_funccall(payload, nullptr, &is_call, Parser::CallLookup { nullptr, owner, std::nullopt });
+
+    if (call != nullptr) {
+        return call;
+    }
+
+    // parse_funccall declined the speculative `<` - so `Point::MAX < $n` is a comparison, not a call
+    // on a type. put everything back and let the constant path read it
+    if (!is_call) {
+        cursor.restore(start);
+    }
+
+    return nullptr;
+}
+
+AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &payload)
+{
+    auto &cursor = payload.cursor;
+
+    const auto shape = static_call_split(cursor, /*want_property=*/true);
+
+    if (!shape.has_value()) {
+        return nullptr;
+    }
+
+    const auto resolved = parse_static_owner(payload, shape.value());
+
+    if (!resolved.has_value()) {
+        return nullptr;
+    }
+
+    const AST::ValueType owner = resolved.value();
+    const auto name_token = cursor.current();
+
+    cursor.skip(); // the `$name`
+
+    // **committed from here**, exactly as the call form is, and for the same reason: `Type::$x` where
+    // `Type` is a type has no second reading to fall back to. a namespace has no `$` names in it
+    const AST::ComplexType *owner_type = owner.get_complex_type()->template_or_self();
+    const auto found = owner_type->find_static_property(name_token.value());
+
+    if (!found.has_value()) {
+        payload.collector.collect_issue<AST::Issue::UnknownStaticProperty>(
+            payload.context.code_ref(name_token),
+            name_token.value(),
+            owner.get_type_desciption()
+        );
+
+        // **reported, and then a node with no declaration is handed back anyway.** the alternatives
+        // both cost a second, unrelated diagnostic: recovering to the next statement leaves
+        // parse_varexpr mid-declaration, and returning null sends these tokens to the namespace walk,
+        // which mints a namespace and then meets a `$name` no operand arm accepts
+        //
+        // a null `decl` is a legitimate hole - result_type() answers `unknown` for it, ensure_static_init
+        // declines it, and codegen never sees it because has_critical_issues() already stopped
+        return &payload.context.emplace_node<AST::StaticPropertyExprNode>(
+            name_token, owner, nullptr, 0);
+    }
+
+    // **a `private` static is reachable only from inside its own type**, which is the same rule and the
+    // same question an instance property answers - AST::can_reach_private_member, off the enclosing
+    // declaration rather than off the file
+    if (found->second->is_private
+        && !AST::can_reach_private_member(
+            payload.context.self_struct_ptr != nullptr
+                ? &payload.context.self_struct_ptr->complex_type()
+                : nullptr,
+            owner_type)) {
+        payload.collector.collect_issue<AST::Issue::PrivateMember>(
+            payload.context.code_ref(name_token),
+            name_token.value(),
+            owner.get_type_desciption()
+        );
+    }
+
+    auto &node = payload.context.emplace_node<AST::StaticPropertyExprNode>(
+        name_token, owner, found->second, found->first);
+
+    return &node;
 }
 
 const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, AST::NodeReference base)
@@ -1378,6 +1719,37 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         return AST::make_ref(literal);
     }
 
+    // **`.name(...)`, a static call whose owner its destination names.** beside the `null` arm below
+    // because it is the same shape of thing: a value with no type of its own, which the place it is
+    // going says. the difference is only which question the destination answers - `null`'s is "may
+    // absence arrive here", this one's is "which type declares this"
+    //
+    // it is an ordinary FunctionCallExprNode with no owner rather than a node of its own, and that is
+    // what makes the rest free: `result_type()` already answers `void` for a call with no decl, which
+    // is_undetermined_type accepts - so argument_fit scores it t_undetermined at its first arm,
+    // strictly_better skips it on both sides, and **a shorthand can never take part in choosing an
+    // overload**, enforced by construction with no rule anywhere saying so
+    else if (Parser::starts_shorthand_call(cursor)) {
+        const auto dot_token = cursor.current();
+        cursor.skip(); // the `.`
+
+        bool is_call = false;
+        auto *call = parse_funccall(payload, nullptr, &is_call, Parser::CallLookup { nullptr, {}, dot_token });
+
+        if (call == nullptr) {
+            return AST::make_void_ref();
+        }
+
+        // the destination, where the position carries one it already knows: a declared variable's type
+        // and a return type both arrive here. an *argument* cannot - the parameter sits on a
+        // declaration nobody has chosen yet - so that one is bound by AST::CallResolver instead
+        if (expected_type != nullptr) {
+            AST::bind_shorthand_to(call, expected_type->type);
+        }
+
+        return Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+    }
+
     else if (cursor.is_type(Token::Type::t_null)) {
         // null has no type of its own - it takes the one the position expects. an unbound null
         // stays untyped here and is reported by the checker, which has the context to say so
@@ -1713,6 +2085,19 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         cursor.skip();
 
         return Parser::parse_postfix_chain(payload, AST::make_ref(const_ref));
+    }
+
+    // **a static call, `Type::f(...)`, and a static property, `Type::$x`** - both claimed before the
+    // namespace walk below for the reason the `self::` arm above gives: parse_namespace mints what it
+    // does not find, so by the time it has consumed `Point::` there is a namespace called `Point` and
+    // the type it named is out of reach. a `$name` after the `::` would then fall off the end of this
+    // function entirely, since neither the call arm nor the constant arm accepts one
+    if (auto *static_call = Parser::try_parse_static_call(payload)) {
+        return Parser::parse_postfix_chain(payload, AST::make_ref(*static_call));
+    }
+
+    if (auto *static_property = Parser::try_parse_static_property(payload)) {
+        return Parser::parse_postfix_chain(payload, AST::make_ref(*static_property));
     }
 
     // there might be a namespace used

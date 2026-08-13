@@ -32,6 +32,7 @@
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/StaticPropertyExprNode.h"
 #include "AST/StringInterpolationNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
@@ -231,6 +232,14 @@ void RecursiveVisitor::visit_loop_control(LoopControlNode &node)
     // AST::TypeChecker never validates them - and "every drop is an ordinary call node in the tree" is
     // the whole reason they are nodes rather than a codegen side effect
     statement_edges(node.unwind);
+}
+
+void RecursiveVisitor::visit_static_property(StaticPropertyExprNode &node)
+{
+    // **a leaf.** the owner is a type and the declaration lives on it, so there is no owned edge
+    // here at all - the initializer belongs to the declaration, and the body AST::OwnershipPass
+    // synthesizes is what a walk reaches it through
+    (void)node;
 }
 
 void RecursiveVisitor::visit_string_interpolation(StringInterpolationExprNode &node)

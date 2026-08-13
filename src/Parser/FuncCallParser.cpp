@@ -169,6 +169,18 @@ bool Parser::starts_call_statement(Parser::Payload &payload)
         || cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
 }
 
+bool Parser::starts_static_property_statement(Parser::Payload &payload)
+{
+    // **the one shape a statement can start with that reaches no other arm.** the vardecl branch is
+    // anchored on a `$name` at the head, the call branch on an identifier followed by a `(`, and the
+    // constant-chain branch on an identifier followed by a `->` - so `Session::$count = 1;` matched
+    // none of them and fell to the catch-all, which reported an unexpected identifier
+    //
+    // the shape itself is Parser::starts_static_property's, which is also what the operand parser
+    // measures - so the branch this dispatch takes and the production it hands off to cannot disagree
+    return Parser::starts_static_property(payload.cursor);
+}
+
 bool Parser::starts_constant_chain_statement(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -235,7 +247,8 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 AST::FunctionCallExprNode *Parser::parse_funccall(
     Parser::Payload &payload,
     const AST::Namespace *requested_namespace,
-    bool *out_is_call
+    bool *out_is_call,
+    const Parser::CallLookup &lookup
 )
 {
     // the whole call, so declining can put the name back too - the caller has to be able to read it as
@@ -315,10 +328,42 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     // it used to be two, the enclosing scope chain first and the namespace symbol table as a
     // fallback, which meant `a::foo()` preferred a same-named scope entry over the namespace it
     // explicitly asked for
-    funcall.lookup_namespace = requested_namespace ? requested_namespace : payload.context.current_namespace;
+    //
+    // a **static** call names neither: its candidates come from the type, so the namespace is left
+    // null and nothing walks outward from it. that omission is the whole of what stops `Foo::f()`
+    // from quietly resolving to an enclosing free `f`. a **shorthand** names neither yet, and leaving
+    // both unset is the honest state - not a lookup that found nothing
+    if (lookup.shorthand_dot.has_value()) {
+        funcall.token_shorthand_dot.emplace(lookup.shorthand_dot.value());
+    }
+    else if (lookup.static_owner.has_complex_type()) {
+        funcall.static_owner = lookup.static_owner;
+    }
+    else {
+        funcall.lookup_namespace = requested_namespace ? requested_namespace : payload.context.current_namespace;
+    }
 
     switch (resolve_funccall(payload, funcall)) {
     case AST::CallResolver::Result::t_unknown_name:
+        // a shorthand has no owner yet, so there was nothing to search and nothing to be unknown.
+        // the call is kept, pending, for the destination to name an owner for - and if none ever
+        // does, the monomorphizer's finalizing sweep is what says so, having run out of rounds
+        if (lookup.shorthand_dot.has_value()) {
+            return &funcall;
+        }
+
+        // the type is named and its static overload set has nothing by that name. a different
+        // sentence from UnknownFunction's, because the search was not a search of any namespace -
+        // and reported here rather than left to the fixpoint, the owner already being concrete
+        if (lookup.static_owner.has_complex_type()) {
+            payload.collector.collect_issue<AST::Issue::UnknownStaticFunction>(
+                payload.context.code_ref(funcname_token),
+                funcname_token.value(),
+                lookup.static_owner.get_type_desciption()
+            );
+            return nullptr;
+        }
+
         // a name with no declarations anywhere is a different error from a name whose declarations
         // do not answer this call, and only the first one is UnknownFunction
         payload.collector.collect_issue<AST::Issue::UnknownFunction>(payload.context.code_ref(funcname_token), funcname_token.value());

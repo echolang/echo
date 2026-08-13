@@ -5,6 +5,7 @@
 
 #include "Parser/ParserPayload.h"
 #include "AST/ExprNode.h"
+#include "AST/StaticPropertyExprNode.h"
 
 #include <unordered_map>
 
@@ -18,6 +19,43 @@ namespace Parser
     // on a malformed chain (missing identifier after `->`) it collects an
     // UnexpectedToken issue and returns make_void_ref(); callers do their own recovery
     const AST::NodeReference parse_postfix_chain(Payload &payload, AST::NodeReference base);
+
+    // **`Type::f(...)`, a call whose candidates come from a type rather than a namespace.** null when
+    // these tokens are not one, with the cursor put back exactly as it was found - so an operand
+    // position tries this first and reads a namespace-qualified call as it always did.
+    //
+    // it has to be tried *before* Parser::parse_namespace, which mints what it does not find: once
+    // that has consumed `Point::` there is a namespace called `Point` and the type is unreachable.
+    // it also has to *commit* once the owner is known to be a type - falling back to the namespace
+    // path there is what lets FunctionRegistry::overloads walk outward and answer `Foo::f()` with an
+    // enclosing free `f`, which is the pre-existing bug this arm must not inherit
+    AST::FunctionCallExprNode *try_parse_static_call(Payload &payload);
+
+    // **does a `.name(` start here?** - the shorthand static call, whose owner comes from wherever its
+    // value goes rather than from anything written at the call site.
+    //
+    // one predicate with two readers, which is the point: `is_expr_token` decides whether the
+    // shunting-yard loop enters at all and `parse_operand` decides what to build, and a disagreement
+    // between them is not a diagnostic - it is the compiler aborting on a sanity assert with no
+    // location. guarded on the identifier *and* what follows it so `..`, which is two `t_dot` and a
+    // declared infix operator, can never be claimed
+    bool starts_shorthand_call(Cursor &cursor);
+
+    // **`Type::$x`, a read or a write of storage the type owns.** null when these tokens are not
+    // one, cursor untouched - and, like the call form above, tried before Parser::parse_namespace
+    // for the same reason: once that has minted a namespace called `Point` the type is out of
+    // reach, and a `$name` after the `::` matches no arm in parse_operand at all
+    AST::StaticPropertyExprNode *try_parse_static_property(Payload &payload);
+
+    // **does `[identifier [<...>] ::]+ $name` start here?** - the shape a static property access is
+    // written in, measured without deciding that the prefix names a type. that second question is
+    // try_parse_static_property's, asked once, inside the expression parse.
+    //
+    // one scanner because two readers have to agree about the same token run: the statement dispatch,
+    // which owes `Session::$count = 1;` a branch it is otherwise anchored on nothing to reach, and the
+    // operand parser that reads it. a disagreement between them is silent in the worst direction - the
+    // statement falls to the catch-all and reports an unexpected identifier, saying nothing about statics
+    bool starts_static_property(Cursor &cursor);
 
     // `weak($obj)` / `weak<Foo>($obj)`, and `strong($w)`. the two halves of a weak reference, written
     // rather than implicit because each moves a reference count and one of them can fail

@@ -23,6 +23,7 @@ namespace AST
         n_literal_bool,
         n_literal_string,
         n_string_interpolation,
+        n_expr_static_property,
         n_vardecl,
         n_const_decl,
         n_var,

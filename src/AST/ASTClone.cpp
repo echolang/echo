@@ -39,6 +39,7 @@
 #include "AST/ForStatementNode.h"
 #include "AST/LoopControlNode.h"
 #include "AST/ForeachNode.h"
+#include "AST/StaticPropertyExprNode.h"
 #include "AST/StringInterpolationNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
@@ -63,6 +64,20 @@ Node *LiteralFloatExprNode::clone(CloneContext &cc) const { return cc.shallow(th
 Node *LiteralIntExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralBoolExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralStringExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+
+Node *StaticPropertyExprNode::clone(CloneContext &cc) const
+{
+    StaticPropertyExprNode *c = cc.shallow(this);
+
+    // **the owner substitutes, and that is the whole of the clone.** `Box<T>::$count` written
+    // inside a generic body has to become `Box<int32>::$count` in the instance, or every
+    // instantiation would name the template's storage - which is one global for what are meant to
+    // be several. the declaration is *not* rebound: it lives on the template and is shared, which
+    // is the same arrangement a method's declaration has
+    c->owner = cc.substitute(c->owner);
+
+    return c;
+}
 
 Node *StringInterpolationExprNode::clone(CloneContext &cc) const
 {
@@ -110,6 +125,14 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
     // decl points at the (generic) declaration; the monomorphizer repoints it at the
     // concrete instance afterwards. rebind keeps self-recursive calls correct in the meantime
     c->decl = cc.rebind(c->decl);
+
+    // **the owner of a static call is a *type*, so it substitutes like a parameter type does.**
+    // cc.shallow copy-constructs, so without this line a `result<T, E>::ok(...)` written inside a
+    // generic body keeps the template's `result<T, E>` in every instance - and since the owner is what
+    // AST::can_instantiate binds E from, the instantiation stays undecidable forever. Silently: both
+    // the monomorphizer's still-generic skip and determine_type_args' undecided arm report nothing,
+    // so the call is emitted nowhere and nothing says why
+    c->static_owner = cc.substitute(c->static_owner);
     return c;
 }
 

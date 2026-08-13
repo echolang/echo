@@ -1,0 +1,16 @@
+// each instantiation gets its own storage, which falls out of the symbol: the global is named from
+// the owner's mangled token, and an instantiation's carries its type arguments
+struct Box<T> {
+    static int32 $made = 0;
+    public T $v;
+}
+
+Box<int32>::$made = 5;
+
+echo Box<int32>::$made;
+echo Box<bool>::$made;
+
+Box<bool>::$made = 9;
+
+echo Box<int32>::$made;
+echo Box<bool>::$made;

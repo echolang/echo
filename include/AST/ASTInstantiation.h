@@ -114,12 +114,33 @@ namespace AST
         TypeSubstitution bindings;
     };
 
+    // **the owner's type parameters, for a call that has no receiver to read them from.**
+    //
+    // a method binds `Box<T>`'s T by unifying `args[0]`'s declared `Box<T>&` against the receiver's
+    // type. a *static* has no args[0], and its owner's parameters may appear nowhere in its signature
+    // at all - `result<T, E>::ok(T $v)` says nothing about E - so the owner the call site named is the
+    // only thing that can say. without this the instantiation is undecidable, and undecidable is
+    // reported by nobody: the monomorphizer skips a still-generic decl and determine_type_args answers
+    // nullopt, both in silence, so the call is emitted nowhere and nothing explains it
+    //
+    // positional over the **inherited** prefix, which is exactly the owner's own parameter list -
+    // FuncDeclParser shares the owner's declarations rather than copying them, so this binds the same
+    // TypeParamDecl pointers the receiver path would have
+    //
+    // empty for anything that is not a static, and empty while `owner` still mentions a type parameter:
+    // a static call written inside an un-instantiated template has to stay a not-yet, not a decision
+    TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner);
+
     // the question asked with argument types alone, plus whatever type arguments the call site
     // spelled out. `explicit_type_args` empty means "infer everything"
+    //
+    // `static_owner` is the type a static call named - `unknown` for every other shape of call, which
+    // is what makes the seed above a no-op for them
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
-        const std::vector<ValueType> &explicit_type_args = {});
+        const std::vector<ValueType> &explicit_type_args = {},
+        const ValueType &static_owner = ValueType::make_unknown());
 
     // the same question asked of a call node: argument types are read off the arguments, type
     // arguments off `explicit_type_args`. for a caller that has not already got the argument types

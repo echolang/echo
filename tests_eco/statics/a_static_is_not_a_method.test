@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownMember  a_static_is_not_a_method.eco:15:10
+
+  The type 'Point' has no member named 'origin'
+
+  14 | 
+  15 | $q = $p->origin();
+     :          ^^^^^^
+  16 | 
+
+[error] a_static_is_not_a_method.eco:15:18
+
+  cannot infer type of variable without an initializer
+
+  14 | 
+  15 | $q = $p->origin();
+     :                  ^
+  16 | 
+
+2 errors, nothing was compiled.

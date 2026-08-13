@@ -1,0 +1,16 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownStaticProperty  static_init_names_itself.eco:5:26
+
+  The type 'A' has no static property named '$x'
+
+  4 | struct A {
+  5 |     static int32 $x = A::$x + 1;
+    :                          ^^
+  6 |     public int32 $p;
+
+  help: a static property is declared 'static' in the type's body and read on the type itself. an ordinary property lives in each value instead, and is reached through one with '->'
+  note: inside a static's initializer only statics declared before it can be named - including the one being declared, which is not yet one of them
+
+1 error, nothing was compiled.

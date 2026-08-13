@@ -133,6 +133,93 @@ ISSUE_MESSAGE_FNC(UnknownMember)
     return fmt::format("The type '{}' has no member named '{}'", type_name, member_name);
 }
 
+ISSUE_MESSAGE_FNC(UnknownStaticFunction)
+{
+    return fmt::format("The type '{}' has no static function named '{}'", type_name, function_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnknownStaticFunction::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "a static function is declared 'static function' in the type's body and called on the type "
+        "itself. an ordinary method is reached through a value instead, with '->'" } };
+}
+
+ISSUE_MESSAGE_FNC(UnknownStaticProperty)
+{
+    return fmt::format("The type '{}' has no static property named '{}'", type_name, property_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnknownStaticProperty::notes() const
+{
+    // the second note is the one a reader hits inside an initializer, and it is a *rule* rather than a
+    // limitation worth apologising for: a static's initializer may name statics declared before it, and
+    // nothing else - which is what makes a cycle between two of them unwritable rather than something
+    // the compiler has to go looking for
+    return {
+        IssueNote { NoteKind::t_help,
+            "a static property is declared 'static' in the type's body and read on the type itself. "
+            "an ordinary property lives in each value instead, and is reached through one with '->'" },
+        IssueNote { NoteKind::t_note,
+            "inside a static's initializer only statics declared before it can be named - including "
+            "the one being declared, which is not yet one of them" },
+    };
+}
+
+ISSUE_MESSAGE_FNC(UnboundShorthandCall)
+{
+    return fmt::format(
+        "'.{}(...)' takes its type from where its value goes, and nothing here says what that is",
+        function_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::UnboundShorthandCall::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "name the type - 'SomeType::" + function_name + "(...)' - or give the destination a declared "
+        "type. a shorthand reads its owner from a return type, a declared variable's type, or the "
+        "parameter it is passed to" } };
+}
+
+ISSUE_MESSAGE_FNC(AmbiguousShorthandCall)
+{
+    return _message;
+}
+
+std::vector<AST::IssueNote> AST::Issue::AmbiguousShorthandCall::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "a shorthand has no type of its own, so it cannot be what tells these apart - and unlike an "
+        "ordinary argument there is nothing to cast. name the type at the call instead" } };
+}
+
+ISSUE_MESSAGE_FNC(StaticOutsideType)
+{
+    return fmt::format("'{}' is not declared inside a type, so it cannot be static", function_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::StaticOutsideType::notes() const
+{
+    // worded for both positions this refuses - a declaration at file scope and one in a body - since
+    // what is missing is the same thing in each: a type to do the owning
+    return { IssueNote { NoteKind::t_help,
+        "'static' says which type owns a declaration, and here there is none to own it. remove the "
+        "modifier, or move the declaration into a type's body" } };
+}
+
+ISSUE_MESSAGE_FNC(ConstOnStaticFunction)
+{
+    return fmt::format("'{}' is static, so it has no receiver for 'const' to qualify", function_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::ConstOnStaticFunction::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "'const function' says the method only reads the value it was called on. a static is called "
+        "on the type and never on a value, so write 'const' on the parameters that are read-only "
+        "instead" } };
+}
+
 ISSUE_MESSAGE_FNC(ArgumentTypeMismatch)
 {
     return _message;

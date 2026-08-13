@@ -1,0 +1,9 @@
+// a static's initializer cannot name the static it is initializing - it is not yet one of the ones
+// declared before it. that is what makes a cycle between statics unwritable rather than something the
+// compiler has to detect, and the note beside the refusal says so
+struct A {
+    static int32 $x = A::$x + 1;
+    public int32 $p;
+}
+
+echo A::$x;

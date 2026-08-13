@@ -48,12 +48,47 @@ namespace AST
         return std::nullopt;
     }
 
+    TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner)
+    {
+        TypeSubstitution bindings;
+
+        if (tmpl == nullptr || !tmpl->is_static_method() || !owner.has_complex_type()) {
+            return bindings;
+        }
+
+        const size_t inherited = tmpl->inherited_type_param_count;
+
+        if (inherited == 0) {
+            return bindings;
+        }
+
+        // the owner's *instantiation* is what says what its parameters are. an owner that is still a
+        // template - `result<T, E>` inside its own body, or inside a generic that has not been
+        // instantiated - carries none, and binding nothing is what keeps that a not-yet
+        const std::vector<ValueType> &args = owner.get_complex_type()->instantiation_args;
+
+        for (size_t i = 0; i < inherited && i < args.size() && i < tmpl->type_parameters.size(); i++) {
+            if (is_undetermined_type(args[i])) {
+                continue;
+            }
+
+            bindings.bind(tmpl->type_parameters[i], args[i]);
+        }
+
+        return bindings;
+    }
+
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
-        const std::vector<ValueType> &explicit_type_args)
+        const std::vector<ValueType> &explicit_type_args,
+        const ValueType &static_owner)
     {
         Instantiation result;
+
+        // **the static's substitute for a receiver**, seeded before anything is inferred so that every
+        // arm below reads it exactly as it reads what argument 0 bound. see static_owner_bindings
+        result.bindings = static_owner_bindings(tmpl, static_owner);
 
         // which argument's shape could not be reconciled. collected rather than returned on, so
         // that the parameters can still be judged - a template with one bad argument is usually
@@ -113,7 +148,14 @@ namespace AST
             // `f<T>(T $a, T $b)` over an int32 and an int64 still reconciles the way it did. What
             // remains wrong is the general case of one parameter bound from several arguments, which
             // is still open
-            const size_t authoritative = tmpl->args.empty() ? 0 : 1;
+            //
+            // **asked of has_receiver(), never of is_member() or of a list of kinds** - this is an
+            // argument *index*, which is the reading a static silently breaks. a static and a closure
+            // are both the shape where args[0] is not a receiver: a static's seed is already in
+            // `result.bindings` and survives argument 0 by starting at 0, which is the same rule for
+            // the same reason - the owner was *declared* at the call site, and an argument must not
+            // rename the instance - and a closure's args[0] is the environment its captures live in
+            const size_t authoritative = (tmpl->has_receiver() && !tmpl->args.empty()) ? 1 : 0;
 
             for (size_t i = 0; i < argument_types.size(); i++) {
                 // an argument with no type yet cannot contradict the template, and must not bind
@@ -261,6 +303,6 @@ namespace AST
 
     Instantiation can_instantiate(const FunctionDeclNode *tmpl, const FunctionCallExprNode &call)
     {
-        return can_instantiate(tmpl, argument_types_of(call), explicit_type_args_of(call));
+        return can_instantiate(tmpl, argument_types_of(call), explicit_type_args_of(call), call.static_owner);
     }
 };

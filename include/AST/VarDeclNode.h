@@ -68,6 +68,20 @@ namespace AST
         // only ever true of a *property*. a local has no outside to be hidden from
         bool is_private = false;
 
+        // where the `static` was written, on the same "present *is* the modifier" terms as a function's.
+        // the token rather than a bool, so a refusal points at the modifier rather than at the name
+        //
+        // **this declares storage the type owns rather than storage each value carries**, so a static
+        // property is not in ComplexType's layout at all - it has no offset, no index, and no part in a
+        // field-wise constructor or a copy. what it has is one global per (type, property), which is
+        // Compiler::LLVM::StaticStorageCodegen's business
+        //
+        // only ever true of a *property*: a local's storage is its frame's, which is the one thing
+        // `static` would be saying otherwise, and Parser::parse_scope refuses one
+        std::optional<TokenReference> static_token;
+
+        bool is_static() const { return static_token.has_value(); }
+
         // written `guard T $x = <nullable> else {...}`: this declaration's initializer is one level more
         // *nullable* than the declaration is, because the statement around it tests the value and only
         // binds on the path where it was there

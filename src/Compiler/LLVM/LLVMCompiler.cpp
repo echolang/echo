@@ -25,7 +25,7 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _memory(_ctx), _process(_ctx), _debug_print(_ctx), _debug_info(_ctx),
+      _abort(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx), _debug_info(_ctx),
       _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
@@ -39,6 +39,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.classes = &_classes;
     _ctx.abort = &_abort;
     _ctx.memory = &_memory;
+    _ctx.statics = &_statics;
     _ctx.process = &_process;
     _ctx.debug_print = &_debug_print;
     _ctx.debug_info = &_debug_info;
@@ -263,6 +264,16 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         // the epilogue is the function's own, not the last file-root statement's - and gen_report emits
         // `printf` calls, which must carry a location like every other call here
         _debug_info.set_function_scope_location();
+
+        // **before the report, and that ordering is the whole reason teardown is not `atexit`.**
+        // `--track-allocations` is on for every corpus case, so a static torn down after gen_report
+        // would read as a live allocation - and an atexit handler runs after this by construction.
+        // it also runs after `~Backend` has deleted the JIT's engine, which is a call into unmapped
+        // memory rather than merely a wrong number
+        //
+        // inside the terminated-block guard with everything else here, so `die`, a failed `assert`
+        // and `std::env::exit` skip it - the same thing module-scope releases already do
+        _statics.gen_teardown();
 
         // **no report on a test run**, because the moment it describes has not happened: the report is what
         // a program prints as it ends, and what ends here is a prologue that ran no statement of anybody's.
@@ -800,6 +811,9 @@ void LLVMCompiler::visit_assign(AST::AssignNode &node) { _stmt.gen_assign(node);
 
 void LLVMCompiler::visitTypeCast(AST::TypeCastNode &node) { _expr.gen_type_cast(node); }
 void LLVMCompiler::visitVarRef(AST::VarRefNode &node) { _expr.gen_var_ref(node); }
+// a *read* of a static property. every other use - a write, a borrow, an `&` - reaches the same
+// address through gen_lvalue, which is where the lazy-init call is emitted
+void LLVMCompiler::visit_static_property(AST::StaticPropertyExprNode &node) { _expr.gen_static_property(node); }
 void LLVMCompiler::visitLiteralFloatExpr(AST::LiteralFloatExprNode &node) { _expr.gen_literal_float(node); }
 void LLVMCompiler::visitLiteralIntExpr(AST::LiteralIntExprNode &node) { _expr.gen_literal_int(node); }
 void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node) { _expr.gen_literal_bool(node); }

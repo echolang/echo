@@ -371,9 +371,29 @@ namespace AST
 
     void Monomorphizer::report_unknown_name(FunctionCallExprNode &call, const CodeRef &at)
     {
-        // which of the two errors it is, is which kind of call it is - and that is `lookup_namespace`,
-        // the one field that distinguishes them: a member call has none, because its candidates come
-        // from the receiver sitting in argument 0
+        // **a shorthand first, because `lookup_namespace` no longer tells the kinds apart on its own.**
+        // a `.timeout(30)` has none either, so the member arm below would read its first *argument* as
+        // a receiver and report that `int32` has no member `timeout` - a sentence about a type nobody
+        // wrote, pointing away from the thing that is actually missing
+        if (call.is_shorthand_static_call()) {
+            // an owner was named and the type simply declares no such static. the owner is concrete
+            // here, so this is a real answer rather than a round that ran out
+            if (call.static_owner.has_complex_type()) {
+                _collector.collect_issue<Issue::UnknownStaticFunction>(
+                    at, call.token_function_name.value(), call.static_owner.get_type_desciption());
+                return;
+            }
+
+            // nothing ever named an owner. reported at the `.`, which is where the missing information
+            // belongs - the name is not the mistake
+            _collector.collect_issue<Issue::UnboundShorthandCall>(
+                at_token(at, call.token_shorthand_dot), call.token_function_name.value());
+            return;
+        }
+
+        // which of the two remaining errors it is, is which kind of call it is - and that is
+        // `lookup_namespace`, the one field that distinguishes them: a member call has none, because
+        // its candidates come from the receiver sitting in argument 0
         if (call.lookup_namespace == nullptr
             && !call.arguments.empty() && call.arguments[0] != nullptr) {
 
@@ -403,7 +423,21 @@ namespace AST
     {
         CallResolver resolver(_collector);
 
-        for (auto &[call, mod] : snapshot_calls()) {
+        // **shorthands last, and the order is the diagnostic.** the arena holds a call's arguments
+        // ahead of the call itself, so `draw(.norm(2.0))` would reach the shorthand first and report
+        // that nothing named its owner - true, but the thing worth saying is that `draw` is overloaded
+        // and a shorthand cannot be what tells the overloads apart. letting the enclosing call speak
+        // first lets it say so *and* mark the shorthand terminal, which is what leaves one diagnostic
+        // rather than two for one mistake
+        //
+        // a shorthand nothing encloses is unaffected: its turn comes either way
+        auto ordered = snapshot_calls();
+
+        std::stable_partition(ordered.begin(), ordered.end(), [](const auto &entry) {
+            return !entry.first->is_shorthand_static_call();
+        });
+
+        for (auto &[call, mod] : ordered) {
             // t_failed among the terminal states is what keeps this sweep from reporting a second
             // time on a call some round already reported - it used to rely on the collector
             // de-duplicating the identical message

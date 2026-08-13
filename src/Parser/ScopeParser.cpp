@@ -286,7 +286,18 @@ AST::ScopeNode & Parser::parse_scope(
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_dec })
         ) {
-            parse_varexpr(payload, &scope_node);
+            AST::VarDeclNode *var = parse_varexpr(payload, &scope_node);
+
+            // **`static` says which type owns storage, and a body has no type to own it.** a local's
+            // storage is its frame's, which is the one thing the modifier would be denying - refused
+            // here rather than in parse_varexpr, because this is the walk that knows it is reading a
+            // body at all. reported *after* the parse, which is what leaves the declaration the local
+            // it was written as, and what lets the message name it: the declaration knows both its
+            // modifier's token and its name, where the token run ahead of them only had to be scanned
+            if (var != nullptr && var->is_static()) {
+                payload.collector.collect_issue<AST::Issue::StaticOutsideType>(
+                    payload.context.code_ref(var->static_token.value()), var->name_full());
+            }
         }
 
         // neither branch above claims a call through a callable *value*: it is not a declaration, and
@@ -301,6 +312,26 @@ AST::ScopeNode & Parser::parse_scope(
         // because the root and everything after it is what parse_expr already reads - and then the
         // same tail the call-rooted branch below uses, which is what makes `stdout->write($t);` and
         // `first(&$o)->bump(1);` one statement form with two roots
+        // a statement rooted in a **static property**: `Session::$count = 1;`, `Type::$p->x = 2;`.
+        // ahead of the two branches below because both are anchored on an identifier and would consume
+        // the prefix as a namespace, leaving a `$name` neither of them accepts
+        else if (starts_static_property_statement(payload)) {
+            // **the place alone, not parse_expr.** `t_assign` carries a precedence, so a full
+            // expression parse swallows the `=` and everything after it - and finish_place_statement
+            // then looks for an `=` at the semicolon. the two branches beside this one never noticed
+            // because neither of their shapes is ever written to
+            if (auto *root = try_parse_static_property(payload)) {
+                auto place = parse_postfix_chain(payload, AST::make_ref(*root));
+
+                if (auto *target = place.unsafe_ptr<AST::ExprNode>()) {
+                    finish_place_statement(payload, scope_node, target);
+                }
+            }
+            else {
+                cursor.try_skip_to_next_statement();
+            }
+        }
+
         else if (starts_constant_chain_statement(payload)) {
             if (auto *root = parse_expr(payload, nullptr)) {
                 finish_place_statement(payload, scope_node, root);

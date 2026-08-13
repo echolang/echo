@@ -1,0 +1,21 @@
+// **a static's initializer may name statics declared before it, and nothing else.** that ordering is
+// the whole of the cycle story: a reference resolves only to something already declared, so the
+// references between statics form a total order and a cycle cannot be written at all - there is
+// nothing for the compiler to go looking for
+struct B {
+    static int32 $y = 10;
+    public int32 $p;
+}
+
+struct A {
+    static int32 $base = 2;
+
+    // both are behind this one: `B` is an earlier declaration, `$base` an earlier member
+    static int32 $x = B::$y + A::$base;
+
+    public int32 $p;
+}
+
+echo A::$x;
+echo A::$base;
+echo B::$y;

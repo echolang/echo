@@ -1,0 +1,17 @@
+expect: fail
+
+--- OUT --->
+[error] AmbiguousShorthandCall  shorthand_cannot_pick_an_overload.eco:18:11
+
+  The overload of 'draw' cannot be chosen: '.norm(...)' has no type of its own, so nothing here separates these:
+    draw(Point)
+    draw(Circle)
+
+  17 | 
+  18 | echo draw(.norm(2.0));
+     :           ^
+  19 | 
+
+  help: a shorthand has no type of its own, so it cannot be what tells these apart - and unlike an ordinary argument there is nothing to cast. name the type at the call instead
+
+1 error, nothing was compiled.

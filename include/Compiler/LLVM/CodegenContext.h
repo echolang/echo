@@ -41,6 +41,7 @@ namespace Compiler::LLVM
     class ClassCodegen;
     class AbortCodegen;
     class MemoryCodegen;
+    class StaticStorageCodegen;
     class ProcessCodegen;
     class DebugPrintCodegen;
     class DebugInfoCodegen;
@@ -271,6 +272,11 @@ namespace Compiler::LLVM
         // from. the entry point fills it in and the three `process_*` builtins read it back, which is
         // the whole of how anything the platform hands `main` reaches Echo
         ProcessCodegen *process = nullptr;
+
+        // the static-storage subsystem: the one owner of where a static property's storage comes
+        // from, when it is filled and when it is torn down. reachable from the lvalue subsystem,
+        // which is where every access to one goes through
+        StaticStorageCodegen *statics = nullptr;
 
         // the debug-print subsystem: the whole of how `dprint` renders a value. reachable from the
         // expression subsystem, which is where the builtin's call site is - and its own subsystem

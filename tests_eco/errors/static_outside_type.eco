@@ -1,0 +1,7 @@
+// `static` says which type owns a function, and at file scope there is none to own it. reported and
+// then ignored, so the declaration still registers as the free function it was written as
+static function nope() : int32 {
+    return 1;
+}
+
+echo nope();

@@ -1,0 +1,11 @@
+// the same, for the type that actually allocates. `--track-allocations` is on for every case in this
+// corpus, so a static whose teardown never ran would be a live allocation the report names - which is
+// the whole reason teardown is walked from `main`'s epilogue rather than registered with `atexit`:
+// an atexit handler runs *after* MemoryCodegen::gen_report, and after ~Backend has unmapped the JIT
+struct Holder {
+    static string $name = 'hello world, long enough that this is not a literal in the binary';
+    public int32 $x;
+}
+
+echo Holder::$name;
+echo mem::live_allocations();

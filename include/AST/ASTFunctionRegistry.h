@@ -55,6 +55,15 @@ namespace AST
         // way to it
         void register_member_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
 
+        // registers a `static function` on its owner - ComplexType::add_static_method, and no more.
+        // like a method it is absent from `_by_name`, and unlike one it is absent from the method
+        // table too, so nothing reaches it through a receiver
+        //
+        // the duplicate check is against the static list *alone*, deliberately: `function get()` and
+        // `static function get()` on one type are told apart at every call site, so they are two
+        // declarations and not a collision
+        void register_static_function(Collector &collector, const CodeRef &at, FunctionDeclNode *decl, ComplexType &owner);
+
         // registers the owner's destructor. reconciles across the parse passes by declaration site
         // like the two above, but enters the declaration in *neither* lookup structure: the method
         // table would make it an overload candidate, and it is not a name anyone can write - the
@@ -102,6 +111,14 @@ namespace AST
             const FunctionDeclNode *ignore = nullptr
         ) const;
 
+        // the same question over the owner's *static* overload set. a separate entry point rather than
+        // a flag, because which set a declaration collides within is the whole of the difference
+        FunctionDeclNode *find_static_by_signature(
+            const ComplexType &owner,
+            const FunctionDeclNode *decl,
+            const FunctionDeclNode *ignore = nullptr
+        ) const;
+
         // every registered declaration, in declaration order
         inline const std::vector<FunctionDeclNode *> &get_all() const {
             return _functions;
@@ -121,6 +138,16 @@ namespace AST
         // violation is reachable from malformed input - so it is reported like everything else rather
         // than asserted
         bool claim_declaration_site(Collector &collector, const CodeRef &at, FunctionDeclNode *decl);
+
+        // the first candidate whose parameter types are exactly `decl`'s, skipping `ignore`. the two
+        // signature lookups above differ only in which overload set they hand over, so the comparison
+        // itself lives here once - materializing `decl`'s parameter types for the whole search rather
+        // than per candidate
+        FunctionDeclNode *first_matching_signature(
+            const std::vector<FunctionDeclNode *> &candidates,
+            const FunctionDeclNode *decl,
+            const FunctionDeclNode *ignore
+        ) const;
 
         // declaration order, so a diagnostic or a dump listing declarations is reproducible across
         // runs - the namespace and name maps are unordered and would not be

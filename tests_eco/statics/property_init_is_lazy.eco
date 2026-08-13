@@ -1,0 +1,23 @@
+// **initialization is lazy and first-use**, which is a language rule and not an implementation
+// detail: a static nothing ever names is never initialized, so its initializer's side effects never
+// run. the alternative was llvm.global_ctors, and MCJIT never runs those - `echoc build` would have
+// initialized statics and `echoc run` would silently not
+function seed() : int32 {
+    echo 99;
+    return 7;
+}
+
+struct Cfg {
+    static int32 $lazy = seed();
+    static int32 $plain = 3;
+    public int32 $x;
+}
+
+// nothing has touched a static yet, so `seed()` has not run
+echo 1;
+
+echo Cfg::$plain;
+
+// the first read runs the initializer - once. the second reads what it seated
+echo Cfg::$lazy;
+echo Cfg::$lazy;

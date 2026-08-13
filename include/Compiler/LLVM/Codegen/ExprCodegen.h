@@ -16,6 +16,7 @@ namespace llvm
 
 namespace AST
 {
+    class StaticPropertyExprNode;
     class FunctionDeclNode;
     class TypeCastNode;
     class VarRefNode;
@@ -54,6 +55,11 @@ namespace Compiler::LLVM
 
         void gen_type_cast(AST::TypeCastNode &node);
         void gen_var_ref(AST::VarRefNode &node);
+
+        // a read of `Type::$x`. a load over the place below it and nothing else - which is the
+        // whole reason a static property needed no arm in the assignment, borrow or `&` paths:
+        // they route through gen_lvalue, and so does this
+        void gen_static_property(AST::StaticPropertyExprNode &node);
         void gen_literal_float(AST::LiteralFloatExprNode &node);
         void gen_literal_int(AST::LiteralIntExprNode &node);
         void gen_literal_bool(AST::LiteralBoolExprNode &node);

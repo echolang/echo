@@ -28,6 +28,61 @@ namespace AST
     // TypeRegistry::get_or_create_instantiation needs to know nothing about members
     std::vector<FunctionDeclNode *> find_member_functions(const ComplexType *ct, const std::string &name);
 
+    // the candidate **static** functions a name denotes on `ct` - the same overload set the lookup
+    // above answers, over ComplexType::static_methods, with the same template_ref redirect.
+    //
+    // **why this is not AST::member_surface_namespace**, which CLAUDE.md names as the owner of "which
+    // namespace holds a type's member surface" and which already carries a type's nested types and its
+    // compile-time constants. Three reasons, and the first is decisive:
+    //
+    //  - TypeRegistry names an instantiation `result<int32, string>`, so a member surface for one would
+    //    be a namespace *called* that. the surface route cannot express a generic owner at all, and a
+    //    static on a generic type is the whole motivating case
+    //  - FunctionRegistry::overloads walks *outward* from the namespace it is given. a member lookup
+    //    does not, and must not: `Foo::f()` finding an enclosing free `f` is a bug, not a fallback
+    //  - the shorthand `.f(...)` has no namespace token to name. its owner arrives as a *type*, from
+    //    the destination, so an owner-keyed lookup is needed regardless - and two lookups for one
+    //    concept is the recurring bug "one question, one owner" exists to stop
+    //
+    // so the split is by what the name denotes: the surface keeps what is arity-free, non-overloadable
+    // and takes no type arguments (a nested type, a constant); this takes overload sets declared with
+    // the owner's type parameters in scope
+    std::vector<FunctionDeclNode *> find_static_functions(const ComplexType *ct, const std::string &name);
+
+    // **may a value arriving here name a static owner?** - asked of a destination type, by the two
+    // things that have to agree about it: Parser::parse_return's gate on whether to hand the return
+    // type down as a parse-time destination at all, and AST::bind_shorthand_to, which takes the owner.
+    //
+    // one predicate rather than a `has_complex_type()` at each, because the *peels* are the content -
+    // a borrow parameter and a `T?` both name an owner their spelling does not
+    bool destination_names_a_static_owner(const ValueType &destination);
+
+    // the owner a destination names, peeled - or `unknown` when it names none. the answer
+    // destination_names_a_static_owner is a yes/no over, so the peel is written once
+    ValueType static_owner_of_destination(const ValueType &destination);
+
+    // **gives a shorthand `.f(...)` the owner its destination names.** the exact shape of
+    // AST::bind_null_to beside it, and for the same reason: a value with no type of its own, typed by
+    // the place it is going, at whichever of the four positions can say.
+    //
+    // a no-op on anything that is not an unbound shorthand, and on a destination that names no owner -
+    // that second one being a *not-yet* rather than a refusal, since a parameter still mentioning a
+    // type parameter says nothing about anything. the refusal, when the destination is real and simply
+    // has no owner to give, belongs to the finalizing sweep, which is the only reader that knows no
+    // later round is coming
+    //
+    // **idempotent**, like bind_array_literal_to: several passes may reach one call, and the first
+    // destination to name an owner is the one that meant it
+    bool bind_shorthand_to(ExprNode *expr, const ValueType &destination);
+
+    // the shorthand this expression is *and nothing has named an owner for*, or null - the
+    // tag-compare-plus-cast that keeps every asker from spelling it, null-safe on both axes.
+    //
+    // unbound is the whole question rather than a mode, both readers wanting a call still waiting on a
+    // destination: bind_shorthand_to, whose binding an already-bound call must not have redone, and the
+    // tie diagnostic, which is about an argument that has no type for the overloads to be told apart by
+    FunctionCallExprNode *unbound_shorthand_call_of(ExprNode *expr);
+
     // there is deliberately no find_member_type here. a nested type is only ever reached through an
     // owner *named in source*, which is a declaration and never an instantiation, so there is nothing
     // for the template_ref redirect below to do - ComplexType::find_member_type_decl is the whole

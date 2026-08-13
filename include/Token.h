@@ -107,6 +107,7 @@ public:
         t_public,                   // public
         t_operator,                 // operator
         t_test,                     // test
+        t_static,                   // static
         t_unknown
     };
 

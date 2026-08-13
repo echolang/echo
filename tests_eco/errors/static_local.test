@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] StaticOutsideType  static_local.eco:4:5
+
+  '$x' is not declared inside a type, so it cannot be static
+
+  3 | function f() : int32 {
+  4 |     static int32 $x = 1;
+    :     ^^^^^^
+  5 |     return $x;
+
+  help: 'static' says which type owns a declaration, and here there is none to own it. remove the modifier, or move the declaration into a type's body
+
+1 error, nothing was compiled.

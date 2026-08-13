@@ -61,13 +61,15 @@ AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_
     // same shape AST::receiver_is_const takes, and for the same reason: `$this` is args[0] like any
     // other parameter, so a second carrier on the declaration would be a second answer
     //
-    // is_member() rather than implicit_arg_count(), because a closure's args[0] is its environment
-    // and not a receiver: nothing accesses a region through it
+    // has_receiver() rather than implicit_arg_count(), because a closure's args[0] is its environment
+    // and not a receiver: nothing accesses a region through it. and rather than is_member(), because a
+    // **static method** has an owner and no `$this` - its args[0] is an ordinary written parameter, so
+    // answering the receiver rule for it would refuse legal calls against an effect nobody declared
     //
     // a **constructor** is absent from this switch on purpose, and its `t_constructor` arm would be
     // unreachable if it were here: its `$this` is a body-*local* that AST::declare_constructor_this
     // mints and marks `t_out`, so it has no receiver argument for this to answer about
-    if (index == 0 && decl.is_member()) {
+    if (index == 0 && decl.has_receiver()) {
         switch (decl.member_kind) {
         case AST::MemberKind::t_destructor:
             // the receiver is going away and the body is what ends it
@@ -80,6 +82,10 @@ AST::AccessEffect AST::access_effect_of(const AST::FunctionDeclNode &decl, size_
         // a **test** is as absent from this as a constructor is, and for a stronger reason: it takes no
         // arguments at all, so there is no index 0 for this to be asked about
         case AST::MemberKind::t_test:
+        // a **static method** is absent for the reason the gate above gives - has_receiver() is false
+        // for one, so this arm is unreachable. it is written out because the switch has no default,
+        // which is what makes a kind added without a decision a compile error rather than a silent one
+        case AST::MemberKind::t_static_method:
             return AST::receiver_is_const(decl) ? AST::AccessEffect::t_read : AST::AccessEffect::t_inout;
         }
     }

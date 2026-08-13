@@ -238,6 +238,22 @@ bool Parser::starts_vardecl(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
 
+    // **`static` is a modifier and never the declaration**, so it is skipped and the question asked of
+    // what follows. it is safe to skip unconditionally: `static` is a reserved word, so nothing else in
+    // the grammar can begin with one, and `static function` was already claimed by starts_funcdecl -
+    // which the struct-body dispatch asks ahead of this, exactly as it asks starts_constdecl
+    //
+    // scanned rather than consumed, because all four predicates read from the statement's head and a
+    // consumed modifier would leave the three that answer no looking at the wrong token
+    if (cursor.is_type(Token::Type::t_static)) {
+        const auto before_modifier = cursor.snapshot();
+        cursor.skip();
+        const bool is_decl = starts_vardecl(payload);
+        cursor.restore(before_modifier);
+
+        return is_decl;
+    }
+
     // `const`, `ptr` and `weak` begin nothing else at a statement head, so they answer without a scan.
     // that keeps a malformed one reported by parse_varexpr, which knows what it was reading,
     // rather than by the statement dispatch's catch-all

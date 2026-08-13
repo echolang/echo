@@ -207,6 +207,11 @@ namespace AST
 
         // semantic analysis diagnostics (recorded by the type-check pass, never thrown)
         MAKE_ISSUE_DEF2(UnknownMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+        // the same shape as UnknownMember on purpose: "no such member" and "no such static" are one
+        // kind of mistake on two axes, and a reader who wrote the wrong one of `->` and `::` needs the
+        // two messages to look alike enough to see which they got
+        MAKE_ISSUE_DEF2(UnknownStaticFunction, IssueSeverity::Error, const std::string, function_name, const std::string, type_name,
+            std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(ArgumentTypeMismatch, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvedTypeParameter, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnsatisfiedTypeConstraint, IssueSeverity::Error, const std::string, _message);
@@ -230,6 +235,31 @@ namespace AST
         MAKE_ISSUE_DEF1(DuplicateTestName, IssueSeverity::Error, const std::string, test_name,
             std::vector<IssueNote> notes() const override;);
 
+        // a `.f(...)` that nothing gave an owner to. its own kind because the remedy is not "fix the
+        // name" but "say where this value goes" - a reader shown UnknownFunction here goes looking for
+        // a declaration that exists, under a type they were not told to name
+        MAKE_ISSUE_DEF1(UnboundShorthandCall, IssueSeverity::Error, const std::string, function_name,
+            std::vector<IssueNote> notes() const override;);
+
+        // an overload set that cannot be chosen between *because* an argument is an unbound shorthand.
+        // its own kind rather than AmbiguousCall's second reading, because AmbiguousCall's remedy is
+        // "an explicit cast on the argument picks one" - and a shorthand has no type to cast from, so
+        // the one thing that message tells the reader to do is the one thing they cannot
+        MAKE_ISSUE_DEF1(AmbiguousShorthandCall, IssueSeverity::Error, const std::string, _message,
+            std::vector<IssueNote> notes() const override;);
+
+        // `static` written where no type owns the declaration. its own kind rather than a GenericError
+        // because the remedy is structural - the declaration has to move inside a type - and a tool that
+        // can offer that wants to know which diagnostic it is looking at
+        MAKE_ISSUE_DEF1(StaticOutsideType, IssueSeverity::Error, const std::string, function_name,
+            std::vector<IssueNote> notes() const override;);
+
+        // `const static function`. its own kind because the two modifiers are not redundant, they
+        // contradict: `const` qualifies a receiver and a static has none, so neither one is the mistake
+        // on its own and a message about either alone would be wrong
+        MAKE_ISSUE_DEF1(ConstOnStaticFunction, IssueSeverity::Error, const std::string, function_name,
+            std::vector<IssueNote> notes() const override;);
+
         // a `T&` formed from a raw address outside an `unsafe` block. its own kind because it is *the*
         // semantic boundary of the type model: a borrow's type is a contract every later access is
         // optimized against, and this is the one place a program can assert that contract over storage
@@ -249,6 +279,12 @@ namespace AST
         // is the diagnostic that makes an invariant enforceable rather than merely documented - every
         // aliasing conclusion `mem::buffer<T>` licenses rests on this refusal existing
         MAKE_ISSUE_DEF2(PrivateMember, IssueSeverity::Error, const std::string, member_name, const std::string, type_name);
+        // a `Type::$x` naming a static the type does not declare. the mirror of
+        // UnknownStaticFunction beside it, and its own kind for the same reason: the search was of
+        // a type's static storage and not of any namespace, so neither UnknownVariable nor
+        // UnknownMember is describing what was actually looked for
+        MAKE_ISSUE_DEF2(UnknownStaticProperty, IssueSeverity::Error, const std::string, property_name, const std::string, type_name,
+            std::vector<IssueNote> notes() const override;);
 
         // a `private` **method** called from outside the type that declared it. a kind of its own rather
         // than PrivateMember's second reading, for two reasons that are the same reason: the advice

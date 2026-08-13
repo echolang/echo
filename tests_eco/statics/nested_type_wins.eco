@@ -1,0 +1,21 @@
+// `Owner::Name(...)` has two readings and the older one wins: a nested type's constructor, which
+// resolves through the member surface namespace exactly as it always did. the two spellings are
+// identical, so only what the owner *declares* can tell them apart - and try_parse_static_call asks
+// that before it commits, which is what keeps `string::view($b, $n)` a constructor call
+struct Outer {
+    public int32 $v;
+
+    struct Inner {
+        public int32 $w;
+    }
+
+    static function make(int32 $v) : Outer {
+        return Outer($v);
+    }
+}
+
+$i = Outer::Inner(5);
+echo $i->w;
+
+$o = Outer::make(9);
+echo $o->v;

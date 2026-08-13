@@ -148,6 +148,35 @@ void AST::FunctionRegistry::register_member_function(
     owner.add_method(decl);
 }
 
+void AST::FunctionRegistry::register_static_function(
+    AST::Collector &collector,
+    const AST::CodeRef &at,
+    AST::FunctionDeclNode *decl,
+    AST::ComplexType &owner
+)
+{
+    // a static is written where its name is written, exactly as a method is, so the two passes
+    // reconcile on a real token with no virtual one minted
+    if (!claim_declaration_site(collector, at, decl)) {
+        return;
+    }
+
+    // **against the static list alone**, which is the whole reason this is not register_member_function
+    // with a flag: a `static function get()` and a `function get()` on one type are two declarations a
+    // reader can tell apart at both call sites, so they do not collide. checking across the two would
+    // refuse a pair the language admits
+    if (auto *previous = find_static_by_signature(owner, decl, decl)) {
+        report_duplicate_signature(collector, at, previous);
+
+        // not added, so the first declaration wins and resolution stays deterministic
+        return;
+    }
+
+    // neither in _by_name nor in the method table - see the comment on ComplexType::add_static_method
+    // for why the second of those matters as much as the first
+    owner.add_static_method(decl);
+}
+
 void AST::FunctionRegistry::register_destructor(
     AST::Collector &collector,
     const AST::CodeRef &at,
@@ -175,11 +204,29 @@ AST::FunctionDeclNode *AST::FunctionRegistry::find_member_by_signature(
     const AST::FunctionDeclNode *ignore
 ) const
 {
+    return first_matching_signature(find_member_functions(&owner, decl->func_name()), decl, ignore);
+}
+
+AST::FunctionDeclNode *AST::FunctionRegistry::find_static_by_signature(
+    const AST::ComplexType &owner,
+    const AST::FunctionDeclNode *decl,
+    const AST::FunctionDeclNode *ignore
+) const
+{
+    return first_matching_signature(find_static_functions(&owner, decl->func_name()), decl, ignore);
+}
+
+AST::FunctionDeclNode *AST::FunctionRegistry::first_matching_signature(
+    const std::vector<AST::FunctionDeclNode *> &candidates,
+    const AST::FunctionDeclNode *decl,
+    const AST::FunctionDeclNode *ignore
+) const
+{
     // materialized once for the whole search rather than per candidate, which is what keeps
     // signatures_match's parameter-at-a-time comparison worth having
     const std::vector<ValueType> parameter_types = decl->parameter_types();
 
-    for (auto *candidate : find_member_functions(&owner, decl->func_name())) {
+    for (auto *candidate : candidates) {
         if (candidate == ignore) {
             continue;
         }

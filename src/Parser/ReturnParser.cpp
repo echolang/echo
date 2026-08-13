@@ -2,6 +2,7 @@
 
 #include "Parser/ExprParser.h"
 
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
@@ -63,10 +64,17 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     //
     // it was harmless while `null` could only ever go somewhere pointer-shaped. generalising the flag is
     // what made the destination decide the representation, and this is the site that had to hear about it
+    //
+    // **and for a destination that names a static owner**, which `return .ok($v);` needs for the same
+    // reason: a shorthand has no type of its own, and the return type is the only thing in scope that
+    // says which one it is. widening the gate is inert for every other form - the three literal parsers
+    // each re-ask can_type_a_literal before *using* the hint, so a `result<T, E>` reaching them changes
+    // nothing about how a `1` or a `'x'` is typed
     AST::TypeNode *expected_type = payload.context.return_type_ptr;
     if (expected_type != nullptr
         && !AST::can_type_a_literal(expected_type->type)
-        && !AST::destination_admits_null(expected_type->type)) {
+        && !AST::destination_admits_null(expected_type->type)
+        && !AST::destination_names_a_static_owner(expected_type->type)) {
         expected_type = nullptr;
     }
 

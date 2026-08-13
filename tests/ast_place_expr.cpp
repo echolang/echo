@@ -189,6 +189,11 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         // where this one is a concatenation the program computes and does not name - a value, and one
         // a `const string&` parameter has to be able to bind a slot for
         { NodeType::n_string_interpolation, StorageClass::t_materializable },
+
+        // **the one place whose storage is neither a frame slot nor reached through a value.**
+        // `Session::$count` names a global, and answering t_place is what gives it `&`, an
+        // assignment, a borrow argument and a compound write with no arm anywhere for any of them
+        { NodeType::n_expr_static_property, StorageClass::t_place },
         { NodeType::n_expr_binary, StorageClass::t_materializable },
         { NodeType::n_expr_unary, StorageClass::t_materializable },
         { NodeType::n_type_cast, StorageClass::t_materializable },

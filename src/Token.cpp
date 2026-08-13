@@ -118,6 +118,7 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
         case Token::Type::t_test: return "test";
+        case Token::Type::t_static: return "static";
 
         default: return "[undefined]";
     }
@@ -200,6 +201,7 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_public: return "public";
         case Token::Type::t_operator: return "operator";
         case Token::Type::t_test: return "test";
+        case Token::Type::t_static: return "static";
 
         default:
             assert(false && "undefined operator type");

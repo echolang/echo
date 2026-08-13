@@ -23,6 +23,7 @@ namespace AST
     class FunctionDeclNode;
     class FunctionCallExprNode;
     class MemberAccessNode;
+    class StaticPropertyExprNode;
     class NodeReference;
 
     // **the operand edge a pending temporary request means.** the owner holds its operand in one of two
@@ -427,6 +428,20 @@ namespace AST
             const ValueType &type,
             std::vector<NodeReference> &out);
 
+        // **the same taxonomy, over storage that is already a place.** the spelling above builds
+        // `$root->a->b` and hands it here; a static property's global has no root declaration to build
+        // one from and hands its own access node over instead.
+        //
+        // lifted rather than duplicated because the arms *are* the language rule - a callable, an
+        // interface and a weak owe one release, a class owes one release and a deinit for later, and a
+        // struct owes a call - and a second copy of them would be a second answer to what ending a
+        // value means
+        void emit_drop_of_place(
+            ExprNode *place,
+            const ValueType &type,
+            const TokenReference &at,
+            std::vector<NodeReference> &out);
+
         // `<base>-><name>` - one step of a path, and the one place this pass mints a member access. both
         // spellings below go through it, so anything a synthesized access later has to carry is set once
         ExprNode *member_place(ExprNode *base, const std::string &name, const TokenReference &at);
@@ -481,8 +496,8 @@ namespace AST
         // emit_destructor_call below on behalf of a body being built
         void emit_teardown_call(
             FunctionDeclNode *callee,
-            VarDeclNode *root,
-            const std::vector<std::string> &path,
+            ExprNode *place,
+            const TokenReference &at,
             std::vector<NodeReference> &out);
 
         // the destructor call for one value, when its type declares one
@@ -574,6 +589,37 @@ namespace AST
         // absent from the sweep, which is asking about types nothing in the program has torn down yet
         FunctionDeclNode *ensure_deinit(const ValueType &type, std::optional<TokenReference> at);
 
+        // **the function that seats a static property's value, and the one that ends it.**
+        //
+        // a static's initializer is written outside every body: it sits on the declaration, in a type
+        // declaration, where no frame exists and no pass that decides ownership ever walks. so the
+        // whole of what this does is *give it a body* - `Type::$x = <what was written>;` in a real
+        // scope, published like any other synthesized declaration - and from there every rule that
+        // matters was decided by the passes that already know how: the copy taxonomy, the temporary
+        // materialization, the drop of whatever the initializer built and did not hand over.
+        //
+        // that is the reason this is here rather than in codegen. an initializer emitted straight into
+        // the init function would be an expression nobody had walked, so an owning value would be
+        // seated with no retain and torn down twice - or not at all
+        //
+        // memoized on (type, index), and idempotent: every access to one static asks, and the first
+        // one to be reached is the author. answers null while the owner is a template, which is a
+        // *not yet* on the same terms ensure_deinit's guards are
+        void ensure_static_init(StaticPropertyExprNode &node);
+
+        // what a static property's storage owes: the function that fills it, and the one that ends it.
+        // both may legitimately be null - a static with no initializer needs no filling, and one whose
+        // type owns nothing needs no ending - which is why this is a pair rather than a pointer
+        struct StaticInit
+        {
+            FunctionDeclNode *init = nullptr;
+            FunctionDeclNode *deinit = nullptr;
+        };
+
+        // what ensure_static_init already answered for this (type, index), so the second access to a
+        // static does not build a second body for it
+        std::map<std::pair<const ComplexType *, size_t>, StaticInit> _static_inits;
+
         // builds the body: the type's own destructor first, then each owning property in reverse
         // declaration order, out of emit_destructor_call and emit_property_drops.
         //
@@ -626,6 +672,41 @@ namespace AST
         std::unordered_map<const ComplexType *, TypeHome> _type_module;
 
         void build_type_module_map();
+
+        // **writes a synthesized body at its type rather than at the site that asked for it**, for the
+        // duration of a scope.
+        //
+        // every `linkonce_odr` body this pass mints owes this: a deinit, a copy constructor and a
+        // static's initializer are shared by every use of the type, so the first use to need one is the
+        // worst possible author. the body's DISubprogram would take its file from the owner and its line
+        // from a virtual token in another file, and its call nodes would land in whichever module's walk
+        // reached the type first - which build_function_maps' arena sweep turns into a different
+        // function order in that module's object. two units emitting different bytes for one symbol is
+        // unsound rather than untidy, which is why this is the shape it is.
+        //
+        // **scoped rather than a swap-and-restore pair**: an early return between them leaves the pass
+        // writing into another module's file, and nothing downstream says so
+        class TypeHomeScope
+        {
+        public:
+            TypeHomeScope(OwnershipPass &pass, const ComplexType *ct);
+            ~TypeHomeScope();
+
+            TypeHomeScope(const TypeHomeScope &) = delete;
+            TypeHomeScope &operator=(const TypeHomeScope &) = delete;
+
+            // the type's recorded home, or null when nothing placed it - a compiler-minted anonymous
+            // layout, or a module whose file the body pass never built. the caller decides what that
+            // means for it: a deinit has nowhere to be written and gives up, a static's initializer is
+            // positioned on its own property declaration and carries on
+            const TypeHome *home() const { return _home; }
+
+        private:
+            OwnershipPass &_pass;
+            Module *_previous_module;
+            File *_previous_file;
+            const TypeHome *_home = nullptr;
+        };
 
         // --- copies ----------------------------------------------------------------------------
 

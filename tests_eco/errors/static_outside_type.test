@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] StaticOutsideType  static_outside_type.eco:3:1
+
+  'nope' is not declared inside a type, so it cannot be static
+
+  2 | // then ignored, so the declaration still registers as the free function it was written as
+  3 | static function nope() : int32 {
+    : ^^^^^^
+  4 |     return 1;
+
+  help: 'static' says which type owns a declaration, and here there is none to own it. remove the modifier, or move the declaration into a type's body
+
+1 error, nothing was compiled.

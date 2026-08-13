@@ -8,8 +8,10 @@ bool AST::receiver_is_const(const AST::FunctionDeclNode &decl)
 {
     // a free function has no receiver to be const, and a half-parsed member may not have pushed one
     // yet - both answer false rather than asserting, since every caller is asking about a declaration
-    // that may still be settling
-    if (!decl.is_member() || decl.args.empty()) {
+    // that may still be settling. a **static method** answers false through the same door: it has an
+    // owner but no `$this`, and reading its args[0] here would render `static function f(const T&)`
+    // as a `const function` in every signature and every -p ast golden
+    if (!decl.has_receiver() || decl.args.empty()) {
         return false;
     }
 
@@ -19,8 +21,9 @@ bool AST::receiver_is_const(const AST::FunctionDeclNode &decl)
 bool AST::const_receiver_refused(const AST::FunctionDeclNode &callee, const ValueType &receiver)
 {
     // only a method is refused this way. a free function's parameters carry their own const, and the
-    // ordinary argument diagnostic already words that against the parameter it belongs to
-    if (!callee.is_member() || callee.args.empty()) {
+    // ordinary argument diagnostic already words that against the parameter it belongs to - as does a
+    // **static method**, whose args[0] is a written parameter and not a receiver at all
+    if (!callee.has_receiver() || callee.args.empty()) {
         return false;
     }
 

@@ -1,0 +1,30 @@
+// **a static on a generic type binds its owner's parameters from the owner the call site named**, and
+// nothing else can say what they are: a method reads them off its receiver, and a static has none.
+// `result<T, E>::ok` mentions E nowhere in its signature, so without the owner as a substitution seed
+// the instantiation is undecidable - and undecidable is reported by nobody, so the call would be
+// emitted nowhere at all
+struct result<T, E> {
+    public T $value;
+    public E $error;
+    public bool $is_ok;
+
+    static function ok(T $v, E $blank) : result<T, E> {
+        return result<T, E>($v, $blank, true);
+    }
+
+    static function error(T $blank, E $e) : result<T, E> {
+        return result<T, E>($blank, $e, false);
+    }
+}
+
+$a = result<int32, int64>::ok(42, 0);
+echo $a->value;
+echo $a->is_ok;
+
+$b = result<int32, int64>::error(0, 7);
+echo $b->error;
+echo $b->is_ok;
+
+// a second instantiation is distinct storage and a distinct symbol, mangled through the owner segment
+$c = result<bool, int32>::ok(true, 0);
+echo $c->value;

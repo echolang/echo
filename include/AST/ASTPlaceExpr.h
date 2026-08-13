@@ -58,6 +58,11 @@ namespace AST
             // it owns nothing, exactly like `$this`: the slot borrows the value the chain already holds,
             // so nothing here is retained and nothing is dropped
             case NodeType::n_expr_chain_base:
+            // `Session::$count` names storage the *type* owns - one global per (type, property).
+            // a place like any other from here on: `&` takes its address, an assignment writes
+            // through it, a borrow argument binds it. what is different is only where the address
+            // comes from, which is LValueCodegen's arm and nothing else's
+            case NodeType::n_expr_static_property:
                 return StorageClass::t_place;
 
             // an array literal fills storage, so it has to *name* it - AST::OperatorRewriter expands it

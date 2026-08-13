@@ -13,7 +13,9 @@
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTClone.h"
 #include "AST/AssignNode.h"
+#include "AST/StaticPropertyExprNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
@@ -1409,6 +1411,16 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
     }
 
     switch (expr->get_node_type()) {
+        // **the demand that builds a static's storage.** every read and every write of one reaches
+        // here, and the first to do so is what mints the initializer body - so a static nothing names
+        // costs nothing, and the alternative, a sweep, would instantiate whatever an untouched
+        // `static array<T> $cache` drags in
+        case NodeType::n_expr_static_property:
+        {
+            ensure_static_init(*static_cast<StaticPropertyExprNode *>(expr));
+            break;
+        }
+
         case NodeType::n_varref:
         {
             // reading a variable whose value has been handed somewhere else. the whole point of
@@ -2108,11 +2120,25 @@ void OwnershipPass::emit_drop(
     std::vector<NodeReference> &out
 )
 {
+    // **the place is built once and handed over**, where each arm below used to build its own. they
+    // are the same place - only one arm ever runs - and lifting it is what lets storage that is *not*
+    // rooted in a declaration be dropped by the same rules: a static property's global is a place
+    // like any other, and had no spelling here while a root was a VarDeclNode
+    emit_drop_of_place(make_place(root, path), type, root->token_varname, out);
+}
+
+void OwnershipPass::emit_drop_of_place(
+    ExprNode *place,
+    const ValueType &type,
+    const TokenReference &at,
+    std::vector<NodeReference> &out
+)
+{
     // a callable owes one release of its environment and has no properties to walk - so it answers here,
     // before the ComplexType it does not have is asked for. no deinit to ensure either: the environment's
     // teardown is uniform, because a callable's static type never says which environment it holds
     if (type.is_callable()) {
-        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(place)));
         _changed = true;
         return;
     }
@@ -2126,7 +2152,7 @@ void OwnershipPass::emit_drop(
     // no deinit to ensure at this end - the type does not say which class is inside. that is done at the
     // widening, in resolve_value_arrival, which is the last place it is known
     if (type.is_interface()) {
-        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(place)));
         _changed = true;
         return;
     }
@@ -2139,7 +2165,7 @@ void OwnershipPass::emit_drop(
     // here than anywhere: `class Node { weak<Node> $prev; }` is precisely the shape this whole feature
     // exists to make writable, and descending into the class a weak names would have no bottom
     if (type.is_weak()) {
-        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(place)));
         _changed = true;
         return;
     }
@@ -2158,9 +2184,9 @@ void OwnershipPass::emit_drop(
     // returning here rather than falling through is also what makes `class Node { Node $next; }`
     // terminate: recursing into the properties of a type that can contain itself has no bottom
     if (type.is_class()) {
-        ensure_deinit(type, root->token_varname);
+        ensure_deinit(type, at);
 
-        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(make_place(root, path))));
+        out.push_back(make_ref(_current_module->nodes.emplace_back<ReleaseNode>(place)));
         _changed = true;
         return;
     }
@@ -2170,7 +2196,7 @@ void OwnershipPass::emit_drop(
     // member accesses that took were the compiler reaching inside a type from outside it, which `private`
     // refused. ensure_deinit answers the one function that tears this value down, and where the body of
     // that function is is its decision rather than this one's
-    FunctionDeclNode *tear_down = ensure_deinit(type, root->token_varname);
+    FunctionDeclNode *tear_down = ensure_deinit(type, at);
 
     // **a teardown this pass owes and could not write is a defect, and it is said out loud.** every caller
     // reached here through needs_destruction, which for a struct is the same question ensure_deinit
@@ -2184,7 +2210,7 @@ void OwnershipPass::emit_drop(
             + "', whose layout is incomplete. This is a compiler defect, not a source error.");
     }
 
-    emit_teardown_call(tear_down, root, path, out);
+    emit_teardown_call(tear_down, place, at, out);
 }
 
 FunctionCallExprNode &OwnershipPass::emit_resolved_member_call(
@@ -2235,8 +2261,8 @@ AST::ExprNode *OwnershipPass::receiver_for_teardown(AST::ExprNode *place)
 
 void OwnershipPass::emit_teardown_call(
     FunctionDeclNode *callee,
-    VarDeclNode *root,
-    const std::vector<std::string> &path,
+    ExprNode *place,
+    const TokenReference &at,
     std::vector<NodeReference> &out
 )
 {
@@ -2246,10 +2272,10 @@ void OwnershipPass::emit_teardown_call(
     const TokenReference &receiver_token = virtual_token(
         callee->func_name(),
         callee->name_token.has_value() ? callee->name_token.value().type() : Token::Type::t_identifier,
-        root->token_varname);
+        at);
 
     out.push_back(make_ref(emit_resolved_member_call(
-        callee, receiver_token, receiver_for_teardown(make_place(root, path)))));
+        callee, receiver_token, receiver_for_teardown(place))));
 }
 
 void OwnershipPass::emit_destructor_call(
@@ -2265,7 +2291,7 @@ void OwnershipPass::emit_destructor_call(
         return;
     }
 
-    emit_teardown_call(dtor, root, path, out);
+    emit_teardown_call(dtor, make_place(root, path), root->token_varname, out);
 }
 
 IfStatementNode &OwnershipPass::branch_when_present(
@@ -2413,47 +2439,188 @@ FunctionDeclNode *OwnershipPass::ensure_deinit(const ValueType &type, std::optio
     // first, which build_function_maps' arena sweep turns into a different function order in that
     // module's object. absent only for a compiler-minted anonymous layout, which is a closure
     // environment and therefore a class, and for those the walking file is the honest answer
-    Module *previous_module = _current_module;
-    File *previous_file = _current_file;
+    const TypeHomeScope home(*this, ct);
+
     std::optional<TokenReference> site = at;
 
-    const auto home = _type_module.find(ct->template_or_self());
-
-    if (home != _type_module.end() && home->second.module != nullptr && home->second.decl != nullptr
-        && home->second.decl->name_token.has_value()) {
-        // the file the type was declared in, so the body's file and its line agree. only when nothing
-        // could place the declaration does the module's first file stand in
-        File *home_file = home->second.file != nullptr
-            ? home->second.file
-            : home->second.module->files().first();
-
-        // a module with no file, or one whose root the body pass never built. nothing can be published
-        // into it, so the teardown that asked stays the answer
-        if (home_file != nullptr && home_file->root != nullptr) {
-            _current_module = home->second.module;
-            _current_file = home_file;
-
-            // emplace rather than assign: a TokenReference holds its collection by reference and so has
-            // no copy assignment
-            site.emplace(home->second.decl->name_token.value());
-        }
+    // the type's own name token, which a placed home always carries. emplace rather than assign: a
+    // TokenReference holds its collection by reference and so has no copy assignment
+    if (home.home() != nullptr) {
+        site.emplace(home.home()->decl->name_token.value());
     }
 
     // nowhere to write it and nobody asking from a real line - which is only synthesize_pending_class_deinits
     // sweeping an anonymous layout, and for those the demand-driven ask carries the drop's own token
     if (!site.has_value()) {
-        _current_module = previous_module;
-        _current_file = previous_file;
-
         return nullptr;
     }
 
-    FunctionDeclNode *decl = build_deinit(*ct, site.value());
+    return build_deinit(*ct, site.value());
+}
 
-    _current_module = previous_module;
-    _current_file = previous_file;
+OwnershipPass::TypeHomeScope::TypeHomeScope(OwnershipPass &pass, const ComplexType *ct)
+    : _pass(pass), _previous_module(pass._current_module), _previous_file(pass._current_file)
+{
+    const auto found = pass._type_module.find(ct->template_or_self());
 
-    return decl;
+    // **a home is only a home if it can position a body**, which is the declaration and its name token
+    // together. absent for a compiler-minted anonymous layout - a closure environment, and therefore a
+    // class - and for those the walking file is the honest answer, so nothing is swapped at all
+    if (found == pass._type_module.end() || found->second.module == nullptr
+        || found->second.decl == nullptr || !found->second.decl->name_token.has_value()) {
+        return;
+    }
+
+    // the file the type was declared in, so the body's file and its line agree. only when nothing
+    // could place the declaration does the module's first file stand in
+    File *home_file = found->second.file != nullptr
+        ? found->second.file
+        : found->second.module->files().first();
+
+    // a module with no file, or one whose root the body pass never built. nothing can be published
+    // into it, so the asking site stays the answer and `home()` keeps saying so
+    if (home_file == nullptr || home_file->root == nullptr) {
+        return;
+    }
+
+    _home = &found->second;
+    _pass._current_module = found->second.module;
+    _pass._current_file = home_file;
+}
+
+OwnershipPass::TypeHomeScope::~TypeHomeScope()
+{
+    _pass._current_module = _previous_module;
+    _pass._current_file = _previous_file;
+}
+
+void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
+{
+    ComplexType *ct = node.owner.get_complex_type();
+
+    if (ct == nullptr || node.decl == nullptr) {
+        return;
+    }
+
+    const auto key = std::make_pair(static_cast<const ComplexType *>(ct), node.index);
+
+    if (auto it = _static_inits.find(key); it != _static_inits.end()) {
+        node.init = it->second.init;
+        node.deinit = it->second.deinit;
+        return;
+    }
+
+    // **a template's static has no storage of its own**, on exactly ensure_deinit's terms: its declared
+    // type still mentions the owner's parameters, so neither the layout nor the teardown is answerable -
+    // and answering here would make that non-answer permanent. an instantiation is what gets a body
+    if (ct->is_generic() && !ct->is_instantiated()) {
+        return;
+    }
+
+    // written at the type rather than at the access that asked - see TypeHomeScope for why that is a
+    // soundness rule and not a tidiness one. the property's own `$name` positions the body either way,
+    // so unlike a deinit there is nothing here that a missing home would leave unanswered
+    const TypeHomeScope home(*this, ct);
+    const TokenReference &site = node.decl->token_varname;
+
+    StaticInit built;
+
+    // the initializer, if one was written. a static with none is simply zero - the global is
+    // zero-initialized, which is a defined value and the same one a fresh frame slot would hold
+    if (node.decl->init_expr != nullptr) {
+        // **the index is part of the name**, or two statics on one type mangle to one symbol -
+        // a member's mangled name is its owner, its name and its parameter types, and these take
+        // no parameters at all. `$` is the compiler's own namespace, as it is for `$deinit`
+        auto &decl = begin_synthesized_decl(
+            fmt::format("$static_init{}", node.index), site);
+
+        // the owner is set so AST::enclosing_type_of answers for this body, which is what lets a
+        // `private` static be seated by its own type's initializer - and what keeps
+        // CodegenContext::function_file_map's `site_of(owner_type)` fallback able to place it
+        decl.owner_type = ct;
+        decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(ValueType::make_void());
+
+        // **`Type::$x = <the initializer>;`, and that one statement is the whole design.** it is an
+        // ordinary assignment into an ordinary place, so OwnershipPass's own walk of this body inserts
+        // whatever copy, retain or drop the initializer's shape calls for, with no rule here about any
+        // of it. `is_initialization` because the global is fresh, zero-filled storage: there is no
+        // previous value owed an ending
+        auto &target = _current_module->nodes.emplace_back<StaticPropertyExprNode>(
+            node.token_name, node.owner, node.decl, node.index);
+
+        // **an instantiation clones the initializer; a plain type moves it.**
+        //
+        // the declaration lives on the *template*, so `Box<int32>` and `Box<bool>` reach one
+        // `init_expr` between them - and moving it means the first instantiation to be touched steals
+        // it and every later one is seated with nothing at all. that is silent: the storage is
+        // zero-initialized, so it reads as a plausible value rather than as a missing one
+        //
+        // a non-generic owner has exactly one instantiation of itself, so moving is right there - and
+        // it is what keeps the written expression out of AST::RecursiveVisitor's reach, which would
+        // otherwise walk it again through visit_type_decl, in a context with no enclosing function
+        ExprNode *initializer = node.decl->init_expr;
+
+        if (ct->is_instantiated()) {
+            TypeSubstitution subst = TypeSubstitution::positional(
+                ct->template_or_self()->type_parameters, ct->instantiation_args);
+
+            CloneContext cc(_current_module->nodes, subst, _collector.type_registry);
+            initializer = static_cast<ExprNode *>(node.decl->init_expr->clone(cc));
+        }
+
+        auto &assign = _current_module->nodes.emplace_back<AssignNode>(
+            &target, initializer, site);
+
+        assign.is_initialization = true;
+
+        decl.body->children.push_back(AST::make_ref(assign));
+
+        publish_synthesized_decl(decl);
+        built.init = &decl;
+
+        // the template's copy stays where it is for the next instantiation to clone; a plain type's
+        // is now owned by the body above, and leaving it on the declaration as well would put one
+        // subtree in the tree twice
+        if (!ct->is_instantiated()) {
+            node.decl->init_expr = nullptr;
+        }
+    }
+
+    // **the teardown, for a static whose type owes one** - the same drop every other owning value
+    // gets, over a place that happens to be a global rather than a slot. emit_drop_of_place is what
+    // makes that sentence true: a class static gets its release, a struct static gets its deinit call,
+    // and a `weak` static gets its weak release, with no arm here about any of them
+    //
+    // **when** it runs is this subsystem's own answer, and the one thing a local does not need:
+    // Compiler::LLVM::StaticStorageCodegen pushes this function onto an intrusive chain as the value
+    // is seated, and `main`'s epilogue walks it - LIFO, so reverse of initialization
+    if (needs_destruction(node.decl->type())) {
+        auto &decl = begin_synthesized_decl(
+            fmt::format("$static_deinit{}", node.index), site);
+
+        decl.owner_type = ct;
+        decl.return_type = &_current_module->nodes.emplace_back<TypeNode>(ValueType::make_void());
+
+        auto &place = _current_module->nodes.emplace_back<StaticPropertyExprNode>(
+            node.token_name, node.owner, node.decl, node.index);
+
+        place.init = built.init;
+
+        std::vector<NodeReference> drops;
+        emit_drop_of_place(&place, node.decl->type(), site, drops);
+
+        for (auto &drop : drops) {
+            decl.body->children.push_back(drop);
+        }
+
+        publish_synthesized_decl(decl);
+        built.deinit = &decl;
+    }
+
+    _static_inits[key] = built;
+
+    node.init = built.init;
+    node.deinit = built.deinit;
 }
 
 FunctionDeclNode *OwnershipPass::build_deinit(ComplexType &type, const TokenReference &site)

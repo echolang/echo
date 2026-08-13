@@ -18,6 +18,7 @@
 #include "Compiler/LLVM/Codegen/TypeDeclCodegen.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
+#include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
@@ -116,6 +117,7 @@ public:
     void visit_loop_control(AST::LoopControlNode &node);
     void visit_foreach(AST::ForeachNode &node);
     void visit_string_interpolation(AST::StringInterpolationExprNode &node);
+    void visit_static_property(AST::StaticPropertyExprNode &node);
     void visit_assign(AST::AssignNode &node);
     void visitNamespaceDecl(AST::NamespaceDeclNode &node);
     void visitNamespace(AST::NamespaceNode &node);
@@ -181,6 +183,7 @@ private:
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
     Compiler::LLVM::MemoryCodegen _memory;
+    Compiler::LLVM::StaticStorageCodegen _statics;
     Compiler::LLVM::ProcessCodegen _process;
     Compiler::LLVM::DebugPrintCodegen _debug_print;
     Compiler::LLVM::DebugInfoCodegen _debug_info;
