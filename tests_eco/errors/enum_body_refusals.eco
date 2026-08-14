@@ -1,0 +1,13 @@
+enum E
+{
+    case a;
+
+    // an enum's layout is the compiler's, so an author's field has nowhere to go
+    public int32 $extra;
+
+    // a value of an enum is always some case, so a constructor could build one that is none of them
+    constructor() {}
+
+    // `E::name` already denotes a case, so a constant beside them would make one spelling mean two
+    const LIMIT = 4;
+}

@@ -20,6 +20,7 @@
 #include "AST/OperatorNode.h"
 #include "AST/ReleaseNode.h"
 #include "AST/ReturnNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/StaticPropertyExprNode.h"
 #include "AST/StringInterpolationNode.h"
@@ -176,6 +177,11 @@ const TokenReference *source_token_of(const Node &node)
         // one points too
         case NodeType::n_expr_temp_bind:
             return &static_cast<const TemporaryBindExprNode &>(node).token;
+
+        // the `match` keyword. every diagnostic about the form as a whole - non-exhaustive, arms that
+        // do not meet at a type - points here, where an arm's own diagnostics point at that arm
+        case NodeType::n_expr_match:
+            return &static_cast<const MatchExprNode &>(node).token;
 
         // the shapes nobody wrote, each standing in for its operand: `&`, a deref, an implicit cast,
         // the retain a class assignment owes

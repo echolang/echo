@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_case_outside_enum.eco:3:5
+
+  'P' is declared `struct`, so it cannot declare a case - only an `enum` has them.
+
+  2 | {
+  3 |     case nope;
+    :     ^^^^
+  4 | }
+
+1 error, nothing was compiled.

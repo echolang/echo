@@ -74,9 +74,11 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     // written on such a type is a contradiction rather than an answer to it. every other arm below
     // decides *how* to copy; this one decides that there is no such thing
     //
-    // asked before is_struct() too, because the flag lives on the ComplexType and a class or an
-    // interface can never carry it - bind_unique_attribute refuses both at the declaration
-    if (type.is_struct() && type.get_complex_type()->is_unique) {
+    // asked of *any* type that can carry the flag rather than of a struct, because a class and an
+    // interface are refused it at the declaration and have already returned above - so the kind test
+    // added nothing and would have had to grow an arm for every kind that can be written `#[unique]`.
+    // an enum can, and means exactly the same thing by it
+    if (type.has_complex_type() && type.get_complex_type()->is_unique) {
         return AST::CopyKind::t_none;
     }
 
@@ -91,7 +93,14 @@ AST::CopyKind AST::classify_copy(const AST::ValueType &type)
     // primitive owns its own bytes, a pointer and a borrow own nothing at all, and a type parameter the
     // fixpoint has not settled yet must read as "nothing to arrange" rather than as a refusal - it is a
     // not-yet, and the instantiation is classified on its own
-    if (!type.is_struct()) {
+    //
+    // **an enum falls through with a struct and that is the whole argument for its layout being flat.**
+    // its properties are `__tag` and one slot per payload field, so the fold below answers over the
+    // payloads with no arm here and no arm in AST::needs_destruction: an enum any of whose cases owns
+    // something is t_synthesizable, and one whose cases own nothing copies as bytes. a union buffer
+    // would arrive here as a `[N x i8]` property and fold to t_bytes - silently, and for exactly the
+    // shape that must not
+    if (!type.is_struct() && !type.is_enum()) {
         return AST::CopyKind::t_bytes;
     }
 

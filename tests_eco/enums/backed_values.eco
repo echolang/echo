@@ -1,0 +1,22 @@
+// a backed enum carries a constant per case, read back with `value()`. an integer backing *is* the
+// discriminant - `not_found` is tag 404, not tag 1 - while a string backing numbers its cases from
+// zero and recovers the spelling through the accessor.
+enum Status : int32
+{
+    case ok = 200;
+    case not_found = 404;
+}
+
+enum Unit : string
+{
+    case meter = "m";
+    case mile = "mi";
+}
+
+echo Status::ok->value();
+echo Status::not_found->value();
+echo Unit::meter->value();
+echo Unit::mile->value();
+
+// the backing does not change what the cases *are*: they still compare by case
+if (Status::ok != Status::not_found) { echo "distinct\n"; }

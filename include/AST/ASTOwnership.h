@@ -521,6 +521,45 @@ namespace AST
             const TokenReference &at
         );
 
+        // `if ($tag_root->__tag == <discriminant>) { <body> }` - the same thing one case of an enum
+        // wide, and the reason branch_when_present above is not the only shape: an optional has one
+        // payload and asks a `bool`, an enum has one per case and asks which.
+        //
+        // this one mints a comparison where that one reads a place, and the comparison is over the
+        // discriminant's own primitive - so AST::binary_has_builtin_meaning answers it directly and no
+        // declared `operator ==` is consulted. an enum whose author declared one is therefore torn down
+        // by the tag it actually holds rather than by what they said equality means
+        IfStatementNode &branch_when_case(
+            VarDeclNode *tag_root,
+            const ComplexType *ct,
+            int64_t discriminant,
+            ScopeNode *body,
+            const TokenReference &at
+        );
+
+        // the shared half of the two above: the branch itself, with no else arm.
+        //
+        // no else because neither caller has one - an absent optional owes nothing and a case that is
+        // not live owes nothing - and because AST::scope_exit_kind reads a branch with no else as
+        // leaving nothing, which is what keeps both of them out of every control-flow rule
+        IfStatementNode &branch_on(
+            ExprNode *condition,
+            ScopeNode *body,
+            const TokenReference &at
+        );
+
+        // each case of `ct` whose payload owns something, as one guarded group per case.
+        //
+        // **the enum half of emit_property_drops**, and a different walk rather than a filter over
+        // that one: a struct's properties are all live at once and an enum's are live one case at a
+        // time, so what changes is not which properties are dropped but how many branches they are
+        // spread over. reverse declaration order *within* a case, as there
+        void emit_enum_case_drops(
+            VarDeclNode *root,
+            const ComplexType *ct,
+            std::vector<NodeReference> &out,
+            const TokenReference &at);
+
         // each property of `ct` that needs destroying, in reverse declaration order.
         //
         // **called from build_deinit and nowhere else**, which is what keeps the member accesses it mints

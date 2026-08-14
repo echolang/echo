@@ -1,0 +1,26 @@
+// a generic enum: the case table and the payload property types are carried across an instantiation,
+// so `Slot<int32>` and `Slot<string>` are two types with the same cases and different payloads.
+enum Slot<T>
+{
+    case empty;
+    case filled(T $value);
+}
+
+function describe_int(Slot<int32> $s) : int32
+{
+    return match ($s) {
+        Slot<int32>::empty        => -1,
+        Slot<int32>::filled($v)   => $v,
+    };
+}
+
+echo describe_int(Slot<int32>::filled(9));
+echo describe_int(Slot<int32>::empty());
+
+// the shorthand takes the enum from the destination, which for a generic is where it is spelled once
+Slot<string> $s = .filled("hi");
+
+echo match ($s) {
+    Slot<string>::empty      => "empty",
+    Slot<string>::filled($v) => $v,
+};

@@ -1,0 +1,28 @@
+// `match` is an expression: every arm produces a value, they meet at one type, and the result is
+// what the arm the discriminant chose handed back.
+enum Unit
+{
+    case meter(int32 $v);
+    case kilometer(int32 $v);
+    case mile(int32 $v);
+}
+
+function to_meters(Unit $u) : int32
+{
+    return match ($u) {
+        Unit::meter($v)     => $v,
+        Unit::kilometer($v) => $v * 1000,
+        Unit::mile($v)      => $v * 1609,
+    };
+}
+
+echo to_meters(Unit::meter(7));
+echo to_meters(Unit::kilometer(3));
+echo to_meters(Unit::mile(2));
+
+// an `else` arm covers whatever is left, so a match that only cares about one case says so
+$only = match (Unit::mile(1)) {
+    Unit::meter($v) => $v,
+    else            => -1,
+};
+echo $only;

@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] enum_backing_type.eco:1:12
+
+  'float64' cannot back an enum - a case's value has to be an integer type or `string`.
+
+  1 | enum Bad : float64
+    :            ^^^^^^^
+  2 | {
+
+1 error, nothing was compiled.

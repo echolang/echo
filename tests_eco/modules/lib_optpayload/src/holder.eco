@@ -1,0 +1,21 @@
+namespace modopt;
+
+// the shape `result<T, E>` has. Two optional properties rather than one, so the interned layout is
+// reached twice and a payload lowered per unit has two chances to be the wrong one
+public struct Holder<T, E>
+{
+    T? $value;
+    E? $failure;
+
+    public function has() : bool
+    {
+        return $this->value != null;
+    }
+}
+
+// built through the field-wise constructor, so the optional is minted inside *this* module while the
+// instantiation that reads it back is in the consumer's
+public function held<T, E>(T $value) : Holder<T, E>
+{
+    return Holder<T, E>($value, null);
+}

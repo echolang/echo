@@ -8,14 +8,15 @@
 
 namespace Parser
 {
-    // `struct`, `class` and `interface` open the same declaration. one predicate rather than the token
-    // spelled at each of the three dispatch sites, so a site cannot be taught about one keyword and not
-    // the others - which for the type-name pass would mean a name never becoming a namespace symbol,
+    // `struct`, `class`, `interface` and `enum` open the same declaration. one predicate rather than the
+    // token spelled at each of the four dispatch sites, so a site cannot be taught about one keyword and
+    // not the others - which for the type-name pass would mean a name never becoming a namespace symbol,
     // and an unqualified use of it silently typing as `unknown` rather than as a diagnostic
     inline bool starts_typedecl(const Cursor &cursor) {
         return cursor.is_type(Token::Type::t_struct)
             || cursor.is_type(Token::Type::t_class)
-            || cursor.is_type(Token::Type::t_interface);
+            || cursor.is_type(Token::Type::t_interface)
+            || cursor.is_type(Token::Type::t_enum);
     }
 
     // which storage class the keyword under the cursor declares. only meaningful when
@@ -27,6 +28,10 @@ namespace Parser
 
         if (cursor.is_type(Token::Type::t_interface)) {
             return AST::ComplexTypeKind::t_interface;
+        }
+
+        if (cursor.is_type(Token::Type::t_enum)) {
+            return AST::ComplexTypeKind::t_enum;
         }
 
         return AST::ComplexTypeKind::t_struct;

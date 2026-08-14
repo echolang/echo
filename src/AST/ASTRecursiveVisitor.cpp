@@ -8,6 +8,8 @@
 
 #include "AST/ASTRecursiveVisitor.h"
 
+#include "AST/MatchExprNode.h"
+
 #include "AST/ScopeNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
@@ -398,6 +400,26 @@ void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 // AST::TypeChecker has to see them in: a drop names a destructor whose call it validates like any
 // other, and a body that reads out of a temporary declared after it would read a declaration this
 // visitor had not reached yet
+void RecursiveVisitor::visit_match(MatchExprNode &node)
+{
+    // the subject first, and as a *statement* edge: it is a declaration this node owns, reachable from
+    // nowhere else, and it is evaluated before any arm. the same shape and the same order
+    // visit_temporary_bind's temporaries have
+    statement_edge(node.subject);
+
+    for (MatchExprNode::Arm &arm : node.arms) {
+        // **one edge for the arm's scope and not two.** the payload bindings are that scope's own first
+        // children, so walking the scope walks them - descending into them here as well would visit each
+        // twice, and a rewriter that inserts a deref per visit would insert two. the rule
+        // visit_guard states for its `failure` declaration
+        statement_edge(arm.scope);
+
+        // the arm's value is *not* inside that scope: it is the value the match hands back, and it has
+        // to be reachable as a value edge so an implicit cast to the unified type lands on it
+        value_edge(arm.value);
+    }
+}
+
 void RecursiveVisitor::visit_temporary_bind(TemporaryBindExprNode &node)
 {
     for (auto *temp : node.temporaries) {

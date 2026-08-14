@@ -615,13 +615,21 @@ std::string AST::interface_erasure_refusal(const AST::ValueType &from, const AST
     // **the asymmetry the whole design rests on.** a struct's conformance is a compile-time contract: it
     // has no block, no typeinfo word and nothing to dispatch through, so there is no erased value to build.
     // the constraint path is what a struct uses, and it costs nothing at runtime
-    if (from.is_struct()) {
+    //
+    // an enum is refused by the same arm and for the same reason, its layout being a stack aggregate
+    // with a discriminant and no typeinfo word either. the kind is read off the declaration rather than
+    // written into the sentence, so the message names what the author actually wrote
+    if (from.is_struct() || from.is_enum()) {
+        const char *keyword = AST::type_kind_keyword(from.get_complex_type()->kind);
+
         return fmt::format(
-            "'{}' is a struct, so it cannot be stored as '{}' - a struct carries no runtime type to "
+            "'{}' is a {}, so it cannot be stored as '{}' - a {} carries no runtime type to "
             "dispatch through. Take it through a constrained generic instead, e.g. "
             "'function f<T: {}>(T& $v)'.",
             from.get_type_desciption(),
+            keyword,
             interface.get_type_desciption(),
+            keyword,
             interface.get_complex_type()->name.value_or("TheInterface"));
     }
 

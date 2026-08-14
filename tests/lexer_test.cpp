@@ -542,6 +542,8 @@ TEST_CASE( "Keywords are whole words", "[lexer]" )
         { "struct", Token::Type::t_struct },
         { "class", Token::Type::t_class },
         { "enum", Token::Type::t_enum },
+        { "case", Token::Type::t_case },
+        { "match", Token::Type::t_match },
         { "extern", Token::Type::t_extern },
         { "as", Token::Type::t_as },
         { "true", Token::Type::t_bool_literal },

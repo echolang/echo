@@ -8,6 +8,7 @@
 #include "AST/ASTOperatorRewriter.h"
 #include "AST/ASTForeachLowering.h"
 #include "AST/ASTGuardLowering.h"
+#include "AST/ASTMatchResolution.h"
 #include "AST/ASTInterpolationLowering.h"
 #include "AST/ASTConstFolding.h"
 #include "AST/ASTOwnership.h"
@@ -73,6 +74,7 @@ namespace AST
         // generic subject *creates a generic call site*, which is the ownership pass's exact reason -
         // see its header for the ordering the round depends on. a `T?` never reaches it
         GuardLowering _guards;
+        MatchResolution _matches;
 
         // `foreach`, rewritten into the iterator declaration and the `while` it stands for. driven from
         // inside here because the element type is only knowable after resolution, and it must run before

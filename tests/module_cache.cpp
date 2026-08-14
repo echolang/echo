@@ -239,16 +239,20 @@ TEST_CASE("a cache key is stable, and moves only for what changed", "[cache]")
     }
 }
 
-TEST_CASE("a library's object does not depend on which application consumes it", "[cache][odr]")
+// **the invariant the whole module cache rests on.** A module's emitted code has to be a function of its own
+// source: generic instantiations and other compiler-generated definitions are emitted into the unit that
+// *references* them, so a consumer cannot cause a definition to appear in the library's object.
+//
+// if this fails, caching is unsound rather than merely ineffective - the object stored for one application
+// would be the wrong object for the next.
+//
+// **written once and asked twice**, because the answer has to be the same with the baseline pipeline off.
+// It was not: `GlobalDCE` inside that pipeline was the only thing dropping the shared definitions a consumer
+// had caused to be emitted here, so the invariant held on an ordinary build and broke under `--optimize
+// none` - which `-g` implies, which is how it was found. That discard is part of the object writer now
+static void check_consumer_independence(const std::string &suite, const std::string &extra_flags)
 {
-    // **the invariant the whole module cache rests on.** Stages 0-3 exist to make a module's emitted code a
-    // function of its own source: generic instantiations and other compiler-generated definitions are emitted
-    // into the unit that *references* them, so a consumer can no longer cause a definition to appear in the
-    // library's object.
-    //
-    // if this fails, caching is unsound rather than merely ineffective - the object stored for one application
-    // would be the wrong object for the next
-    ScopedProject project("consumer_independence");
+    ScopedProject project(suite);
 
     write_file(project.root() / "lib" / "module.eco",
         "#[module: \"shared\"]\n"
@@ -323,25 +327,41 @@ TEST_CASE("a library's object does not depend on which application consumes it",
 
     write_file(project.root() / "app_b" / "app.eco",
         "struct Local { int32 $x; }\n"
+        "operator (const Local& $a) == (const Local& $b) : bool { return $a->x == $b->x; }\n"
         "shared::Holder<Local> $h = shared::Holder<Local>(Local(3));\n"
         "echo $h->get()->x;\n"
         "echo shared::plain(4);\n"
         "usize $half = shared::PAGE / 2;\n"
         "echo $half;\n"
-        "echo shared::journal_of(5);\n");
+        "echo shared::journal_of(5);\n"
+        // **and a stdlib generic instantiated over a type only this application declares.** This is the
+        // sharp half: `map<Local, int32>`'s seat, find and slot hash are t_odr_shared bodies that call
+        // `hash::of(Local&)` and `operator ==(Local&, Local&)`, which nothing but app_b defines - so a
+        // copy of one landing in the *stdlib's* object makes that object unusable by every other program
+        // that is served it. The library above cannot show this: its own object holds nothing that
+        // reaches back into a consumer
+        "map<Local, int32> $m;\n"
+        "$m[Local(6)] = 6;\n"
+        "echo $m[Local(6)];\n");
+
+    // a namespace is a file-level statement, so the hash overload cannot share app.eco
+    write_file(project.root() / "app_b" / "hash.eco",
+        "namespace hash;\n"
+        "public function of(const Local& $k) : uint64 { return 3; }\n");
 
     const fs::path manifest = project.root() / "lib" / "module.eco";
     const fs::path cache_a = project.root() / "cache_a";
     const fs::path cache_b = project.root() / "cache_b";
 
-    const auto build = [&](const std::string &app, const fs::path &cache) {
+    const auto build = [&](const std::string &app, const fs::path &cache, const std::string &sources) {
         return project.echoc(
-            "build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache) + " app.eco",
+            "build " + extra_flags + " -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache)
+                + " " + sources,
             project.root() / app);
     };
 
-    const ProcessResult a = build("app_a", cache_a);
-    const ProcessResult b = build("app_b", cache_b);
+    const ProcessResult a = build("app_a", cache_a, "app.eco");
+    const ProcessResult b = build("app_b", cache_b, "app.eco hash.eco");
 
     REQUIRE(a.exit_code == 0);
     REQUIRE(b.exit_code == 0);
@@ -357,12 +377,13 @@ TEST_CASE("a library's object does not depend on which application consumes it",
 
     // the library's key must be identical, because none of its own inputs differ between the two builds
     const std::string key_a = line_starting_with(
-        project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_a)
-            + " --explain cache app.eco", project.root() / "app_a").output, "shared");
+        project.echoc("build " + extra_flags + " -o out -m " + quoted(manifest) + " --build-dir "
+            + quoted(cache_a) + " --explain cache app.eco", project.root() / "app_a").output, "shared");
 
     const std::string key_b = line_starting_with(
-        project.echoc("build -o out -m " + quoted(manifest) + " --build-dir " + quoted(cache_b)
-            + " --explain cache app.eco", project.root() / "app_b").output, "shared");
+        project.echoc("build " + extra_flags + " -o out -m " + quoted(manifest) + " --build-dir "
+            + quoted(cache_b) + " --explain cache app.eco hash.eco", project.root() / "app_b").output,
+        "shared");
 
     REQUIRE_FALSE(key_a.empty());
     REQUIRE(key_a == key_b);
@@ -389,6 +410,19 @@ TEST_CASE("a library's object does not depend on which application consumes it",
         INFO("library object: " << fs::relative(object, cache_a).string());
         REQUIRE(files_are_identical(object, counterpart));
     }
+}
+
+TEST_CASE("a library's object does not depend on which application consumes it", "[cache][odr]")
+{
+    check_consumer_independence("consumer_independence", "");
+}
+
+// the same claim with the baseline pipeline off, which is the build a `-g` session gets. Before the
+// unreferenced-definition discard moved into the object writer, app_b's `Holder<Local>` survived into the
+// *library's* object here and the two stores held two different files under one key
+TEST_CASE("a library's object does not depend on its consumer with the pipeline off", "[cache][odr]")
+{
+    check_consumer_independence("consumer_independence_noopt", "--optimize none");
 }
 
 TEST_CASE("a stored object is reused, and a changed source is not", "[cache][store]")

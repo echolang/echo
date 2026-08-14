@@ -51,6 +51,7 @@ namespace AST
         n_expr_indirect_call,
         n_expr_instanceof,
         n_expr_temp_bind,
+        n_expr_match,
         n_expr_const_ref,
         n_expr_const,
         n_release,

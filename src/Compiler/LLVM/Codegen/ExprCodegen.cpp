@@ -1,5 +1,7 @@
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
 
+#include "AST/MatchExprNode.h"
+
 #include "AST/StaticPropertyExprNode.h"
 
 #include "AST/ASTArrayLiteral.h"
@@ -253,6 +255,27 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
         _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
             ? _ctx.builder->CreateICmpEQ(left, right)
             : _ctx.builder->CreateICmpNE(left, right));
+        return;
+    }
+
+    // **two payload-free enums, compared by their discriminant** - which is what an enum's identity is.
+    // AST::binary_has_builtin_meaning is what refused every other operator and every enum that carries a
+    // payload, so what reaches here is exactly `==` and `!=` over two of one type.
+    //
+    // the operands arrive as whole aggregates - `{ i8 }` for a plain enum - so the tag is *extracted*
+    // rather than loaded: the values are already in registers by this point, and reaching for the place
+    // again would be a second answer to where a discriminant lives
+    if (lhsret.is_enum() || rhsret.is_enum()) {
+        if (!node.op_node->op->is_identity_comparison()) {
+            throw unlowered(lhsret, rhsret);
+        }
+
+        llvm::Value *left_tag = _ctx.builder->CreateExtractValue(left, {AST::k_enum_tag_index}, "lhs.tag");
+        llvm::Value *right_tag = _ctx.builder->CreateExtractValue(right, {AST::k_enum_tag_index}, "rhs.tag");
+
+        _ctx.value_stack.push(node.op_node->op->type == Token::Type::t_logical_eq
+            ? _ctx.builder->CreateICmpEQ(left_tag, right_tag)
+            : _ctx.builder->CreateICmpNE(left_tag, right_tag));
         return;
     }
 
@@ -1691,5 +1714,151 @@ void ExprCodegen::gen_operator(AST::OperatorNode &node)
         "an operator node reached codegen: '{}'. an operator is not a value - a declared one is "
         "lowered as a call, and a built-in one is read by gen_binary_expr without being visited",
         node.token_literal.value()));
+}
+
+void ExprCodegen::gen_match(AST::MatchExprNode &node)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    const AST::ValueType result = node.result_type();
+    const bool has_value = !result.is_void();
+
+    // **the subject is emitted as the declaration it is**, slot and initializer, through the same
+    // gen_var_decl every local goes through - so it is evaluated exactly once, before the branch, and
+    // the arms read its payload off storage rather than re-running whatever produced it
+    node.subject->accept(*_ctx.visitor);
+
+    const AST::ValueType subject_type = node.subject->type();
+    const AST::ComplexType *ct = subject_type.get_complex_type();
+
+    auto slot = _ctx.var_map.find(node.subject);
+
+    if (slot == _ctx.var_map.end()) {
+        throw _ctx.error(fmt::format(
+            "the subject of a 'match' has no allocation in scope {}", _ctx.function_context()));
+    }
+
+    // the discriminant, read as the ordinary property it is - the same GEP any member read emits, which
+    // is the whole dividend of `__tag` being in the layout rather than a shape codegen invents
+    llvm::Value *tag_address = _ctx.builder->CreateStructGEP(
+        _ctx.types->get_llvm_type(subject_type, *_ctx.current_cmp_unit),
+        slot->second,
+        AST::k_enum_tag_index,
+        "match.tag_ptr");
+
+    // **and read through the seam, not with a CreateLoad of its own.** LValueCodegen::gen_load is where
+    // the `!tbaa` tag is attached, and an untagged load is the conservative answer said by omission - so
+    // reading the tag by hand would make the one access this node emits alias everything, while every
+    // ordinary member read beside it stays described. the place is `t_typed`: the address is the
+    // subject's own slot and has been nowhere near a `ptr<T>`
+    llvm::Value *tag = _ctx.lvalues->gen_load(
+        LValue { tag_address, ct->get_property_type(AST::k_enum_tag_index), Provenance::t_typed },
+        "match.tag");
+
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.done", function);
+
+    // **the default block is the `else` arm when there is one, and unreachable otherwise.** unreachable
+    // is not a shortcut: AST::MatchResolution refuses a match that does not cover every case, so a tag
+    // outside the set is a value the program cannot hold - and telling LLVM so is what lets the switch
+    // fold away when the subject's case is known
+    llvm::BasicBlock *default_block = nullptr;
+
+    std::vector<llvm::BasicBlock *> arm_blocks;
+    arm_blocks.reserve(node.arms.size());
+
+    for (const AST::MatchExprNode::Arm &arm : node.arms) {
+        const bool is_else = arm.is_else();
+
+        arm_blocks.push_back(llvm::BasicBlock::Create(
+            *_ctx.llvm_context, is_else ? "match.else" : "match.arm", function));
+
+        if (is_else) {
+            default_block = arm_blocks.back();
+        }
+    }
+
+    const bool has_else = default_block != nullptr;
+
+    if (!has_else) {
+        default_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.unreachable", function);
+    }
+
+    llvm::SwitchInst *branch = _ctx.builder->CreateSwitch(
+        tag, default_block, static_cast<unsigned>(node.arms.size()));
+
+    for (size_t i = 0; i < node.arms.size(); i++) {
+        const AST::MatchExprNode::Arm &arm = node.arms[i];
+
+        if (arm.is_else()) {
+            continue;  // the default block, which takes no case of its own
+        }
+
+        const AST::ComplexType::EnumCase &entry = ct->enum_cases()[arm.case_ordinal.value()];
+
+        branch->addCase(
+            llvm::ConstantInt::get(
+                llvm::cast<llvm::IntegerType>(tag->getType()),
+                static_cast<uint64_t>(entry.discriminant),
+                /*IsSigned=*/true),
+            arm_blocks[i]);
+    }
+
+    // the value each arm produced and the block it ended in, which is what the phi is built from. the
+    // ended-in block is the load-bearing half - an arm holding a branch of its own leaves the builder
+    // somewhere other than where it started, and a phi naming the start block names a predecessor that
+    // does not reach it
+    std::vector<std::pair<llvm::Value *, llvm::BasicBlock *>> incoming;
+
+    for (size_t i = 0; i < node.arms.size(); i++) {
+        const AST::MatchExprNode::Arm &arm = node.arms[i];
+
+        _ctx.set_insert_point(arm_blocks[i]);
+
+        // the arm's scope first - its bindings are the scope's own leading declarations, so this is
+        // what seats and initializes them, and a block arm's statements follow in the same walk
+        if (arm.scope != nullptr) {
+            arm.scope->accept(*_ctx.visitor);
+        }
+
+        if (has_value && arm.value != nullptr && !_ctx.block_is_terminated()) {
+            arm.value->accept(*_ctx.visitor);
+
+            llvm::Value *value = _ctx.types->coerce_value(
+                _ctx.pop(), arm.value->result_type(), result, *_ctx.current_cmp_unit);
+
+            incoming.emplace_back(value, _ctx.builder->GetInsertBlock());
+        }
+
+        // an arm whose body already left - every path returned, or it ended in `die` - owes no branch
+        // to the join and contributes no incoming value. the same test gen_scope makes before it seats
+        // a slot, and for the same reason: a block that already ends cannot take a second terminator
+        if (!_ctx.block_is_terminated()) {
+            _ctx.builder->CreateBr(done_block);
+        }
+    }
+
+    if (!has_else) {
+        _ctx.set_insert_point(default_block);
+        _ctx.builder->CreateUnreachable();
+    }
+
+    _ctx.set_insert_point(done_block);
+
+    // a void match is a statement and pushes nothing, exactly as a void call does - so gen_scope's
+    // stack-depth assertion stays true rather than being special-cased for this node
+    if (!has_value || incoming.empty()) {
+        return;
+    }
+
+    llvm::PHINode *phi = _ctx.builder->CreatePHI(
+        _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit),
+        static_cast<unsigned>(incoming.size()),
+        "match");
+
+    for (const auto &[value, block] : incoming) {
+        phi->addIncoming(value, block);
+    }
+
+    _ctx.value_stack.push(phi);
 }
 };

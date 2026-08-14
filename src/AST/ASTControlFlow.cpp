@@ -7,6 +7,7 @@
 #include "AST/ConstIfNode.h"
 #include "AST/ConstExprNode.h"
 #include "AST/LoopControlNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 
@@ -83,6 +84,43 @@ namespace
             auto *branch = statement.get_ptr<AST::ConstIfNode>();
 
             return branch_exit_kind(branch->if_scope, branch->else_scope);
+        }
+
+        // **a `match` used as a statement leaves iff every one of its arms does** - the two-armed rule
+        // above read N arms wide, and sound for its reason: a match is exhaustive, so the arms are the
+        // only ways out and there is no fallthrough path to account for.
+        //
+        // exhaustiveness is what has to be *known* rather than assumed, and `patterns_decided` is how:
+        // AST::MatchResolution refuses a match that does not cover every case, so a decided one covers
+        // them. an undecided one - which is what Parser::parse_guard and AST::close_constructor_body see,
+        // both asked while the parse is still building the tree - is admitted only when an `else` arm is
+        // written, which is a fact about the arms alone. under-answering there costs a dead trailing
+        // statement, where over-answering is the failure mode this file's header refuses
+        //
+        // an arm that produces a *value* never leaves: it hands one back to the match, so control
+        // rejoins. only a `{ }` arm can leave, which is also why the two shapes are worth telling apart
+        if (statement.has_type<AST::MatchExprNode>()) {
+            auto *node = statement.get_ptr<AST::MatchExprNode>();
+
+            const bool has_else = std::any_of(
+                node->arms.begin(), node->arms.end(),
+                [](const AST::MatchExprNode::Arm &arm) { return arm.is_else(); });
+
+            if (node->arms.empty() || !(node->patterns_decided || has_else)) {
+                return AST::ExitKind::t_none;
+            }
+
+            AST::ExitKind kind = AST::ExitKind::t_function;
+
+            for (const AST::MatchExprNode::Arm &arm : node->arms) {
+                if (arm.value != nullptr || arm.scope == nullptr) {
+                    return AST::ExitKind::t_none;
+                }
+
+                kind = std::min(kind, AST::scope_exit_kind(*arm.scope));
+            }
+
+            return kind;
         }
 
         // a bare nested block leaves for whatever reason its own children do. without this arm a

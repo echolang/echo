@@ -34,6 +34,7 @@ namespace AST
     class IndirectCallExprNode;
     class InstanceOfExprNode;
     class TemporaryBindExprNode;
+    class MatchExprNode;
     class ReleaseNode;
     class IndexExprNode;
     class BinaryExprNode;
@@ -92,6 +93,7 @@ namespace AST
         virtual void visit_indirect_call_expr(IndirectCallExprNode &node) = 0;
         virtual void visit_instanceof_expr(InstanceOfExprNode &node) = 0;
         virtual void visit_temporary_bind(TemporaryBindExprNode &node) = 0;
+        virtual void visit_match(MatchExprNode &node) = 0;
         virtual void visit_release(ReleaseNode &node) = 0;
         virtual void visit_index_expr(IndexExprNode &node) = 0;
         virtual void visit_array_literal_expr(ArrayLiteralExprNode &node) = 0;

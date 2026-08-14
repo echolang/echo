@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_match_over_non_enum.eco:3:6
+
+  'match' reads which case an enum is holding, and 'int32' is not an enum.
+
+  2 | 
+  3 | $r = match ($n) {
+    :      ^^^^^
+  4 |     else => 1,
+
+1 error, nothing was compiled.

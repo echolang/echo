@@ -141,7 +141,7 @@ bool Compiler::compute_module_keys(
 
     // **and whether the per-unit pipeline ran**, which is a different question from the one above: `-O`
     // decides what is compiled *together*, `--no-optimize` decides whether the object this key names went
-    // through Backend::optimize_unit at all. Two builds differing only in that flag produce different
+    // through the baseline pipeline at all. Two builds differing only in that flag produce different
     // objects, so without this one of them would be served the other's
     environment = fnv1a64(
         options.no_optimize ? std::string("noopt") : std::string("opt"), environment);

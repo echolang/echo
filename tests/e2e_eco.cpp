@@ -147,7 +147,7 @@ namespace
         std::vector<ProcessResult> dumps;  // one per `test.checks`, same order
     };
 
-    // `clang` is what Backend::make_exec shells out to link with. a FAIL rather than a skip: a suite
+    // `clang` is what Backend::link_executable falls back to. a FAIL rather than a skip: a suite
     // that quietly stops testing native builds is exactly the silent no-op this corpus refuses
     void require_clang()
     {
@@ -253,7 +253,7 @@ namespace
             FAIL("echoc build exited " << build.exit_code);
         }
 
-        // make_exec used to report all three of its failure paths by printing and returning, so
+        // the emit path used to report all of its failure paths by printing and returning, so
         // "exited 0" is on its own no proof that anything was linked
         if (!outcome.binary_exists) {
             INFO("build log:\n" << build.output);

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_match_binding_arity.eco:6:5
+
+  'pair' carries 2 values, so this pattern binds 2 names - 1 written.
+
+  5 | $n = match ($e) {
+  6 |     E::pair($only) => $only,
+    :     ^
+  7 | };
+
+1 error, nothing was compiled.

@@ -1,0 +1,4 @@
+enum Bad : float64
+{
+    case a = 1;
+}

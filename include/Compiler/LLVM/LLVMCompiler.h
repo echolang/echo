@@ -109,6 +109,7 @@ public:
     void visit_indirect_call_expr(AST::IndirectCallExprNode &node);
     void visit_instanceof_expr(AST::InstanceOfExprNode &node);
     void visit_temporary_bind(AST::TemporaryBindExprNode &node);
+    void visit_match(AST::MatchExprNode &node);
     void visit_release(AST::ReleaseNode &node);
     void visit_index_expr(AST::IndexExprNode &node);
     void visit_array_literal_expr(AST::ArrayLiteralExprNode &node);
@@ -161,12 +162,6 @@ public:
 
     // what that prune dropped, for `--explain-prune`. Empty on any path that has not run one
     const std::string &prune_report() const;
-
-    // false when no binary was produced, see Backend::make_exec
-    bool make_exec(
-        const std::string &executable_name,
-        const std::filesystem::path &object_path,
-        const std::vector<Compiler::LinkRequirement> &link);
 
     // one object per unit that still has a module, into `object_for(unit name)`. The objects are appended to
     // `out_objects` in unit order, so the link command is deterministic

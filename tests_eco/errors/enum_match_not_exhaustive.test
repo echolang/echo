@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_match_not_exhaustive.eco:5:6
+
+  this 'match' does not cover every case of 'Unit' - 2 are left out. Name kilometer, mile, or add an 'else' arm.
+
+  4 | 
+  5 | $n = match ($u) {
+    :      ^^^^^
+  6 |     Unit::meter => 1,
+
+1 error, nothing was compiled.

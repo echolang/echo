@@ -1,5 +1,7 @@
 #include "AST/ASTOwnership.h"
 
+#include "AST/MatchExprNode.h"
+
 
 #include "AST/ConstRefExprNode.h"
 
@@ -101,6 +103,25 @@ namespace
             }
 
             RecursiveVisitor::visitVarDecl(node);
+        }
+
+        // **a match whose patterns are not decided yet is never answerable.** the bindings are untyped
+        // and have no initializer until AST::MatchResolution has said which case each arm names, so a
+        // walk now would resolve the arrival of a value that is about to be replaced by a payload read
+        // - permanently, this pass walking a body exactly once ever, and with nothing reporting it.
+        //
+        // the untyped-declaration arm above catches a *bound* arm today, the bindings being scope
+        // children with no type node. this one is what covers an arm that binds nothing, where there is
+        // no declaration to be untyped and the arm's value would otherwise be walked against a match
+        // whose own result type is still unknown
+        void visit_match(MatchExprNode &node) override
+        {
+            if (!node.patterns_decided) {
+                answerable = false;
+                return;
+            }
+
+            RecursiveVisitor::visit_match(node);
         }
 
         // **an unexpanded array literal is never answerable**, which the declaration's type alone does
@@ -1673,6 +1694,39 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             break;
         }
 
+        // **a match owns a declaration and N scopes, so it is walked like the statement it half is.**
+        // named here rather than left to `default:` for the reason the arms above are: that one walks
+        // nothing, so a subtree reached only through this node would never be walked at all - which is
+        // exactly what left an interpolation inside an arm with no scope to materialize its
+        // concatenations into, reported as this pass and argument_fit disagreeing
+        //
+        // the order is the order it runs in: the subject, then each arm's bindings and body, then that
+        // arm's value. **the value goes through walk_value_edge**, which opens a MaterializationScope of
+        // its own - so a temporary an arm's value makes lives and dies inside that arm, which is the
+        // only place it could: an arm is a branch, and a temporary bound at the statement would be
+        // acquired on one path and released on all of them
+        case NodeType::n_expr_match:
+        {
+            auto *node = static_cast<MatchExprNode *>(expr);
+
+            if (node->subject != nullptr) {
+                walk_statement(make_ref(node->subject));
+            }
+
+            for (MatchExprNode::Arm &arm : node->arms) {
+                // the arm's own frame: the bindings are its leading declarations, and a block arm's
+                // statements follow them. borrows own nothing, so what this frame ends is whatever the
+                // arm's *body* declared - which is exactly what a block's frame is for
+                if (arm.scope != nullptr) {
+                    walk_scope(*arm.scope);
+                }
+
+                arm.value = walk_value_edge(arm.value);
+            }
+
+            break;
+        }
+
         // a leaf: it stands for a value the enclosing chain already evaluated and owns
         case NodeType::n_expr_chain_base:
             break;
@@ -2071,7 +2125,9 @@ void OwnershipPass::reject_uncopyable(
     // **a `#[unique]` type gets its own wording, and it is the opposite advice.** the general
     // refusal below ends in "give it a copy constructor", which for a type whose whole claim is that
     // one value names its storage is the one thing its author must never do
-    if (wanted.is_struct() && wanted.get_complex_type()->is_unique) {
+    // AST::classify_copy's reading of the same flag: asked of any type that can carry it, a class and
+    // an interface being refused it where it is written
+    if (wanted.has_complex_type() && wanted.get_complex_type()->is_unique) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' is unique: exactly one value may name its storage, so it is moved and never "
@@ -2339,6 +2395,15 @@ IfStatementNode &OwnershipPass::branch_when_present(
     // leaving nothing - which is what keeps this out of every control-flow rule
     ExprNode *condition = make_place(tag_root, std::vector<std::string>{ k_optional_has_name });
 
+    return branch_on(condition, body, at);
+}
+
+IfStatementNode &OwnershipPass::branch_on(
+    ExprNode *condition,
+    ScopeNode *body,
+    const TokenReference &at
+)
+{
     auto &branch = _current_module->nodes.emplace_back<IfStatementNode>(condition, body, nullptr);
 
     // emplace rather than assign: a TokenReference holds its collection by reference and so has no copy
@@ -2346,6 +2411,77 @@ IfStatementNode &OwnershipPass::branch_when_present(
     branch.token_if.emplace(virtual_token("if", Token::Type::t_if, at));
 
     return branch;
+}
+
+IfStatementNode &OwnershipPass::branch_when_case(
+    VarDeclNode *tag_root,
+    const ComplexType *ct,
+    int64_t discriminant,
+    ScopeNode *body,
+    const TokenReference &at
+)
+{
+    ExprNode *tag = make_place(tag_root, std::vector<std::string>{ k_enum_tag_name });
+
+    // the literal is typed to the discriminant's own primitive rather than left to default to int32:
+    // the comparison is performed at AST::binary_operation_type's answer for the pair, and a `uint8`
+    // tag beside a signed literal is exactly the shape todo/B51 is about
+    const ValueType tag_type = ct->get_property_type(k_enum_tag_index);
+
+    auto &literal = _current_module->nodes.emplace_back<LiteralIntExprNode>(
+        virtual_token(std::to_string(discriminant), Token::Type::t_integer_literal, at),
+        tag_type.get_primitive_type());
+
+    const Operator *equals = _collector.operators.get_operator("==");
+    assert(equals != nullptr && "the '==' operator is always predefined");
+
+    auto &op_node = _current_module->nodes.emplace_back<OperatorNode>(
+        virtual_token("==", Token::Type::t_unknown, at), equals);
+
+    auto &condition = _current_module->nodes.emplace_back<BinaryExprNode>(&op_node, tag, &literal);
+
+    return branch_on(&condition, body, at);
+}
+
+void OwnershipPass::emit_enum_case_drops(
+    VarDeclNode *root,
+    const ComplexType *ct,
+    std::vector<NodeReference> &out,
+    const TokenReference &at
+)
+{
+    for (const ComplexType::EnumCase &entry : ct->enum_cases()) {
+        std::vector<NodeReference> case_drops;
+
+        // reverse declaration order within the case, which is emit_property_drops' rule and the same
+        // rule a frame's locals are dropped by
+        for (size_t i = entry.payload_field_count; i > 0; i--) {
+            const ComplexType::Property &prop =
+                ct->get_property(entry.first_payload_property + i - 1);
+
+            if (!needs_destruction(prop.type)) {
+                continue;
+            }
+
+            std::vector<std::string> path{ prop.name };
+            emit_drop(root, path, prop.type, case_drops);
+        }
+
+        // a case that owns nothing reaches no new code at all - not even an empty branch. the same
+        // property the optional arm has, and what keeps a plain enum's teardown exactly the nothing it
+        // was before payload cases existed
+        if (case_drops.empty()) {
+            continue;
+        }
+
+        auto &then_scope = _current_module->nodes.emplace_back<ScopeNode>();
+
+        for (const NodeReference &drop : case_drops) {
+            then_scope.children.push_back(drop);
+        }
+
+        out.push_back(make_ref(branch_when_case(root, ct, entry.discriminant, &then_scope, at)));
+    }
 }
 
 void OwnershipPass::emit_property_drops(
@@ -2714,7 +2850,21 @@ FunctionDeclNode *OwnershipPass::build_deinit(ComplexType &type, const TokenRefe
     std::vector<std::string> path;
 
     emit_destructor_call(&this_decl, path, ct, statements);
-    emit_property_drops(&this_decl, path, ct, statements);
+
+    // **an enum drops the payload of the case it is holding, and no other**, which is the one thing its
+    // teardown does that a struct's does not - the enum-shaped reading of the line the tagged optional
+    // owns below.
+    //
+    // a different walk rather than emit_property_drops plus a wrapper, because the grouping *is* the
+    // difference: a struct's properties are all live together and are dropped in one reverse pass, an
+    // enum's are live one case at a time and are dropped in one guarded group each. the destructor call
+    // above stays unguarded either way - it is the whole value's teardown, whatever case that value is
+    if (ct->is_enum_kind()) {
+        emit_enum_case_drops(&this_decl, ct, statements, site);
+    }
+    else {
+        emit_property_drops(&this_decl, path, ct, statements);
+    }
 
     // **a tagged optional destroys its payload only when it has one**, which is the one thing its teardown
     // does that a struct's does not - and the only reason the pair is a layout at all is that it is
@@ -2836,6 +2986,34 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
         present = &_current_module->nodes.emplace_back<ScopeNode>();
     }
 
+    // **an enum copies the payload of the case `$other` is holding, and no other** - the optional's rule
+    // read one case wider, and needed for its reason exactly: a case that is not live is storage nothing
+    // ever wrote, so copy-constructing out of it is a crash inside a library's copy constructor with the
+    // case nowhere in sight.
+    //
+    // a per-property lookup rather than a test inside the loop, so the write loop below stays one pass
+    // over the layout in layout order - which is what keeps `__tag`'s write ahead of every payload's and
+    // makes the body read in the order it runs
+    std::vector<ScopeNode *> case_scope_of_property(ct->property_count(), nullptr);
+    std::vector<std::pair<const ComplexType::EnumCase *, ScopeNode *>> case_scopes;
+
+    if (ct->is_enum_kind()) {
+        for (const ComplexType::EnumCase &entry : ct->enum_cases()) {
+            // a case with no payload has nothing to guard, so it gets no branch at all - the property
+            // that says which case it is has already been copied unconditionally
+            if (!entry.has_payload()) {
+                continue;
+            }
+
+            auto &scope = _current_module->nodes.emplace_back<ScopeNode>();
+            case_scopes.emplace_back(&entry, &scope);
+
+            for (size_t i = 0; i < entry.payload_field_count; i++) {
+                case_scope_of_property[entry.first_payload_property + i] = &scope;
+            }
+        }
+    }
+
     for (size_t i = 0; i < ct->property_count(); i++) {
         const ComplexType::Property &prop = ct->get_property(i);
 
@@ -2865,6 +3043,9 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
         if (present != nullptr && i == k_optional_value_index) {
             present->children.push_back(make_ref(assign));
         }
+        else if (case_scope_of_property[i] != nullptr) {
+            case_scope_of_property[i]->children.push_back(make_ref(assign));
+        }
         else {
             body.children.push_back(make_ref(assign));
         }
@@ -2875,6 +3056,13 @@ FunctionDeclNode *OwnershipPass::ensure_copy_constructor(const ValueType &type, 
     // payload the write inside reads
     if (present != nullptr) {
         body.children.push_back(make_ref(branch_when_present(&other_decl, present, site)));
+    }
+
+    // and the enum's, one per case that has a payload, for the same reason and read off `$other` for
+    // the same one: it is `$other`'s payload each branch copies
+    for (const auto &[entry, scope] : case_scopes) {
+        body.children.push_back(
+            make_ref(branch_when_case(&other_decl, ct, entry->discriminant, scope, site)));
     }
 
     close_constructor_body(*_current_module, decl, this_decl);

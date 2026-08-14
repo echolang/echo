@@ -205,6 +205,12 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         { NodeType::n_expr_strong, StorageClass::t_materializable },
         { NodeType::n_expr_null_coalesce, StorageClass::t_materializable },
         { NodeType::n_expr_optional_chain, StorageClass::t_materializable },
+
+        // **a match is materializable, like the interpolation above and unlike the two `const` nodes.**
+        // it is not transient at all - it reaches codegen as a switch and a phi - and what it produces
+        // is a value one of its arms chose and nobody stored. so a `const T&` parameter has to be able
+        // to bind a slot for it, exactly as it does for `f($a ?? $b)`
+        { NodeType::n_expr_match, StorageClass::t_materializable },
     };
 
     // asked of the tag rather than of a node, which is the whole of what storage_of reads - so the
@@ -285,8 +291,7 @@ TEST_CASE("An assignable target is every place, plus a peel", "[AST][pointer]")
     REQUIRE_FALSE(is_assignable_target(*call));
 }
 
-TEST_CASE("read_reaches_storage admits a place and a borrow-returning call, and nothing else",
-    "[AST][pointer]")
+TEST_CASE("read_reaches_storage admits a place and a borrow-returning call, and nothing else", "[AST][pointer]")
 {
     // **the one answer behind all four mirrors of the auto-deref**, and a different question from
     // storage_of beside it: a call has no address of its own - `&get()` is still refused - but the
@@ -357,8 +362,7 @@ TEST_CASE("read_reaches_storage admits a place and a borrow-returning call, and 
     }
 }
 
-TEST_CASE("value_result_type reads through a place and leaves a computed value alone",
-    "[AST][pointer]")
+TEST_CASE("value_result_type reads through a place and leaves a computed value alone", "[AST][pointer]")
 {
     // the rule behind two inferences that look alike but are not: `$copy = $r` over an `int32&`
     // infers int32 because reading a place auto-derefs, while `$ref = &$var` infers int32&

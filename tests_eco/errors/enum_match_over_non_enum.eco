@@ -1,0 +1,7 @@
+$n = 3;
+
+$r = match ($n) {
+    else => 1,
+};
+
+echo $r;

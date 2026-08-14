@@ -1,0 +1,9 @@
+enum Unit { case meter; case kilometer; case mile; }
+
+$u = Unit::meter;
+
+$n = match ($u) {
+    Unit::meter => 1,
+};
+
+echo $n;

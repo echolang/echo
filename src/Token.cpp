@@ -107,6 +107,8 @@ const std::string token_type_string(Token::Type type)
         case Token::Type::t_class: return "class";
         case Token::Type::t_interface: return "interface";
         case Token::Type::t_enum: return "enum";
+        case Token::Type::t_case: return "case";
+        case Token::Type::t_match: return "match";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";
         case Token::Type::t_destructor: return "destructor";
@@ -190,6 +192,8 @@ const std::string token_lit_symbol_string(const Token::Type type)
         case Token::Type::t_class: return "class";
         case Token::Type::t_interface: return "interface";
         case Token::Type::t_enum: return "enum";
+        case Token::Type::t_case: return "case";
+        case Token::Type::t_match: return "match";
         case Token::Type::t_extern: return "extern";
         case Token::Type::t_as: return "as";
         case Token::Type::t_destructor: return "destructor";

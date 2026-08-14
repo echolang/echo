@@ -1,0 +1,29 @@
+// a payload binding is a **borrow** of the value being matched, not a copy of it. so a match over an
+// enum holding a string allocates nothing - and a method call on the binding works, the receiver
+// already being an address.
+enum Message
+{
+    case empty;
+    case text(string $body);
+}
+
+function is_blank(Message $m) : bool
+{
+    return match ($m) {
+        Message::empty       => true,
+        Message::text($body) => $body->size() == 0,
+    };
+}
+
+echo is_blank(Message::text("chevron seven locked"));
+echo is_blank(Message::text(""));
+echo is_blank(Message::empty());
+
+// reading one into a place that outlives the arm copies, as reading any other borrow does
+string $kept = match (Message::text("held")) {
+    Message::empty       => "",
+    Message::text($body) => $body,
+};
+
+echo $kept;
+echo mem::live_allocations();

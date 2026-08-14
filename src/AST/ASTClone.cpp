@@ -48,6 +48,7 @@
 #include "AST/AttributeNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ReleaseNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/TemporaryBindExprNode.h"
 
 namespace AST
@@ -246,6 +247,39 @@ Node *RetainExprNode::clone(CloneContext &cc) const
 {
     RetainExprNode *c = cc.shallow(this);
     c->operand = cc.child(c->operand);
+    return c;
+}
+
+Node *MatchExprNode::clone(CloneContext &cc) const
+{
+    MatchExprNode *c = cc.shallow(this);
+
+    // **the subject first**, exactly as TemporaryBindExprNode clones its temporaries before its body
+    // and for its reason: every arm reaches it through a VarNode whose declaration edge is a cc.rebind,
+    // and rebind answers the clone only for a declaration the map already holds. cloned in the other
+    // order the arms would keep pointing at the *original* declaration, which has no alloca in this
+    // function - a "Variable has no allocation in scope" out of a body nobody wrote
+    //
+    // load-bearing here for the same reason it is there: the subject hangs off this node rather than
+    // off a scope, so ScopeNode::clone's declaration pre-pass never sees it
+    c->subject = cc.child(c->subject);
+
+    for (Arm &arm : c->arms) {
+        // the written owner is a type node, so it substitutes with the rest - `match` inside a generic
+        // body may write `result<T, E>::ok`, and an instance of it means its own arguments
+        arm.owner = cc.child(arm.owner);
+
+        // the scope before the value, which is the order they are reached in: the bindings are the
+        // scope's own children, and the value reads them
+        arm.scope = cc.child(arm.scope);
+        arm.value = cc.child(arm.value);
+    }
+
+    // the unified arm type is a type of this node's own, unlike TemporaryBindExprNode's - so unlike
+    // that one it needs substituting, or `match` over a generic enum answers the template's type in
+    // every instance
+    c->result = cc.substitute(c->result);
+
     return c;
 }
 

@@ -35,7 +35,7 @@ namespace AST
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
         : _bundle(bundle), _collector(bundle.collector), _ownership(bundle),
-          _const_folding(bundle), _operators(bundle), _guards(bundle), _foreach(bundle),
+          _const_folding(bundle), _operators(bundle), _guards(bundle), _matches(bundle), _foreach(bundle),
           _interpolation(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
@@ -608,6 +608,21 @@ namespace AST
             // than merely fast
             progressed |= _foreach.run_round();
 
+            // **before the interpolation lowering, and that is the whole of why it sits here.** a
+            // `"{$s}"` inside a match arm is lowered in the first round that reaches it - that pass has
+            // no pending state and no finalize - so a payload binding still untyped at that moment is a
+            // `str::from` overload chosen against nothing at all. the loop lowering above is ahead of
+            // interpolation for exactly this reason and this is the same reason again.
+            //
+            // it derives its own subject's type rather than waiting for the sweep below, which is what
+            // makes running here possible - AST::MatchResolution::resolve says why, and a guard's
+            // binding sets the precedent.
+            //
+            // and before the ownership pass, which walks a body exactly once ever:
+            // OwnershipPass::body_is_concrete answers false while MatchExprNode::patterns_decided is
+            // false, so the round a match resolves in is the round its body becomes eligible
+            progressed |= _matches.run_round();
+
             // beside the loop lowering, and for two of its three reasons. **before settle_calls**,
             // because the `str::from` and `str::concat` calls it mints are exactly what that has to
             // finish - one of them may name a user's own overload, or a generic the next round still
@@ -651,6 +666,7 @@ namespace AST
         _const_folding.finalize();
         _operators.finalize();
         _guards.finalize();
+        _matches.finalize();
         _foreach.finalize();
 
         finalize_calls();

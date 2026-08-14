@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] enum_body_refusals.eco:6:18
+
+  'E' is an enum, so it cannot declare a property. An enum holds `case` declarations, and the functions, operators and statics it answers with.
+
+  5 |     // an enum's layout is the compiler's, so an author's field has nowhere to go
+  6 |     public int32 $extra;
+    :                  ^^^^^^
+  7 | 
+
+[error] enum_body_refusals.eco:9:5
+
+  'E' is an enum, so it cannot declare a constructor. An enum holds `case` declarations, and the functions, operators and statics it answers with.
+
+   8 |     // a value of an enum is always some case, so a constructor could build one that is none of them
+   9 |     constructor() {}
+     :     ^^^^^^^^^^^
+  10 | 
+
+2 errors, nothing was compiled.

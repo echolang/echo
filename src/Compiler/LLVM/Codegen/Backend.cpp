@@ -59,14 +59,14 @@ void Backend::print_ir(bool to_file)
 
 // **every unit, in order, as the object writer will see it.** `print_ir` prints one merged module, which is
 // what `-O` produces and therefore what almost every IR golden pins - and that left the *ordinary* build path
-// with no way to be looked at or asserted on at all, which is exactly where Backend::optimize_unit now runs.
+// with no way to be looked at or asserted on at all, which is where prepare_unit_for_emission now runs.
 //
 // each unit is optimized first, deliberately: a dump of what the emitter is about to be handed is worth
 // having, and a dump of something else is a check that pins nothing. `--no-optimize` is how to see the raw IR
 //
-// read off the options rather than taken as a parameter, because the promise above is only true while this
-// and LLVMCompiler::emit_objects ask the same thing of the same source. optimize_unit is idempotent, so the
-// emit that follows this dump re-optimizes nothing
+// what it dumps is what the object will hold, which is only true while this and LLVMCompiler::emit_objects
+// ask the same thing of the same source - so both call prepare_unit_for_emission and neither reads
+// `no_optimize` itself. It is idempotent, so the emit that follows this dump repeats nothing
 void Backend::print_unit_ir()
 {
     for (auto &cmp_unit : _ctx.cmp_units) {
@@ -74,9 +74,7 @@ void Backend::print_unit_ir()
             continue;
         }
 
-        if (!_ctx.options.no_optimize) {
-            optimize_unit(*cmp_unit);
-        }
+        prepare_unit_for_emission(*cmp_unit);
 
         // a header per unit, in the `[section]` shape --print-symbol-table and the measurement dumps use,
         // so a golden can anchor on the unit it means rather than on whatever came first
@@ -209,7 +207,7 @@ void Backend::init_target()
     // **and the machine's own optimization level, which is not the IR pipeline's.** createTargetMachine
     // defaults to CodeGenOptLevel::Default - O2 - so instruction selection, machine scheduling, stack
     // slot colouring and the peephole passes all ran even under `--no-optimize`, which turns off only
-    // Backend::optimize_unit. That is invisible in an IR dump and fatal to a debugger: an unoptimized
+    // the baseline pipeline. That is invisible in an IR dump and fatal to a debugger: an unoptimized
     // body still came out with its stores merged and its frame folded into a post-indexed `stp`, so
     // every local's DWARF location named a stack slot the function had already given back, and
     // `frame variable` printed whatever was there.
@@ -435,7 +433,7 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
     // moved or the binary is copied to another machine, and then reports "no debug symbols" with nothing
     // saying why. dsymutil is what folds them into a self-contained <exe>.dSYM.
     //
-    // here rather than in make_exec, so the whole-program and per-module paths both get it - and
+    // here, on the one link there is, so the whole-program and per-module paths both get it - and
     // explicitly rather than left to the clang driver, because the preferred path is a direct `ld`
     // invocation that will never run it, which would make debuggability depend on whether
     // `xcrun --show-sdk-path` happened to answer
@@ -452,24 +450,6 @@ void Backend::gen_debug_symbols(const std::string &executable_name)
 #endif
 }
 
-bool Backend::make_exec(
-    const std::string &executable_name,
-    const std::filesystem::path &object_path,
-    const std::vector<Compiler::LinkRequirement> &link
-)
-{
-    Compiler::LLVM::CmpUnit *main_cmp_unit = _ctx.main_cmp_unit();
-    if (!main_cmp_unit) {
-        llvm::errs() << "No main module found to emit\n";
-        return false;
-    }
-
-    if (!emit_object(*main_cmp_unit, object_path)) {
-        return false;
-    }
-
-    return link_executable(executable_name, { object_path }, link);
-}
 
 // guards the module, builds the four analysis managers and cross-registers the proxies, then runs
 // whatever pipeline `build` filled in. Every module-pass entry point below goes through here, so how
@@ -517,6 +497,13 @@ void Backend::optimize()
         return;
     }
 
+    // **a module that has been through a pipeline is `optimized`, whichever pipeline it was.** the merged
+    // module is still a unit and still reaches prepare_unit_for_emission on its way to an object, and
+    // without this it would take the O2 arm there after finishing O3 here
+    if (Compiler::LLVM::CmpUnit *main_unit = _ctx.main_cmp_unit()) {
+        main_unit->optimized = true;
+    }
+
     run_module_passes(*_ctx.current_module(), _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
         // **the O3 pipeline and nothing after it.** this used to append a second ModuleInlinerPass once
         // the pipeline had already finished, which is a shape worth naming so it is not added back:
@@ -532,7 +519,7 @@ void Backend::optimize()
     });
 }
 
-void Backend::optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit)
+void Backend::prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit)
 {
     if (!cmp_unit.llvm_module || cmp_unit.optimized) {
         return;
@@ -540,9 +527,35 @@ void Backend::optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit)
 
     cmp_unit.optimized = true;
 
-    // **O2 per unit, and the reason it is not O3 is not timidity - it is that this one has to stay
-    // cheap.** `Backend::optimize` runs once, over a merged module, for a build that asked for it. This
-    // runs on every unit of every ordinary `echoc build`, whose whole point is that it is the fast path.
+    // **the definitions this unit does not reference are not this unit's to emit**, and that is a rule
+    // about the object rather than a thing an optimizer happens to do.
+    //
+    // a `t_odr_shared` body is emitted into every unit that *references* it, and a generic the
+    // application instantiates over its own types reaches the library's unit too - so a library object
+    // ended up holding `map<clash, int32>::seat`, whose body calls a `hash::of` and an `operator ==`
+    // that only the application defines. That object is stored under the library's key, which is
+    // correct by its own rules and knows nothing about the application, so a second unrelated program
+    // with the same key is served it and fails to link. Two bundles, one key, two different objects.
+    //
+    // the O2 pipeline below has been hiding it: GlobalDCE drops exactly those bodies. So the bug was
+    // invisible until `--optimize none` - which `-g` implies, which is why it read as debug info being
+    // broken rather than as the cache being unsound. Doing it here, unconditionally, is what makes the
+    // two paths agree by construction rather than by one of them running a pipeline.
+    //
+    // safe because a symbol nothing in a unit references is provided by whichever unit does reference
+    // it - the invariant Backend.h states over emit_object, and the one thing every `linkonce_odr`
+    // definition this compiler emits has in common. `GlobalDCEPass` and nothing beside it: no
+    // InternalizePass, which is what makes this a different thing from `prune_to_entry` and not a
+    // weaker one - there is no root set here, only a use count
+    //
+    // **and the baseline pipeline after it unless the invocation said not to.** one pass manager for
+    // both, a ModulePassManager being itself a module pass - so the discard is the first thing the unit
+    // sees either way and stays unconditional, while an `--optimize none` unit no longer pays for a
+    // second PassBuilder and a second set of analysis managers it has nothing to run in
+    //
+    // **O2 rather than O3, and that is not timidity - it is that this one has to stay cheap.**
+    // `Backend::optimize` runs once, over a merged module, for a build that asked for it. This runs on
+    // every unit of every ordinary `echoc build`, whose whole point is that it is the fast path.
     //
     // it exists because that path previously ran **no IR pass at all**: no mem2reg, no SROA, no inlining.
     // Every parameter of every function is spilled to an entry alloca by StmtCodegen and reloaded per use,
@@ -555,8 +568,14 @@ void Backend::optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit)
     // dependencies' keys - which is what Compiler::compute_module_keys promises and tests/module_cache.cpp
     // pins byte for byte. Whole-program `-O` is still merge-then-O3 and still bypasses the cache; the two
     // are no longer all or nothing, which is the actual change here
-    run_module_passes(*cmp_unit.llvm_module, _target_machine.get(), [](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
-        modulePM = passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+    const bool optimize = !_ctx.options.no_optimize;
+
+    run_module_passes(*cmp_unit.llvm_module, _target_machine.get(), [optimize](llvm::PassBuilder &passBuilder, llvm::ModulePassManager &modulePM) {
+        modulePM.addPass(llvm::GlobalDCEPass());
+
+        if (optimize) {
+            modulePM.addPass(passBuilder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
+        }
     });
 }
 

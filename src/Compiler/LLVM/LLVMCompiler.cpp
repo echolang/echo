@@ -1,5 +1,6 @@
 #include "Compiler/LLVM/LLVMCompiler.h"
 
+#include "Compiler/LLVM/OdrComparison.h"
 #include "Compiler/PhaseTimings.h"
 
 #include "AST/ASTFunctionEmission.h"
@@ -10,8 +11,6 @@
 #include "AST/ConstExprNode.h"
 
 #include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Verifier.h>
@@ -20,7 +19,7 @@
 
 #include <fmt/core.h>
 
-#include <cctype>
+#include <optional>
 #include <set>
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
@@ -422,265 +421,17 @@ void LLVMCompiler::drain_pending_definitions()
 namespace
 {
 
-    // three things in a rendered body are numbered *per module* rather than being properties of the
-    // definition, so two identical bodies in two units can still render differently:
-    //
-    //  - attribute group slots, `#0` / `#1`, numbered in the order a module first needed each group;
-    //  - the disambiguating suffix LLVM appends to a named type or a local, `%N3str3bufE.box.4`. Every unit
-    //    builds its own StructType for the same Echo type and they all share one LLVMContext, so the
-    //    second one to be created gets renamed. IRMover unifies them structurally at link time, and under
-    //    separate object files the name is gone entirely - only the layout survives;
-    //  - nothing else, and that is the point of doing this by text at all: an instruction sequence, a
-    //    called symbol or an integer constant that differs *is* a real divergence and does show up.
-    //
-    // both are stripped rather than compared, and what would otherwise be lost with them is compared
-    // exactly instead - the AttributeList at the comparison, which is uniqued in the shared context.
-    //
-    // free functions rather than lambdas inside the check: none of them touches the compiler, and as
-    // lambdas the text normalizer - the part most likely to need a fourth rule - could not be reached
-    // from anywhere else.
-    // `array<int32>.2` -> `array<int32>`: the uniquing suffix, off the end of a name
-    std::string strip_uniquing_suffix(const std::string &name)
+    // **the render is the message and nothing else.** built for the one definition that diverged,
+    // after the comparison already said so - where the check used to render every duplicated
+    // definition in the bundle and compare the characters
+    std::string render_definition(llvm::Function *fn)
     {
-        size_t end = name.size();
-        while (end > 0 && std::isdigit(static_cast<unsigned char>(name[end - 1]))) {
-            end--;
-        }
+        std::string rendered;
+        llvm::raw_string_ostream stream(rendered);
+        fn->print(stream);
+        stream.flush();
 
-        const bool is_suffix = end > 1 && end < name.size() && name[end - 1] == '.';
-
-        return is_suffix ? name.substr(0, end - 1) : name;
-    }
-
-    std::string strip_module_local_numbering(const std::string &text)
-    {
-        std::string out;
-        out.reserve(text.size());
-
-        for (size_t i = 0; i < text.size(); i++) {
-            const bool digits_follow =
-                i + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[i + 1]));
-
-            // `#0` an attribute group reference, `@4` an unnamed global's slot, `!42` a metadata node.
-            // All three are positions in a per-module numbering, so the digits are dropped and the sigil
-            // kept - which leaves a body that says "some private constant here" and "some debug location
-            // here", and is why both are compared separately below. A *named* global is untouched:
-            // `@__eco_abort` starts with a letter, and so does every metadata *kind*, `!dbg` and `!tbaa`
-            if ((text[i] == '#' || text[i] == '@' || text[i] == '!') && digits_follow) {
-                while (i + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[i + 1]))) {
-                    i++;
-                }
-                continue;
-            }
-
-            // `%"array<int32>.2"` - a quoted name, which is how LLVM renders one holding characters an
-            // identifier cannot. Taken whole rather than by the per-character rule below, because the
-            // character before the suffix is then whatever the Echo type's name ended with - `>` for an
-            // instantiation - and no plausible character rule covers that without covering too much
-            if ((text[i] == '%' || text[i] == '@') && i + 1 < text.size() && text[i + 1] == '"') {
-                const size_t close = text.find('"', i + 2);
-
-                if (close != std::string::npos) {
-                    out.push_back(text[i]);
-                    out.push_back('"');
-                    out += strip_uniquing_suffix(text.substr(i + 2, close - (i + 2)));
-                    out.push_back('"');
-                    i = close;
-                    continue;
-                }
-            }
-
-            // `.4` at the end of a `%`-identifier - a uniquing suffix, dropped while the name it belongs
-            // to is kept. Only inside an identifier, so a struct field index or a plain number is safe
-            if (text[i] == '.' && digits_follow && !out.empty()
-                && (std::isalnum(static_cast<unsigned char>(out.back())) || out.back() == '_'
-                    || out.back() == '.')) {
-                size_t lookahead = i + 1;
-                while (lookahead < text.size() && std::isdigit(static_cast<unsigned char>(text[lookahead]))) {
-                    lookahead++;
-                }
-
-                // a suffix ends the identifier; digits followed by more name are part of the name
-                const bool ends_identifier = lookahead >= text.size()
-                    || (!std::isalnum(static_cast<unsigned char>(text[lookahead])) && text[lookahead] != '_'
-                        && text[lookahead] != '.');
-
-                if (ends_identifier) {
-                    i = lookahead - 1;
-                    continue;
-                }
-            }
-
-            out.push_back(text[i]);
-        }
-
-        return out;
-    }
-
-    // **what the body text cannot see.** A private global renders as its slot number, `@0`, so two bodies
-    // referencing two *different* private constants render identically - and that is exactly the shape of
-    // the divergence this check exists for, since an abort message is a private string built from the file
-    // name. So the initializer of every private constant a body reaches is folded into the comparison.
-    std::string referenced_private_constants(llvm::Function *fn)
-    {
-        std::string out;
-        std::set<std::string> seen;
-
-        for (llvm::BasicBlock &block : *fn) {
-            for (llvm::Instruction &inst : block) {
-                for (llvm::Value *operand : inst.operands()) {
-                    // through the constant expression a GEP'd string literal arrives as
-                    llvm::SmallVector<llvm::Value *, 4> roots{ operand };
-                    if (auto *expr = llvm::dyn_cast<llvm::ConstantExpr>(operand)) {
-                        roots.assign(expr->op_begin(), expr->op_end());
-                    }
-
-                    for (llvm::Value *root : roots) {
-                        auto *global = llvm::dyn_cast<llvm::GlobalVariable>(root);
-                        if (global == nullptr || !global->hasLocalLinkage() || !global->hasInitializer()) {
-                            continue;
-                        }
-
-                        std::string rendered;
-                        llvm::raw_string_ostream stream(rendered);
-                        global->getInitializer()->print(stream);
-                        stream.flush();
-
-                        seen.insert(rendered);
-                    }
-                }
-            }
-        }
-
-        for (const std::string &entry : seen) {
-            out += entry;
-            out += "\n";
-        }
-
-        return out;
-    }
-
-    // **the compile unit is a fact about the module, not about the body.** Every scope chain ends at one -
-    // a DILocation names a subprogram, which names its unit, which names the module's first file - so a
-    // printed tree drags in something that is *supposed* to differ between two units and would make every
-    // ODR-shared body compare unequal. The types beneath it are deduplicated by the linker on their
-    // `identifier:`, exactly as C++ does across translation units.
-    //
-    // printTree indents by depth, so dropping the line and everything below it is the subtree
-    std::string strip_compile_unit(const std::string &text)
-    {
-        std::string out;
-        out.reserve(text.size());
-
-        size_t cut_at_indent = std::string::npos;
-
-        for (size_t i = 0; i < text.size();) {
-            const size_t end = text.find('\n', i);
-            const size_t stop = end == std::string::npos ? text.size() : end;
-            const std::string_view line(text.data() + i, stop - i);
-
-            const size_t indent = line.find_first_not_of(' ');
-            const size_t depth = indent == std::string_view::npos ? 0 : indent;
-
-            if (cut_at_indent != std::string::npos) {
-                if (depth > cut_at_indent) {
-                    i = stop + 1;
-                    continue;
-                }
-
-                cut_at_indent = std::string::npos;
-            }
-
-            if (line.find("!DICompileUnit(") != std::string_view::npos) {
-                cut_at_indent = depth;
-                i = stop + 1;
-                continue;
-            }
-
-            out += line;
-            out += '\n';
-
-            if (end == std::string::npos) {
-                break;
-            }
-
-            i = end + 1;
-        }
-
-        return out;
-    }
-
-    // **the other half of what the body text cannot see**, and the exact mirror of the function above.
-    //
-    // a metadata reference renders as `!42`, a per-module slot, so `strip_module_local_numbering` drops
-    // the digits for `@0`'s reason - and once they are gone two bodies carrying *different* metadata
-    // render identically. Which is precisely the divergence this check exists for: a t_odr_shared body
-    // is emitted into every unit that references it, and a `!dbg` derived from the ambient walk rather
-    // than from the declaration is two descriptions of one symbol, of which the linker keeps an
-    // arbitrary one.
-    //
-    // **every kind, not just `!dbg`.** `!tbaa` is the other one a body carries today, and singling out
-    // debug info would leave exactly the hole this function was written to close - one that only opens
-    // the day some access family stops being a pure function of the declaration. getAllMetadata is
-    // ordered by kind id, so the walk is deterministic without sorting.
-    //
-    // **in instruction order, not a set.** A private constant is a thing a body *reaches*, and the order
-    // says nothing; metadata describes each instruction, so the sequence is the content.
-    std::string referenced_metadata(llvm::Function *fn)
-    {
-        std::string out;
-        llvm::SmallVector<std::pair<unsigned, llvm::MDNode *>, 4> attached;
-
-        // **one render per distinct node, not per attachment.** MDNodes are uniqued and heavily shared -
-        // one `!tbaa` leaf hangs off nearly every load and store in a body, and a `!dbg` drags its whole
-        // reachable type graph along - so rendering at the attachment made this quadratic in the size of
-        // the metadata graph for a check whose distinct content is linear
-        std::unordered_map<const llvm::MDNode *, std::string> rendered_nodes;
-
-        for (llvm::BasicBlock &block : *fn) {
-            for (llvm::Instruction &inst : block) {
-                attached.clear();
-                inst.getAllMetadata(attached);
-
-                // an instruction carrying none is a fact about this body as much as one carrying some -
-                // the prologue and the emitted runtime deliberately have no position, and a copy that
-                // grew one is what this is watching for
-                if (attached.empty()) {
-                    out += "-\n";
-                    continue;
-                }
-
-                for (const auto &[kind, node] : attached) {
-                    auto known = rendered_nodes.find(node);
-
-                    if (known == rendered_nodes.end()) {
-                        std::string rendered;
-                        llvm::raw_string_ostream stream(rendered);
-
-                        // the whole tree, so a DILocation brings its scope, its subprogram and its file
-                        // with it rather than one more slot number. run through the same normalizer as
-                        // the body above, because a tree prints its own shared subnodes by slot too -
-                        // what survives is the content: the file names, the lines, the type names.
-                        //
-                        // **with the module, which is not optional.** Handed no module, printTree
-                        // numbers the nodes it reaches by *address* - `<0x13bf09128>` - and an address
-                        // differs between two units by construction, so every ODR-shared body compared
-                        // unequal the moment it carried any metadata at all
-                        node->printTree(stream, fn->getParent());
-                        stream.flush();
-
-                        std::string normalized =
-                            strip_module_local_numbering(strip_compile_unit(rendered));
-
-                        known = rendered_nodes.emplace(node, std::move(normalized)).first;
-                    }
-
-                    out += fmt::format("{}: {}\n", kind, known->second);
-                }
-            }
-        }
-
-        return out;
+        return rendered;
     }
 
 };
@@ -695,10 +446,11 @@ void LLVMCompiler::verify_odr_consistency()
         return;
     }
 
-    // names first, bodies only where there is something to compare. Rendering every definition in the
-    // bundle to a string would cost more than the rest of codegen, and the overwhelmingly common answer
+    // names first, bodies only where there is something to compare - the overwhelmingly common answer
     // is that no symbol is defined twice at all
-    std::unordered_map<std::string, std::vector<Compiler::LLVM::CmpUnit *>> definers;
+    // the definitions themselves rather than the units holding them: the unit was only ever a way back
+    // to the `llvm::Function`, and the walk below already has it in hand
+    std::unordered_map<std::string, std::vector<llvm::Function *>> definers;
 
     for (auto &cmp_unit : _ctx.cmp_units) {
         if (cmp_unit->llvm_module == nullptr) {
@@ -710,52 +462,36 @@ void LLVMCompiler::verify_odr_consistency()
                 continue;
             }
 
-            definers[fn.getName().str()].push_back(cmp_unit.get());
+            definers[fn.getName().str()].push_back(&fn);
         }
     }
 
-    for (const auto &[name, units] : definers) {
-        if (units.size() < 2) {
+    for (const auto &[name, copies] : definers) {
+        if (copies.size() < 2) {
             continue;
         }
 
-        bool have_first = false;
-        std::string first_body;
-        std::string first_constants;
-        std::string first_metadata;
-        llvm::AttributeList first_attributes;
+        // every later copy against the first, which is what makes the message's two sides mean
+        // "what the rest of the bundle emitted" and "what this unit emitted"
+        llvm::Function *first = copies.front();
 
-        for (Compiler::LLVM::CmpUnit *unit : units) {
-            llvm::Function *fn = unit->llvm_module->getFunction(name);
+        for (size_t i = 1; i < copies.size(); i++) {
+            llvm::Function *fn = copies[i];
 
-            std::string rendered;
-            llvm::raw_string_ostream stream(rendered);
-            fn->print(stream);
-            stream.flush();
+            const std::optional<Compiler::LLVM::OdrDifference> difference =
+                Compiler::LLVM::first_odr_difference(*first, *fn);
 
-            const std::string body = strip_module_local_numbering(rendered);
-            const std::string constants = referenced_private_constants(fn);
-            const std::string metadata = referenced_metadata(fn);
-
-            if (!have_first) {
-                have_first = true;
-                first_body = body;
-                first_constants = constants;
-                first_metadata = metadata;
-                first_attributes = fn->getAttributes();
+            if (!difference.has_value()) {
                 continue;
             }
 
-            if (body != first_body || constants != first_constants || metadata != first_metadata
-                || fn->getAttributes() != first_attributes) {
-                throw Compiler::InternalCompilerException(fmt::format(
-                    "'{}' is defined with linkonce_odr linkage in more than one module and the "
-                    "definitions differ, so the linker would keep an arbitrary one. A generated "
-                    "definition must be a pure function of the declaration and its substitution - "
-                    "something in this body read ambient compiler state instead.\n\n{}{}{}\n--- vs ---\n\n{}{}{}",
-                    name, first_body, first_constants, first_metadata, body, constants, metadata
-                ), nullptr);
-            }
+            throw Compiler::InternalCompilerException(fmt::format(
+                "'{}' is defined with linkonce_odr linkage in more than one module and the "
+                "definitions differ at {}, so the linker would keep an arbitrary one. A generated "
+                "definition must be a pure function of the declaration and its substitution - "
+                "something in this body read ambient compiler state instead.\n\n{}\n--- vs ---\n\n{}",
+                name, difference->what, render_definition(first), render_definition(fn)
+            ), nullptr);
         }
     }
 #endif
@@ -865,6 +601,7 @@ void LLVMCompiler::visit_retain_expr(AST::RetainExprNode &node) { _classes.gen_r
 void LLVMCompiler::visit_strong_expr(AST::StrongExprNode &node) { _expr.gen_strong_expr(node); }
 void LLVMCompiler::visit_guard(AST::GuardNode &node) { _stmt.gen_guard(node); }
 void LLVMCompiler::visit_null_coalesce(AST::NullCoalesceExprNode &node) { _expr.gen_null_coalesce(node); }
+void LLVMCompiler::visit_match(AST::MatchExprNode &node) { _expr.gen_match(node); }
 void LLVMCompiler::visit_optional_chain(AST::OptionalChainExprNode &node) { _expr.gen_optional_chain(node); }
 void LLVMCompiler::visit_chain_base(AST::ChainBaseNode &node) { _expr.gen_chain_base(node); }
 void LLVMCompiler::visit_closure_expr(AST::ClosureExprNode &node) { _expr.gen_closure_expr(node); }
@@ -903,13 +640,11 @@ bool LLVMCompiler::emit_objects(
             continue;
         }
 
-        // **the baseline pipeline, per unit, before the object is written.** this is the path an ordinary
-        // `echoc build` takes, and until now it ran no IR pass at all - see Backend::optimize_unit. It is
-        // deliberately here and not inside emit_object: the whole-program path also emits an object, and
-        // that module has already been through Backend::optimize
-        if (!_ctx.options.no_optimize) {
-            _backend.optimize_unit(*cmp_unit);
-        }
+        // **what the unit's module holds by the time it is an object** - the unreferenced shared
+        // definitions dropped, then the baseline pipeline unless the invocation refused it. Here and
+        // not inside emit_object because `--print ir-units` has to reach the same answer, and it dumps
+        // rather than emits; the whole-program module arrives already marked optimized
+        _backend.prepare_unit_for_emission(*cmp_unit);
 
         const std::filesystem::path object_path = object_for(cmp_unit->ast_module->name);
 
@@ -950,11 +685,3 @@ void LLVMCompiler::set_jit_roots(std::vector<std::string> roots)
     _backend.set_jit_roots(std::move(roots));
 }
 const std::string &LLVMCompiler::prune_report() const { return _backend.prune_report(); }
-bool LLVMCompiler::make_exec(
-    const std::string &executable_name,
-    const std::filesystem::path &object_path,
-    const std::vector<Compiler::LinkRequirement> &link
-)
-{
-    return _backend.make_exec(executable_name, object_path, link);
-}

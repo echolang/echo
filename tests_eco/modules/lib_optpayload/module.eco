@@ -1,0 +1,10 @@
+/*
+ * A library whose generic holds a `T?`. That is the whole point of the fixture: nothing in `stdlib/`
+ * did until `result<T, E>`, and a user-declared generic never reaches it - its template and its
+ * instantiation are in one unit, so there is only one `llvm::StructType` for the payload to be.
+ */
+
+#[module: "modopt"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]

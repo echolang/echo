@@ -36,7 +36,7 @@ namespace Compiler
         // where the options are built - a report over a counter nothing maintains reads zero forever
         bool report_allocations = false;
 
-        // **turns off the per-unit baseline pipeline** that Backend::optimize_unit runs on every ordinary
+        // **turns off the per-unit baseline pipeline** that prepare_unit_for_emission runs on every ordinary
         // build. for reading raw IR, for bisecting a miscompile against the optimizer, and for the two
         // goldens that pin unoptimized output on purpose. it is not the inverse of `-O`, which is a
         // *different* thing: that one merges every unit and runs O3 over the result
@@ -54,7 +54,7 @@ namespace Compiler
         // the build a person reaches for a debugger over
         //
         // it does settle one thing at the CLI rather than here - see resolve_options - because the O2
-        // pipeline Backend::optimize_unit runs on every ordinary build reorders and folds until a line
+        // pipeline prepare_unit_for_emission runs on every ordinary build reorders and folds until a line
         // table describes a program nobody wrote. `-g` alone therefore also sets no_optimize, and `-O`
         // said out loud overrides it
         bool debug_info = false;

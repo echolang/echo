@@ -96,6 +96,8 @@ public:
         t_class,                    // class
         t_interface,                // interface
         t_enum,                     // enum
+        t_case,                     // case
+        t_match,                    // match
         t_extern,                   // extern
         t_as,                       // as
         t_destructor,               // destructor

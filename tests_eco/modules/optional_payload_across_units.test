@@ -1,0 +1,14 @@
+# A stdlib-shaped generic holding a `T?`, instantiated over `string` from another module.
+#
+# `TypeLowering::optional_llvm_type` used to look its type up **by name**, so the second unit adopted the
+# first one's `eco.optional.*` - whose payload slot is the *first* unit's `%string`, while every value that
+# unit inserts is its own `%string.1`. IR verification failed with "Invalid InsertValueInst operands".
+#
+# It is per unit now, exactly like every other struct, which the structural ODR check is what makes safe.
+modules: modules/lib_optpayload
+
+--- OUT --->
+1
+kept
+0
+absent

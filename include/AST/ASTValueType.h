@@ -50,6 +50,18 @@ namespace AST
         // separates it is that it has no properties of its own and never a layout. as a *value* it
         // exists only over a class, because dispatch needs the runtime identity only a class carries
         t_interface,
+        // a closed set of alternatives: `enum DistanceUnit`. a named type reached through the same
+        // ComplexType as the three above, with a layout like a struct's - `__tag` first, then one
+        // property per payload field - so member access, TBAA, debug info and the whole copy and
+        // teardown taxonomy apply to it unchanged.
+        //
+        // **a kind rather than a flag on the layout, which is the opposite call from is_optional** and
+        // for t_weak's reason. an optional is a flag precisely so the is_struct() sites go on answering
+        // yes, because everything they do to a struct is right for one. an enum is the reverse: its
+        // slots are the compiler's, not the author's, so a site that admits it as a struct would let
+        // `$e->__tag = 3` through and would synthesize a field-wise constructor seating a discriminant
+        // by hand. as a kind each one refuses until an arm is added on purpose
+        t_enum,
         t_generic,
         t_pointer,
         // a non-owning handle on a counted object: `weak<Foo>`. recursive like a pointer, holding the
@@ -84,7 +96,23 @@ namespace AST
     constexpr const char *k_optional_has_name = "__has";
     constexpr const char *k_optional_value_name = "__value";
 
-    // which of the three storage classes a named type was declared as. the distinction is one tag and
+    // **the discriminant of an enum, by index** - the same declaration the pair above is, for its
+    // reason, and first for the reason `__has` is first: a case is identified by its ordinal, ordinal
+    // zero is the first case written, so an all-zero enum value is that first case and nothing else.
+    //
+    // a payload field is property `k_enum_tag_index + 1` and onward, named by
+    // AST::enum_payload_property_name - the tag is the only slot with a fixed index, because how many
+    // properties precede a given case's payload is what ComplexType::EnumCase records
+    constexpr unsigned k_enum_tag_index = 0;
+    constexpr const char *k_enum_tag_name = "__tag";
+
+    // `__c<ordinal>_<field>` - the property a payload field of a case occupies. one function rather
+    // than a format string at each of the four sites that build or read one (the layout synthesis, the
+    // case constructor, the pattern binding and the teardown), since a name that is derived in four
+    // places is a name that can differ in one
+    std::string enum_payload_property_name(size_t case_ordinal, const std::string &field_name);
+
+    // which of the four storage classes a named type was declared as. the distinction is one tag and
     // nearly everything else about them is identical - one parser, one declaration node, one member
     // store - so it is a tag rather than separate types. carried on ComplexType, since that is the
     // only thing a generic instantiation has
@@ -93,12 +121,26 @@ namespace AST
     // interface is declared, named, namespaced, generic and mangled exactly as the other two are, and
     // its requirements live in the same `_methods` list a struct's methods do. what it does *not* have
     // is properties or a layout, which is a refusal at its declaration rather than a different shape
+    //
+    // t_enum is the fourth for that same argument read forwards: it is declared, named, namespaced,
+    // generic and mangled identically, its methods and statics live in the same two lists, and what it
+    // adds is a case table beside them plus a set of refusals at its declaration. what it does *not*
+    // add is a second declaration parser or a second answer to any member-lookup question
     enum class ComplexTypeKind
     {
         t_struct,
         t_class,
         t_interface,
+        t_enum,
     };
+
+    // **the keyword this kind was declared with** - "struct", "class", "interface", "enum".
+    //
+    // one owner rather than the `is_class() ? ... : is_interface_kind() ? ...` ladder each reader
+    // would otherwise write, because those readers are diagnostics and a dump, and a kind added
+    // without an arm in one of them reads as a *different kind* rather than as a missing case. the
+    // switch has no tail for that reason
+    const char *type_kind_keyword(ComplexTypeKind kind);
 
     // flags apply to the level they sit on, which is what makes `ptr<const T>` (const pointee)
     // and `const ptr<T>` (const pointer) distinct types. t_nullable only ever sits on a
@@ -175,6 +217,10 @@ namespace AST
 
     constexpr bool is_interface(ValueTypeKind kind) {
         return kind == ValueTypeKind::t_interface;
+    }
+
+    constexpr bool is_enum(ValueTypeKind kind) {
+        return kind == ValueTypeKind::t_enum;
     }
 
     std::string get_primitive_name(ValueTypePrimitive primitive);
@@ -440,6 +486,10 @@ namespace AST
             return kind == ValueTypeKind::t_interface;
         }
 
+        bool is_enum() const {
+            return kind == ValueTypeKind::t_enum;
+        }
+
         // a named user type of any storage class - exactly the kinds get_complex_type() answers
         // for. this is what a *member* question wants: `->x` resolves the same property table either
         // way, and the difference is only in how codegen reaches it. asking is_struct() where this
@@ -450,14 +500,19 @@ namespace AST
         // has_property_layout() below for that. the two were one predicate while there were only two
         // kinds, and every reader that meant the second one has to say so now
         bool has_complex_type() const {
-            return is_struct() || is_class() || is_interface();
+            return is_struct() || is_class() || is_interface() || is_enum();
         }
 
         // a named user type that has *properties* - a place a `->x` can be stored in and a thing
         // codegen can lower to an llvm struct. an interface declares requirements and no storage, so
         // it is excluded: this is the half of the old has_complex_type() that meant "a layout"
+        //
+        // an enum is one: `__tag` and its payload fields are ordinary properties, which is the whole
+        // of what lets member access, TBAA, debug info, the copy taxonomy and the teardown reach an
+        // enum with no arm of their own. what an enum does not admit is a property the *author* writes,
+        // and that is a refusal at its declaration rather than an answer here
         bool has_property_layout() const {
-            return is_struct() || is_class();
+            return is_struct() || is_class() || is_enum();
         }
 
         bool is_numeric_type() const {
@@ -587,12 +642,13 @@ namespace AST
                 case ValueTypeKind::t_weak:
                     return *_pointee == *other._pointee;
 
-                // for struct, class and interface types, compare the complex type pointers
+                // for struct, class, interface and enum types, compare the complex type pointers
                 // two named types are equal if they point to the same ComplexType, so an
                 // instantiation is a distinct type from its template and from another instantiation
                 case ValueTypeKind::t_struct:
                 case ValueTypeKind::t_class:
                 case ValueTypeKind::t_interface:
+                case ValueTypeKind::t_enum:
                     return _complex_type == other._complex_type;
 
                 // structural, like a pointer: a signature carries no identity of its own, so two
@@ -776,6 +832,10 @@ namespace AST
 
         bool is_interface_kind() const {
             return kind == ComplexTypeKind::t_interface;
+        }
+
+        bool is_enum_kind() const {
+            return kind == ComplexTypeKind::t_enum;
         }
 
         // has properties, and so a layout codegen can lower. false for an interface, which declares
@@ -965,6 +1025,66 @@ namespace AST
         // together rather than by a lookup and then a search
         std::optional<std::pair<size_t, VarDeclNode *>> find_static_property(const std::string &name) const;
 
+        // **the cases of an enum, in declaration order** - `case timeout(int32 $after)`.
+        //
+        // here beside `kind` and the two member lists, and for exactly their reason: an *instantiation*
+        // has a ComplexType and no declaration node, so this is the only thing that can answer for
+        // `result<int32, string>` what `result` wrote. TypeRegistry::get_or_create_instantiation carries
+        // it across, as it carries `kind` and `is_unique`
+        //
+        // **the case is not the constructor.** `X::timeout(30)` resolves through `_static_methods` like
+        // any other static, which is what AST::find_static_functions' refusal to ask what kind the owner
+        // is already buys. what this table is for is the two questions a call cannot answer: which
+        // discriminant a *pattern* names, and which properties a case's payload occupies - neither of
+        // which is a function
+        struct EnumCase
+        {
+            size_t ordinal;
+            std::string name;
+
+            // what `__tag` holds for this case. the ordinal, or the written value for an integer-backed
+            // enum - which is why it is stored rather than derived: `case not_found = 404` is a case
+            // whose ordinal is 1
+            int64_t discriminant;
+
+            // the written value of a `: string` backed enum. the discriminant stays the ordinal there,
+            // because a string cannot be a discriminant and every enum value would otherwise carry one
+            std::optional<std::string> backing_string;
+
+            // where this case's payload sits in `_properties`, and how wide it is. a half-open range
+            // rather than a list of indices: the layout synthesis appends a case's fields together, so
+            // contiguity is a fact about how it is built and not a coincidence to be preserved by hand
+            size_t first_payload_property = 0;
+            size_t payload_field_count = 0;
+
+            // the names as the author wrote them. read by the diagnostics and by the pattern binder,
+            // which needs the arity - a pattern binding the wrong number of names is refused against
+            // this rather than against the constructor, a pattern not being a call
+            std::vector<std::string> payload_field_names;
+
+            bool has_payload() const {
+                return payload_field_count > 0;
+            }
+        };
+
+        void add_enum_case(EnumCase entry) {
+            _enum_cases.push_back(std::move(entry));
+        }
+
+        const std::vector<EnumCase> &enum_cases() const {
+            return _enum_cases;
+        }
+
+        // the case that name denotes, or null. **the one lookup** - a linear walk, as the static
+        // property's is, since a case list is short and a second index would be a second thing to carry
+        // across an instantiation
+        const EnumCase *find_enum_case(const std::string &name) const;
+
+        // the type written after the `:` of a backed enum - an integer primitive or `string`. absent for
+        // a plain enum and for one with payload cases, the two being mutually exclusive at the
+        // declaration. what reads it is the synthesized `value()` and the choice of `__tag`'s own type
+        std::optional<ValueType> enum_backing;
+
         // the types declared *inside* this one, by name. `string::view` is reached through its owner
         // and lives in no namespace at all, which is the same decision that keeps a method out of
         // FunctionRegistry::_by_name: no namespace path a user can write reaches it, so two structs
@@ -1142,6 +1262,7 @@ namespace AST
         std::vector<FunctionDeclNode *> _implicit_conversions;
         std::vector<ValueType> _conformances;
         std::vector<TypeParamDecl *> _associated_types;
+        std::vector<EnumCase> _enum_cases;
 
         friend class TypeRegistry;  // allow TypeRegistry to access _properties
     };

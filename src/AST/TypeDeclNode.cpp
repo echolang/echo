@@ -29,18 +29,11 @@ const std::string AST::TypeDeclNode::namespaced_type_name() const
 
 const std::string AST::TypeDeclNode::node_description()
 {
-    // the keyword the declaration was written with, so --print-ast says which of the three kinds this
+    // the keyword the declaration was written with, so --print-ast says which of the four kinds this
     // is. an interface used to print as `struct`, which made the one dump that could have shown the
-    // difference say there was none
-    const char *keyword = "struct ";
-    if (is_class()) {
-        keyword = "class ";
-    }
-    else if (complex_type().is_interface_kind()) {
-        keyword = "interface ";
-    }
-
-    std::string result = std::string(keyword) + namespaced_type_name() + "\n{\n";
+    // difference say there was none - AST::type_kind_keyword is why a fourth kind could not repeat it
+    std::string result =
+        std::string(AST::type_kind_keyword(complex_type().kind)) + " " + namespaced_type_name() + "\n{\n";
 
     // ahead of the members, which is the order they are declared in and the order the parser enforces:
     // a requirement's signature may mention one, so it has to be a name before one is read

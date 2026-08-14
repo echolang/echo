@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_match_unreachable_else.eco:5:6
+
+  this 'match' already covers every case of 'Unit', so its 'else' arm can never run.
+
+  4 | 
+  5 | $n = match ($u) {
+    :      ^^^^^
+  6 |     Unit::meter => 1,
+
+1 error, nothing was compiled.

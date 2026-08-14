@@ -1,0 +1,9 @@
+enum E { case pair(int32 $a, int32 $b); }
+
+$e = E::pair(1, 2);
+
+$n = match ($e) {
+    E::pair($only) => $only,
+};
+
+echo $n;

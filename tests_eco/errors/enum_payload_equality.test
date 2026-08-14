@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] NoMatchingOverload  enum_payload_equality.eco:8:8
+
+  operator '==' is not supported on operands of type 'E' and 'E'
+
+  7 | 
+  8 | if ($a == $b) { echo "same"; }
+    :        ^^^^^^^^^^^
+  9 | 
+
+1 error, nothing was compiled.

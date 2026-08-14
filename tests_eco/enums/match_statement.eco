@@ -1,0 +1,33 @@
+// a `{ }` arm produces nothing, which makes the whole match `void` - the statement form. it owes no
+// semicolon, exactly as `if` and `foreach` do.
+enum E
+{
+    case none;
+    case one(int32 $v);
+    case two(int32 $a, int32 $b);
+}
+
+function show(E $e) : void
+{
+    match ($e) {
+        E::none        => { echo "none"; },
+        E::one($v)     => { echo "one"; echo $v; },
+        E::two($a, $b) => { echo "two"; echo $a; echo $b; },
+    }
+}
+
+show(E::none());
+show(E::one(4));
+show(E::two(5, 6));
+
+// a match all of whose arms leave is a way out of the function, so this needs no trailing return
+function pick(E $e) : int32
+{
+    match ($e) {
+        E::none        => { return 0; },
+        E::one($v)     => { return $v; },
+        E::two($a, $b) => { return $a + $b; },
+    }
+}
+
+echo pick(E::two(1, 2));

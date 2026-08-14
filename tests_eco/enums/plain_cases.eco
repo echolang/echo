@@ -1,0 +1,23 @@
+// a plain enum: named cases, no backing value, no payload. its whole layout is the discriminant,
+// and `Unit::meter` names the case without parentheses because a case of no arguments is a call of
+// no arguments.
+enum Unit
+{
+    case meter;
+    case kilometer;
+    case mile;
+}
+
+$a = Unit::meter;
+$b = Unit::mile;
+
+// equality is the discriminant, which is what an enum's identity *is* - no operator is declared for
+// this anywhere, and none can be written that would disagree
+if ($a == Unit::meter) { echo "a is meter"; }
+if ($a != $b) { echo "a is not b"; }
+
+// the destination names the type, so the case does not have to
+Unit $c = .kilometer;
+if ($c == Unit::kilometer) { echo "c is kilometer"; }
+
+echo mem::size_of<Unit>();

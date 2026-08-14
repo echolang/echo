@@ -1,0 +1,8 @@
+// a payload enum has no built-in equality: two `timeout` values holding different numbers are not
+// the same value, and comparing the tags alone would say they are
+enum E { case none; case timeout(int32 $after); }
+
+$a = E::timeout(1);
+$b = E::timeout(2);
+
+if ($a == $b) { echo "same"; }

@@ -1,0 +1,11 @@
+// the payload is a `string`, which is a named type lowered in more than one unit - the one shape that
+// reproduces it. `int32` never did, a primitive having no llvm::StructType to split
+modopt::Holder<string, int32> $h = modopt::held<string, int32>('kept');
+
+echo $h->has();
+echo $h->value ?? 'absent';
+
+modopt::Holder<string, int32> $empty;
+
+echo $empty->has();
+echo $empty->value ?? 'absent';

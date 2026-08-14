@@ -32,6 +32,7 @@ namespace AST
     class AddrOfExprNode;
     class StrongExprNode;
     class NullCoalesceExprNode;
+    class MatchExprNode;
     class OptionalChainExprNode;
     class ChainBaseNode;
     class DerefExprNode;
@@ -88,6 +89,17 @@ namespace Compiler::LLVM
         // `A ?? B`: evaluate A, test it, and take B only when it is absent. a branch and a phi rather than
         // a select, because **B must not be evaluated on the present path** - it may be a call
         void gen_null_coalesce(AST::NullCoalesceExprNode &node);
+
+        // **`match ($u) { ... }` - one switch over `__tag`, one block per arm, one phi.**
+        //
+        // shaped on gen_null_coalesce beside it, which is the two-arm case of exactly this: each arm's
+        // value is coerced to the match's own result before the phi, and the block a phi takes an
+        // incoming value from is the one the builder *ended* in rather than the one it started in.
+        //
+        // the switch is what a chain of tag comparisons would have been, and it is worth being: LLVM
+        // turns a dense if-chain over an integer into one anyway, but only after the O2 pipeline - and
+        // `run` defaults to --debug, where nothing folds
+        void gen_match(AST::MatchExprNode &node);
 
         // `A?->b`: evaluate A, test it, and run the continuation only when it is there. the same shape as
         // `??` with the arms the other way round, and the absent arm supplying the destination's null

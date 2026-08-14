@@ -31,21 +31,46 @@ namespace Parser
     // enclosing free `f`, which is the pre-existing bug this arm must not inherit
     AST::FunctionCallExprNode *try_parse_static_call(Payload &payload);
 
-    // **does a `.name(` start here?** - the shorthand static call, whose owner comes from wherever its
+    // **does a `.name` start here?** - the shorthand static call, whose owner comes from wherever its
     // value goes rather than from anything written at the call site.
     //
     // one predicate with two readers, which is the point: `is_expr_token` decides whether the
     // shunting-yard loop enters at all and `parse_operand` decides what to build, and a disagreement
     // between them is not a diagnostic - it is the compiler aborting on a sanity assert with no
-    // location. guarded on the identifier *and* what follows it so `..`, which is two `t_dot` and a
-    // declared infix operator, can never be claimed
+    // location.
+    //
+    // the argument list is deliberately *not* part of the test, an enum's payload-free case being
+    // written `.cannot_connect`. `..` is still unclaimable without it: a range is two adjacent `t_dot`
+    // tokens, so what follows the first is never an identifier - and being infix it is read where an
+    // operator is expected, which is not where this is asked
     bool starts_shorthand_call(Cursor &cursor);
+
+    // **does that shorthand write an argument list?** - asked with the cursor still on the `.`, so the
+    // two forms are told apart before either is committed to.
+    //
+    // separate from the predicate above rather than folded into it, because they answer for different
+    // readers: that one says whether these tokens are a shorthand at all, this one says which of the
+    // two shapes it is. one predicate answering both is what made `.cannot_connect` unspellable
+    bool shorthand_call_has_arguments(Cursor &cursor);
 
     // **`Type::$x`, a read or a write of storage the type owns.** null when these tokens are not
     // one, cursor untouched - and, like the call form above, tried before Parser::parse_namespace
     // for the same reason: once that has minted a namespace called `Point` the type is out of
     // reach, and a `$name` after the `::` matches no arm in parse_operand at all
     AST::StaticPropertyExprNode *try_parse_static_property(Payload &payload);
+
+    // **the owner written before a `::`, read as the type it is** - or null, with the cursor exactly
+    // as it was found. on success the cursor sits just past the `::`.
+    //
+    // one owner grammar for every form written after one: `Type::f(...)`, `Type::$x` and a `match`
+    // pattern's `Type::case`. what it costs to write a second is measurable - a hand-rolled scan for
+    // the separating `::` does not count angle brackets, so `Pair<int32, int32>::left` splits at the
+    // comma inside the type arguments and the owner is never seen at all.
+    //
+    // `want_property` says what follows the `::`, which is the only thing that differs between the
+    // forms: a `$name` for a static property, an identifier for everything else. it is speculation, so
+    // nothing is reported - a name that turns out to be a namespace is not a mistake here
+    AST::TypeNode *try_parse_static_owner(Payload &payload, bool want_property);
 
     // **does `[identifier [<...>] ::]+ $name` start here?** - the shape a static property access is
     // written in, measured without deciding that the prefix names a type. that second question is

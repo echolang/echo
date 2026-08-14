@@ -67,6 +67,7 @@ namespace AST
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
         void visit_instanceof_expr(InstanceOfExprNode &node) override;
         void visit_temporary_bind(TemporaryBindExprNode &node) override;
+        void visit_match(MatchExprNode &node) override;
         void visit_release(ReleaseNode &node) override;
         void visit_index_expr(IndexExprNode &node) override;
         void visit_array_literal_expr(ArrayLiteralExprNode &node) override;

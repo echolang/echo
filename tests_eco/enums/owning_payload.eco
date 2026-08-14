@@ -1,0 +1,28 @@
+// **the payload of the case a value is holding is torn down, and no other.** the layout is flat, so
+// every case's slots are there at once - what makes this correct is that the synthesized deinit and
+// the synthesized copy each branch on the discriminant, once per case, inside the body the type owns.
+enum E
+{
+    case none;
+    case text(string $s);
+    case pair(string $a, string $b);
+}
+
+function take(E $v) : void {}
+
+// an owning payload, copied and dropped
+$a = E::text("hello");
+$b = $a;
+take($b);
+
+// a case that owns nothing reaches no branch at all - not even an empty one
+$c = E::none();
+$d = $c;
+take($d);
+
+// two owning slots in one case, dropped in reverse declaration order
+$e = E::pair("x", "y");
+take($e);
+
+echo "done";
+echo mem::live_allocations();

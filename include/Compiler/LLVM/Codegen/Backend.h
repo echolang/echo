@@ -36,7 +36,7 @@ namespace Compiler::LLVM
         // llvm::Module can be created with a layout already attached. must run before
         // create_cmp_units
         //
-        // the layout used to be set only in make_exec, i.e. after all IR had been built and never
+        // the layout used to be set only at emission, i.e. after all IR had been built and never
         // at all on the JIT path - so anything asking "how big is this type" during codegen got
         // LLVM's default layout (which aligns i64 to 4, unlike any real 64-bit target) and the
         // optimizer ran over layout-less modules
@@ -50,10 +50,12 @@ namespace Compiler::LLVM
 
         void optimize();
 
-        // the baseline pipeline for one unit, on the ordinary `echoc build` path where no merge happens.
-        // see the implementation for why it is per unit and why that is what makes the object cache and
-        // optimized IR stop being mutually exclusive
-        void optimize_unit(Compiler::LLVM::CmpUnit &cmp_unit);
+        // **everything that happens to a unit's module between codegen and its object**, which is two
+        // things and only one of them is optional: the definitions this unit does not reference are
+        // dropped always, and the baseline pipeline runs unless `--optimize none` was asked for. See the
+        // implementation for why the discard cannot be left to the pipeline, and for why the pipeline is
+        // per unit and what that buys the object cache. Idempotent - `CmpUnit::optimized` is the flag
+        void prepare_unit_for_emission(Compiler::LLVM::CmpUnit &cmp_unit);
 
         void print_ir(bool to_file);
 
@@ -116,26 +118,19 @@ namespace Compiler::LLVM
         // a compile prints is the driver's question, and the driver is the only place that sees the flag
         const std::string &prune_report() const { return _prune_report; }
 
-        // emits the object file and links it into `executable_name`, false on any of its three
-        // failure paths. it reports by return value rather than only by printing, because a caller
-        // that cannot tell exits 0 having produced no binary - which is a build that looks
-        // successful to a shell, a Makefile and the e2e suite alike
+        // **one unit to one object file, and one link, and that is the whole of emission.** A third
+        // entry point used to sit beside these two that was exactly the pair of them over the one unit
+        // a merge leaves behind, so the driver branched between two spellings of one path and the one
+        // exercised least was the one a change would miss.
         //
-        // the whole-program spelling: one unit, one object, one link. Kept for the paths that merged
-        // everything into main first - `-O` and `--print-ir` - where per-module objects do not exist.
+        // both report by return value rather than only by printing, because a caller that cannot tell
+        // exits 0 having produced no binary - a build that looks successful to a shell, a Makefile and
+        // the e2e suite alike.
         //
-        // **`object_path` is passed in rather than derived from the executable's name.** Where a build
-        // artifact goes is Compiler::BuildLayout's one question, and this used to answer it a second
-        // time with a string concatenation - which is how every optimized build left an object beside
-        // the binary that nothing ever collected
-        bool make_exec(
-            const std::string &executable_name,
-            const std::filesystem::path &object_path,
-            const std::vector<Compiler::LinkRequirement> &link);
-
-        // one unit to one object file. **Sound only because an ODR-shared definition is emitted into
-        // every unit that references it**: without that a unit's object would be missing the bodies its
-        // callers expect somebody else to have provided
+        // **Sound only because an ODR-shared definition is emitted into every unit that references
+        // it**: without that a unit's object would be missing the bodies its callers expect somebody
+        // else to have provided. Its converse is prepare_unit_for_emission's discard - a unit that does
+        // *not* reference one has no business shipping it
         bool emit_object(CmpUnit &cmp_unit, const std::filesystem::path &object_path);
 
         // links objects into an executable. Prefers the system linker and falls back to the `clang`

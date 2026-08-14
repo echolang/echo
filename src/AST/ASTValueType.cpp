@@ -7,6 +7,8 @@
 #include "AST/VarDeclNode.h"
 #include "External/infint.h"
 
+#include <fmt/core.h>
+
 #include <cassert>
 std::string AST::get_primitive_name(ValueTypePrimitive primitive)
 {
@@ -134,6 +136,9 @@ AST::ValueType AST::ValueType::make_complex(ComplexType *complex_type, const std
         break;
     case ComplexTypeKind::t_interface:
         value_kind = ValueTypeKind::t_interface;
+        break;
+    case ComplexTypeKind::t_enum:
+        value_kind = ValueTypeKind::t_enum;
         break;
     }
 
@@ -544,6 +549,14 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     instantiated->visibility = tmpl->visibility;
     instantiated->declared_in = tmpl->declared_in;
 
+    // and so is the case table: `result<int32, string>` has the cases `result` wrote, at the same
+    // ordinals and over the same property range. the payload property *types* substitute below with
+    // every other property, so what has to be carried is the table describing them - without it a
+    // pattern over an instantiation would find no case and every `match` on a generic enum would read
+    // as non-exhaustive against a set of nothing
+    instantiated->_enum_cases = tmpl->_enum_cases;
+    instantiated->enum_backing = tmpl->enum_backing;
+
     instantiated->template_ref = tmpl;
     instantiated->instantiation_args = args;
 
@@ -647,6 +660,39 @@ std::optional<std::pair<size_t, AST::VarDeclNode *>> AST::ComplexType::find_stat
     }
 
     return std::nullopt;
+}
+
+const char *AST::type_kind_keyword(AST::ComplexTypeKind kind)
+{
+    switch (kind) {
+        case ComplexTypeKind::t_struct: return "struct";
+        case ComplexTypeKind::t_class: return "class";
+        case ComplexTypeKind::t_interface: return "interface";
+        case ComplexTypeKind::t_enum: return "enum";
+    }
+
+    // no tail: every kind is above, and the switch is what makes a fifth one a compile error here
+    // rather than a diagnostic that calls it a struct
+    assert(false && "unhandled ComplexTypeKind in type_kind_keyword");
+    return "struct";
+}
+
+const AST::ComplexType::EnumCase *AST::ComplexType::find_enum_case(const std::string &name) const
+{
+    // a linear walk, for find_static_property's reason above: a case list is short, and a name map
+    // would be a second structure TypeRegistry::get_or_create_instantiation had to carry across
+    for (const EnumCase &entry : _enum_cases) {
+        if (entry.name == name) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+std::string AST::enum_payload_property_name(size_t case_ordinal, const std::string &field_name)
+{
+    return fmt::format("__c{}_{}", case_ordinal, field_name);
 }
 
 AST::TypeParamDecl *AST::ComplexType::find_associated_type(const std::string &name) const

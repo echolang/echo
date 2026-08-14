@@ -794,7 +794,11 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         return result;
     }
 
-    if (type.is_struct()) {
+    // an enum describes as the aggregate it is - `__tag` and the payload slots, by their property
+    // names. deliberately the struct path rather than a DW_TAG_variant_part: what DWARF would gain is
+    // a debugger showing only the live case, and what it costs is a second description of a layout
+    // this one already gets right. tools/echo_lldb.py is where that presentation belongs
+    if (type.is_struct() || type.is_enum()) {
         return struct_type_of(type, cmp_unit);
     }
 

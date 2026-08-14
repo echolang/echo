@@ -935,7 +935,7 @@ static void store_module_records(
 // and a second spelling would let them drift. the status is part of the rule, not the caller's - a
 // module whose codegen threw part way through a function is neither runnable nor linkable, and
 // printing the diagnostic and then carrying on is how both paths used to report success on a failed
-// compile: the exit code said 0 while MCJIT ran over a half-built module, or make_exec emitted
+// compile: the exit code said 0 while MCJIT ran over a half-built module, or the emit path wrote
 // objects for one that may be null or only partly linked. the e2e corpus' `expect:` now asserts it
 static int report_compiler_exception(
     const AST::DiagnosticRenderer &diagnostics,
@@ -2352,12 +2352,14 @@ static int build_one_program(
             Compiler::ProgressPhase::t_emit,
             std::filesystem::path(output).filename().string());
 
-        // one merged module, one object, one link for the whole-program path, which has to keep existing
-        // because `-O` depends on it. Either way the tool that failed has already said what it could, and
-        // what it could not say is which manifest asked for each requirement
-        const bool linked = whole_program
-            ? compiler.make_exec(output, front.layout().scratch_object(entry_module), link)
-            : emit_and_link_modules(compiler, front.layout(), output, plan, link);
+        // **one emit-and-link path, whichever build this is.** The whole-program arm used to be a second
+        // spelling of it - an emit_object plus a link_executable over the one unit `emit_objects` skips
+        // its way down to anyway, `link_into_main()` having consumed all the others. What
+        // `--optimize whole` depends on is that merge, which happened above and is not in question; with
+        // an empty plan `object_for` answers the scratch path, which is the object that arm was handed.
+        // The tool that failed has already said what it could, and what it could not say is which
+        // manifest asked for each requirement
+        const bool linked = emit_and_link_modules(compiler, front.layout(), output, plan, link);
 
         // closed before the failure is reported rather than by the destructor after it, so the row sits
         // above the sentence that explains it - the order every other step reaches deliberately

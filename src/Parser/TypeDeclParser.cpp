@@ -1,5 +1,6 @@
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ConstDeclParser.h"
+#include "Parser/EnumDeclParser.h"
 #include "Parser/OperatorDeclParser.h"
 
 #include "AST/ASTConformance.h"
@@ -7,13 +8,10 @@
 #include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionRegistry.h"
 #include "AST/ASTMemberLookup.h"
+#include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
-#include "AST/MemberAccessNode.h"
-#include "AST/AssignNode.h"
 #include "AST/ReturnNode.h"
-#include "AST/VarRefNode.h"
-#include "AST/VarNode.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/VarDeclParser.h"
@@ -263,6 +261,40 @@ static void parse_conformance_clause(
         }
 
         const AST::ValueType conformance = entry->type;
+
+        // **an enum reads its backing type out of this same clause**, rather than out of a grammar of
+        // its own. the two are told apart by what the entry names - an interface is always a declared
+        // type, a backing is always a primitive or `string` - so `enum X : int32` and
+        // `enum X : contract::describable` and both at once are one walk with one refusal each.
+        //
+        // asked ahead of the is_interface() test below so a backing does not first read as a
+        // conformance that is not an interface, which would be the right refusal for the wrong thing
+        if (owner.is_enum_kind() && !conformance.is_interface()) {
+            const std::string refusal =
+                Parser::enum_backing_refusal(conformance, payload.collector.core_types);
+
+            if (!refusal.empty()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(entry_token), refusal);
+            }
+            else if (owner.enum_backing.has_value()) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(entry_token),
+                    fmt::format(
+                        "'{}' is already backed by '{}' - an enum has one backing type.",
+                        struct_node.type_name(), owner.enum_backing->get_type_desciption()));
+            }
+            else {
+                owner.enum_backing = conformance;
+            }
+
+            if (cursor.is_type(Token::Type::t_comma)) {
+                cursor.skip();
+                continue;
+            }
+
+            break;
+        }
 
         if (!conformance.is_interface()) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -809,49 +841,19 @@ static void synthesize_field_wise_constructor(
     auto &this_vardecl = AST::declare_constructor_this(payload.context.module, type_node, name_token);
     default_ctor.body->add_vardecl(this_vardecl);
 
-    // one read of `$this` per use, never one node shared between them: a node that sits in the tree
-    // twice has two parents, and every pass that rewrites a child in place - AST::OperatorRewriter on a
-    // member-access base, AST::PointerAdjuster on a deref - would rewrite it once per parent. it is also
-    // what lets a clone answer "already cloned" with the one clone: two parents would collapse onto it
-    auto make_this_read = [&]() {
-        auto *var = payload.context.emplace_nodep<AST::VarNode>(&this_vardecl);
-        return payload.context.emplace_nodep<AST::VarRefNode>(var);
-    };
-
-    // for each property we create an assignment statement in the constructor body
+    // one write per property, through the rule AST::seat_property_from_parameter owns - the pointer
+    // binding, the initialization and the hand-over are all its, and an enum's case constructor is
+    // built out of the same call
     for (size_t i = 0; i < struct_node->properties().size(); i++) {
         auto *prop = struct_node->properties()[i];
 
-        // create $this->prop access
-        auto member_token = payload.context.make_virtual_token(prop->name(), Token::Type::t_identifier, prop->token_varname);
-        AST::ExprNode *target = payload.context.emplace_nodep<AST::MemberAccessNode>(AST::make_ref(*make_this_read()), member_token);
-
-        // a pointer property is *bound* here, not written through. a plain assignment to a
-        // pointer means "store into the pointee", which for a field that has never been
-        // seated writes through uninitialized memory - so the synthesized initializer spells
-        // the re-seating form, `$this->prop:$ = $prop`, exactly as a user would
-        // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
-        if (prop->has_type() && prop->type().is_pointer()) {
-            target = payload.context.emplace_nodep<AST::PointerValueNode>(target, member_token);
-        }
-
-        // reference the matching constructor argument
-        auto param_var = payload.context.emplace_nodep<AST::VarNode>(default_ctor.args[i]);
-        auto param_ref = payload.context.emplace_nodep<AST::VarRefNode>(param_var);
-
-        auto member_mut = payload.context.emplace_nodep<AST::AssignNode>(target, param_ref, member_token);
-
-        // this is the one write a `const` property ever gets, so it is an initialization rather
-        // than a mutation and the const checks in AST::TypeChecker have to let it through
-        member_mut->is_initialization = true;
-
-        // and the parameter is *handed over*, not copied. the author wrote none of this, so there is
-        // nowhere to put a `mv` - and nothing ambiguous to say: the parameter was given to this
-        // constructor to be built into the struct it hands back. the only place in the language that
-        // sets this, which is why a hand-written constructor still has to spell its own transfers
-        member_mut->hands_over_value = true;
-
-        default_ctor.body->children.push_back(AST::make_ref(member_mut));
+        default_ctor.body->children.push_back(AST::make_ref(
+            AST::seat_property_from_parameter(
+                payload.context.module,
+                this_vardecl,
+                *prop,
+                default_ctor.args[i],
+                prop->token_varname)));
     }
 
     // return the initialized struct instance, through the same owner the written constructor above ends
@@ -1162,6 +1164,14 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         parse_conformance_clause(payload, *struct_node, conformance_snapshot, conformance_token.value());
     }
 
+    // **`__tag` is appended here and nowhere else**, which is what makes it property 0: after the
+    // clause, because an integer backing decides its type, and before the member loop, because every
+    // payload property a case appends has to land behind it. gated on collect_members with the
+    // conformances above and for their reason - the body pass walks this same code
+    if (struct_node->complex_type().is_enum_kind() && collect_members) {
+        Parser::declare_enum_tag(payload, struct_node);
+    }
+
     // the struct as seen from inside its own body: the plain struct for a non-generic one, or the
     // self-application Foo<T...> for a generic one. giving a constructor generic type parameters +
     // this return type lets the monomorphizer instantiate it alongside Foo<int>, and a method's
@@ -1218,22 +1228,40 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // later pass could find and believe in
     const bool is_interface_body = struct_node->complex_type().is_interface_kind();
 
+    // **an enum body refuses the same shapes an interface does, minus one and for a different reason.**
+    // an interface refuses a property because it has no layout; an enum refuses one because its layout
+    // is the *compiler's* - `__tag` and the payload slots - so an author's field would be seated beside
+    // a discriminant it knows nothing about. what an enum keeps that an interface does not is the static
+    // property, which is storage the type owns and no part of any value's layout
+    const bool is_enum_body = struct_node->complex_type().is_enum_kind();
+
     // the interface's associated types resolve throughout its body. opened for every body kind, with a
     // null owner outside an interface, so `find_type_param` has one rule rather than a conditional
     AST::AssociatedTypeScope associated_scope(
         payload.context, is_interface_body ? &struct_node->complex_type() : nullptr);
 
-    // reports a member shape an interface cannot hold, and consumes it so the rest of the body is still
+    // reports a member shape this body cannot hold, and consumes it so the rest of the body is still
     // read. one lambda rather than the wording repeated at four arms, which is what keeps the four
     // consistent - and the shape is named rather than the token quoted, since `constructor` and a
     // property read nothing alike
-    auto refuse_interface_member = [&](const TokenReference &at, const std::string &shape) {
+    //
+    // the kind is read off the declaration rather than written into the sentence, which is what let the
+    // fourth kind reuse all four arms. only the two kinds that refuse anything reach this, and both
+    // spell with "an" - a fifth that did not would want the article from AST::type_kind_keyword's owner
+    // rather than from here
+    auto refuse_member_shape = [&](const TokenReference &at, const std::string &shape) {
+        const char *holds = is_interface_body
+            ? "An interface holds requirements only - a `function` or `operator` signature ending in ';'."
+            : "An enum holds `case` declarations, and the functions, operators and statics it answers with.";
+
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(at),
             fmt::format(
-                "'{}' is an interface, so it cannot declare {}. An interface holds requirements only - "
-                "a `function` or `operator` signature ending in ';'.",
-                struct_node->type_name(), shape));
+                "'{}' is an {}, so it cannot declare {}. {}",
+                struct_node->type_name(),
+                AST::type_kind_keyword(struct_node->complex_type().kind),
+                shape,
+                holds));
     };
 
     // and the three shapes that are refused *with a body* - a nested type, a constructor, a destructor.
@@ -1241,7 +1269,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // skips were not: a copy that forgets skip_till_end_of_scope reads the refused member's own body as
     // more members and reports every statement in it
     auto refuse_braced_member = [&](const std::string &shape) {
-        refuse_interface_member(cursor.current(), shape);
+        refuse_member_shape(cursor.current(), shape);
         cursor.skip_until({ Token::Type::t_open_brace });
         cursor.skip_till_end_of_scope();
     };
@@ -1276,6 +1304,31 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // `view` is the case that needs it
             parse_attribute(payload);
         }
+        // `case timeout(int32 $after);` - the one member shape only an enum has. ahead of every arm
+        // below for the nested type's reason: it is an unambiguous keyword, and an unambiguous keyword
+        // should never race the type-grammar scanner starts_vardecl runs
+        else if (starts_enum_case(cursor)) {
+            if (!is_enum_body) {
+                payload.collector.collect_issue<AST::Issue::GenericError>(
+                    payload.context.code_ref(cursor.current()),
+                    fmt::format(
+                        "'{}' is declared `{}`, so it cannot declare a case - only an `enum` has them.",
+                        struct_node->type_name(),
+                        AST::type_kind_keyword(struct_node->complex_type().kind)));
+                cursor.try_skip_to_next_statement();
+                continue;
+            }
+
+            // a case is as reachable as the enum is: it is named through the owner and is the only way
+            // to build one, so narrowing it would leave a case nothing could construct
+            refuse_visibility_prefix(
+                payload,
+                visibility,
+                "A case is the only way to build the enum it belongs to, so it is reachable exactly "
+                "where that enum is.");
+
+            parse_enum_case(payload, struct_node, self_value_type, collect_members);
+        }
         else if (starts_typedecl(cursor)) {
             // a nested type. recursed into rather than skipped, so one function owns "what does a
             // struct body contain" - and the recursion needs nothing passed to it: the SelfScope
@@ -1287,7 +1340,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             //
             // ahead of starts_vardecl because this is an unambiguous keyword and that one scans the
             // type grammar - the order costs nothing and means the two can never race
-            if (is_interface_body) {
+            // an enum is refused one for a reason of its own: a nested type is reached as `A::Inner`,
+            // and an enum's `::` already means a case. one spelling denoting a type in one enum and a
+            // value in the next is the ambiguity a pattern cannot afford
+            if (is_interface_body || is_enum_body) {
                 refuse_braced_member("a nested type");
                 continue;
             }
@@ -1375,8 +1431,12 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
             // a requirement is behaviour. a constant is a value the owner names, so it is storage-shaped in
             // every sense that matters here - refused for the reason a property is
-            if (is_interface_body) {
-                refuse_interface_member(at, "a constant");
+            // an enum is refused one because `X::name` already denotes a case. a constant beside the
+            // cases would make one spelling mean a case in one enum and a folded literal in the next,
+            // and a *pattern* has no way to say which it meant - so the ambiguity is refused at the
+            // declaration rather than resolved by a precedence nobody could see
+            if (is_interface_body || is_enum_body) {
+                refuse_member_shape(at, "a constant");
                 cursor.try_skip_to_next_statement();
             }
             // the nested-type refusal's reason, exactly: the initializer may mention the owner's `T`, and a
@@ -1418,7 +1478,16 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             // every implementor and mean nothing without a stored offset, so it is refused - which also
             // keeps ComplexType::has_property_layout() true of exactly the two kinds that have one
             if (is_interface_body) {
-                refuse_interface_member(
+                refuse_member_shape(
+                    var != nullptr ? var->token_varname : cursor.current(), "a property");
+            }
+            // **an enum refuses an instance property and keeps the static one**, which is the whole of
+            // what separates its layout rule from an interface's. an interface has no layout at all; an
+            // enum has one the compiler owns, so an author's field would be seated beside a discriminant
+            // it knows nothing about - while a static is one global for the type and no part of any
+            // value, so nothing about it can disagree with `__tag`
+            else if (is_enum_body && !(var != nullptr && var->is_static())) {
+                refuse_member_shape(
                     var != nullptr ? var->token_varname : cursor.current(), "a property");
             }
             // **a static is storage the type owns, so it is not in the layout at all** - no offset, no
@@ -1455,7 +1524,10 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         else if (cursor.is_type(Token::Type::t_identifier) && cursor.current().value() == "constructor") {
             // an interface is never constructed - a value of one is always some implementor's object
             // widened to it - so a constructor here could not be called by anything
-            if (is_interface_body) {
+            //
+            // an enum is refused one because it already has as many as it has cases: a value of one is
+            // always some case, and a constructor beside them could build a value that is none of them
+            if (is_interface_body || is_enum_body) {
                 refuse_braced_member("a constructor");
                 continue;
             }
@@ -1514,8 +1586,18 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // never for an interface: it has no fields to take, so what would be synthesized is a zero-argument
     // constructor of a type that is never constructed - and unlike the refusals in the body walk above
     // this one nobody wrote, so there would be no token to report it at
-    if (collect_members && !is_interface_body) {
+    // never for an enum either, and said here rather than left to the private-property rule that would
+    // already suppress it: every slot of an enum is private, so that rule does catch this today - but it
+    // catches it by accident, and a field-wise constructor over `(__tag, __c1_after, __c2_code)` is
+    // exactly the door out of the case table that must not exist by accident
+    if (collect_members && !is_interface_body && !is_enum_body) {
         synthesize_field_wise_constructor(payload, struct_node, self_value_type);
+    }
+
+    // and the enum's own, in the same position and for the same reason: after the walk, so it is built
+    // from the case list this walk just collected
+    if (collect_members && is_enum_body) {
+        Parser::synthesize_backing_accessor(payload, struct_node, self_value_type);
     }
 
     if (!declarations_only) {
@@ -1543,6 +1625,28 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         // land there - at the tail, where it has always been
         if (struct_node->field_wise_constructor() != nullptr) {
             payload.context.declaration_scope().add_funcdecl(*struct_node->field_wise_constructor());
+        }
+
+        // **and every member an enum synthesized, for the same reason and one sharper than it.** a case
+        // constructor and the backing accessor are `is_implicitly_generated`, so
+        // AST::function_emission_kind makes them `t_odr_shared` and codegen emits them wherever they are
+        // referenced - which made them *run* without ever landing here.
+        //
+        // what they did not get is the walk: the semantic passes descend from the file root, so a body
+        // that is in no scope is never reached by AST::PointerAdjuster. the accessor's `$__match = $this`
+        // therefore kept the receiver's address instead of the value behind it, and the enum read its
+        // discriminant out of a pointer - a wrong answer with nothing anywhere reporting it
+        if (is_enum_body) {
+            const auto publish_synthesized = [&](const std::vector<AST::FunctionDeclNode *> &members) {
+                for (AST::FunctionDeclNode *member : members) {
+                    if (member != nullptr && member->is_implicitly_generated && member->body != nullptr) {
+                        payload.context.declaration_scope().add_funcdecl(*member);
+                    }
+                }
+            };
+
+            publish_synthesized(struct_node->complex_type().static_methods());
+            publish_synthesized(struct_node->complex_type().methods());
         }
     }
 

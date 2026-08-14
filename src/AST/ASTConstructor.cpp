@@ -2,8 +2,10 @@
 
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTModule.h"
+#include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/MemberAccessNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"
@@ -54,4 +56,45 @@ void AST::close_constructor_body(
     auto &ret = module.nodes.emplace_back<AST::ReturnNode>(&read);
 
     decl.body->children.push_back(AST::make_ref(ret));
+}
+
+AST::ExprNode *AST::make_member_place(
+    AST::Module &module,
+    AST::VarDeclNode &local,
+    const std::string &name,
+    const TokenReference &at
+)
+{
+    auto &var = module.nodes.emplace_back<AST::VarNode>(&local, local.token_varname);
+    auto &read = module.nodes.emplace_back<AST::VarRefNode>(&var);
+
+    return &module.nodes.emplace_back<AST::MemberAccessNode>(
+        AST::make_ref(read),
+        module.make_virtual_token(name, Token::Type::t_identifier, at));
+}
+
+AST::AssignNode &AST::seat_property_from_parameter(
+    AST::Module &module,
+    AST::VarDeclNode &self,
+    const AST::VarDeclNode &property,
+    AST::VarDeclNode *parameter,
+    const TokenReference &at
+)
+{
+    AST::ExprNode *target = AST::make_member_place(module, self, property.name(), at);
+
+    if (property.has_type() && property.type().is_pointer()) {
+        target = &module.nodes.emplace_back<AST::PointerValueNode>(
+            target, module.make_virtual_token(property.name(), Token::Type::t_identifier, at));
+    }
+
+    auto &param_var = module.nodes.emplace_back<AST::VarNode>(parameter);
+    auto &param_read = module.nodes.emplace_back<AST::VarRefNode>(&param_var);
+
+    auto &write = module.nodes.emplace_back<AST::AssignNode>(target, &param_read, at);
+
+    write.is_initialization = true;
+    write.hands_over_value = true;
+
+    return write;
 }

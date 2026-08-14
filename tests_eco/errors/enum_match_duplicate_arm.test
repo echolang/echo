@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] enum_match_duplicate_arm.eco:7:5
+
+  'meter' is already covered by an earlier arm.
+
+  6 |     Unit::meter => 1,
+  7 |     Unit::meter => 2,
+    :     ^^^^
+  8 |     Unit::mile  => 3,
+
+1 error, nothing was compiled.

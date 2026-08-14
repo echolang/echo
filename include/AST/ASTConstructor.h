@@ -5,19 +5,27 @@
 
 #include "Token.h"
 
+#include <string>
+
 namespace AST
 {
+    class AssignNode;
+    class ExprNode;
     class FunctionDeclNode;
     class Module;
     class TypeNode;
     class VarDeclNode;
 
-    // **the two things every constructor body is made of, whoever writes it.** three producers build
-    // one - Parser::parse_constructor for a written `constructor(...)`, the field-wise one the type
-    // declaration parser synthesizes, and AST::OwnershipPass::ensure_copy_constructor - and none of
-    // them is the one the reader happens to be looking at. so the rules live here rather than at the
-    // first of them: while they did not, the third producer rediscovered them wrongly - it gave a class
-    // no allocation at all, and nothing anywhere said so
+    // **what every constructor body is made of, whoever writes it.** four producers build one -
+    // Parser::parse_constructor for a written `constructor(...)`, the field-wise one the type
+    // declaration parser synthesizes, an enum's case constructor, and
+    // AST::OwnershipPass::ensure_copy_constructor - and none of them is the one the reader happens to
+    // be looking at. so the rules live here rather than at the first of them: while they did not, the
+    // third producer rediscovered them wrongly - it gave a class no allocation at all, and nothing
+    // anywhere said so
+    //
+    // the first two below open and close a body; the last two are the writes in between, and a producer
+    // that seats a property by hand is a producer deciding three ownership questions on its own
 
     // mints a constructor's `$this` and gives it its storage. a struct's is the plain stack slot
     // StmtCodegen::ensure_var_slot zero-fills; a class's is a fresh heap block with both counts
@@ -62,6 +70,40 @@ namespace AST
     // rewrites that where it is read, off Context::ctor_this_ptr, long before the body scope this takes
     // exists - a different moment, and the only thing the two share is the shape of the node
     void close_constructor_body(Module &module, FunctionDeclNode &decl, VarDeclNode &this_decl);
+
+    // `$<local>-><name>`, as a place - one step of a synthesized path, and one read of the local per
+    // use.
+    //
+    // never one node shared between two uses: a node that sits in the tree twice has two parents, and
+    // every pass that rewrites a child in place - AST::PointerAdjuster on a deref, AST::OperatorRewriter
+    // on a member-access base - would rewrite it once per parent. it is also what lets a clone answer
+    // "already cloned" with the one clone, two parents collapsing onto it
+    ExprNode *make_member_place(
+        Module &module,
+        VarDeclNode &local,
+        const std::string &name,
+        const TokenReference &at
+    );
+
+    // **one property of a constructor's `$this`, seated from the parameter that carries it** - the
+    // whole of what a synthesized constructor body is, past the two above.
+    //
+    // three decisions in as many lines and none of them is the caller's, which is why they are here
+    // rather than at the two producers. a *pointer* property is bound and not written through, a plain
+    // assignment to one meaning "store into the pointee" and doing that over a slot nothing has seated
+    // writing through uninitialized memory. the write is an **initialization**, so it is the one write a
+    // `const` property ever gets and AST::TypeChecker has to let it through. and the parameter is
+    // **handed over** rather than copied - the author wrote none of this, so there is nowhere to put an
+    // `mv` and nothing ambiguous to say, the parameter having been given to this constructor to become
+    // part of the value it hands back. the only place in the language that sets that, which is why a
+    // hand-written constructor still has to spell its own transfers
+    AssignNode &seat_property_from_parameter(
+        Module &module,
+        VarDeclNode &self,
+        const VarDeclNode &property,
+        VarDeclNode *parameter,
+        const TokenReference &at
+    );
 };
 
 #endif

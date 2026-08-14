@@ -1,4 +1,5 @@
 #include "Parser/ScopeParser.h"
+#include "Parser/MatchParser.h"
 
 #include "AST/VarDeclNode.h"
 #include "AST/ExprNode.h"
@@ -239,6 +240,22 @@ AST::ScopeNode & Parser::parse_scope(
         else if (cursor.is_type(Token::Type::t_foreach)) {
             if (auto *loop = parse_foreach(payload)) {
                 scope_node.children.push_back(AST::make_ref(loop));
+            }
+        }
+        // `match ($u) { ... }` used as a statement, its value discarded. **an arm rather than letting
+        // the expression-statement fallthrough take it**, and for one reason: a statement-position
+        // match ends at its closing brace and owes no `;`, exactly as `if` and `foreach` do - while
+        // every expression statement below is terminated by one. so the two are told apart here, where
+        // the keyword is, rather than by a rule about semicolons somewhere further down
+        else if (starts_match(cursor)) {
+            if (auto *node = parse_match(payload)) {
+                scope_node.children.push_back(AST::make_ref(node));
+            }
+
+            // and a `;` after it is accepted rather than required: `$x = match (...) { };` puts one
+            // there because the *assignment* wants it, and a reader who writes one here is not wrong
+            if (cursor.is_type(Token::Type::t_semicolon)) {
+                cursor.skip();
             }
         }
         // `break;` / `continue;`. their own token types, so starts_vardecl - which scans the type grammar

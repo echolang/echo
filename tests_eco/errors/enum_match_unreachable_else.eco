@@ -1,0 +1,11 @@
+enum Unit { case meter; case mile; }
+
+$u = Unit::meter;
+
+$n = match ($u) {
+    Unit::meter => 1,
+    Unit::mile  => 2,
+    else        => 3,
+};
+
+echo $n;

@@ -815,18 +815,20 @@ llvm::StructType *TypeLowering::optional_llvm_type(
         return cmp_unit.structure_table->get_structure(id).llvm_struct;
     }
 
-    // the mangled name of the *payload*, so `int32?` and `float64?` are two shapes and two names, and so
-    // the same `int32?` reached from two units is one llvm::Type. name-first lookup for the reason
-    // class_header_llvm_type uses one - and unlike an ordinary struct, which is content to let each unit
-    // mint its own, an optional's synthesized deinit is `t_odr_shared` and verify_odr_consistency
-    // compares the rendered IR of the two copies
+    // the mangled name of the *payload*, so `int32?` and `float64?` are two shapes and two names.
+    //
+    // **and minted per unit, exactly like every other struct.** This used to look the name up in the
+    // context first, so two units shared one `eco.optional.*` - which the `linkonce_odr` deinit and copy
+    // constructor were held to need, `verify_odr_consistency` having compared the two copies as *text*
+    // and a renamed `%eco.optional.X.1` reading as a divergence. That check compares layouts now
+    // (Compiler::LLVM::first_odr_difference), so the sharing bought nothing and cost the one thing a
+    // shared type cannot survive: the layout was built in whichever unit reached it first and holds
+    // *that* unit's `%string`, while the values the next unit inserts into it are its own `%string.1`.
+    //
+    // `eco.callable`, `eco.iface` and `eco.classheader` keep their by-name lookup, and the difference is
+    // the whole rule: their members are context-primitives, so they have no payload to split
     const AST::ValueType payload = type.optional_payload();
     const std::string name = "eco.optional." + payload.get_mangled_name();
-
-    if (auto *existing = llvm::StructType::getTypeByName(*_ctx.llvm_context, name)) {
-        cmp_unit.structure_table->push_structure(layout, existing);
-        return existing;
-    }
 
     // opaque first and registered before the payload is lowered, exactly as create_llvm_struct_for_instance
     // does and for its reason: a payload that mentions this same optional resolves to the in-progress type
@@ -1029,7 +1031,11 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     if (type.is_primitive()) {
         base_type = get_llvm_type(type.get_primitive_type());
     }
-    else if (type.is_struct()) {
+    // an enum shares the arm because it shares the shape: a layout of ordinary properties, `__tag`
+    // first, reached through the same structure table and lowered by the same two entry points. the
+    // discriminant and the payload slots are not codegen's invention, which is what keeps this from
+    // being a second layout minter beside ClassBox
+    else if (type.is_struct() || type.is_enum()) {
         auto *complex = type.get_complex_type();
         auto struct_id = cmp_unit.structure_table->get_structure_id(complex);
 

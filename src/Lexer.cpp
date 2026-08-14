@@ -263,6 +263,14 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_class);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_interface);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_enum);
+    // `case` and `match` are keywords rather than contextual words, which is what `constructor` and
+    // `type` are. the difference is where they appear: those two are read in one position each, inside a
+    // type body, so a name that happens to spell one is still an identifier everywhere else. `match`
+    // starts an *expression*, so it has to be a keyword or `match ($x)` is a call to a function named
+    // match - and `case` reads as a declaration head, where a contextual word would make
+    // `case timeout(int32 $a);` ambiguous with a statement calling `timeout`
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_case);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_match);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_extern);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_as);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_destructor);

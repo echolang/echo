@@ -45,9 +45,11 @@ namespace Compiler::LLVM
         std::vector<const AST::FunctionDeclNode *> pending_definitions;
         std::unordered_set<const AST::FunctionDeclNode *> definition_queued;
 
-        // has Backend::optimize_unit already run over this module? two callers reach it - the dump and
-        // the object writer, in that order under `--print-unit-ir` - and the dump exists precisely to
-        // show what the writer is handed, so the second call has nothing left to do but pay for it again
+        // has Backend::prepare_unit_for_emission already run over this module? three things set it - the
+        // per-unit dump and the object writer, in that order under `--print ir-units`, and the
+        // whole-program `Backend::optimize`, whose merged module must not then take the O2 arm as well.
+        // the dump exists precisely to show what the writer is handed, so the second call has nothing
+        // left to do but pay for it again
         bool optimized = false;
 
         CmpUnit() {
