@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "AST/ASTFixpointLowering.h"
 #include "AST/ASTIteration.h"
-#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ASTValueType.h"
 
 #include "Token.h"
@@ -14,13 +14,9 @@
 namespace AST
 {
     class Bundle;
-    class Collector;
-    struct CodeRef;
     class ExprNode;
-    class File;
     class ForeachNode;
     class FunctionCallExprNode;
-    class Module;
     class ScopeNode;
     class VarDeclNode;
 
@@ -51,41 +47,32 @@ namespace AST
     // NodeCollection owns a detached node forever, so an of_type sweep would re-process one that has
     // already been lowered away
     //
-    // **built on AST::RecursiveVisitor rather than on a switch of its own.** a hand-rolled statement
-    // walk is a second answer to "what are this node's owned children", and the way it fails is by
-    // omission: a missing arm silently never reaches the loops under it, and a `foreach` that is never
-    // lowered surfaces as the InternalCompilerException the monomorphizer throws for a survivor. the
-    // visitor is total by construction - a node kind added without a visit method does not compile -
-    // so only the two edges this pass treats differently are overridden below
-    class ForeachLowering : private RecursiveVisitor
+    // **built on AST::RecursiveVisitor rather than on a switch of its own** - through
+    // AST::FixpointLowering, which is the chassis every pass in the fixpoint shares. a hand-rolled
+    // statement walk is a second answer to "what are this node's owned children", and the way it fails
+    // is by omission: a missing arm silently never reaches the loops under it, and a `foreach` that is
+    // never lowered surfaces as the InternalCompilerException the monomorphizer throws for a survivor.
+    // the visitor is total by construction - a node kind added without a visit method does not compile -
+    // so only the one edge this pass treats differently is overridden below
+    class ForeachLowering : private FixpointLowering
     {
     public:
         ForeachLowering(Bundle &bundle);
 
-        // answers whether anything changed, so the fixpoint can report progress
-        bool run_round();
-
-        // **the fixpoint's exit obligation**: one last round in which "the source is not settled yet"
-        // is a refusal. being out of rounds is the proof that nothing was ever going to settle it,
-        // which is Monomorphizer::finalize_calls' reasoning and its moment.
+        // the chassis' own two entry points, and the whole of this pass's public surface.
         //
-        // without it, `pending` had no exit at all: a source that never becomes typed - `$a = [];`,
-        // then a loop over `$a` - left the node in the tree, and PointerAdjuster's throw for a
-        // survivor aborted the process on top of a perfectly good diagnostic nobody had printed yet
-        void finalize();
+        // `finalize` is exposed because a loop *has* a pending state, and without an exit for it
+        // `pending` had none at all: a source that never becomes typed - `$a = [];`, then a loop over
+        // `$a` - left the node in the tree, and PointerAdjuster's throw for a survivor aborted the
+        // process on top of a perfectly good diagnostic nobody had printed yet
+        using FixpointLowering::run_round;
+        using FixpointLowering::finalize;
 
     private:
-        CodeRef code_ref_for(const TokenReference &token);
-
         // indexed rather than the base's ranged walk, because lower() replaces the child in place and
         // the wrapper it leaves behind is descended into on the same index - which is what lets a
         // nested foreach lower in the same round as the one around it
         void visitScope(ScopeNode &node) override;
-
-        // a template's body is only meaningful once cloned into a concrete instance, and the source
-        // type this pass needs is exactly what is not known there. OperatorRewriter's rule, and
-        // PointerAdjuster's before it
-        void visitFunctionDecl(FunctionDeclNode &node) override;
 
         // lowers `scope.children[index]`, which is a ForeachNode. leaves it in place when the source's
         // type is not settled yet, and replaces it with an empty scope when it refused - a refused node
@@ -109,18 +96,6 @@ namespace AST
             const std::string &name,
             const TokenReference &at
         );
-
-        Bundle &_bundle;
-        Collector &_collector;
-
-        Module *_current_module = nullptr;
-        File *_current_file = nullptr;
-
-        bool _changed = false;
-
-        // is this the finalizing round? see finalize() above. a flag rather than a parameter because
-        // it has to reach lower() through the visitor's descent, which takes none
-        bool _finalizing = false;
     };
 };
 

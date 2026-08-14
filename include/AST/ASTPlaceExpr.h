@@ -110,6 +110,18 @@ namespace AST
         return storage_of(expr.get_node_type());
     }
 
+    // **is this a `match` every arm of which named storage?** one of the two shapes whose *value* is an
+    // address without their being a place - the other is a call returning `T&`, which stays inside
+    // AST::read_reaches_storage below because deciding it needs a `result_type` this signature does not
+    // take. false for everything that merely holds a pointer, which is a *place* and is covered there too.
+    //
+    // the two shapes are one situation: there is no slot holding the address, the value is the address, and
+    // reading through it is what the expression means. a `match` earns it the way a call does -
+    // `E::one($v) => $v` hands back a borrow into the subject, and the phi joining the arms is of those
+    // addresses. it is deliberately **not** AST::storage_of: a match has no address of its own, so
+    // `&match (...) { ... }` is refused exactly as `&$o->get()` is, and for the same reason
+    bool value_is_an_address(const ExprNode &expr);
+
     // true when the expression denotes storage: it has an address
     //
     // shared deliberately. four places have to agree on this question - the parser rejecting
@@ -148,6 +160,13 @@ namespace AST
     inline bool read_reaches_storage(const ExprNode &expr, const ValueType &result_type)
     {
         if (is_place_expression(expr)) {
+            return true;
+        }
+
+        // a `match` whose arms all named storage, which is the second shape whose value is an address. it
+        // needs no nullability test the way a call does: a payload borrow is minted by AST::MatchResolution
+        // and is non-nullable by construction, so there is no `ptr<T>` spelling of it to exclude
+        if (value_is_an_address(expr)) {
             return true;
         }
 

@@ -1,0 +1,35 @@
+// **`E` is named nowhere in `ok`'s signature**, so the only thing that can say what it is is the owner the
+// call site named - which for a case constructor is `AST::static_owner_bindings`, seeding what a receiver
+// would have. two distinct `E`s over one `T` is what makes that observable: if the owner were not the seed
+// the two would be one instantiation, or neither would be emitted at all
+function small(int32 $n) : result<int32, string>
+{
+    return .ok($n);
+}
+
+function wide(int32 $n) : result<int32, int64>
+{
+    return .ok($n);
+}
+
+echo small(1)->value_or(0);
+echo wide(2)->value_or(0);
+
+// **the shorthand's three destinations**, which is the same list `statics/shorthand_three_destinations`
+// walks - now over a standard library type. a return type above, a declared variable, and the parameter of
+// a call that has been chosen
+result<int32, string> $declared = .error('from a declaration');
+
+echo $declared->failure();
+
+function takes(result<int32, string> $r) : int32
+{
+    return $r->value_or(-1);
+}
+
+echo takes(.ok(7));
+echo takes(.error('from an argument'));
+
+// and the fully written spelling, which needs no destination at all
+echo result<int32, string>::ok(9)->value_or(0);
+echo mem::live_allocations();

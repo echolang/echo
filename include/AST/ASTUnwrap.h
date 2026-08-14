@@ -11,6 +11,7 @@
 namespace AST
 {
     class CoreTypes;
+    class FunctionDeclNode;
 
     // where the value behind a `guard` comes from
     enum class UnwrapSource
@@ -39,10 +40,33 @@ namespace AST
         // `const_unwrappable` would be read
         ValueType payload_type;
 
+        // **the two callees, named through the conformance rather than by their spelling** - the rule
+        // IterationPlan::iterate states and this plan used to break. null on the t_builtin_nullable arm,
+        // where the compiler answers the presence question itself and there is nothing to call.
+        //
+        // this matters three ways, and only the first is tidiness. `stdlib/core/contract.eco` could
+        // rename everything it declares and only Echo source would notice, which is precisely what
+        // `#[core:]` exists to give. `has_value()` is const and `unwrap()` is not, so the two already
+        // differ in the axis AST::argument_fit ranks on - a by-name lookup could land on a
+        // differently-ranked overload than the one conformance checking accepted. and a user type
+        // declaring `unwrappable<V>` beside its own unrelated `unwrap(...)` set was resolved by the
+        // matcher rather than by the contract.
+        //
+        // for an *erased* subject these are the interface's own requirements, which is not a second case:
+        // a requirement **is** the declaration there, and ExprCodegen::gen_function_call already routes
+        // on FunctionDeclNode::is_interface_requirement()
+        FunctionDeclNode *has_value = nullptr;
+        FunctionDeclNode *unwrap = nullptr;
+
         // E, when the subject declares `contract::failable<E>`. **absent is not an error** until an
         // `else ($e)` asks for one, and that refusal belongs at the `$e` - exactly
         // IterationPlan::key_type's rule and for the same reason
         std::optional<ValueType> failure_type;
+
+        // `failure()`, set exactly when `failure_type` is. **the two answers are one answer**: reading E
+        // off the conformance while leaving whether the declaration exists to be discovered by a name
+        // lookup inside the lowering, one pass later, was the worse half of the same bug
+        FunctionDeclNode *failure = nullptr;
     };
 
     // **the sole answer to "how is this value unwrapped".** the unwrapping protocol's
@@ -73,6 +97,19 @@ namespace AST
         Result result = Result::t_pending;
         UnwrapPlan plan;
         std::string refusal;
+
+        // **`t_pending` for a reason somebody else's diagnostic already owns**, so the asker's finalizing
+        // round stays quiet instead of inventing a sentence.
+        //
+        // a conformance that is *declared and unanswered* is the one case: this function has nothing to
+        // lower and never will, but the mistake is at the `struct` and AST::TypeChecker reports it there,
+        // as an UnmetInterfaceRequirement naming the requirement the author owes. that pass runs after
+        // the monomorphizer's fixpoint, so `Collector::has_critical_issues()` - the asker's existing
+        // answer to "did anything else explain this" - cannot see it yet, and without this flag the
+        // guard refused with "'cell' never got a type", about a type that is perfectly well settled.
+        //
+        // never set beside `t_ok` or `t_refused`: it is what a pending answer says about *itself*
+        bool reported_elsewhere = false;
     };
 
     // **`subject.is_nullable()` is the first arm, ahead of the unbound-core check** - which is the

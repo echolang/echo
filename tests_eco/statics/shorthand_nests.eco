@@ -16,21 +16,21 @@ struct err {
     }
 }
 
-struct result<T, E> {
+struct outcome<T, E> {
     public T $value;
     public E $error;
     public bool $is_ok;
 
-    static function ok(T $v, E $blank) : result<T, E> {
-        return result<T, E>($v, $blank, true);
+    static function ok(T $v, E $blank) : outcome<T, E> {
+        return outcome<T, E>($v, $blank, true);
     }
 
-    static function error(E $e, T $blank) : result<T, E> {
-        return result<T, E>($blank, $e, false);
+    static function error(E $e, T $blank) : outcome<T, E> {
+        return outcome<T, E>($blank, $e, false);
     }
 }
 
-function request(int32 $mode) : result<int32, err> {
+function request(int32 $mode) : outcome<int32, err> {
     if ($mode == 0) {
         return .error(.timeout(30), 0);
     }

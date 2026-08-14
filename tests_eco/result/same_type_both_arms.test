@@ -1,0 +1,9 @@
+flags: --track-allocations
+
+--- OUT --->
+positive
+negative
+positive
+positive
+fallback
+0

@@ -1,0 +1,24 @@
+flags: --optimize=whole
+mode: build
+
+# **the merged-module half of the return ABI**, and the reason it is a `mode: build` case with
+# `--optimize=whole` rather than an ordinary one: nothing else in the corpus builds a *binary* out of the
+# merged module. `echoc run` merges too, so the plain-mode cases cover the JIT - but a JIT fault and a
+# linked-binary fault are the same bug and only one of them is reproducible under a debugger.
+#
+# what broke here: an aggregate over Compiler::LLVM::return_abi_for's two-register line comes back through
+# an `sret` pointer, and which *register* that pointer travels in is decided by the attribute on the
+# **call**, not by the one on the function. LLVM hides a missing call-site attribute by reading the
+# callee's - and `CallBase::getCalledFunction()` answers null when the call's FunctionType is not the
+# callee's, which is precisely what a merge produces: `llvm::Linker` brings each unit's own named struct
+# types along, so `string` ends up as both `%string` and `%string.3`, one shape under two identities. The
+# attribute was dropped, every argument shifted one register, and a `string`'s size field arrived holding
+# somebody else's pointer - a `memmove` of a garbage length, faulting nowhere near the cause.
+#
+# so this is an *output* case and not an IR one. The IR claim lives in strings/view_conversion, which pins
+# the attribute at the call site; this pins that the program the two halves make actually runs.
+
+--- OUT --->
+3
+a|b|c
+[a-b-c]

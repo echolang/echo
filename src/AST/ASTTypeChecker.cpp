@@ -802,8 +802,13 @@ void TypeChecker::check_optional_operand(
 void TypeChecker::visit_guard(GuardNode &node)
 {
     // the initializer is the tested value, and it is the declaration's own - a guard has no separate
-    // condition edge
-    if (node.decl != nullptr) {
+    // condition edge.
+    //
+    // **on the `T?` form only, and `presence_test` is what says which form this is.** with one set the
+    // type answered the presence question itself, and AST::GuardLowering has written the protocol's
+    // `deref(unwrap())` onto that same edge - which answers V and is emphatically not nullable, so
+    // asking here would refuse a correct program for being certainly present
+    if (node.decl != nullptr && node.presence_test == nullptr) {
         check_optional_operand(OptionalForm::t_guard, node.decl->init_expr, node.token);
     }
 

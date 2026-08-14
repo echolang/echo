@@ -1,0 +1,11 @@
+flags: --explain memory
+
+--- OUT --->
+33
+nothing to fetch
+-1
+7
+-2
+0
+[memory]
+  0 live allocations

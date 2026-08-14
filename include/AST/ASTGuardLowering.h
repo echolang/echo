@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include "AST/ASTCodeRef.h"
-#include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTFixpointLowering.h"
 #include "AST/ASTUnwrap.h"
 
 #include "Token.h"
@@ -14,11 +13,9 @@
 namespace AST
 {
     class Bundle;
-    class Collector;
-    class File;
     class FunctionCallExprNode;
+    class FunctionDeclNode;
     class GuardNode;
-    class Module;
     class ScopeNode;
     class VarDeclNode;
 
@@ -30,9 +27,21 @@ namespace AST
     // AST::unwrap_plan_for once the fixpoint has settled the subject's type, and mints two calls:
     //
     //     <subject hoisted into an ordinary declaration ahead of the statement>
-    //     guard  presence_test = $__guard0->has_value()
-    //            bound_value   = deref($__guard0->unwrap())
-    //            failure       = deref($__guard0->failure())    // only for `else ($e)`
+    //     guard  <decl>->init_expr = deref($__guard0->unwrap())
+    //            presence_test     = $__guard0->has_value()
+    //            failure           = deref($__guard0->failure())    // only for `else ($e)`
+    //
+    // **the unwrap goes on the declaration's own `init_expr` and never on `GuardNode::bound_value`**, and
+    // that is the whole of what this pass owes the binding: AST::OwnershipPass::resolve_value_arrival then
+    // sees a value arriving at a declaration and covers it with no arm at all. writing it onto
+    // `bound_value` gave that edge two producers with two rules, and the pass that owns "what does an
+    // arriving value owe" knew about one - so the payload was byte-copied out of storage the subject still
+    // owned. AST::ForeachLowering lowers `$el` into exactly this shape for exactly this reason.
+    //
+    // **the callees come off AST::UnwrapPlan, never by name.** the conformance already chose which
+    // declaration answers each requirement, and asking the matcher again is a second answer to that -
+    // reachable, since `has_value()` is const and `unwrap()` is not, so the two differ in the axis
+    // AST::argument_fit ranks on. AST::IterationPlan states the rule and carries its `iterate` for it.
     //
     // **its own pass rather than one more rule in AST::OperatorRewriter**, and that class's own header
     // says why: it holds "no second rule, only a second moment" of a decision the parser already made.
@@ -52,32 +61,28 @@ namespace AST
     //   - *before* the ownership pass, which walks a body exactly once ever - safe rather than merely
     //     early, because `body_is_concrete` answers false while `GuardNode::plan_decided` is false
     //
+    // **the walk, the exit obligation and the generic-body skip are AST::FixpointLowering's**, which is
+    // also where the three invariants they rest on are written. what is left here is the two things that
+    // are genuinely this pass's: which edge it hooks, and what a guard lowers to.
+    //
     // **not a `run_semantic_passes` pass**, so CLAUDE.md's mirror trap does not apply here: it is a
     // member of AST::Monomorphizer, and both the real pipeline and tests/helpers.cpp get it by
     // construction rather than by remembering to register it twice.
-    class GuardLowering : private RecursiveVisitor
+    class GuardLowering : private FixpointLowering
     {
     public:
         GuardLowering(Bundle &bundle);
 
-        // answers whether anything changed, so the fixpoint can report progress
-        bool run_round();
-
-        // **the fixpoint's exit obligation**: one last round in which "the subject is not settled yet"
-        // is a refusal. being out of rounds is the proof that nothing was ever going to settle it -
-        // Monomorphizer::finalize_calls' reasoning and its moment
-        void finalize();
+        // the chassis' own two entry points, and the whole of this pass's public surface. `finalize` is
+        // exposed because a guard *has* a pending state - a subject the fixpoint has not settled - which
+        // is exactly what AST::InterpolationLowering does not
+        using FixpointLowering::run_round;
+        using FixpointLowering::finalize;
 
     private:
-        CodeRef code_ref_for(const TokenReference &token);
-
         // indexed rather than the base's ranged walk, because lower() *inserts* the hoisted subject
         // declaration ahead of the guard - so the walk has to see the list it left behind
         void visitScope(ScopeNode &node) override;
-
-        // a template's body is only meaningful once cloned into a concrete instance, and the subject
-        // type this pass needs is exactly what is not known there
-        void visitFunctionDecl(FunctionDeclNode &node) override;
 
         // lowers `scope.children[index]`, which is a GuardNode whose plan is not decided. leaves it in
         // place when the subject's type is not settled yet
@@ -102,27 +107,22 @@ namespace AST
             const ValueType &subject
         );
 
-        // `$__guardN->name()`, through AST::make_unresolved_member_call - which owns the receiver rule
-        // and the settlement, shared with AST::ForeachLowering. a **fresh** receiver subtree per call:
-        // AST::PointerAdjuster rewrites edges in place, so a shared one would collect a deref per use
+        // **`$__guardN->f()` where `f` is the declaration the conformance answered with**, off
+        // AST::UnwrapPlan, through AST::make_resolved_member_call - which owns the receiver rule and the
+        // settlement, shared with AST::ForeachLowering's `iterate()`.
+        //
+        // **not a name**, and that is `todo/A44`: this pass used to mint `"has_value"`, `"unwrap"` and
+        // `"failure"` as unresolved by-name calls and let AST::CallResolver choose all over again -
+        // a second answer to which declaration the conformance had accepted, over a requirement whose
+        // *spelling* in stdlib/core/contract.eco was therefore load-bearing in a compiler pass.
+        //
+        // a **fresh** receiver subtree per call: AST::PointerAdjuster rewrites edges in place, so a
+        // shared one would collect a deref per use
         FunctionCallExprNode &subject_call(
             VarDeclNode &subject,
-            const std::string &name,
+            FunctionDeclNode *callee,
             const TokenReference &at
         );
-
-        Bundle &_bundle;
-        Collector &_collector;
-
-        Module *_current_module = nullptr;
-        File *_current_file = nullptr;
-
-        bool _changed = false;
-        bool _finalizing = false;
-
-        // **per file**, so a golden can tell two hoists apart and the numbering does not move when an
-        // unrelated file above grows one - AST::OperatorRewriter's `_hoist_count` rule
-        size_t _hoist_count = 0;
     };
 };
 

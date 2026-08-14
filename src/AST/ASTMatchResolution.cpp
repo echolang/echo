@@ -3,8 +3,11 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstructor.h"
+#include "AST/ASTConstness.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTTypeUnify.h"
@@ -104,7 +107,31 @@ void MatchResolution::resolve(MatchExprNode &node)
         const ValueType derived = infer_declaration_type(*subject->init_expr, false);
 
         if (!is_undetermined_type(derived)) {
-            auto &type_node = _current_module->nodes.emplace_back<TypeNode>(derived);
+            // **the subject is never copied when it names storage** - it is borrowed, and the two shapes
+            // of that are told apart the way AST::GuardLowering tells them apart: a place is borrowed, a
+            // value the program computed is owned by this declaration and dropped by the ordinary frame.
+            //
+            // it began as a copy, and the copy was wrong twice over. a `match` over an owning enum
+            // retained every payload on the way in and released them again at the scope's end, for a
+            // read; and a payload borrow handed *out* of the match - which is what lets an enum answer
+            // `contract::unwrappable<V>::unwrap() : V&` - pointed into the copy rather than into the value
+            // the author named, so a write through it went somewhere nobody could see and a `return` of
+            // it outlived its target by one scope
+            //
+            // **and no second address when the subject already is one.** `match ($this)` inside a method
+            // has a receiver of type `Foo&`, so wrapping it would build a `ptr<Foo&>` - the address of the
+            // slot holding the receiver - which unifies against nothing and is the trap CLAUDE.md lists
+            // for every synthesized member call. AST::receiver_for_member_call is that rule's one owner,
+            // asked here rather than restated: a rule whose failure mode is silence must not have two
+            // copies of itself to keep in step. the seated type is then simply what the edge answers
+            ValueType seated = derived;
+
+            if (is_place_expression(*subject->init_expr)) {
+                subject->init_expr = receiver_for_member_call(*_current_module, subject->init_expr);
+                seated = subject->init_expr->result_type();
+            }
+
+            auto &type_node = _current_module->nodes.emplace_back<TypeNode>(seated);
             subject->set_type_node(&type_node);
             _changed = true;
         }
@@ -123,12 +150,19 @@ void MatchResolution::resolve(MatchExprNode &node)
         return;
     }
 
-    const ValueType subject_type = ValueType::make_mutable(subject->type());
+    // **peeled, because the subject is a borrow whenever it named storage.** every question below is about
+    // the enum - which cases it has, which one a pattern names, where a payload lives - and none of them is
+    // about how this node reached it. exactly one level, through the one rule: AST::value_type_of
+    const ValueType peeled_subject = value_type_of(subject->type());
+    const ValueType subject_type = ValueType::make_mutable(peeled_subject);
 
     if (!subject_type.is_enum()) {
+        // **peeled for the message too**, and that is not cosmetic: the borrow is this pass's own doing, so
+        // naming it would report a type the author did not write. `match ($n)` over an `int32` has to read
+        // "'int32' is not an enum" however this node reached the value
         refuse(node, node.token, fmt::format(
             "'match' reads which case an enum is holding, and '{}' is not an enum.",
-            subject->type().get_type_desciption()));
+            peeled_subject.get_type_desciption()));
         return;
     }
 
@@ -230,9 +264,15 @@ void MatchResolution::resolve(MatchExprNode &node)
             // a copy would be dropped at the end of the arm's scope, and an arm's *value* is evaluated
             // after that scope - so a `string` binding would be freed one instruction before the value
             // that reads it. a borrow owns nothing, so AST::OwnershipPass emits no drop and the
-            // ordering question does not arise. it is also simply right: the subject is a local this
-            // node owns and it outlives every arm, so there is nothing here for a copy to protect
-            // against, and a `match` over an owning enum now costs no allocation at all
+            // ordering question does not arise. it is also simply right: the subject either names storage
+            // that outlives the whole form or is a value this node owns for exactly as long, so there is
+            // nothing here for a copy to protect against
+            //
+            // **and it carries the subject's `const`**, through the one rule that owns it:
+            // AST::member_type_through. the payload is reached *through* the subject, so a `const E&`
+            // receiver - which is every `const function` on an enum - hands out `const V&` and a write
+            // through the binding is refused where it should be. it could not come up while the subject
+            // was a copy, that copy always being mutable, so this is the const half of borrowing it
             //
             // the same shape a `foreach` element and `contract::unwrappable<V>::unwrap()` already have,
             // which is why reading one needs nothing new: AST::PointerAdjuster wraps the read, the
@@ -242,7 +282,8 @@ void MatchResolution::resolve(MatchExprNode &node)
             binding->init_expr = &_current_module->nodes.emplace_back<AddrOfExprNode>(member);
 
             auto &type_node = _current_module->nodes.emplace_back<TypeNode>(
-                ValueType::make_pointer(prop.type, false));
+                ValueType::make_pointer(
+                    member_type_through(peeled_subject, prop.type), false));
             binding->set_type_node(&type_node);
 
             _changed = true;
@@ -292,7 +333,46 @@ void MatchResolution::resolve(MatchExprNode &node)
     ValueType unified = ValueType::make_void();
     bool first = true;
 
+    // **every arm that produces anything produces a place**, which is what makes the whole form one - a
+    // match cannot hand back storage for one case and a computed value for another, the phi being of one
+    // kind or the other. an arm that leaves says nothing either way, so it does not spoil this
+    bool all_places = true;
+
     for (MatchExprNode::Arm &arm : node.arms) {
+        // **an arm that never comes back contributes no type**, and is skipped before the settled-type
+        // question below rather than answered by it. `die('...')` is declared `: void`, and `void` is one
+        // of the three shapes AST::is_undetermined_type covers - so without this arm the honest "this
+        // case cannot produce a value" was reported as "this arm's value has no settled type", which is a
+        // sentence about an inference that never happened.
+        //
+        // it is what makes a case whose payload is the wrong type answerable at all. `unwrap() : T&` over
+        // a `result<T, E>` has an `error` arm holding an `E` and no `T` anywhere to hand back, so
+        // stopping is the only thing that arm can do - and the unification has to let it, or the whole
+        // form is refused for the one arm that was never going to produce anything.
+        // AST::expression_never_returns is the owner, shared with AST::scope_exit_kind so a `die` written
+        // as an arm's value and one written as a statement cannot disagree
+        if (arm.value != nullptr && expression_never_returns(*arm.value)) {
+            continue;
+        }
+
+        // **and the same for a `{ }` arm control never leaves the bottom of**, which is the shape a reader
+        // reaches for first: `E::none => { return -1; }` beside `E::one($v) => $v`. a block arm is
+        // otherwise `void` by construction, so without this the two spellings of one intention disagree -
+        // the `die` above would be admitted and the `return` beside it refused with "every arm has to be
+        // one", against a program that is not mixing the two shapes at all.
+        //
+        // scope_always_exits rather than scope_always_leaves_function, and the weaker one is right: a
+        // `break` arm inside a loop does not rejoin the match either, so it has no value to contribute.
+        // an arm that merely *might* leave still falls through on some path and keeps owing a type, which
+        // is what makes this the same question codegen asks with block_is_terminated()
+        if (arm.value == nullptr && arm.scope != nullptr && scope_always_exits(*arm.scope)) {
+            continue;
+        }
+
+        if (arm.value == nullptr || !is_place_expression(*arm.value)) {
+            all_places = false;
+        }
+
         // **read through one pointer level**, which is the auto-deref AST::PointerAdjuster performs -
         // and it has not run yet, this pass being inside the fixpoint that precedes it. so a binding
         // read answers `int32&` here and `int32` at codegen, and unifying against the unpeeled answer
@@ -347,7 +427,24 @@ void MatchResolution::resolve(MatchExprNode &node)
         return;
     }
 
-    node.result = unified;
+    // **and if every arm named storage, so does the match** - the unification above ran on the peeled
+    // types, so re-wrapping is the whole of it and the arms' agreement was decided by exactly the rule it
+    // is decided by everywhere else. writing a second unification over unpeeled types would be a second
+    // answer to "do these arms meet", and the one thing it would buy - telling `T&` from `T` per arm - is
+    // what `all_places` already says for the form as a whole.
+    //
+    // a match with nothing to hand back stays `void`: `first` is still set when every arm left, and there
+    // is no storage in that to name. reading this in a value position costs nothing extra - the auto-deref
+    // every read of a borrow performs is what turns it back into a value, which is why the shape is
+    // transparent to every existing use of a match as an expression
+    if (all_places && !first && !unified.is_void()) {
+        node.result = ValueType::make_pointer(unified, false);
+        node.yields_a_place = true;
+    }
+    else {
+        node.result = unified;
+    }
+
     node.patterns_decided = true;
     _changed = true;
 }

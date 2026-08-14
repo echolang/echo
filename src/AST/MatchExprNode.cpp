@@ -1,9 +1,15 @@
 #include "AST/MatchExprNode.h"
 
+#include "AST/ASTControlFlow.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
 
 using namespace AST;
+
+bool MatchExprNode::arm_yields_address(const Arm &arm) const
+{
+    return yields_a_place && arm.value != nullptr && !expression_never_returns(*arm.value);
+}
 
 const std::string MatchExprNode::node_description()
 {

@@ -1,0 +1,15 @@
+// `unwrap()` is only valid when there is a value, and the protocol is what promises that - `guard` asks
+// `has_value()` first. a call written by hand can get it wrong, and this is where it stops
+function parse(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n);
+}
+
+result<int32, string> $r = parse(-1);
+
+echo $r->is_error();
+echo $r->unwrap();

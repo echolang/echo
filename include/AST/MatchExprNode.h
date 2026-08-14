@@ -108,6 +108,26 @@ namespace AST
         // of which is a block, which is the statement form
         ValueType result = ValueType::make_unknown();
 
+        // **does this match hand back storage rather than a value?** true when every arm that produces
+        // anything produces a *place*, which for an enum is the ordinary shape - a payload binding is a
+        // borrow into the subject, so `E::one($v) => $v` names storage the match did not invent.
+        //
+        // a field rather than an answer derived from `result`, because the two say different things: a
+        // match whose arms are `ptr<T>` *values* also has a pointer `result` and is not a place. read
+        // through AST::read_reaches_storage, which is what every question about the *form* asks, and
+        // per arm through arm_yields_address below
+        //
+        // it is what lets an enum answer `contract::unwrappable<V>::unwrap() : V&`: the `ok` arm hands the
+        // payload's storage out, and the `error` arm - which has no `V` at all - stops the program
+        bool yields_a_place = false;
+
+        // **does this arm hand the phi an address?** the place edge AST::RecursiveVisitor walks and the
+        // address ExprCodegen's phi is built from are one question asked in two places, and they have to
+        // agree: a value edge inserts the auto-deref, so an arm walked as one and then addressed by the
+        // phi reads the payload rather than pointing at it. an arm that never comes back contributes
+        // nothing to either, for the reason it was exempt from the unification too
+        bool arm_yields_address(const Arm &arm) const;
+
         // the `match` keyword, for the diagnostics that are about the form rather than about an arm
         TokenReference token;
 

@@ -1,0 +1,12 @@
+flags: --explain memory
+
+# **`0 live allocations` is the assertion, and `1` on the third line is the other half.** the count says
+# nothing was freed twice; the `1` says the binding is a copy rather than a window onto what `$h` still
+# holds, which is what a byte copy would have made it
+--- OUT --->
+99
+3
+1
+absent
+[memory]
+  0 live allocations

@@ -39,8 +39,8 @@ namespace AST
         void set(ExprNode *place) const;
     };
 
-    // where a value is arriving. two of the five take a place as an implicit move; at the other
-    // three a place would be a copy:
+    // where a value is arriving. two of the five take a place as an implicit move, a third takes one
+    // where the place is provably dead afterwards; at the other two a place is always a copy:
     //
     //  - **t_return** is the one the whole feature rests on. a local is destroyed at the end of its
     //    scope and `return` *is* the end of its scope, so a returned local either moves or is
@@ -52,6 +52,14 @@ namespace AST
     //    over to be built into the struct, and the constructor is the only thing that ever writes
     //    that field. a *hand-written* constructor is not this - it says `$this->data = mv $data`,
     //    because there the transfer is a thing the author can and should be able to see
+    //  - **t_argument** is the conditional one, and the condition is a proof rather than a
+    //    destination: a by-value parameter handed a local the enclosing `return` was about to destroy
+    //    anyway takes it over, because `return f($x)` is `return $x` with a call in between and the
+    //    two must not disagree about who ends `$x`. AST::handover_reads_in is the proof, and it is
+    //    deliberately not part of this enum - what a destination *does* with a value is a property of
+    //    the position, and whether the source is still wanted afterwards is a property of the body.
+    //    **everywhere else an argument is a copy**, so the caller keeps its reference and the object
+    //    outlives the call
     enum class ValueDestination
     {
         t_declaration,
@@ -228,6 +236,15 @@ namespace AST
         // locals moved inside a branch that did not certainly run. read a second time, so the
         // diagnostic can say "may have been moved" rather than claiming it definitely was
         std::unordered_set<const VarDeclNode *> _maybe_moved;
+
+        // **the reads at which this body hands an owner over**, from AST::handover_reads_in - answered
+        // once per body, before the walk, and looked up by arrive_value at every by-value argument.
+        //
+        // before the walk rather than during it, because the question is about what comes *after* the
+        // arrival and this walk only ever knows what came before. the nodes it names are the ones the
+        // parser wrote, and the walk replaces none of them: a read is a VarRefNode on the way in and
+        // on the way out, whatever this pass wraps around it
+        std::unordered_set<const ExprNode *> _handover_reads;
 
         // the storage this body has already *initialized* - a declaration and the member names below
         // it, as one key. an initialization owes the old value no teardown because there is no old

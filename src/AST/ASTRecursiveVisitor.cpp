@@ -8,6 +8,7 @@
 
 #include "AST/ASTRecursiveVisitor.h"
 
+#include "AST/ASTControlFlow.h"
 #include "AST/MatchExprNode.h"
 
 #include "AST/ScopeNode.h"
@@ -416,7 +417,23 @@ void RecursiveVisitor::visit_match(MatchExprNode &node)
 
         // the arm's value is *not* inside that scope: it is the value the match hands back, and it has
         // to be reachable as a value edge so an implicit cast to the unified type lands on it
-        value_edge(arm.value);
+        //
+        // **a place edge when the match hands back storage**, which is the same edge under a different
+        // question rather than a second walk. a value edge is what inserts the auto-deref, and an arm
+        // whose address the phi is built from must keep it: deref'd, `E::one($v) => $v` reads the payload
+        // and AST::PointerAdjuster leaves codegen an expression with no address to take. it is also why
+        // no implicit cast is wanted here - the arms already agreed at one type, and a cast over a place
+        // would be a value
+        // an arm that never comes back is the exception, and for the reason it was exempt from the
+        // unification too: it contributes nothing, so there is no address for the phi to want from it and
+        // `die('...')` has none to give. asked through MatchExprNode::arm_yields_address, which is the
+        // one spelling this and codegen's phi share
+        if (node.arm_yields_address(arm)) {
+            place_edge(arm.value);
+        }
+        else {
+            value_edge(arm.value);
+        }
     }
 }
 

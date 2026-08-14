@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: unwrap() on a result holding a failure
+  at result.eco:110

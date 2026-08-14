@@ -12,6 +12,7 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTLastRead.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTRecursiveVisitor.h"
@@ -490,6 +491,10 @@ void OwnershipPass::resolve_root(ScopeNode &root)
     _initialized_storage.clear();
     _temporary_count = 0;
 
+    // a file root has no parameters - `main` is synthesized from its statements, and takes none of
+    // them from anywhere this pass can see
+    _handover_reads = handover_reads_in(root, {});
+
     walk_scope(root);
 }
 
@@ -536,13 +541,26 @@ void OwnershipPass::resolve_function(FunctionDeclNode &decl)
     // special case - a borrow is a pointer, so needs_destruction already answered no - but a closure's
     // environment is a class *handle*, and by-value class parameters are exactly the ones this owns
     std::vector<VarDeclNode *> owned_params;
+    std::vector<VarDeclNode *> declared_params;
+
     for (size_t i = decl.implicit_arg_count(); i < decl.args.size(); i++) {
         VarDeclNode *arg = decl.args[i];
 
-        if (arg != nullptr && arg->has_type() && needs_destruction(arg->type())) {
+        if (arg == nullptr) {
+            continue;
+        }
+
+        declared_params.push_back(arg);
+
+        if (arg->has_type() && needs_destruction(arg->type())) {
             owned_params.push_back(arg);
         }
     }
+
+    // **the explicit parameters only**, for the reason the frame above skips the implicit ones: a
+    // receiver is a borrow and a closure's environment belongs to the callable that was called, so
+    // neither is this body's to hand over however dead it is afterwards
+    _handover_reads = handover_reads_in(*decl.body, declared_params);
 
     _frames.push_back(Frame{decl.body, owned_params});
     walk_scope(*decl.body);
@@ -649,6 +667,16 @@ ExitKind OwnershipPass::walk_scope(ScopeNode &scope)
     }
 
     if (own_frame) {
+        // **a local leaves the moved-from set with its scope.** nothing outside this block can read it
+        // or owes it a drop, so carrying it out is carrying an answer about a variable that no longer
+        // exists - and the `if` merge one level up reads exactly that set. a value declared *and*
+        // handed over inside one arm was being reported as "moved out of on only one branch", against
+        // an other branch in which the variable was never declared at all
+        for (const VarDeclNode *local : _frames.back().locals) {
+            _moved.erase(local);
+            _maybe_moved.erase(local);
+        }
+
         _frames.pop_back();
     }
 
@@ -881,8 +909,18 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                 // in the same words `$b = $a` gets
                 ExprNode *tested = decl->init_expr;
 
-                if (tested != nullptr && tested->result_type().is_wrapped_optional()
-                    && is_place_expression(*tested)) {
+                // **and the arm is keyed on which edge feeds the binding, not on what the initializer
+                // looks like.** a null `presence_test` is the `T?` form - the one where `init_expr` is
+                // both the value tested and the thing unwrapped, which is what makes the payload read
+                // below necessary. with one set, AST::GuardLowering has already put the protocol's
+                // `deref(unwrap())` on `init_expr` and there is nothing to reach inside: the else arm is
+                // an ordinary declaration arrival and is the whole of what a protocol guard owes.
+                //
+                // reachable rather than tidy: a payload that is *itself* a tagged optional makes
+                // `deref(unwrap())` answer is_wrapped_optional() **and** is_place_expression(), so
+                // without this the protocol path would read `__value` out of the payload it was handed
+                if (stmt->presence_test == nullptr && tested != nullptr
+                    && tested->result_type().is_wrapped_optional() && is_place_expression(*tested)) {
                     stmt->bound_value = resolve_value_arrival(
                         optional_payload_place(tested, stmt->token),
                         type,
@@ -1981,8 +2019,25 @@ ExprNode *OwnershipPass::arrive_value(
     // field-wise constructor's `$this->inner = inner` is the parameter being built into the struct,
     // and marking the parameter moved is what stops it being dropped at the end of the constructor
     // while the struct it now lives in is handed back
+    // **and an argument the enclosing `return` was about to destroy anyway.** the third implicit move,
+    // and the one that is a proof rather than a property of the position: `return f($x)` ends `$x`'s
+    // scope exactly as `return $x` does, so the local is handed to the callee rather than duplicated
+    // for it - which for an owning type is a whole allocation per call, and is what
+    // `return .ok($out)` was paying twice.
+    //
+    // AST::handover_reads_in is what decides, once per body and never here: this walk knows what came
+    // before an arrival and the question is about what comes after it. `param` is required rather than
+    // implied, because a call with no declaration - `echo` - has no parameter to hand anything to and
+    // is the last owner of what it printed
+    const bool hands_over_to_callee =
+        destination == ValueDestination::t_argument
+        && param != nullptr
+        && _handover_reads.count(expr) > 0;
+
     const bool moves_implicitly =
-        destination == ValueDestination::t_return || destination == ValueDestination::t_initialization;
+        destination == ValueDestination::t_return
+        || destination == ValueDestination::t_initialization
+        || hands_over_to_callee;
 
     // ...but only of a place that holds its own value. a place read *through* a borrow is not the owner
     // of anything: `return $src` on a `Box& $src` hands the caller a duplicate of a value that stays
@@ -3087,8 +3142,7 @@ ExprNode *OwnershipPass::optional_payload_place(ExprNode *optional_place, const 
 
 ExprNode *OwnershipPass::make_place(VarDeclNode *root, const std::vector<std::string> &path)
 {
-    auto &var = _current_module->nodes.emplace_back<VarNode>(root, root->token_varname);
-    ExprNode *place = &_current_module->nodes.emplace_back<VarRefNode>(&var);
+    ExprNode *place = &AST::local_place(*_current_module, *root);
 
     for (const auto &name : path) {
         place = member_place(place, name, root->token_varname);

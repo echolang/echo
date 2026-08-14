@@ -1,0 +1,20 @@
+flags: --optimize whole
+
+--- OUT --->
+1482495
+--- IR --->
+// **the loop vectorises, and that is the assertion** - the same one `iteration/lowered_cost` makes and for
+// the same reason it is spelled this way. a loop LoopVectorize widened is one it could prove has no calls,
+// no aliasing hazard and a computable trip count, so `has_value()` and `unwrap()` are inlined away and the
+// enum is SROA'd into registers, or none of this would be here.
+//
+// asking for the vector body **by name** is deliberate: the directives are plain substrings, so a bare
+// `CHECK: body:` would match `vector.body:` and the test would silently stop describing the loop it names.
+//
+// what it pins about this type is the whole performance claim behind it being an enum: a `result<T, E>` over
+// payloads that own nothing costs a tag test, and there is no call left to either contract
+CHECK: define noundef i32 @main
+CHECK: vector.body:
+CHECK-NOT: call
+CHECK-NOT: alloca
+CHECK: br i1

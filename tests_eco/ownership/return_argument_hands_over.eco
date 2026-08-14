@@ -1,0 +1,118 @@
+// **`return f($x)` hands `$x` over**, exactly as `return $x` does. the statement is the end of the
+// local's scope whichever of the two shapes it was written in, so which one the author chose is not
+// something the value can tell - and for an owning type the difference is a whole allocation per call,
+// which is what `return .ok($out)` used to pay twice.
+//
+// `Buffer` says what its copy means, so a copy is a *line* here rather than an inference: 500 is
+// printed exactly where one happens, and nowhere else
+//
+// everywhere but a `return` a by-value argument is still a copy - ownership/copy_struct_holding_class
+// and classes/refcount_transfer are what that rule is pinned by, and `copied()` below is it beside the
+// hand-over so the two can be read together
+
+struct Buffer
+{
+    usize $tag;
+
+    constructor(usize $tag)
+    {
+        $this->tag = $tag;
+    }
+
+    constructor(const Buffer& $other)
+    {
+        echo 500;
+        $this->tag = $other->tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+function tag_of(Buffer $b) : usize
+{
+    echo 10;
+
+    // $b is the callee's, and is destroyed here
+    return $b->tag;
+}
+
+function sum_tags(Buffer $b, usize $extra) : usize
+{
+    echo 20;
+    return $b->tag + $extra;
+}
+
+// the rule: one buffer, destroyed once, inside the callee it was handed to
+function handed_over() : usize
+{
+    Buffer $a = Buffer(1);
+    return tag_of($a);
+}
+
+// **and only in a `return`.** one statement earlier the caller keeps its value, so the copy runs and
+// there are two buffers to destroy
+function copied() : usize
+{
+    Buffer $a = Buffer(2);
+    usize $t = tag_of($a);
+
+    return $t;
+}
+
+// **the only mention in its statement.** `$a` names the same storage twice here, so neither mention is
+// a hand-over: the callee would be tearing down what the other read still names
+function twice() : usize
+{
+    Buffer $a = Buffer(4);
+    return sum_tags($a, $a->tag);
+}
+
+// **an arm that always leaves is not a branch.** it does not reach the code after the `if`, so there is
+// no join for the move to be missing from - and on the path that falls through, the buffer is destroyed
+// by the second `return`'s unwind, never having been handed anywhere
+function branched(bool $c) : usize
+{
+    Buffer $a = Buffer(5);
+
+    if ($c) {
+        return tag_of($a);
+    }
+
+    return 0;
+}
+
+// **an arm that rejoins is.** the inner `return` sits one branch deeper than the declaration, so a
+// hand-over there would leave the fall-through path with nothing to destroy the buffer. copied instead
+function rejoining(bool $c) : usize
+{
+    Buffer $a = Buffer(6);
+
+    if ($c) {
+        if ($c) {
+            return tag_of($a);
+        }
+
+        echo 30;
+    }
+
+    return 0;
+}
+
+echo handed_over();
+echo 0;
+
+echo copied();
+echo 0;
+
+echo twice();
+echo 0;
+
+echo branched(true);
+echo branched(false);
+echo 0;
+
+echo rejoining(true);
+echo 99;

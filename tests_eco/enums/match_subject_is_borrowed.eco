@@ -1,0 +1,57 @@
+// **the subject of a `match` is borrowed when it names storage, never copied** - so a payload binding is a
+// borrow of the value the author named rather than of a copy nobody else can see.
+//
+// the observable half is a *write*: this used to land in the hoisted copy and be discarded with it, which
+// reads as a `match` that quietly did nothing. it is also what a payload handed back out of a match rests
+// on, since a borrow into a copy outlives its target by one scope
+enum E
+{
+    case one(int32 $v);
+    case none;
+}
+
+function read(E& $e) : int32
+{
+    return match ($e) {
+        E::one($v) => $v,
+        E::none    => 0,
+    };
+}
+
+E $e = E::one(1);
+
+match ($e) {
+    E::one($v) => { $v = 42; }
+    E::none    => { }
+}
+
+echo read(&$e);
+
+// a value the program computed is owned by the match instead, and nothing above changes for it - there is
+// no storage of the author's to write through, so the copy is the whole of what there is
+echo read(&$e) + match (E::one(6)) {
+    E::one($v) => $v,
+    E::none    => 0,
+};
+
+// **a `const function` on an enum hands out `const V&`**, the payload being reached *through* the receiver.
+// unreachable while the subject was a copy, that copy always having been mutable
+enum Message
+{
+    case text(string $body);
+    case empty;
+
+    const function is_blank() : bool
+    {
+        return match ($this) {
+            Message::text($body) => $body->size() == 0,
+            Message::empty       => true,
+        };
+    }
+}
+
+Message $m = Message::text("chevron seven");
+echo $m->is_blank();
+echo Message::text("")->is_blank();
+echo Message::empty()->is_blank();
+echo mem::live_allocations();

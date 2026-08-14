@@ -63,6 +63,16 @@ llvm::Function *MemoryCodegen::declare_thunk(
 // `allocsize` says which argument is the byte count, so the optimizer can fold a `size_of` query about the
 // block. It is a *hint* with no soundness weight - a wrong index would mislead rather than miscompile -
 // which is why it sits here beside `noalias` rather than needing an argument of its own
+//
+// **`allockind` and an `alloc-family` pairing this with `__eco_free` are deliberately absent**, and the
+// reason is worth stating because they are the obvious next two attributes to reach for: together they are
+// what `llvm::isRemovableAlloc` reads, and what would let a pass delete a block nothing goes on to use.
+// This thunk exists *only* under `--track-allocations`, where an allocation's observable effect is the
+// counter beside it - so licensing that deletion would silently drop counts and hand `mem::live_allocations`
+// a number that is wrong in the direction that hides leaks. There is nothing to gain in exchange: with
+// tracking off there is no thunk at all, only libc's own `malloc`, which TargetLibraryInfo already knows
+// everything about. `tests_eco/memory/fixed_block_never_reaches_the_binary` is the untracked build being
+// held to exactly that
 void MemoryCodegen::mark_allocating_thunk(llvm::Function *thunk, unsigned size_argument)
 {
     thunk->addRetAttr(llvm::Attribute::NoAlias);

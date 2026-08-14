@@ -6,6 +6,7 @@
 #include "AST/ASTValueType.h"
 #include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -67,7 +68,21 @@ namespace Compiler::LLVM
         // say *how much* is dereferenceable, and neither exists before codegen. the AST supplies the
         // facts, this supplies the spelling - one owner, called from the one place that mints a Function
         void apply_function_attributes(
-            const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit);
+            const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit,
+            const ReturnAbi &abi);
+
+        // **how *this declaration* hands its answer back**, which is the size rule
+        // Compiler::LLVM::return_abi_for owns plus the one thing it cannot see: whether the declaration
+        // uses Echo's convention at all.
+        //
+        // an `extern` is exempt, and that exemption is the load-bearing half - the rule below is Echo's
+        // own, chosen because Echo emits both halves of every call it makes, and claiming it for a
+        // foreign symbol replaces one wrong answer with a different wrong answer. it lives here rather
+        // than at each site because ReturnAbi.h says four places must agree byte for byte or the
+        // arguments shift one register in silence, and a rule that must not drift may not be written
+        // four times
+        ReturnAbi return_abi_of(
+            const AST::FunctionDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::StructType *create_llvm_struct_decl(const AST::TypeDeclNode *node, Compiler::LLVM::CmpUnit &cmp_unit);
 
         // lowers a generic struct instantiation (an interned ComplexType with concrete property

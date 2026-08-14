@@ -1,0 +1,58 @@
+// **an arm that never comes back contributes no type to the arms' unification**, which is what lets a
+// `match` cover a case it has no value for. `die` is declared `: void`, and `void` is one of the shapes
+// AST::is_undetermined_type covers - so before this the honest "this case cannot produce a value" was
+// reported as "this arm's value has no settled type", a sentence about an inference that never happened.
+//
+// it is the rule `contract::unwrappable<V>::unwrap() : V&` over a `result<T, E>` rests on: the `error` arm
+// holds an `E` and has no `T` anywhere to hand back, so stopping is the only thing it can do
+enum E
+{
+    case one(int32 $v);
+    case none;
+}
+
+function pick(E $e) : int32
+{
+    return match ($e) {
+        E::one($v) => $v,
+        E::none    => die('no value in this one'),
+    };
+}
+
+echo pick(E::one(7));
+
+// **and the same for a `{ }` arm control never leaves the bottom of**, which is the spelling a reader
+// reaches for first. a block arm is otherwise `void` by construction, so without that rule the two
+// spellings of one intention disagreed - the `die` above admitted, the `return` beside it refused
+function pick_or(E $e) : int32
+{
+    $r = match ($e) {
+        E::one($v) => $v,
+        E::none    => { return -1; }
+    };
+
+    return $r;
+}
+
+echo pick_or(E::one(5));
+echo pick_or(E::none());
+
+// the weaker exit is enough: a `break` arm does not rejoin the match either, so it owes no value
+function first_one(E $a, E $b) : int32
+{
+    int32 $found = 0;
+
+    while (true) {
+        $found = match ($a) {
+            E::one($v) => $v,
+            E::none    => { break; }
+        };
+
+        break;
+    }
+
+    return $found;
+}
+
+echo first_one(E::one(9), E::none());
+echo first_one(E::none(), E::none());

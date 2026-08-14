@@ -57,6 +57,7 @@ private:
     const char *compare_debug_records(const llvm::Instruction &left, const llvm::Instruction &right);
 
     bool same_type(llvm::Type *left, llvm::Type *right);
+    bool same_attributes(const llvm::AttributeList &left, const llvm::AttributeList &right);
     bool same_type_shape(llvm::Type *left, llvm::Type *right);
     bool same_value(const llvm::Value *left, const llvm::Value *right);
     bool same_constant(const llvm::Constant *left, const llvm::Constant *right);
@@ -183,6 +184,63 @@ bool Comparison::same_type(llvm::Type *left, llvm::Type *right)
     }
 
     return leave(key, same_type_shape(left, right));
+}
+
+bool Comparison::same_attributes(
+    const llvm::AttributeList &left,
+    const llvm::AttributeList &right
+)
+{
+    if (left == right) {
+        return true;
+    }
+
+    // the same indices, or the two describe different things before any attribute is looked at
+    if (left.getNumAttrSets() != right.getNumAttrSets()) {
+        return false;
+    }
+
+    for (unsigned index : left.indexes()) {
+        const llvm::AttributeSet ls = left.getAttributes(index);
+        const llvm::AttributeSet rs = right.getAttributes(index);
+
+        if (ls.getNumAttributes() != rs.getNumAttributes()) {
+            return false;
+        }
+
+        for (const llvm::Attribute &attribute : ls) {
+            // an enum attribute that carries a type - `sret`, `byval`, `elementtype` - is the only shape
+            // whose equality is not the context's to answer, and it is answered the way every other type
+            // in this file is
+            if (attribute.isTypeAttribute()) {
+                const llvm::Attribute::AttrKind kind = attribute.getKindAsEnum();
+
+                if (!rs.hasAttribute(kind)) {
+                    return false;
+                }
+
+                if (!same_type(attribute.getValueAsType(), rs.getAttribute(kind).getValueAsType())) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (attribute.isEnumAttribute() || attribute.isIntAttribute()) {
+                if (rs.getAttribute(attribute.getKindAsEnum()) != attribute) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (rs.getAttribute(attribute.getKindAsString()) != attribute) {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 bool Comparison::same_type_shape(llvm::Type *left, llvm::Type *right)
@@ -769,8 +827,12 @@ const char *Comparison::compare_operation(const llvm::Instruction &left, const l
             return "call convention";
         }
 
-        // uniqued in the shared context, so this is exact rather than a rendering of it
-        if (call->getAttributes() != other->getAttributes()) {
+        // **through same_attributes and not `!=`**, for the reason a signature goes through same_type: an
+        // AttributeList is uniqued in the shared context, but a type-carrying attribute embeds a
+        // `llvm::Type *` and a named struct is the one thing each unit mints for itself. So the `sret` on
+        // an indirect return names this unit's `%string`, the other unit's names its own, and two
+        // definitions that are the same definition compare unequal
+        if (!same_attributes(call->getAttributes(), other->getAttributes())) {
             return "call attributes";
         }
 
@@ -912,9 +974,14 @@ const char *Comparison::compare_signature(const llvm::Function &left, const llvm
         return "calling convention";
     }
 
-    // an AttributeList is uniqued in the shared context, so this compares the whole set exactly -
-    // which is what a rendered `#0` never could, that number being a position in a per-module table
-    if (left.getAttributes() != right.getAttributes()) {
+    // **an AttributeList is uniqued in the shared context, but an attribute may still name a type this
+    // module owns** - `sret(%"array<int32>")` does, and the two units' struct types are structurally equal
+    // and distinct by pointer, exactly as every other type here is. so the set is walked rather than
+    // compared, and the one thing that is not a plain value goes through same_type like everything else.
+    //
+    // it was a pointer comparison for as long as nothing this compiler wrote carried a type, and the day
+    // the return ABI started emitting `sret` every generic instantiation reported as an ODR mismatch
+    if (!same_attributes(left.getAttributes(), right.getAttributes())) {
         return "attributes";
     }
 

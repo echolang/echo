@@ -1,0 +1,10 @@
+flags: --track-allocations
+
+--- OUT --->
+1
+2
+from a declaration
+7
+-1
+9
+0

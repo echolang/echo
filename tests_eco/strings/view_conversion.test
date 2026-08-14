@@ -31,7 +31,16 @@ CHECK-NOT: strong.inc
 # the `C` before `LC6string` is the parameter's pointee being **const**: a synthesized copy takes
 # `const Foo&` wherever its properties allow one (AST::copy_source_may_be_const), and a string's are a
 # view and a class handle, neither of which needs to write through the source
-CHECK: call %string @_stringZZMRBCLC6string
+#
+# a `string` is three words, so the copy answers through storage the caller provides rather than in
+# registers - Compiler::LLVM::return_abi_for's line. the `view` above is two and stays direct, which is
+# why the two calls one screen apart are spelled differently
+#
+# **the `sret` is checked on the *call* and not only on the definition**, which is the bug this spelling
+# exists to catch: LLVM will fall back to the callee's attributes when a call site omits it, right up
+# until a merge leaves the two units naming two `%string`s - and then the hidden pointer travels in the
+# wrong register and every argument shifts one along
+CHECK: call void @_stringZZMRBCLC6string(ptr noalias sret(%string) align 8 %call.sret
 CHECK: call void @_whichZZMLC6string
 
 CHECK: ret i32 0

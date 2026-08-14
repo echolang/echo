@@ -1,0 +1,51 @@
+// **a `match` every arm of which names storage hands back that storage, not a copy of it.** a payload
+// binding is already a borrow into the subject, so `E::one($v) => $v` names a place the match did not
+// invent - and the phi joining the arms is of their addresses.
+//
+// this is what lets an enum answer `contract::unwrappable<V>::unwrap() : V&`, which is the one requirement
+// nothing could satisfy before: `match` handed back a value, so there was no `V&` anywhere to return
+enum E
+{
+    case one(int32 $v);
+    case none;
+
+    function unwrap() : int32&
+    {
+        return match ($this) {
+            E::one($v) => $v,
+            E::none    => die('unwrap() on a none'),
+        };
+    }
+}
+
+E $e = E::one(7);
+
+echo $e->unwrap();
+
+// the borrow reaches the payload itself, so a write through it lands in `$e` - which is the observable
+// half, and the half that would silently write into a discarded copy if the subject were copied
+int32& $slot = $e->unwrap();
+$slot = 42;
+
+echo $e->unwrap();
+
+// **reading one in a value position costs nothing extra and needs no new spelling.** the auto-deref every
+// read of a borrow performs is what turns it back into a value, which is why every `match` that already
+// looked like this went on meaning exactly what it meant
+int32 $copy = $e->unwrap();
+$slot = 1;
+
+echo $copy;
+echo $e->unwrap();
+
+// a match whose arms are *not* all places is a value as it always was, and mixing the two is what decides
+// it: `$v * 2` computes something, so nothing here names storage
+function doubled(E& $e) : int32
+{
+    return match ($e) {
+        E::one($v) => $v * 2,
+        E::none    => 0,
+    };
+}
+
+echo doubled(&$e);

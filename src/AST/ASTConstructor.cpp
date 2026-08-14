@@ -1,6 +1,7 @@
 #include "AST/ASTConstructor.h"
 
 #include "AST/ASTControlFlow.h"
+#include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
@@ -65,11 +66,8 @@ AST::ExprNode *AST::make_member_place(
     const TokenReference &at
 )
 {
-    auto &var = module.nodes.emplace_back<AST::VarNode>(&local, local.token_varname);
-    auto &read = module.nodes.emplace_back<AST::VarRefNode>(&var);
-
     return &module.nodes.emplace_back<AST::MemberAccessNode>(
-        AST::make_ref(read),
+        AST::make_ref(AST::local_place(module, local)),
         module.make_virtual_token(name, Token::Type::t_identifier, at));
 }
 

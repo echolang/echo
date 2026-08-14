@@ -221,6 +221,13 @@ AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode 
     return &module.nodes.emplace_back<AST::AddrOfExprNode>(place);
 }
 
+AST::VarRefNode &AST::local_place(AST::Module &module, AST::VarDeclNode &local)
+{
+    auto &var = module.nodes.emplace_back<AST::VarNode>(&local, local.token_varname);
+
+    return module.nodes.emplace_back<AST::VarRefNode>(&var);
+}
+
 AST::FunctionCallExprNode &AST::make_resolved_member_call(
     AST::Module &module,
     AST::FunctionDeclNode *callee,
@@ -244,10 +251,8 @@ AST::FunctionCallExprNode &AST::make_unresolved_member_call(
     const TokenReference &at
 )
 {
-    auto &var = module.nodes.emplace_back<AST::VarNode>(&local, local.token_varname);
-    auto &var_ref = module.nodes.emplace_back<AST::VarRefNode>(&var);
-
     return module.nodes.emplace_back<AST::FunctionCallExprNode>(
         module.make_virtual_token(name, Token::Type::t_identifier, at),
-        std::vector<AST::ExprNode *>{ receiver_for_member_call(module, &var_ref) });
+        std::vector<AST::ExprNode *>{
+            receiver_for_member_call(module, &local_place(module, local)) });
 }

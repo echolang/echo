@@ -1,0 +1,26 @@
+# `copy` before the value on both forms, and exactly one `drop` per constructed value. the absent path
+# constructs nothing, so it drops only what the holder was built with
+--- OUT --->
+copy
+7
+drop
+drop
+--
+copy
+9
+drop
+drop
+--
+absent
+drop
+--- RAST --->
+# **the copy is in the tree**, and asserting that is the point: a missing one is precisely what compiled
+# quietly before, so the output above is only half the check
+CHECK: Module: [main]
+# the protocol form - the copy wraps `deref(unwrap())` on the declaration's own `init_expr`, which is the
+# edge AST::OwnershipPass::resolve_value_arrival covers with no arm of its own
+CHECK: guard vardecl<type<res>>($v) = call res(addrof<res&>(deref<res>(call unwrap(
+# **the control, unmoved.** a tagged optional read out of a place still copies through `bound_value` over
+# the `__value` place, because there `init_expr` is also the value codegen tests - and `bound_value` is
+# now that arm's edge and nobody else's
+CHECK: guard vardecl<type<res>>($v) = varref<res?>(var($o)) bound call res(addrof<res&>(ma<res>(

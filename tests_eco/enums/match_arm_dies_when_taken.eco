@@ -1,0 +1,17 @@
+// the other half of the diverging arm: when the discriminant *chooses* it, the program stops there.
+// `match_arm_never_returns` covers the arm being admitted; this covers it running
+enum E
+{
+    case one(int32 $v);
+    case none;
+}
+
+function pick(E $e) : int32
+{
+    return match ($e) {
+        E::one($v) => $v,
+        E::none    => die('no value in this one'),
+    };
+}
+
+echo pick(E::none());

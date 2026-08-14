@@ -3,12 +3,10 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTDetach.h"
-#include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ExprNode.h"
-#include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/StringInterpolationNode.h"
 
@@ -18,39 +16,8 @@ namespace AST
 {
 
 InterpolationLowering::InterpolationLowering(Bundle &bundle)
-    : _bundle(bundle), _collector(bundle.collector)
+    : FixpointLowering(bundle)
 {
-}
-
-CodeRef InterpolationLowering::code_ref_for(const TokenReference &token)
-{
-    return CodeRef{_current_module, _current_file, token.make_slice()};
-}
-
-bool InterpolationLowering::run_round()
-{
-    _changed = false;
-
-    for (auto &module_ptr : _bundle.modules) {
-        _current_module = module_ptr.get();
-
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
-    }
-
-    return _changed;
-}
-
-void InterpolationLowering::visitFunctionDecl(FunctionDeclNode &node)
-{
-    if (!node.is_generic()) {
-        RecursiveVisitor::visitFunctionDecl(node);
-    }
 }
 
 ExprNode *InterpolationLowering::rewrite_value_edge(ExprNode *expr)

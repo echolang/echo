@@ -44,14 +44,13 @@ namespace
             return AST::ExitKind::t_function;
         }
 
-        // a statement that never comes back leaves just as surely as a `return`. which builtins those are
-        // is AST::builtin_never_returns's question, not this one's - recognised through AST::BuiltinKind
-        // rather than by name, so it cannot drift from what actually stops the program
+        // a statement that never comes back leaves just as surely as a `return`. which calls those are is
+        // AST::expression_never_returns's question, not this one's, and it is asked here rather than
+        // answered here so that a `die` written as a `match` arm's value gets the same answer this gets
         if (statement.has_type<AST::FunctionCallExprNode>()) {
             auto *call = statement.get_ptr<AST::FunctionCallExprNode>();
 
-            if (call->decl != nullptr && call->decl->is_builtin()
-                && AST::builtin_never_returns(AST::builtin_kind_for(call->decl->builtin.value()))) {
+            if (call != nullptr && AST::expression_never_returns(*call)) {
                 return AST::ExitKind::t_function;
             }
         }
@@ -97,8 +96,11 @@ namespace
         // written, which is a fact about the arms alone. under-answering there costs a dead trailing
         // statement, where over-answering is the failure mode this file's header refuses
         //
-        // an arm that produces a *value* never leaves: it hands one back to the match, so control
-        // rejoins. only a `{ }` arm can leave, which is also why the two shapes are worth telling apart
+        // an arm that produces a *value* hands one back to the match, so control rejoins and the arm does
+        // not leave - **unless the value is one of the calls that never comes back**, which is the one
+        // shape where the two spellings mean the same thing. `E::none => die('...')` leaves exactly as
+        // `E::none => { die('...'); }` does, and answering otherwise here would call a match whose every
+        // arm stops the program a statement control falls out of
         if (statement.has_type<AST::MatchExprNode>()) {
             auto *node = statement.get_ptr<AST::MatchExprNode>();
 
@@ -113,7 +115,15 @@ namespace
             AST::ExitKind kind = AST::ExitKind::t_function;
 
             for (const AST::MatchExprNode::Arm &arm : node->arms) {
-                if (arm.value != nullptr || arm.scope == nullptr) {
+                if (arm.value != nullptr) {
+                    if (!AST::expression_never_returns(*arm.value)) {
+                        return AST::ExitKind::t_none;
+                    }
+
+                    continue;
+                }
+
+                if (arm.scope == nullptr) {
                     return AST::ExitKind::t_none;
                 }
 
@@ -136,6 +146,23 @@ namespace
         // answer, which is the caller that must be most certain
         return AST::ExitKind::t_none;
     }
+}
+
+bool AST::expression_never_returns(const AST::ExprNode &expr)
+{
+    if (expr.get_node_type() != NodeType::n_expr_call) {
+        return false;
+    }
+
+    const auto &call = static_cast<const FunctionCallExprNode &>(expr);
+
+    // a null `decl` is legitimate - an unresolved call is what every round before the last one holds - and
+    // the honest answer for one is "not known to stop the program". the fixpoint asks again next round
+    if (call.decl == nullptr || !call.decl->is_builtin()) {
+        return false;
+    }
+
+    return builtin_never_returns(builtin_kind_for(call.decl->builtin.value()));
 }
 
 AST::ExitKind AST::scope_exit_kind(const AST::ScopeNode &scope)

@@ -1,0 +1,47 @@
+// **`guard` over a `result` is the whole reason the type exists**, and it needs nothing from this file: the
+// two conformances are what AST::unwrap_plan_for reads, so the three calls it mints are `has_value()`,
+// `unwrap()` and `failure()` exactly as declared
+function doubled(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n * 2);
+}
+
+// the ordinary form: the failure is not named
+function quiet(int32 $n) : int32
+{
+    $v = guard doubled($n) else { return -1; }
+
+    return $v;
+}
+
+echo quiet(21);
+echo quiet(-1);
+
+// `else ($e)` binds a borrow of the failure, which is `contract::failable<E>`'s half
+function loud(int32 $n) : int32
+{
+    $v = guard doubled($n) else ($why) {
+        echo $why;
+        return -2;
+    }
+
+    return $v;
+}
+
+echo loud(4);
+echo loud(-4);
+
+// the binding may be written with its type, and it holds a value of its own rather than a borrow
+function typed(int32 $n) : int32
+{
+    int32 $v = guard doubled($n) else { return -3; }
+
+    return $v;
+}
+
+echo typed(5);
+echo mem::live_allocations();

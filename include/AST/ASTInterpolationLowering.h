@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTFixpointLowering.h"
 
 #include "Token.h"
 
@@ -13,12 +13,7 @@
 namespace AST
 {
     class Bundle;
-    class Collector;
-    struct CodeRef;
     class ExprNode;
-    class File;
-    class FunctionDeclNode;
-    class Module;
     class Namespace;
     class StringInterpolationExprNode;
 
@@ -46,27 +41,21 @@ namespace AST
     // **unlike the other three rewriters it has no pending state and so no finalize().** it never
     // needs a type: which overload `str::from` resolves to is AST::CallResolver's question, asked
     // whenever the argument settles. so this pass either lowers a literal or refuses it, in the first
-    // round that reaches it, and there is no "not decided yet" to give an exit to
-    class InterpolationLowering : private RecursiveVisitor
+    // round that reaches it, and there is no "not decided yet" to give an exit to. that is a fact and
+    // not a comment: AST::FixpointLowering *has* a finalize(), and this is the one subclass that does
+    // not re-expose it
+    class InterpolationLowering : private FixpointLowering
     {
     public:
         InterpolationLowering(Bundle &bundle);
 
-        // answers whether anything changed, so the fixpoint can report progress
-        bool run_round();
+        using FixpointLowering::run_round;
 
     private:
-        CodeRef code_ref_for(const TokenReference &token);
-
         // the one edge this pass treats differently. the base's descent runs **first**, so a hole
         // holding an interpolation of its own is already lowered by the time this one folds - which
         // is what makes `"{$a}{$b}"` inside `"{$c}"` terminate
         ExprNode *rewrite_value_edge(ExprNode *expr) override;
-
-        // a template's body is only meaningful once cloned into a concrete instance, and a call minted
-        // into one would be resolved against type parameters nothing has bound. AST::ForeachLowering's
-        // rule, and AST::PointerAdjuster's before it
-        void visitFunctionDecl(FunctionDeclNode &node) override;
 
         // the replacement for `node`, or the literal it is refused down to
         ExprNode *lower(StringInterpolationExprNode &node);
@@ -95,14 +84,6 @@ namespace AST
             const TokenReference &at,
             std::vector<ExprNode *> operands
         );
-
-        Bundle &_bundle;
-        Collector &_collector;
-
-        Module *_current_module = nullptr;
-        File *_current_file = nullptr;
-
-        bool _changed = false;
     };
 };
 

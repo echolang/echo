@@ -1,0 +1,77 @@
+// **a binding taken out of a protocol subject is copied, exactly like one taken out of a `T?`.**
+//
+// the two forms differ only in where the payload came from, so they cannot differ in what the binding
+// owes: `res` is still inside `$h` after the guard, so the binding is a second value and needs a second
+// construction. this program printed `drop` twice and `copy` not at all - the author's copy constructor
+// skipped and one value destroyed twice.
+//
+// what made it wrong is worth stating, because it is the shape rather than the arithmetic:
+// AST::GuardLowering wrote the unwrap onto a side edge of its own (`GuardNode::bound_value`) instead of
+// onto the declaration's `init_expr`, and AST::OwnershipPass - the sole owner of "what does a value
+// arriving at a declaration owe" - knew about only one of that edge's two producers. AST::ForeachLowering
+// lowers `$el` into an ordinary initializer for exactly this reason and says so in its own comment.
+//
+// the `T?` control is beside it below, and the two now print the same thing.
+
+struct res
+{
+    int32 $id;
+
+    constructor(int32 $id) { $this->id = $id; }
+
+    // the observable half. a written copy constructor is what turns "was a copy made" from a question
+    // about allocation counts into a line of output
+    constructor(const res& $o)
+    {
+        $this->id = $o->id;
+        echo 'copy';
+    }
+
+    destructor() { echo 'drop'; }
+}
+
+struct holder : contract::unwrappable<res>
+{
+    bool $present;
+    res $item;
+
+    const function has_value() : bool { return $this->present; }
+    function unwrap() : res& { return &$this->item; }
+}
+
+// the protocol form. `$h` still owns its `res` after the guard, so `$v` is a copy
+function through_a_protocol() : void
+{
+    holder $h = holder(true, res(7));
+
+    res $v = guard $h else { echo 'absent'; return; }
+
+    echo $v->id;
+}
+
+// **the control**: the identical program over a `res?`. it was already correct, and this asserts the
+// protocol form now answers the same way rather than merely answering something
+function through_a_nullable() : void
+{
+    res? $o = res(9);
+
+    res $v = guard $o else { echo 'absent'; return; }
+
+    echo $v->id;
+}
+
+// and the absent path takes neither: nothing is unwrapped, so nothing is copied
+function absent() : void
+{
+    holder $h = holder(false, res(1));
+
+    res $v = guard $h else { echo 'absent'; return; }
+
+    echo $v->id;
+}
+
+through_a_protocol();
+echo '--';
+through_a_nullable();
+echo '--';
+absent();

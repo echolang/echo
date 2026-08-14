@@ -1,0 +1,19 @@
+# A standard library generic enum instantiated in two units that never see each other: `result<string,
+# int32>` is built and read inside `modresult`'s own unit and instantiated again here. The payload is a
+# `string`, a named type lowered per unit, which is the shape `lib_optpayload` was written to reproduce.
+#
+# It is also the only coverage of a stdlib **static** across a module boundary - a case constructor is a
+# static on a generic owner, and nothing else in `stdlib/` declares one.
+modules: modules/lib_resultuser
+flags: --track-allocations
+
+--- OUT --->
+from the library
+the library refused
+1
+from the library
+-2
+mine
+from the library
+refused here
+0

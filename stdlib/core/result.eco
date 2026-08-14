@@ -1,0 +1,142 @@
+/**
+ * `result<T, E>` - a value, or the reason there is not one.
+ *
+ * ```
+ * function request(string::view $url) : result<string, int32>
+ * {
+ *     if (...) {
+ *         return .error(404);
+ *     }
+ *
+ *     return .ok($body);
+ * }
+ *
+ * $body = guard request('https://example.com') else ($code) {
+ *     die('the request failed');
+ * }
+ * ```
+ *
+ * **Nothing in the compiler knows what a result is.** There is no `#[core:]` binding here and there is
+ * deliberately none - a core name exists so the compiler can *say* a type it mints itself, and the
+ * compiler never mints a result, exactly as it never mints a `range<T>` or a `slice<T>`. `guard` reaches
+ * this through the same two interfaces a type of your own would declare, and `.ok(...)` / `.error(...)`
+ * are the ordinary static shorthand every enum's cases get.
+ *
+ * **Why this is an enum and not a struct with a flag.** A struct could hold `bool $ok` beside both
+ * payloads and answer every function below. What it could not do is answer them *cheaply*: the compiler
+ * synthesizes a struct's copy and its teardown over **every** property, so an `ok` result would retain
+ * and release the failure slot it is not holding, and a struct cannot opt out - declaring a destructor to
+ * branch by hand makes `AST::classify_copy` answer `t_none` and takes the synthesized copy with it. An
+ * enum's copy and teardown are per case by construction, so a `result<string, string>` holding an `ok`
+ * touches one payload and not two. That is the whole argument, and it is why the language grew
+ * `unwrap() : T&` rather than this file growing a `bool`.
+ *
+ * **What it costs.** An enum's layout is flat - a tag, then one slot per payload field of every case - so
+ * this is `T` *and* `E` wide rather than the larger of the two. See [Enums](/language/enums) for why, and
+ * for the note that overlapping them is an optimisation that can land later without changing a line of
+ * Echo. Nothing here would change if it did.
+ *
+ * **The borrow `unwrap()` hands back points into the result**, so it lives exactly as long as the result
+ * does. That is the same promise `map<K, V>::at()` and `slice<T>::at()` make, and the same one the
+ * language declines to check: a borrow kept past its subject is yours to keep straight.
+ */
+
+/**
+ * A value of type `T`, or a failure of type `E`.
+ *
+ * Built with `result<T, E>::ok($v)` and `result<T, E>::error($e)`, or with `.ok($v)` / `.error($e)`
+ * wherever the destination already names the type - a return type, a declared variable, or the parameter
+ * of a call that has been chosen. Read with `guard`, which is what the two conformances are for;
+ * `has_value()`, `unwrap()`, `failure()` and `value_or()` are the same thing spelled by hand, and `match`
+ * over one reads it as the ordinary enum it is.
+ */
+public enum result<T, E> : contract::unwrappable<T>, contract::failable<E>
+{
+    /**
+     * The value arm. `E` is named nowhere in this case's signature and is bound from the owner the call
+     * site wrote - `AST::static_owner_bindings` seeds it the way a receiver would for a method.
+     */
+    case ok(T $value);
+
+    /**
+     * The failure arm.
+     *
+     * `error` rather than `failure`, which is the *reader* below. One word builds and one word asks, so a
+     * call site reads `return .error($e);` as the sentence it is.
+     */
+    case error(E $failure);
+
+    /**
+     * Is there a value? `contract::unwrappable<T>`'s first half, and what `guard` asks before anything
+     * else.
+     */
+    const function has_value() : bool
+    {
+        return match ($this) {
+            result<T, E>::ok($v)    => true,
+            result<T, E>::error($e) => false,
+        };
+    }
+
+    /**
+     * True when this holds a failure - `has_value()`'s complement and nothing more.
+     */
+    const function is_error() : bool
+    {
+        return match ($this) {
+            result<T, E>::ok($v)    => false,
+            result<T, E>::error($e) => true,
+        };
+    }
+
+    /**
+     * The value. `contract::unwrappable<T>`'s other half - **only valid when there is one**, which is
+     * what the protocol promises and what lets this skip a test `guard` has already performed.
+     *
+     * The `error` arm stops the program, and it is the reason this function shapes the way it does: that
+     * arm holds an `E` and has no `T` anywhere to hand back, so stopping is the only thing it can do. A
+     * `match` arm that never comes back contributes no type to the arms' unification, which is what makes
+     * one arm handing back a `T&` and the other handing back nothing a legal pair.
+     *
+     * **Not `const`, and with no const overload.** The protocol says so: `has_value()` is const and this
+     * is not, because asking *whether* promises nothing about the storage while taking the value out hands
+     * back a borrow that may be written. `value_or` below is the const read, and a
+     * `contract::const_unwrappable<const V>` is where a const borrow belongs the day it exists.
+     */
+    function unwrap() : T&
+    {
+        return match ($this) {
+            result<T, E>::ok($v)    => $v,
+            result<T, E>::error($e) => die('unwrap() on a result holding a failure'),
+        };
+    }
+
+    /**
+     * Why there is no value - `contract::failable<E>` in full, and what `else ($e)` binds a borrow of.
+     *
+     * **Only valid when there is a failure**, mirroring `unwrap()` exactly, and stopping on the other arm
+     * for the same reason.
+     */
+    function failure() : E&
+    {
+        return match ($this) {
+            result<T, E>::ok($v)    => die('failure() on a result holding a value'),
+            result<T, E>::error($e) => $e,
+        };
+    }
+
+    /**
+     * The value if there is one, `$fallback` otherwise - the const read `unwrap()` cannot be.
+     *
+     * A **copy** of the payload rather than a borrow, which is what makes it answerable from a
+     * `const result<T, E>&` at all. So this is the shape for a reader that only wants to look, and `guard`
+     * stays the shape for everything else.
+     */
+    const function value_or(T $fallback) : T
+    {
+        return match ($this) {
+            result<T, E>::ok($v)    => $v,
+            result<T, E>::error($e) => $fallback,
+        };
+    }
+}

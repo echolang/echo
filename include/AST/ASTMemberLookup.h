@@ -17,6 +17,7 @@ namespace AST
     class FunctionDeclNode;
     class Module;
     class VarDeclNode;
+    class VarRefNode;
 
     // the candidate member functions a name denotes on `ct`, as an overload set - the member
     // counterpart of FunctionRegistry::overloads, and the only place that answers "which
@@ -172,6 +173,13 @@ namespace AST
     // *expression*, so a receiver whose declaration is not typed yet answers `unknown` and gets addressed
     ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
 
+    // **`$local` as a place expression**, for a pass minting a call on a local it just declared. two
+    // nodes and no rule of its own - it exists so the two shapes below share one spelling of it, since a
+    // pass reaching for a *resolved* call on a local wants the receiver the unresolved one already builds
+    // the concrete node rather than ExprNode&, so a caller building a NodeReference out of it can:
+    // AST::make_ref is over a type that carries its own node_type
+    VarRefNode &local_place(Module &module, VarDeclNode &local);
+
     // **a member call a pass synthesizes, with its callee already chosen.** a member call is a
     // FunctionCallExprNode with the receiver prepended - there is no other machinery - so all this owns is
     // the rule above and the settlement below.
@@ -199,8 +207,11 @@ namespace AST
     // the requirement in the interface's own `_methods`, and ExprCodegen::gen_function_call routes on
     // FunctionDeclNode::is_interface_requirement().
     //
-    // two readers, AST::ForeachLowering and AST::GuardLowering, both minting a protocol call on a
-    // hoisted local - the two halves that must not drift being the receiver rule and the settlement
+    // **one reader, AST::ForeachLowering**, for the three calls a cursor's own protocol declares -
+    // `advance`, `current`, `key`. AST::GuardLowering was the second and is not any more: its callees
+    // come off AST::UnwrapPlan now, which is the rule IterationPlan::iterate already stated. so a name
+    // reaching this function is a name a *plan* did not answer, and `IterationPlan` carries only
+    // `iterate`
     FunctionCallExprNode &make_unresolved_member_call(
         Module &module,
         VarDeclNode &local,

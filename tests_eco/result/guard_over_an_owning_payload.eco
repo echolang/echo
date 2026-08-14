@@ -1,0 +1,52 @@
+// **a `guard` over a result with an owning payload leaks nothing and frees nothing twice**, which is the
+// pair of failures this shape is most exposed to: the binding is copied out of storage the result still
+// owns, so one missing copy is a double free and one missing drop is a leak.
+//
+// asserted as a number rather than as a shape - `0` at the end, on every path through both arms, with an
+// `array<int32>` on one side and a `string` on the other so neither answer is the other's
+function fetch(int32 $n) : result<array<int32>, string>
+{
+    if ($n < 0) {
+        return .error('nothing to fetch');
+    }
+
+    array<int32> $rows = [$n, $n + 1, $n + 2];
+
+    return .ok($rows);
+}
+
+function total(int32 $n) : int32
+{
+    $rows = guard fetch($n) else ($why) {
+        echo $why;
+        return -1;
+    }
+
+    int32 $sum = 0;
+
+    foreach ($rows as $row) {
+        $sum = $sum + $row;
+    }
+
+    return $sum;
+}
+
+echo total(10);
+echo total(-1);
+
+// and the same through the borrow rather than through a guard, so the copy the guard performs is not the
+// only thing keeping the count straight
+function first(int32 $n) : int32
+{
+    result<array<int32>, string> $r = fetch($n);
+
+    if ($r->is_error()) {
+        return -2;
+    }
+
+    return $r->unwrap()[0];
+}
+
+echo first(7);
+echo first(-7);
+echo mem::live_allocations();

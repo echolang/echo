@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: no value in this one
+  at match_arm_dies_when_taken.eco:13

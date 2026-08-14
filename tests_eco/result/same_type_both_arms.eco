@@ -1,0 +1,40 @@
+// **`result<string, string>` - both arms at one type, and both of them owning.** the case that would have
+// decided a struct's shape: two hand-written constructors `(T)` and `(E)` are one signature here and
+// collide. as an enum the two cases are told apart by *name*, so the question never arises - and this pins
+// that it stays that way.
+//
+// an owning payload on both arms is also what makes the teardown worth asserting: an enum drops the payload
+// of the case it is holding and no other, so exactly one of the two strings below is ever released
+function named(int32 $n) : result<string, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok('positive');
+}
+
+function report(int32 $n) : void
+{
+    result<string, string> $r = named($n);
+
+    if ($r->has_value()) {
+        echo $r->unwrap();
+        return;
+    }
+
+    echo $r->failure();
+}
+
+report(1);
+report(-1);
+
+// read as a value rather than through the borrow, which copies the payload out
+result<string, string> $ok = named(2);
+string $copied = $ok->unwrap();
+
+echo $copied;
+echo $ok->value_or('fallback');
+echo named(-2)->value_or('fallback');
+
+echo mem::live_allocations();

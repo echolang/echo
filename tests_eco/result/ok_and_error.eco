@@ -1,0 +1,41 @@
+// the whole surface of `result<T, E>`, both arms, at a payload pair that owns nothing
+function parse(int32 $n) : result<int32, int32>
+{
+    if ($n < 0) {
+        return .error(-1);
+    }
+
+    return .ok($n * 2);
+}
+
+result<int32, int32> $a = parse(21);
+
+echo $a->has_value();
+echo $a->is_error();
+echo $a->unwrap();
+echo $a->value_or(0);
+
+result<int32, int32> $b = parse(-5);
+
+echo $b->has_value();
+echo $b->is_error();
+echo $b->failure();
+echo $b->value_or(-77);
+
+// `unwrap()` hands back the payload's storage, so a write through it lands in the result
+int32& $slot = $a->unwrap();
+$slot = 9;
+
+echo $a->unwrap();
+
+// built by naming the type, which is the spelling that does not need a destination
+result<int32, int32> $c = result<int32, int32>::ok(5);
+
+echo $c->unwrap();
+
+// **and a borrow out of a temporary is refused**, which is the existing statement rule doing the work: the
+// result would be gone at the semicolon, so `failure()` would hand back an address into nothing. it has to
+// be named first, and that is the whole of what keeps this type's borrows honest
+result<int32, int32> $d = result<int32, int32>::error(3);
+
+echo $d->failure();

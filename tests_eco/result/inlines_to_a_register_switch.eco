@@ -1,0 +1,35 @@
+// **what a `result<T, E>` costs when nothing owns anything**: the accessors inline away, the enum is
+// SROA'd into registers, and the match becomes a test on the tag. no allocation, no memory traffic, and no
+// call left to either contract - which is what makes this type usable in a hot path at all.
+//
+// the accessors are instantiations, so they are `linkonce_odr` and their bodies are in this unit - the
+// inliner needs no whole-program merge to see them, which is why `stdlib/core/array.eco` carries no
+// `#[inline]` either
+enum step_error
+{
+    case not_found;
+}
+
+function step(int64 $i) : result<int64, step_error>
+{
+    if ($i % 97 == 0) {
+        return .error(.not_found());
+    }
+
+    return .ok($i * 3);
+}
+
+int64 $sum = 0;
+int64 $i = 0;
+
+while ($i < 1000) {
+    result<int64, step_error> $r = step($i);
+
+    if ($r->has_value()) {
+        $sum = $sum + $r->unwrap();
+    }
+
+    $i = $i + 1;
+}
+
+echo $sum;

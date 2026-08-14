@@ -1,0 +1,27 @@
+// the consumer instantiates `result<string, int32>` for itself, having been handed one built in another
+// module's unit. the payload is a `string` - a named type lowered per unit, which is the shape that
+// reproduced the cross-unit split when there was one
+echo modresult::describe(1);
+echo modresult::describe(-1);
+
+result<string, int32> $mine = modresult::fetch(2);
+
+echo $mine->has_value();
+echo $mine->unwrap();
+
+result<string, int32> $failed = modresult::fetch(-2);
+
+echo $failed->failure();
+echo $failed->value_or('mine');
+
+// a guard here, over the same instantiation, in this unit
+function mine(int32 $n) : string
+{
+    $body = guard modresult::fetch($n) else { return 'refused here'; }
+
+    return $body;
+}
+
+echo mine(3);
+echo mine(-3);
+echo mem::live_allocations();

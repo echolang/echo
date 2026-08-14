@@ -1,0 +1,51 @@
+// **the same bug in the shape that makes it a double free rather than a doubled side effect.**
+//
+// a trivially copyable payload hides the bug entirely - two `int32`s destroyed twice is two nothings -
+// so the assertion that matters is over a payload that owns heap memory. built with `--explain memory`,
+// this reported `18446744073709551615 live allocations`, which is -1: one allocation freed twice. under
+// `echoc run` the JIT shares the compiler's heap, so it took the compiler process down with it.
+//
+// nothing here declares a copy constructor or a destructor. `array<T>` has both, the compiler knows what
+// they cost through `mem::needs_destruction<T>()` and nothing else, and that is the whole reason this file
+// needs no arm anywhere: the binding is an ordinary value arriving at an ordinary declaration.
+
+struct holder : contract::unwrappable<array<int32>>
+{
+    bool $present;
+    array<int32> $items;
+
+    const function has_value() : bool { return $this->present; }
+    function unwrap() : array<int32>& { return &$this->items; }
+}
+
+function through_a_protocol() : void
+{
+    array<int32> $a = [1, 2, 3];
+
+    holder $h = holder(true, $a);
+
+    array<int32> $v = guard $h else { echo 'absent'; return; }
+
+    // **the copy is a copy and not an alias**: writing through the binding must not reach what `$h` is
+    // still holding, which is the property the byte copy did not have
+    $v[0] = 99;
+
+    echo $v[0];
+    echo $v->count();
+    echo $h->items[0];
+}
+
+// the absent path allocates the holder's buffer and nothing else
+function absent() : void
+{
+    array<int32> $a = [7];
+
+    holder $h = holder(false, $a);
+
+    array<int32> $v = guard $h else { echo 'absent'; return; }
+
+    echo $v->count();
+}
+
+through_a_protocol();
+absent();

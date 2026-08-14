@@ -204,6 +204,14 @@ namespace Compiler::LLVM
         // body so codegen errors can name their enclosing function. null at global scope
         AST::FunctionDeclNode *current_function = nullptr;
 
+        // **where this function writes its answer, when the answer comes back through storage.** null for
+        // every function whose return fits in registers, which is the whole of the condition -
+        // Compiler::LLVM::return_abi_for owns it and each of the four sites asks that rather than deciding.
+        //
+        // set and restored around each body like current_function, a body being able to hold another's
+        llvm::Value *sret_pointer = nullptr;
+        llvm::Type *sret_type = nullptr;
+
         std::stack<llvm::Value *> value_stack;
         std::unordered_map<AST::VarDeclNode *, llvm::AllocaInst *> var_map;
 

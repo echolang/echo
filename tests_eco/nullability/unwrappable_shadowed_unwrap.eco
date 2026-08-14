@@ -1,0 +1,91 @@
+// **a guard calls the declaration the conformance accepted, not the one the matcher would rank first.**
+//
+// AST::unwrap_plan_for used to resolve the conformance's implementations, throw them away, and let
+// AST::GuardLowering mint `"has_value"` and `"unwrap"` as by-name member calls - a second answer to the
+// question the plan had just answered. `AST::UnwrapPlan` carries the two declarations now, exactly
+// as `AST::IterationPlan` carries `iterate`, and AST::make_resolved_member_call is what a lowering with an
+// answer in hand uses.
+//
+// **nothing else in the corpus would notice**, which is why this file exists. the axis it turns on is
+// already there in the protocol: `contract::unwrappable<V>`'s `has_value()` is declared **const** and its
+// `unwrap()` is not, and a requirement's receiver is compared exactly - so a type may legally declare a
+// non-const `has_value()` beside the const one it answers the contract with. the two are a genuine
+// overload set (const-ness *is* argument 0's type), and for a mutable receiver AST::argument_fit prefers
+// the non-const one, `f(T&)` outranking `f(const T&)` by design.
+//
+// so the by-name lowering called `$__guard0->has_value()` and got the wrong overload: this program
+// printed `wrong has_value` and then `-1`, taking the else arm on a cell that was holding 42.
+//
+// the second half is the plainer reading of the ticket - an unrelated `unwrap()` overload beside the
+// conformance's. it costs nothing to assert both, and neither is reachable through the contract.
+
+struct cell : contract::unwrappable<int32>
+{
+    private int32 $v;
+    private bool $ok;
+
+    constructor(int32 $v, bool $ok)
+    {
+        $this->v = $v;
+        $this->ok = $ok;
+    }
+
+    // **the conformance's**, const, as `contract::unwrappable<V>` asks
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    // and an unrelated non-const overload of the same name, which the matcher prefers for a mutable
+    // receiver. nothing about it is wrong to declare - it is simply not what the contract accepted
+    public function has_value() : bool
+    {
+        echo 'wrong has_value';
+        return false;
+    }
+
+    // the conformance's `unwrap()`, and an unrelated read-only overload beside it
+    public function unwrap() : int32&
+    {
+        return &$this->v;
+    }
+
+    public const function unwrap() : const int32&
+    {
+        echo 'wrong unwrap';
+        return &$this->v;
+    }
+}
+
+// the hoisted subject is a **call result** the guard's own declaration owns
+function owned(int32 $n) : int32
+{
+    int32 $v = guard cell($n, true) else { return -1; }
+
+    return $v;
+}
+
+// and a **place** it borrows, so the receiver of both calls is a `ptr<cell>` rather than an addressed
+// value - the other of the two hoist arms, over the same overload sets
+function borrowed(int32 $n) : int32
+{
+    cell $c = cell($n, true);
+
+    int32 $v = guard $c else { return -1; }
+
+    return $v;
+}
+
+// the absent path reaches the conformance's `has_value()` too, and nothing else
+function absent() : int32
+{
+    cell $c = cell(7, false);
+
+    int32 $v = guard $c else { return -1; }
+
+    return $v;
+}
+
+echo owned(42);
+echo borrowed(9);
+echo absent();

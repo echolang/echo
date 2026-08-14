@@ -1,19 +1,17 @@
 #include "AST/ASTGuardLowering.h"
 
-#include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTCoreTypes.h"
-#include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
-#include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"
 #include "AST/VarDeclNode.h"
+#include "AST/VarRefNode.h"
 
 #include <fmt/core.h>
 
@@ -21,42 +19,8 @@ namespace AST
 {
 
 GuardLowering::GuardLowering(Bundle &bundle)
-    : _bundle(bundle), _collector(bundle.collector)
+    : FixpointLowering(bundle)
 {
-}
-
-CodeRef GuardLowering::code_ref_for(const TokenReference &token)
-{
-    return CodeRef{_current_module, _current_file, token.make_slice()};
-}
-
-bool GuardLowering::run_round()
-{
-    _changed = false;
-
-    for (auto &module_ptr : _bundle.modules) {
-        _current_module = module_ptr.get();
-
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-            _hoist_count = 0;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
-    }
-
-    return _changed;
-}
-
-void GuardLowering::finalize()
-{
-    // one more round rather than a sweep: a round inherits visitFunctionDecl's generic-body skip and
-    // walks scope children, which is the tree walk this pass is required to use
-    _finalizing = true;
-    run_round();
-    _finalizing = false;
 }
 
 void GuardLowering::visitScope(ScopeNode &node)
@@ -84,24 +48,18 @@ void GuardLowering::visitScope(ScopeNode &node)
     }
 }
 
-void GuardLowering::visitFunctionDecl(FunctionDeclNode &node)
-{
-    if (!node.is_generic()) {
-        RecursiveVisitor::visitFunctionDecl(node);
-    }
-}
-
 FunctionCallExprNode &GuardLowering::subject_call(
     VarDeclNode &subject,
-    const std::string &name,
+    FunctionDeclNode *callee,
     const TokenReference &at
 )
 {
-    // AST::make_unresolved_member_call owns both halves of this. the receiver rule matters here in
+    // AST::make_resolved_member_call owns both halves of this. the receiver rule matters here in
     // particular: the borrow arm in lower() binds `$__guardN` as a `ptr<T>`, which is what a receiver
     // wants already - addressing it again yields `ptr<ptr<T>>`, unifies against nothing, and the call is
     // then *silently never instantiated*
-    return make_unresolved_member_call(*_current_module, subject, name, at);
+    return make_resolved_member_call(
+        *_current_module, callee, at, &local_place(*_current_module, subject));
 }
 
 bool GuardLowering::bind_payload_type(
@@ -179,9 +137,13 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 
     if (look.result == UnwrapLookup::Result::t_pending) {
         // **out of rounds is out of answers** - see finalize(). the message is only for the case where
-        // nothing else explained it, which has_critical_issues() is already the compiler's answer to
+        // nothing else explained it, and there are two ways something did: has_critical_issues() for a
+        // diagnostic already collected, and UnwrapLookup::reported_elsewhere for one this compilation has
+        // not reached yet. an unanswered conformance is the second - AST::TypeChecker reports it at the
+        // `struct`, after the fixpoint, so the collector cannot be asked about it here and a message of
+        // our own would be a wrong sentence ("never got a type") about a perfectly settled type
         if (_finalizing) {
-            if (_collector.has_critical_issues()) {
+            if (_collector.has_critical_issues() || look.reported_elsewhere) {
                 guard->plan_decided = true;
             }
             else {
@@ -250,7 +212,7 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
     // and the frame ends it
     auto &subject_decl = _current_module->nodes.emplace_back<VarDeclNode>(
         _current_module->make_virtual_token(
-            fmt::format("$__guard{}", _hoist_count++), Token::Type::t_varname, guard->token),
+            fmt::format("$__guard{}", next_hoist_index()), Token::Type::t_varname, guard->token),
         nullptr);
 
     if (is_place_expression(*subject)) {
@@ -268,7 +230,8 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 
     // **the subject moved into the hoisted declaration and is used exactly once**, so "one subtree per
     // use" holds by construction - AST::ForeachLowering's `loop->source = nullptr` is the same line for
-    // the same reason. the guard now branches on `presence_test` instead
+    // the same reason. the guard branches on `presence_test` from here on, and the slot the subject
+    // vacated is what the unwrap is written back into below
     guard->decl->init_expr = nullptr;
 
     scope.children.insert(
@@ -277,14 +240,24 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
     // the name has to resolve for the calls minted below, and this is the scope they live in
     scope.declare_variable(subject_decl);
 
-    guard->presence_test = &subject_call(subject_decl, "has_value", guard->token);
+    guard->presence_test = &subject_call(subject_decl, plan.has_value, guard->token);
 
+    // **the unwrap is the declaration's ordinary initializer, and that is the whole of what this pass
+    // owes the binding.** AST::OwnershipPass::resolve_value_arrival then sees a value arriving at a
+    // declaration and covers it with no arm at all - the copy when the payload owns something, the drop
+    // that pairs with it, and every rule that edge grows later. AST::ForeachLowering lowers `$el` into
+    // exactly this shape and its own comment says exactly this.
+    //
+    // writing it onto `bound_value` instead is what made a protocol guard byte-copy the payload out of
+    // storage somebody else still owned: two producers of that edge with two different rules, and the
+    // owner of "what does an arriving value owe" knowing about one of them.
+    //
     // **the deref is written here rather than hoped for.** `unwrap()` hands back `V&`, and this is the
-    // round in which AST::OwnershipPass decides the binding's copy - so the edge it reads has to be the
+    // round in which the ownership pass decides the binding's copy - so the edge it reads has to be the
     // one that will actually be read. AST::ForeachLowering writes the same deref over `current()` for
     // the same reason
-    guard->bound_value = &_current_module->nodes.emplace_back<DerefExprNode>(
-        &subject_call(subject_decl, "unwrap", guard->decl->token_varname));
+    guard->decl->init_expr = &_current_module->nodes.emplace_back<DerefExprNode>(
+        &subject_call(subject_decl, plan.unwrap, guard->decl->token_varname));
 
     if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {
         return;
@@ -292,7 +265,7 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 
     if (guard->failure != nullptr) {
         guard->failure->init_expr = &_current_module->nodes.emplace_back<DerefExprNode>(
-            &subject_call(subject_decl, "failure", guard->failure->token_varname));
+            &subject_call(subject_decl, plan.failure, guard->failure->token_varname));
 
         guard->failure->set_type_node(
             &_current_module->nodes.emplace_back<TypeNode>(plan.failure_type.value()));

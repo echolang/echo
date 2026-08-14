@@ -6,6 +6,8 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
 
+#include <llvm/IR/DerivedTypes.h>
+
 #include <vector>
 
 namespace llvm
@@ -100,6 +102,21 @@ namespace Compiler::LLVM
         // turns a dense if-chain over an integer into one anyway, but only after the O2 pipeline - and
         // `run` defaults to --debug, where nothing folds
         void gen_match(AST::MatchExprNode &node);
+
+        // **the caller's half of the return ABI, and the only place a call to an Echo function is
+        // emitted.** three shapes reach it - a direct call, a virtual one through a vtable, and one
+        // through a callable value - and each of them has to provide the storage the signature expects,
+        // mark the argument the way the signature marked its parameter, and read the answer back out of
+        // that storage rather than off the call.
+        //
+        // one function rather than a prepare/emit pair, because the pair is separable and the three steps
+        // are not: a call site that allocated the slot and forgot the attribute is a *miscompile*, and one
+        // that reads the value off the `void` call is a crash. `llvm::FunctionCallee` is what lets the
+        // three shapes share it, being a Function or a (type, pointer) alike
+        void emit_call(
+            llvm::FunctionCallee callee,
+            const AST::ValueType &return_type,
+            std::vector<llvm::Value *> &args);
 
         // `A?->b`: evaluate A, test it, and run the continuation only when it is there. the same shape as
         // `??` with the arms the other way round, and the absent arm supplying the destination's null

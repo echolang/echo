@@ -1,0 +1,13 @@
+/*
+ * A library that returns and reads a `result<T, E>` of its own. The point of the fixture is that the
+ * *template* lives in the standard library's module while the instantiation is minted here and again in the
+ * consumer - so `result<string, int32>` is lowered in two units that never see each other, which is the
+ * shape `lib_optpayload` was written for and the first one a real standard library type has.
+ *
+ * It is also the only place a stdlib *static* crosses a module boundary: a case constructor is a static on
+ * a generic owner, and `grep "static function" stdlib` finds nothing else.
+ */
+
+#[module: "modresult"]
+
+#[sources: "src/*.eco"]

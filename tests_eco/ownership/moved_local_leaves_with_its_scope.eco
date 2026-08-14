@@ -1,0 +1,33 @@
+// **a local's moved-from state ends with its scope.** `$x` is declared and handed over inside one arm
+// of an `if`, so there is no other branch for it to be un-moved on - it does not exist there.
+//
+// the merge after an `if` reads each arm's moved-from set, and carrying a declaration out of the scope
+// that ended it made this "'$x' owns a resource and is moved out of on only one branch" against a
+// variable the other branch had never heard of. a diagnostic on a program with nothing wrong with it,
+// and the only way round it was not to declare the value inside the branch that uses it
+
+struct Buffer
+{
+    usize $tag;
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        echo $this->tag;
+        mem::free($this->data);
+    }
+}
+
+function consume(mv Buffer $b) : void
+{
+    echo 10;
+}
+
+int32 $n = 0;
+
+if ($n == 0) {
+    $x = Buffer(7, mem::alloc<uint8>(1));
+    consume(mv $x);
+}
+
+echo 0;

@@ -1,0 +1,13 @@
+// two library functions, each answering with an aggregate over the two-register line, and each declared
+// in a *different* module from the other. calling both is what puts two units' names for one type into
+// one merged module
+array<string> $parts = str::split('a::b::c', '::');
+
+echo $parts->count();
+echo str::join($parts, '|');
+
+// and an interpolation, which is a fold of `str::concat` over `str::from` - the second aggregate-returning
+// callee, reached from the unit that already brought the first one in
+string $joined = str::join($parts, '-');
+
+echo "[{$joined}]";

@@ -1,0 +1,23 @@
+flags: --optimize whole
+
+--- OUT --->
+28
+--- IR --->
+// **the whole of the assertion is the region between these two lines.** the parameter and
+// `local_unnamed_addr` are what make the first one the *definition* rather than the call site in `main`,
+// and a CHECK-NOT is scoped between its neighbours - which it has to be here, since `mem::` declares
+// `@malloc` and half the standard library calls it somewhere above this
+CHECK: i64 @_accumulateZZMLPl(i64 %seed) local_unnamed_addr
+
+// no block, so nothing to give back and nothing to copy between two of them. the `memcpy` is the one
+// that would come back first if the argument were duplicated again: two blocks each read by the other
+// are two allocations neither of which is dead
+CHECK-NOT: @malloc
+CHECK-NOT: @free
+CHECK-NOT: memcpy
+
+// and no call at all - `reserve`, the element appends, the enum's teardown and the array's are inlined
+// away, which is the stronger statement: a body LLVM could delete an allocation out of is one it had
+// already seen every use of
+CHECK-NOT: call
+CHECK: ret i64

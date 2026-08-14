@@ -1,0 +1,21 @@
+namespace modresult;
+
+// built here, in this module's unit, and handed to a consumer that instantiates the same type itself
+public function fetch(int32 $n) : result<string, int32>
+{
+    if ($n < 0) {
+        return .error($n);
+    }
+
+    return .ok('from the library');
+}
+
+// and read here too, so the library's own unit holds `has_value` and `unwrap` as well as the constructors
+public function describe(int32 $n) : string
+{
+    $body = guard fetch($n) else ($code) {
+        return 'the library refused';
+    }
+
+    return $body;
+}

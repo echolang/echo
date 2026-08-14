@@ -1,0 +1,49 @@
+// **a `contract::failable<E>` that is declared and not answered is the declaration site's mistake, and
+// only the declaration site's.**
+//
+// `failure_type_of` used to read E off the conformance and never ask whether a `failure()` existed at all,
+// so whether the declaration was there got discovered by a **name lookup inside AST::GuardLowering**, one
+// pass later, in a place with no wording for it - the author saw an unknown-function error about a call they
+// had not written.
+//
+// `AST::UnwrapPlan` carries the declaration beside the type now, so the two answers are one answer. and
+// what this file pins is the *deliberate* reading of what happens next: an unanswered conformance makes
+// the plan `t_pending`, which is byte for byte what AST::unwrap_plan_for already does for an unanswered
+// `unwrap()`. AST::TypeChecker reports the unmet requirement at the `struct`, where the author can act on
+// it, and the guard adds nothing about it - a second refusal at the `$e` would be two complaints about one
+// mistake.
+//
+// so the diagnostic that matters is `UnmetInterfaceRequirement` on line 8, naming `failure() : oops&`.
+// the two around it are the shape every refused guard has - see `unwrappable_not_declared` and
+// `failable_not_declared`, which both carry the same tail.
+
+struct oops
+{
+    int32 $code;
+
+    constructor(int32 $code) { $this->code = $code; }
+}
+
+struct cell : contract::unwrappable<int32>, contract::failable<oops>
+{
+    private int32 $v;
+
+    constructor(int32 $v) { $this->v = $v; }
+
+    public const function has_value() : bool { return false; }
+
+    public function unwrap() : int32& { return &$this->v; }
+
+    // and no `failure()`. that is the whole of the program
+}
+
+function take() : int32
+{
+    cell $c = cell(1);
+
+    int32 $v = guard $c else ($e) { return $e->code; }
+
+    return $v;
+}
+
+echo take();

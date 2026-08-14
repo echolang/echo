@@ -3,6 +3,7 @@
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
 #include "AST/ASTFunctionEmission.h"
@@ -306,14 +307,40 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
     // standing in the entry block - one owner for "where does a stack slot come from" is worth more than
     // the line it saves here, and it is what keeps this loop from being the counter-example somebody
     // copies into a loop body later
+    // **the hidden `sret` argument is not one of the declaration's**, so every index below is shifted past
+    // it. TypeLowering::return_abi_of is the one owner of whether there is one, asked here exactly as the
+    // signature and each call site ask it
+    const ReturnAbi abi = _ctx.types->return_abi_of(&node, *_ctx.current_cmp_unit);
+
+    llvm::Value *prev_sret_pointer = _ctx.sret_pointer;
+    llvm::Type *prev_sret_type = _ctx.sret_type;
+
+    llvm::Value *sret_destination = nullptr;
+
+    if (abi.is_indirect() && func->arg_size() > 0) {
+        sret_destination = func->getArg(0);
+        sret_destination->setName("sret");
+    }
+
+    _ctx.sret_pointer = sret_destination;
+    _ctx.sret_type = abi.indirect_type;
+
+    const unsigned abi_offset = abi.is_indirect() ? 1 : 0;
+
     for (auto &arg : func->args()) {
-        arg.setName(node.args[arg.getArgNo()]->name());
+        if (arg.getArgNo() < abi_offset) {
+            continue;
+        }
+
+        AST::VarDeclNode *declared = node.args[arg.getArgNo() - abi_offset];
+
+        arg.setName(declared->name());
         llvm::AllocaInst *alloca = _ctx.entry_alloca(arg.getType(), arg.getName());
         _ctx.builder->CreateStore(&arg, alloca);
-        _ctx.var_map[node.args[arg.getArgNo()]] = alloca;
+        _ctx.var_map[declared] = alloca;
 
         // 1-based, which is the whole of what distinguishes a parameter from a local in DWARF
-        _ctx.debug_info->declare_local(alloca, *node.args[arg.getArgNo()], arg.getArgNo() + 1);
+        _ctx.debug_info->declare_local(alloca, *declared, arg.getArgNo() - abi_offset + 1);
     }
 
     // a synthesized constructor arrives here like any other function - the struct parser builds its
@@ -341,8 +368,43 @@ void StmtCodegen::gen_function_decl(AST::FunctionDeclNode &node)
 
     _ctx.debug_info->end_function();
 
+    _ctx.sret_pointer = prev_sret_pointer;
+    _ctx.sret_type = prev_sret_type;
+
     _ctx.current_function = prev_function;
     _ctx.current_file = prev_file;
+}
+
+void StmtCodegen::store_aggregate_fieldwise(
+    llvm::Value *value,
+    llvm::Value *slot,
+    llvm::Type *type
+)
+{
+    if (auto *structure = llvm::dyn_cast<llvm::StructType>(type)) {
+        for (unsigned i = 0; i < structure->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, i),
+                _ctx.builder->CreateStructGEP(structure, slot, i),
+                structure->getElementType(i));
+        }
+
+        return;
+    }
+
+    if (auto *array = llvm::dyn_cast<llvm::ArrayType>(type)) {
+        for (uint64_t i = 0; i < array->getNumElements(); i++) {
+            store_aggregate_fieldwise(
+                _ctx.builder->CreateExtractValue(value, static_cast<unsigned>(i)),
+                _ctx.builder->CreateConstInBoundsGEP2_64(array, slot, 0, i),
+                array->getElementType());
+        }
+
+        return;
+    }
+
+    // a leaf. no `!tbaa`: this is the caller's return storage, which nothing else names yet
+    _ctx.builder->CreateStore(value, slot);
 }
 
 void StmtCodegen::gen_return(AST::ReturnNode &node)
@@ -396,6 +458,17 @@ void StmtCodegen::gen_return(AST::ReturnNode &node)
     // ReturnNode::unwind: `return $c->x` over an owning `$c` reads the block and then gives it back
     emit_unwind();
 
+    // **an aggregate the caller made room for is written there and the function returns nothing.** the
+    // store is field by field rather than one whole-struct store, and that granularity is the point: a
+    // `store %Foo %v` of an assembled value is something SROA folds straight back into the insertvalue
+    // chain it came from, which puts the first-class aggregate - and the phi over it that LLVM will not
+    // if-convert - right back where taking it out of the signature was supposed to remove it
+    if (_ctx.sret_pointer != nullptr) {
+        store_aggregate_fieldwise(ret, _ctx.sret_pointer, _ctx.sret_type);
+        _ctx.builder->CreateRetVoid();
+        return;
+    }
+
     _ctx.builder->CreateRet(ret);
 }
 
@@ -410,21 +483,23 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     // entry block, so where the declaration sits among its siblings decides nothing
     llvm::AllocaInst *slot = ensure_var_slot(*node.decl);
 
-    // **exactly one of `init_expr` and `presence_test` is the value evaluated before the branch**, and it
-    // is evaluated exactly once. that is GuardNode's stated invariant, and the branch below is the whole
-    // of what this function knows about which protocol answered
+    // **`presence_test` is what decides which of the two shapes this is**, and it is the whole of what
+    // this function knows about which protocol answered. with one set it is the value evaluated before
+    // the branch and `init_expr` is evaluated inside the bound block; with none, `init_expr` is the
+    // tested optional and is evaluated before the branch, once, for both. that is GuardNode's stated
+    // invariant
     llvm::Value *condition = nullptr;
 
-    // the tested optional, on the builtin path only. the protocol path leaves both unset and always
-    // carries a `bound_value`, so the unwrap arm below never reads them
+    // the tested optional, on the builtin path only. the protocol path leaves both unset - there is no
+    // optional there at all - so the unwrap arm below never reads them
     llvm::Value *optional = nullptr;
     AST::ValueType optional_type;
 
     if (node.presence_test != nullptr) {
         // **the type answered the presence question**, through `contract::unwrappable<V>::has_value()`.
         // there is no optional here to unwrap: AST::GuardLowering hoisted the subject into an ordinary
-        // declaration ahead of this statement, so what the binding is given hangs off `bound_value`
-        // below - which is the path a tagged optional read out of a place has always taken
+        // declaration ahead of this statement and wrote the protocol's `deref(unwrap())` onto
+        // `init_expr`, which the bound block below evaluates like any other initializer
         node.presence_test->accept(*_ctx.visitor);
 
         condition = _ctx.types->coerce_value(
@@ -456,7 +531,19 @@ void StmtCodegen::gen_guard(AST::GuardNode &node)
     llvm::Value *bound = nullptr;
     AST::ValueType bound_type;
 
-    if (node.bound_value != nullptr) {
+    if (node.presence_test != nullptr) {
+        // **the protocol's unwrap, evaluated here and not before the branch** - `has_value()` gates it,
+        // which is the whole of what `contract::unwrappable<V>` promises, so calling `unwrap()` on the
+        // absent path would be reading a value the type just said it is not holding.
+        //
+        // an ordinary initializer at this point: AST::OwnershipPass walked this edge like any other
+        // declaration's, so whatever copy an owning payload owes is already in it
+        node.decl->init_expr->accept(*_ctx.visitor);
+
+        bound = _ctx.pop();
+        bound_type = node.decl->init_expr->result_type();
+    }
+    else if (node.bound_value != nullptr) {
         // **the payload was copied rather than moved out**, because the tested value is a place somebody
         // else still owns. AST::OwnershipPass built the copy over the `__value` place and hung it here
         node.bound_value->accept(*_ctx.visitor);

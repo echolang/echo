@@ -4,6 +4,7 @@
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
@@ -197,10 +198,23 @@ void TypeLowering::create_cmp_units(
     }
 }
 
+ReturnAbi TypeLowering::return_abi_of(
+    const AST::FunctionDeclNode *node,
+    Compiler::LLVM::CmpUnit &cmp_unit
+)
+{
+    if (node->extern_symbol.has_value()) {
+        return ReturnAbi{};
+    }
+
+    return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit), _ctx.layout());
+}
+
 void TypeLowering::apply_function_attributes(
     const AST::FunctionDeclNode *node,
     llvm::Function *func,
-    Compiler::LLVM::CmpUnit &cmp_unit
+    Compiler::LLVM::CmpUnit &cmp_unit,
+    const ReturnAbi &abi
 )
 {
     // a *hint*, which is exactly what `#[inline]` is: FunctionDeclNode::is_inline is documented as "not a
@@ -211,10 +225,30 @@ void TypeLowering::apply_function_attributes(
         func->addFnAttr(llvm::Attribute::InlineHint);
     }
 
+    // **the `sret` attribute is what makes the hidden argument mean something to the optimizer**, and
+    // Compiler::LLVM::indirect_return_attributes is the one place that spells it - every call site applies
+    // the same builder, because a function and a call to it disagreeing about this is a miscompile rather
+    // than a missed optimization
+    //
+    // written here rather than in get_function_type so the whole per-argument attribute story stays in one
+    // function, and taken as a parameter rather than re-derived: the caller minting this Function asked
+    // TypeLowering::return_abi_of for the signature it built, and one answer is what keeps the two from
+    // being able to differ at all
+    const size_t abi_offset = abi.is_indirect() ? 1 : 0;
+
+    if (abi.is_indirect() && func->arg_size() > 0) {
+        func->addParamAttrs(0, indirect_return_attributes(*_ctx.llvm_context, abi, _ctx.layout()));
+    }
+
     for (size_t i = 0; i < node->args.size(); i++) {
         const AST::VarDeclNode *arg = node->args[i];
 
-        if (arg == nullptr || !arg->has_type() || i >= func->arg_size()) {
+        // **every index below is shifted past the hidden `sret` argument**, which is why abi_offset is
+        // computed once above rather than at each of the three uses: the declaration's parameter i is the
+        // function's argument i + 1 whenever the answer comes back through storage
+        const size_t at = i + abi_offset;
+
+        if (arg == nullptr || !arg->has_type() || at >= func->arg_size()) {
             continue;
         }
 
@@ -238,7 +272,7 @@ void TypeLowering::apply_function_attributes(
         // license one: a callee can reach the same storage through a class handle it holds or a
         // pointer it stored, neither of which appears at the call. see notes/aliasing.md
         if (AST::declared_access_effect(*arg) == AST::AccessEffect::t_read && type.is_pointer()) {
-            func->getArg(static_cast<unsigned>(i))->addAttr(llvm::Attribute::ReadOnly);
+            func->getArg(static_cast<unsigned>(at))->addAttr(llvm::Attribute::ReadOnly);
         }
 
         // **`t_pointer` only, and deliberately not a class handle.** a class also lowers to a bare `ptr`,
@@ -255,7 +289,7 @@ void TypeLowering::apply_function_attributes(
             continue;
         }
 
-        llvm::Argument *param = func->getArg(static_cast<unsigned>(i));
+        llvm::Argument *param = func->getArg(static_cast<unsigned>(at));
 
         // **the bargain, stated because it is a real one.** a borrow is non-nullable by the type system,
         // and the one path that can produce a null one is a `ptr<T>` narrowing whose check a release build
@@ -314,8 +348,22 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
         arg_types.push_back(get_llvm_type(node->args[i]->type_node()->type, cmp_unit));
     }
 
+    // **an aggregate too big for registers comes back through a hidden first argument.**
+    // Compiler::LLVM::return_abi_for is the one owner of that decision and every other site asks it -
+    // the prologue that names the arguments, the `return` that fills the slot, and each call site.
+    //
+    // the `extern` exemption is TypeLowering::return_abi_of's, which is where every site asks it
+    llvm::Type *lowered_return = get_llvm_type(func_type, cmp_unit);
+
+    const ReturnAbi abi = return_abi_of(node, cmp_unit);
+
+    if (abi.is_indirect()) {
+        lowered_return = llvm::Type::getVoidTy(*_ctx.llvm_context);
+        arg_types.insert(arg_types.begin(), llvm::PointerType::getUnqual(*_ctx.llvm_context));
+    }
+
     llvm::FunctionType *requested_type =
-        llvm::FunctionType::get(get_llvm_type(func_type, cmp_unit), arg_types, is_c_variadic);
+        llvm::FunctionType::get(lowered_return, arg_types, is_c_variadic);
 
     // handle intrinsic functions
     //
@@ -396,7 +444,7 @@ llvm::Function *TypeLowering::create_llvm_func_decl(const AST::FunctionDeclNode 
 
     // the declaration is where the attributes go, not the definition: a unit that only *references* this
     // symbol has to make the same promises about it, or the caller side of a call cannot use them
-    apply_function_attributes(node, llvm_func, cmp_unit);
+    apply_function_attributes(node, llvm_func, cmp_unit, abi);
 
     // store in the function map
     cmp_unit.function_table.push_function(func_name, node, llvm_func);
@@ -967,7 +1015,21 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
         param_types.push_back(get_llvm_type(param, cmp_unit));
     }
 
-    return llvm::FunctionType::get(get_llvm_type(signature.return_type, cmp_unit), param_types, false);
+    // **the same return ABI a declaration gets, or the two shapes of one call disagree.** this builds the
+    // type a *callable value* and an *interface requirement* are called through, and the body on the other
+    // end of both is emitted by StmtCodegen::gen_function_decl from a declaration - so if only one of the
+    // two asks Compiler::LLVM::return_abi_for, a closure returning a big struct is called with the
+    // arguments one slot out of place and reads its receiver as its answer
+    llvm::Type *lowered_return = get_llvm_type(signature.return_type, cmp_unit);
+
+    const ReturnAbi abi = return_abi_for(lowered_return, _ctx.layout());
+
+    if (abi.is_indirect()) {
+        lowered_return = llvm::Type::getVoidTy(*_ctx.llvm_context);
+        param_types.insert(param_types.begin(), llvm::PointerType::getUnqual(*_ctx.llvm_context));
+    }
+
+    return llvm::FunctionType::get(lowered_return, param_types, false);
 }
 
 llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit)

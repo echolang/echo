@@ -7,8 +7,15 @@
 -3
 --- RAST --->
 CHECK: Module: [main]
-// the hoisted subject, then the guard branching on the protocol's own presence question rather than on
-// a machine null test - and the binding filled from a deref of `unwrap()`
-CHECK: vardecl<type<parsed_int>>($__guard0)
-CHECK: guard vardecl<type<int32>>($v) if call has_value(
-CHECK: bound deref<int32>(call unwrap(
+// the hoisted subject, then the guard branching on the protocol's own presence question rather than on a
+// machine null test - and the binding filled from an **ordinary initializer**, `deref(unwrap())`. that is
+// the whole of the fix: on that edge AST::OwnershipPass::resolve_value_arrival covers the binding with no
+// arm of its own, where a side edge of the lowering's own had it byte-copied out of storage somebody still
+// owned. `bound_value` is now the ownership pass's alone
+CHECK: vardecl<type<parsed_int>>($__guard0) = call parse(
+CHECK: guard vardecl<type<int32>>($v) = deref<int32>(call unwrap(
+// the **place** arm: `$__guard1` borrows the value the author named, so the receiver of both calls is
+// handed over bare rather than addressed a second time
+CHECK: vardecl<type<parsed_int&>>($__guard1) = addrof
+CHECK: call unwrap(varref<parsed_int&>(var($__guard1)))
+CHECK: if call has_value(varref<parsed_int&>(var($__guard1)))

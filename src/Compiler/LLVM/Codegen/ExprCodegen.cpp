@@ -8,6 +8,8 @@
 #include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
+#include "AST/ASTControlFlow.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTConstFold.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -731,13 +733,65 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             _ctx.value_stack.pop();
         }
 
-        llvm::Value *ret = _ctx.builder->CreateCall(func, args);
+        emit_call(func, node.decl->get_return_type(), args);
+    }
+}
 
-        // a void call produces no value. pushing one anyway left a void-typed entry that no
-        // parent ever pops, so a `foo();` statement quietly grew the stack
-        if (!ret->getType()->isVoidTy()) {
-            _ctx.value_stack.push(ret);
-        }
+void ExprCodegen::emit_call(
+    llvm::FunctionCallee callee,
+    const AST::ValueType &return_type,
+    std::vector<llvm::Value *> &args
+)
+{
+    llvm::FunctionType *fn_type = callee.getFunctionType();
+
+    // **an aggregate too big for registers comes back through storage this call site provides.**
+    // Compiler::LLVM::return_abi_for is the one owner and the signature asked it the same way, so a caller
+    // and its callee cannot disagree about where the answer is. the slot is an ordinary entry alloca, which
+    // is what lets SROA promote it into scalars once the callee is inlined
+    //
+    // **the slot's type comes from the declaration, never from the `sret` attribute on the callee.**
+    // reading it off the attribute is the same answer right up until the modules are merged: the JIT and
+    // `--optimize whole` both link every unit into one and `llvm::Linker` brings each unit's own named
+    // struct types along, so the attribute can name the *other* unit's `%string` while this unit allocates
+    // and reads its own
+    // the return type is lowered only where the answer is about to need storage - a callee answering
+    // anything but `void` cannot be writing through a hidden pointer, and lowering a struct return can
+    // mint a layout into this unit
+    const ReturnAbi abi =
+        fn_type != nullptr && fn_type->getReturnType()->isVoidTy()
+            ? return_abi_for(
+                _ctx.types->get_llvm_type(return_type, *_ctx.current_cmp_unit), _ctx.layout())
+            : ReturnAbi{};
+
+    if (abi.is_indirect()) {
+        llvm::Value *slot = _ctx.entry_alloca(abi.indirect_type, "call.sret");
+
+        args.insert(args.begin(), slot);
+
+        auto *call = _ctx.builder->CreateCall(callee, args);
+
+        // **the attribute goes on the call too, and forgetting it is a miscompile rather than a missed
+        // optimization** - see the note on Compiler::LLVM::indirect_return_attributes. it decides which
+        // register the hidden pointer travels in, and LLVM's fallback to the callee's own attributes stops
+        // working the moment a merge leaves this unit's `%string` and the callee's as two types
+        call->setAttributes(call->getAttributes().addParamAttributes(
+            *_ctx.llvm_context, 0,
+            indirect_return_attributes(*_ctx.llvm_context, abi, _ctx.layout())));
+
+        // the call answers `void`, so the value this expression produces is what the callee wrote
+        _ctx.value_stack.push(
+            _ctx.builder->CreateLoad(abi.indirect_type, slot, "call.result"));
+
+        return;
+    }
+
+    auto *call = _ctx.builder->CreateCall(callee, args);
+
+    // a void call produces no value. pushing one anyway left a void-typed entry that no
+    // parent ever pops, so a `foo();` statement quietly grew the stack
+    if (!call->getType()->isVoidTy()) {
+        _ctx.value_stack.push(call);
     }
 }
 
@@ -808,12 +862,7 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
     llvm::FunctionType *fn_type =
         _ctx.types->get_llvm_function_type(node.decl->callable_type().signature(), *_ctx.current_cmp_unit);
 
-    llvm::Value *ret = _ctx.builder->CreateCall(fn_type, callee, args);
-
-    // a void call produces no value, exactly as at a direct one
-    if (!ret->getType()->isVoidTy()) {
-        _ctx.value_stack.push(ret);
-    }
+    emit_call({ fn_type, callee }, node.decl->get_return_type(), args);
 }
 
 // the callee symbol *in the current unit*, declared on demand if this unit has not named it yet.
@@ -958,11 +1007,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
     llvm::FunctionType *fn_type =
         _ctx.types->get_llvm_function_type(signature, *_ctx.current_cmp_unit);
 
-    llvm::Value *ret = _ctx.builder->CreateCall(fn_type, fn, args);
-
-    if (!ret->getType()->isVoidTy()) {
-        _ctx.value_stack.push(ret);
-    }
+    emit_call({ fn_type, fn }, signature.return_type, args);
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
@@ -1728,7 +1773,11 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
     // the arms read its payload off storage rather than re-running whatever produced it
     node.subject->accept(*_ctx.visitor);
 
-    const AST::ValueType subject_type = node.subject->type();
+    // **the subject is a borrow whenever it named storage**, which AST::MatchResolution decided and this
+    // reads back off the declaration's type rather than re-deciding. peeled through the one rule, so the
+    // layout below is the enum's however the node reached it
+    const AST::ValueType subject_decl_type = node.subject->type();
+    const AST::ValueType subject_type = AST::value_type_of(subject_decl_type);
     const AST::ComplexType *ct = subject_type.get_complex_type();
 
     auto slot = _ctx.var_map.find(node.subject);
@@ -1738,11 +1787,26 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
             "the subject of a 'match' has no allocation in scope {}", _ctx.function_context()));
     }
 
+    // the address the payload and the tag are read off. for a borrowed subject the slot holds an address,
+    // so it is loaded through once here - the single auto-deref every read of a borrow performs, done once
+    // for the whole node rather than per arm
+    llvm::Value *subject_address = slot->second;
+
+    if (subject_decl_type.is_pointer()) {
+        subject_address = _ctx.lvalues->gen_load(
+            LValue {
+                slot->second,
+                subject_decl_type,
+                Provenance::t_typed,
+            },
+            "match.subject");
+    }
+
     // the discriminant, read as the ordinary property it is - the same GEP any member read emits, which
     // is the whole dividend of `__tag` being in the layout rather than a shape codegen invents
     llvm::Value *tag_address = _ctx.builder->CreateStructGEP(
         _ctx.types->get_llvm_type(subject_type, *_ctx.current_cmp_unit),
-        slot->second,
+        subject_address,
         AST::k_enum_tag_index,
         "match.tag_ptr");
 
@@ -1820,13 +1884,45 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
             arm.scope->accept(*_ctx.visitor);
         }
 
-        if (has_value && arm.value != nullptr && !_ctx.block_is_terminated()) {
-            arm.value->accept(*_ctx.visitor);
+        if (arm.value != nullptr && !_ctx.block_is_terminated()) {
+            // **an arm whose value never comes back is emitted and then not read.** `die('...')` leaves
+            // no value on the stack and terminates its own block with `unreachable`, so popping one would
+            // read a stack that is empty and coerce whatever was under it. AST::expression_never_returns
+            // is the same owner AST::MatchResolution asked when it let this arm out of the unification -
+            // it contributed no type there and it contributes no incoming value here, which are the two
+            // halves of one fact
+            //
+            // emitted **unconditionally** rather than under `has_value`: when every arm dies the match's
+            // own type is `void`, and a guard on that would drop the only statement those arms had.
+            // one axis and three answers, so one chain rather than a nest testing it twice
+            if (AST::expression_never_returns(*arm.value)) {
+                arm.value->accept(*_ctx.visitor);
+            }
+            // **a place-yielding match phis addresses, so the arm is addressed rather than read.** the
+            // one difference between the two shapes, and it is one line: gen_place is what every other
+            // read-through goes through, so the payload's `!tbaa` tag, its provenance and its GEP are the
+            // same ones a `$e->__c0_v` written by hand would get. reading the value here instead and
+            // taking its address after would be a copy, which is what this shape exists to avoid
+            //
+            // **gen_place and not gen_lvalue**, and the difference is the whole bug it replaced: a binding
+            // is a `T&`, so its *own* slot holds the address rather than the payload. gen_lvalue hands
+            // back that slot, and the phi then joined pointers-to-borrows - which read back as whatever
+            // the address happened to be, an integer in the low billions instead of the payload
+            else if (node.arm_yields_address(arm)) {
+                LValue place = _ctx.lvalues->gen_place(*arm.value);
 
-            llvm::Value *value = _ctx.types->coerce_value(
-                _ctx.pop(), arm.value->result_type(), result, *_ctx.current_cmp_unit);
+                incoming.emplace_back(place.address, _ctx.builder->GetInsertBlock());
+            }
+            else {
+                arm.value->accept(*_ctx.visitor);
 
-            incoming.emplace_back(value, _ctx.builder->GetInsertBlock());
+                if (has_value) {
+                    llvm::Value *value = _ctx.types->coerce_value(
+                        _ctx.pop(), arm.value->result_type(), result, *_ctx.current_cmp_unit);
+
+                    incoming.emplace_back(value, _ctx.builder->GetInsertBlock());
+                }
+            }
         }
 
         // an arm whose body already left - every path returned, or it ended in `die` - owes no branch

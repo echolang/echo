@@ -6,6 +6,7 @@
 namespace AST
 {
     class ScopeNode;
+    class ExprNode;
 
     // **how far does control go when it leaves this scope?** ordered, weakest first, so an `if` is the
     // weaker of its two arms and every caller's question is a comparison rather than a flag.
@@ -40,6 +41,25 @@ namespace AST
     // StmtCodegen::gen_scope stops at the first terminated block. **it must only ever answer above t_none
     // when it is certain**, since a false positive is a leak in one caller and a broken binding in another
     ExitKind scope_exit_kind(const ScopeNode &scope);
+
+    // **does evaluating this expression never come back?** the expression half of the question above, and
+    // the reason it is worth naming separately is that a value can be written where a statement was
+    // expected and both readings have to agree: `die('...')` is the same call whether it stands alone or
+    // sits in a `match` arm, and only one of the two used to notice.
+    //
+    // AST::builtin_never_returns is what actually decides, through AST::BuiltinKind rather than by name,
+    // so nothing here can drift from what stops the program. this is the walk down to the call: an
+    // expression never returns iff it *is* one of those calls, which is deliberately narrower than "some
+    // subexpression of it does not return". an argument that dies takes the whole call with it, but the
+    // shapes that would reach - `f(die())` - are ones AST::TypeChecker refuses on the argument's `void`
+    // type first, so widening this would be answering for programs that do not exist
+    //
+    // two readers, and they are the two halves of one rule: statement_exit_kind, so a bare `die('...')`
+    // ends its scope, and AST::MatchResolution, so an arm that dies contributes no type to the arms'
+    // unification. without the second, the only thing a `match` arm could do with a case whose payload is
+    // the wrong type was produce a value it has not got - which is what stopped an enum from answering
+    // `contract::unwrappable<V>::unwrap() : V&`
+    bool expression_never_returns(const ExprNode &expr);
 
     // **can control fall out of the bottom of this scope?** the scope-boundary question, and the one two of
     // the three callers want:

@@ -2,6 +2,7 @@
 
 #include "AST/ExprNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/TemporaryBindExprNode.h"
 #include "AST/VarDeclNode.h"
@@ -13,6 +14,18 @@
 
 namespace AST
 {
+
+bool value_is_an_address(const ExprNode &expr)
+{
+    if (expr.get_node_type() != NodeType::n_expr_match) {
+        return false;
+    }
+
+    // **asked of the node, because the answer is in the arms rather than in the tag.** an undecided match
+    // answers false, which is the honest reading while the fixpoint is still running: the arms have not
+    // agreed yet, and this is asked from inside that fixpoint
+    return static_cast<const MatchExprNode &>(expr).yields_a_place;
+}
 
 VarDeclNode *place_root_of(ExprNode *expr)
 {

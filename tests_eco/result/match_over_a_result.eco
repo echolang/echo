@@ -1,0 +1,37 @@
+// **a `result` is an ordinary enum, so `match` reads it directly** - which is the half of the enum route a
+// struct could never have offered. the case names are `ok` and `error`, the payloads bind as borrows, and
+// exhaustiveness is checked the way it is for any other enum
+function parse(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n * 3);
+}
+
+function describe(int32 $n) : string
+{
+    return match (parse($n)) {
+        result<int32, string>::ok($v)    => str::from($v),
+        result<int32, string>::error($e) => $e,
+    };
+}
+
+echo describe(4);
+echo describe(-4);
+
+// the leading-dot shorthand works in a pattern too, the subject naming the enum
+function is_ok(int32 $n) : bool
+{
+    result<int32, string> $r = parse($n);
+
+    return match ($r) {
+        .ok($v)    => true,
+        .error($e) => false,
+    };
+}
+
+echo is_ok(1);
+echo is_ok(-1);
+echo mem::live_allocations();

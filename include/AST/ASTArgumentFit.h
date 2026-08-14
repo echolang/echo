@@ -293,6 +293,25 @@ namespace AST
             return ArgumentFit::t_undetermined;
         }
 
+        // **and a placeholder seated behind an address is still a placeholder.** a `match` binding is
+        // declared `unknown&` by the parser - the pointer level is deliberate, so a member call in the arm
+        // knows its receiver is already addressed - and AST::is_undetermined_type asks the level it is
+        // given, where `ptr<unknown>` is a perfectly determined pointer to nothing in particular.
+        //
+        // without this, an argument that is one scores `t_none` against every candidate, and
+        // CallResolver's `t_no_viable` arm is *final*: the refusal it reports is permanent, taken in the
+        // round before AST::MatchResolution answered what the binding holds. that arm says in its own
+        // comment that nothing viable is ever rejected for being unknown, and this is what makes the
+        // sentence true. one candidate hid it - match rule 2 takes a lone candidate without consulting
+        // types at all - so it showed only against an overload set, `str::from($v)` being the first
+        // asked of the pointee directly rather than through AST::value_type_of, which answers by value:
+        // the bare level is already the gate above, so what is left is the address one, and a `ValueType`
+        // copy per candidate per argument per round is not what that costs
+        if ((from.is_pointer() && from.pointee().is_unknown())
+            || (to.is_pointer() && to.pointee().is_unknown())) {
+            return ArgumentFit::t_undetermined;
+        }
+
         if (from == to) {
             return ArgumentFit::t_exact;
         }

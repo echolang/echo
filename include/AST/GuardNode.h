@@ -51,7 +51,14 @@ namespace AST
         // it is set for one shape: a tagged optional whose payload needs a real copy, read out of a
         // *place*. There the binding and the optional are two owners of two values, so the payload has to
         // be copied rather than moved out from under a value somebody else still holds - and the copy
-        // cannot live on `decl->init_expr`, because that edge is also the value being tested
+        // cannot live on `decl->init_expr`, because on that form that edge is also the value being tested.
+        //
+        // **written by AST::OwnershipPass and by nothing else**, which is the invariant rather than an
+        // incidental fact. AST::GuardLowering used to write it too, for the protocol form, and the
+        // ownership pass knew about only one of the two producers - so the protocol's payload was
+        // byte-copied out of storage somebody else still owned and both ends were then destroyed. the
+        // protocol form puts its `deref(unwrap())` on `decl->init_expr` instead, where the ordinary
+        // arrival machinery covers it with no arm at all
         ExprNode *bound_value = nullptr;
 
         // **the presence question, when the type answers it rather than the machine.**
@@ -61,13 +68,19 @@ namespace AST
         // path moves.
         //
         // non-null for a subject declaring `contract::unwrappable<V>`: it is the `has_value()` call
-        // AST::GuardLowering minted, and it is the value codegen branches on. **`decl->init_expr` is
-        // then null** - there is no optional left to evaluate, the subject having been hoisted into an
-        // ordinary declaration ahead of this statement - and what the binding is given hangs off
-        // `bound_value`, which is the same edge a tagged optional read out of a place already uses.
+        // AST::GuardLowering minted, and it is the value codegen branches on. there is no optional left
+        // to evaluate there, the subject having been hoisted into an ordinary declaration ahead of this
+        // statement - so `decl->init_expr` holds the protocol's `deref(unwrap())` and is an ordinary
+        // declaration initializer in every sense the rest of the compiler cares about.
         //
-        // the invariant, stated once: **exactly one of `decl->init_expr` and `presence_test` is the
-        // value evaluated before the branch, and it is evaluated exactly once**
+        // **this pointer is therefore which form the statement is**, and three places read it as that:
+        // AST::OwnershipPass keys its arm on it, AST::TypeChecker asks "is this certainly present"
+        // only for the other form, and StmtCodegen::gen_guard branches on it twice.
+        //
+        // the invariant, stated once: **`presence_test` if set is the value evaluated before the branch
+        // and `decl->init_expr` is then evaluated inside the bound block; with none, `init_expr` is
+        // evaluated before the branch and is both what is tested and what is unwrapped. either way
+        // nothing is evaluated twice and nothing on the absent path is evaluated at all**
         ExprNode *presence_test = nullptr;
 
         // `else ($e)` - the reason the subject was not holding a value, when it declares

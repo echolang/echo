@@ -1,0 +1,13 @@
+# **the output is the assertion.** `wrong has_value` on any line means the by-name lookup won and the
+# guard called an overload the conformance never accepted - which is what this program used to print,
+# followed by `-1` for a cell that was holding 42
+--- OUT --->
+42
+9
+-1
+--- IR --->
+# and the same thing at the symbol level, because the two overloads differ only in their receiver: `BCLC`
+# is the const one `contract::unwrappable<V>` declares, `BMLC` the mutable one beside it. the mutable one
+# is defined - it is an ordinary public member - and never called from a guard
+CHECK: call i1 @_M4cell_has_valueZZMRBCLC4cell(ptr %__guard0
+CHECK-NOT: call i1 @_M4cell_has_valueZZMRBMLC4cell(

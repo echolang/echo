@@ -1,0 +1,51 @@
+// **a heap block of a constant size whose contents never leave the function is one LLVM deletes**, and
+// nothing in Echo's allocation seam stands in the way of it: `mem::alloc` is a plain `malloc` call in an
+// untracked build, which TargetLibraryInfo recognises and `isRemovableAlloc` will remove once every load
+// out of the block has been forwarded.
+//
+// **what used to stand in the way was the copy.** `return .ok($out)` duplicated the array into the
+// argument, so the loop held `malloc(16)`, a `memcpy` into `malloc(12)`, and two `free`s - two blocks,
+// each read by the other, and neither of them dead. rustc's binary for the same program contained no
+// allocation in the loop at all, which read as 22x and was blamed on the seam. With the argument handed
+// over rather than copied (ownership/return_argument_hands_over) there is one block, it is dead, and
+// what is left of the function is arithmetic.
+//
+// the seed comes from `argc` so nothing here folds to a literal: the assertion is that the *block* goes,
+// not that the whole program does
+
+function rows(int64 $seed) : result<array<int32>, int32>
+{
+    if (($seed & 63) == 0) {
+        return .error(-1);
+    }
+
+    int32 $n = $seed;
+
+    array<int32> $out = array<int32>();
+    $out->reserve(3);
+
+    $out[] = $n;
+    $out[] = $n + 1;
+    $out[] = $n + 2;
+
+    return .ok($out);
+}
+
+function accumulate(int64 $seed) : int64
+{
+    int64 $sum = 0;
+    int64 $i = 0;
+
+    while ($i < 4) {
+        match (rows($seed + $i)) {
+            result<array<int32>, int32>::ok($v)    => { $sum = $sum + $v[0] + $v[2]; }
+            result<array<int32>, int32>::error($e) => { $sum = $sum - 1; }
+        }
+
+        $i = $i + 1;
+    }
+
+    return $sum;
+}
+
+echo accumulate(std::env::argc());
