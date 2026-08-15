@@ -14,7 +14,7 @@ echo $s;
 echo $s->size();
 
 // a byte, not a character
-$s->push_byte(33);
+$s->push(33);
 echo $s;
 echo $s->size();
 
@@ -38,12 +38,12 @@ echo $self;
 $noop = 'kept';
 $noop->append('');
 echo $noop;
-echo mem::ref_count($noop->owner);
+echo mem::refs($noop->owner);
 
 // clear keeps the allocation
 $s->clear();
 echo $s->size();
-echo $s->is_empty();
+echo $s->empty();
 $s->append('again');
 echo $s;
 

@@ -7,7 +7,7 @@
 map<string, int32> $m = map<string, int32>();
 
 echo $m->count();
-echo $m->is_empty();
+echo $m->empty();
 echo $m->capacity();
 
 $m['a'] = 1;
@@ -15,7 +15,7 @@ $m['b'] = 2;
 $m->set('c', 3);
 
 echo $m->count();
-echo $m->is_empty();
+echo $m->empty();
 
 // a replace, not an insert
 $m['a'] = 9;
@@ -62,10 +62,10 @@ while ($i < $vs->count()) {
 
 echo $sum;
 
-// clear keeps the buffers, shrink_to_fit gives them back
+// clear keeps the buffers, shrink gives them back
 $m->clear();
 echo $m->count();
-echo $m->is_empty();
+echo $m->empty();
 
 // extend copies every entry across
 map<string, int32> $o = map<string, int32>();

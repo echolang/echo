@@ -22,7 +22,7 @@ function outlive() : weak<Res>
     weak<Res> $w = &$r;
 
     // the one the strong references hold together, plus $w
-    echo mem::weak_count($r);
+    echo mem::weaks($r);
 
     return $w;
 }

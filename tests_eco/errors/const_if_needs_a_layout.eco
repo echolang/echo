@@ -1,5 +1,5 @@
-// `size_of` is answered from the target layout, which only exists once code is being emitted - so it
+// `size` is answered from the target layout, which only exists once code is being emitted - so it
 // cannot decide a compile-time branch. a refusal rather than a not-yet: no round is going to answer it.
-const if (mem::size_of<int32>() > 2) {
+const if (mem::size<int32>() > 2) {
     echo 1;
 }

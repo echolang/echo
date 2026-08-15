@@ -166,7 +166,7 @@ def _read_text(view):
     """The bytes a `string::view` names, as text.
 
     **Length-delimited, never a C-string read.** A substring shares its owner's buffer and narrows
-    only the window (`string::sub`), so the bytes are not NUL-terminated at `size` - `view::is_terminated`
+    only the window (`string::sub`), so the bytes are not NUL-terminated at `size` - `view::terminated`
     exists precisely because a window that stops early is not. lldb renders `ptr<const uint8>` as a
     C string by default, which is why the *unformatted* output looks right and is wrong: on
     `$s->sub(0, 3)` it prints the whole of "Alice" where the answer is "Ali"."""

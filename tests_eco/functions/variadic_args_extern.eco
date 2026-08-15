@@ -16,14 +16,14 @@ string $word = 'hi';
 float $ratio = 1.5f;
 int16 $small = 7;
 
-int32 $n = c_snprintf($buf, 64, $format->c_str(), [$small, $word->c_str(), $ratio]);
+int32 $n = c_snprintf($buf, 64, $format->cstr(), [$small, $word->cstr(), $ratio]);
 echo $n;
-echo str::view_of_c_str($buf);
+echo str::cview($buf);
 
 // an empty list is legal and means no varargs at all
 string $plain = 'plain';
-int32 $m = c_snprintf($buf, 64, $plain->c_str(), []);
+int32 $m = c_snprintf($buf, 64, $plain->cstr(), []);
 echo $m;
-echo str::view_of_c_str($buf);
+echo str::cview($buf);
 
 mem::free($buf);

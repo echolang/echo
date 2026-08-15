@@ -11,16 +11,16 @@ function parse(int32 $n) : result<int32, int32>
 result<int32, int32> $a = parse(21);
 
 echo $a->has_value();
-echo $a->is_error();
+echo $a->failed();
 echo $a->unwrap();
-echo $a->value_or(0);
+echo $a->or(0);
 
 result<int32, int32> $b = parse(-5);
 
 echo $b->has_value();
-echo $b->is_error();
+echo $b->failed();
 echo $b->failure();
-echo $b->value_or(-77);
+echo $b->or(-77);
 
 // `unwrap()` hands back the payload's storage, so a write through it lands in the result
 int32& $slot = $a->unwrap();

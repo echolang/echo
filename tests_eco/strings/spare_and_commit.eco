@@ -15,7 +15,7 @@ $s->commit(3);
 
 echo $s;
 echo $s->size();
-echo $s->is_terminated();
+echo $s->terminated();
 echo $s->room();
 
 // a second write into the leftover spare
@@ -24,4 +24,4 @@ $q:$[0] = 33;
 $s->commit(1);
 
 echo $s;
-echo $s->c_str() != null;
+echo $s->cstr() != null;

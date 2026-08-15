@@ -6,7 +6,7 @@ expect: fail
   'size_of' is answered from the target's layout, which the compiler only knows once it is emitting code - so it cannot decide a 'const' expression.
 
   2 | // cannot decide a compile-time branch. a refusal rather than a not-yet: no round is going to answer it.
-  3 | const if (mem::size_of<int32>() > 2) {
+  3 | const if (mem::size<int32>() > 2) {
     : ^^^^^
   4 |     echo 1;
 

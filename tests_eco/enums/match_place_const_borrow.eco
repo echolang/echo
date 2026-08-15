@@ -1,0 +1,17 @@
+// mixed const and mutable place arms yield the most-const: a const int32&.
+// a read is fine; a write would be refused (match_place_const_launder)
+enum E
+{
+    case mut;
+    case imm;
+}
+
+const int32 $c = 7;
+int32 $m = 2;
+
+const int32& $slot = match (E::imm) {
+    E::mut => $m,
+    E::imm => $c,
+};
+
+echo $slot;

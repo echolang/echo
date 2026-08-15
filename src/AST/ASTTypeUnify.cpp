@@ -116,6 +116,34 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
         return true;
     }
 
+    // two signatures of the same kind bind structurally: `extern function<T(T)>` against
+    // `extern function<int32(int32)>` binds T. kinds must agree so a C function pointer and
+    // an Echo callable stay distinct. `allow_decay` off below, for the pointer arm's reason
+    if (param.has_signature() && arg.has_signature()) {
+        if (param.is_c_function() != arg.is_c_function()) {
+            return false;
+        }
+
+        const CallableSignature &ps = param.signature();
+        const CallableSignature &as = arg.signature();
+
+        if (ps.parameter_types.size() != as.parameter_types.size()) {
+            return false;
+        }
+
+        if (!unify_type(ps.return_type, as.return_type, out, false, position)) {
+            return false;
+        }
+
+        for (size_t i = 0; i < ps.parameter_types.size(); i++) {
+            if (!unify_type(ps.parameter_types[i], as.parameter_types[i], out, false, position)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // nothing was bound, and the parameter's shape is what decides whether that is a failure
     //
     // **still mentions a type parameter**: the shapes genuinely did not match. none of the arms above

@@ -20,7 +20,7 @@ echo std::env::var('ECO_CORPUS_SURELY_UNSET', 'fell_back');
 echo std::env::var('ECO_CORPUS_KEY', 'fell_back');
 
 // set but empty - `has` said true above, and this is the case a fallback cannot see
-echo std::env::var('ECO_CORPUS_EMPTY', 'fell_back')->is_empty();
+echo std::env::var('ECO_CORPUS_EMPTY', 'fell_back')->empty();
 
 // nothing here allocates: every answer is a view into the environment block
 echo mem::live_allocations();

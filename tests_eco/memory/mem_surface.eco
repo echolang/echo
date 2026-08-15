@@ -1,4 +1,4 @@
-// the rest of the mem:: surface: realloc, zero, copy, size_of, align_of, and freeing null
+// the rest of the mem:: surface: realloc, zero, copy, size, align, and freeing null
 
 // realloc keeps the contents that still fit, and may move the block - so its result re-seats the
 // pointer with `:$` rather than being written through it
@@ -23,8 +23,8 @@ mem::copy<int32>($dst, $a, 2);
 echo $dst:$[0];
 echo $dst:$[1];
 
-echo mem::size_of<int32>();
-echo mem::align_of<float64>();
+echo mem::size<int32>();
+echo mem::align<float64>();
 
 mem::free($a);
 mem::free($z);

@@ -18,7 +18,7 @@ class Handle
 // t_retain - a class handle
 function take_class(Handle $h) : int32
 {
-    return mem::ref_count<Handle>($h);
+    return mem::refs<Handle>($h);
 }
 
 function through_const_class(const Handle& $h) : int32
@@ -63,7 +63,7 @@ function through_mut_counted(Counted& $c) : int32
 // a `string`, which owns a buffer through a class
 function take_string(string $s) : usize
 {
-    return mem::ref_count<str::buf>($s->owner);
+    return mem::refs<str::buf>($s->owner);
 }
 
 function through_const_string(const string& $s) : usize
@@ -84,7 +84,7 @@ function through_mut_string(string& $s) : usize
     echo through_mut_class($h);
 
     // and the copies are gone again once the calls returned
-    echo mem::ref_count<Handle>($h);
+    echo mem::refs<Handle>($h);
 }
 
 {
@@ -104,7 +104,7 @@ function through_mut_string(string& $s) : usize
     echo through_const_string($s);
     echo through_mut_string($s);
 
-    echo mem::ref_count<str::buf>($s->owner);
+    echo mem::refs<str::buf>($s->owner);
 }
 
 // nothing the copies took was left behind

@@ -12,7 +12,7 @@ echo $mine->unwrap();
 result<string, int32> $failed = modresult::fetch(-2);
 
 echo $failed->failure();
-echo $failed->value_or('mine');
+echo $failed->or('mine');
 
 // a guard here, over the same instantiation, in this unit
 function mine(int32 $n) : string

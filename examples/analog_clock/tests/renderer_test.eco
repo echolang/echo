@@ -118,6 +118,6 @@ test layers_are_drawn_in_the_order_they_were_added
     // whichever went in last is the one in the corner, and that is the whole of the compositing rule. the
     // three real layers never overlap - the hands reach 0.95 of the radius and the ring is at 1.0 - so it
     // takes a layer written for the purpose to see it
-    assert($a_first->frame(&$t)->byte_at(0) == 66, 'the later stamp won');
-    assert($b_first->frame(&$t)->byte_at(0) == 65, 'and it wins the other way round too');
+    assert($a_first->frame(&$t)->byte(0) == 66, 'the later stamp won');
+    assert($b_first->frame(&$t)->byte(0) == 65, 'and it wins the other way round too');
 }

@@ -1,5 +1,5 @@
 // how C's variadic convention unpacks a struct is platform specific, so a struct is refused rather
-// than half-supported. a `string` is one of these, which is why `->c_str()` is the way across
+// than half-supported. a `string` is one of these, which is why `->cstr()` is the way across
 struct Point
 {
     int32 $x;
@@ -15,4 +15,4 @@ ptr<uint8> $buf = mem::alloc<uint8>(16);
 string $format = '%d';
 Point $p = Point(1, 2);
 
-c_snprintf($buf, 16, $format->c_str(), [$p, $format]);
+c_snprintf($buf, 16, $format->cstr(), [$p, $format]);

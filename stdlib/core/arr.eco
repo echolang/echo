@@ -7,7 +7,7 @@
  *
  * A function goes here rather than on the type when it does not need the type's internals. Neither
  * function below touches a property of either argument - `merge` is two `extend` calls and
- * `with_capacity` is a constructor and a `reserve` - so putting them in the struct would grow the
+ * `room` is a constructor and a `reserve` - so putting them in the struct would grow the
  * surface every reader of `array<T>` has to walk past for no gain in what they can do.
  */
 
@@ -30,7 +30,7 @@ public function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
 {
     // the room is asked for ahead of both appends rather than letting each reserve its own half:
     // `extend` reserves for what it is about to add, so two of them would double once in between
-    array<T> $out = with_capacity<T>($a->count() + $b->count());
+    array<T> $out = room<T>($a->count() + $b->count());
 
     $out->extend($a);
     $out->extend($b);
@@ -48,9 +48,9 @@ public function merge<T>(const array<T>& $a, const array<T>& $b) : array<T>
  * five elements to anyone who has met `vec![0; 5]`, and there is no way to name a constructor. Room for
  * five and a length of five are different things, so the one that is ambiguous is not spelled.
  *
- * `count()` is `0` afterwards. Use `reserve_exact` through this if the slack matters.
+ * `count()` is `0` afterwards. Use `fit` through this if the slack matters.
  */
-public function with_capacity<T>(usize $count) : array<T>
+public function room<T>(usize $count) : array<T>
 {
     array<T> $out = array<T>();
     $out->reserve($count);

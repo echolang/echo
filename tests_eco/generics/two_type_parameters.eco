@@ -224,7 +224,7 @@ assert(mem::live_allocations() == 0, "two buffers each, both given back");
 
     // 2 buffers + the written string's two allocations
     assert(mem::live_allocations() == 4, "two buffers and one written string");
-    assert(mem::ref_count<str::buf>($s->owner) == 2, "the local and the slot");
+    assert(mem::refs<str::buf>($s->owner) == 2, "the local and the slot");
 
     echo $p[0];
     echo $p->count();
@@ -233,7 +233,7 @@ assert(mem::live_allocations() == 0, "two buffers each, both given back");
     pair_buffer<int32, string> $q = $p;
 
     assert(mem::live_allocations() == 6, "two more buffers, and the element retained");
-    assert(mem::ref_count<str::buf>($s->owner) == 3, "the local and both slots");
+    assert(mem::refs<str::buf>($s->owner) == 3, "the local and both slots");
 
     echo $q[0];
 

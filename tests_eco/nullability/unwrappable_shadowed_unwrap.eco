@@ -1,7 +1,7 @@
 // **a guard calls the declaration the conformance accepted, not the one the matcher would rank first.**
 //
 // AST::unwrap_plan_for used to resolve the conformance's implementations, throw them away, and let
-// AST::GuardLowering mint `"has_value"` and `"unwrap"` as by-name member calls - a second answer to the
+// AST::GuardLowering mint `"ok"` and `"unwrap"` as by-name member calls - a second answer to the
 // question the plan had just answered. `AST::UnwrapPlan` carries the two declarations now, exactly
 // as `AST::IterationPlan` carries `iterate`, and AST::make_resolved_member_call is what a lowering with an
 // answer in hand uses.
@@ -14,7 +14,7 @@
 // the non-const one, `f(T&)` outranking `f(const T&)` by design.
 //
 // so the by-name lowering called `$__guard0->has_value()` and got the wrong overload: this program
-// printed `wrong has_value` and then `-1`, taking the else arm on a cell that was holding 42.
+// printed `wrong ok` and then `-1`, taking the else arm on a cell that was holding 42.
 //
 // the second half is the plainer reading of the ticket - an unrelated `unwrap()` overload beside the
 // conformance's. it costs nothing to assert both, and neither is reachable through the contract.
@@ -40,7 +40,7 @@ struct cell : contract::unwrappable<int32>
     // receiver. nothing about it is wrong to declare - it is simply not what the contract accepted
     public function has_value() : bool
     {
-        echo 'wrong has_value';
+        echo 'wrong ok';
         return false;
     }
 

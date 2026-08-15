@@ -174,9 +174,11 @@ namespace AST
     // **the post-parse moment of type_literal_at**, walked on the live tree.
     //
     // three written destinations: a declaration's initializer, an assignment's right-hand side, a
-    // return. generic bodies are skipped - a template's `T $sum = 0` is only meaningful once cloned.
-    // of_type is deliberately not this: a detached assign stays in the arena forever, and a walk
-    // that does not inherit visitFunctionDecl's skip would stamp the template
+    // return. plus the two wrappers that are themselves a destination: a `??` RHS at the unwrapped
+    // left type, and a `match` arm at the unified type. generic bodies are skipped - a template's
+    // `T $sum = 0` is only meaningful once cloned. of_type is deliberately not this: a detached
+    // assign stays in the arena forever, and a walk that does not inherit visitFunctionDecl's skip
+    // would stamp the template
     //
     // after AST::rederive_stale_variable_types in the fixpoint, because that step may be what makes
     // a declaration's type concrete in this same round

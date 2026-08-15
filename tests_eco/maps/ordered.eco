@@ -89,7 +89,7 @@
     $m->clear();
 
     echo $m->count();
-    echo $m->is_empty();
+    echo $m->empty();
 
     int32 $after_clear = 0;
 

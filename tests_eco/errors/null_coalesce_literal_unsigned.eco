@@ -1,0 +1,5 @@
+// `??` is a destination. an untyped -1 beside a uint32? must refuse, the same
+// way `$u / -1` does - not bit-cast to 0xFFFFFFFF
+uint32? $o = null;
+
+echo $o ?? -1;

@@ -9,5 +9,5 @@
 string $path = std::env::exe();
 
 echo $path->size() > 0;
-echo $path->starts_with('/');
-echo $path->ends_with('exe');
+echo $path->starts('/');
+echo $path->ends('exe');

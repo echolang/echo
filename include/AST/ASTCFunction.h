@@ -31,6 +31,25 @@ namespace AST
         const CoreTypes &core
     );
 
+    // **why may this type not appear on a declaration, given it may hide an `extern function<...>`?**
+    // nullopt when every C function pointer it contains is legal.
+    //
+    // the walk TypeChecker used to own, and the one that was not total: it descended through
+    // pointers, weaks, signatures and instantiation *arguments*, then stopped, so a property of
+    // `Handler<Point>` whose type was `extern function<Point(Point)>` never reached the refusal.
+    // asked of the type as a whole, including layout properties and statics, with a seen-set so a
+    // recursive `S { S& $next }` does not loop
+    std::optional<std::string> c_function_type_refusal(
+        const ValueType &type,
+        const CoreTypes &core
+    );
+
+    // **are these one C type?** Echo's `const` on a by-value parameter is a local write-protect
+    // and is not part of C's convention, so `extern function<int32(const int32)>` and
+    // `extern function<int32(int32)>` convert. the one comparison bind_function_ref_to and
+    // is_implicitly_convertible both ask
+    bool c_function_signatures_match(const CallableSignature &a, const CallableSignature &b);
+
     // **why may this declaration's address not be taken?** nullopt when it may.
     //
     // reads implicit_arg_count(), is_generic() and function_emission_kind rather than

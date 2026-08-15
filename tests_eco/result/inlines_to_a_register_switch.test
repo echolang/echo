@@ -5,7 +5,7 @@ flags: --optimize whole
 --- IR --->
 // **the loop vectorises, and that is the assertion** - the same one `iteration/lowered_cost` makes and for
 // the same reason it is spelled this way. a loop LoopVectorize widened is one it could prove has no calls,
-// no aliasing hazard and a computable trip count, so `has_value()` and `unwrap()` are inlined away and the
+// no aliasing hazard and a computable trip count, so `ok()` and `unwrap()` are inlined away and the
 // enum is SROA'd into registers, or none of this would be here.
 //
 // asking for the vector body **by name** is deliberate: the directives are plain substrings, so a bare

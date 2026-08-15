@@ -2,6 +2,7 @@
 
 #include "eco.h"
 
+#include "AST/ASTCFunction.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/VarDeclNode.h"
@@ -752,6 +753,12 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
 
     if (bare_from == bare_to) {
         return true;
+    }
+
+    // two C function pointers that C cannot tell apart. Echo's const on a by-value
+    // parameter is not part of that convention
+    if (bare_from.is_c_function() && bare_to.is_c_function()) {
+        return c_function_signatures_match(bare_from.signature(), bare_to.signature());
     }
 
     // **a value widens into `T?`, and a `T?` never narrows back.** one direction only, and it is the same

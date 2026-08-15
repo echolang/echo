@@ -1,11 +1,10 @@
 #include "AST/ASTMatchResolution.h"
 
-#include "AST/ASTBundle.h"
+#include "AST/ASTCFunction.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstructor.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTControlFlow.h"
-#include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTModule.h"
@@ -24,46 +23,20 @@ namespace AST
 {
 
 MatchResolution::MatchResolution(Bundle &bundle)
-    : _bundle(bundle), _collector(bundle.collector)
+    : FixpointLowering(bundle)
 {
-}
-
-CodeRef MatchResolution::code_ref_for(const TokenReference &token)
-{
-    return CodeRef{_current_module, _current_file, token.make_slice()};
-}
-
-bool MatchResolution::run_round()
-{
-    _changed = false;
-
-    for (auto &module_ptr : _bundle.modules) {
-        _current_module = module_ptr.get();
-
-        for (auto &file : module_ptr->files()) {
-            _current_file = &file;
-
-            if (file.root != nullptr) {
-                file.root->accept(*this);
-            }
-        }
-    }
-
-    return _changed;
-}
-
-void MatchResolution::finalize()
-{
-    _finalizing = true;
-    run_round();
-    _finalizing = false;
 }
 
 void MatchResolution::visitFunctionDecl(FunctionDeclNode &node)
 {
-    if (!node.is_generic()) {
-        RecursiveVisitor::visitFunctionDecl(node);
+    if (node.is_generic()) {
+        return;
     }
+
+    FunctionDeclNode *previous = _enclosing_function;
+    _enclosing_function = &node;
+    RecursiveVisitor::visitFunctionDecl(node);
+    _enclosing_function = previous;
 }
 
 void MatchResolution::visit_match(MatchExprNode &node)
@@ -330,6 +303,18 @@ void MatchResolution::resolve(MatchExprNode &node)
     // **the arms have to meet at one type**, and a `{ }` arm meets at `void`. one answer for the whole
     // form rather than one per arm: the value a match hands back is a single value, so an arm list that
     // disagreed would be a phi with two types
+    // an overloaded `&name` in an arm has no type until a destination binds it. the
+    // enclosing function's return type is that destination for `return match { => &add }`
+    if (_enclosing_function != nullptr) {
+        const ValueType wanted = _enclosing_function->get_return_type();
+
+        if (wanted.is_c_function()) {
+            for (MatchExprNode::Arm &arm : node.arms) {
+                bind_function_ref_to(arm.value, wanted, _collector.functions);
+            }
+        }
+    }
+
     ValueType unified = ValueType::make_void();
     bool first = true;
 
@@ -337,6 +322,7 @@ void MatchResolution::resolve(MatchExprNode &node)
     // match cannot hand back storage for one case and a computed value for another, the phi being of one
     // kind or the other. an arm that leaves says nothing either way, so it does not spoil this
     bool all_places = true;
+    bool place_pointee_const = false;
 
     for (MatchExprNode::Arm &arm : node.arms) {
         // **an arm that never comes back contributes no type**, and is skipped before the settled-type
@@ -384,6 +370,16 @@ void MatchResolution::resolve(MatchExprNode &node)
         const ValueType arm_type = arm.value != nullptr
             ? value_type_of(arm.value->result_type())
             : ValueType::make_void();
+
+        // **the most-const peeled type among the place arms**, kept separately from `unified`.
+        // `is_implicitly_convertible` starts by `make_mutable` on both sides, so a later `const int32`
+        // converts *into* an earlier `int32` and `unified` stays mutable. wrapping that as `int32&`
+        // is a mutable borrow of const storage, and reversing the arms produced `const int32&` -
+        // same program, two types. the place form has to take the most const, or a const arm can
+        // never produce a mutable `T&`
+        if (all_places && arm.value != nullptr && arm_type.is_const()) {
+            place_pointee_const = true;
+        }
 
         if (is_undetermined_type(arm_type) && arm.value != nullptr) {
             if (_finalizing) {
@@ -433,16 +429,34 @@ void MatchResolution::resolve(MatchExprNode &node)
     // answer to "do these arms meet", and the one thing it would buy - telling `T&` from `T` per arm - is
     // what `all_places` already says for the form as a whole.
     //
+    // **const is not peeled away.** `is_implicitly_convertible` drops it, which is right for a *value*
+    // (a copy out of const storage is fine) and wrong for a *place*: wrapping a mutable `unified` as
+    // `T&` after a const arm converted into it launders the const. the most-const of the place arms
+    // is the pointee, so a const arm can never produce a mutable `T&`.
+    //
     // a match with nothing to hand back stays `void`: `first` is still set when every arm left, and there
     // is no storage in that to name. reading this in a value position costs nothing extra - the auto-deref
     // every read of a borrow performs is what turns it back into a value, which is why the shape is
     // transparent to every existing use of a match as an expression
     if (all_places && !first && !unified.is_void()) {
+        if (place_pointee_const) {
+            unified = ValueType::make_const(unified);
+        }
+
         node.result = ValueType::make_pointer(unified, false);
         node.yields_a_place = true;
     }
     else {
         node.result = unified;
+    }
+
+    // an overloaded `&name` in an arm was parsed with no destination. the unified type is that
+    // destination, and bind_function_ref_to is the one writer that consults one - the same moment
+    // CallResolver asks for a call argument
+    if (!node.yields_a_place) {
+        for (MatchExprNode::Arm &arm : node.arms) {
+            bind_function_ref_to(arm.value, node.result, _collector.functions);
+        }
     }
 
     node.patterns_decided = true;

@@ -24,7 +24,7 @@ namespace str;
  * three places instead of a `- 1` living in a dozen.
  *
  * The invariant everything downstream leans on: **`$bytes[$used]` is always 0**. That is what makes
- * `->c_str()` sound with no copy, and what lets a window which stops early be *detected* rather
+ * `->cstr()` sound with no copy, and what lets a window which stops early be *detected* rather
  * than silently handing a caller bytes past its end.
  *
  * Nothing but `string` should construct one, and that stays a convention rather than a rule - `public`, and
@@ -76,7 +76,7 @@ public class buf
     /**
      * Copies `$count` bytes onto the end and re-terminates.
      */
-    function append_bytes(ptr<const uint8> $src, usize $count) : void
+    function append(ptr<const uint8> $src, usize $count) : void
     {
         $this->reserve($this->used + $count);
 
@@ -103,7 +103,7 @@ public class buf
     /**
      * Drops the contents and keeps the allocation.
      */
-    function empty() : void
+    function clear() : void
     {
         $this->used = 0;
         $this->bytes:$[0] = 0;
@@ -118,8 +118,8 @@ public class buf
     }
 }
 
-// **`private` on the block, which belongs to every declaration in it.** `view_of_c_str` and
-// `parse_float` are what this file offers over these two; a C symbol bound here is not a surface,
+// **`private` on the block, which belongs to every declaration in it.** `cview` and
+// `float` are what this file offers over these two; a C symbol bound here is not a surface,
 // and a consumer wanting `strlen` declares its own `extern` rather than borrowing ours
 private extern {
     function strlen as c_strlen(ptr<const uint8> $s) : usize;
@@ -142,7 +142,7 @@ private extern {
 // **Split by who reads them, not by what they spell.** The four this file alone compares against are
 // `private`; the rest are `internal` because format.eco is written on them too - a spec's letters and
 // its digits are the same table. Neither group is a surface: a program spelling `str::CH_DOT` is
-// reading this file's implementation, and `'.'->byte_at(0)` is what it should write instead.
+// reading this file's implementation, and `'.'->byte(0)` is what it should write instead.
 private const uint8 CH_TAB = 9;
 private const uint8 CH_LF = 10;
 private const uint8 CH_CR = 13;
@@ -175,7 +175,7 @@ internal const uint8 CH_X = 120;
  *
  * `private`: the three `trim` functions are what it is for.
  */
-private function is_ascii_space(uint8 $b) : bool
+private function space(uint8 $b) : bool
 {
     return $b == CH_SPACE || $b == CH_TAB || $b == CH_LF || $b == CH_CR;
 }
@@ -183,7 +183,7 @@ private function is_ascii_space(uint8 $b) : bool
 /**
  * The value of an ASCII digit byte, or `-1` when it is not one.
  *
- * One answer for the three places that read a number out of text - `parse_int`, and a format spec's
+ * One answer for the three places that read a number out of text - `int`, and a format spec's
  * width and precision. `-1` rather than an optional because every caller is already inside a loop
  * that stops on the first byte that is not a digit.
  *
@@ -194,7 +194,7 @@ private function is_ascii_space(uint8 $b) : bool
  * width and its precision are read with this, and one answer to "what number does this byte spell" is
  * the whole point.
  */
-internal function digit_value(uint8 $b) : int32
+internal function digit(uint8 $b) : int32
 {
     int32 $wide = $b;
     int32 $digit = $wide - CH_ZERO;
@@ -209,17 +209,17 @@ internal function digit_value(uint8 $b) : int32
 /**
  * A window over a NUL-terminated C string, without copying it.
  *
- * The counterpart to `string::view::c_str()`, which goes the other way. Everything C hands back is
+ * The counterpart to `string::view::cstr()`, which goes the other way. Everything C hands back is
  * shaped like this - a bare pointer with the length left implicit in a terminator - so this is the
- * seam every binding crosses on the way in, the way `c_str()` is the one they cross going out.
+ * seam every binding crosses on the way in, the way `cstr()` is the one they cross going out.
  *
  * **It borrows.** The bytes belong to whoever allocated them, and the window is valid only while
  * they are. That is the right default for the two callers that matter: an `argv` entry and an
  * environment variable both live as long as the process does, so copying them would be an
- * allocation bought for nothing. Reach for `from_c_str` when the bytes are *not* yours to rely on -
+ * allocation bought for nothing. Reach for `from` when the bytes are *not* yours to rely on -
  * a buffer you are about to free, or anything behind a `setenv`.
  */
-public function view_of_c_str(ptr<const uint8> $s) : string::view
+public function cview(ptr<const uint8> $s) : string::view
 {
     return string::view($s, c_strlen($s));
 }
@@ -227,28 +227,28 @@ public function view_of_c_str(ptr<const uint8> $s) : string::view
 /**
  * An owning copy of a NUL-terminated C string.
  *
- * `view_of_c_str` with the bytes taken along, for when the source will not outlive the result.
+ * `cview` with the bytes taken along, for when the source will not outlive the result.
  *
- * The terminator is the only thing this knows that `from_bytes` does not, so that is the whole of
+ * The terminator is the only thing this knows that `from` does not, so that is the whole of
  * what it contributes: `c_strlen` answers the count and the copy is the same one.
  */
-public function from_c_str(ptr<const uint8> $s) : string
+public function from(ptr<const uint8> $s) : string
 {
-    return from_bytes($s, c_strlen($s));
+    return from($s, c_strlen($s));
 }
 
 /**
  * An owning copy of `$count` bytes at `$b`, with no terminator required.
  *
- * `from_c_str` for text whose length you already know - a `read` that answered how many bytes it
+ * `from` for text whose length you already know - a `read` that answered how many bytes it
  * wrote, a slice of a larger buffer. The block is sized up front so the append does not grow it,
  * the bargain `string::clone_reserving` makes.
  */
-public function from_bytes(ptr<const uint8> $b, usize $count) : string
+public function from(ptr<const uint8> $b, usize $count) : string
 {
     // `+ 1` is the NUL slot `$capacity` does not count
     buf $owner = buf($count, 0, mem::alloc<uint8>($count + 1));
-    $owner->append_bytes($b, $count);
+    $owner->append($b, $count);
 
     return string(string::view($owner->bytes, $count), $owner);
 }
@@ -275,13 +275,13 @@ public function concat(const string& $a, const string& $b) : string
  * A window, not a copy: the result shares `$text`'s buffer, which is what makes trimming free. Call
  * `->clone()` on it if you want the parent's bytes released.
  */
-public function trim_start(const string& $text) : string
+public function ltrim(const string& $text) : string
 {
     usize $n = $text->size();
     usize $i = 0;
 
     while ($i < $n) {
-        if (!is_ascii_space($text->byte_at($i))) {
+        if (!space($text->byte($i))) {
             break;
         }
 
@@ -292,14 +292,14 @@ public function trim_start(const string& $text) : string
 }
 
 /**
- * `$text` with trailing ASCII whitespace removed. A window, for `trim_start`'s reason.
+ * `$text` with trailing ASCII whitespace removed. A window, for `ltrim`'s reason.
  */
-public function trim_end(const string& $text) : string
+public function rtrim(const string& $text) : string
 {
     usize $n = $text->size();
 
     while ($n > 0) {
-        if (!is_ascii_space($text->byte_at($n - 1))) {
+        if (!space($text->byte($n - 1))) {
             break;
         }
 
@@ -310,11 +310,11 @@ public function trim_end(const string& $text) : string
 }
 
 /**
- * `$text` with ASCII whitespace removed from both ends. A window, for `trim_start`'s reason.
+ * `$text` with ASCII whitespace removed from both ends. A window, for `ltrim`'s reason.
  */
 public function trim(const string& $text) : string
 {
-    return trim_start(trim_end($text));
+    return ltrim(rtrim($text));
 }
 
 /**
@@ -331,7 +331,7 @@ public function split(const string& $text, const string& $sep) : array<string>
 {
     array<string> $parts = array<string>();
 
-    if ($sep->is_empty()) {
+    if ($sep->empty()) {
         $parts->push($text->sub(0, $text->size()));
         return $parts;
     }
@@ -341,9 +341,9 @@ public function split(const string& $text, const string& $sep) : array<string>
 
     while (true) {
         string $rest = $text->sub($start, $size - $start);
-        usize $at = $rest->index_of($sep);
+        usize $at = $rest->find($sep);
 
-        // `index_of` answers the haystack's own size when there is no match - there is no `Option`
+        // `find` answers the haystack's own size when there is no match - there is no `Option`
         // to hand back, and the size is the one value always to hand and never a valid index
         if ($at >= $rest->size()) {
             $parts->push($rest);
@@ -421,7 +421,7 @@ public function repeat(const string& $text, usize $times) : string
  * asks for, and neither of those is a codepoint count either - so counting bytes is at least a
  * rule that can be stated. Text already that wide is answered unchanged rather than truncated.
  */
-public function pad_start(const string& $text, usize $width, uint8 $fill) : string
+public function lpad(const string& $text, usize $width, uint8 $fill) : string
 {
     usize $size = $text->size();
 
@@ -435,7 +435,7 @@ public function pad_start(const string& $text, usize $width, uint8 $fill) : stri
     usize $i = $size;
 
     while ($i < $width) {
-        $out->push_byte($fill);
+        $out->push($fill);
         $i = $i + 1;
     }
 
@@ -445,9 +445,9 @@ public function pad_start(const string& $text, usize $width, uint8 $fill) : stri
 
 /**
  * `$text` with `$fill` bytes added on the right until it is `$width` bytes wide. Bytes, for
- * `pad_start`'s reason.
+ * `lpad`'s reason.
  */
-public function pad_end(const string& $text, usize $width, uint8 $fill) : string
+public function rpad(const string& $text, usize $width, uint8 $fill) : string
 {
     usize $size = $text->size();
 
@@ -462,7 +462,7 @@ public function pad_end(const string& $text, usize $width, uint8 $fill) : string
     usize $i = $size;
 
     while ($i < $width) {
-        $out->push_byte($fill);
+        $out->push($fill);
         $i = $i + 1;
     }
 
@@ -472,7 +472,7 @@ public function pad_end(const string& $text, usize $width, uint8 $fill) : string
 // int64's minimum divided by ten, its last digit, and the minimum itself. at file scope because a
 // constant is its expression copied into each use site and so cannot be declared inside a body -
 // which is the whole difference between a constant and a `const` variable. `private`, since the one
-// thing that reads them is `parse_int` below
+// thing that reads them is `int` below
 private const int64 PARSE_INT_FLOOR = -922337203685477580;
 private const int64 PARSE_INT_FLOOR_DIGIT = 8;
 private const int64 INT64_MIN = -9223372036854775808;
@@ -487,7 +487,7 @@ private const int64 INT64_MIN = -9223372036854775808;
  * no positive counterpart, so accumulating positive and negating at the end cannot parse the one
  * value most likely to be tested. Overflow answers `null` rather than wrapping.
  */
-public function parse_int(const string& $text) : int64?
+public function int(const string& $text) : int64?
 {
     usize $n = $text->size();
 
@@ -498,7 +498,7 @@ public function parse_int(const string& $text) : int64?
     usize $i = 0;
     bool $negative = false;
 
-    uint8 $first = $text->byte_at(0);
+    uint8 $first = $text->byte(0);
 
     if ($first == CH_MINUS) {
         $negative = true;
@@ -516,7 +516,7 @@ public function parse_int(const string& $text) : int64?
     int64 $value = 0;
 
     while ($i < $n) {
-        int64 $digit = digit_value($text->byte_at($i));
+        int64 $digit = digit($text->byte($i));
 
         if ($digit < 0) {
             return null;
@@ -557,16 +557,16 @@ public function parse_int(const string& $text) : int64?
  * its parent's buffer and simply stops early. Trading an allocation for that is the honest price
  * of a C boundary.
  */
-public function parse_float(const string& $text) : float64?
+public function float(const string& $text) : float64?
 {
-    if ($text->is_empty()) {
+    if ($text->empty()) {
         return null;
     }
 
     string $owned = $text->clone();
 
     ptr<uint8> $stop = null;
-    float64 $value = c_strtod($owned->c_str(), &$stop);
+    float64 $value = c_strtod($owned->cstr(), &$stop);
 
     if ($stop:$ == null) {
         return null;
@@ -574,7 +574,7 @@ public function parse_float(const string& $text) : float64?
 
     // compared as integers rather than as pointers: `mem::bit_cast` is how an address becomes a
     // number here, and a subtraction of two of them is the length `strtod` consumed
-    usize $begin = mem::bit_cast<usize, ptr<const uint8>>($owned->c_str());
+    usize $begin = mem::bit_cast<usize, ptr<const uint8>>($owned->cstr());
     usize $end = mem::bit_cast<usize, ptr<uint8>>($stop);
 
     // nothing parsed, or something left over

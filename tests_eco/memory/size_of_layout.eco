@@ -1,19 +1,19 @@
-// size_of / align_of answer from the *host target's* data layout, folded to a constant.
+// size / align answer from the *host target's* data layout, folded to a constant.
 // `Padded` is the case that matters: only the real layout reports 16/8 for it
 struct Padded {
     uint8 $a;
     uint64 $b;
 }
 
-echo mem::size_of<int32>();
-echo mem::size_of<uint8>();
-echo mem::size_of<float64>();
-echo mem::size_of<Padded>();
+echo mem::size<int32>();
+echo mem::size<uint8>();
+echo mem::size<float64>();
+echo mem::size<Padded>();
 
-echo mem::align_of<uint8>();
-echo mem::align_of<Padded>();
+echo mem::align<uint8>();
+echo mem::align<Padded>();
 
-// size_of is the allocation *stride*, so it includes tail padding and `$p:$[n]` lands on
+// size is the allocation *stride*, so it includes tail padding and `$p:$[n]` lands on
 // element n. also a cross-module instantiation: `alloc<Padded>` is cloned into the stdlib
 // module, which has to lower a layout declared here in main
 ptr<Padded> $items = mem::alloc<Padded>(2);

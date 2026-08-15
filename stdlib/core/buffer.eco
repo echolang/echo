@@ -125,14 +125,14 @@ public struct buffer<T>
      * the caller owns the question of what the two ranges mean afterwards. `array<T>` uses it to
      * repeat a range it is about to declare live.
      */
-    function copy_nonoverlapping(usize $to, usize $from, usize $count) : void
+    function copy(usize $to, usize $from, usize $count) : void
     {
         mem::copy<T>($this->data:$ + $to, $this->data:$ + $from, $count);
     }
 
     /**
      * The same, for two ranges that **may** overlap - a container closing a gap by shifting a run of
-     * elements down by one slot, which is exactly what `copy_nonoverlapping` promises does not happen.
+     * elements down by one slot, which is exactly what `copy` promises does not happen.
      *
      * Nothing is duplicated and nothing is destroyed: each element ends up somewhere else, so the
      * count of owners is unchanged.
@@ -150,7 +150,7 @@ public struct buffer<T>
      * buffer to itself is refused before it gets here: the receiver takes `inout` access and `$src`
      * takes `read`, and one value cannot be both.
      */
-    function copy_from(usize $to, const buffer<T>& $src, usize $from, usize $count) : void
+    function copy(usize $to, const buffer<T>& $src, usize $from, usize $count) : void
     {
         mem::copy<T>($this->data:$ + $to, $src->data:$ + $from, $count);
     }

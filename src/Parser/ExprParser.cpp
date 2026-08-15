@@ -331,47 +331,6 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
 }
 
 /**
- * Tries to implicitly cast the source expression to the expected type.
- */
-AST::NodeReference try_implicit_cast(Parser::Payload &payload, AST::NodeReference source, const AST::ValueType &expected_type)
-{
-    // a literal is retyped rather than cast, which is what keeps a written value exact and is what
-    // AST::type_literal_at is for. **asked of every literal, typed or not** - this is the destination
-    // speaking, and unlike a binary operand's neighbour it always outranks a default
-    if (source.has_type<AST::LiteralIntExprNode>()
-        || source.has_type<AST::LiteralFloatExprNode>()
-        || source.has_type<AST::LiteralBoolExprNode>()) {
-        return apply_literal_typing(payload, source.unsafe_ptr<AST::ExprNode>(), expected_type);
-    }
-    // other expressions
-    else if (source.is_expression_node()) {
-        auto expr_node = source.unsafe_ptr<AST::ExprNode>();
-
-        // if the expression is already of the expected type, we can return it
-        if (expr_node->result_type() == expected_type) {
-            return source;
-        }
-
-        // otherwise we create a type cast node
-        auto &cast_node = payload.context.emplace_node<AST::TypeCastNode>(expected_type, expr_node);
-        return AST::make_ref(cast_node);
-    }
-    else {
-        // payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-        //     payload.context.code_ref(source.token_reference()),
-        //     fmt::format(
-        //         "Cannot implicitly cast the expression of type '{}' to the expected type '{}'.",
-        //         source.result_type().get_type_desciption(),
-        //         expected_type.get_type_desciption()
-        //     )
-        // );
-        // return AST::make_void_ref();
-    }
-
-    return source;
-}
-
-/**
  * BINARY EXPRESSION
  * ----------------------------------------------------------------------------
  *
@@ -1475,16 +1434,6 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     ref.is_qualified = qualified;
     ref.static_owner = static_owner;
 
-    if (cursor.peek_is_type(1, Token::Type::t_open_paren)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(amp),
-            "cannot take the address of a call - '&f(...)' is the address of a result, "
-            "and a result has none. Write '&f' for the function itself.");
-        cursor.try_skip_to_next_statement();
-        ref.resolved = true;
-        return AST::make_ref(ref);
-    }
-
     cursor.skip();
 
     const auto candidates = AST::function_ref_candidates(ref, payload.collector.functions);
@@ -1519,7 +1468,18 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
         AST::bind_function_ref_to(&ref, expected_type->type, payload.collector.functions);
     }
 
-    return Parser::parse_postfix_chain(payload, AST::make_ref(ref));
+    auto chained = Parser::parse_postfix_chain(payload, AST::make_ref(ref));
+
+    // `&add(41)` is the function-ref plus a postfix call, the same `$f(...)` shape a
+    // variable of callable type already has. parse_postfix_chain does not consume `(`
+    if (cursor.is_type(Token::Type::t_open_paren) && chained.is_expression_node()) {
+        if (auto *call = Parser::parse_indirect_call(
+                payload, chained.unsafe_ptr<AST::ExprNode>(), amp)) {
+            return Parser::parse_postfix_chain(payload, AST::make_ref(*call));
+        }
+    }
+
+    return chained;
 }
 
 const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode *expected_type)

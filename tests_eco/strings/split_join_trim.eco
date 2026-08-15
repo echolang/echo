@@ -17,8 +17,8 @@ echo str::join(array<string>(), '-')->size();
 
 // bound first, because a hole opens on `{$` and a free call does not start with one
 string $trimmed = str::trim("  \t hi \n ");
-string $start = str::trim_start('  hi  ');
-string $end = str::trim_end('  hi  ');
+string $start = str::ltrim('  hi  ');
+string $end = str::rtrim('  hi  ');
 string $blank = str::trim('     ');
 
 echo "|{$trimmed}|";
@@ -29,8 +29,8 @@ echo "|{$blank}|";
 echo str::repeat('ab', 3);
 echo str::repeat('ab', 0)->size();
 // the fill is a byte: 48 is '0' and 46 is '.'
-string $padded_start = str::pad_start('7', 4, 48);
-string $padded_end = str::pad_end('7', 4, 46);
+string $padded_start = str::lpad('7', 4, 48);
+string $padded_end = str::rpad('7', 4, 46);
 
 echo "|{$padded_start}|";
 echo "|{$padded_end}|";

@@ -61,7 +61,7 @@ made the status something a program *chooses*: pinned as `fail`, a case assertin
 as well if the compiler crashed. In `mode: build` an exact status is the *program's* — a build that fails
 before producing a binary is reported as a build failure, not matched against it.
 
-`env`, `args` and `stdin` exist for the same reason: without them `std::env` and `std::io::read_line` can
+`env`, `args` and `stdin` exist for the same reason: without them `std::env` and `std::io::readline` can
 only be tested against whatever the machine running the suite inherited — which differs between a developer
 and CI and asserts almost nothing, and in `stdin`'s case is a hang. All three are shell-level — a
 `KEY=VALUE` prefix, an argument suffix, and a `printf ... |` ahead of the whole command — so they reach a
@@ -69,7 +69,7 @@ JIT'd program and a linked binary by the same route, and none can leak into the 
 into a parallel case. Neither a value, an argument nor a line may contain a space; a pair without an `=` is
 a located error rather than a word the shell would try to run.
 
-`stdin` is **one line per word**, so `stdin: hello second` feeds two lines. That is what a `read_line` case
+`stdin` is **one line per word**, so `stdin: hello second` feeds two lines. That is what a `readline` case
 wants and it is the only shape that fits the whitespace-separated header the other two already use.
 
 ### Testing another platform

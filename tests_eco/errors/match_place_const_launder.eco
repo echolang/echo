@@ -1,0 +1,18 @@
+// a place-yielding match must not wrap a const arm as a mutable T&. arm order
+// used to decide: mut first then const produced int32&, the reverse produced
+// const int32&
+enum E
+{
+    case mut;
+    case imm;
+}
+
+const int32 $c = 1;
+int32 $m = 2;
+
+int32& $slot = match (E::mut) {
+    E::mut => $m,
+    E::imm => $c,
+};
+
+$slot = 99;

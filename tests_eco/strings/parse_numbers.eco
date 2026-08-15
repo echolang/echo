@@ -1,40 +1,40 @@
-// `parse_int` and `parse_float` answer a nullable, so the absence case is `guard ... else` rather
+// `int` and `float` answer a nullable, so the absence case is `guard ... else` rather
 // than a sentinel
-int64 $a = guard str::parse_int('42') else { die('42'); }
+int64 $a = guard str::int('42') else { die('42'); }
 echo $a;
 
-int64 $b = guard str::parse_int('-42') else { die('-42'); }
+int64 $b = guard str::int('-42') else { die('-42'); }
 echo $b;
 
-int64 $c = guard str::parse_int('+7') else { die('+7'); }
+int64 $c = guard str::int('+7') else { die('+7'); }
 echo $c;
 
 // the two boundaries, which is what accumulating negative buys
-int64 $min = guard str::parse_int('-9223372036854775808') else { die('min'); }
+int64 $min = guard str::int('-9223372036854775808') else { die('min'); }
 echo $min;
 
-int64 $max = guard str::parse_int('9223372036854775807') else { die('max'); }
+int64 $max = guard str::int('9223372036854775807') else { die('max'); }
 echo $max;
 
 // and what overflow answers: null, never a wrapped value
-echo str::parse_int('9223372036854775808') ?? -1;
-echo str::parse_int('-9223372036854775809') ?? -1;
+echo str::int('9223372036854775808') ?? -1;
+echo str::int('-9223372036854775809') ?? -1;
 
 // nothing else is accepted - no whitespace, no separators, no trailing text
-echo str::parse_int('') ?? -1;
-echo str::parse_int('-') ?? -1;
-echo str::parse_int(' 4') ?? -1;
-echo str::parse_int('4 ') ?? -1;
-echo str::parse_int('4kg') ?? -1;
-echo str::parse_int('0x10') ?? -1;
+echo str::int('') ?? -1;
+echo str::int('-') ?? -1;
+echo str::int(' 4') ?? -1;
+echo str::int('4 ') ?? -1;
+echo str::int('4kg') ?? -1;
+echo str::int('0x10') ?? -1;
 
-float64 $f = guard str::parse_float('1.25') else { die('1.25'); }
+float64 $f = guard str::float('1.25') else { die('1.25'); }
 echo $f;
 
-float64 $neg = guard str::parse_float('-0.5') else { die('-0.5'); }
+float64 $neg = guard str::float('-0.5') else { die('-0.5'); }
 echo $neg;
 
 // the whole text has to be consumed, which is the difference between this and calling strtod
-echo str::parse_float('1.5kg') ?? -1.0;
-echo str::parse_float('') ?? -1.0;
-echo str::parse_float('nonsense') ?? -1.0;
+echo str::float('1.5kg') ?? -1.0;
+echo str::float('') ?? -1.0;
+echo str::float('nonsense') ?? -1.0;

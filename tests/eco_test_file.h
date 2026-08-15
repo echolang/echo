@@ -111,7 +111,7 @@ namespace EchoTests
         std::vector<std::string> arguments;
 
         // the lines to feed the program on standard input, **one word per line**. it exists for
-        // `std::io::read_line`, which can otherwise only be tested against whatever the terminal
+        // `std::io::readline`, which can otherwise only be tested against whatever the terminal
         // running the suite happens to be attached to - which is a hang under CI rather than an
         // assertion.
         //

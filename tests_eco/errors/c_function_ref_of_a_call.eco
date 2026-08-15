@@ -1,3 +1,5 @@
+// `&get()` calls get through a C function pointer. that int32 is not itself
+// a function pointer
 function get() : int32
 {
     return 5;

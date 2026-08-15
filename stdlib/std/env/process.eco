@@ -85,7 +85,7 @@ public struct arg_iterator : contract::iterator<string::view>, contract::keyed<u
             return false;
         }
 
-        $this->current = str::view_of_c_str($this->block:$[$this->pos]);
+        $this->current = str::cview($this->block:$[$this->pos]);
         $this->pos = $this->pos + 1;
 
         return true;
@@ -105,7 +105,7 @@ public struct arg_iterator : contract::iterator<string::view>, contract::keyed<u
 /**
  * The argument at `$index`, counting the program name as 0.
  *
- * Checked with `assert`, the bargain `string::view::byte_at` makes: reading past `argc()` is a mistake
+ * Checked with `assert`, the bargain `string::view::byte` makes: reading past `argc()` is a mistake
  * in the caller rather than a condition to recover from.
  */
 public function arg(usize $index) : string::view
@@ -116,7 +116,7 @@ public function arg(usize $index) : string::view
     // storage - AST::storage_of calls that addressless
     ptr<ptr<uint8>> $block = raw_argv();
 
-    return str::view_of_c_str($block:$[$index]);
+    return str::cview($block:$[$index]);
 }
 
 /**
@@ -153,9 +153,9 @@ public function argv() : array<string>
 
     while ($i < $count) {
         // through the raw C string rather than the view `arg` builds, the shape `exe`'s fallback uses:
-        // `str::from_c_str` is the one function that turns bytes nobody owns into bytes this array does,
+        // `str::from` is the one function that turns bytes nobody owns into bytes this array does,
         // and re-measuring them costs a `strlen` the view had already paid for
-        $out[] = str::from_c_str(arg($i)->c_str());
+        $out[] = str::from(arg($i)->cstr());
         $i = $i + 1;
     }
 
@@ -167,7 +167,7 @@ public function argv() : array<string>
  *
  * An owning `string` rather than a view, and that is forced rather than chosen: both platform calls write
  * into a buffer this function allocated, so a window over them would dangle the moment it was handed
- * back. The same reason `working_dir` owns its answer.
+ * back. The same reason `cwd` owns its answer.
  *
  * **On a platform this module has not been taught, it falls back to `argv[0]`** - the path as invoked,
  * which is absolute when the program was launched by an absolute path and whatever the caller felt like
@@ -199,7 +199,7 @@ public function exe() : string
         die('_NSGetExecutablePath refused a buffer it asked for');
     }
 
-    string $path = str::from_c_str($raw);
+    string $path = str::from($raw);
     mem::free($raw);
 
     return $path;
@@ -214,7 +214,7 @@ public function exe() : string
 
     while ($capacity <= 65536) {
         ptr<uint8> $raw = mem::alloc<uint8>($capacity + 1);
-        int64 $written = c_readlink($link->c_str(), $raw, $capacity);
+        int64 $written = c_readlink($link->cstr(), $raw, $capacity);
 
         if ($written < 0) {
             mem::free($raw);
@@ -230,7 +230,7 @@ public function exe() : string
         // the terminator readlink did not write
         $raw:$[$written] = 0;
 
-        string $path = str::from_c_str($raw);
+        string $path = str::from($raw);
         mem::free($raw);
 
         return $path;
@@ -238,7 +238,7 @@ public function exe() : string
 
     die('the executable path does not fit in 64 KiB');
 #[else]
-    return str::from_c_str(arg(0)->c_str());
+    return str::from(arg(0)->cstr());
 #[end]
 }
 

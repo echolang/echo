@@ -14,7 +14,7 @@
 # answers `void` and writes through the `sret` slot its caller allocated
 CHECK: define linkonce_odr void @_arrayZZMRBCLC5arrayIMLPiEGMLPi(ptr noalias sret(%"array<int32>")
 CHECK-NOT: br i1
-CHECK: call void @_M5array_reserve_exact
+CHECK: call void @_M5array_fit
 CHECK: call void @_M5array_extend
 
 CHECK: define linkonce_odr void @_M5array_extendZZMRBMLC5arrayIMLPiEZMRBCLC5arrayIMLPiEGMLPi(

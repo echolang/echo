@@ -1,7 +1,7 @@
 // seek after a write, then read the bytes back from the start
 
 string $path = '';
-$path->append(str::from(std::env::tmp_dir()));
+$path->append(str::from(std::env::tmp()));
 $path->append('/echo-io-seek-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -46,9 +46,8 @@ echo $sz;
 
 $f->close();
 
-usize $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::io::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;

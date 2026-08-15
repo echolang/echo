@@ -1,6 +1,6 @@
-// `read_line` answers a nullable, so end of input is `guard ... else` rather than a sentinel - the
+// `readline` answers a nullable, so end of input is `guard ... else` rather than a sentinel - the
 // same shape `std::env::var` already has
-string $first = guard std::io::read_line() else {
+string $first = guard std::io::readline() else {
     std::io::println('nothing at all');
     return 0;
 }
@@ -8,7 +8,7 @@ string $first = guard std::io::read_line() else {
 std::io::println("first: {$first} ({$first->size()} bytes)");
 
 // the newline is not part of the line
-string $second = guard std::io::stdin->read_line() else {
+string $second = guard std::io::stdin->readline() else {
     std::io::println('one line only');
     return 0;
 }
@@ -16,7 +16,7 @@ string $second = guard std::io::stdin->read_line() else {
 std::io::println("second: {$second}");
 
 // and a third read past the end answers null rather than an empty string
-string $third = guard std::io::read_line() else {
+string $third = guard std::io::readline() else {
     std::io::println('end of input');
     return 0;
 }

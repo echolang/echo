@@ -27,7 +27,7 @@ internal extern {
     function getenv as c_getenv(ptr<const uint8> $name) : ptr<uint8>;
 
     // writes the path into `$buf` and hands it back, or null when it does not fit - which is the
-    // only failure `working_dir` has to distinguish, and why it grows its buffer rather than
+    // only failure `cwd` has to distinguish, and why it grows its buffer rather than
     // reading errno
     function getcwd as c_getcwd(ptr<uint8> $buf, usize $size) : ptr<uint8>;
 
@@ -50,7 +50,7 @@ internal extern {
 #[elif: os == linux]
 internal extern {
     // the byte count written, or -1. It does **not** terminate, which is the one thing a caller here has to
-    // remember - `str::from_c_str` would read past the end
+    // remember - `str::from` would read past the end
     function readlink as c_readlink(ptr<const uint8> $path, ptr<uint8> $buf, usize $size) : int64;
 }
 #[end]

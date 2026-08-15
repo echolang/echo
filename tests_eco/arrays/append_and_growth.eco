@@ -31,7 +31,7 @@ echo $b->count();
 echo $b->capacity();
 
 // **borrowing the new slot** rather than building a value to copy into it. `&$a[]` and
-// `->push_slot()` are the same thing; neither reads what is in the slot, which is why both are legal
+// `->slot()` are the same thing; neither reads what is in the slot, which is why both are legal
 // where `echo $a[]` is not
 $m = array<Mat2>();
 Mat2& $slot = &$m[];
@@ -39,7 +39,7 @@ $slot->a = 1.0;
 $slot->d = 1.0;
 echo $m[0]->a + $m[0]->d;
 
-Mat2& $second = $m->push_slot();
+Mat2& $second = $m->slot();
 $second->a = 5.0;
 echo $m->count();
 echo $m[1]->a;

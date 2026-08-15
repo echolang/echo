@@ -2,7 +2,7 @@
 // reader is the only thing pulling bytes off the fd
 
 string $path = '';
-$path->append(str::from(std::env::tmp_dir()));
+$path->append(str::from(std::env::tmp()));
 $path->append('/echo-io-reader-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -21,14 +21,14 @@ file $f = guard std::io::open($path, .read) else ($e) {
 
 std::io::reader $r = std::io::reader(std::io::stream($f->fd()));
 
-string? $a = guard $r->read_line() else ($e) {
+string? $a = guard $r->readline() else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $a ?? 'null';
 
-string? $b = guard $r->read_line() else ($e) {
+string? $b = guard $r->readline() else ($e) {
     echo $e->message();
     return 1;
 }
@@ -44,9 +44,8 @@ echo $rest->size();
 
 $f->close();
 
-usize $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::io::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;

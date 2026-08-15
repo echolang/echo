@@ -11,5 +11,5 @@ function parse(int32 $n) : result<int32, string>
 
 result<int32, string> $r = parse(-1);
 
-echo $r->is_error();
+echo $r->failed();
 echo $r->unwrap();

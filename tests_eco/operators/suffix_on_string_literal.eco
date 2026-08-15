@@ -8,7 +8,7 @@ operator (string $s)_handle: usize {
     usize $hash = 5381;
     usize $i = 0;
     while ($i < $s->size()) {
-        $hash = $hash * 33 + $s->byte_at($i);
+        $hash = $hash * 33 + $s->byte($i);
         $i = $i + 1;
     }
     return $hash % 100000;

@@ -1,27 +1,27 @@
 // a substring shares its parent's buffer rather than copying it. that is what the owner is for, and
-// `mem::ref_count` is how it can be observed rather than asserted in a comment
+// `mem::refs` is how it can be observed rather than asserted in a comment
 
 // a literal owns nothing at all - static bytes, a null owner, a count of zero
 $lit = 'hello world';
-echo mem::ref_count($lit->owner);
+echo mem::refs($lit->owner);
 
 // ->clone() is the one operation that always allocates, so this is the first real buffer
 $own = $lit->clone();
-echo mem::ref_count($own->owner);
+echo mem::refs($own->owner);
 echo $own;
 
 // ...and a substring of it is a second reference to that same buffer, not a second buffer
 $sub = $own->sub(6, 5);
-echo mem::ref_count($own->owner);
+echo mem::refs($own->owner);
 echo $sub;
 echo $sub->size();
 
 // a substring of a substring narrows again, still sharing
 $inner = $sub->sub(1, 3);
-echo mem::ref_count($own->owner);
+echo mem::refs($own->owner);
 echo $inner;
 
 // an ordinary copy is one more retain, and no bytes move
 $copy = $own;
-echo mem::ref_count($own->owner);
+echo mem::refs($own->owner);
 echo $copy;

@@ -11,7 +11,7 @@
  *     function snprintf as c_snprintf(ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
  * }
  *
- * c_snprintf($buf, $size, '%.*f'->c_str(), [$precision, $value]);
+ * c_snprintf($buf, $size, '%.*f'->cstr(), [$precision, $value]);
  * ```
  *
  * Four parameters, four arguments. The brackets are what the C side receives as its variadic tail,
@@ -27,7 +27,7 @@
  * bits becomes an `int32` or a `uint32`. The compiler does that rather than each declaration, which
  * is also where a C compiler does it.
  *
- * What may not: a struct, a class, an interface or a callable. Pass a `string`'s `->c_str()` rather
+ * What may not: a struct, a class, an interface or a callable. Pass a `string`'s `->cstr()` rather
  * than the `string`.
  *
  * **This type has no values.** It is never constructed, never stored, never returned, and it is legal

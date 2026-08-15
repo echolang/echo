@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include "AST/ASTCodeRef.h"
-#include "AST/ASTRecursiveVisitor.h"
+#include "AST/ASTFixpointLowering.h"
 
 #include "Token.h"
 
@@ -13,10 +12,8 @@
 namespace AST
 {
     class Bundle;
-    class Collector;
-    class File;
+    class FunctionDeclNode;
     class MatchExprNode;
-    class Module;
 
     // **which case each arm of a `match` selects, and what each of its bindings holds.**
     //
@@ -36,24 +33,19 @@ namespace AST
     // to ask any of them. what is left for the checker is what it already does for every other tree -
     // the bindings are ordinary declarations with ordinary initializers by then, and an arm's value is
     // an ordinary expression
-    class MatchResolution : private RecursiveVisitor
+    //
+    // **the walk, the exit obligation and the generic-body skip are AST::FixpointLowering's.** this
+    // pass hoists nothing, so it never asks next_hoist_index(); what it needed from the chassis is
+    // exactly the three invariants that used to be a fourth copy here
+    class MatchResolution : private FixpointLowering
     {
     public:
         MatchResolution(Bundle &bundle);
 
-        // answers whether anything changed, so the fixpoint can report progress
-        bool run_round();
-
-        // **the fixpoint's exit obligation**: one last round in which "the subject is not settled yet"
-        // is a refusal. being out of rounds is the proof that nothing was ever going to settle it -
-        // AST::GuardLowering::finalize's reasoning and its moment
-        void finalize();
+        using FixpointLowering::run_round;
+        using FixpointLowering::finalize;
 
     private:
-        CodeRef code_ref_for(const TokenReference &token);
-
-        // a template's body is only meaningful once cloned into a concrete instance, and the subject
-        // type this pass needs is exactly what is not known there
         void visitFunctionDecl(FunctionDeclNode &node) override;
 
         // the node itself, reached as an ordinary expression edge - a match may sit anywhere a value
@@ -69,14 +61,9 @@ namespace AST
         // reached with a half-filled one - has_critical_issues() stops the build first
         void refuse(MatchExprNode &node, const TokenReference &at, std::string why);
 
-        Bundle &_bundle;
-        Collector &_collector;
-
-        Module *_current_module = nullptr;
-        File *_current_file = nullptr;
-
-        bool _changed = false;
-        bool _finalizing = false;
+        // the function whose body is being walked, so a `return match { => &add }` can bind
+        // an overloaded `&name` to the declared return type. null at file scope
+        FunctionDeclNode *_enclosing_function = nullptr;
     };
 };
 

@@ -17,7 +17,7 @@
  * with the same gate: a null owner owns nothing, so it is not uniquely owned, and writing through
  * it would scribble on the program's own image.
  *
- * Sizes are **bytes**, never characters. `->size()` is O(1) and `->char_count()` is a walk; that
+ * Sizes are **bytes**, never characters. `->size()` is O(1) and `->chars()` is a walk; that
  * the two disagree is the point rather than an oversight - `'héllo'` is five characters in six
  * bytes. Nothing here validates UTF-8, and nothing here normalizes or case-folds.
  *
@@ -72,7 +72,7 @@ public struct string
         /**
          * True when the window covers no bytes.
          */
-        const function is_empty() : bool
+        const function empty() : bool
         {
             if ($this->size > 0) {
                 return false;
@@ -87,7 +87,7 @@ public struct string
          * Checked with `assert`, so `echoc build` drops the check - the bargain C's `assert` makes.
          * Reading past the end is a mistake in the caller, not a condition to recover from.
          */
-        const function byte_at(usize $index) : uint8
+        const function byte(usize $index) : uint8
         {
             assert($index < $this->size, 'string index out of bounds');
 
@@ -136,7 +136,7 @@ public struct string
         /**
          * True when the window begins with `$prefix`. An empty prefix always matches.
          */
-        const function starts_with(string::view $prefix) : bool
+        const function starts(string::view $prefix) : bool
         {
             if ($prefix->size > $this->size) {
                 return false;
@@ -150,7 +150,7 @@ public struct string
         /**
          * True when the window ends with `$suffix`. An empty suffix always matches.
          */
-        const function ends_with(string::view $suffix) : bool
+        const function ends(string::view $suffix) : bool
         {
             if ($suffix->size > $this->size) {
                 return false;
@@ -174,7 +174,7 @@ public struct string
          *
          * A plain O(n*m) scan.
          */
-        const function index_of(string::view $needle) : usize
+        const function find(string::view $needle) : usize
         {
             if ($needle->size > $this->size) {
                 return $this->size;
@@ -205,7 +205,7 @@ public struct string
          */
         const function contains(string::view $needle) : bool
         {
-            usize $at = $this->index_of($needle);
+            usize $at = $this->find($needle);
 
             if ($at < $this->size) {
                 return true;
@@ -228,7 +228,7 @@ public struct string
          *
          * Invalid UTF-8 is counted, not rejected. This is a count, not a validator.
          */
-        const function char_count() : usize
+        const function chars() : usize
         {
             usize $count = 0;
             usize $i = 0;
@@ -245,7 +245,7 @@ public struct string
         }
 
         /**
-         * True when the byte just past the window is a 0, which is what `c_str` needs.
+         * True when the byte just past the window is a 0, which is what `cstr` needs.
          *
          * Reading that byte is always safe, and that is the whole invariant this file maintains:
          * every buffer allocated here has room for one byte past its text and holds a 0 there, and
@@ -259,7 +259,7 @@ public struct string
          * The one shape it cannot judge is a view built by hand through the field-wise constructor
          * over an arbitrary pointer, which establishes none of the above.
          */
-        const function is_terminated() : bool
+        const function terminated() : bool
         {
             if ($this->bytes:$[$this->size] == 0) {
                 return true;
@@ -273,15 +273,15 @@ public struct string
          *
          * Asserted rather than checked, because handing C a pointer that runs past the end of the
          * window is a mistake in the caller and not a condition to recover from. `->clone()` first
-         * when you need a terminated copy of a substring, or ask `is_terminated()` when you would
+         * when you need a terminated copy of a substring, or ask `terminated()` when you would
          * rather branch than die.
          *
          * A 0 byte *inside* the window still ends the C string early. That is what a C string is,
          * and nothing here can do anything about it.
          */
-        const function c_str() : ptr<const uint8>
+        const function cstr() : ptr<const uint8>
         {
-            assert($this->is_terminated(), 'string is not NUL terminated - clone it first');
+            assert($this->terminated(), 'string is not NUL terminated - clone it first');
 
             return $this->bytes;
         }
@@ -289,7 +289,7 @@ public struct string
         /**
          * The bytes, with no terminator required.
          *
-         * `c_str()` is this plus the assert that C can walk off the end of a substring. A window
+         * `cstr()` is this plus the assert that C can walk off the end of a substring. A window
          * that stops early is still a valid pointer and length - hand both to anything that already
          * knows the count.
          */
@@ -322,21 +322,21 @@ public struct string
     }
 
     /**
-     * The byte count. O(1) - it is a field, not a walk. See `char_count`.
+     * The byte count. O(1) - it is a field, not a walk. See `chars`.
      */
     const function size() : usize
     {
         return $this->window->size;
     }
 
-    const function is_empty() : bool
+    const function empty() : bool
     {
-        return $this->window->is_empty();
+        return $this->window->empty();
     }
 
-    const function byte_at(usize $index) : uint8
+    const function byte(usize $index) : uint8
     {
-        return $this->window->byte_at($index);
+        return $this->window->byte($index);
     }
 
     /**
@@ -368,22 +368,22 @@ public struct string
         return $this->window->equals($other->window);
     }
 
-    const function starts_with(string $prefix) : bool
+    const function starts(string $prefix) : bool
     {
-        return $this->window->starts_with($prefix->window);
+        return $this->window->starts($prefix->window);
     }
 
-    const function ends_with(string $suffix) : bool
+    const function ends(string $suffix) : bool
     {
-        return $this->window->ends_with($suffix->window);
+        return $this->window->ends($suffix->window);
     }
 
     /**
      * The byte offset of the first occurrence of `$needle`, or `$this->size()` when there is none.
      */
-    const function index_of(string $needle) : usize
+    const function find(string $needle) : usize
     {
-        return $this->window->index_of($needle->window);
+        return $this->window->find($needle->window);
     }
 
     const function contains(string $needle) : bool
@@ -394,25 +394,25 @@ public struct string
     /**
      * The number of UTF-8 codepoints. A walk, unlike `size()`.
      */
-    const function char_count() : usize
+    const function chars() : usize
     {
-        return $this->window->char_count();
+        return $this->window->chars();
     }
 
     /**
-     * True when this string's bytes are safe to hand to C as-is. See `string::view::is_terminated`.
+     * True when this string's bytes are safe to hand to C as-is. See `string::view::terminated`.
      */
-    const function is_terminated() : bool
+    const function terminated() : bool
     {
-        return $this->window->is_terminated();
+        return $this->window->terminated();
     }
 
     /**
-     * The bytes as a NUL-terminated C string, with no copy. See `string::view::c_str`.
+     * The bytes as a NUL-terminated C string, with no copy. See `string::view::cstr`.
      */
-    const function c_str() : ptr<const uint8>
+    const function cstr() : ptr<const uint8>
     {
-        return $this->window->c_str();
+        return $this->window->cstr();
     }
 
     /**
@@ -443,9 +443,9 @@ public struct string
      * copy's exact size and then appending reallocated the fresh block on the very next statement and
      * copied every byte a second time.
      *
-     * The bytes are copied through `str::buf::append_bytes` rather than by hand, so the two
+     * The bytes are copied through `str::buf::append` rather than by hand, so the two
      * invariants that file states - every allocation is `$capacity + 1`, and `$bytes[$used]` is 0 -
-     * are maintained where they are declared. Sizing the block up front is what keeps `append_bytes`
+     * are maintained where they are declared. Sizing the block up front is what keeps `append`
      * from growing it: `reserve` does nothing when the room is already there.
      *
      * `private`, so only `string`'s own bodies reach it
@@ -456,7 +456,7 @@ public struct string
 
         // `+ 1` is the NUL slot, exactly as str::buf counts it
         str::buf $buf = str::buf($n + $extra, 0, mem::alloc<uint8>($n + $extra + 1));
-        $buf->append_bytes($this->window->bytes, $n);
+        $buf->append($this->window->bytes, $n);
 
         return string(string::view($buf->bytes, $n), $buf);
     }
@@ -480,7 +480,7 @@ public struct string
      * buffer. Three ways that can fail to be true already, collapsing into two conditions:
      *
      *  - the bytes are a **literal**. Static, immutable, in the binary. Its owner is null and
-     *    `mem::ref_count(null)` is 0, so it takes the same branch a shared buffer does. Answering 1 here
+     *    `mem::refs(null)` is 0, so it takes the same branch a shared buffer does. Answering 1 here
      *    would have `append` scribble on the program's own image.
      *  - a **second `string`** names the same buffer, so the count is 2 or more.
      *  - this string is a **sub-window** of its own buffer. The bytes ahead of it are not ours to
@@ -497,7 +497,7 @@ public struct string
      */
     private function make_unique() : void
     {
-        if (mem::ref_count($this->owner) == 1) {
+        if (mem::refs($this->owner) == 1) {
             if ($this->window->size == $this->owner->used) {
                 return;
             }
@@ -562,16 +562,16 @@ public struct string
      * Appends `$count` bytes at `$src`.
      *
      * The same work `append` does, for a pointer and a length C already has. Copy-on-write first,
-     * then through `str::buf::append_bytes`, so the terminator stays this file's invariant.
+     * then through `str::buf::append`, so the terminator stays this file's invariant.
      */
-    function append_bytes(ptr<const uint8> $src, usize $count) : void
+    function append(ptr<const uint8> $src, usize $count) : void
     {
         if ($count == 0) {
             return;
         }
 
         $this->make_unique();
-        $this->owner->append_bytes($src, $count);
+        $this->owner->append($src, $count);
         $this->reseat();
     }
 
@@ -640,7 +640,7 @@ public struct string
         }
 
         $this->make_unique();
-        $this->owner->append_bytes($other->window->bytes, $extra);
+        $this->owner->append($other->window->bytes, $extra);
         $this->reseat();
     }
 
@@ -648,9 +648,9 @@ public struct string
      * Appends one byte.
      *
      * A byte, not a character: appending `0x80` on its own leaves the string holding invalid UTF-8,
-     * and nothing here will say so - `char_count` will simply count it as a character.
+     * and nothing here will say so - `chars` will simply count it as a character.
      */
-    function push_byte(uint8 $byte) : void
+    function push(uint8 $byte) : void
     {
         $this->make_unique();
         $this->owner->push($byte);
@@ -666,7 +666,7 @@ public struct string
     function clear() : void
     {
         $this->make_unique();
-        $this->owner->empty();
+        $this->owner->clear();
 
         // the same re-seat as every other mutator: `empty()` has just set `$used` to 0, so the
         // window this hands back is the empty one, spelled as the one rule rather than as a second

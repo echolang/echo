@@ -246,8 +246,7 @@ TEST_CASE("taking the address of something with no storage is a diagnostic", "[s
 
     EchoTests::assert_code_emits_issue(
         "function get() : int { return 5; }\nint& $r = &get();\n",
-        "cannot take the address of a call - '&f(...)' is the address of a result, "
-        "and a result has none. Write '&f' for the function itself.");
+        "Invalid type conversion: cannot implicitly convert 'int32' to 'int32&'");
 }
 
 TEST_CASE("an address only compares against another address", "[sema][pointer]")

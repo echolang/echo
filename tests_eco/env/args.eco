@@ -6,7 +6,7 @@
 echo std::env::argc();
 
 // the program name: under `run` the source file, under `build` the linked binary
-echo std::env::arg(0)->ends_with('.eco');
+echo std::env::arg(0)->ends('.eco');
 
 // indexed
 echo std::env::arg(1);

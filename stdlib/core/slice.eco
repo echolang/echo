@@ -34,7 +34,7 @@ public struct slice<T> : contract::iterable<T>, contract::const_iterable<const T
      *
      * A branch and two `return`s rather than `return $this->len == 0;` - `string.eco` explains why.
      */
-    const function is_empty() : bool
+    const function empty() : bool
     {
         if ($this->len > 0) {
             return false;

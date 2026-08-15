@@ -1027,7 +1027,13 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
     // arguments one slot out of place and reads its receiver as its answer
     llvm::Type *lowered_return = get_llvm_type(signature.return_type, cmp_unit);
 
-    const ReturnAbi abi = return_abi_for(lowered_return, _ctx.layout());
+    // **t_c is always-direct.** Echo's sret convention is not C's, and claiming it for a C
+    // function pointer is a silent ABI miss the moment a struct slips through
+    // c_function_signature_refusal. return_abi_of is the declaration half of the same
+    // exemption; this is the callable / indirect-call half
+    const ReturnAbi abi = shape == FunctionCallingShape::t_c
+        ? ReturnAbi{}
+        : return_abi_for(lowered_return, _ctx.layout());
 
     if (abi.is_indirect()) {
         lowered_return = llvm::Type::getVoidTy(*_ctx.llvm_context);

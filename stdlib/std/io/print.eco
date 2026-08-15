@@ -33,7 +33,7 @@ public function print(const string& $text) : void
 #[inline]
 public function println(const string& $text) : void
 {
-    stdout->write_line($text);
+    stdout->writeline($text);
 }
 
 /**
@@ -51,5 +51,5 @@ public function eprint(const string& $text) : void
 #[inline]
 public function eprintln(const string& $text) : void
 {
-    stderr->write_line($text);
+    stderr->writeline($text);
 }

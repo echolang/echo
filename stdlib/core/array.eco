@@ -105,10 +105,10 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
 
         // sized to the byte and not through `reserve`, because a copy is not an array still growing:
         // the floor and the doubling exist for a run of appends, and this is one allocation for a
-        // known count. `reserve_exact(0)` returns without allocating, so an empty source still copies
+        // known count. `fit(0)` returns without allocating, so an empty source still copies
         // to an empty array rather than to a zero-length allocation - and `extend` then has nothing
         // left to reserve, so this is the only allocation on either path
-        $this->reserve_exact($other->count());
+        $this->fit($other->count());
 
         $this->extend($other);
     }
@@ -150,7 +150,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     /**
      * True when it holds no elements. Says nothing about capacity.
      */
-    const function is_empty() : bool
+    const function empty() : bool
     {
         if ($this->len > 0) {
             return false;
@@ -166,7 +166,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * instead of being O(n²). Call it up front when you already know the size - that is the one
      * allocation for the whole loop, because a request above the floor below is honoured exactly.
      *
-     * Use `reserve_exact()` when you want a small array sized to the byte.
+     * Use `fit()` when you want a small array sized to the byte.
      *
      * **This may move the buffer**, so every borrow into the array is stale afterwards: every
      * `slice<T>` you took, every `&$a[$i]`. See docs/collections/arrays.md.
@@ -194,24 +194,24 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         //
         // it can only ever raise `$grown`, and `$grown` is already max(cap * 2, $count) - so a request
         // above the floor is untouched and the doc's promise about reserving up front is unchanged.
-        // `reserve_exact` is the way to ask for a small buffer sized to the byte.
+        // `fit` is the way to ask for a small buffer sized to the byte.
         //
         // by element size, which is what Rust's RawVec calls MIN_NON_ZERO_CAP: the smaller the element,
         // the more of them fit in the smallest block an allocator will hand out at all, so the floor
         // costs nothing there and saves more. A `T` bigger than a page gets no floor, because for one of
         // those the allocation *is* the cost and rounding it up doubles that.
         //
-        // plain `if`s and not `const if`: `mem::size_of<T>()` folds to a constant at the call site in
+        // plain `if`s and not `const if`: `mem::size<T>()` folds to a constant at the call site in
         // codegen, so both tests are already decided by the time LLVM sees them - but AST::const_fold
         // cannot answer a layout query before codegen, so `const if` would refuse it. When that
         // lands these should become `const if` and stop being branches in an unoptimized build too
         usize $floor = 4;
 
-        if (mem::size_of<T>() == 1) {
+        if (mem::size<T>() == 1) {
             $floor = 8;
         }
 
-        if (mem::size_of<T>() > 1024) {
+        if (mem::size<T>() > 1024) {
             $floor = 1;
         }
 
@@ -239,7 +239,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * because there is no headroom left to absorb it - so this is the wrong call for an array that is
      * still growing, and `reserve()` is the right one.
      */
-    function reserve_exact(usize $count) : void
+    function fit(usize $count) : void
     {
         if ($this->storage->capacity() >= $count) {
             return;
@@ -257,7 +257,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * **This may move the buffer**, exactly as `reserve` may - every borrow into the array is stale
      * afterwards.
      */
-    function shrink_to_fit() : void
+    function shrink() : void
     {
         if ($this->storage->capacity() == $this->len) {
             return;
@@ -290,7 +290,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * **`$a->extend($a)` is refused**, and that is a rule rather than an oversight: `$this` takes
      * `inout` access by being a method's receiver, `$other` takes `read` by being a const borrow, and
      * one array cannot be both at once. Neither word is written here. See
-     * docs/memory/unsafe.md. `extend_from_within` below is how you append an array to itself.
+     * docs/memory/unsafe.md. `extend` below is how you append an array to itself.
      */
     function extend(const array<T>& $other) : void
     {
@@ -320,7 +320,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // used to carry the element loop's blocks and the `operator []` instantiation they needed,
         // behind a branch that could not be taken
         const if (mem::is_trivially_copyable<T>()) {
-            $this->storage->copy_from($this->len, $other->storage, 0, $n);
+            $this->storage->copy($this->len, $other->storage, 0, $n);
 
             // written after the copy, not before: `len` is what says which slots are live, and between
             // the two statements the new ones are not yet
@@ -348,19 +348,19 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * one way that is unambiguous, and it is a better API besides - it says *which* range to repeat
      * rather than "all of it, as it was when you asked".
      *
-     *     $a->extend_from_within(0, $a->count());   // double it
-     *     $a->extend_from_within(0, 1);             // repeat the first element
+     *     $a->extend(0, $a->count());   // double it
+     *     $a->extend(0, 1);             // repeat the first element
      *
      * The two ranges live in one allocation and are **statically disjoint**: the destination begins at
      * the old length and the source ends at or before it. That is a fact about ranges rather than
      * about types, which is exactly the kind a type-based aliasing rule could never express.
      */
-    function extend_from_within(usize $start, usize $count) : void
+    function extend(usize $start, usize $count) : void
     {
         // two separate checks rather than one on the sum, so the sum cannot wrap on the way to being
         // checked - the same shape `sub` uses, and for the same reason
-        assert($start <= $this->len, "extend_from_within start out of range");
-        assert($count <= $this->len - $start, "extend_from_within count out of range");
+        assert($start <= $this->len, "extend start out of range");
+        assert($count <= $this->len - $start, "extend count out of range");
 
         if ($count == 0) {
             return;
@@ -380,7 +380,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
             // `mem::copy` and not `mem::move`: its two regions must not overlap, and here they
             // provably do not - the source ends at `$start + $count <= $old_len`, which is where the
             // destination begins
-            $this->storage->copy_nonoverlapping($old_len, $start, $count);
+            $this->storage->copy($old_len, $start, $count);
 
             // after the copy, for `extend`'s reason: between the two statements the new slots are not
             // yet live
@@ -409,7 +409,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * The slot starts out **uninitialized** while `count()` has already grown, so filling it is
      * part of the contract rather than an option.
      */
-    function push_slot() : T&
+    function slot() : T&
     {
         return &$this[];
     }
@@ -439,7 +439,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * Removes the element at `$index` and hands over its ownership, **shifting everything after it down**.
      * Preserves order.
      *
-     * O(n), which is the whole difference from `swap_remove` below - reach for that one when order does not
+     * O(n), which is the whole difference from `pluck` below - reach for that one when order does not
      * matter and this one when it does. `ordered_map<K, V>` is what this exists for: it keeps its keys in
      * insertion order, so removing one has to close the gap without reordering the rest.
      */
@@ -447,7 +447,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
     {
         assert($index < $this->len, "remove index out of range");
 
-        // taken first and unconditionally, for swap_remove's reason: it keeps the single `return` outside
+        // taken first and unconditionally, for pluck's reason: it keeps the single `return` outside
         // every branch, and an owning local moved out of on one arm and not the other is a conditional move
         T $doomed = mem::take<T>($this->storage->at($index));
 
@@ -479,9 +479,9 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * The last element is not a special case: removing it is the whole operation with the relocation
      * skipped, so there is one `mem::take` and one `return` on every path.
      */
-    function swap_remove(usize $index) : T
+    function pluck(usize $index) : T
     {
-        assert($index < $this->len, "swap_remove index out of range");
+        assert($index < $this->len, "pluck index out of range");
 
         // taken rather than read, so the array stops holding it and the caller starts - a read would
         // copy, leaving the slot owning a second reference nothing releases. taken *first* and
@@ -500,7 +500,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
         // one element: nothing is duplicated, the last slot is about to fall outside `len`, and the count
         // of owners is unchanged, so there is no copy to run and none to skip
         if ($index + 1 < $this->len) {
-            $this->storage->copy_nonoverlapping($index, $this->len - 1, 1);
+            $this->storage->copy($index, $this->len - 1, 1);
         }
 
         $this->len = $this->len - 1;
@@ -561,7 +561,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * Destroys every element past `$count` and keeps the buffer.
      *
      * `count()` becomes `$count` - or stays where it is, if it was already that short. `capacity()` does
-     * not move; `shrink_to_fit()` is what gives the buffer back.
+     * not move; `shrink()` is what gives the buffer back.
      *
      * This is where the array's element teardown lives. `clear()` is this with a bound of zero, and the
      * destructor is `clear()` plus the `mem::free` - so what it means to destroy a run of elements has one
@@ -684,7 +684,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
  * borrow this hands back, because a place is exactly an address plus what is stored at it.
  *
  * Bounds-checked with `assert`, so a debug build catches the mistake and a release build pays
- * nothing - the same bargain `->at()` and `string::view::byte_at` make.
+ * nothing - the same bargain `->at()` and `string::view::byte` make.
  */
 operator<T> (array<T>& $a)[usize $index] : T&
 {

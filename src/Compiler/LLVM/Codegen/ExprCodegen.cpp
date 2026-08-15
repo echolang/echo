@@ -1011,12 +1011,14 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
             ? TypeLowering::FunctionCallingShape::t_c
             : TypeLowering::FunctionCallingShape::t_echo);
 
-    emit_call(
-        { fn_type, fn },
-        args,
-        return_abi_for(
+    // the same exemption get_llvm_function_type applies: a C function pointer is never sret
+    const ReturnAbi abi = c_function
+        ? ReturnAbi{}
+        : return_abi_for(
             _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit),
-            _ctx.layout()));
+            _ctx.layout());
+
+    emit_call({ fn_type, fn }, args, abi);
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)

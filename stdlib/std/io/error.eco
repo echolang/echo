@@ -16,7 +16,7 @@ public struct ioerror
      */
     const function message() : string
     {
-        return str::from_c_str(c_strerror($this->code));
+        return str::from(c_strerror($this->code));
     }
 
     /**

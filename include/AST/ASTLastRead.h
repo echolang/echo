@@ -48,8 +48,9 @@ namespace AST
     //     moved on one arm of an `if` is one nothing destroys on the other, and that is
     //     report_conditional_move's refusal. an arm that always leaves is not one of these: it does not
     //     reach the join, so its moves go with it, which is what keeps `if (...) { return .ok($out); }`
-    //     in. a `match` arm counts as rejoining whatever it does, AST::OwnershipPass carrying one
-    //     moved-from set across all of them
+    //     in. a `match` arm is the same question: one that always leaves does not rejoin. a match
+    //     used as a return value still joins its arms at a phi, so handing over on only one of
+    //     them is the conditional move OwnershipPass reports
     //   - **no closure captures the declaration.** the capture is read whenever the callable is, which is
     //     a point no walk of this body can see
     //

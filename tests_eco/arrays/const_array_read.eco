@@ -11,7 +11,7 @@ echo $frozen[0];
 // and the methods that declared themselves readers
 echo $frozen->count();
 echo $frozen->get(2);
-echo $frozen->is_empty();
+echo $frozen->empty();
 
 // the mutable array still picks the writable contract, its operand matching exactly where the
 // read-only one would only widen - which is what the t_borrow / t_borrow_const ranks decide

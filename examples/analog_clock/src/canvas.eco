@@ -41,7 +41,7 @@ function append_glyph(string& $out, uint8 $id) : void
     if ($id == GLYPH_PIN) { $out->append('┼'); return; }
 
     // anything else is its own ASCII byte
-    $out->push_byte($id);
+    $out->push($id);
 }
 
 // **Borrowed everywhere, never copied.** A `Canvas` owns its rows, and a struct is copied field by
@@ -61,11 +61,11 @@ struct Canvas
         $this->height = $height;
 
         // there is no fill constructor and no fixed-size array, so each row is pushed cell by cell into
-        // a buffer sized up front. `arr::with_capacity` is that in one call
-        $this->rows = arr::with_capacity<array<uint8>>($height);
+        // a buffer sized up front. `arr::room` is that in one call
+        $this->rows = arr::room<array<uint8>>($height);
 
         foreach (0 .. $height as $y) {
-            array<uint8> $row = arr::with_capacity<uint8>($width);
+            array<uint8> $row = arr::room<uint8>($width);
 
             foreach (0 .. $width as $x) {
                 $row[] = GLYPH_EMPTY;
@@ -121,7 +121,7 @@ struct Canvas
     function write_text(int32 $x, int32 $y, string& $text) : void
     {
         foreach (0 .. $text->size() as $i) {
-            $this->set($x + $i, $y, $text->byte_at($i));
+            $this->set($x + $i, $y, $text->byte($i));
         }
     }
 

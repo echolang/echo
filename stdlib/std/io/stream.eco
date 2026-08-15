@@ -47,7 +47,7 @@ public struct stream
      *
      * The seam every other method here goes through.
      */
-    const function write_bytes(ptr<const uint8> $b, usize $count) : void
+    const function write(ptr<const uint8> $b, usize $count) : void
     {
         if ($count == 0) {
             return;
@@ -56,7 +56,9 @@ public struct stream
         // stdio first, for the reason in this type's own documentation
         $this->flush();
 
-        c_write($this->fd, $b, $count);
+        // short writes are the normal case on a pipe. fire-and-forget still has to retry them;
+        // ignoring a failed write(2) is a different sentence from writing some of the bytes
+        result<usize, ioerror> $ignored = raw_write_all($this->fd, $b, $count);
     }
 
     /**
@@ -67,7 +69,7 @@ public struct stream
      */
     const function write(const string& $text) : void
     {
-        $this->write_bytes($text->view()->bytes, $text->size());
+        $this->write($text->view()->bytes, $text->size());
     }
 
     /**
@@ -76,10 +78,10 @@ public struct stream
      * Two writes rather than one, deliberately: appending the newline to the bytes would mean
      * copying them, and they may be a shared substring with nowhere to put a longer copy.
      */
-    const function write_line(const string& $text) : void
+    const function writeline(const string& $text) : void
     {
         $this->write($text);
-        $this->write_bytes(NEWLINE->c_str(), 1);
+        $this->write(NEWLINE->cstr(), 1);
     }
 
     /**
@@ -103,9 +105,9 @@ public struct stream
      * A final line with no newline is answered in full; the `null` is reserved for "there was
      * nothing at all", which is what makes `guard ... else` the right shape to read one with:
      *
-     *     string $line = guard std::io::stdin->read_line() else { return 0; }
+     *     string $line = guard std::io::stdin->readline() else { return 0; }
      */
-    const function read_line() : string?
+    const function readline() : string?
     {
         str::buf $owner = str::buf(64, 0, mem::alloc<uint8>(65));
 
@@ -136,9 +138,9 @@ public struct stream
     }
 }
 
-// the byte and the one-byte string, so `write_line` needs no allocation and `read_line` no magic
+// the byte and the one-byte string, so `writeline` needs no allocation and `readline` no magic
 // number. a constant is its expression copied into each use site, so neither costs anything.
-// `private`: `write_line` and `read_line` just below are the only things that read them
+// `private`: `writeline` and `readline` just below are the only things that read them
 private const NEWLINE = '\n';
 private const uint8 NEWLINE_BYTE = 10;
 

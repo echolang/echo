@@ -525,7 +525,7 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             }
 
             // **the operands may not agree yet, and the answer to that is not this file's.** the parser
-            // reconciles what it can see - AST::common_numeric_type plus try_implicit_cast, which
+            // reconciles what it can see - AST::reconcile_binary_operands, which
             // *retypes* a literal rather than wrapping it - but AST::ConstantExpander lands its clones
             // after that, so `const usize MAX = 100;` then `MAX > 50` arrives here as a usize beside an
             // int32 with nothing having reconciled them.

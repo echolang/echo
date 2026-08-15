@@ -9,4 +9,4 @@ ptr<uint8> $buf = mem::alloc<uint8>(16);
 string $format = 'x';
 int32 $n = 1;
 
-c_snprintf($buf, 16, $format->c_str(), $n);
+c_snprintf($buf, 16, $format->cstr(), $n);

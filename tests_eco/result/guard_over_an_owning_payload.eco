@@ -40,7 +40,7 @@ function first(int32 $n) : int32
 {
     result<array<int32>, string> $r = fetch($n);
 
-    if ($r->is_error()) {
+    if ($r->failed()) {
         return -2;
     }
 

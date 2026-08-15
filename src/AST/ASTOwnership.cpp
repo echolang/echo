@@ -42,6 +42,7 @@
 #include "AST/TemporaryBindExprNode.h"
 
 #include <fmt/core.h>
+#include <unordered_map>
 
 namespace AST
 {
@@ -947,6 +948,12 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             // the else arm is walked with the moved-set *saved and restored*, exactly as an `if` arm is:
             // it is a branch, and what it moves out of does not reach the code after the guard
             //
+            // **presence_test is an ordinary value arrival**, walked before the branch, in the order
+            // GuardNode states: test, then the bound path (already arrived above), then else. today
+            // `has_value()` / `has_value()` is a const bool, so skipping it did not miscompile; a presence
+            // test that materialises a temporary would silently not be an arrival
+            stmt->presence_test = walk_value_edge(stmt->presence_test);
+
             // no merge, though, and that is the difference from an `if`: the arm cannot fall through
             // (Parser::parse_guard refused one that could), so there is no path on which its moves are
             // visible afterwards. taking the union would mark things moved that this statement's
@@ -1762,15 +1769,80 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 walk_statement(make_ref(node->subject));
             }
 
+            // **each arm starts from the pre-match moved set**, the same snapshot/restore an `if`
+            // uses. walking them against one shared set made `ok => consume(mv $x)` mark `$x`
+            // moved before `error => use($x)` was walked, a false use-after-move on exclusive
+            // arms. arms that rejoin merge; arms that leave contribute nothing to the join
+            const auto before = _moved;
+            const auto maybe_before = _maybe_moved;
+
+            struct ArmState
+            {
+                std::unordered_set<const VarDeclNode *> moved;
+                std::unordered_set<const VarDeclNode *> maybe_moved;
+            };
+
+            std::vector<ArmState> joining;
+
             for (MatchExprNode::Arm &arm : node->arms) {
-                // the arm's own frame: the bindings are its leading declarations, and a block arm's
-                // statements follow them. borrows own nothing, so what this frame ends is whatever the
-                // arm's *body* declared - which is exactly what a block's frame is for
+                _moved = before;
+                _maybe_moved = maybe_before;
+
+                ExitKind scope_exit = ExitKind::t_none;
+
                 if (arm.scope != nullptr) {
-                    walk_scope(*arm.scope);
+                    scope_exit = walk_scope(*arm.scope);
+                }
+
+                if (scope_exit != ExitKind::t_none) {
+                    continue;
                 }
 
                 arm.value = walk_value_edge(arm.value);
+
+                if (arm.value != nullptr && expression_never_returns(*arm.value)) {
+                    continue;
+                }
+
+                joining.push_back(ArmState{std::move(_moved), std::move(_maybe_moved)});
+            }
+
+            _moved = before;
+            _maybe_moved = maybe_before;
+
+            if (joining.empty()) {
+                break;
+            }
+
+            if (joining.size() == 1) {
+                _moved = std::move(joining[0].moved);
+                _maybe_moved = std::move(joining[0].maybe_moved);
+                break;
+            }
+
+            _maybe_moved = joining[0].maybe_moved;
+
+            for (size_t i = 1; i < joining.size(); i++) {
+                _maybe_moved.insert(
+                    joining[i].maybe_moved.begin(), joining[i].maybe_moved.end());
+            }
+
+            std::unordered_map<const VarDeclNode *, size_t> moved_on;
+
+            for (const ArmState &arm : joining) {
+                for (const VarDeclNode *decl : arm.moved) {
+                    moved_on[decl]++;
+                }
+            }
+
+            for (const auto &[decl, count] : moved_on) {
+                if (count == joining.size()) {
+                    _moved.insert(decl);
+                }
+                else {
+                    _maybe_moved.insert(decl);
+                    report_conditional_move(decl);
+                }
             }
 
             break;

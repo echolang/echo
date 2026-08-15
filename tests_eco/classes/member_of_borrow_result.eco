@@ -1,6 +1,6 @@
 // a class-typed borrow is the address of a *slot holding a handle*, so reading a member through one
 // loads the handle out of the returned address and steps into the payload - the same hop a named
-// local's member read makes. the mem::ref_count either side is the assertion that matters: a borrow owns
+// local's member read makes. the mem::refs either side is the assertion that matters: a borrow owns
 // nothing, so nothing along the way may retain or release
 
 class Node
@@ -25,7 +25,7 @@ struct Holder
 
 $h = Holder(Node(7));
 
-echo mem::ref_count($h->n);
+echo mem::refs($h->n);
 
 // a property through the class-typed borrow the call returned
 echo $h->node()->v;
@@ -38,4 +38,4 @@ echo $h->n->v;
 echo $h->node()->get();
 
 // unchanged: no retain and no release leaked
-echo mem::ref_count($h->n);
+echo mem::refs($h->n);

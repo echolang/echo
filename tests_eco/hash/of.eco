@@ -73,11 +73,11 @@ echo hash::of($pz32) == hash::of($nz32);
 
 echo hash::combine(hash::of(1), hash::of(2)) == hash::combine(hash::of(2), hash::of(1));
 
-// ---- of_bytes is the explicit spelling, for a type that *is* its bytes
+// ---- bits is the explicit spelling, for a type that *is* its bytes
 
 struct point { int32 $x; int32 $y; }
 
 point $p = point(3, 4);
 point $q = point(3, 4);
 
-echo hash::of_bytes<point>($p) == hash::of_bytes<point>($q);
+echo hash::bits<point>($p) == hash::bits<point>($q);

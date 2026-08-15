@@ -12,8 +12,8 @@ function wide(int32 $n) : result<int32, int64>
     return .ok($n);
 }
 
-echo small(1)->value_or(0);
-echo wide(2)->value_or(0);
+echo small(1)->or(0);
+echo wide(2)->or(0);
 
 // **the shorthand's three destinations**, which is the same list `statics/shorthand_three_destinations`
 // walks - now over a standard library type. a return type above, a declared variable, and the parameter of
@@ -24,12 +24,12 @@ echo $declared->failure();
 
 function takes(result<int32, string> $r) : int32
 {
-    return $r->value_or(-1);
+    return $r->or(-1);
 }
 
 echo takes(.ok(7));
 echo takes(.error('from an argument'));
 
 // and the fully written spelling, which needs no destination at all
-echo result<int32, string>::ok(9)->value_or(0);
+echo result<int32, string>::ok(9)->or(0);
 echo mem::live_allocations();

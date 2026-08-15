@@ -11,10 +11,10 @@ show($owned);
 // ...and the whole read surface is on the view itself
 $v = $owned->view();
 echo $v->size;
-echo $v->byte_at(0);
-echo $v->is_empty();
-echo $v->char_count();
-echo $v->starts_with($owned->view());
+echo $v->byte(0);
+echo $v->empty();
+echo $v->chars();
+echo $v->starts($owned->view());
 
 // a sub-view narrows without touching a reference count, because there is none to touch
 string::view $tail = $v->sub(6, 5);

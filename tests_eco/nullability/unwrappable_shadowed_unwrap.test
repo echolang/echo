@@ -1,4 +1,4 @@
-# **the output is the assertion.** `wrong has_value` on any line means the by-name lookup won and the
+# **the output is the assertion.** `wrong ok` on any line means the by-name lookup won and the
 # guard called an overload the conformance never accepted - which is what this program used to print,
 # followed by `-1` for a cell that was holding 42
 --- OUT --->

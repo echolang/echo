@@ -1,0 +1,16 @@
+// the template is legal - T is not a refusal. seating Point into a *property*
+// of an instantiation must refuse: the walk used to stop at instantiation
+// arguments and never look at the layout
+struct Point
+{
+    int32 $x;
+}
+
+struct Handler<T>
+{
+    extern function<T(T)> $op;
+}
+
+function take(Handler<Point> $h) : void
+{
+}

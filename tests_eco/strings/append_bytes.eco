@@ -1,15 +1,15 @@
-// append_bytes is append for a pointer and a length. a literal still goes through the gate
+// append is append for a pointer and a length. a literal still goes through the gate
 
 $src = 'xyz';
 
 $lit = 'ab';
-$lit->append_bytes($src->data(), $src->size());
+$lit->append($src->data(), $src->size());
 echo $lit;
 
 $empty = '';
-$empty->append_bytes($src->data(), 0);
+$empty->append($src->data(), 0);
 echo $empty->size();
 echo $empty;
 
-$empty->append_bytes($src->data(), 2);
+$empty->append($src->data(), 2);
 echo $empty;

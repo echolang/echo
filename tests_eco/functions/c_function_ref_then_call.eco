@@ -1,0 +1,7 @@
+// `&add(41)` is a function-ref plus a postfix call, not the address of a result
+function add(int32 $n) : int32
+{
+    return $n + 1;
+}
+
+echo &add(41);

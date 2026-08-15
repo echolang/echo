@@ -20,4 +20,4 @@ if ($a != $b) { echo "a is not b"; }
 Unit $c = .kilometer;
 if ($c == Unit::kilometer) { echo "c is kilometer"; }
 
-echo mem::size_of<Unit>();
+echo mem::size<Unit>();

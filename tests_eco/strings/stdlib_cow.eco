@@ -1,26 +1,26 @@
 // copy-on-write: a mutation copies the buffer whenever this string is not its sole owner. three
 // ways that happens, and the gate is one rule for all of them
 
-// 1. the bytes are a literal. static, in the binary, owned by nobody - so `mem::ref_count` is 0 and the
+// 1. the bytes are a literal. static, in the binary, owned by nobody - so `mem::refs` is 0 and the
 //    first write clones rather than scribbling on the program's own image
 $lit = 'ab';
 $lit->append('cd');
 echo $lit;
-echo mem::ref_count($lit->owner);
+echo mem::refs($lit->owner);
 
 // 2. a second string names the same buffer. the copy is untouched by the original's mutation
 $orig = 'one';
 $orig->append('two');
 $copy = $orig;
-echo mem::ref_count($orig->owner);
+echo mem::refs($orig->owner);
 
 $orig->append('three');
 echo $copy;
 echo $orig;
 
 // ...and now they are two buffers, each uniquely owned
-echo mem::ref_count($orig->owner);
-echo mem::ref_count($copy->owner);
+echo mem::refs($orig->owner);
+echo mem::refs($copy->owner);
 
 // 3. a sub-window of a buffer this string *does* uniquely own. the bytes ahead of it are not its to
 //    move, so it clones too - and the parent is left alone
@@ -34,8 +34,8 @@ echo $whole;
 // a string that *is* the whole of a buffer it alone owns mutates in place, which is the case the
 // gate exists to let through
 $solo = $whole->clone();
-usize $before = mem::ref_count($solo->owner);
+usize $before = mem::refs($solo->owner);
 $solo->append('g');
 echo $solo;
 echo $before;
-echo mem::ref_count($solo->owner);
+echo mem::refs($solo->owner);

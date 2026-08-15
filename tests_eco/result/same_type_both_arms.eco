@@ -34,7 +34,7 @@ result<string, string> $ok = named(2);
 string $copied = $ok->unwrap();
 
 echo $copied;
-echo $ok->value_or('fallback');
-echo named(-2)->value_or('fallback');
+echo $ok->or('fallback');
+echo named(-2)->or('fallback');
 
 echo mem::live_allocations();

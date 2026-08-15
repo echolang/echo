@@ -11,8 +11,8 @@
 function show(string::view& $v) : void
 {
     echo $v->size;
-    echo $v->byte_at(0);
-    echo $v->byte_at(4);
+    echo $v->byte(0);
+    echo $v->byte(4);
 }
 
 $owned = 'hello world';

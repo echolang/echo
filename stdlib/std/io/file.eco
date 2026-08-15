@@ -30,7 +30,7 @@ public class file
      */
     static function open(const string& $path, filemode $mode) : result<file, ioerror>
     {
-        int32 $fd = c_open($path->c_str(), flags_of($mode), [OPEN_MODE]);
+        int32 $fd = c_open($path->cstr(), flags_of($mode), [OPEN_MODE]);
 
         if ($fd < 0) {
             return .error(last_error());
@@ -73,7 +73,7 @@ public class file
         return $this->fd;
     }
 
-    function write_bytes(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+    function write(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
     {
         if ($this->fd < 0) {
             return .error(ioerror(EBADF));
@@ -88,7 +88,7 @@ public class file
 
     function write(const string& $text) : result<usize, ioerror>
     {
-        return $this->write_bytes($text->data(), $text->size());
+        return $this->write($text->data(), $text->size());
     }
 
     function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
@@ -117,7 +117,7 @@ public class file
         return readall_from($this->fd, $this->rin);
     }
 
-    function read_line() : result<string?, ioerror>
+    function readline() : result<string?, ioerror>
     {
         if ($this->fd < 0) {
             return .error(ioerror(EBADF));
@@ -127,7 +127,7 @@ public class file
             return .error($e);
         }
 
-        return read_line_from($this->fd, $this->rin);
+        return readline_from($this->fd, $this->rin);
     }
 
     function seek(int64 $offset, whence $from) : result<int64, ioerror>
@@ -230,29 +230,36 @@ public function writefile(const string& $path, const string& $text) : result<usi
     return .ok($n);
 }
 
-public function exists(const string& $path) : bool
+public function exists(const string& $path) : result<bool, ioerror>
 {
-    if (c_access($path->c_str(), F_OK) == 0) {
-        return true;
+    if (c_access($path->cstr(), F_OK) == 0) {
+        return .ok(true);
     }
 
-    return false;
+    ioerror $e = last_error();
+
+    // missing is an answer. denied is not "no" - EACCES is a file that is there
+    if ($e->missing()) {
+        return .ok(false);
+    }
+
+    return .error($e);
 }
 
-public function remove(const string& $path) : result<usize, ioerror>
+public function remove(const string& $path) : result<bool, ioerror>
 {
-    if (c_unlink($path->c_str()) < 0) {
+    if (c_unlink($path->cstr()) < 0) {
         return .error(last_error());
     }
 
-    return .ok(0);
+    return .ok(true);
 }
 
-public function rename(const string& $from, const string& $to) : result<usize, ioerror>
+public function rename(const string& $from, const string& $to) : result<bool, ioerror>
 {
-    if (c_rename($from->c_str(), $to->c_str()) < 0) {
+    if (c_rename($from->cstr(), $to->cstr()) < 0) {
         return .error(last_error());
     }
 
-    return .ok(0);
+    return .ok(true);
 }

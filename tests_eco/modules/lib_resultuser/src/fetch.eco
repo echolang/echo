@@ -10,7 +10,7 @@ public function fetch(int32 $n) : result<string, int32>
     return .ok('from the library');
 }
 
-// and read here too, so the library's own unit holds `has_value` and `unwrap` as well as the constructors
+// and read here too, so the library's own unit holds `ok` and `unwrap` as well as the constructors
 public function describe(int32 $n) : string
 {
     $body = guard fetch($n) else ($code) {

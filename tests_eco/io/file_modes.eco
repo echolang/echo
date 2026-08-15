@@ -1,7 +1,7 @@
 // create truncates, append extends, open-for-read refuses a missing path
 
 string $path = '';
-$path->append(str::from(std::env::tmp_dir()));
+$path->append(str::from(std::env::tmp()));
 $path->append('/echo-io-modes-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -53,9 +53,8 @@ string $extended = guard std::io::readfile($path) else ($e) {
 
 echo $extended;
 
-usize $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::io::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;

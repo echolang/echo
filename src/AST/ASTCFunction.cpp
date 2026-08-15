@@ -8,8 +8,10 @@
 #include "AST/ASTVariadic.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/VarDeclNode.h"
 
 #include <fmt/format.h>
+#include <unordered_set>
 
 namespace
 {
@@ -71,7 +73,114 @@ namespace
             "'{}' has no C spelling.",
             type.get_type_desciption());
     }
+
+    // const on a by-value parameter is Echo's local write-protect, not C's. two signatures that
+    // differ only by that bit are one C type, so bind_function_ref_to compares the erased form
+    AST::CallableSignature abi_erased(const AST::CallableSignature &signature)
+    {
+        AST::CallableSignature erased;
+        erased.return_type = AST::ValueType::make_mutable(
+            AST::ValueType::make_non_nullable(signature.return_type));
+
+        erased.parameter_types.reserve(signature.parameter_types.size());
+
+        for (const auto &parameter : signature.parameter_types) {
+            erased.parameter_types.push_back(
+                AST::ValueType::make_mutable(AST::ValueType::make_non_nullable(parameter)));
+        }
+
+        return erased;
+    }
+
+    std::optional<std::string> type_refusal_walk(
+        const AST::ValueType &type,
+        const AST::CoreTypes &core,
+        std::unordered_set<const AST::ComplexType *> &seen)
+    {
+        if (type.is_pointer()) {
+            return type_refusal_walk(type.pointee(), core, seen);
+        }
+
+        if (type.is_weak()) {
+            return type_refusal_walk(type.weak_target(), core, seen);
+        }
+
+        if (type.has_signature()) {
+            if (type.is_c_function()) {
+                if (auto reason = AST::c_function_signature_refusal(type.signature(), core)) {
+                    return fmt::format(
+                        "'{}' is not a C-callable signature - {}",
+                        type.get_type_desciption(),
+                        reason.value());
+                }
+            }
+
+            if (auto nested = type_refusal_walk(type.signature().return_type, core, seen)) {
+                return nested;
+            }
+
+            for (const auto &parameter : type.signature().parameter_types) {
+                if (auto nested = type_refusal_walk(parameter, core, seen)) {
+                    return nested;
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        if (!type.has_complex_type()) {
+            return std::nullopt;
+        }
+
+        AST::ComplexType *ct = type.get_complex_type();
+
+        if (ct == nullptr || !seen.insert(ct).second) {
+            return std::nullopt;
+        }
+
+        if (ct->is_instantiated()) {
+            for (const auto &arg : ct->instantiation_args) {
+                if (auto nested = type_refusal_walk(arg, core, seen)) {
+                    return nested;
+                }
+            }
+        }
+
+        for (size_t i = 0; i < ct->property_count(); i++) {
+            if (auto nested = type_refusal_walk(ct->get_property_type(i), core, seen)) {
+                return nested;
+            }
+        }
+
+        for (AST::VarDeclNode *prop : ct->static_properties()) {
+            if (prop != nullptr && prop->has_type()) {
+                if (auto nested = type_refusal_walk(prop->type(), core, seen)) {
+                    return nested;
+                }
+            }
+        }
+
+        return std::nullopt;
+    }
 };
+
+std::optional<std::string> AST::c_function_type_refusal(
+    const AST::ValueType &type,
+    const AST::CoreTypes &core
+)
+{
+    std::unordered_set<const ComplexType *> seen;
+
+    return type_refusal_walk(type, core, seen);
+}
+
+bool AST::c_function_signatures_match(
+    const AST::CallableSignature &a,
+    const AST::CallableSignature &b
+)
+{
+    return abi_erased(a) == abi_erased(b);
+}
 
 std::optional<std::string> AST::c_function_signature_refusal(
     const AST::CallableSignature &signature,
@@ -185,7 +294,7 @@ bool AST::bind_function_ref_to(
     std::vector<FunctionDeclNode *> matches;
 
     for (FunctionDeclNode *candidate : function_ref_candidates(*ref, functions)) {
-        if (candidate->c_function_type().signature() == wanted.signature()) {
+        if (c_function_signatures_match(candidate->c_function_type().signature(), wanted.signature())) {
             matches.push_back(candidate);
         }
     }

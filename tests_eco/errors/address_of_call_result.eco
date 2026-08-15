@@ -1,6 +1,8 @@
-// a call result is a value, not storage, so there is nothing for `&` to point at
-function get() : int {
+// `&get()` is a function-ref plus a postfix call. assigning that int32 to a
+// borrow needs a place, which a call is not
+function get() : int32
+{
     return 5;
 }
 
-int& $r = &get();
+int32& $r = &get();

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] IntegerOverflow  match_arm_literal_precision.eco:10:13
+
+  Integer overflow: The literal '300' is too large for the integer type 'int8'. The maximum value is '127'.
+
+   9 | int8 $x = match (E::a) {
+  10 |     E::a => 300,
+     :             ^^^
+  11 |     E::b => die('no'),
+
+1 error, nothing was compiled.

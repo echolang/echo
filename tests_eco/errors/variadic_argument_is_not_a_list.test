@@ -6,7 +6,7 @@ expect: fail
   'c_snprintf' takes a C variadic tail, which has to be written as a list right here - 'c_snprintf(..., [$a, $b])'. A value cannot be handed over instead, because C decides where each argument goes from its type at the call site.
 
   11 | 
-  12 | c_snprintf($buf, 16, $format->c_str(), $n);
+  12 | c_snprintf($buf, 16, $format->cstr(), $n);
      : ^^^^^^^^^^
   13 | 
 

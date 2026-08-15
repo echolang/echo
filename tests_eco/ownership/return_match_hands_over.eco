@@ -1,0 +1,48 @@
+// `return match { => tag_of($a) }` hands `$a` over the way `return tag_of($a)` does.
+// the match is the return operand, so its arms do not rejoin with later uses
+struct Buffer
+{
+    usize $tag;
+
+    constructor(usize $tag)
+    {
+        $this->tag = $tag;
+    }
+
+    constructor(const Buffer& $other)
+    {
+        echo 500;
+        $this->tag = $other->tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+enum Kind
+{
+    case go;
+    case stop;
+}
+
+function tag_of(Buffer $b) : usize
+{
+    echo 10;
+    return $b->tag;
+}
+
+function via_match() : usize
+{
+    Buffer $a = Buffer(7);
+
+    match (Kind::go) {
+        Kind::go   => { return tag_of($a); },
+        Kind::stop => { die('no'); },
+    }
+
+    return 0;
+}
+
+echo via_match();

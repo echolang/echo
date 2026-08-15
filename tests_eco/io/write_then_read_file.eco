@@ -1,7 +1,7 @@
 // writefile / readfile is the whole-file door
 
 string $path = '';
-$path->append(str::from(std::env::tmp_dir()));
+$path->append(str::from(std::env::tmp()));
 $path->append('/echo-io-roundtrip-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -20,10 +20,14 @@ string $body = guard std::io::readfile($path) else ($e) {
 
 echo $body;
 
-usize $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::io::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;
-echo std::io::exists($path);
+bool $gone = guard std::io::exists($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $gone;

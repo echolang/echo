@@ -431,41 +431,12 @@ void TypeChecker::check_variadic_argument(FunctionCallExprNode &node)
 
 void TypeChecker::check_c_function_type(const ValueType &type, const TokenReference &at)
 {
-    if (type.is_pointer()) {
-        check_c_function_type(type.pointee(), at);
-        return;
-    }
-
-    if (type.is_weak()) {
-        check_c_function_type(type.weak_target(), at);
-        return;
-    }
-
-    if (type.has_signature()) {
-        if (type.is_c_function()) {
-            if (auto refusal = c_function_signature_refusal(type.signature(), _collector.core_types)) {
-                _collector.collect_issue<Issue::GenericError>(
-                    code_ref_for(at),
-                    fmt::format(
-                        "'{}' is not a C-callable signature - {}",
-                        type.get_type_desciption(),
-                        refusal.value()));
-            }
-        }
-
-        check_c_function_type(type.signature().return_type, at);
-
-        for (const auto &parameter : type.signature().parameter_types) {
-            check_c_function_type(parameter, at);
-        }
-
-        return;
-    }
-
-    if (type.has_complex_type() && type.get_complex_type()->is_instantiated()) {
-        for (const auto &arg : type.get_complex_type()->instantiation_args) {
-            check_c_function_type(arg, at);
-        }
+    // the walk is AST::c_function_type_refusal's - this pass reports, it does not re-derive where
+    // an `extern function<...>` can hide
+    if (auto refusal = c_function_type_refusal(type, _collector.core_types)) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(at),
+            std::move(refusal.value()));
     }
 }
 

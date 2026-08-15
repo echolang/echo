@@ -1,7 +1,7 @@
-// several lines in one write, then read_line in a loop - the case one syscall per byte makes unusable
+// several lines in one write, then readline in a loop - the case one syscall per byte makes unusable
 
 string $path = '';
-$path->append(str::from(std::env::tmp_dir()));
+$path->append(str::from(std::env::tmp()));
 $path->append('/echo-io-lines-');
 $path->append(str::from(std::env::pid()));
 $path->append('.txt');
@@ -18,28 +18,28 @@ file $f = guard std::io::open($path, .read) else ($e) {
     return 1;
 }
 
-string? $a = guard $f->read_line() else ($e) {
+string? $a = guard $f->readline() else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $a ?? 'null';
 
-string? $b = guard $f->read_line() else ($e) {
+string? $b = guard $f->readline() else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $b ?? 'null';
 
-string? $c = guard $f->read_line() else ($e) {
+string? $c = guard $f->readline() else ($e) {
     echo $e->message();
     return 1;
 }
 
 echo $c ?? 'null';
 
-string? $d = guard $f->read_line() else ($e) {
+string? $d = guard $f->readline() else ($e) {
     echo $e->message();
     return 1;
 }
@@ -50,9 +50,8 @@ if ($d == null) {
 
 $f->close();
 
-usize $rm = guard std::io::remove($path) else ($e) {
+bool $rm = guard std::io::remove($path) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;

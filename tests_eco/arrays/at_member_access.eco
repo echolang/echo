@@ -1,4 +1,4 @@
-// `->at()` and `->push_slot()` return `T&`, and reading a member off that borrow used to abort the
+// `->at()` and `->slot()` return `T&`, and reading a member off that borrow used to abort the
 // compiler - which is why arrays.md counted it as one of the reasons element access is specified as a
 // place rather than as sugar for a method call. it works now, so filling an element field by field
 // through the slot the container handed back is a thing that can be written
@@ -8,8 +8,8 @@ struct Point { int32 $x; int32 $y; }
 array<Point> $a = [];
 
 // the slot is a borrow of the new element, so each field is written straight into the buffer
-$a->push_slot()->x = 1;
-$a->push_slot()->x = 3;
+$a->slot()->x = 1;
+$a->slot()->x = 3;
 
 echo $a->at(0)->x;
 echo $a->at(1)->x;

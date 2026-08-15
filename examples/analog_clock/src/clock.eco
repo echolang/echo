@@ -91,8 +91,8 @@ function time_from_args(Time& $out) : bool
 #[inline]
 function two_digits_at(string::view $s, usize $at) : int32
 {
-    int32 $tens = $s->byte_at($at) - 48;
-    int32 $ones = $s->byte_at($at + 1) - 48;
+    int32 $tens = $s->byte($at) - 48;
+    int32 $ones = $s->byte($at + 1) - 48;
 
     return $tens * 10 + $ones;
 }

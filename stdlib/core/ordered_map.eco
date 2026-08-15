@@ -69,9 +69,9 @@ public struct ordered_map<K, V> : contract::iterable<V>, contract::const_iterabl
         return $this->table->capacity();
     }
 
-    const function is_empty() : bool
+    const function empty() : bool
     {
-        return $this->table->is_empty();
+        return $this->table->empty();
     }
 
     const function has(const K& $key) : bool

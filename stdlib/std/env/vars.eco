@@ -23,7 +23,7 @@ namespace std::env;
  */
 public function has(string::view $key) : bool
 {
-    ptr<uint8> $found = c_getenv($key->c_str());
+    ptr<uint8> $found = c_getenv($key->cstr());
 
     return $found:$ != null;
 }
@@ -35,19 +35,19 @@ public function has(string::view $key) : bool
  * means by it - `guard`, `??` or `?->`, whichever fits. The two-argument overload below is the
  * short spelling of the common choice.
  *
- * `$key` is read through `->c_str()`, which needs it NUL-terminated. Every literal is, and so is
+ * `$key` is read through `->cstr()`, which needs it NUL-terminated. Every literal is, and so is
  * every whole `string`; a **sub-window** of one is not, and asking with one is a `die`. `clone()`
  * it first.
  */
 public function var(string::view $key) : string::view?
 {
-    ptr<uint8> $found = c_getenv($key->c_str());
+    ptr<uint8> $found = c_getenv($key->cstr());
 
     if ($found:$ == null) {
         return null;
     }
 
-    return str::view_of_c_str($found);
+    return str::cview($found);
 }
 
 /**
@@ -108,10 +108,10 @@ public struct var_iterator : contract::iterator<string::view>, contract::keyed<s
             return false;
         }
 
-        string::view $whole = str::view_of_c_str($entry);
-        usize $split = $whole->index_of('=');
+        string::view $whole = str::cview($entry);
+        usize $split = $whole->find('=');
 
-        // `index_of` answers the size when there is no match, and then the key is the whole entry and the
+        // `find` answers the size when there is no match, and then the key is the whole entry and the
         // value is empty - which is the honest reading of an entry with no `=` in it
         $this->key = $whole->sub(0, $split);
 

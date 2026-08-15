@@ -7,24 +7,24 @@ $a = 'hello world';
 // the #[implicit] conversion
 echo $a->equals('hello world');
 echo $a->equals('hello');
-echo $a->starts_with('hello');
-echo $a->starts_with('world');
-echo $a->ends_with('world');
+echo $a->starts('hello');
+echo $a->starts('world');
+echo $a->ends('world');
 
 // an empty prefix or suffix always matches
-echo $a->starts_with('');
-echo $a->ends_with('');
+echo $a->starts('');
+echo $a->ends('');
 
-// index_of answers with the haystack's own size when there is no match - the one value always to
+// find answers with the haystack's own size when there is no match - the one value always to
 // hand that is never a valid index
-echo $a->index_of('world');
-echo $a->index_of('o');
-echo $a->index_of('zzz');
+echo $a->find('world');
+echo $a->find('o');
+echo $a->find('zzz');
 echo $a->size();
 
 echo $a->contains('lo w');
 echo $a->contains('zzz');
 
 // and the found offset feeds straight back into sub, with no adjustment
-$found = $a->sub($a->index_of('world'), 5);
+$found = $a->sub($a->find('world'), 5);
 echo $found;

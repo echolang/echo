@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  null_coalesce_literal_unsigned.eco:5:12
+
+  Invalid type conversion: The integer literal '-1' cannot be implicitly converted to an unsigned integer because it is negative.
+
+  4 | 
+  5 | echo $o ?? -1;
+    :            ^^
+  6 | 
+
+1 error, nothing was compiled.

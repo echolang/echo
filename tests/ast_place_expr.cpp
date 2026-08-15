@@ -412,7 +412,7 @@ TEST_CASE("null is deliberately not an expression node for conversion purposes",
 {
     // NullNode is an ExprNode, but `n_null` is intentionally absent from is_expression_node()
     //
-    // that predicate gates try_implicit_cast (src/Parser/ExprParser.cpp), and null must not be
+    // that predicate gates destination typing, and null must not be
     // wrapped in a TypeCastNode: it has no type of its own, it acquires one through bound_type,
     // and the type checker's null-specific rules all test for the raw n_null tag. wrapping it
     // would hide the tag and turn "cannot be null" into a silent conversion

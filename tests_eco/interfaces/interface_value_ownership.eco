@@ -29,7 +29,7 @@ function shared() : void
     Drawable $erased = $circle;
 
     $erased->draw();
-    echo mem::ref_count($circle);
+    echo mem::refs($circle);
 }
 
 // ...and the object is destroyed once, when both have gone

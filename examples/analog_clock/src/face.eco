@@ -163,8 +163,8 @@ function two_digits(string& $out, int32 $value) : void
     uint8 $tens = 48 + $value / 10;
     uint8 $ones = 48 + $value % 10;
 
-    $out->push_byte($tens);
-    $out->push_byte($ones);
+    $out->push($tens);
+    $out->push($ones);
 }
 
 // a free function and not a method on `Time`: it is string arithmetic rather than drawing, and the layer

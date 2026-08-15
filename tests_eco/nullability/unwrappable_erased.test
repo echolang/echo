@@ -4,7 +4,7 @@
 10
 -2
 --- IR --->
-// the table, in requirement order: slot 0 is the implementor's release thunk, then `has_value` and
+// the table, in requirement order: slot 0 is the implementor's release thunk, then `ok` and
 // `unwrap` - the order AST::interface_requirements answers in, which is what the dispatch site has to
 // agree with and could not before an instantiated requirement resolved through its template_ref
 CHECK: .vtable" = linkonce_odr constant [3 x ptr] [ptr @__eco_release_4Cell, ptr @_M4Cell_has_value

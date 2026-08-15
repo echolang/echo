@@ -1,4 +1,4 @@
-// `->c_str()` is the way out to C, and it costs nothing: every buffer this library allocates has
+// `->cstr()` is the way out to C, and it costs nothing: every buffer this library allocates has
 // room for one byte past its text and holds a 0 there, and the compiler emits every literal
 // NUL-terminated too. so the pointer is handed over as-is
 
@@ -8,27 +8,27 @@ extern {
 
 // a literal: the bytes are in the binary, already terminated
 $lit = 'hello';
-echo $lit->is_terminated();
-echo c_strlen($lit->c_str());
+echo $lit->terminated();
+echo c_strlen($lit->cstr());
 
 // an owned buffer: terminated by str::buf, which is what makes `$bytes[$used]` an invariant
 $owned = $lit->clone();
 $owned->append(' world');
-echo $owned->is_terminated();
-echo c_strlen($owned->c_str());
+echo $owned->terminated();
+echo c_strlen($owned->cstr());
 echo $owned->size();
 
 // a substring reaching the end of its buffer is terminated too
 $tail = $owned->sub(6, 5);
-echo $tail->is_terminated();
-echo c_strlen($tail->c_str());
+echo $tail->terminated();
+echo c_strlen($tail->cstr());
 
-// ...but one that stops early is not, and `c_str()` on it would abort rather than run past the end
+// ...but one that stops early is not, and `cstr()` on it would abort rather than run past the end
 $head = $owned->sub(0, 5);
-echo $head->is_terminated();
+echo $head->terminated();
 echo $head;
 
 // cloning is how a substring becomes safe to hand over
 $safe = $head->clone();
-echo $safe->is_terminated();
-echo c_strlen($safe->c_str());
+echo $safe->terminated();
+echo c_strlen($safe->cstr());

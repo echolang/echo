@@ -1,0 +1,13 @@
+// unify_type binds T from an extern function pointer argument, so apply(&id, 41)
+// does not need apply<int32>
+function apply<T>(extern function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+function id(int32 $n) : int32
+{
+    return $n;
+}
+
+echo apply(&id, 41);

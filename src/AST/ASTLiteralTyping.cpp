@@ -1,6 +1,7 @@
 #include "AST/ASTLiteralTyping.h"
 
 #include "AST/ASTBundle.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTFile.h"
@@ -15,6 +16,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/MatchExprNode.h"
 #include "AST/ReturnNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/VarDeclNode.h"
@@ -527,7 +529,7 @@ namespace AST
         // step above is about which side the answer comes *from*; this is about how the other side gets
         // there, and a literal gets there by being written at the type instead of converted to it. that is
         // what keeps `2 * 3.14f` two float32 literals rather than a cast around an int32 one - and it is
-        // the one thing the parser's try_implicit_cast did that AST::OperatorRewriter's copy never could
+        // the one thing the parser's destination typing did that AST::OperatorRewriter's copy never could
         if (is_literal_primitive(loser)) {
             const LiteralTyping typing = type_literal_at(loser, *common, nodes);
 
@@ -641,10 +643,70 @@ namespace AST
             RecursiveVisitor::visitReturn(node);
         }
 
+        // **a `??` RHS takes the unwrapped left type**, which is the destination the form itself
+        // names. `type_destination_literals` used to stop at the three shallow slots, so
+        // `$o ?? -1` over a `uint32?` reached codegen untyped and `coerce_value` bit-cast it
+        void visit_null_coalesce(NullCoalesceExprNode &node) override
+        {
+            if (node.lhs != nullptr && node.rhs != nullptr) {
+                const ValueType dest = unwrapped_type_of(node.lhs->result_type());
+
+                if (!is_undetermined_type(dest)) {
+                    write_at(node.rhs, dest, node.token);
+                }
+            }
+
+            RecursiveVisitor::visit_null_coalesce(node);
+        }
+
+        // **a match arm's value takes the unified type**, once resolution has one. the same hole
+        // as `??`: `match { .a => 300 }` at an `int8` destination used to wrap in coerce_value
+        void visit_match(MatchExprNode &node) override
+        {
+            if (node.patterns_decided && !is_undetermined_type(node.result)) {
+                const ValueType dest = node.yields_a_place
+                    ? value_type_of(node.result)
+                    : node.result;
+
+                for (MatchExprNode::Arm &arm : node.arms) {
+                    if (arm.value != nullptr) {
+                        write_at(arm.value, dest, arm.token);
+                    }
+                }
+            }
+
+            RecursiveVisitor::visit_match(node);
+        }
+
     private:
         void write_at(ExprNode *&slot, const ValueType &destination, const TokenReference &at)
         {
-            if (!is_untyped_literal(slot) || is_undetermined_type(destination)) {
+            if (is_undetermined_type(destination) || slot == nullptr) {
+                return;
+            }
+
+            // wrappers that are transparent for a destination: the written type belongs
+            // on the arm / the fallback, not on the form. without this `int8 $x = match
+            // { => 300 }` unifies as int32 and coerce_value wraps, while `return 300`
+            // from int8 is refused
+            if (slot->get_node_type() == NodeType::n_expr_match) {
+                auto *match = static_cast<MatchExprNode *>(slot);
+
+                for (MatchExprNode::Arm &arm : match->arms) {
+                    if (arm.value != nullptr) {
+                        write_at(arm.value, destination, arm.token);
+                    }
+                }
+
+                return;
+            }
+
+            if (slot->get_node_type() == NodeType::n_expr_null_coalesce) {
+                write_at(static_cast<NullCoalesceExprNode *>(slot)->rhs, destination, at);
+                return;
+            }
+
+            if (!is_untyped_literal(slot)) {
                 return;
             }
 

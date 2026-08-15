@@ -179,7 +179,7 @@ namespace AST
         void check_variadic_args_position(FunctionDeclNode &node);
 
         // every `extern function<R(P...)>` that appears on a declaration, through the one
-        // sentence-writer in AST::c_function_signature_refusal
+        // walk in AST::c_function_type_refusal
         void check_c_function_type(const ValueType &type, const TokenReference &at);
 
         // what may arrive at one: a list written right here, holding primitives and addresses

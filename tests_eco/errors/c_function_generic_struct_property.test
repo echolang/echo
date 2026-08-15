@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_generic_struct_property.eco:14:30
+
+  'extern function<Point(Point)>' is not a C-callable signature - 'Point' cannot cross a C function-pointer boundary by value - echoc and clang classify a struct differently, and the disagreement is silent. Pass a 'ptr<Point>' instead.
+
+  13 | 
+  14 | function take(Handler<Point> $h) : void
+     :                              ^^
+  15 | {
+
+1 error, nothing was compiled.

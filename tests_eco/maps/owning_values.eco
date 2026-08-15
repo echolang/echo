@@ -25,7 +25,7 @@
 
     // +3 for the table. the value was **retained**, not duplicated - which is what the count below says
     assert(mem::live_allocations() == 5, 'the three buffers, and the string retained rather than copied');
-    assert(mem::ref_count<str::buf>($v->owner) == 2, 'the local and the slot');
+    assert(mem::refs<str::buf>($v->owner) == 2, 'the local and the slot');
 
     echo $m->get('greet');
 
@@ -42,8 +42,8 @@
     $m->set('greet', $v2);
 
     assert(mem::live_allocations() == 7, 'nothing allocated and nothing leaked');
-    assert(mem::ref_count<str::buf>($v->owner) == 1, 'the slot gave its reference back');
-    assert(mem::ref_count<str::buf>($v2->owner) == 2, 'and the new value has it');
+    assert(mem::refs<str::buf>($v->owner) == 1, 'the slot gave its reference back');
+    assert(mem::refs<str::buf>($v2->owner) == 2, 'and the new value has it');
 
     echo $m->get('greet');
     echo $m->count();
@@ -53,7 +53,7 @@
     map<string, string> $c = $m;
 
     assert(mem::live_allocations() == 10, 'a second table, and the element retained');
-    assert(mem::ref_count<str::buf>($v2->owner) == 3, 'the local and both maps');
+    assert(mem::refs<str::buf>($v2->owner) == 3, 'the local and both maps');
 
     echo $c->get('greet');
     echo $c->count();
@@ -78,14 +78,14 @@ echo mem::live_allocations();
     $m->set($k, 1);
 
     assert(mem::live_allocations() == 5, 'the three buffers and the written key');
-    assert(mem::ref_count<str::buf>($k->owner) == 2, 'the local and the stored key');
+    assert(mem::refs<str::buf>($k->owner) == 2, 'the local and the stored key');
 
     echo $m->get($k);
 
     // removing destroys the key as well as the value
     echo $m->remove($k);
 
-    assert(mem::ref_count<str::buf>($k->owner) == 1, 'the stored key was destroyed');
+    assert(mem::refs<str::buf>($k->owner) == 1, 'the stored key was destroyed');
     echo $m->count();
 }
 
@@ -102,12 +102,12 @@ echo mem::live_allocations();
 
     $m->set('k', $s);
 
-    assert(mem::ref_count<str::buf>($s->owner) == 2, 'the local and the slot');
+    assert(mem::refs<str::buf>($s->owner) == 2, 'the local and the slot');
 
     string $out = $m->take('k');
 
     // **unchanged**: the slot stopped being an owner at the same moment `$out` started being one
-    assert(mem::ref_count<str::buf>($s->owner) == 2, 'handed over, not duplicated');
+    assert(mem::refs<str::buf>($s->owner) == 2, 'handed over, not duplicated');
     assert(mem::live_allocations() == 5, 'and nothing was allocated to do it');
 
     echo $out;

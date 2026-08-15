@@ -214,7 +214,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
         return $this->cap;
     }
 
-    const function is_empty() : bool
+    const function empty() : bool
     {
         if ($this->len > 0) {
             return false;
@@ -432,7 +432,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * The other half of what `reserve` and `remove` leave behind: nothing else here ever lowers `capacity`,
      * so a map that grew large and then emptied holds three buffers until it is destroyed.
      */
-    function shrink_to_fit() : void
+    function shrink() : void
     {
         if ($this->len == 0) {
             // nothing to keep, so the buffers go rather than being re-seated to the floor
@@ -555,7 +555,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
     #[inline]
     private const function slot_is_live(usize $at) : bool
     {
-        // spelled as a branch rather than `return <comparison>`, exactly as `is_empty` and `has` are: a
+        // spelled as a branch rather than `return <comparison>`, exactly as `empty` and `has` are: a
         // literal types at its destination, and the destination of a returned expression is the return
         // type - so the `1` in `return ... > 1` is typed `bool`
         if ($this->hashes:$[$at] > 1) {
@@ -649,7 +649,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * How many slots `$count` entries need: a power of two, at least 8, keeping the load under 0.75.
      *
      * The floor is flat rather than element-size dependent, deliberately unlike `array<T>::reserve`'s:
-     * `mem::size_of` cannot decide a `const if`, and a slot here is a `uint64` plus a `K` plus a
+     * `mem::size` cannot decide a `const if`, and a slot here is a `uint64` plus a `K` plus a
      * `V` and is never one byte - so there is nothing a size could buy, and nothing to revisit when A41
      * lands.
      */
@@ -668,7 +668,7 @@ public struct map<K, V> : contract::iterable<V>, contract::const_iterable<const 
      * The slot holding `$key`, or **`capacity()`** when the map does not hold it.
      *
      * There is no optional to hand back, so the sentinel is the one value always to hand and never a valid
-     * slot - `string::view::index_of` makes the same choice for the same reason, and the test reads
+     * slot - `string::view::find` makes the same choice for the same reason, and the test reads
      * `if ($at < $this->cap)`. For an empty map `capacity()` is 0, so every such test is false.
      */
     const function find(const K& $key) : usize

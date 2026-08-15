@@ -1,7 +1,7 @@
 /**
  * Printing a value while you are looking for something.
  *
- * In the root namespace beside `die`, `assert` and `ref_count`, and for the same reason: "what is
+ * In the root namespace beside `die`, `assert` and `refs`, and for the same reason: "what is
  * actually in this thing" is a question you ask at three in the morning, and it belongs to no
  * subsystem you have to opt into first.
  */
@@ -29,11 +29,11 @@
  * and the layout it reads them out of. It has no symbol, nothing links against it, and the shape is
  * expanded where you wrote the call - so a struct of ten scalars is *one* `printf`.
  *
- * The parameter is a **borrow**, not a value, and that matters more here than for `ref_count`. A
+ * The parameter is a **borrow**, not a value, and that matters more here than for `refs`. A
  * by-value class argument is one more reference, so the printer would be perturbing exactly what you
  * called it to look at; a by-value struct argument is a copy, so a struct declaring a copy
  * constructor would run it and you would be reading the copy. As a borrow it reads in place and
- * changes nothing - `mem::ref_count($x)` reads the same on both sides of a `dprint($x)`.
+ * changes nothing - `mem::refs($x)` reads the same on both sides of a `dprint($x)`.
  *
  * **It walks the static type, not the object graph.** A type that reaches itself is cut with
  * `<cycle>` the second time it appears on the way down, so a three-element linked list prints one

@@ -22,7 +22,7 @@
     $b->append('world');
 
     assert(mem::live_allocations() == 5, "the buffer and two written strings");
-    assert(mem::ref_count<str::buf>($a->owner) == 1, "one owner so far");
+    assert(mem::refs<str::buf>($a->owner) == 1, "one owner so far");
 
     mem::init<string>($buf:$[0], $a);
     mem::init<string>($buf:$[1], $b);
@@ -31,7 +31,7 @@
     // into the slot is the owner the by-value parameter already copied, which the count below is what
     // actually proves - two owners of one str::buf, the local and the slot
     assert(mem::live_allocations() == 5, "init moved an owner in rather than allocating one");
-    assert(mem::ref_count<str::buf>($a->owner) == 2, "the local and the slot");
+    assert(mem::refs<str::buf>($a->owner) == 2, "the local and the slot");
 
     echo $buf:$[0];
     echo $buf:$[1];
@@ -43,7 +43,7 @@
     string $gone = mem::take<string>($buf:$[1]);
 
     assert(mem::live_allocations() == 5, "take moved an owner out rather than releasing one");
-    assert(mem::ref_count<str::buf>($a->owner) == 2, "still the local and now the taken value");
+    assert(mem::refs<str::buf>($a->owner) == 2, "still the local and now the taken value");
 
     echo $out;
 

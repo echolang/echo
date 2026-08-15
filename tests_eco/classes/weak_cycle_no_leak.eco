@@ -4,8 +4,8 @@
 // so the two can be read together
 //
 // the counts are asserted rather than inferred from the destructor output, because output alone cannot
-// tell a collected cycle from one that happens to be unreachable: `mem::ref_count` says who owns the object
-// and `mem::weak_count` says who is merely watching it, and only the pair of them shows the edge doing its job
+// tell a collected cycle from one that happens to be unreachable: `mem::refs` says who owns the object
+// and `mem::weaks` says who is merely watching it, and only the pair of them shows the edge doing its job
 
 class Node
 {
@@ -31,13 +31,13 @@ function linked() : void
     $b->prev = &$a;
 
     // one owner of $a - the local. the back edge is not one, which is the whole point
-    echo mem::ref_count($a);
+    echo mem::refs($a);
 
     // two owners of $b - the local and $a->next
-    echo mem::ref_count($b);
+    echo mem::refs($b);
 
     // and the back edge shows up here instead: the one the strong references hold together, plus $b->prev
-    echo mem::weak_count($a);
+    echo mem::weaks($a);
 }
 
 // so the scope end collects everything, in reverse declaration order: $b's local reference goes (2 -> 1),

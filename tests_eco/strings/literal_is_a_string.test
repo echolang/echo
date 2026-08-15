@@ -13,7 +13,7 @@ hey
 # null owner. this is the claim that makes `$foo = 'jan'` free, and it is not observable from program
 # output - only from here
 
-# the bytes live in the binary, NUL-terminated so `->c_str()` on a literal costs nothing
+# the bytes live in the binary, NUL-terminated so `->cstr()` on a literal costs nothing
 CHECK: @str = private unnamed_addr constant [4 x i8] c"hey\00"
 
 CHECK: define i32 @main(

@@ -5,7 +5,7 @@
  * so has nowhere of its own to keep leftover bytes.
  *
  *     reader $in = reader(std::io::stdin);
- *     string $line = guard $in->read_line() else ($e) { die('read failed'); };
+ *     string $line = guard $in->readline() else ($e) { die('read failed'); };
  */
 
 namespace std::io;
@@ -26,9 +26,9 @@ public class reader
         return read_from($this->fd, $this->rin, $dst, $count);
     }
 
-    function read_line() : result<string?, ioerror>
+    function readline() : result<string?, ioerror>
     {
-        return read_line_from($this->fd, $this->rin);
+        return readline_from($this->fd, $this->rin);
     }
 
     function readall() : result<string, ioerror>

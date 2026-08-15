@@ -58,7 +58,7 @@ namespace AST
 
         // every ExprNode subclass must be listed here. a missing entry is silent: the node still
         // parses and lowers, it just stops being recognised as an expression, so it drops out of
-        // implicit conversion (try_implicit_cast) and out of anything else that gates on this
+        // implicit conversion and out of anything else that gates on this
         // n_member_access was missing, which is why `$s->x * 3.14` never got its implicit cast
         inline bool is_expression_node() const {
             assert(has());

@@ -1,0 +1,10 @@
+// Echo's const on a by-value parameter is a local write-protect, not C's.
+// &add1 must bind to extern function<int32(int32)>
+function add1(const int32 $x) : int32
+{
+    return $x + 1;
+}
+
+extern function<int32(int32)> $f = &add1;
+
+echo $f(41);

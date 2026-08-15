@@ -42,17 +42,17 @@ public class writer
         return flush_write($this->fd, $this->wout);
     }
 
-    function write_bytes(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+    function write(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
     {
         return write_to($this->fd, $this->wout, $src, $count);
     }
 
     function write(const string& $text) : result<usize, ioerror>
     {
-        return $this->write_bytes($text->data(), $text->size());
+        return $this->write($text->data(), $text->size());
     }
 
-    function write_line(const string& $text) : result<usize, ioerror>
+    function writeline(const string& $text) : result<usize, ioerror>
     {
         usize $n = guard $this->write($text) else ($e) {
             return .error($e);

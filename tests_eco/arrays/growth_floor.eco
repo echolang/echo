@@ -24,8 +24,8 @@ array<usize> $big;
 $big->reserve(1000);
 echo $big->capacity();
 
-// while `reserve_exact` is the way to ask for a small buffer sized to the byte - the floor is on the
+// while `fit` is the way to ask for a small buffer sized to the byte - the floor is on the
 // growth path only
 array<usize> $tight;
-$tight->reserve_exact(3);
+$tight->fit(3);
 echo $tight->capacity();

@@ -11,8 +11,8 @@ usize $count = 0;
 foreach (std::env::vars() as $key => $value) {
     $count = $count + 1;
 
-    // `index_of` answers the size when there is no match, so this is "no `=` survived in the key"
-    assert($key->index_of('=') == $key->size, 'a key kept its =');
+    // `find` answers the size when there is no match, so this is "no `=` survived in the key"
+    assert($key->find('=') == $key->size, 'a key kept its =');
 
     if ($key->equals('ECO_CORPUS_ITER')) {
         $found = true;

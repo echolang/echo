@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  match_place_const_launder.eco:13:8
+
+  Invalid type conversion: cannot implicitly convert 'const int32' to 'int32&'
+
+  12 | 
+  13 | int32& $slot = match (E::mut) {
+     :        ^^^^^
+  14 |     E::mut => $m,
+
+1 error, nothing was compiled.

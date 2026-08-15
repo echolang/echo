@@ -21,4 +21,4 @@ extern {
 
 string $text = 'hello';
 
-echo measure($text->c_str());
+echo measure($text->cstr());

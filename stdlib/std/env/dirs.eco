@@ -20,7 +20,7 @@ namespace std::env;
  * of a loop that allocates until the machine gives up; no path on any supported platform comes near
  * it.
  */
-public function working_dir() : string
+public function cwd() : string
 {
     usize $capacity = 256;
 
@@ -40,8 +40,8 @@ public function working_dir() : string
             continue;
         }
 
-        // the copy is what lets the buffer go - `from_c_str` takes the bytes along
-        string $path = str::from_c_str($raw);
+        // the copy is what lets the buffer go - `from` takes the bytes along
+        string $path = str::from($raw);
         mem::free($raw);
 
         return $path;
@@ -56,7 +56,7 @@ public function working_dir() : string
  * Nullable because an unset `HOME` has no honest answer. Returning `""` would hand back a path that
  * resolves - to the working directory - and the caller could not tell that from a real one.
  */
-public function home_dir() : string::view?
+public function home() : string::view?
 {
     return var('HOME');
 }
@@ -67,7 +67,7 @@ public function home_dir() : string::view?
  * Not nullable, because unlike `HOME` there *is* an honest answer when the variable is missing: the
  * path every POSIX system has.
  */
-public function tmp_dir() : string::view
+public function tmp() : string::view
 {
     return var('TMPDIR', '/tmp');
 }

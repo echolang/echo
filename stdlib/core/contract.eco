@@ -117,7 +117,7 @@ public interface keyed<K>
  * result, a parse outcome, a lazily filled cache slot - anything that means "maybe a value" - conforms
  * and is guarded exactly the way a nullable is:
  *
- *     $n = guard parse_int($text) else { return 0; }
+ *     $n = guard str::int($text) else { return 0; }
  *
  * `has_value()` is called first and its answer gates the unwrap, so `unwrap()` is only ever reached
  * after a `true`. That is the whole contract, and it is what lets `unwrap()` skip the check

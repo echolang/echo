@@ -1,0 +1,12 @@
+// a match arm is a destination. 300 at an int8 written type must overflow,
+// the same way `function f() : int8 { return 300; }` does
+enum E
+{
+    case a;
+    case b;
+}
+
+int8 $x = match (E::a) {
+    E::a => 300,
+    E::b => die('no'),
+};

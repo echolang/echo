@@ -18,13 +18,13 @@ class Res
 function through_guard<T>(T $w) : int32
 {
     Res $r = guard $w else { return -1; }
-    return mem::ref_count($r);
+    return mem::refs($r);
 }
 
 function through_coalesce<T>(T $w, Res $fb) : int32
 {
     Res $picked = $w ?? $fb;
-    return mem::ref_count($picked);
+    return mem::refs($picked);
 }
 
 // the chain is the one that needs a second thing repaired: its ChainBaseNode stores the base's
@@ -40,16 +40,16 @@ function balanced() : void
     Res $r = Res(1);
     weak<Res> $w = &$r;
 
-    echo mem::ref_count($r);
+    echo mem::refs($r);
 
     echo through_guard($w);
-    echo mem::ref_count($r);
+    echo mem::refs($r);
 
     echo through_chain($w);
-    echo mem::ref_count($r);
+    echo mem::refs($r);
 
     echo through_coalesce($w, Res(2));
-    echo mem::ref_count($r);
+    echo mem::refs($r);
 }
 
 balanced();

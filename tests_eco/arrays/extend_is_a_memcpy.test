@@ -14,7 +14,7 @@ CHECK: define linkonce_odr void @_M5array_extendZZMRBMLC5arrayIMLPiEZMRBCLC5arra
 # instantiation it would have created. bounded by the memcpy below rather than run to the end of the module
 CHECK-NOT: @_operatorx20x5b
 
-# and the arm it selected: one call, for the whole append. it goes through `mem::buffer<T>::copy_from`
+# and the arm it selected: one call, for the whole append. it goes through `mem::buffer<T>::copy`
 # rather than `mem::copy` directly, because the buffer's fields are private - the layering is the
 # point, and the bulk copy is still one call rather than a loop
-CHECK: call void @_mem_MN3mem6bufferE_copy_from
+CHECK: call void @_mem_MN3mem6bufferE_copy

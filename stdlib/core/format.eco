@@ -107,7 +107,7 @@ public function spec_of(const string& $text) : spec
         return $out;
     }
 
-    uint8 $first = $text->byte_at(0);
+    uint8 $first = $text->byte(0);
 
     if ($first == CH_LT || $first == CH_GT || $first == CH_CARET) {
         $out->align = $first;
@@ -115,14 +115,14 @@ public function spec_of(const string& $text) : spec
     }
 
     while ($i < $n) {
-        uint8 $b = $text->byte_at($i);
+        uint8 $b = $text->byte($i);
 
         if ($b == CH_DOT) {
             $i = $i + 1;
             $out->precision = 0;
 
             while ($i < $n) {
-                int32 $digit = digit_value($text->byte_at($i));
+                int32 $digit = digit($text->byte($i));
 
                 if ($digit < 0) {
                     break;
@@ -135,7 +135,7 @@ public function spec_of(const string& $text) : spec
             continue;
         }
 
-        int32 $digit = digit_value($b);
+        int32 $digit = digit($b);
 
         if ($digit >= 0) {
             usize $place = $digit;
@@ -160,7 +160,7 @@ public function spec_of(const string& $text) : spec
  *
  * **The six functions from here down to `float_to_string` are `private`**, and that is the file's own
  * shape said out loud: `spec`, `spec_of` and the `from` overloads are the surface, and everything
- * between them is how a spec becomes bytes. `str::pad_start` and `str::pad_end` are the public
+ * between them is how a spec becomes bytes. `str::lpad` and `str::rpad` are the public
  * spellings of what this one does.
  */
 private function align_to(const string& $text, const spec& $s, uint8 $default_align) : string
@@ -176,11 +176,11 @@ private function align_to(const string& $text, const spec& $s, uint8 $default_al
     }
 
     if ($align == CH_LT) {
-        return pad_end($text, $s->width, $s->fill());
+        return rpad($text, $s->width, $s->fill());
     }
 
     if ($align == CH_GT) {
-        return pad_start($text, $s->width, $s->fill());
+        return lpad($text, $s->width, $s->fill());
     }
 
     // centred: the odd byte goes on the right, which is what every other implementation of this
@@ -188,7 +188,7 @@ private function align_to(const string& $text, const spec& $s, uint8 $default_al
     usize $total = $s->width - $text->size();
     usize $left = $total / 2;
 
-    return pad_end(pad_start($text, $text->size() + $left, $s->fill()), $s->width, $s->fill());
+    return rpad(lpad($text, $text->size() + $left, $s->fill()), $s->width, $s->fill());
 }
 
 /**
@@ -240,7 +240,7 @@ private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
 
     while ($i > 0) {
         $i = $i - 1;
-        $out->push_byte($reversed[$i]);
+        $out->push($reversed[$i]);
     }
 
     return $out;
@@ -305,7 +305,7 @@ private function unsigned_to_string(uint64 $value, const spec& $s) : string
  * `echo 3.5` writes `3.500000` because its `%f` is pinned by several hundred golden files, where
  * `str::from(3.5)` writes `3.5` because that is what a reader wants inside a sentence.
  *
- * Round-tripping through `str::parse_float` is not promised at the default precision. Ask for
+ * Round-tripping through `str::float` is not promised at the default precision. Ask for
  * `{$x:.17g}` when it matters.
  */
 private function float_to_string(float64 $value, const spec& $s, int32 $default_precision) : string
@@ -334,7 +334,7 @@ private function float_to_string(float64 $value, const spec& $s, int32 $default_
     while (true) {
         buf $owner = buf($capacity, 0, mem::alloc<uint8>($capacity + 1));
 
-        int32 $needed = c_snprintf($owner->bytes, $capacity + 1, $format->c_str(), [$precision, $value]);
+        int32 $needed = c_snprintf($owner->bytes, $capacity + 1, $format->cstr(), [$precision, $value]);
 
         if ($needed < 0) {
             return align_to('', $s, CH_GT);
@@ -466,10 +466,10 @@ public function from(const string& $v, const string& $spec) : string
 #[inline]
 public function from(const string::view& $v) : string
 {
-    return from_bytes($v->bytes, $v->size);
+    return from($v->bytes, $v->size);
 }
 
 public function from(const string::view& $v, const string& $spec) : string
 {
-    return from(from_bytes($v->bytes, $v->size), $spec);
+    return from(from($v->bytes, $v->size), $spec);
 }

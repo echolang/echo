@@ -28,14 +28,14 @@ function exercise() : void
     echo $a->count();
     echo $a[0];
 
-    // and swap_remove hands one element over while keeping the rest. order is not preserved: the last
+    // and pluck hands one element over while keeping the rest. order is not preserved: the last
     // element is relocated into the hole, so what was 'z' is now first
     array<string> $c;
     $c[] = 'x';
     $c[] = 'y';
     $c[] = 'z';
 
-    echo $c->swap_remove(0);
+    echo $c->pluck(0);
     echo $c->count();
     echo $c[0];
 }

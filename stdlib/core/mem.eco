@@ -66,17 +66,17 @@ private extern {
 /**
  * The size of one `T` in bytes, as a compile-time constant.
  *
- * This is the allocation stride, so it includes any tail padding - `size_of<T>() * $n` is exactly
+ * This is the allocation stride, so it includes any tail padding - `size<T>() * $n` is exactly
  * the room `$n` elements of `T` need, and `$p:$[n]` lands on element `n`.
  */
 #[builtin: size_of]
-public function size_of<T>() : usize;
+public function size<T>() : usize;
 
 /**
  * The alignment `T` requires, in bytes, as a compile-time constant.
  */
 #[builtin: align_of]
-public function align_of<T>() : usize;
+public function align<T>() : usize;
 
 /**
  * True when duplicating a `T` is duplicating its bytes and nothing else, as a compile-time constant.
@@ -173,7 +173,7 @@ public function alloc<T>(usize $count) : ptr<T>
     // **the raw seam.** the allocator hands back bytes and this is what says they are `T`s - but it
     // needs no `unsafe`, and that is the boundary working as intended: this produces a `ptr<T>`, and
     // a raw pointer promises nothing. the word is owed by whoever turns one of these into a `T&`
-    return ptr<T>(alloc_bytes($count * size_of<T>()));
+    return ptr<T>(alloc_bytes($count * size<T>()));
 }
 
 /**
@@ -184,7 +184,7 @@ public function alloc<T>(usize $count) : ptr<T>
  */
 public function realloc<T>(ptr<T> $p, usize $count) : ptr<T>
 {
-    return ptr<T>(realloc_bytes(ptr<uint8>($p:$), $count * size_of<T>()));
+    return ptr<T>(realloc_bytes(ptr<uint8>($p:$), $count * size<T>()));
 }
 
 /**
@@ -200,7 +200,7 @@ public function free<T>(ptr<T> $p) : void
  */
 public function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 {
-    copy_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
+    copy_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size<T>());
 }
 
 /**
@@ -213,7 +213,7 @@ public function copy<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
  */
 public function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
 {
-    move_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size_of<T>());
+    move_bytes(ptr<uint8>($dst:$), ptr<uint8>($src:$), $count * size<T>());
 }
 
 /**
@@ -221,7 +221,7 @@ public function move<T>(ptr<T> $dst, ptr<T> $src, usize $count) : void
  */
 public function zero<T>(ptr<T> $p, usize $count) : void
 {
-    set_bytes(ptr<uint8>($p:$), 0, $count * size_of<T>());
+    set_bytes(ptr<uint8>($p:$), 0, $count * size<T>());
 }
 
 /**
@@ -249,13 +249,13 @@ public function zero<T>(ptr<T> $p, usize $count) : void
  */
 public function bit_cast<To, From>(From $value) : To
 {
-    assert(size_of<From>() == size_of<To>(), "bit_cast needs two types of the same size");
+    assert(size<From>() == size<To>(), "bit_cast needs two types of the same size");
 
     // zero-filled by the ordinary declaration rule, so a `To` wider than the bytes written would still
     // be a defined value rather than whatever the frame held
     To $out;
 
-    copy_bytes(ptr<uint8>(&$out), ptr<uint8>(&$value), size_of<To>());
+    copy_bytes(ptr<uint8>(&$out), ptr<uint8>(&$value), size<To>());
 
     return $out;
 }
@@ -281,19 +281,19 @@ public function bit_cast<To, From>(From $value) : To
  * against precisely that - see `stdlib/core/string.eco`.
  */
 #[builtin: ref_count]
-public function ref_count<T>(T& $handle) : usize;
+public function refs<T>(T& $handle) : usize;
 
 /**
  * How many handles need the *block* `$handle` names to stay readable. Zero for a null handle.
  *
- * The other count in the same header, and it answers a different question. `ref_count` is about the
+ * The other count in the same header, and it answers a different question. `refs` is about the
  * object: at zero the destructor has run and the object is gone. This one is about the memory: at
  * zero the block itself is given back. They are not the same moment, and that gap is exactly what a
  * `weak<T>` lives in - it keeps the block readable so it can ask whether the object is still there,
  * instead of dangling to find out.
  *
  * All the strong references together hold **one** of these, seated with the first and given back by
- * the release that takes `ref_count` to zero. So a freshly built object reads 1 here, and each
+ * the release that takes `refs` to zero. So a freshly built object reads 1 here, and each
  * `weak<T>` naming it adds one more.
  *
  * Mostly for tests. Nothing observable from Echo distinguishes a balanced pair of counts from a
@@ -301,7 +301,7 @@ public function ref_count<T>(T& $handle) : usize;
  * than merely appearing to be - see `tests_eco/classes/weak_cycle_no_leak.eco`.
  */
 #[builtin: weak_count]
-public function weak_count<T>(T& $handle) : usize;
+public function weaks<T>(T& $handle) : usize;
 
 /**
  * How many allocations the program is still holding.
@@ -320,7 +320,7 @@ public function weak_count<T>(T& $handle) : usize;
  * counter, and rather than answer zero - the one wrong answer you could not tell from the right one -
  * the compiler refuses the call where you wrote it.
  *
- * This is `weak_count`'s argument one level down, and the same job: nothing else observable from
+ * This is `weaks`'s argument one level down, and the same job: nothing else observable from
  * Echo tells a program that gave everything back apart from one that did not. So it is how the
  * corpus asserts the absence of a leak instead of inferring it from destructor output.
  *

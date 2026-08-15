@@ -1,0 +1,40 @@
+// exclusive match arms do not share a moved-from set. a move in one arm is not
+// a use-after-move in the other
+struct Buffer
+{
+    usize $tag;
+
+    constructor(usize $tag)
+    {
+        $this->tag = $tag;
+    }
+
+    destructor()
+    {
+        echo $this->tag;
+    }
+}
+
+enum Kind
+{
+    case take;
+    case keep;
+}
+
+function consume(Buffer $b) : void
+{
+    echo 10;
+}
+
+function exclusive(Kind $k) : void
+{
+    Buffer $x = Buffer(8);
+
+    match ($k) {
+        Kind::take => { consume(mv $x); return; },
+        Kind::keep => { echo $x->tag; return; },
+    }
+}
+
+exclusive(Kind::take);
+exclusive(Kind::keep);

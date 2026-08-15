@@ -1,5 +1,5 @@
 string $dir = '';
-$dir->append(str::from(std::env::tmp_dir()));
+$dir->append(str::from(std::env::tmp()));
 $dir->append('/');
 
 string $a = $dir;
@@ -12,7 +12,17 @@ $b->append('echo-io-ren-b-');
 $b->append(str::from(std::env::pid()));
 $b->append('.txt');
 
-echo std::io::exists($a);
+function present(const string& $path) : bool
+{
+    bool $here = guard std::io::exists($path) else ($e) {
+        echo $e->message();
+        return false;
+    }
+
+    return $here;
+}
+
+echo present($a);
 
 usize $w = guard std::io::writefile($a, 'moved') else ($e) {
     echo $e->message();
@@ -20,17 +30,16 @@ usize $w = guard std::io::writefile($a, 'moved') else ($e) {
 }
 
 echo $w;
-echo std::io::exists($a);
-echo std::io::exists($b);
+echo present($a);
+echo present($b);
 
-usize $ren = guard std::io::rename($a, $b) else ($e) {
+bool $ren = guard std::io::rename($a, $b) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $ren;
-echo std::io::exists($a);
-echo std::io::exists($b);
+echo present($a);
+echo present($b);
 
 string $body = guard std::io::readfile($b) else ($e) {
     echo $e->message();
@@ -39,10 +48,9 @@ string $body = guard std::io::readfile($b) else ($e) {
 
 echo $body;
 
-usize $rm = guard std::io::remove($b) else ($e) {
+bool $rm = guard std::io::remove($b) else ($e) {
     echo $e->message();
     return 1;
 }
 
-echo $rm;
-echo std::io::exists($b);
+echo present($b);

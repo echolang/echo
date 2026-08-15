@@ -53,7 +53,7 @@ namespace hash;
  *
  * ## Two algorithms, chosen by shape
  *
- * A **byte run** - a string, a view, or anything reaching `of_bytes<T>` - is FNV-1a, 64 bit. It is the right
+ * A **byte run** - a string, a view, or anything reaching `bits<T>` - is FNV-1a, 64 bit. It is the right
  * shape for a variable-length sequence: one pass, one accumulator, no length to know in advance.
  *
  * An **integer** goes through `mix` instead, and the reason is latency rather than quality. FNV-1a folds one
@@ -74,7 +74,7 @@ namespace hash;
  * Not cryptographic, not stable across architectures, and not a serialization format: `of(string "1")`
  * differs from `of(int32 1)`, and the byte-run values differ between a big- and a little-endian target.
  * This is an in-memory bucket index and nothing else. Do not write one to a file, and do not expect the
- * integer values to match another implementation of anything - only the `of_bytes`/string side is
+ * integer values to match another implementation of anything - only the `bits`/string side is
  * canonical FNV-1a.
  */
 
@@ -84,7 +84,7 @@ namespace hash;
  *
  * `bytes` takes a seed rather than starting from a basis itself, so a hand-written `of` folding several
  * byte runs into one hash needs somewhere to begin: `bytes($p, $n, hash::OFFSET_BASIS)` is that call,
- * and it is what `of_bytes` and the `string::view` overload below do. A multiplier is not that - it is
+ * and it is what `bits` and the `string::view` overload below do. A multiplier is not that - it is
  * a step of the algorithm, and nothing outside this file can do anything with one.
  *
  * The canonical constant. Note that the compiler's own `fnv1a64` - which hashes module cache keys -
@@ -113,7 +113,7 @@ private const uint64 MIX_B = 10723151780598845931;
 /**
  * One machine word, stirred so that every output bit depends on every input bit.
  *
- * **This is what an integer key gets instead of a byte walk.** `of_bytes<T>` would fold an `int64` one byte
+ * **This is what an integer key gets instead of a byte walk.** `bits<T>` would fold an `int64` one byte
  * at a time - eight multiplies, each waiting on the one before it - to produce a number from a value that
  * was already a number. This is two multiplies and no loop.
  *
@@ -147,7 +147,7 @@ public function mix(uint64 $key) : uint64
  * refuses an overflow rather than wrapping it, deliberately.
  *
  * `#[inline]`, because this is the innermost operation of every key hash and it is a *call* inside
- * `bytes`'s per-byte loop. `of_bytes<T>` is a generic instantiation and so is emitted into the caller's
+ * `bytes`'s per-byte loop. `bits<T>` is a generic instantiation and so is emitted into the caller's
  * unit, but these two are ordinary module symbols - so without the attribute nothing inlines them
  * across that boundary short of `-O`'s whole-program merge, and the `run` path performs no IR pass at all.
  */
@@ -217,12 +217,12 @@ public function combine(uint64 $seed, uint64 $value) : uint64
  * thought about, silently. This is that capability with the decision left where it belongs: at the call
  * site, in your own `of`, where you know what your type is made of.
  */
-public function of_bytes<T>(const T& $value) : uint64
+public function bits<T>(const T& $value) : uint64
 {
     // a `ptr<const uint8>` over the value's bytes, walked by value. no borrow is formed, so nothing
     // is promised and no `unsafe` is owed - the doc above is the whole of the argument about when
     // this is the wrong thing to do, and it stays advice rather than a compiler rule
-    return bytes(ptr<const uint8>($value:$), mem::size_of<T>(), OFFSET_BASIS);
+    return bytes(ptr<const uint8>($value:$), mem::size<T>(), OFFSET_BASIS);
 }
 
 /**
@@ -277,7 +277,7 @@ public function of_bytes<T>(const T& $value) : uint64
  *
  * **The bit pattern is read through a pointer and then stirred like any other word**, rather than walked a
  * byte at a time. A float is one machine word, so it belongs on `mix`'s side of this file's split for the
- * same reason an integer does - and going through `of_bytes` would leave the bottom of the hash carrying
+ * same reason an integer does - and going through `bits` would leave the bottom of the hash carrying
  * the exponent's structure, which is precisely the half `map<K, V>` indexes with.
  *
  * The reinterpret is a read of storage this function owns, one word wide, at its own alignment - so it
@@ -320,7 +320,7 @@ public function of(const float64& $value) : uint64
 /**
  * A string's **text**, hashed - not its bytes.
  *
- * A `string` is a window and a `str::buf` handle, so `of_bytes<string>` would hash an address and a
+ * A `string` is a window and a `str::buf` handle, so `bits<string>` would hash an address and a
  * length: two strings holding the same text in two buffers would hash differently while `==` said they
  * were equal, and a map keyed on them would lose entries. So this goes through the window, and a
  * substring of a large buffer hashes as its own text rather than as its parent's.

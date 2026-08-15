@@ -6,7 +6,7 @@ $s->append(', world');
 
 echo $s;
 echo $s->size();
-echo $s->char_count();
+echo $s->chars();
 echo $s->contains('world');
 
 $sub = $s->sub(7, 5);

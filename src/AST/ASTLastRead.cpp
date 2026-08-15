@@ -142,16 +142,30 @@ namespace
             statement_edge(node.subject);
 
             for (AST::MatchExprNode::Arm &arm : node.arms) {
-                // **an arm counts as rejoining whatever it does**, unlike an `if`'s. AST::OwnershipPass
-                // walks the arms with one moved-from set between them, so a move in the first arm is
-                // still recorded when the second is walked and when the code after the match is - and
-                // the drop the enclosing scope owes on the arms that did not move would be skipped
-                _position.branches++;
+                // **the same walk_arm an `if` gets.** an arm that always leaves does not rejoin,
+                // and a match that *is* the operand of a `return` does not rejoin with later uses
+                // of a local either - the function is over. incrementing unconditionally made
+                // `return match { => .ok($out) }` copy where `if { return .ok($out); }` handed over
+                const bool leaves =
+                    (arm.scope != nullptr && AST::scope_always_exits(*arm.scope))
+                    || (arm.value != nullptr && AST::expression_never_returns(*arm.value));
+
+                // `_returning` is not a reason to skip the increment: a match used as a
+                // return value still joins its arms at a phi, and handing over on one arm
+                // only is the conditional move OwnershipPass reports. skip only when the
+                // arm itself always leaves, the same walk_arm an `if` gets
+                const bool rejoins = !leaves;
+
+                if (rejoins) {
+                    _position.branches++;
+                }
 
                 statement_edge(arm.scope);
                 value_edge(arm.value);
 
-                _position.branches--;
+                if (rejoins) {
+                    _position.branches--;
+                }
             }
         }
 

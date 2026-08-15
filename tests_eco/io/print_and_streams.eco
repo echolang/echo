@@ -2,17 +2,17 @@
 // variable and handed around - a constant is its expression cloned into each use site, and this
 // one's expression is `stream(1)`
 std::io::stdout->write('written');
-std::io::stdout->write_line(' and a line');
+std::io::stdout->writeline(' and a line');
 
 stream $out = std::io::stdout;
-$out->write_line('through a copy');
+$out->writeline('through a copy');
 
 std::io::print('print');
 std::io::println(' then println');
 
 // stderr is reachable the same way. the corpus merges both streams, so this lands in order
 std::io::eprintln('to stderr');
-std::io::stderr->write_line('and again');
+std::io::stderr->writeline('and again');
 
 // interpolation is how a value becomes the `string` these take
 int32 $dice = 4;

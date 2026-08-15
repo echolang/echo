@@ -8,12 +8,12 @@ $a[] = 2;
 $a[] = 3;
 
 // double it
-$a->extend_from_within(0, $a->count());
+$a->extend(0, $a->count());
 foreach ($a as $v) { echo $v; }
 echo $a->count();
 
 // repeat one element
-$a->extend_from_within(1, 1);
+$a->extend(1, 1);
 echo $a->get($a->count() - 1);
 
 // an owning element type takes the element loop rather than the memcpy, and each element gets its
@@ -21,10 +21,10 @@ echo $a->get($a->count() - 1);
 array<string> $s = array<string>();
 $s[] = "x";
 $s[] = "y";
-$s->extend_from_within(0, 2);
+$s->extend(0, 2);
 foreach ($s as $t) { echo $t; }
 
 // a zero-length request allocates nothing and appends nothing
 usize $before = $s->count();
-$s->extend_from_within(0, 0);
+$s->extend(0, 0);
 echo $s->count() - $before;

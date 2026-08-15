@@ -97,10 +97,15 @@ internal function flush_write(int32 $fd, writewin& $w) : result<usize, ioerror>
         return .ok(0);
     }
 
-    result<usize, ioerror> $r = raw_write_all($fd, $w->buf->data(), $n);
+    // **clear only after the bytes landed.** a failed write(2) would otherwise forget what never
+    // reached the kernel, and file.close / writer.~ throw that result away
+    usize $wrote = guard raw_write_all($fd, $w->buf->data(), $n) else ($e) {
+        return .error($e);
+    }
+
     $w->buf->clear();
 
-    return $r;
+    return .ok($wrote);
 }
 
 internal function write_to(int32 $fd, writewin& $w, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
@@ -131,7 +136,7 @@ internal function write_to(int32 $fd, writewin& $w, ptr<const uint8> $src, usize
             $take = $count - $done;
         }
 
-        $w->buf->append_bytes($src:$ + $done, $take);
+        $w->buf->append($src:$ + $done, $take);
         $done = $done + $take;
     }
 
@@ -189,7 +194,7 @@ internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $coun
     return .ok($done);
 }
 
-internal function read_line_from(int32 $fd, readwin& $w) : result<string?, ioerror>
+internal function readline_from(int32 $fd, readwin& $w) : result<string?, ioerror>
 {
     string $line = '';
     bool $any = false;
@@ -199,12 +204,12 @@ internal function read_line_from(int32 $fd, readwin& $w) : result<string?, ioerr
         usize $end = $w->buf->size();
 
         while ($i < $end) {
-            if ($w->buf->byte_at($i) == 10) {
+            if ($w->buf->byte($i) == 10) {
                 usize $n = $i - $w->pos;
 
                 if ($n > 0) {
                     ptr<const uint8> $src = $w->buf->data();
-                    $line->append_bytes($src:$ + $w->pos, $n);
+                    $line->append($src:$ + $w->pos, $n);
                 }
 
                 $w->pos = $i + 1;
@@ -219,7 +224,7 @@ internal function read_line_from(int32 $fd, readwin& $w) : result<string?, ioerr
 
         if ($left > 0) {
             ptr<const uint8> $src = $w->buf->data();
-            $line->append_bytes($src:$ + $w->pos, $left);
+            $line->append($src:$ + $w->pos, $left);
             $any = true;
         }
 
@@ -249,7 +254,7 @@ internal function readall_from(int32 $fd, readwin& $w) : result<string, ioerror>
 
     if ($left > 0) {
         ptr<const uint8> $src = $w->buf->data();
-        $out->append_bytes($src:$ + $w->pos, $left);
+        $out->append($src:$ + $w->pos, $left);
         $w->drop();
     }
 
