@@ -35,6 +35,14 @@ public struct stream
     }
 
     /**
+     * The descriptor this stream names.
+     */
+    const function fd() : int32
+    {
+        return $this->fd;
+    }
+
+    /**
      * Writes `$count` bytes at `$b`, and nothing else - no terminator is read and none is written.
      *
      * The seam every other method here goes through.

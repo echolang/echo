@@ -1,0 +1,67 @@
+/**
+ * A write window over a `stream`.
+ *
+ * The stream is not owned and is not closed. This is how you buffer stdout, or any other
+ * descriptor you do not own. The last handle flushes; it does not close.
+ *
+ *     writer $out = writer(std::io::stdout);
+ *     usize $n = guard $out->write('hello') else ($e) { die('write failed'); };
+ *
+ * If you wrap stdout, `flush` before `echo`. `echo` goes through printf, this goes through
+ * `write(2)`, and an unflushed window is a third place for output to sit.
+ */
+
+namespace std::io;
+
+public class writer
+{
+    private int32 $fd;
+    private writewin $wout;
+
+    constructor(stream $dst)
+    {
+        $this->fd = $dst->fd();
+        $this->wout = writewin();
+    }
+
+    destructor()
+    {
+        result<usize, ioerror> $ignored = $this->flush();
+    }
+
+    /**
+     * Drains the window onto the descriptor.
+     *
+     * Stdio first, for the same reason `stream` does: `echo` writes through printf, and this
+     * writes through `write(2)`.
+     */
+    function flush() : result<usize, ioerror>
+    {
+        c_fflush(null);
+
+        return flush_write($this->fd, $this->wout);
+    }
+
+    function write_bytes(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+    {
+        return write_to($this->fd, $this->wout, $src, $count);
+    }
+
+    function write(const string& $text) : result<usize, ioerror>
+    {
+        return $this->write_bytes($text->data(), $text->size());
+    }
+
+    function write_line(const string& $text) : result<usize, ioerror>
+    {
+        usize $n = guard $this->write($text) else ($e) {
+            return .error($e);
+        }
+
+        usize $nl = guard $this->write('\n') else ($e) {
+            return .error($e);
+        }
+
+        return .ok($n + $nl);
+    }
+}

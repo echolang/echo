@@ -1,0 +1,8 @@
+expect: fail
+
+# the line is the assert inside string.eco, not the call site. update the number if that
+# assert moves; the claim is that the location names the file the assert was written in
+
+--- OUT --->
+assertion failed: commit past the end of the spare
+  at string.eco:619

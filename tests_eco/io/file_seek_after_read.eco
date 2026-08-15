@@ -1,0 +1,49 @@
+// read_line then seek to start: the read window must not leak into the second pass
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-seek2-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $w = guard std::io::writefile($path, 'alpha\nbeta\n') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $w;
+
+file $f = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+string? $first = guard $f->read_line() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $first ?? 'null';
+
+int64 $at = guard $f->seek(0, .start) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $at;
+
+string? $again = guard $f->read_line() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $again ?? 'null';
+
+$f->close();
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

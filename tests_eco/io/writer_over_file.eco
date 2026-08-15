@@ -1,0 +1,49 @@
+// writer wraps a stream. many small writes, no explicit flush: the last handle drains the window
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-writer-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+file $f = guard std::io::create($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+{
+    std::io::writer $out = std::io::writer(std::io::stream($f->fd()));
+
+    usize $a = guard $out->write('hel') else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    usize $b = guard $out->write('lo') else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    usize $c = guard $out->write_line('') else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    echo $a + $b + $c;
+}
+
+$f->close();
+
+string $body = guard std::io::readfile($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $body;
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

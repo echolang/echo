@@ -1,0 +1,38 @@
+/**
+ * A read window over a `stream`.
+ *
+ * The stream is not owned and is not closed. This is how you buffer stdin, which is a stream and
+ * so has nowhere of its own to keep leftover bytes.
+ *
+ *     reader $in = reader(std::io::stdin);
+ *     string $line = guard $in->read_line() else ($e) { die('read failed'); };
+ */
+
+namespace std::io;
+
+public class reader
+{
+    private int32 $fd;
+    private readwin $rin;
+
+    constructor(stream $src)
+    {
+        $this->fd = $src->fd();
+        $this->rin = readwin();
+    }
+
+    function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
+    {
+        return read_from($this->fd, $this->rin, $dst, $count);
+    }
+
+    function read_line() : result<string?, ioerror>
+    {
+        return read_line_from($this->fd, $this->rin);
+    }
+
+    function readall() : result<string, ioerror>
+    {
+        return readall_from($this->fd, $this->rin);
+    }
+}

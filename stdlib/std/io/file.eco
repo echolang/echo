@@ -1,0 +1,258 @@
+/**
+ * An owned file descriptor, with a read window and a write window.
+ *
+ * `stream` is a borrowed fd that never closes. This is the other half: you opened it, it closes
+ * itself, and leftover bytes have somewhere to live.
+ */
+
+namespace std::io;
+
+public class file
+{
+    private int32 $fd;
+    private readwin $rin;
+    private writewin $wout;
+
+    private constructor(int32 $fd)
+    {
+        $this->fd = $fd;
+        $this->rin = readwin();
+        $this->wout = writewin();
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    /**
+     * Opens `$path` for `$mode`. The descriptor is closed when the last handle is gone.
+     */
+    static function open(const string& $path, filemode $mode) : result<file, ioerror>
+    {
+        int32 $fd = c_open($path->c_str(), flags_of($mode), [OPEN_MODE]);
+
+        if ($fd < 0) {
+            return .error(last_error());
+        }
+
+        return .ok(file($fd));
+    }
+
+    /**
+     * Flushes the write window, then closes. Safe to call twice.
+     */
+    function close() : void
+    {
+        if ($this->fd < 0) {
+            return;
+        }
+
+        result<usize, ioerror> $ignored = flush_write($this->fd, $this->wout);
+        c_close($this->fd);
+        $this->fd = -1;
+    }
+
+    /**
+     * Writes whatever the write window is still holding.
+     */
+    function flush() : result<usize, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        return flush_write($this->fd, $this->wout);
+    }
+
+    /**
+     * The raw descriptor. The kernel's offset may disagree with `position()` until you `flush`.
+     */
+    const function fd() : int32
+    {
+        return $this->fd;
+    }
+
+    function write_bytes(ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $rewound = guard rewind_unread($this->fd, $this->rin) else ($e) {
+            return .error($e);
+        }
+
+        return write_to($this->fd, $this->wout, $src, $count);
+    }
+
+    function write(const string& $text) : result<usize, ioerror>
+    {
+        return $this->write_bytes($text->data(), $text->size());
+    }
+
+    function read(ptr<uint8> $dst, usize $count) : result<usize, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        return read_from($this->fd, $this->rin, $dst, $count);
+    }
+
+    function readall() : result<string, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        return readall_from($this->fd, $this->rin);
+    }
+
+    function read_line() : result<string?, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        return read_line_from($this->fd, $this->rin);
+    }
+
+    function seek(int64 $offset, whence $from) : result<int64, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        usize $flushed = guard $this->flush() else ($e) {
+            return .error($e);
+        }
+
+        usize $rewound = guard rewind_unread($this->fd, $this->rin) else ($e) {
+            return .error($e);
+        }
+
+        int64 $at = c_lseek($this->fd, $offset, whence_of($from));
+
+        if ($at < 0) {
+            return .error(last_error());
+        }
+
+        return .ok($at);
+    }
+
+    function position() : result<int64, ioerror>
+    {
+        if ($this->fd < 0) {
+            return .error(ioerror(EBADF));
+        }
+
+        int64 $kern = c_lseek($this->fd, 0, SEEK_CUR);
+
+        if ($kern < 0) {
+            return .error(last_error());
+        }
+
+        int64 $unread = $this->rin->pending();
+        int64 $held = $this->wout->buf->size();
+
+        return .ok($kern - $unread + $held);
+    }
+
+    function size() : result<int64, ioerror>
+    {
+        int64 $here = guard $this->position() else ($e) {
+            return .error($e);
+        }
+
+        int64 $end = guard $this->seek(0, .end) else ($e) {
+            return .error($e);
+        }
+
+        int64 $back = guard $this->seek($here, .start) else ($e) {
+            return .error($e);
+        }
+
+        return .ok($end);
+    }
+}
+
+public function open(const string& $path, filemode $mode) : result<file, ioerror>
+{
+    return file::open($path, $mode);
+}
+
+public function create(const string& $path) : result<file, ioerror>
+{
+    return file::open($path, .write);
+}
+
+public function append(const string& $path) : result<file, ioerror>
+{
+    return file::open($path, .append);
+}
+
+public function readfile(const string& $path) : result<string, ioerror>
+{
+    file $f = guard file::open($path, .read) else ($e) {
+        return .error($e);
+    }
+
+    return $f->readall();
+}
+
+public function writefile(const string& $path, const string& $text) : result<usize, ioerror>
+{
+    file $f = guard file::open($path, .write) else ($e) {
+        return .error($e);
+    }
+
+    usize $n = guard $f->write($text) else ($e) {
+        return .error($e);
+    }
+
+    usize $flushed = guard $f->flush() else ($e) {
+        return .error($e);
+    }
+
+    return .ok($n);
+}
+
+public function exists(const string& $path) : bool
+{
+    if (c_access($path->c_str(), F_OK) == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+public function remove(const string& $path) : result<usize, ioerror>
+{
+    if (c_unlink($path->c_str()) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok(0);
+}
+
+public function rename(const string& $from, const string& $to) : result<usize, ioerror>
+{
+    if (c_rename($from->c_str(), $to->c_str()) < 0) {
+        return .error(last_error());
+    }
+
+    return .ok(0);
+}

@@ -1,0 +1,61 @@
+// create truncates, append extends, open-for-read refuses a missing path
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-modes-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $w = guard std::io::writefile($path, 'first') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $w;
+
+file $again = guard std::io::create($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $n = guard $again->write('ab') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $n;
+$again->close();
+
+string $truncated = guard std::io::readfile($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $truncated;
+
+file $log = guard std::io::append($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $extra = guard $log->write('cd') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $extra;
+$log->close();
+
+string $extended = guard std::io::readfile($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $extended;
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

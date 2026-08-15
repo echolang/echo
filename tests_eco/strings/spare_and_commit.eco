@@ -1,0 +1,27 @@
+// spare is the first free byte, commit takes the write as part of the string and re-terminates
+
+$s = '';
+$s->reserve(8);
+
+echo $s->capacity();
+echo $s->room();
+echo $s->size();
+
+ptr<uint8> $p = $s->spare();
+$p:$[0] = 65;
+$p:$[1] = 66;
+$p:$[2] = 67;
+$s->commit(3);
+
+echo $s;
+echo $s->size();
+echo $s->is_terminated();
+echo $s->room();
+
+// a second write into the leftover spare
+ptr<uint8> $q = $s->spare();
+$q:$[0] = 33;
+$s->commit(1);
+
+echo $s;
+echo $s->c_str() != null;

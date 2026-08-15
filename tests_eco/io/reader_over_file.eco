@@ -1,0 +1,52 @@
+// reader wraps a stream. the file is opened and not read, so its window is empty and the
+// reader is the only thing pulling bytes off the fd
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-reader-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $w = guard std::io::writefile($path, 'red\nblue') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $w;
+
+file $f = guard std::io::open($path, .read) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+std::io::reader $r = std::io::reader(std::io::stream($f->fd()));
+
+string? $a = guard $r->read_line() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $a ?? 'null';
+
+string? $b = guard $r->read_line() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $b ?? 'null';
+
+string $rest = guard $r->readall() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rest->size();
+
+$f->close();
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

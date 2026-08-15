@@ -1,0 +1,33 @@
+// a file's buffer and its fd go away with the last handle
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-close-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $before = mem::live_allocations();
+
+{
+    file $f = guard std::io::create($path) else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    usize $n = guard $f->write('xyz') else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    echo $n;
+    echo mem::live_allocations() > $before;
+}
+
+echo mem::live_allocations() == $before;
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

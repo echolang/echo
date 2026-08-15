@@ -1,0 +1,48 @@
+string $dir = '';
+$dir->append(str::from(std::env::tmp_dir()));
+$dir->append('/');
+
+string $a = $dir;
+$a->append('echo-io-ren-a-');
+$a->append(str::from(std::env::pid()));
+$a->append('.txt');
+
+string $b = $dir;
+$b->append('echo-io-ren-b-');
+$b->append(str::from(std::env::pid()));
+$b->append('.txt');
+
+echo std::io::exists($a);
+
+usize $w = guard std::io::writefile($a, 'moved') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $w;
+echo std::io::exists($a);
+echo std::io::exists($b);
+
+usize $ren = guard std::io::rename($a, $b) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $ren;
+echo std::io::exists($a);
+echo std::io::exists($b);
+
+string $body = guard std::io::readfile($b) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $body;
+
+usize $rm = guard std::io::remove($b) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;
+echo std::io::exists($b);

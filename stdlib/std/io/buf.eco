@@ -1,0 +1,301 @@
+/**
+ * The read and write windows `file`, `reader` and `writer` share.
+ *
+ * Not a surface. A fill, a flush, a newline scan - one copy, so the two types cannot drift.
+ */
+
+namespace std::io;
+
+internal struct readwin
+{
+    string $buf;
+    usize $pos;
+
+    constructor()
+    {
+        $this->buf = '';
+        $this->pos = 0;
+    }
+
+    function pending() : usize
+    {
+        return $this->buf->size() - $this->pos;
+    }
+
+    function drop() : void
+    {
+        $this->buf->clear();
+        $this->pos = 0;
+    }
+}
+
+internal struct writewin
+{
+    string $buf;
+
+    constructor()
+    {
+        $this->buf = '';
+    }
+}
+
+internal function as_usize(isize $n) : usize
+{
+    if ($n <= 0) {
+        return 0;
+    }
+
+    usize $out = $n;
+
+    return $out;
+}
+
+internal function raw_write_all(int32 $fd, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+{
+    usize $done = 0;
+
+    while ($done < $count) {
+        isize $got = c_write($fd, $src:$ + $done, $count - $done);
+
+        if ($got <= 0) {
+            return .error(last_error());
+        }
+
+        $done = $done + as_usize($got);
+    }
+
+    return .ok($count);
+}
+
+internal function fill_read(int32 $fd, readwin& $w) : result<usize, ioerror>
+{
+    if ($w->pending() == 0) {
+        $w->drop();
+    }
+
+    $w->buf->reserve($w->buf->size() + IO_BUF);
+
+    ptr<uint8> $dst = $w->buf->spare();
+    usize $room = $w->buf->room();
+    isize $got = c_read($fd, $dst, $room);
+
+    if ($got < 0) {
+        return .error(last_error());
+    }
+
+    usize $n = as_usize($got);
+    $w->buf->commit($n);
+
+    return .ok($n);
+}
+
+internal function flush_write(int32 $fd, writewin& $w) : result<usize, ioerror>
+{
+    usize $n = $w->buf->size();
+
+    if ($n == 0) {
+        return .ok(0);
+    }
+
+    result<usize, ioerror> $r = raw_write_all($fd, $w->buf->data(), $n);
+    $w->buf->clear();
+
+    return $r;
+}
+
+internal function write_to(int32 $fd, writewin& $w, ptr<const uint8> $src, usize $count) : result<usize, ioerror>
+{
+    if ($count == 0) {
+        return .ok(0);
+    }
+
+    if ($w->buf->size() == 0 && $count >= IO_BUF) {
+        return raw_write_all($fd, $src, $count);
+    }
+
+    usize $done = 0;
+
+    while ($done < $count) {
+        if ($w->buf->room() == 0) {
+            usize $flushed = guard flush_write($fd, $w) else ($e) {
+                return .error($e);
+            }
+
+            $w->buf->reserve(IO_BUF);
+        }
+
+        usize $space = $w->buf->room();
+        usize $take = $space;
+
+        if ($take > $count - $done) {
+            $take = $count - $done;
+        }
+
+        $w->buf->append_bytes($src:$ + $done, $take);
+        $done = $done + $take;
+    }
+
+    return .ok($count);
+}
+
+internal function read_from(int32 $fd, readwin& $w, ptr<uint8> $dst, usize $count) : result<usize, ioerror>
+{
+    usize $done = 0;
+
+    while ($done < $count) {
+        usize $avail = $w->pending();
+
+        if ($avail == 0) {
+            usize $need = $count - $done;
+
+            if ($need >= IO_BUF) {
+                isize $got = c_read($fd, $dst:$ + $done, $need);
+
+                if ($got < 0) {
+                    return .error(last_error());
+                }
+
+                if ($got == 0) {
+                    break;
+                }
+
+                $done = $done + as_usize($got);
+                continue;
+            }
+
+            usize $got = guard fill_read($fd, $w) else ($e) {
+                return .error($e);
+            }
+
+            if ($got == 0) {
+                break;
+            }
+
+            $avail = $w->pending();
+        }
+
+        usize $take = $avail;
+
+        if ($take > $count - $done) {
+            $take = $count - $done;
+        }
+
+        ptr<const uint8> $src = $w->buf->data();
+        mem::copy<uint8>($dst:$ + $done, ptr<uint8>($src:$ + $w->pos), $take);
+        $w->pos = $w->pos + $take;
+        $done = $done + $take;
+    }
+
+    return .ok($done);
+}
+
+internal function read_line_from(int32 $fd, readwin& $w) : result<string?, ioerror>
+{
+    string $line = '';
+    bool $any = false;
+
+    while (true) {
+        usize $i = $w->pos;
+        usize $end = $w->buf->size();
+
+        while ($i < $end) {
+            if ($w->buf->byte_at($i) == 10) {
+                usize $n = $i - $w->pos;
+
+                if ($n > 0) {
+                    ptr<const uint8> $src = $w->buf->data();
+                    $line->append_bytes($src:$ + $w->pos, $n);
+                }
+
+                $w->pos = $i + 1;
+
+                return .ok($line);
+            }
+
+            $i = $i + 1;
+        }
+
+        usize $left = $end - $w->pos;
+
+        if ($left > 0) {
+            ptr<const uint8> $src = $w->buf->data();
+            $line->append_bytes($src:$ + $w->pos, $left);
+            $any = true;
+        }
+
+        $w->drop();
+
+        usize $got = guard fill_read($fd, $w) else ($e) {
+            return .error($e);
+        }
+
+        if ($got == 0) {
+            if ($any) {
+                return .ok($line);
+            }
+
+            return .ok(null);
+        }
+
+        $any = true;
+    }
+}
+
+internal function readall_from(int32 $fd, readwin& $w) : result<string, ioerror>
+{
+    string $out = '';
+
+    usize $left = $w->pending();
+
+    if ($left > 0) {
+        ptr<const uint8> $src = $w->buf->data();
+        $out->append_bytes($src:$ + $w->pos, $left);
+        $w->drop();
+    }
+
+    $out->reserve(IO_BUF);
+
+    while (true) {
+        if ($out->room() < IO_BUF) {
+            $out->reserve($out->size() + IO_BUF);
+        }
+
+        ptr<uint8> $dst = $out->spare();
+        usize $room = $out->room();
+        isize $got = c_read($fd, $dst, $room);
+
+        if ($got < 0) {
+            return .error(last_error());
+        }
+
+        if ($got == 0) {
+            break;
+        }
+
+        $out->commit(as_usize($got));
+    }
+
+    return .ok($out);
+}
+
+internal function rewind_unread(int32 $fd, readwin& $w) : result<usize, ioerror>
+{
+    usize $unread = $w->pending();
+
+    if ($unread == 0) {
+        $w->drop();
+
+        return .ok(0);
+    }
+
+    int64 $delta = $unread;
+    int64 $at = c_lseek($fd, 0 - $delta, SEEK_CUR);
+
+    if ($at < 0) {
+        return .error(last_error());
+    }
+
+    $w->drop();
+
+    return .ok(0);
+}

@@ -24,4 +24,93 @@ internal extern {
     // `fflush(null)` flushes every stdio stream, which is the one thing this module needs from
     // stdio: the `echo` statement writes through `printf`, and printf is buffered
     function fflush as c_fflush(ptr<uint8> $stream) : int32;
+
+    // C's `open` is variadic: the mode is only consumed when O_CREAT is set. declaring it as a
+    // fixed third parameter left the file with mode 0 on Darwin - write through the fd worked,
+    // open-for-read then said EACCES
+    function open as c_open(ptr<const uint8> $path, int32 $flags, variadic_args $args) : int32;
+    function close as c_close(int32 $fd) : int32;
+    function lseek as c_lseek(int32 $fd, int64 $offset, int32 $whence) : int64;
+    function unlink as c_unlink(ptr<const uint8> $path) : int32;
+    function rename as c_rename(ptr<const uint8> $from, ptr<const uint8> $to) : int32;
+    function access as c_access(ptr<const uint8> $path, int32 $amode) : int32;
+    function strerror as c_strerror(int32 $code) : ptr<uint8>;
+}
+
+// errno is a thread-local behind a function, and the function's name is the platform. read the
+// int it points at immediately - nothing else in the caller may touch libc first
+#[if: os == darwin]
+internal extern {
+    function __error as c_errno_location() : ptr<int32>;
+}
+#[elif: os == linux]
+internal extern {
+    function __errno_location as c_errno_location() : ptr<int32>;
+}
+#[else]
+// so `--target-os windows` still typechecks the stdlib. the values are Linux's; nothing here
+// claims to run
+internal extern {
+    function __errno_location as c_errno_location() : ptr<int32>;
+}
+#[end]
+
+// `O_*` values are not the same number on Darwin and Linux. the rest of this module names these
+// constants and never the literals, so a flag used on the wrong host is a missing-symbol problem
+// at compile time rather than a silent wrong open
+#[if: os == darwin]
+internal const int32 O_RDONLY = 0;
+internal const int32 O_WRONLY = 1;
+internal const int32 O_RDWR = 2;
+internal const int32 O_APPEND = 8;
+internal const int32 O_CREAT = 512;
+internal const int32 O_TRUNC = 1024;
+internal const int32 O_CLOEXEC = 16777216;
+#[elif: os == linux]
+internal const int32 O_RDONLY = 0;
+internal const int32 O_WRONLY = 1;
+internal const int32 O_RDWR = 2;
+internal const int32 O_CREAT = 64;
+internal const int32 O_TRUNC = 512;
+internal const int32 O_APPEND = 1024;
+internal const int32 O_CLOEXEC = 524288;
+#[else]
+internal const int32 O_RDONLY = 0;
+internal const int32 O_WRONLY = 1;
+internal const int32 O_RDWR = 2;
+internal const int32 O_CREAT = 64;
+internal const int32 O_TRUNC = 512;
+internal const int32 O_APPEND = 1024;
+internal const int32 O_CLOEXEC = 524288;
+#[end]
+
+// these four, and EBADF, agree on every platform this compiler targets
+internal const int32 EPERM = 1;
+internal const int32 ENOENT = 2;
+internal const int32 EBADF = 9;
+internal const int32 EACCES = 13;
+internal const int32 EEXIST = 17;
+
+internal const int32 SEEK_SET = 0;
+internal const int32 SEEK_CUR = 1;
+internal const int32 SEEK_END = 2;
+
+internal const int32 F_OK = 0;
+
+// 0666. the umask takes its usual cut
+internal const uint32 OPEN_MODE = 438;
+
+internal const usize IO_BUF = 8192;
+
+/**
+ * The `errno` the last failing libc call left, as an `ioerror`.
+ *
+ * Call this before anything else that might overwrite it.
+ */
+internal function last_error() : ioerror
+{
+    ptr<int32> $slot = c_errno_location();
+    int32 $code = $slot;
+
+    return ioerror($code);
 }

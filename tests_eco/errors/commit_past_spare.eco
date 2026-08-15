@@ -1,0 +1,5 @@
+// commit past room is a mistake in the caller, not a condition to recover from
+
+$s = '';
+$s->reserve(2);
+$s->commit(3);

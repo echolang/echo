@@ -1,0 +1,13 @@
+/**
+ * `str::from` for `ioerror`, so `"{$e}"` is the strerror text.
+ *
+ * A file of its own because a namespace is a property of the file: error.eco is `std::io` and
+ * cannot also be `str`.
+ */
+
+namespace str;
+
+public function from(const std::io::ioerror& $e) : string
+{
+    return $e->message();
+}

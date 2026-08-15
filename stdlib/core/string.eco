@@ -285,6 +285,18 @@ public struct string
 
             return $this->bytes;
         }
+
+        /**
+         * The bytes, with no terminator required.
+         *
+         * `c_str()` is this plus the assert that C can walk off the end of a substring. A window
+         * that stops early is still a valid pointer and length - hand both to anything that already
+         * knows the count.
+         */
+        const function data() : ptr<const uint8>
+        {
+            return $this->bytes;
+        }
     }
 
     string::view $window;
@@ -404,6 +416,14 @@ public struct string
     }
 
     /**
+     * The bytes, with no terminator required. See `string::view::data`.
+     */
+    const function data() : ptr<const uint8>
+    {
+        return $this->window->data();
+    }
+
+    /**
      * An independent copy that shares nothing.
      *
      * The one operation that always allocates. Everything else in this file avoids a copy until a
@@ -520,6 +540,86 @@ public struct string
     {
         $this->make_unique();
         $this->owner->reserve($capacity);
+        $this->reseat();
+    }
+
+    /**
+     * How many text bytes the buffer can hold without growing.
+     *
+     * A literal has no buffer, so this is `size()` - there is no spare room until a write clones
+     * one into existence.
+     */
+    function capacity() : usize
+    {
+        if ($this->owner == null) {
+            return $this->window->size;
+        }
+
+        return $this->owner->capacity;
+    }
+
+    /**
+     * Appends `$count` bytes at `$src`.
+     *
+     * The same work `append` does, for a pointer and a length C already has. Copy-on-write first,
+     * then through `str::buf::append_bytes`, so the terminator stays this file's invariant.
+     */
+    function append_bytes(ptr<const uint8> $src, usize $count) : void
+    {
+        if ($count == 0) {
+            return;
+        }
+
+        $this->make_unique();
+        $this->owner->append_bytes($src, $count);
+        $this->reseat();
+    }
+
+    /**
+     * Address of the first free byte, after the copy-on-write gate.
+     *
+     * C writes here. `room()` is how many bytes it may write. `commit($n)` is what makes those
+     * bytes part of the string. Growing the buffer after this - `append`, `reserve`, another
+     * `spare` that reallocates - invalidates the pointer, the same rule `mem::buffer::resize`
+     * states.
+     */
+    function spare() : ptr<uint8>
+    {
+        $this->make_unique();
+        $this->reseat();
+
+        return $this->owner->bytes:$ + $this->owner->used;
+    }
+
+    /**
+     * How many bytes `spare()` can accept without growing.
+     *
+     * The gate runs first, so a literal or a shared buffer answers 0 only until the clone exists,
+     * then the room in that clone.
+     */
+    function room() : usize
+    {
+        $this->make_unique();
+        $this->reseat();
+
+        return $this->owner->capacity - $this->owner->used;
+    }
+
+    /**
+     * Takes the first `$n` bytes of the spare as part of the string, and re-terminates.
+     *
+     * `$n` must not exceed `room()`. The bytes themselves are whoever wrote `spare()`'s business;
+     * this only moves `used`.
+     */
+    function commit(usize $n) : void
+    {
+        $this->make_unique();
+        $this->reseat();
+
+        assert($n <= $this->owner->capacity - $this->owner->used, 'commit past the end of the spare');
+
+        $this->owner->used = $this->owner->used + $n;
+        $this->owner->bytes:$[$this->owner->used] = 0;
         $this->reseat();
     }
 

@@ -1,0 +1,40 @@
+// many small writes, close without an explicit flush, the file still holds all of them
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-bufw-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+{
+    file $f = guard std::io::create($path) else ($e) {
+        echo $e->message();
+        return 1;
+    }
+
+    usize $i = 0;
+
+    while ($i < 5) {
+        usize $n = guard $f->write('x') else ($e) {
+            echo $e->message();
+            return 1;
+        }
+
+        echo $n;
+        $i = $i + 1;
+    }
+}
+
+string $body = guard std::io::readfile($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $body;
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;

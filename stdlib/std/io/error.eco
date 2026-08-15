@@ -1,0 +1,101 @@
+/**
+ * Why an I/O call failed.
+ *
+ * An `errno` and the four questions you actually ask of one. Not an enum of every code the kernel
+ * can invent: those differ by platform and most of them a program will only ever print.
+ */
+
+namespace std::io;
+
+public struct ioerror
+{
+    int32 $code;
+
+    /**
+     * `strerror` of `$code`, copied into an owning string.
+     */
+    const function message() : string
+    {
+        return str::from_c_str(c_strerror($this->code));
+    }
+
+    /**
+     * Nothing of that name exists. `ENOENT`.
+     */
+    const function missing() : bool
+    {
+        if ($this->code == ENOENT) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * The process is not allowed. `EACCES` or `EPERM`.
+     */
+    const function denied() : bool
+    {
+        if ($this->code == EACCES) {
+            return true;
+        }
+
+        if ($this->code == EPERM) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Something of that name is already there. `EEXIST`.
+     */
+    const function exists() : bool
+    {
+        if ($this->code == EEXIST) {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+/**
+ * How a file is opened.
+ */
+public enum filemode
+{
+    case read;
+    case write;
+    case append;
+    case readwrite;
+}
+
+/**
+ * Where a `seek` counts from.
+ */
+public enum whence
+{
+    case start;
+    case current;
+    case end;
+}
+
+internal function flags_of(filemode $mode) : int32
+{
+    return match ($mode) {
+        filemode::read      => O_RDONLY | O_CLOEXEC,
+        filemode::write     => O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        filemode::append    => O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
+        filemode::readwrite => O_RDWR | O_CLOEXEC,
+    };
+}
+
+internal function whence_of(whence $from) : int32
+{
+    return match ($from) {
+        whence::start   => SEEK_SET,
+        whence::current => SEEK_CUR,
+        whence::end     => SEEK_END,
+    };
+}

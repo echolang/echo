@@ -1,0 +1,22 @@
+// data() is the bytes with no terminator required. c_str() is that plus the NUL assert.
+// a substring that stops early is still a valid pointer and length
+
+extern {
+    function strlen as c_strlen(ptr<const uint8> $s) : usize;
+}
+
+$owned = 'hello';
+$owned = $owned->clone();
+$owned->append(' world');
+
+echo $owned->data() == $owned->c_str();
+echo c_strlen($owned->c_str());
+
+$head = $owned->sub(0, 5);
+echo $head;
+echo $head->is_terminated();
+echo $head->data() != null;
+echo $head->byte_at(0);
+
+string::view $window = $head->view();
+echo $window->data() != null;

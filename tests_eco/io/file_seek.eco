@@ -1,0 +1,54 @@
+// seek after a write, then read the bytes back from the start
+
+string $path = '';
+$path->append(str::from(std::env::tmp_dir()));
+$path->append('/echo-io-seek-');
+$path->append(str::from(std::env::pid()));
+$path->append('.txt');
+
+usize $made = guard std::io::writefile($path, '') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+file $f = guard std::io::open($path, .readwrite) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+usize $n = guard $f->write('abcdef') else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $n;
+
+int64 $at = guard $f->seek(0, .start) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $at;
+
+string $body = guard $f->readall() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $body;
+
+int64 $sz = guard $f->size() else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $sz;
+
+$f->close();
+
+usize $rm = guard std::io::remove($path) else ($e) {
+    echo $e->message();
+    return 1;
+}
+
+echo $rm;
