@@ -1,0 +1,13 @@
+// `$o->get()->x++` used to parse the target twice, so the increment wrote a different
+// temporary than it read and the write was silently lost. binding the address once makes
+// that `&$o->get()->x`, which is already a located error
+struct Inner { int32 $tag; }
+
+struct Outer
+{
+    Inner $in;
+    function get() : Inner { return $this->in; }
+}
+
+$o = Outer(Inner(5));
+$o->get()->tag++;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] increment_member_of_temporary.eco:13:12
+
+  'Inner' has no storage of its own, so the address of its member 'tag' would point into a value destroyed at the end of this statement. Bind it to a variable first.
+
+  12 | $o = Outer(Inner(5));
+  13 | $o->get()->tag++;
+     :            ^^^
+  14 | 
+
+1 error, nothing was compiled.

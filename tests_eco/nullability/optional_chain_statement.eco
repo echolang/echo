@@ -1,0 +1,44 @@
+// `?->` as a statement: call it if the receiver is there, otherwise do nothing
+class Node
+{
+    int32 $tag;
+    Node? $next;
+
+    function save() : void
+    {
+        echo $this->tag;
+    }
+
+    function child() : Node?
+    {
+        return $this->next;
+    }
+}
+
+Node? $absent = null;
+$absent?->save();
+
+$n = Node(7, null);
+Node? $present = $n;
+$present?->save();
+
+$n2 = Node(3, $n);
+Node? $chain = $n2;
+$chain?->child()?->save();
+
+$absent?->child()?->save();
+
+usize $before = mem::live_allocations();
+{
+    Node? $gone = null;
+    $gone?->save();
+}
+echo mem::live_allocations() == $before;
+
+usize $held = mem::live_allocations();
+{
+    Node $live = Node(1, null);
+    Node? $maybe = $live;
+    $maybe?->save();
+}
+echo mem::live_allocations() == $held;

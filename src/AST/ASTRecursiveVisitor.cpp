@@ -363,6 +363,11 @@ void RecursiveVisitor::visit_null_coalesce(NullCoalesceExprNode &node)
 {
     value_edge(node.lhs);
     value_edge(node.rhs);
+
+    // the copy the present arm is given, when the payload needed one. a value edge: it produces
+    // the value the `??` yields on that path, and every pass that rewrites one - the adjuster's
+    // deref, the checker's cast - has to reach it exactly as it reaches an initializer
+    value_edge(node.present_value);
 }
 
 void RecursiveVisitor::visit_optional_chain(OptionalChainExprNode &node)

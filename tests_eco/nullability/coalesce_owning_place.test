@@ -1,0 +1,16 @@
+# the copy on the present arm is the whole fix: without it the first echo frees the local's
+# buffer and the second echo, the assignment's leftover read, or the allocation count moves
+--- OUT --->
+hello
+hello
+gone
+hello
+hello
+hello
+--- IR --->
+# scoped to main so a copy of `present()`'s return is not this assertion. the present arm
+# must borrow `$a.__value` and call the string copy constructor, not extractvalue the bits
+CHECK: define i32 @main(
+CHECK: coalesce.present:
+CHECK: getelementptr
+CHECK: call void @_stringZZMRBCLC6string

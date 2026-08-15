@@ -180,6 +180,12 @@ Node *NullCoalesceExprNode::clone(CloneContext &cc) const
     NullCoalesceExprNode *c = cc.shallow(this);
     c->lhs = cc.child(c->lhs);
     c->rhs = cc.child(c->rhs);
+
+    // the copy the present arm is given, when there is one. an instance whose payload became
+    // owning gets its own from AST::OwnershipPass, but a template that already had one must not
+    // hand the instance the template's nodes
+    c->present_value = cc.child(c->present_value);
+
     return c;
 }
 

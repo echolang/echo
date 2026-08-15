@@ -88,6 +88,97 @@ static AST::ExprNode *build_incdec_value(Parser::Payload &payload, AST::ExprNode
     return &payload.context.emplace_node<AST::BinaryExprNode>(&op_node, operand, step);
 }
 
+// true when the target must be bound rather than parsed twice. a bare `$i++` or `$c->hits++`
+// names storage with no work, so the second parse that keeps PointerAdjuster off a shared node
+// is free - and is what keeps `increment_const` naming `$c` and every `$i++` golden showing
+// `$i = $i + 1` rather than a `$__incN`. `$a[0]++` and `$o->get()->x++` are not: the first is
+// two bounds checks, the second writes a different temporary than it read
+static bool increment_evaluates_twice(const AST::ExprNode *target)
+{
+    const AST::ExprNode *expr = target;
+
+    while (expr != nullptr) {
+        switch (expr->get_node_type()) {
+            case AST::NodeType::n_expr_call:
+            case AST::NodeType::n_expr_indirect_call:
+                return true;
+
+            // a container index becomes `operator []`; binding `&$a[0]` is what calls it
+            // once. a pointer index is a GEP - two of them are free, and `&$p[0]->x`
+            // would be a borrow of raw storage, which is UnsafePromotion
+            case AST::NodeType::n_expr_index:
+            {
+                const auto *index = static_cast<const AST::IndexExprNode *>(expr);
+                if (!index->indexed_base_type().is_pointer()) {
+                    return true;
+                }
+
+                expr = index->base;
+                break;
+            }
+
+            case AST::NodeType::n_member_access:
+            {
+                const auto &base = static_cast<const AST::MemberAccessNode *>(expr)->get_base_node();
+                expr = base.has() && base.is_expression_node()
+                    ? base.unsafe_ptr<AST::ExprNode>()
+                    : nullptr;
+                break;
+            }
+
+            case AST::NodeType::n_expr_peel:
+                expr = static_cast<const AST::PointerValueNode *>(expr)->operand;
+                break;
+
+            case AST::NodeType::n_expr_deref:
+                expr = static_cast<const AST::DerefExprNode *>(expr)->operand;
+                break;
+
+            default:
+                return false;
+        }
+    }
+
+    return false;
+}
+
+// bind the target's address once and increment through that pointer, so `$a[0]++` calls
+// `operator []` once. a peel is not a place (`:$` names the slot); the address is of its operand
+static AST::ExprNode *bind_incdec_target(
+    Parser::Payload &payload,
+    AST::ExprNode *target,
+    const TokenReference &op_token,
+    AST::ExprNode *&out_write
+)
+{
+    AST::ExprNode *place = target;
+    if (target->get_node_type() == AST::NodeType::n_expr_peel) {
+        place = static_cast<AST::PointerValueNode *>(target)->operand;
+    }
+
+    auto &addr = payload.context.emplace_node<AST::AddrOfExprNode>(place);
+    auto name_token = payload.context.make_virtual_token(
+        fmt::format("$__inc{}", payload.context.incdec_bind_count++),
+        Token::Type::t_varname,
+        op_token);
+
+    // the type arrives from the initializer. an index is still untyped here - OperatorRewriter
+    // attaches the element contract inside the fixpoint - so this is unknown until then.
+    // infer_declaration_type collapses `void&` / `unknown&` to unknown, which is what keeps
+    // rederive_stale_variable_types asking rather than freezing a `void&`
+    auto &tmp = payload.context.emplace_node<AST::VarDeclNode>(name_token, nullptr);
+    tmp.init_expr = &addr;
+    tmp.set_type_node(&payload.context.emplace_node<AST::TypeNode>(
+        AST::infer_declaration_type(addr, false)));
+    payload.context.scope().add_vardecl(tmp);
+
+    auto &write_var = payload.context.emplace_node<AST::VarNode>(&tmp);
+    out_write = &payload.context.emplace_node<AST::VarRefNode>(&write_var);
+
+    auto &read_var = payload.context.emplace_node<AST::VarNode>(&tmp);
+    return &payload.context.emplace_node<AST::VarRefNode>(&read_var);
+}
+
 AST::ExprNode *Parser::parse_assigned_value(
     Parser::Payload &payload,
     AST::ExprNode *target,
@@ -234,19 +325,6 @@ AST::VarDeclNode *Parser::parse_varexpr(
             return nullptr;
         }
 
-        // an assignment target binds its storage rather than reading it, which is what makes
-        // `$a[] = 5` legal where `echo $a[]` is not. see AST::IndexExprNode::slot_is_bound, whose
-        // other setter is the `&` arm of Parser::parse_postfix_chain's caller
-        if (target->get_node_type() == AST::NodeType::n_expr_index) {
-            auto *index = static_cast<AST::IndexExprNode *>(target);
-
-            index->slot_is_bound = true;
-
-            // and the narrower fact, which only this setter may record: there is an `=` behind this
-            // bracket. see AST::IndexExprNode::is_assignment_target for what turns on it
-            index->is_assignment_target = true;
-        }
-
         // `$obj->push(5);` reaches here because the statement dispatch routes anything starting
         // `$var ->` to an assignment, and the postfix chain is what discovers the call. it is a
         // statement in its own right, so there is no `=` to demand - the same shape the call
@@ -255,29 +333,45 @@ AST::VarDeclNode *Parser::parse_varexpr(
         // both kinds of call, because the chain discovers both: `$obj->push(5)` is a member call and
         // `$obj->op(5)` over a callable *property* is an indirect one, and which of the two a name is
         // decided in parse_postfix_chain, not here
-        if (AST::is_call_expression(*target)) {
+        if (AST::is_call_statement(*target)) {
             finish_call_statement(payload, payload.context.scope(), target);
             return nullptr;
         }
 
         AST::ExprNode *expr = nullptr;
-        TokenReference assign_token = cursor.current();
+        TokenReference assign_token = cursor.here();
 
         // `$i++` / `$p:$--`. the statement carries no `=`, the step comes from the operator
         if (cursor.is_type(Token::Type::t_op_inc) || cursor.is_type(Token::Type::t_op_dec)) {
-            // the operand of the arithmetic is the target parsed a *second* time rather than
-            // the same node under two parents: AST::PointerAdjuster rewrites edges in place,
-            // and a shared subtree would be adjusted twice - an index expression would collect
-            // a second deref on the way through
-            cursor.restore(target_start);
-            auto *operand = parse_assign_target(payload, prev_vardecl);
-            cursor.skip(); // the ++/-- token, re-reached by the second parse
-
             // the same destination rule the `=` path applies - `$p:$` is legal, `$p:$:$++` is not
-            if (operand == nullptr || !AST::is_assignable_target(*target)) {
+            if (!AST::is_assignable_target(*target)) {
                 payload.collector.collect_issue<AST::Issue::GenericError>(
                     payload.context.code_ref(assign_token),
                     "'" + assign_token.value() + "' needs an expression with storage to step");
+                cursor.try_skip_to_next_statement();
+                return nullptr;
+            }
+
+            cursor.skip(); // the ++/-- token
+
+            AST::ExprNode *operand = nullptr;
+
+            // a target that does work to name its storage must run that work once. bind the
+            // address and increment through the pointer; PointerAdjuster then sees two VarRefs
+            // of the temporary, not one index under two parents
+            if (increment_evaluates_twice(target)) {
+                operand = bind_incdec_target(payload, target, assign_token, target);
+            }
+            else {
+                // the operand of the arithmetic is the target parsed a *second* time rather than
+                // the same node under two parents: AST::PointerAdjuster rewrites edges in place,
+                // and a shared subtree would be adjusted twice
+                cursor.restore(target_start);
+                operand = parse_assign_target(payload, prev_vardecl);
+                cursor.skip(); // the ++/-- token, re-reached by the second parse
+            }
+
+            if (operand == nullptr) {
                 cursor.try_skip_to_next_statement();
                 return nullptr;
             }
@@ -290,6 +384,16 @@ AST::VarDeclNode *Parser::parse_varexpr(
                 payload.collect_unexpected_token(Token::Type::t_assign);
                 cursor.try_skip_to_next_statement();
                 return nullptr;
+            }
+
+            // an assignment target binds its storage rather than reading it, which is what makes
+            // `$a[] = 5` legal where `echo $a[]` is not. not set on `++`: that path takes the
+            // address of the element and writes through the pointer, so the bracket is a read
+            if (target->get_node_type() == AST::NodeType::n_expr_index) {
+                auto *index = static_cast<AST::IndexExprNode *>(target);
+
+                index->slot_is_bound = true;
+                index->is_assignment_target = true;
             }
 
             // a declaration is the other case and binds instead, which is why the init_expr path
@@ -416,7 +520,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
     if (!vardecl->has_type()) {
         // if there is no explicit type we need to be able to infer it
         if (vardecl->init_expr == nullptr) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(cursor.current()), "cannot infer type of variable without an initializer");
+            payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(cursor.here()), "cannot infer type of variable without an initializer");
             cursor.try_skip_to_next_statement();
             return nullptr;
         }

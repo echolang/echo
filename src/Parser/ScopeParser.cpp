@@ -54,7 +54,7 @@ void Parser::finish_place_statement(Parser::Payload &payload, AST::ScopeNode &sc
     // a chain that ended in a call is a statement of its own - `first(&$o)->bump(1);` - and needs no
     // `=`. both kinds, because the chain discovers both: a member call and an indirect one through a
     // callable property
-    if (AST::is_call_expression(*target)) {
+    if (AST::is_call_statement(*target)) {
         finish_call_statement(payload, scope, target);
         return;
     }
@@ -303,6 +303,7 @@ AST::ScopeNode & Parser::parse_scope(
             // pointer, `$s->x = ...` writes a member, `$a[$i] = ...` writes an element, and `$i++`
             // desugars to an assignment
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_accessorlr }) ||
+            cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_optional_arrow }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_ptr_of }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_open_bracket }) ||
             cursor.is_type_sequence(0, { Token::Type::t_varname, Token::Type::t_op_inc }) ||

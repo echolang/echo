@@ -1,0 +1,4 @@
+// a namespaced generic call as a whole statement reports; it does not abort. the
+// constructor-argument form (unknown_generic_ctor_arg) is the one that used to
+// run the cursor off the end
+nope::alloc<int32>(1);

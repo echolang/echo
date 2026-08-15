@@ -596,3 +596,20 @@ TEST_CASE("A bound temporary is not a place either", "[AST][pointer][ownership]"
     // the temporary is created rather than left to that check
     REQUIRE(place_root_of(bind) == nullptr);
 }
+
+TEST_CASE("infer_declaration_type collapses a pointer to no information", "[AST][pointer]")
+{
+    // `&$a[0]` is `void&` / `unknown&` until the bracket becomes an `operator []` call.
+    // that is still no information, so an inferred declaration stays unknown rather than
+    // freezing a `void&` the stale-variable sweep would treat as concrete
+    const ValueType unknown_ptr = ValueType::make_pointer(ValueType::make_unknown(), false);
+    const ValueType void_ptr = ValueType::make_pointer(ValueType::make_void(), false);
+
+    REQUIRE(infer_declaration_type(unknown_ptr, false).is_unknown());
+    REQUIRE(infer_declaration_type(void_ptr, false).is_unknown());
+
+    // a `T&` is information: collapsing it would erase a generic's borrow
+    REQUIRE(infer_declaration_type(
+        ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), false),
+        false).is_pointer());
+}

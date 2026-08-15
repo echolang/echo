@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownFunction  unknown_generic_ctor_arg.eco:4:23
+
+  The function 'alloc' could not be found
+
+  3 | struct Box<T> { ptr<T> $slot; }
+  4 | $b = Box<int32>(nope::alloc<int32>(1));
+    :                       ^^^^^
+  5 | 
+
+[error] unknown_generic_ctor_arg.eco:4:39
+
+  cannot infer type of variable without an initializer
+
+  3 | struct Box<T> { ptr<T> $slot; }
+  4 | $b = Box<int32>(nope::alloc<int32>(1));
+    :                                       ^
+  5 | 
+
+2 errors, nothing was compiled.

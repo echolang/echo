@@ -1,0 +1,23 @@
+stdlib: off
+expect: fail
+
+--- OUT --->
+[error] UnknownFunction  unknown_generic_as_statement.eco:4:7
+
+  The function 'alloc' could not be found
+
+  3 | // run the cursor off the end
+  4 | nope::alloc<int32>(1);
+    :       ^^^^^
+  5 | 
+
+[error] UnexpectedToken  unknown_generic_as_statement.eco:4:22
+
+  Unexpected token 'semicolon (;)' found
+
+  3 | // run the cursor off the end
+  4 | nope::alloc<int32>(1);
+    :                      ^ unexpected here
+  5 | 
+
+2 errors, nothing was compiled.

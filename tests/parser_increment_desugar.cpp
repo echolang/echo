@@ -2,6 +2,8 @@
 
 #include <AST/AssignNode.h>
 #include <AST/ExprNode.h>
+#include <AST/VarDeclNode.h>
+#include <AST/VarRefNode.h>
 
 #include "helpers.h"
 
@@ -89,4 +91,61 @@ TEST_CASE("'++' needs storage to step", "[parser][pointer]")
     // `$p:$:$` is the address of the pointer slot, not the slot
     auto bundle = EchoTests::tests_make_parsed_bundle("int $a = 1; ptr<int> $p = &$a; $p:$:$++;");
     REQUIRE(bundle->collector.has_critical_issues());
+}
+
+TEST_CASE("an index increment binds the address once", "[parser][pointer]")
+{
+    // `$b[0]++` must not parse the bracket twice: PointerAdjuster would visit a shared
+    // subtree twice, and `operator []` would run for both the read and the write
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Bag { int32 $v; }\n"
+        "operator (Bag& $b)[usize $i] : int32& { return &$b->v; }\n"
+        "$b = Bag(1);\n"
+        "$b[0]++;\n");
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+    VarDeclNode *tmp = nullptr;
+    for (auto *decl : module.nodes.of_type<VarDeclNode>()) {
+        if (decl->name_full() == "$__inc0") {
+            tmp = decl;
+            break;
+        }
+    }
+
+    REQUIRE(tmp != nullptr);
+    REQUIRE(tmp->init_expr != nullptr);
+    REQUIRE(tmp->init_expr->get_node_type() == NodeType::n_expr_addrof);
+
+    // PointerAdjuster inserts a deref on each read of the borrow, so the assign
+    // is `*$__inc0 = *$__inc0 + 1` - two DerefExprNodes, not two VarRefs
+    auto place_of = [](ExprNode *expr) -> ExprNode * {
+        if (expr != nullptr && expr->get_node_type() == NodeType::n_expr_deref) {
+            return static_cast<DerefExprNode *>(expr)->operand;
+        }
+        return expr;
+    };
+
+    AssignNode *inc = nullptr;
+    for (auto *assign : module.nodes.of_type<AssignNode>()) {
+        auto *place = place_of(assign->target);
+        if (place == nullptr || place->get_node_type() != NodeType::n_varref) {
+            continue;
+        }
+
+        auto *ref = static_cast<VarRefNode *>(place);
+        if (ref->is_var() && &ref->get_var().decl() == tmp) {
+            inc = assign;
+            break;
+        }
+    }
+
+    REQUIRE(inc != nullptr);
+    REQUIRE(inc->value_expr != nullptr);
+    REQUIRE(inc->value_expr->get_node_type() == NodeType::n_expr_binary);
+
+    auto *binary = static_cast<BinaryExprNode *>(inc->value_expr);
+    REQUIRE(binary->lhs != inc->target);
+    REQUIRE(place_of(binary->lhs) != nullptr);
+    REQUIRE(place_of(binary->lhs)->get_node_type() == NodeType::n_varref);
 }

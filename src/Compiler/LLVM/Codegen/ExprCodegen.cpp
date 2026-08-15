@@ -13,7 +13,6 @@
 #include "AST/ASTNullability.h"
 #include "AST/ASTConstFold.h"
 #include "AST/ASTOperatorSemantics.h"
-#include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTConformance.h"
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
@@ -1625,10 +1624,28 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // the present path unwraps and fits the result type. that second step matters when the two sides
     // differ - `lookup($k) ?? 0` over an `int32?` and an untyped literal, or a nullable result the right
     // side made non-nullable
+    //
+    // **present_value is the copy AST::OwnershipPass built over the payload place**, when a place
+    // left side still owns what extractvalue would alias. evaluated here and not before the branch,
+    // so a copy constructor's work does not run on the absent path. null is the common case: a
+    // computed left side, or a payload that copies as bytes, and unwrap is the whole of it
     _ctx.set_insert_point(present_block);
+
+    llvm::Value *unwrapped = nullptr;
+    AST::ValueType present_type = AST::unwrapped_type_of(lhs_type);
+
+    if (node.present_value != nullptr) {
+        node.present_value->accept(*_ctx.visitor);
+        unwrapped = _ctx.pop();
+        present_type = node.present_value->result_type();
+    }
+    else {
+        unwrapped = _ctx.types->gen_unwrapped(left, lhs_type);
+    }
+
     llvm::Value *present = _ctx.types->coerce_value(
-        _ctx.types->gen_unwrapped(left, lhs_type),
-        AST::unwrapped_type_of(lhs_type),
+        unwrapped,
+        present_type,
         result,
         *_ctx.current_cmp_unit);
     llvm::BasicBlock *present_end = _ctx.builder->GetInsertBlock();

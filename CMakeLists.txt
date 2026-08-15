@@ -145,7 +145,8 @@ set(LLVM_COMPONENTS
 # add the native architecture to the list of components
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     set(NATIVE_ARCH "X86")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    # Darwin says arm64, Linux says aarch64. both are AArch64 to LLVM
     set(NATIVE_ARCH "AArch64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     set(NATIVE_ARCH "ARM")

@@ -173,8 +173,9 @@ namespace
         {
             value_edge(node.lhs);
 
-            // the fallback runs only when the left side was absent
+            // the present-arm copy and the fallback each run on only one path
             _position.branches++;
+            value_edge(node.present_value);
             value_edge(node.rhs);
             _position.branches--;
         }

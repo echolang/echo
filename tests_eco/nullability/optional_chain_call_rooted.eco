@@ -1,0 +1,25 @@
+// a `?->` statement whose root is a call, not a `$var`. starts_call_statement
+// already reaches parse_postfix_chain; is_call_statement is what lets the chain
+// stand alone rather than demanding `=`
+class Node
+{
+    int32 $tag;
+
+    function save() : void
+    {
+        echo $this->tag;
+    }
+}
+
+function present() : Node?
+{
+    return Node(4);
+}
+
+function absent() : Node?
+{
+    return null;
+}
+
+present()?->save();
+absent()?->save();

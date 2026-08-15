@@ -1,0 +1,4 @@
+// an unknown namespaced generic call as a constructor argument of an *inferred*
+// declaration. recovery used to run the cursor off the end and abort instead of reporting
+struct Box<T> { ptr<T> $slot; }
+$b = Box<int32>(nope::alloc<int32>(1));

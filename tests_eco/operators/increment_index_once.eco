@@ -1,0 +1,15 @@
+// `$a[0]++` must call `operator []` once. the increment used to parse its target twice, so
+// the bounds check (and any other work the operator does) ran for both the read and the write
+struct Bag { int32 $v; }
+
+operator (Bag& $b)[usize $i] : int32&
+{
+    echo 1;
+    return &$b->v;
+}
+
+$b = Bag(4);
+$b[0]++;
+echo $b->v;
+$b[0]--;
+echo $b->v;

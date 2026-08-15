@@ -423,6 +423,18 @@ namespace AST
     // its *elements* by AST::array_literal_type_for, and only the `const` half applies there
     inline ValueType infer_declaration_type(const ValueType &inferred, bool is_const)
     {
+        // a pointer to unknown/void is still no information: `&$a[0]` is `void&` until the
+        // bracket becomes an `operator []` call. collapsing it here - the one owner of what
+        // an inferred declaration takes from its initializer - is what keeps the stale-variable
+        // sweep asking, without teaching that sweep to peel. a `T&` stays `T&`: a type
+        // parameter is information, and collapsing it would erase a generic's borrow
+        if (inferred.is_pointer()) {
+            const ValueType inner = value_type_of(inferred);
+            if (inner.is_unknown() || inner.is_void()) {
+                return infer_declaration_type(ValueType::make_unknown(), is_const);
+            }
+        }
+
         return is_const ? ValueType::make_const(inferred) : inferred;
     }
 

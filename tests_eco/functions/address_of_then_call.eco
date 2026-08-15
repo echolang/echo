@@ -1,0 +1,10 @@
+// `&f()` is a function-ref plus a postfix call, not an address-of a call result.
+// this used to abort on ParserCursor::current when written as a declaration
+// initializer (B38)
+function add() : int32
+{
+    return 41;
+}
+
+$n = &add();
+echo $n;

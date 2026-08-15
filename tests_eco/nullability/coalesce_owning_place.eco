@@ -1,0 +1,44 @@
+// `??` of a still-live place must copy an owning payload. extractvalue of a `string?` local is a
+// second name for the handle the local still owns, and whoever receives the `??` - echo's discarded
+// temporary, an assignment - then released it. two owners, one count, and the next drop freed the
+// buffer under the local. a computed left side is the other case: extractvalue *is* the move.
+//
+// the second echo, the read of `$a` after assigning out of it, and the allocation count are the
+// three pins. a dangling handle, a use-after-free, and a count that is not zero each name a
+// different half of the same miss
+
+function present() : string?
+{
+    string $s = 'hello';
+    return $s->clone();
+}
+
+function empty() : string?
+{
+    return null;
+}
+
+{
+    string? $a = present();
+    echo $a ?? 'null';
+    echo $a ?? 'null';
+}
+
+{
+    string? $n = empty();
+    echo $n ?? 'gone';
+}
+
+{
+    string? $a = present();
+    string $x = $a ?? 'gone';
+    echo $x;
+    echo $a ?? 'null';
+}
+
+{
+    string $x = present() ?? 'gone';
+    echo $x;
+}
+
+assert(mem::live_allocations() == 0, "every coalesce gave its string back");

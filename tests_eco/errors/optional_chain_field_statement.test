@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnexpectedToken  optional_chain_field_statement.eco:6:14
+
+  Unexpected token 'semicolon (;)' found. Expected 'assign (=)'
+
+  5 | Node? $absent = null;
+  6 | $absent?->tag;
+    :              ^ expected assign (=)
+  7 | 
+
+1 error, nothing was compiled.

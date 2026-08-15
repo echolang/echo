@@ -18,11 +18,9 @@ namespace
         payload.collector.collect_issue<AST::Issue::GenericError>(payload.context.code_ref(at), message);
     }
 
-    // the token a "this ran out" message points at. there is no current token at the end of input, and
-    // Cursor::current asserts rather than answering
     TokenReference here(const Parser::Cursor &cursor)
     {
-        return cursor.is_done() ? cursor.last() : cursor.current();
+        return cursor.here();
     }
 
     // is the token `offset` ahead a bare word - an identifier, or a keyword spelled like one.

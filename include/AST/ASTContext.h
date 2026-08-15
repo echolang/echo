@@ -104,6 +104,11 @@ namespace AST
         // exactly the bound a labelled `break N` would validate against
         unsigned loop_depth = 0;
 
+        // `$__incN` names minted by an increment that binds the target's address once. per file,
+        // same reason AST::FixpointLowering's hoist counter is: a golden's `$__inc0` must not move
+        // when an unrelated file grows one
+        size_t incdec_bind_count = 0;
+
         inline ScopeNode &scope() const {
             assert(scope_ptr);
             return *scope_ptr;

@@ -733,6 +733,26 @@ namespace AST
         ExprNode *lhs;
         ExprNode *rhs;
 
+        // **what the present arm yields**, when unwrapping the left side is not the whole of it.
+        //
+        // null is the common case and the whole no-regression story: a payload that copies as bytes,
+        // a computed left side whose extractvalue *is* the move - every `??` in the tree before a
+        // tagged optional owned anything - leaves this unset and codegen unwraps exactly as it
+        // always did.
+        //
+        // it is set for one shape: a *place* whose payload needs a real copy. There the `??` and the
+        // place are two names for one value, so the payload has to be copied rather than moved out
+        // from under a value somebody else still holds - and the copy cannot live on `lhs`, because
+        // that edge is also the value being tested. GuardNode::bound_value's shape, and for its
+        // reason.
+        //
+        // **written by AST::OwnershipPass and by nothing else.** arrive_value of the `??` itself
+        // cannot insert the copy: the node is not a place (`gen_lvalue` throws), so the copy is
+        // this edge, over the `__value` place for a tagged optional and over the handle for a flag
+        // one. TypeChecker validates it, `-p ast-resolved` shows it, and codegen evaluates it on
+        // the present arm
+        ExprNode *present_value = nullptr;
+
         TokenReference token;
 
         NullCoalesceExprNode(ExprNode *lhs, ExprNode *rhs, TokenReference token) :
@@ -861,6 +881,23 @@ namespace AST
 
         Node *clone(CloneContext &cc) const override;
     };
+
+    // **may this stand alone as a statement?** `is_call_expression` is the two call nodes; a `?->`
+    // whose continuation is a call is a discarded chain, which is a statement in exactly that way.
+    // peeled rather than folded into is_call_expression, because read_reaches_storage asks the
+    // two-node question and a chain's result is the continuation made nullable
+    inline bool is_call_statement(const ExprNode &expr)
+    {
+        const ExprNode *cur = &expr;
+        while (cur->get_node_type() == NodeType::n_expr_optional_chain) {
+            cur = static_cast<const OptionalChainExprNode *>(cur)->continuation;
+            if (cur == nullptr) {
+                return false;
+            }
+        }
+
+        return is_call_expression(*cur);
+    }
 
     // `E instanceof T` - is the object E names an instance of exactly T?
     //

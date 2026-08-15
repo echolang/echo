@@ -75,6 +75,13 @@ namespace Parser
             return tokens[range_size() - 1];
         }
 
+        // the token a diagnostic points at from *this* cursor position. `current()` asserts when the
+        // range is exhausted - recovery that consumed the terminator leaves the cursor there, and the
+        // caller still owes a message. the last token is where the input ran out
+        inline TokenReference here() const {
+            return is_done() ? last() : current();
+        }
+
         inline bool is_valid(size_t index) const {
             return index < range_size();
         }

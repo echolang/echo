@@ -12,6 +12,7 @@
 #include "AST/ASTControlFlow.h"
 #include "AST/ASTCopy.h"
 #include "AST/ASTDestruction.h"
+#include "AST/ASTNullability.h"
 #include "AST/ASTLastRead.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTPlaceExpr.h"
@@ -1727,26 +1728,50 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
                 request_storage_for(expr);
             }
 
-            // the continuation is rooted at the marker, which stands for the base rather than holding it -
-            // so it is walked for the reads *inside* it and cannot ask for the base a second time
-            chain->continuation = walk_expression(chain->continuation);
+            // **a value edge, not a plain walk.** a nested `$a?->child()?->save()` has an inner
+            // chain whose base is a call, and that call addresses the *outer* marker. binding
+            // the call at the statement would evaluate it before the outer chain has pushed
+            // its slot. walk_value_edge binds the inner base around the inner chain, so the
+            // call runs inside the outer continuation
+            //
+            // the continuation is rooted at the marker, which stands for the base rather than
+            // holding it - so it cannot ask for the base a second time
+            chain->continuation = walk_value_edge(chain->continuation);
             break;
         }
 
-        // **`??` registers nothing, and that is not an omission.** its result *is* its left side's value on
-        // the path where the value was there - so an upgrade's reference flows out of the expression to
-        // whoever keeps it, exactly as a class-returning call's does. binding the left side as a temporary
-        // and dropping it would take back the very reference the result carries, leaving two names on one
-        // object and a count of one
+        // **`??` registers nothing on a computed left side**, and that is not an omission. its result
+        // *is* that value on the path where it was there - an upgrade's retain, a call's payload - so
+        // binding the left as a temporary and dropping it would take back the reference the result
+        // carries, leaving two names on one object and a count of one
         //
-        // so the existing machinery already covers every position: a `??` that *arrives* somewhere is an
-        // ordinary value arrival, one that is *read through* gets a temporary from the member-access arm,
-        // and one that is *discarded* gets one from bind_discarded_temporary
+        // **a place left side is the other case.** extractvalue of a `string?` local aliases `$a`'s
+        // payload, and arrive_value of the `??` itself cannot insert the copy: the node is not a
+        // place (`gen_lvalue` throws). the copy hangs off `present_value`, over the `__value` place
+        // for a tagged optional and over the handle for a flag one - GuardNode::bound_value's shape
+        // and for its reason. a payload that copies as bytes leaves the edge unset, so codegen
+        // unwraps exactly as it always did
         case NodeType::n_expr_null_coalesce:
         {
             auto *coalesce = static_cast<NullCoalesceExprNode *>(expr);
             coalesce->lhs = walk_expression(coalesce->lhs);
             coalesce->rhs = walk_value_edge(coalesce->rhs);
+
+            ExprNode *lhs = coalesce->lhs;
+
+            if (lhs != nullptr && is_place_expression(*lhs)) {
+                const ValueType payload = unwrapped_type_of(lhs->result_type());
+
+                if (copy_needs_constructor(payload)) {
+                    ExprNode *source = lhs->result_type().is_wrapped_optional()
+                        ? optional_payload_place(lhs, coalesce->token)
+                        : lhs;
+
+                    coalesce->present_value = resolve_value_arrival(
+                        source, payload, nullptr, ValueDestination::t_declaration);
+                }
+            }
+
             break;
         }
 
@@ -2055,6 +2080,11 @@ ExprNode *OwnershipPass::arrive_value(
     // "a read that reaches storage is copied, a computed value is moved". a value the program
     // computed - a constructor call, a call returning `T` - is one nobody else holds, so it needs no
     // annotation and leaves nothing behind
+    //
+    // **`??` of a place is the one computed value that is a lie**, and that copy is not this
+    // arrival's to insert: the `??` is not a place (`gen_lvalue` throws). the walk of the node
+    // itself hangs it off `present_value`, over the payload place, so by the time the `??`
+    // arrives here it is already a copy nobody else holds
     //
     // **a call returning a borrow is on the copying side**, which is the whole of why this asks
     // AST::read_reaches_storage rather than is_place_expression: `string $s = $a->at(0);` reads

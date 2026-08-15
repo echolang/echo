@@ -1,0 +1,6 @@
+// a `?->` that ends in a field is not a call, so it is not a statement. `$n->tag;`
+// is the same refusal; the optional chain must not invent a second meaning
+class Node { int32 $tag; }
+
+Node? $absent = null;
+$absent?->tag;

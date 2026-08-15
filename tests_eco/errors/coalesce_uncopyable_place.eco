@@ -1,0 +1,16 @@
+// `??` of a still-live uncopyable place must refuse. extractvalue of the payload
+// would hand two owners one resource; the copy hangs off the present arm, so the
+// refusal is arrive_value's ordinary one rather than a codegen throw
+
+struct Buffer
+{
+    ptr<uint8> $data;
+
+    destructor()
+    {
+        mem::free($this->data);
+    }
+}
+
+Buffer? $a = Buffer(mem::alloc<uint8>(1));
+Buffer $x = $a ?? Buffer(mem::alloc<uint8>(1));

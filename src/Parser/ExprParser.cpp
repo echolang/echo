@@ -2190,7 +2190,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
 
     int depth = 0;
 
-    auto token = cursor.current();
+    auto token = cursor.here();
     auto tvalue = token.value();
 
     while (is_expr_token(payload, cursor)) {

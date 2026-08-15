@@ -226,8 +226,15 @@ AST::ValueType AST::NullCoalesceExprNode::result_type() const
 
 const std::string AST::NullCoalesceExprNode::node_description()
 {
-    return "coalesce<" + result_type().get_type_desciption() + ">("
+    std::string desc = "coalesce<" + result_type().get_type_desciption() + ">("
         + lhs->node_description() + ", " + rhs->node_description() + ")";
+
+    // appended only when set, so a `??` that copies as bytes renders exactly as it always did
+    if (present_value != nullptr) {
+        desc += " present " + present_value->node_description();
+    }
+
+    return desc;
 }
 
 const std::string AST::OptionalChainExprNode::node_description()
