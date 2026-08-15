@@ -1,0 +1,11 @@
+--- OUT --->
+6
+4.000000
+4000000001
+--- RAST --->
+CHECK: function total -> type<T>
+CHECK: vardecl<type<T>>($sum) = literal<int32>(0)
+CHECK: function total -> type<float64>
+CHECK: vardecl<type<float64>>($sum) = literal<float64>(0.0 [0])
+CHECK: function total -> type<int64>
+CHECK: vardecl<type<int64>>($sum) = literal<int64>(0)

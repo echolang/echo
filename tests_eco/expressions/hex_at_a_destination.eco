@@ -1,0 +1,25 @@
+// **a hex literal takes its width from its destination**, like every other integer spelling.
+//
+// it used to accept an expected type and never read it, so `int32 $x = 0xFF;` was a uint8 node and
+// `uint8 $y = 0x1FF;` silently stored 255. the digit count is still the *default*, which is what
+// `$e = 0xFF;` reads as - docs/language/types.md describes both halves
+
+int32 $x = 0xFF;
+echo $x;
+
+uint64 $big = 0xFF;
+echo $big;
+
+int64 $neg = 0x7FFFFFFFFFFFFFFF;
+echo $neg;
+
+// no destination: the digit count decides, so this is a uint8 and holds 255
+$e = 0xFF;
+echo $e;
+
+$f = 0x00FF;
+echo $f;
+
+// an ordinary operand beside a typed one, so the literal defers exactly as a decimal one does
+uint32 $u = 4294967280;
+echo $u & 0xFF;

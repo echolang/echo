@@ -1540,8 +1540,12 @@ namespace AST
     //   - a non-nullable borrow T& widens to a nullable ptr<T>, never the reverse
     bool is_implicitly_convertible(const ValueType &from, const ValueType &to);
 
-    // can this type decide what a number or bool literal is? only a concrete, non-void primitive
-    // can. every other kind reaches a literal as a hint that says nothing about it:
+    // **may a hint for this type be handed down into an expression before it is parsed?** a
+    // *parse-time* question, and deliberately not the same one AST::type_literal_at answers - that one
+    // is the rule, this one is whether the rule may be applied to an operand nobody has seen yet.
+    //
+    // only a concrete, non-void primitive that is not a `bool` can. every other kind reaches a literal
+    // as a hint that says nothing about it:
     //   - a pointer hint belongs to the expression as a whole, not to the operand - in
     //     `ptr<int> $q = $p:$ + 1` the literal is only the element offset;
     //   - a type parameter says nothing until it is substituted;
@@ -1550,6 +1554,14 @@ namespace AST
     // fitted at its destination by TypeLowering::coerce_value after monomorphization, the same way
     // a `return` in a generic body is. treating them as hints instead made the autocast helpers
     // report a bogus "unexpected token" at the literal
+    //
+    // **`bool` is on that list and the reason is the parser's shape.** the shunting yard hands every
+    // operand the same hint and cannot know the operator yet, so a `bool` destination reached the `3`
+    // and the `4` of `bool $x = 3 < 4;` and retyped both - a comparison decided on garbage. the
+    // destination is applied *once, to the finished expression*, in Parser::parse_expr_ref, which is
+    // where `bool $a = 1;` becomes `true` and `bool $a = 3;` is refused. a bool is not a width, so
+    // there is nothing for the hint to decide about an *operand* even when the finished literal
+    // would have been 0 or 1
     bool can_type_a_literal(const ValueType &type);
 
 };

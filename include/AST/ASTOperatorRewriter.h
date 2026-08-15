@@ -114,8 +114,8 @@ namespace AST
         bool _finalizing = false;
 
         // rule 4 - two mismatched numeric operands are reconciled, for a declaration whose type only a
-        // later pass could give it. the *rule* is AST::common_numeric_type's, shared with the parser;
-        // this is the second moment it has to be applied at, and only the cast is built here
+        // later pass could give it. the *rule* is AST::reconcile_binary_operands', shared with the
+        // parser; this is the second moment it has to be applied at
         void widen_binary_operands(BinaryExprNode &bin);
 
         // rule 1 - a bracket over a container becomes its `operator []`. a base whose type is still

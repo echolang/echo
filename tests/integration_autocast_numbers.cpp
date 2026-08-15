@@ -83,7 +83,9 @@ TEST_CASE( "init autocast (T = int)", "[Integration][Autocast][Numbers]" )
         "vardecl<type<float64>>($a) = literal<float64>(1.0 [1])"
     );
 
-    // bool
+    // **0 and 1 are the two values a bool holds.** anything else is refused - that is not a width
+    // question, it is that `3` is not either of those, and tests_eco/errors/literal_at_bool_destination
+    // pins the sentence. the override is what get_bool_value reads, so the token `1` is `true`
     REQUIRE_NODE_DESC(
         "bool $a = 1;",
         "vardecl<type<bool>>($a) = literal<bool>(true [1])"
@@ -143,37 +145,30 @@ TEST_CASE( "init autocast (T = float)", "[Integration][Autocast][Numbers]" )
 }
 
 
-TEST_CASE( "init autocast (T = bool)", "[Integration][Autocast][Numbers]" )
+// **the mirror of the arm above, and refused for the same reason.** `int $a = true;` used to become
+// `literal<int32>(1 [true])`, which reads as though the language had a number for `true` - it does
+// not, and a variable still converts (`int32 $n = $flag;`) exactly as a float still truncates. what
+// changed is only what a *written* literal may mean
+TEST_CASE( "a bool literal at a numeric destination", "[Integration][Autocast][Numbers]" )
 {
-    REQUIRE_NODE_DESC(
+    EchoTests::assert_code_emits_issue(
         "int $a = true;",
-        "vardecl<type<int32>>($a) = literal<int32>(1 [true])"
+        "Invalid type conversion: a literal of type 'bool' cannot be written where a 'int32' is expected - Echo has no truthiness in a written literal, so say which of the two you meant"
     );
 
-    REQUIRE_NODE_DESC(
-        "int $a = false;",
-        "vardecl<type<int32>>($a) = literal<int32>(0 [false])"
-    );
-
-    REQUIRE_NODE_DESC(
-        "uint8 $a = true;",
-        "vardecl<type<uint8>>($a) = literal<uint8>(1 [true])"
-    );
-
-    REQUIRE_NODE_DESC(
+    EchoTests::assert_code_emits_issue(
         "uint8 $a = false;",
-        "vardecl<type<uint8>>($a) = literal<uint8>(0 [false])"
+        "Invalid type conversion: a literal of type 'bool' cannot be written where a 'uint8' is expected - Echo has no truthiness in a written literal, so say which of the two you meant"
     );
 
-    // test invalid conversions
     EchoTests::assert_code_emits_issue(
         "float $a = true;",
-        "Invalid type conversion: The boolean literal 'true' cannot be implicitly converted to the expected type 'float32'."
+        "Invalid type conversion: a literal of type 'bool' cannot be written where a 'float32' is expected - Echo has no truthiness in a written literal, so say which of the two you meant"
     );
 
     EchoTests::assert_code_emits_issue(
         "float64 $a = false;",
-        "Invalid type conversion: The boolean literal 'false' cannot be implicitly converted to the expected type 'float64'."
+        "Invalid type conversion: a literal of type 'bool' cannot be written where a 'float64' is expected - Echo has no truthiness in a written literal, so say which of the two you meant"
     );
 }
 

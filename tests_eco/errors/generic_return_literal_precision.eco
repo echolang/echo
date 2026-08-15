@@ -1,0 +1,11 @@
+// **a returned literal is typed once T is bound.** the parse cannot, T says nothing yet, so
+// the `2.5` defaults to float64. without the pending-literal sweep walking ReturnNode, the
+// instance kept that float64 and TypeChecker waved float→int through, so `T = int32`
+// truncated in silence
+
+function take<T>() : T
+{
+    return 2.5;
+}
+
+echo take<int32>();

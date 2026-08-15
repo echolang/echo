@@ -1,0 +1,27 @@
+// `0b1011` used to lex as the integer `0` followed by an identifier `b1011`, and the parser arm that
+// would have read the token was an empty stub that fell off the end of a non-void function.
+//
+// like every other integer spelling it takes its width from its destination, and defaults to the
+// narrowest unsigned type its digits fit when there is none - the rule
+// tests_eco/expressions/hex_at_a_destination.eco pins for `0x`
+
+echo 0b1011;
+echo 0b0;
+echo 0b11111111;
+
+uint8 $mask = 0b11110000;
+echo $mask;
+
+int32 $one = 0b1;
+echo $one;
+
+int64 $wide = 0b1000000000000000000000000000000000;
+echo $wide;
+
+float64 $f = 0b101;
+echo $f;
+
+// an ordinary operand, so the binary spelling is nothing special downstream
+echo 0b1100 & 0b1010;
+echo 0b1100 | 0b1010;
+echo 0b1100 ^ 0b1010;

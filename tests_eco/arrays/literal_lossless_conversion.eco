@@ -1,0 +1,26 @@
+// the other side of errors/array_literal_element_precision.eco: an element position refuses a
+// literal it cannot hold and converts one it can, exactly as a written declaration does
+
+array<int64> $a = [1, 2.0];
+
+echo $a[0];
+echo $a[1];
+
+// the first element decides the type, which is the intended rule and not part of that bug - so
+// this one holds 2.5 and 1.0 rather than truncating either
+$b = [2.5, 1];
+
+echo $b[0];
+echo $b[1];
+
+array<float64> $c = [];
+$c[] = 3;
+$c[0] = 4;
+
+echo $c[0];
+
+// and an append into a narrower slot still takes the width it was given
+array<uint8> $d = [];
+$d[] = 255;
+
+echo $d[0];

@@ -136,11 +136,19 @@ namespace AST
     //
     // `static_owner` is the type a static call named - `unknown` for every other shape of call, which
     // is what makes the seed above a no-op for them
+    //
+    // **`argument_defers` says which arguments have no opinion about the instance's name.** an untyped
+    // number literal is one: its type is a default nobody chose, and letting it bind a parameter that
+    // another argument also mentions makes the argument that *knows* what it is fit the one that does
+    // not - `pick(0, $n)` over a `usize $n` named `pick<int32>` and truncated `$n`. positional and
+    // parallel to `argument_types`; empty means "every argument has an opinion", which is what the
+    // type-only callers get and is the pre-existing rule
     Instantiation can_instantiate(
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
         const std::vector<ValueType> &explicit_type_args = {},
-        const ValueType &static_owner = ValueType::make_unknown());
+        const ValueType &static_owner = ValueType::make_unknown(),
+        const std::vector<bool> &argument_defers = {});
 
     // the same question asked of a call node: argument types are read off the arguments, type
     // arguments off `explicit_type_args`. for a caller that has not already got the argument types
@@ -153,6 +161,10 @@ namespace AST
     // AST::CallResolver, which needs the argument types for the matcher as well
     std::vector<ValueType> argument_types_of(const FunctionCallExprNode &call);
     std::vector<ValueType> explicit_type_args_of(const FunctionCallExprNode &call);
+
+    // and which of them are AST::is_untyped_literal, in the same positional shape. read off the nodes
+    // here rather than at each caller so the two that ask can_instantiate cannot disagree about it
+    std::vector<bool> argument_defers_of(const FunctionCallExprNode &call);
 
     // **the** constraint rule: the first (parameter, argument) pair the parameter's constraint
     // rejects, as an index into both vectors, or nothing when none does

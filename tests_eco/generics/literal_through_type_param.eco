@@ -15,7 +15,10 @@ function make<T>() : T
     return $x;
 }
 
-// the bool literal takes the same path, through a different autocast branch
+// a bool literal takes the same path - it is typed once the instance exists. what it may *become*
+// there is narrower than a number's: `T = bool` is the only instance this compiles for, because a
+// bool is not a width and a written `true` names no number. errors/literal_at_bool_destination is
+// the refusal, and it is the same one `int32 $k = true;` gets outside a generic
 function truthy<T>() : T
 {
     T $x = true;
@@ -39,4 +42,3 @@ echo make<float64>();
 echo make<uint8>();
 
 echo truthy<bool>();
-echo truthy<int32>();

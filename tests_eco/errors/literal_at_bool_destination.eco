@@ -1,0 +1,23 @@
+// **a bool is not a width, so only 0 and 1 name one.** those two are what `echo` prints for
+// `true` and `false`; expressions/bool_from_zero_and_one is the conversion. everything else
+// used to compile and print 0, because a `bool` destination retyped the literal and the value
+// then came back out by string-comparing the token to "true".
+//
+// only a *written* literal is refused. `bool $b = $n;` on an int32 still converts at runtime,
+// exactly as `int32 $t = $f;` still truncates - a literal is a compile-time question and a variable
+// is a narrowing, which is the split every other precision refusal already makes
+
+bool $a = 3;
+
+// and the mirror: there is no number `true` means
+int32 $k = true;
+
+echo $a;
+echo $k;
+
+// a bool return is a destination too - stripping the hint because can_type_a_literal
+// refuses bool compiled this as truthiness (`icmp ne 0`)
+function bad() : bool
+{
+    return 3;
+}

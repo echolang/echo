@@ -1,0 +1,32 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidTypeConversion  literal_at_bool_destination.eco:10:11
+
+  Invalid type conversion: a literal of type 'int32' cannot be written where a 'bool' is expected - Echo has no truthiness in a written literal, so say which of the two you meant
+
+   9 | 
+  10 | bool $a = 3;
+     :           ^
+  11 | 
+
+[error] InvalidTypeConversion  literal_at_bool_destination.eco:13:12
+
+  Invalid type conversion: a literal of type 'bool' cannot be written where a 'int32' is expected - Echo has no truthiness in a written literal, so say which of the two you meant
+
+  12 | // and the mirror: there is no number `true` means
+  13 | int32 $k = true;
+     :            ^^^^
+  14 | 
+
+[error] InvalidTypeConversion  literal_at_bool_destination.eco:22:12
+
+  Invalid type conversion: a literal of type 'int32' cannot be written where a 'bool' is expected - Echo has no truthiness in a written literal, so say which of the two you meant
+
+  21 | {
+  22 |     return 3;
+     :            ^
+  23 | }
+
+3 errors, nothing was compiled.

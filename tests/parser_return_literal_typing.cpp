@@ -88,6 +88,24 @@ TEST_CASE("a returned literal is typed against the declared return type", "[Pars
         REQUIRE(return_expr_type(*bundle, "f") == prim(ValueTypePrimitive::t_bool));
     }
 
+    SECTION("0 and 1 returned from a bool function become false and true")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "function yes() : bool { return 1; }\n"
+            "function no() : bool { return 0; }\n");
+
+        REQUIRE_FALSE(bundle->collector.has_critical_issues());
+        REQUIRE(return_expr_type(*bundle, "yes") == prim(ValueTypePrimitive::t_bool));
+        REQUIRE(return_expr_type(*bundle, "no") == prim(ValueTypePrimitive::t_bool));
+    }
+
+    SECTION("a non-0/1 literal returned as bool is refused")
+    {
+        EchoTests::assert_code_emits_issue(
+            "function f() : bool { return 3; }\n",
+            "Invalid type conversion: a literal of type 'int32' cannot be written where a 'bool' is expected - Echo has no truthiness in a written literal, so say which of the two you meant");
+    }
+
     SECTION("an out-of-range literal is reported where it is written")
     {
         EchoTests::assert_code_emits_issue(
@@ -167,4 +185,29 @@ TEST_CASE("the return type hint is scoped to its own function body", "[Parser][R
 
     REQUIRE(after != nullptr);
     REQUIRE(after->type() == prim(ValueTypePrimitive::t_int32));
+}
+
+TEST_CASE("a returned literal is typed after the return type is substituted", "[Parser][Return][Generics]")
+{
+    EchoTests::assert_code_emits_issue(
+        "function f<T>() : T { return 2.5; }\n"
+        "echo f<int32>();\n",
+        "Invalid type conversion: The floating point number literal '2.5' cannot be implicitly converted to an integer type due to non zero decimal values.");
+}
+
+TEST_CASE("a float32 destination warns from the non-parser askers", "[Parser][Literal]")
+{
+    // the parser already pins this sentence at a written declaration; these two are the
+    // askers that used to replace the node and drop the warning
+    auto call = EchoTests::tests_make_parsed_bundle(
+        "function take(float32 $x) : float32 { return $x; }\n"
+        "take(123456.123456);\n");
+
+    REQUIRE(EchoTests::has_issue_containing(*call, "loss of precision"));
+
+    auto pending = EchoTests::tests_make_parsed_bundle(
+        "function hold<T>() : T { T $x = 123456.123456; return $x; }\n"
+        "hold<float32>();\n");
+
+    REQUIRE(EchoTests::has_issue_containing(*pending, "loss of precision"));
 }

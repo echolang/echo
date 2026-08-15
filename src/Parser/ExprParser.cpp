@@ -5,6 +5,7 @@
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTNullability.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ExprNode.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/VarRefNode.h"
@@ -37,41 +38,46 @@ bool Parser::starts_const_expr(const Parser::Cursor &cursor)
     return cursor.is_type_sequence(0, { Token::Type::t_const, Token::Type::t_open_paren });
 }
 
-bool can_hold_literal_int(Parser::Payload &payload, AST::ValueType type, const std::string &literal, const TokenReference literal_token)
+// **report what AST::type_literal_at decided**, and hand back whatever the literal became.
+//
+// the rule itself is AST::ASTLiteralTyping's now - it used to be `autocast_literal_int` and
+// `autocast_literal_float` right here, which is why the five positions that are not this parser each
+// grew their own answer or none at all. what stays behind is the half that has a CodeRef, the same
+// split AST::ArrayLiteralLookup and AST::interface_erasure_refusal both make
+//
+// this is the rule. apply_literal_typing_if_wanted is the operand-hint gate
+// (AST::can_type_a_literal); parse_expr_ref calls this directly so a bool destination
+// still types 0/1 and refuses everything else
+AST::NodeReference apply_literal_typing(
+    Parser::Payload &payload, AST::ExprNode *literal, const AST::ValueType &destination)
 {
-    InfInt value(literal);
+    const AST::LiteralTyping typing =
+        AST::type_literal_at(literal, destination, payload.context.module.nodes);
 
-    auto int_size = AST::get_integer_size(type.get_primitive_type());
+    const AST::CodeRef at = payload.context.code_ref(AST::literal_token_of(literal));
 
-    if (value > int_size.get_max_positive_value()) {
-        payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-            payload.context.code_ref(literal_token),
-            fmt::format(
-                "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
-                literal,
-                AST::get_primitive_name(type.get_primitive_type()),
-                int_size.get_max_positive_value()
-            )
-        );
+    AST::report_literal_warning(payload.collector, at, typing);
 
-        return false;
+    if (typing.result == AST::LiteralTyping::Result::t_refused) {
+        AST::report_literal_refusal(payload.collector, at, typing);
+
+        return AST::make_void_ref();
     }
 
-    if (value < int_size.get_max_negative_value()) {
-        payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
-            payload.context.code_ref(literal_token),
-            fmt::format(
-                "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
-                literal,
-                AST::get_primitive_name(type.get_primitive_type()),
-                int_size.get_max_negative_value()
-            )
-        );
+    // the node type is on the node - the literal may have become a *different* kind of literal,
+    // and the shape of what came back is exactly what it decided
+    return AST::NodeReference(typing.node->get_node_type(), typing.node);
+}
 
-        return false;
+// the same, for a destination that may be anything at all - the shape every literal parse arm wants
+AST::NodeReference apply_literal_typing_if_wanted(
+    Parser::Payload &payload, AST::ExprNode *literal, AST::TypeNode *expected_type)
+{
+    if (expected_type == nullptr || !AST::can_type_a_literal(expected_type->type)) {
+        return AST::NodeReference(literal->get_node_type(), literal);
     }
 
-    return true;
+    return apply_literal_typing(payload, literal, expected_type->type);
 }
 
 // an interpolated string literal, cursor on its `t_string_interp_begin`. answers null having reported
@@ -187,280 +193,6 @@ bool parse_bracketed_expr_list(Parser::Payload &payload, std::vector<AST::ExprNo
     return true;
 }
 
-std::string get_fstring_literal(std::string value)
-{
-    // remove trailing zeros
-    value.erase(value.find_last_not_of('0') + 1, std::string::npos);
-    // leave at least one digit after the dot
-    if (value.back() == '.') {
-        value += '0';
-    }
-
-    return value;
-}
-
-std::string get_f64_string_literal(double value)
-{
-    return get_fstring_literal(std::to_string(value));
-}
-
-std::string get_f32_string_literal(float value)
-{
-    return get_fstring_literal(std::to_string(value)) + "f";
-}
-
-/**
- * AUTOCAST FLOAT
- * ----------------------------------------------------------------------------
- *
- * Autocast a "float" literal to the expected type.
- *
- * Float literals can be implicitly converted to:
- *  - to larger float types (float32 to float64)
- *  - smaller float types (float64 to float32) can throw a warning if the value is not representable
- *  - to integer types (float to int) can throw an error if the value is not a whole number
- */
-const AST::NodeReference autocast_literal_float(Parser::Payload &payload, AST::LiteralFloatExprNode &node, const AST::ValueType *expected_type)
-{
-    auto literal_token = node.token_literal;
-
-    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
-    if (expected_type != nullptr && !AST::can_type_a_literal(*expected_type)) {
-        expected_type = nullptr;
-    }
-
-    // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr) {
-        // floats / doubles
-        if (expected_type->is_floating_type()) {
-            // even if the number doesn't fit into the expected type, we can continue because the value is still valid
-            // we just loose precision and the user gets a warning
-            auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(literal_token, expected_type->get_primitive_type());
-
-            // if the actual type is a float32 and the expected type is a float64, emit an warning
-            if (node.result_type().will_fit_into(*expected_type) == false) {
-
-                // we do a quick check if the literal would actually loose precision
-                // I personally see no point in annyoing the user with a warning if the literal is 1.0
-                // so if we can cast the double to float and back to double and the value is the same, we dont emit a warning
-                double dliteral = std::stod(node.get_fvalue_string());
-                float fliteral = (float) dliteral;
-                double dliteral2 = (double) fliteral;
-
-                if (dliteral != dliteral2) {
-                    payload.collector.collect_issue<AST::Issue::LossOfPrecision>(
-                        payload.context.code_ref(literal_token),
-                        fmt::format(
-                            "The literal '{}' is stored in 32bit float which will result in the effctive value {}",
-                            node.get_fvalue_string(),
-                            fliteral
-                        )
-                    );
-
-                    // override the literal value with the float value
-                    casted_node.override_literal_value.emplace(get_f32_string_literal(fliteral));
-                }
-                else {
-                    casted_node.override_literal_value.emplace(node.get_fvalue_string() + "f");
-                }
-            }
-
-            // if the exptected type is a float64, we define the override literal value without the "f" suffix
-            // at least if there is one in the first place
-            if (
-                expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64 &&
-                node.effective_token_literal_value().back() == 'f'
-            ) {
-                casted_node.override_literal_value.emplace(node.get_fvalue_string());
-            }
-
-            return AST::make_ref(casted_node);
-        }
-
-        // integers
-        else if (expected_type->is_integer_type()) {
-            // determine if the literal has any decimal values besides 0
-            // if so, we emit a error (not just a warning) because the user highly likely made a mistake
-            // or is expecting a wrong type
-            double dliteral = std::stod(node.get_fvalue_string());
-            double dliteral_cmp = (double) (long long) dliteral;
-
-            if (dliteral != dliteral_cmp) {
-                payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token),
-                    fmt::format(
-                        "The floating point number literal '{}' cannot be implicitly converted to an integer type due to non zero decimal values.",
-                        node.get_fvalue_string()
-                    )
-                );
-
-                return AST::make_void_ref();
-            }
-
-            // if we end up here our floating point number is a whole number
-            // so we can safely convert it to an integer, but we still have to check
-            // if the integer type will fit the literal
-
-            // the int literal is simply the fvalue string with everything after the dot removed
-            std::string int_literal = node.get_fvalue_string().substr(0, node.get_fvalue_string().find('.'));
-
-            if (!can_hold_literal_int(payload, *expected_type, int_literal, literal_token)) {
-                return AST::make_void_ref();
-            }
-
-            auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(literal_token, expected_type->get_primitive_type());
-            casted_node.override_literal_value.emplace(int_literal);
-
-            return AST::make_ref(casted_node);
-        }
-
-        // cannot cast
-        else {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(literal_token),
-                Token::Type::t_unknown,
-                literal_token.type()
-            );
-        }
-    }
-
-    // otherwise just return the original node
-    return AST::make_ref(node);
-}
-
-/**
- * AUTOCAST INT
- * ----------------------------------------------------------------------------
- *
- * Autocast a "int" literal to the expected type.
- *
- * Integer literals can be implicitly converted to:
- *  - to "float" types (int to float) can always cause a loss of precision (TODO emit warning)
- *  - to larger integer types (int8 to int16) can always be done
- *  - to smaller integer types (int64 to int8) can throw an error if the value is not representable
- *  - to boolean types (int to bool) can always be done, 0 is false, everything else is true
- */
-const AST::NodeReference autocast_literal_int(Parser::Payload &payload, AST::LiteralIntExprNode &node, const AST::ValueType *expected_type)
-{
-    auto literal_token = node.token_literal;
-    InfInt intvalue(literal_token.value());
-
-    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
-    if (expected_type != nullptr && !AST::can_type_a_literal(*expected_type)) {
-        expected_type = nullptr;
-    }
-
-    if (expected_type != nullptr) {
-        // floats / doubles
-        // if the expected type is a float, we can "safely" convert the integer to a float
-        if (expected_type->is_floating_type()) {
-            // we can safely convert the integer to a float
-            auto &casted_node = payload.context.emplace_node<AST::LiteralFloatExprNode>(literal_token, expected_type->get_primitive_type());
-
-            if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float32) {
-                float val = casted_node.float_value();
-                casted_node.override_literal_value.emplace(get_f32_string_literal(val));
-            }
-            else if (expected_type->get_primitive_type() == AST::ValueTypePrimitive::t_float64) {
-                double val = casted_node.double_value();
-                casted_node.override_literal_value.emplace(get_f64_string_literal(val));
-            }
-            else {
-                payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token),
-                    fmt::format(
-                        "The integer literal '{}' cannot be implicitly converted to the expected type '{}'.",
-                        literal_token.value(),
-                        expected_type->get_type_desciption()
-                    )
-                );
-
-                return AST::make_void_ref();
-            }
-
-            // @TODO we should add a detection if the float value is actually the same as the integer value
-            // as very large integers will loose precision when converted to a float
-            return AST::make_ref(casted_node);
-        }
-
-        // integers
-        else if (expected_type->is_integer_type()) {
-            auto &expected_node = payload.context.emplace_node<AST::LiteralIntExprNode>(literal_token, expected_type->get_primitive_type());
-
-            // check if the expected type is unsigned and the literal is negative
-            // which should throw an error
-            if (expected_type->is_unsigned_integer() && intvalue < 0) {
-                payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                    payload.context.code_ref(literal_token),
-                    fmt::format(
-                        "The integer literal '{}' cannot be implicitly converted to an unsigned integer because it is negative.",
-                        literal_token.value()
-                    )
-                );
-
-                return AST::make_void_ref();
-            }
-
-            // check if the literal fits the expected type
-            auto int_size = AST::get_integer_size(expected_type->get_primitive_type());
-            auto lower_bound = int_size.get_max_negative_value();
-            auto upper_bound = int_size.get_max_positive_value();
-
-            if (intvalue < lower_bound) {
-                payload.collector.collect_issue<AST::Issue::IntegerUnderflow>(
-                    payload.context.code_ref(literal_token),
-                    fmt::format(
-                        "The literal '{}' is too small for the integer type '{}'. The minimum value is '{}'.",
-                        literal_token.value(),
-                        AST::get_primitive_name(expected_type->get_primitive_type()),
-                        lower_bound
-                    )
-                );
-
-                return AST::make_void_ref();
-            }
-
-            if (intvalue > upper_bound) {
-                payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
-                    payload.context.code_ref(literal_token),
-                    fmt::format(
-                        "The literal '{}' is too large for the integer type '{}'. The maximum value is '{}'.",
-                        literal_token.value(),
-                        AST::get_primitive_name(expected_type->get_primitive_type()),
-                        upper_bound
-                    )
-                );
-
-                return AST::make_void_ref();
-            }
-
-            // if we end up here, the literal fits the expected type and can be used as expected
-            return AST::make_ref(expected_node);
-        }
-
-        // booleans
-        else if (expected_type->is_boolean_type()) {
-            // we can convert to a boolean, we consider 0 as false and everything else as true
-            auto &casted_node = payload.context.emplace_node<AST::LiteralBoolExprNode>(literal_token);
-            casted_node.override_literal_value.emplace(intvalue == 0 ? "false" : "true");
-            return AST::make_ref(casted_node);
-        }
-
-        // cannot cast
-        else {
-            payload.collector.collect_issue<AST::Issue::UnexpectedToken>(
-                payload.context.code_ref(literal_token),
-                Token::Type::t_unknown,
-                literal_token.type()
-            );
-        }
-    }
-
-    // otherwise just return the original node
-    return AST::make_ref(node);
-}
-
-
 /**
  * FLOAT LITERAL
  * ----------------------------------------------------------------------------
@@ -475,10 +207,7 @@ const AST::NodeReference parse_literal_float(Parser::Payload &payload, AST::Type
     auto &node = payload.context.emplace_node<AST::LiteralFloatExprNode>(current_token);
     cursor.skip();
 
-    auto expected_type_ptr = expected_type ? &expected_type->type : nullptr;
-
-    // handle autocasting
-    return autocast_literal_float(payload, node, expected_type_ptr);
+    return apply_literal_typing_if_wanted(payload, &node, expected_type);
 }
 
 /**
@@ -492,21 +221,67 @@ const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNo
     auto &cursor = payload.cursor;
     auto current_token = cursor.current();
 
-    // we first check if the literal is larger then a 32bit integer, if so we automatically create a 64bit integer
-    InfInt intvalue(current_token.value());
-    auto guessed_int_type = AST::ValueTypePrimitive::t_int32;
-
-    if (intvalue > AST::get_integer_size(AST::ValueTypePrimitive::t_int32).get_max_positive_value()) {
-        guessed_int_type = AST::ValueTypePrimitive::t_int64;
-    }
-
-    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, guessed_int_type);
+    // which width a bare integer defaults to is AST::LiteralIntExprNode's own question now - it used
+    // to be decided here and *stamped* as though a destination had chosen it, which is precisely what
+    // left every later rule unable to tell a default apart from an answer
+    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token);
     cursor.skip();
 
-    auto expected_type_ptr = expected_type ? &expected_type->type : nullptr;
+    return apply_literal_typing_if_wanted(payload, &node, expected_type);
+}
 
-    // handle autocasting
-    return autocast_literal_int(payload, node, expected_type_ptr);
+// the decimal rendering of a `0x` or `0b` spelling, and the width its digit count defaults to.
+// **one function for the two**, because the only thing that differs is the base and the prefix - and
+// they had drifted already: the hex arm ignored its destination entirely, so `int32 $x = 0xFF;` was a
+// uint8 node and `uint8 $y = 0x1FF;` silently stored 255
+const AST::NodeReference parse_literal_radix(
+    Parser::Payload &payload,
+    AST::TypeNode *expected_type,
+    int base,
+    size_t digits_per_byte
+)
+{
+    auto &cursor = payload.cursor;
+    auto current_token = cursor.current();
+
+    const std::string spelling = current_token.value();
+    const size_t digits = spelling.length() - 2;  // the `0x` / `0b` prefix
+
+    // the width the *spelling* asks for, which is a default and not a choice: a destination still
+    // decides, and only where there is none does this stand
+    AST::ValueTypePrimitive width = AST::ValueTypePrimitive::t_uint64;
+
+    if (digits <= digits_per_byte) {
+        width = AST::ValueTypePrimitive::t_uint8;
+    } else if (digits <= digits_per_byte * 2) {
+        width = AST::ValueTypePrimitive::t_uint16;
+    } else if (digits <= digits_per_byte * 4) {
+        width = AST::ValueTypePrimitive::t_uint32;
+    }
+
+    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(
+        current_token, AST::LiteralIntExprNode::DefaultWidth { width });
+
+    // everything downstream reads a literal's value as decimal, so the radix spelling is carried in
+    // the override the way an autocast's rewritten value is
+    try {
+        node.override_literal_value.emplace(
+            std::to_string(std::stoull(spelling.substr(2), nullptr, base)));
+    }
+    catch (const std::exception &) {
+        payload.collector.collect_issue<AST::Issue::IntegerOverflow>(
+            payload.context.code_ref(current_token),
+            fmt::format(
+                "The literal '{}' does not fit any integer type - the largest is 'uint64'.",
+                spelling));
+
+        cursor.skip();
+        return AST::make_void_ref();
+    }
+
+    cursor.skip();
+
+    return apply_literal_typing_if_wanted(payload, &node, expected_type);
 }
 
 /**
@@ -517,40 +292,7 @@ const AST::NodeReference parse_literal_int(Parser::Payload &payload, AST::TypeNo
  */
 const AST::NodeReference parse_literal_hex(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
-    auto &cursor = payload.cursor;
-    auto current_token = cursor.current();
-
-    // we first check if the literal is larger then a 32bit integer, if so we automatically create a 64bit integer
-    std::string hex_value = current_token.value();
-    auto hex_len = hex_value.length() - 2; // remove the "0x" prefix
-
-    // determine the integer type based on the string length of the hex value
-    auto guessed_int_type = AST::ValueTypePrimitive::t_uint64;
-    if (hex_len <= 2) {
-        guessed_int_type = AST::ValueTypePrimitive::t_uint8;
-    } else if (hex_len <= 4) {
-        guessed_int_type = AST::ValueTypePrimitive::t_uint16;
-    } else if (hex_len <= 8) {
-        guessed_int_type = AST::ValueTypePrimitive::t_uint32;
-    } else {
-        guessed_int_type = AST::ValueTypePrimitive::t_uint64;
-    }
-
-    auto &node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, guessed_int_type);
-
-    // interpret the hex value as an integer
-    if (guessed_int_type == AST::ValueTypePrimitive::t_uint64) {
-        node.override_literal_value.emplace(std::to_string(std::stoull(hex_value, nullptr, 16)));
-    } else if (guessed_int_type == AST::ValueTypePrimitive::t_uint32) {
-        node.override_literal_value.emplace(std::to_string(std::stoul(hex_value.substr(0, 10), nullptr, 16)));
-    } else if (guessed_int_type == AST::ValueTypePrimitive::t_uint16) {
-        node.override_literal_value.emplace(std::to_string(std::stoul(hex_value.substr(0, 6), nullptr, 16)));
-    } else if (guessed_int_type == AST::ValueTypePrimitive::t_uint8) {
-        node.override_literal_value.emplace(std::to_string(std::stoul(hex_value.substr(0, 4), nullptr, 16)));
-    }
-
-    cursor.skip();
-    return AST::make_ref(node);
+    return parse_literal_radix(payload, expected_type, 16, 2);
 }
 
 /**
@@ -561,8 +303,7 @@ const AST::NodeReference parse_literal_hex(Parser::Payload &payload, AST::TypeNo
  */
 const AST::NodeReference parse_literal_binary(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
-    auto &cursor = payload.cursor;
-    auto current_token = cursor.current();
+    return parse_literal_radix(payload, expected_type, 2, 8);
 }
 
 /**
@@ -584,41 +325,7 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
     auto &node = payload.context.emplace_node<AST::LiteralBoolExprNode>(current_token);
     cursor.skip();
 
-    // only a concrete primitive can say what a literal is (AST::can_type_a_literal)
-    if (expected_type != nullptr && !AST::can_type_a_literal(expected_type->type)) {
-        expected_type = nullptr;
-    }
-
-    // if there is a specified expected type, check if the literal fits the type
-    if (expected_type != nullptr) {
-        // the literal already is what was asked for. without this the branch below reported that
-        // the boolean literal 'true' cannot be converted to the expected type 'bool' - it was
-        // only reachable through a pointer destination before a `return` started supplying its
-        // declared type as the expected one
-        if (expected_type->type.is_boolean_type()) {
-            return AST::make_ref(node);
-        }
-
-        // if we except a int type, we simply convert the boolean to an integer
-        if (expected_type->type.is_integer_type()) {
-            auto &casted_node = payload.context.emplace_node<AST::LiteralIntExprNode>(current_token, expected_type->type.get_primitive_type());
-            casted_node.override_literal_value.emplace(node.get_bool_value() ? "1" : "0");
-            return AST::make_ref(casted_node);
-        }
-        else {
-            payload.collector.collect_issue<AST::Issue::InvalidTypeConversion>(
-                payload.context.code_ref(current_token),
-                fmt::format(
-                    "The boolean literal '{}' cannot be implicitly converted to the expected type '{}'.",
-                    current_token.value(),
-                    expected_type->type.get_type_desciption()
-                )
-            );
-            return AST::make_void_ref();
-        }
-    }
-
-    return AST::make_ref(node);
+    return apply_literal_typing_if_wanted(payload, &node, expected_type);
 }
 
 /**
@@ -626,15 +333,13 @@ const AST::NodeReference parse_literal_boolean(Parser::Payload &payload, AST::Ty
  */
 AST::NodeReference try_implicit_cast(Parser::Payload &payload, AST::NodeReference source, const AST::ValueType &expected_type)
 {
-    // literal int?
-    if (source.has_type<AST::LiteralIntExprNode>()) {
-        auto &literal_node = source.get<AST::LiteralIntExprNode>();
-        return autocast_literal_int(payload, literal_node, &expected_type);
-    }
-    // literal float?
-    else if (source.has_type<AST::LiteralFloatExprNode>()) {
-        auto &literal_node = source.get<AST::LiteralFloatExprNode>();
-        return autocast_literal_float(payload, literal_node, &expected_type);
+    // a literal is retyped rather than cast, which is what keeps a written value exact and is what
+    // AST::type_literal_at is for. **asked of every literal, typed or not** - this is the destination
+    // speaking, and unlike a binary operand's neighbour it always outranks a default
+    if (source.has_type<AST::LiteralIntExprNode>()
+        || source.has_type<AST::LiteralFloatExprNode>()
+        || source.has_type<AST::LiteralBoolExprNode>()) {
+        return apply_literal_typing(payload, source.unsafe_ptr<AST::ExprNode>(), expected_type);
     }
     // other expressions
     else if (source.is_expression_node()) {
@@ -746,31 +451,24 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
         return AST::make_ref(*call);
     }
 
-    // **the numeric reconciliation, asked of AST::common_numeric_type** - which AST::OperatorRewriter
-    // asks again for the operands only a later pass gives a type to. the rule is shared; the insertion
-    // is not, and this is the moment that can do better than a cast: try_implicit_cast retypes a literal
-    // outright where the rewriter has nothing left but a TypeCastNode to wrap the operand in
-    //
-    // gated on AST::binary_reconciles_operands, because a shift's rhs is a count rather than a second
-    // operand: widening `$byte` to meet an `int64` count is the shift leaving the type it was written at
+    // **the numeric reconciliation, and it is AST::reconcile_binary_operands' whole answer** - the same
+    // one AST::OperatorRewriter asks for the operands only a later pass gives a type to. it used to be
+    // written out here and again there, and neither copy had any notion of which side *knows* what it
+    // is, so a literal's default cast the variable beside it down to meet it
     const AST::Operator *reconcile_op = op_node != nullptr ? op_node->op : nullptr;
 
-    if (AST::binary_reconciles_operands(reconcile_op)) {
-        if (const auto common = AST::common_numeric_type(lhs_type, rhs_type)) {
-            // exactly one side differs: the common type is always one of the two
-            if (lhs_type.get_primitive_type() != common->get_primitive_type()) {
-                lhs = try_implicit_cast(payload, lhs, *common);
-            } else {
-                rhs = try_implicit_cast(payload, rhs, *common);
-            }
-        }
+    const AST::BinaryReconciliation reconciled = AST::reconcile_binary_operands(
+        reconcile_op, lhs_expr, rhs_expr, payload.context.module.nodes);
+
+    AST::report_binary_reconciliation(
+        payload.collector, &payload.context.module, payload.context.file.file, reconciled);
+
+    if (reconciled.result == AST::BinaryReconciliation::Result::t_refused) {
+        return AST::make_void_ref();
     }
 
-    // update the expr ptrs
-    lhs_expr = lhs.unsafe_ptr<AST::ExprNode>();
-    rhs_expr = rhs.unsafe_ptr<AST::ExprNode>();
-
-    auto &node = payload.context.emplace_node<AST::BinaryExprNode>(op_node, lhs_expr, rhs_expr);
+    auto &node = payload.context.emplace_node<AST::BinaryExprNode>(
+        op_node, reconciled.lhs, reconciled.rhs);
 
     return AST::make_ref(node);
 }
@@ -2406,7 +2104,7 @@ std::vector<ExprPart> shunting_yard(const std::vector<ExprPart> &expr_parts)
     return output;
 }
 
-const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
+const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNode *expected_type)
 {
     auto &cursor = payload.cursor;
 
@@ -2615,4 +2313,26 @@ const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::T
     }
 
     return node_stack.top();
+}
+
+const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    const AST::NodeReference expr = parse_expr_parts(payload, expected_type);
+
+    // **the destination, applied once to the finished expression.**
+    //
+    // every operand above was parsed with the same hint, because a shunting yard cannot know which
+    // operator is coming - so a hint that describes the expression's *result* rather than its operands
+    // must not be handed down at all. AST::can_type_a_literal is that filter, and `bool` is the case it
+    // exists for: without this step `bool $x = 3 < 4;` retyped both operands and compared two bools,
+    // and with the filter alone `bool $a = 3;` would have been coerced in silence via icmp ne 0.
+    // `bool $a = 1;` is typed here, as `true`; `3` is refused.
+    //
+    // costs nothing for the destinations the operands *were* given: those literals already carry a
+    // chosen type, so AST::is_untyped_literal answers false and this does not fire
+    if (expected_type == nullptr || !expr.has() || !AST::is_untyped_literal(expr.unsafe_ptr<AST::ExprNode>())) {
+        return expr;
+    }
+
+    return apply_literal_typing(payload, expr.unsafe_ptr<AST::ExprNode>(), expected_type->type);
 }

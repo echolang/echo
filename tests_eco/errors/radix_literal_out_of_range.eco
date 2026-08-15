@@ -1,0 +1,7 @@
+// a hex or binary literal is range-checked at its destination like every other integer spelling.
+// `0x1FF` used to store 255 here in silence, because the hex arm accepted an expected type and
+// never read it. the message names what was *written* rather than the decimal it stands for
+
+uint8 $y = 0x1FF;
+
+echo $y;

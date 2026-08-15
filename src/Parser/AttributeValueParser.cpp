@@ -42,6 +42,16 @@ namespace
 
     bool parse_atom(Parser::Payload &payload, AST::AttributeValue &out);
 
+    // the three sites that accept a number have to agree, or `#[foo: 0b1]` is a token the
+    // grammar does not know - the same class of miss hex used to be
+    bool is_number_token(Token::Type type)
+    {
+        return type == Token::Type::t_integer_literal
+            || type == Token::Type::t_hex_literal
+            || type == Token::Type::t_binary_literal
+            || type == Token::Type::t_floating_literal;
+    }
+
     bool parse_list(Parser::Payload &payload, AST::AttributeValue &out)
     {
         Parser::Cursor &cursor = payload.cursor;
@@ -149,11 +159,18 @@ namespace
             return true;
         }
 
-        const int base = token.type() == Token::Type::t_hex_literal ? 16 : 10;
+        const int base = token.type() == Token::Type::t_hex_literal ? 16
+            : token.type() == Token::Type::t_binary_literal ? 2
+            : 10;
+
+        // `0x` is accepted by stoll at base 16; `0b` is not accepted at base 2
+        const std::string digits = token.type() == Token::Type::t_binary_literal
+            ? written.substr(2)
+            : written;
 
         try {
             out.kind = AST::AttributeValueKind::t_int;
-            out.integer = static_cast<int64_t>(std::stoll(written, nullptr, base)) * (negated ? -1 : 1);
+            out.integer = static_cast<int64_t>(std::stoll(digits, nullptr, base)) * (negated ? -1 : 1);
         } catch (const std::exception &) {
             refuse(payload, token, fmt::format("'{}' does not fit in a number.", written));
             return false;
@@ -191,14 +208,14 @@ namespace
             return true;
         }
 
-        if (cursor.is_type({ Token::Type::t_integer_literal, Token::Type::t_hex_literal, Token::Type::t_floating_literal })) {
+        if (!cursor.is_done() && is_number_token(cursor.current().type())) {
             return parse_number(payload, out, false);
         }
 
         if (cursor.is_type(Token::Type::t_op_sub)) {
             cursor.skip(); // `-`
 
-            if (!cursor.is_type({ Token::Type::t_integer_literal, Token::Type::t_hex_literal, Token::Type::t_floating_literal })) {
+            if (cursor.is_done() || !is_number_token(cursor.current().type())) {
                 refuse(payload, here(cursor), "a '-' in an attribute has to be followed by a number.");
                 return false;
             }
@@ -240,6 +257,7 @@ bool Parser::starts_attribute_value(const Parser::Cursor &cursor, size_t offset)
     return cursor.peek_is_type(offset, Token::Type::t_string_literal)
         || cursor.peek_is_type(offset, Token::Type::t_integer_literal)
         || cursor.peek_is_type(offset, Token::Type::t_hex_literal)
+        || cursor.peek_is_type(offset, Token::Type::t_binary_literal)
         || cursor.peek_is_type(offset, Token::Type::t_floating_literal)
         || cursor.peek_is_type(offset, Token::Type::t_bool_literal)
         || at_a_word(cursor, offset)

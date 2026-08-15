@@ -292,6 +292,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     lx_functions.push_back(std::make_unique<LexerFunction::StringLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::VariableName>());
     lx_functions.push_back(std::make_unique<LexerFunction::HexLiteral>());
+    lx_functions.push_back(std::make_unique<LexerFunction::BinaryLiteral>());
     lx_functions.push_back(std::make_unique<LexerFunction::SingleLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::MultiLineComment>());
     lx_functions.push_back(std::make_unique<LexerFunction::Identifier>());
@@ -716,6 +717,37 @@ bool LexerFunction::HexLiteral::parse(TokenCollection &tokens, LexerCursor &curs
     }
 
     tokens.push(value, Token::Type::t_hex_literal, cursor.line, start_offset);
+
+    return true;
+}
+
+// --- BinaryLiteral ---
+// ----------------------------------------------------------------------------
+const std::vector<std::string> LexerFunction::BinaryLiteral::must_match() const
+{
+    return { "0b", "0B" };
+}
+
+bool LexerFunction::BinaryLiteral::parse(TokenCollection &tokens, LexerCursor &cursor) const
+{
+    // **only where a digit follows**, unlike the hex arm. `0b` and `0x` are both unspellable as
+    // anything else, but a bare `0b` would push an empty literal the parser then reads as zero -
+    // and `0` followed by an identifier is what this exists to stop happening
+    if (cursor.peek(2) != '0' && cursor.peek(2) != '1') {
+        return false;
+    }
+
+    auto start_offset = cursor.char_offset;
+
+    cursor.skip(2);
+    std::string value = "0b";
+
+    while (cursor.peek() == '0' || cursor.peek() == '1') {
+        value += cursor.peek();
+        cursor.skip();
+    }
+
+    tokens.push(value, Token::Type::t_binary_literal, cursor.line, start_offset);
 
     return true;
 }

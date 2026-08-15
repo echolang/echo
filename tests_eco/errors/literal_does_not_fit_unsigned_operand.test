@@ -1,0 +1,14 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidTypeConversion  literal_does_not_fit_unsigned_operand.eco:10:11
+
+  Invalid type conversion: the literal '-1' does not fit a 'uint32', and reconciling the two would read that operand as a 'int32' instead - write the conversion if that is what you meant
+
+   9 | 
+  10 | echo $u / -1;
+     :           ^^
+  11 | 
+
+1 error, nothing was compiled.

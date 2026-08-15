@@ -186,11 +186,10 @@ namespace AST
     // One owner, for build_operator_call_node's reason: there are two *moments* that ask, and only one
     // rule.
     //
-    // Parser::parse_binary_expr asks with the operand types it knows at parse time and inserts the cast
-    // through try_implicit_cast, which may retype a literal outright instead. AST::OperatorRewriter asks
-    // again for the operands a later pass typed, and has only a TypeCastNode to wrap the losing side in
-    // - `foreach ($a as $i => $x) { if ($i == 0) ... }`, where `$i` has no type until the loop lowers
-    // and the literal has long since defaulted to int32.
+    // Parser::parse_binary_expr and AST::OperatorRewriter both ask AST::reconcile_binary_operands,
+    // which retypes a literal and only then falls back to a TypeCastNode on a typed loser.
+    // OperatorRewriter is the second moment - `foreach ($a as $i => $x) { if ($i == 0) ... }`,
+    // where `$i` has no type until the loop lowers and the literal has long since defaulted to int32.
     //
     // The insertion is each caller's. The decision is not. Two answers here means one program means two
     // things depending on which pass got to type an operand first, and the way that surfaces is codegen

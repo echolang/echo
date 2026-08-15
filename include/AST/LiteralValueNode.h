@@ -16,20 +16,37 @@ namespace AST
 
         TokenReference token_literal;
 
+        // **engaged means a destination chose this type**, and that is the whole of what
+        // AST::is_untyped_literal reads. so the type a literal takes when *nobody* chooses one lives
+        // beside it rather than inside it: stamping the guess in here would make a defaulted literal
+        // byte-identical to a destination-typed one, and every rule that has to defer to a
+        // destination - a binary operand, a bound type parameter, a substituted declaration - would
+        // have nothing left to ask
         std::optional<ValueTypePrimitive> expected_primitive_type;
+
+        // what this literal is when nothing says otherwise. written once, by the subclass that knows
+        // how to read it off the spelling: the digits for an integer, the trailing `f` for a float
+        ValueTypePrimitive default_primitive_type;
 
         std::optional<std::string> override_literal_value;
 
-        LiteralPrimitiveExprNode(TokenReference token) :
-            token_literal(token)
+        LiteralPrimitiveExprNode(TokenReference token, ValueTypePrimitive fallback) :
+            token_literal(token),
+            default_primitive_type(fallback)
         {
         };
 
-        LiteralPrimitiveExprNode(TokenReference token, ValueTypePrimitive expected) :
+        LiteralPrimitiveExprNode(TokenReference token, ValueTypePrimitive fallback, ValueTypePrimitive expected) :
             token_literal(token),
-            expected_primitive_type(expected)
+            expected_primitive_type(expected),
+            default_primitive_type(fallback)
         {
         };
+
+        // did a destination decide what this is, or is it still sitting on its default
+        bool type_was_chosen() const {
+            return expected_primitive_type.has_value();
+        }
 
         const std::string effective_token_literal_value() const {
             return override_literal_value.value_or(token_literal.value());
@@ -50,20 +67,28 @@ namespace AST
     public:
         ECO_AST_NODE_TYPE(n_literal_float);
 
+        // a float literal ends with `f` iff it is single precision - read off the spelling once, at
+        // construction, because that is the moment the token is the only thing there is to read. an
+        // autocast writes an override afterwards and always engages expected_primitive_type with it,
+        // so the default is never asked again on a node whose spelling has moved
+        static ValueTypePrimitive spelled_precision(const TokenReference &token) {
+            return token.value().back() == 'f'
+                ? ValueTypePrimitive::t_float32
+                : ValueTypePrimitive::t_float64;
+        }
+
         LiteralFloatExprNode(TokenReference token) :
-            LiteralPrimitiveExprNode(token)
+            LiteralPrimitiveExprNode(token, spelled_precision(token))
         {};
 
         LiteralFloatExprNode(TokenReference token, ValueTypePrimitive expected) :
-            LiteralPrimitiveExprNode(token, expected)
+            LiteralPrimitiveExprNode(token, spelled_precision(token), expected)
         {
             assert(expected == ValueTypePrimitive::t_float64 || expected == ValueTypePrimitive::t_float32);
         };
 
         ValueTypePrimitive get_effective_primitive_type() const {
-            return expected_primitive_type.value_or(
-                is_double_precision() ? ValueTypePrimitive::t_float64 : ValueTypePrimitive::t_float32
-            );
+            return expected_primitive_type.value_or(default_primitive_type);
         }
 
         ValueType result_type() const override {
@@ -113,12 +138,30 @@ namespace AST
     public:
         ECO_AST_NODE_TYPE(n_literal_int);
 
+        // a width that is the literal's **default** rather than a destination's choice. named so it
+        // cannot be confused with the `expected` overload below, which is the opposite fact - a hex
+        // or binary spelling takes its width from how many digits were written and is still waiting
+        // for somebody to say otherwise
+        struct DefaultWidth
+        {
+            ValueTypePrimitive value;
+        };
+
+        // **the sole owner of the decimal integer default** - int32, unless the digits do not fit one,
+        // in which case int64. out of line because deciding it exactly means arbitrary precision, and
+        // the parser used to spell this rule beside the node rather than on it
+        static ValueTypePrimitive spelled_width(const TokenReference &token);
+
         LiteralIntExprNode(TokenReference token) :
-            LiteralPrimitiveExprNode(token)
+            LiteralPrimitiveExprNode(token, spelled_width(token))
+        {};
+
+        LiteralIntExprNode(TokenReference token, DefaultWidth fallback) :
+            LiteralPrimitiveExprNode(token, fallback.value)
         {};
 
         LiteralIntExprNode(TokenReference token, ValueTypePrimitive expected) :
-            LiteralPrimitiveExprNode(token, expected)
+            LiteralPrimitiveExprNode(token, spelled_width(token), expected)
         {
             assert(
                 expected == ValueTypePrimitive::t_int8 ||
@@ -135,7 +178,7 @@ namespace AST
         };
 
         ValueType result_type() const override {
-            return ValueType(expected_primitive_type.value_or(ValueTypePrimitive::t_int32));
+            return ValueType(expected_primitive_type.value_or(default_primitive_type));
         }
 
         void accept(Visitor &visitor) override {
@@ -183,11 +226,14 @@ namespace AST
         ECO_AST_NODE_TYPE(n_literal_bool);
 
         LiteralBoolExprNode(TokenReference token) :
-            LiteralPrimitiveExprNode(token)
+            LiteralPrimitiveExprNode(token, ValueTypePrimitive::t_bool)
         {};
 
+        // the **effective** value, like every other accessor on every other literal. reading the
+        // token instead ignored an override, so a node built from a `1` and overridden to "true"
+        // still answered false - which is the whole of what `bool $b = 1;` printing 0 was
         bool get_bool_value() const {
-            return token_literal.value() == "true";
+            return effective_token_literal_value() == "true";
         }
 
         ValueType result_type() const override {

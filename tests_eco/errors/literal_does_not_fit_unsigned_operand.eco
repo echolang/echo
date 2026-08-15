@@ -1,0 +1,10 @@
+// the one case a literal beside a typed operand cannot simply be written at that operand's type: it
+// does not fit. reconciling the two the old way meant reading `$u` as a signed value, which is a
+// reinterpretation and not a widening - so it is refused rather than done in silence.
+//
+// the widening that *is* value preserving is not affected, and is pinned in
+// tests_eco/expressions/unsigned_literal_arithmetic.eco
+
+uint32 $u = 4294967280;
+
+echo $u / -1;

@@ -1,0 +1,59 @@
+// **0 and 1 are the two values a bool holds.** they become false and true at a bool
+// destination, the same way `echo` prints a bool as 0 and 1. anything else is still
+// refused - errors/literal_at_bool_destination is that sentence.
+//
+// the old conversion minted the node and then read the token as the value, so every
+// integer printed as 0. the override is what get_bool_value reads now
+
+bool $yes = 1;
+bool $no = 0;
+bool $hex = 0x1;
+bool $bin = 0b0;
+
+echo $yes;
+echo $no;
+echo $hex;
+echo $bin;
+
+function flag() : bool
+{
+    return 1;
+}
+
+function take(bool $v) : int32
+{
+    if ($v) {
+        return 1;
+    }
+
+    return 0;
+}
+
+echo flag();
+echo take(1);
+echo take(0);
+
+// a literal in a generic body is typed once T is bound
+function as_flag<T>() : T
+{
+    T $x = 1;
+    return $x;
+}
+
+echo as_flag<bool>();
+
+// the same conversion on a returned literal, once T is bound
+function as_returned<T>() : T
+{
+    return 1;
+}
+
+echo as_returned<bool>();
+
+// the hint must not reach the operands - this is why can_type_a_literal excludes bool
+function compared() : bool
+{
+    return 3 < 4;
+}
+
+echo compared();

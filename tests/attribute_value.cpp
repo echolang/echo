@@ -98,6 +98,7 @@ TEST_CASE("numbers, bools and a negated number", "[attributes]")
 {
     REQUIRE(attribute_of("core: 42").value().integer == 42);
     REQUIRE(attribute_of("core: 0x2a").value().integer == 42);
+    REQUIRE(attribute_of("core: 0b101010").value().integer == 42);
     REQUIRE(attribute_of("core: -7").value().integer == -7);
     REQUIRE(attribute_of("core: true").value().boolean == true);
     REQUIRE(attribute_of("core: 1.5").value().kind == AttributeValueKind::t_float);

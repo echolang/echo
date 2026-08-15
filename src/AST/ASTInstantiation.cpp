@@ -1,5 +1,7 @@
 #include "AST/ASTInstantiation.h"
 
+#include "AST/ASTLiteralTyping.h"
+
 #include "AST/ASTTypeParam.h"
 #include "AST/ASTTypeUnify.h"
 #include "AST/ExprNode.h"
@@ -82,7 +84,8 @@ namespace AST
         const FunctionDeclNode *tmpl,
         const std::vector<ValueType> &argument_types,
         const std::vector<ValueType> &explicit_type_args,
-        const ValueType &static_owner)
+        const ValueType &static_owner,
+        const std::vector<bool> &argument_defers)
     {
         Instantiation result;
 
@@ -157,19 +160,55 @@ namespace AST
             // rename the instance - and a closure's args[0] is the environment its captures live in
             const size_t authoritative = (tmpl->has_receiver() && !tmpl->args.empty()) ? 1 : 0;
 
-            for (size_t i = 0; i < argument_types.size(); i++) {
+            // **two passes, and the second one is the arguments with no opinion.**
+            //
+            // an untyped literal has a type only because something had to be written on the node -
+            // `int32` unless the digits need more - and treating that default as a binding as strong
+            // as a declared type is backwards. `pick(0, $n)` over a `usize $n` bound `T = int32` from
+            // the `0` and then narrowed `$n` to fit it, dropping the top half of a 64-bit value with
+            // nothing at the source to suggest it.
+            //
+            // so a literal binds nothing another argument could bind, and AST::CallResolver types it
+            // at whatever they decided. two literals and nothing else - `0 .. 10` - still reach the
+            // second pass with the parameter unbound and default there exactly as they always did,
+            // which is the case that must not change
+            const auto defers = [&](size_t i) {
+                return i < argument_defers.size() && argument_defers[i];
+            };
+
+            const auto unify_argument = [&](size_t i, bool write_back_only_new) {
                 // an argument with no type yet cannot contradict the template, and must not bind
                 // anything either: binding `T` to unknown would name the instance after
                 // information that has not arrived. it is the reason for the t_maybe answer below
                 if (is_undetermined_type(argument_types[i])) {
                     saw_untyped_argument = true;
-                    continue;
+                    return;
                 }
 
                 // a parameter with no type at all is a hole left by a failed parse, already
                 // reported where it was read. not a not-yet - nothing is coming for it
                 if (!tmpl->args[i]->has_type()) {
-                    continue;
+                    return;
+                }
+
+                // a literal unifies into a *copy*, and only the parameters nothing else reached are
+                // written back. asked through `covers` rather than by enumerating what the parameter
+                // mentions, because a nested application binds several in one descent
+                if (write_back_only_new) {
+                    TypeSubstitution attempt = result.bindings;
+
+                    if (!unify_type(tmpl->args[i]->type(), argument_types[i], attempt)
+                        && !mismatched_argument.has_value()) {
+                        mismatched_argument = i;
+                    }
+
+                    for (const auto &binding : attempt.bindings) {
+                        if (!result.bindings.covers(binding.first)) {
+                            result.bindings.bind(binding.first, binding.second);
+                        }
+                    }
+
+                    return;
                 }
 
                 // what the receiver has already decided, kept across this argument's unification.
@@ -185,6 +224,18 @@ namespace AST
 
                 for (const auto &binding : decided.bindings) {
                     result.bindings.bind(binding.first, binding.second);
+                }
+            };
+
+            for (size_t i = 0; i < argument_types.size(); i++) {
+                if (!defers(i)) {
+                    unify_argument(i, false);
+                }
+            }
+
+            for (size_t i = 0; i < argument_types.size(); i++) {
+                if (defers(i)) {
+                    unify_argument(i, true);
                 }
             }
         }
@@ -289,6 +340,18 @@ namespace AST
         return argument_types;
     }
 
+    std::vector<bool> argument_defers_of(const FunctionCallExprNode &call)
+    {
+        std::vector<bool> defers;
+        defers.reserve(call.arguments.size());
+
+        for (const auto *arg : call.arguments) {
+            defers.push_back(is_untyped_literal(arg));
+        }
+
+        return defers;
+    }
+
     std::vector<ValueType> explicit_type_args_of(const FunctionCallExprNode &call)
     {
         std::vector<ValueType> explicit_type_args;
@@ -303,6 +366,11 @@ namespace AST
 
     Instantiation can_instantiate(const FunctionDeclNode *tmpl, const FunctionCallExprNode &call)
     {
-        return can_instantiate(tmpl, argument_types_of(call), explicit_type_args_of(call), call.static_owner);
+        return can_instantiate(
+            tmpl,
+            argument_types_of(call),
+            explicit_type_args_of(call),
+            call.static_owner,
+            argument_defers_of(call));
     }
 };

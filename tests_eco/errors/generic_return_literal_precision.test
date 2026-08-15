@@ -1,0 +1,14 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] InvalidTypeConversion  generic_return_literal_precision.eco:8:12
+
+  Invalid type conversion: The floating point number literal '2.5' cannot be implicitly converted to an integer type due to non zero decimal values.
+
+  7 | {
+  8 |     return 2.5;
+    :            ^^^
+  9 | }
+
+1 error, nothing was compiled.

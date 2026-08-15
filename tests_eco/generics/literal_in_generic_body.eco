@@ -1,0 +1,36 @@
+// **a literal in a generic body is written at the instance's type, not at the template's guess.**
+//
+// `T` cannot type a literal - it says nothing until it is substituted - so the `0` defaults to
+// int32, correctly. What was missing is the other half: CloneContext::shallow copies a literal
+// verbatim, so the instance's declaration became `float64` while its initializer stayed `int32`.
+// The float instance quietly computed something else and the int64 one failed the LLVM verifier
+
+function total<T>(array<T>& $a) : T
+{
+    T $sum = 0;
+
+    usize $i = 0;
+    while ($i < $a->count()) {
+        $sum = $sum + $a[$i];
+        $i = $i + 1;
+    }
+
+    return $sum;
+}
+
+// **reached through a second generic, so the instance is created a round later.** that ordering is
+// the whole of what made this two bugs rather than one: the re-derivation sweep treated the written
+// `T` as a stale type and rewrote the *template's* declaration to int32, so every instance cloned
+// after it declared an int32 too - a float64 one computing in int32, in silence
+function via<U>(array<U>& $a) : U
+{
+    return total($a);
+}
+
+array<float64> $f = [1.5, 2.5];
+array<int64> $g = [4000000000, 1];
+array<int32> $h = [1, 2, 3];
+
+echo total($h);
+echo via($f);
+echo via($g);

@@ -255,6 +255,21 @@ namespace LexerFunction
         bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
     };
 
+    // the same shape as HexLiteral, and it has to sit at the same priority for the same reason:
+    // NumericLiteral matches at every position, so without this `0b1011` lexed as the integer `0`
+    // followed by an identifier `b1011` - two tokens, no diagnostic at the lexer, and a parser stub
+    // that fell off the end of a non-void function if the token had ever been produced
+    class BinaryLiteral : public Base
+    {
+    public:
+        int priority() const override {
+            return 20;
+        }
+
+        const std::vector<std::string> must_match() const override;
+        bool parse(TokenCollection &tokens, LexerCursor &cursor) const override;
+    };
+
     // **the two quote characters are not interchangeable.** a `'` string is verbatim and lexes to
     // exactly one t_string_literal; a `"` string interpolates `{$...}` and lexes to a *run* of
     // tokens when it holds one. a `"` string with no `{$` in it takes the verbatim path too, which

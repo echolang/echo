@@ -8,6 +8,7 @@
 #include "AST/ASTConstness.h"
 #include "AST/ASTFunctionMatcher.h"
 #include "AST/ASTInstantiation.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTOperatorSemantics.h"
@@ -166,7 +167,20 @@ namespace AST
         // against the literal would fit the wrong node - it is `t_addressless`, and a borrow parameter
         // would get a cast where an address belongs. So the call waits a round, exactly as an
         // undetermined argument does
-        bool bind_destination_typed_arguments(FunctionCallExprNode &call, const CoreTypes &core)
+        // **and a number literal is the fourth**, for the third time the same reason. `$a[] = 2.5` on
+        // an `array<int32>` reaches its destination as an operand of a synthesized `operator []` call,
+        // and the ordinary argument conversion narrowed it - correct for a variable, and silent data
+        // loss for a literal, which is the one thing every *written* destination refuses. So the check
+        // that refuses `int32 $x = 2.5;` is asked here too, at the first point holding both the
+        // argument node and a resolved parameter.
+        //
+        // it also completes the other half of a bound type parameter: `can_instantiate` no longer lets
+        // an untyped literal decide what `T` is, and this is what then types it *at* whatever the
+        // concrete arguments decided. so `pick(0, $n)` over a `usize $n` binds `usize` and the `0` is
+        // written at it, where it used to bind `int32` and truncate `$n`
+        bool bind_destination_typed_arguments(
+            FunctionCallExprNode &call, const CoreTypes &core, NodeCollection &nodes,
+            Collector &collector, const CodeRef &at)
         {
             bool waiting_on_a_literal = false;
 
@@ -189,6 +203,23 @@ namespace AST
 
                 if (bind_array_literal_to(call.arguments[i], expected, core)) {
                     waiting_on_a_literal = true;
+                }
+
+                // asked only of a literal nobody has typed, so a round that runs again over a settled
+                // argument does nothing - and so an *explicit* cast the author wrote is never undone
+                if (is_untyped_literal(call.arguments[i])) {
+                    const LiteralTyping typing =
+                        type_literal_at(call.arguments[i], value_type_of(expected), nodes);
+                    const CodeRef here = code_ref_at_literal(at, call.arguments[i]);
+
+                    report_literal_warning(collector, here, typing);
+
+                    if (typing.result == LiteralTyping::Result::t_refused) {
+                        report_literal_refusal(collector, here, typing);
+                    }
+                    else {
+                        call.arguments[i] = typing.node;
+                    }
                 }
             }
 
@@ -293,6 +324,9 @@ namespace AST
 
         const std::vector<ValueType> argument_types = argument_types_of(call);
 
+        // which of them have no opinion about the instance's name, read once for every candidate below
+        const std::vector<bool> argument_defers = argument_defers_of(call);
+
         // with a single candidate there is nothing to choose between, so it is taken as written and
         // every judgement about it is left to the passes that specialise in one: the monomorphizer
         // reports an unsatisfied constraint by name, the type checker reports which argument is
@@ -327,8 +361,8 @@ namespace AST
                 // overload set over a generic owner is scored against these substituted parameters,
                 // and without the seed every candidate is still holding a bare `T` - so they all
                 // rank undetermined and tie, and the call never resolves
-                const Instantiation inst =
-                    can_instantiate(candidate, argument_types, explicit_type_args, call.static_owner);
+                const Instantiation inst = can_instantiate(
+                    candidate, argument_types, explicit_type_args, call.static_owner, argument_defers);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set
@@ -666,7 +700,7 @@ namespace AST
         // an array literal argument is typed here too, and unlike a null it also makes the call wait:
         // what finally reaches the parameter is the declaration AST::OperatorRewriter hoists, not the
         // literal itself, and that rewrite happens at the top of the next round
-        if (!bind_destination_typed_arguments(call, _collector.core_types)) {
+        if (!bind_destination_typed_arguments(call, _collector.core_types, nodes, _collector, at)) {
             return Result::t_pending;
         }
 

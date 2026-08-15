@@ -10,8 +10,12 @@
 #include "AST/VarRefNode.h"
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
+#include "AST/ASTLiteralTyping.h"
+#include "AST/AssignNode.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRecursiveVisitor.h"
+#include "AST/ReturnNode.h"
 #include "Debugging.h"
 
 #include <fmt/core.h>
@@ -265,6 +269,30 @@ namespace AST
                     continue;
                 }
 
+                // **a type parameter the author *wrote* is not stale**, and it is the one shape here
+                // that is not.
+                //
+                // undetermined covers two different things. `$b = Box<int32>(...)` captured the
+                // template's un-substituted return type and `$x = f(...)` captured void - those are
+                // missing information, and this sweep is what supplies it. A written `T` is not
+                // missing anything: it is information that arrives at substitution, and deriving it
+                // from the initializer instead **destroyed the declaration on the template**.
+                // `T $sum = 0;` became `int32 $sum` there, so every instance cloned afterwards
+                // declared an int32 - a `float64` one computing in int32 and an `int64` one
+                // overflowing, both in silence. Invisible while every instance happened to be created
+                // before this ran, which is why it only showed once a generic reached another generic
+                // and was discovered a round later.
+                //
+                // **both halves are load-bearing.** `type_token` alone is too coarse - a written type
+                // whose *name* did not resolve at parse time is undetermined for the first reason and
+                // does want re-deriving, which is what `stream $out = std::io::stdout;` is. And
+                // `contains_type_param` alone is too coarse the other way, since a captured
+                // `Box<T>` mentions one and is exactly what this exists for. Written **and** a type
+                // parameter is the intersection, and it is only ever the declaration in a template
+                if (decl->type_node()->type_token.has_value() && contains_type_param(decl->type())) {
+                    continue;
+                }
+
                 // **a guard's binding is not this sweep's to derive**, and the flag says exactly why:
                 // `binds_unwrapped` *means* "this declaration's type is not its initializer's type", so
                 // deriving it from the initializer is guaranteed to be one level wrong. a deferred one
@@ -288,6 +316,119 @@ namespace AST
                 auto &type_node = mod.nodes.emplace_back<TypeNode>(derived);
                 decl->set_type_node(&type_node);
                 progressed = true;
+            }
+        }
+
+        return progressed;
+    }
+
+    // step B1: a literal whose destination only became concrete after the parse
+    //
+    // **the mirror of step B, and the direction matters.** that one derives a declaration's type from
+    // its initializer; this one writes a literal at the type the declaration already has. two shapes
+    // reach it, and neither could have been answered by the parser:
+    //
+    //   T $sum = 0;              inside a generic. `T` cannot type a literal, correctly, so the `0`
+    //                            defaulted to int32 - and CloneContext::shallow copies a literal
+    //                            verbatim, so the `float64` instance kept an int32 zero and quietly
+    //                            computed something else
+    //
+    //   $a[] = 2.5;              an append AST::OperatorRewriter minted, whose destination is an
+    //                            `int32&` place nobody had written. every *written* destination
+    //                            refuses a literal it cannot hold; this one truncated in silence
+    //
+    // asked of AST::is_untyped_literal, so a literal a destination already typed is never revisited -
+    // which is what keeps this idempotent across rounds and keeps an explicit cast the author wrote
+    // from being undone
+    bool Monomorphizer::type_pending_literals()
+    {
+        bool progressed = false;
+
+        for (auto &module_ptr : _bundle.modules) {
+            Module &mod = *module_ptr;
+
+            const auto write_at = [&](ExprNode *&slot, const ValueType &destination,
+                                      const TokenReference &at) {
+                if (!is_untyped_literal(slot) || is_undetermined_type(destination)) {
+                    return;
+                }
+
+                const LiteralTyping typing = type_literal_at(slot, destination, mod.nodes);
+
+                if (typing.result == LiteralTyping::Result::t_unchanged) {
+                    return;
+                }
+
+                const CodeRef here = code_ref_at_literal(code_ref_for(mod, at), slot);
+
+                report_literal_warning(_collector, here, typing);
+
+                if (typing.result == LiteralTyping::Result::t_refused) {
+                    // no `progressed`: nothing moved, and the identical sentence at the identical
+                    // token is what Collector::collect_issue de-duplicates on
+                    report_literal_refusal(_collector, here, typing);
+
+                    return;
+                }
+
+                slot = typing.node;
+                progressed = true;
+            };
+
+            for (auto *decl : mod.nodes.of_type<VarDeclNode>()) {
+                // a guard's binding is not this sweep's either, and for step B's reason: its declared
+                // type is deliberately one level less nullable than what the initializer produces
+                if (!decl->has_type() || decl->init_expr == nullptr || decl->binds_unwrapped) {
+                    continue;
+                }
+
+                write_at(decl->init_expr, value_type_of(decl->type()), decl->token_varname);
+            }
+
+            for (auto *assign : mod.nodes.of_type<AssignNode>()) {
+                if (assign->target == nullptr || assign->value_expr == nullptr) {
+                    continue;
+                }
+
+                // the *storage's* type, peeled through the borrow an element operator hands back -
+                // AST::value_result_type, the same peel Parser::parse_varexpr makes for a written
+                // assignment. an index that has not resolved yet answers void and waits a round
+                write_at(
+                    assign->value_expr,
+                    value_result_type(*assign->target),
+                    assign->token_assign);
+            }
+
+            // the third written destination, and the one the parser cannot type when the return
+            // is still a `T`. `function f<T>() : T { return 2.5; }` defaulted the literal at parse
+            // and TypeChecker waved float→int through, so `T = int32` truncated in silence - the
+            // same hole `T $sum = 0` and `$a[] = 2.5` just stopped having
+            struct ReturnWalker : RecursiveVisitor
+            {
+                decltype(write_at) &write;
+                ValueType dest;
+
+                ReturnWalker(decltype(write_at) &write, ValueType dest) : write(write), dest(dest) {}
+
+                void visitFunctionDecl(FunctionDeclNode &) override {}
+
+                void visitReturn(ReturnNode &node) override
+                {
+                    if (node.expr != nullptr && node.token_return.has_value()) {
+                        write(node.expr, dest, *node.token_return);
+                    }
+
+                    RecursiveVisitor::visitReturn(node);
+                }
+            };
+
+            for (auto *fn : mod.nodes.of_type<FunctionDeclNode>()) {
+                if (fn->body == nullptr || fn->return_type == nullptr || fn->is_generic()) {
+                    continue;
+                }
+
+                ReturnWalker walker(write_at, value_type_of(fn->get_return_type()));
+                fn->body->accept(walker);
             }
         }
 
@@ -636,6 +777,12 @@ namespace AST
             progressed |= _interpolation.run_round();
 
             progressed |= rederive_stale_variable_types();
+
+            // **after the re-derivation, and that order is the content**: step B may be what makes a
+            // declaration's type concrete in this very round, and a literal written at a type that is
+            // still undetermined would simply be skipped
+            progressed |= type_pending_literals();
+
             progressed |= rederive_stale_capture_types();
             progressed |= settle_calls();
 

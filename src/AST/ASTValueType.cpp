@@ -806,7 +806,7 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
 
 bool AST::can_type_a_literal(const ValueType &type)
 {
-    return type.is_primitive() && !type.is_void();
+    return type.is_primitive() && !type.is_void() && !type.is_boolean_type();
 }
 
 bool AST::contains_type_param(const ValueType &type)

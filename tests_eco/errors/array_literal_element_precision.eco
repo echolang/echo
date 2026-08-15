@@ -1,0 +1,21 @@
+// **an element is a destination like any other.** all three spellings used to store 2 and say
+// nothing: the append reaches its slot through a synthesized operator rather than a written
+// declaration, and the ordinary argument conversion narrows - which is right for a variable and is
+// silent data loss for a literal.
+//
+// tests_eco/arrays/literal_lossless_conversion.eco is the other half: a literal that converts
+// exactly still converts, silently, because nothing was lost
+
+array<int32> $a = [1, 2.5];
+
+array<int32> $b = [];
+$b[] = 2.5;
+$b[0] = 3.9;
+
+// the untyped literal is the same defect wearing a disguise - the first element decides the type,
+// so this is an array<int32> and 2.5 is appended into it
+$c = [1, 2.5];
+
+echo $a[1];
+echo $b[0];
+echo $c[1];

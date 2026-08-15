@@ -1,0 +1,32 @@
+// **a literal argument does not name the instance.** its `int32` is a default nobody chose, so where
+// another argument binds the same parameter and actually knows what it is, that one decides and the
+// literal is written at the result.
+//
+// `pick(0, $n)` used to bind `T = int32` from the `0` and then narrow `$n` to fit it, dropping the
+// top half of a 64-bit value with nothing at the source to suggest it
+
+function pick<T>(T $a, T $b) : T
+{
+    return $b;
+}
+
+usize $n = 5000000000;
+
+echo pick(0, $n);
+echo pick($n, 0);
+
+// two literals have nothing concrete to defer to and still default exactly as they did
+echo pick(1, 2);
+
+// the receiver keeps its own rule, which is a separate one and older
+array<int64> $wide = [];
+$wide[] = 5;
+echo $wide[0];
+
+// and a range over a count is the shape this was found through: the operator is an ordinary generic
+// taking two `T`s, so the bound is what decides and the index is a usize rather than an int32
+array<int32> $items = [10, 20, 30];
+
+foreach (0 .. $items->count() as $i) {
+    echo $i;
+}

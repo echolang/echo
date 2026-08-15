@@ -1,0 +1,54 @@
+// **a literal beside a typed operand takes that operand's type.** the literal is the operand with no
+// opinion - its `int32` is a default nobody chose - so it is retyped rather than the variable being
+// cast down to meet it.
+//
+// this needs a *narrow* unsigned to be observable: beside a `uint64` the reconciliation already went
+// the other way, because it picked the wider of the two and 8 beats 4. at equal width it fell to the
+// signed side, and `uint32 $u = 4294967280; $u / 2` printed -8.
+//
+// tests_eco/expressions/unsigned_comparison.eco is the two-variable shape, which is why it never
+// caught this
+
+uint32 $u = 4294967280;
+
+echo $u + 2;
+echo $u / 2;
+echo $u % 7;
+echo $u > 2;
+echo $u >> 2;
+
+uint16 $s = 65520;
+
+echo $s + 2;
+echo $s / 2;
+echo $s > 2;
+
+uint8 $b = 240;
+
+echo $b + 2;
+echo $b / 2;
+echo $b - 8;
+echo $b * 1;
+echo $b < 2;
+echo $b <= 2;
+echo $b >= 2;
+
+// the signed control: nothing here changes for a signed operand
+int32 $n = -16;
+
+echo $n / 2;
+echo $n < 2;
+
+// and the widening that is *not* a reinterpretation still happens: the literal does not fit an
+// int32, both sides meet at int64, and the variable is widened - which is value preserving
+int32 $small = 5;
+echo $small + 5000000000;
+
+// the unsigned twins of that widening: a signedness change that is *not* same-width is
+// not a reinterpretation. these used to be refused because reinterprets() fired on any
+// signedness flip
+uint8 $from_narrow = 200;
+echo $from_narrow + 256;
+
+uint32 $from_u32 = 1;
+echo $from_u32 + 5000000000;

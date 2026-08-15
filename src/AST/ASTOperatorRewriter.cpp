@@ -5,6 +5,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTDetach.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTLiteralTyping.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTNullability.h"
@@ -16,6 +17,7 @@
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/IfStatementNode.h"
+#include "AST/LiteralValueNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/ReturnNode.h"
@@ -128,7 +130,7 @@ FunctionCallExprNode &OperatorRewriter::build_operator_call(
 void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
 {
     // **the post-parse moment of the parser's binary reconciliation** - the rule itself is
-    // AST::common_numeric_type's, shared with Parser::parse_binary_expr, and only the insertion is here.
+    // AST::reconcile_binary_operands', shared with Parser::parse_binary_expr.
     //
     // the parser can only reconcile operands whose type it knows *then*. a declaration typed by a later
     // pass misses it entirely - `foreach ($a as $i => $x) { if ($i == 0) ... }` is the shape that made
@@ -184,22 +186,29 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
         return;
     }
 
-    const ValueType left = value_type_of(raw_left);
-    const ValueType right = value_type_of(raw_right);
+    // **the rule is AST::reconcile_binary_operands', in one place with the parser's.** it used to be
+    // written out here and again there, and neither copy knew which side *knows* what it is - so a
+    // literal's default cast the typed operand beside it down to meet it
+    const BinaryReconciliation reconciled = reconcile_binary_operands(
+        bin.op_node != nullptr ? bin.op_node->op : nullptr,
+        bin.lhs,
+        bin.rhs,
+        _current_module->nodes);
 
-    const auto common = common_numeric_type(left, right);
+    report_binary_reconciliation(_collector, _current_module, _current_file, reconciled);
 
-    if (!common.has_value()) {
+    if (reconciled.result == BinaryReconciliation::Result::t_refused) {
+        // no `_changed`: nothing moved, and the identical sentence at the identical token is what
+        // Collector::collect_issue de-duplicates on, so a later round reporting again is a no-op
         return;
     }
 
-    // exactly one side differs: the common type is always one of the two
-    if (left.get_primitive_type() != common->get_primitive_type()) {
-        bin.lhs = &_current_module->nodes.emplace_back<TypeCastNode>(*common, bin.lhs, true);
+    if (reconciled.result == BinaryReconciliation::Result::t_unchanged) {
+        return;
     }
-    else {
-        bin.rhs = &_current_module->nodes.emplace_back<TypeCastNode>(*common, bin.rhs, true);
-    }
+
+    bin.lhs = reconciled.lhs;
+    bin.rhs = reconciled.rhs;
 
     _changed = true;
 }

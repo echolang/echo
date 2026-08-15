@@ -1,0 +1,14 @@
+expect: fail
+stdlib: off
+
+--- OUT --->
+[error] IntegerOverflow  radix_literal_out_of_range.eco:5:12
+
+  Integer overflow: The literal '0x1FF' is too large for the integer type 'uint8'. The maximum value is '255'.
+
+  4 | 
+  5 | uint8 $y = 0x1FF;
+    :            ^^^^^
+  6 | 
+
+1 error, nothing was compiled.

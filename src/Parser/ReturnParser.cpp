@@ -53,8 +53,11 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     // parse the expression that follows the return keyword, typed against the declared return
     // type the same way a variable declaration's initializer is typed against its variable
     //
-    // only a concrete primitive is a useful hint though - the literal parsers apply the same rule
-    // to themselves, this one keeps the hint from reaching the rest of the expression too
+    // operand arms re-ask AST::can_type_a_literal before using the hint, so a type that is only a
+    // *finished*-expression destination is inert for them. `bool` is that case: the shunting yard
+    // must not retype the `3` and `4` of `return 3 < 4;`, but parse_expr_ref must still see the
+    // hint so `return 1;` becomes `true` and `return 3;` is refused rather than compiled as
+    // truthiness. stripping bool here left that step with nothing to apply
     //
     // **except for a destination that admits absence**, which a `null` in this position genuinely needs:
     // the empty value's *shape* depends on it. an address-like nullable is a null pointer and a wrapped
@@ -73,6 +76,7 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
     AST::TypeNode *expected_type = payload.context.return_type_ptr;
     if (expected_type != nullptr
         && !AST::can_type_a_literal(expected_type->type)
+        && !expected_type->type.is_boolean_type()
         && !AST::destination_admits_null(expected_type->type)
         && !AST::destination_names_a_static_owner(expected_type->type)) {
         expected_type = nullptr;
