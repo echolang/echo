@@ -1,0 +1,12 @@
+// omitted else is abort. the binding is an ordinary local on the path that found a value
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n * 2;
+}
+
+int32 $v = guard pick(21);
+echo $v;

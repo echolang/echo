@@ -1,0 +1,11 @@
+// take_hook restores the default report
+function report(const crash::info& $info) : void
+{
+    echo "hooked";
+}
+
+crash::set_hook(&report);
+crash::take_hook();
+echo 1;
+die("after take");
+echo 2;

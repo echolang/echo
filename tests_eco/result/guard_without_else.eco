@@ -1,0 +1,12 @@
+// result is unwrappable; omitted else is the same abort a T? gets
+function pick(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n * 2);
+}
+
+int32 $v = guard pick(21);
+echo $v;

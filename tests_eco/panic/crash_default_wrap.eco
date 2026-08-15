@@ -1,0 +1,11 @@
+// keep the default print and do more after it
+function report(const crash::info& $info) : void
+{
+    crash::default_hook($info);
+    echo "extra";
+}
+
+crash::set_hook(&report);
+echo 1;
+die("wrapped");
+echo 2;

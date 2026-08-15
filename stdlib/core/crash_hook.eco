@@ -1,0 +1,51 @@
+/**
+ * Watching a crash.
+ *
+ * `die` and an omitted `guard` else stop the program. This is how a program observes that
+ * stop: log it, print something extra, flush a journal. It cannot resume. After the hook
+ * returns the process still exits 1.
+ *
+ * The hook is a C function pointer, not an Echo `function<>`. Closures allocate, and the
+ * crash path must not; `&name` of a free function is the whole install.
+ *
+ * `die` and `assert` stay at the root in crash.eco - they are vocabulary. This file is the
+ * other tier: about the language, not written every line.
+ */
+
+namespace crash;
+
+/**
+ * What a crash hook is handed. Views, not owned strings: the crash site must not allocate.
+ * `$headline` is `fatal error` or `assertion failed`. `$message` is the detail (the text of
+ * a `die`, empty when there was none). `$file` and `$line` are the site that stopped.
+ */
+#[core: crash_info]
+public struct info
+{
+    public string::view $headline;
+    public string::view $message;
+    public string::view $file;
+    public int32 $line;
+}
+
+/**
+ * Install `$hook` as the crash report. Returns the previous hook, or `null` if the default
+ * report was in place. A set hook *replaces* the default print; wrap with `default_hook` to
+ * keep it.
+ */
+#[builtin: crash_set_hook]
+public function set_hook(extern function<void(const info&)> $hook) : extern function<void(const info&)>?;
+
+/**
+ * Remove the installed hook and restore the default report. Returns what was installed, or
+ * `null` if nothing was.
+ */
+#[builtin: crash_take_hook]
+public function take_hook() : extern function<void(const info&)>?;
+
+/**
+ * The default report: the same `fatal error` / `assertion failed` shape `die` prints, and
+ * nothing else. Does not exit, so a wrapper can print then do more.
+ */
+#[builtin: crash_default_hook]
+public function default_hook(const info& $info) : void;

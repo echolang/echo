@@ -1,0 +1,4 @@
+// assert is compiled out in release, so its message has to be foldable - a runtime string would
+// disappear with the check
+string $m = "not a literal at the call site";
+assert(false, $m);

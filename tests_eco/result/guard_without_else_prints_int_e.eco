@@ -1,0 +1,11 @@
+// a primitive E interpolates the same way a string one does
+function pick() : result<int32, int32>
+{
+    return .error(-3);
+}
+
+echo 1;
+int32 $v = guard pick() else ($e) {
+    die("unwrapped a failure: {$e}");
+}
+echo $v;

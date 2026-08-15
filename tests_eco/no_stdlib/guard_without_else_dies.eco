@@ -1,0 +1,5 @@
+// --no-stdlib has no die declaration; the minted unwrap_abort is what stops
+int32? $maybe = null;
+echo 1;
+int32 $v = guard $maybe;
+echo $v;

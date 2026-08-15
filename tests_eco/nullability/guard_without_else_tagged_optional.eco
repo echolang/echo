@@ -1,0 +1,9 @@
+// a tagged optional is a `T?` like any other: omitted else stops, a present value binds
+string? $s = 'hello';
+string $t = guard $s;
+echo $t;
+
+string? $gone = null;
+echo 1;
+string $u = guard $gone;
+echo $u;

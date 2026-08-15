@@ -169,7 +169,7 @@ namespace Compiler::LLVM
         // Reachable only from the JIT, it cannot be asked for anywhere that would be unsound.
         //
         // without it a `return 0;` program still machine-codes the whole of core/string.eco,
-        // core/mem.eco and core/panic.eco - 54 definitions to reach two. Nothing else prunes them:
+        // core/mem.eco and core/crash.eco - 54 definitions to reach two. Nothing else prunes them:
         // codegen gives every function ExternalLinkage and only weakens `t_odr_shared` to
         // linkonce_odr, so GlobalDCE alone - which is all `-O` has - cannot touch them.
         //

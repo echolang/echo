@@ -1,0 +1,11 @@
+// a computed die message still reaches the hook
+function report(const crash::info& $info) : void
+{
+    echo $info->message;
+}
+
+crash::set_hook(&report);
+string $m = "computed";
+echo 1;
+die($m);
+echo 2;

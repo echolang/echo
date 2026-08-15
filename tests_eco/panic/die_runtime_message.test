@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: not a literal at the call site
+  at die_runtime_message.eco:4

@@ -229,10 +229,10 @@ namespace AST
             const TokenReference &at
         );
 
-        // `die`'s and `assert`'s message has to be a string literal, because codegen folds it into a
-        // constant along with the call site's source location. reported here rather than in the
-        // parser: the declaration is what makes the call legal, and codegen has to be able to trust
-        // the shape by the time it reads it. a no-op for every other call
+        // `assert`'s message has to be a string literal: the whole call is compiled out in release,
+        // and a runtime string that vanished with it is the side-effect trap in a new costume.
+        // `die` accepts any `string` - its location is still folded, the text is not. a no-op for
+        // every other call
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);

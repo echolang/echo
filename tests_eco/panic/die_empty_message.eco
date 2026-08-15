@@ -1,0 +1,2 @@
+// an empty literal is still a literal: no ": " after the headline
+die("");

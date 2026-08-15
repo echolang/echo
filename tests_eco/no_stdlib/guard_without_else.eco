@@ -1,0 +1,4 @@
+// a T? still guards without the stdlib, and omitted else still stops
+int32? $maybe = 7;
+int32 $v = guard $maybe;
+echo $v;

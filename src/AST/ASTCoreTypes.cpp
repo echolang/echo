@@ -24,6 +24,7 @@ namespace
             { "unwrappable", AST::CoreTypeKind::t_unwrappable },
             { "failable", AST::CoreTypeKind::t_failable },
             { "variadic_args", AST::CoreTypeKind::t_variadic_args },
+            { "crash_info", AST::CoreTypeKind::t_crash_info },
         };
 
         return table;
@@ -127,6 +128,84 @@ std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::
     if (!string_decl->complex_type().get_property_type(layout.owner_index).is_class()) {
         out_error = fmt::format("'{}'s $owner must be a class - it is what holds the reference count",
             string_decl->complex_type().namespaced_name());
+        return std::nullopt;
+    }
+
+    return layout;
+}
+
+std::optional<AST::CoreCrashInfoLayout> AST::resolve_core_crash_info_layout(
+    const AST::CoreTypes &types, std::string &out_error)
+{
+    AST::TypeDeclNode *info_decl = types.declaration(AST::CoreTypeKind::t_crash_info);
+
+    if (info_decl == nullptr) {
+        out_error = "no type is declared with #[core: crash_info]";
+        return std::nullopt;
+    }
+
+    if (!types.has(AST::CoreTypeKind::t_string_view)) {
+        out_error = "#[core: crash_info] needs #[core: string_view] for its text fields";
+        return std::nullopt;
+    }
+
+    auto require = [&out_error](const AST::ComplexType &ct, const char *property, size_t &out_index) {
+        const AST::ComplexType::Property *found = ct.find_property(property);
+
+        if (found == nullptr) {
+            out_error = fmt::format("'{}' has no property '${}'", ct.namespaced_name(), property);
+            return false;
+        }
+
+        out_index = found->index;
+        return true;
+    };
+
+    AST::CoreCrashInfoLayout layout {};
+    const AST::ComplexType &info = info_decl->complex_type();
+
+    if (!require(info, "headline", layout.headline_index)
+        || !require(info, "message", layout.message_index)
+        || !require(info, "file", layout.file_index)
+        || !require(info, "line", layout.line_index)) {
+        return std::nullopt;
+    }
+
+    if (info.property_count() != 4) {
+        out_error = fmt::format(
+            "'{}' must have exactly the four crash fields ($headline, $message, $file, $line)",
+            info.namespaced_name());
+        return std::nullopt;
+    }
+
+    AST::TypeDeclNode *view_decl = types.declaration(AST::CoreTypeKind::t_string_view);
+
+    if (!require(view_decl->complex_type(), "bytes", layout.view_bytes_index)
+        || !require(view_decl->complex_type(), "size", layout.view_size_index)) {
+        return std::nullopt;
+    }
+
+    const AST::ValueType view = types.string_view_type();
+    auto require_view = [&out_error, &info, &view](size_t index, const char *name) {
+        if (info.get_property_type(index) != view) {
+            out_error = fmt::format("'{}'s ${} is not the #[core: string_view] type",
+                info.namespaced_name(), name);
+            return false;
+        }
+
+        return true;
+    };
+
+    if (!require_view(layout.headline_index, "headline")
+        || !require_view(layout.message_index, "message")
+        || !require_view(layout.file_index, "file")) {
+        return std::nullopt;
+    }
+
+    const AST::ValueType line = info.get_property_type(layout.line_index);
+
+    if (!line.is_primitive() || line.get_primitive_type() != AST::ValueTypePrimitive::t_int32) {
+        out_error = fmt::format("'{}'s $line must be 'int32'", info.namespaced_name());
         return std::nullopt;
     }
 

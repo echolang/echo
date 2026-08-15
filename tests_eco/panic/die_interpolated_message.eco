@@ -1,0 +1,6 @@
+// a runtime die message can be an interpolated string: the text is computed, the location is
+// still the `die` itself
+int32 $n = 7;
+echo 1;
+die("boom: {$n}");
+echo 2;

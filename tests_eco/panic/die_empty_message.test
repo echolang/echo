@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error
+  at die_empty_message.eco:2

@@ -22,6 +22,8 @@ namespace AST
 {
     typedef size_t module_handle_t;
 
+    class FunctionDeclNode;
+
     class Module
     {
     public:
@@ -38,6 +40,10 @@ namespace AST
         // symbol: nothing resolves to one, so there is no set to join and no lookup to serve - only a list
         // to walk. The driver is the only reader
         std::vector<TestDeclaration> tests;
+
+        // the unspellable `unwrap_abort` a `guard` without `else` calls. null until
+        // AST::ensure_unwrap_abort first asks, then one decl for the module
+        FunctionDeclNode *unwrap_abort = nullptr;
 
         Module(const std::string &name, module_handle_t handle) :
             name(name), handle(handle)

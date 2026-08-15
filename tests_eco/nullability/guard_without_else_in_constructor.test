@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+3
+fatal error: unwrapped an absent value
+  at guard_without_else_in_constructor.eco:11

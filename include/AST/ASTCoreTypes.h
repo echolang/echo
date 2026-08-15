@@ -102,6 +102,11 @@ namespace AST
         // the bracket at its last argument is a pack rather than an array. it knows no method and no
         // property of it, and there is nothing to know: the declaration has no body
         t_variadic_args,
+
+        // `struct crash::info` - what a crash hook is handed. bound so AbortCodegen can fill one
+        // by property name, the way the string layout is resolved. the hook itself is a compiler
+        // global, not a field
+        t_crash_info,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that
@@ -198,6 +203,24 @@ namespace AST
     // what the bound declarations are missing. absence of a binding is *not* an error here - a caller
     // asks CoreTypes::has first, since a program without the stdlib legitimately has no string
     std::optional<CoreStringLayout> resolve_core_string_layout(const CoreTypes &types, std::string &out_error);
+
+    // where AbortCodegen finds the four fields of `crash::info`, and the two of `string::view`
+    // those text fields are. by name, for the string layout's reason: the stdlib may reorder
+    // them. the view indices live here so the crash path does not depend on a `string` binding
+    struct CoreCrashInfoLayout
+    {
+        size_t headline_index;
+        size_t message_index;
+        size_t file_index;
+        size_t line_index;
+
+        // on `string::view`
+        size_t view_bytes_index;
+        size_t view_size_index;
+    };
+
+    std::optional<CoreCrashInfoLayout> resolve_core_crash_info_layout(
+        const CoreTypes &types, std::string &out_error);
 };
 
 #endif

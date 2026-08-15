@@ -2,8 +2,10 @@
 
 #include "AST/ASTConformance.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTModule.h"
 #include "AST/ASTNullability.h"
 #include "AST/FunctionDeclNode.h"
+#include "AST/TypeNode.h"
 
 #include <fmt/core.h>
 
@@ -347,4 +349,21 @@ std::string AST::guard_payload_refusal(
         written.get_type_desciption(),
         payload.get_type_desciption(),
         subject.get_type_desciption());
+}
+
+AST::FunctionDeclNode &AST::ensure_unwrap_abort(AST::Module &module, const TokenReference &at)
+{
+    if (module.unwrap_abort != nullptr) {
+        return *module.unwrap_abort;
+    }
+
+    auto &decl = module.nodes.emplace_back<FunctionDeclNode>(
+        module.make_virtual_token("unwrap_abort", Token::Type::t_identifier, at));
+
+    decl.builtin = "unwrap_abort";
+    decl.is_implicitly_generated = true;
+    decl.return_type = &module.nodes.emplace_back<TypeNode>(ValueType::void_type());
+
+    module.unwrap_abort = &decl;
+    return decl;
 }

@@ -1,0 +1,46 @@
+// E has no str::from. omitted else is unwrap_abort either way - the message does not name E
+
+struct parse_error
+{
+    public int32 $code;
+}
+
+struct parsed : contract::unwrappable<int32>, contract::failable<parse_error>
+{
+    private int32 $value;
+    private bool $ok;
+    private parse_error $error;
+
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+        $this->ok = true;
+        $this->error = parse_error(0);
+    }
+
+    constructor(parse_error $error)
+    {
+        $this->value = 0;
+        $this->ok = false;
+        $this->error = $error;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->value;
+    }
+
+    public function failure() : parse_error&
+    {
+        return &$this->error;
+    }
+}
+
+echo 1;
+int32 $v = guard parsed(parse_error(7));
+echo $v;

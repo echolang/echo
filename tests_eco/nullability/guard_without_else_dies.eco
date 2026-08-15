@@ -1,0 +1,13 @@
+// the value is not there, and there is no else, so the program stops
+function pick(int32 $n) : int32?
+{
+    if ($n < 0) {
+        return null;
+    }
+
+    return $n * 2;
+}
+
+echo 1;
+int32 $v = guard pick(-1);
+echo $v;

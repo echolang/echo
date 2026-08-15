@@ -1,0 +1,5 @@
+// a computed string is a legal die message. the location is still the call site
+string $m = "not a literal at the call site";
+echo 1;
+die($m);
+echo 2;

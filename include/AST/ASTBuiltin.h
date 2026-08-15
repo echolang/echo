@@ -93,6 +93,19 @@ namespace AST
         t_die,
         t_assert,
 
+        // the unspellable stop a `guard` without `else` lowers to. no arguments: the headline
+        // and the location come from the call site, which is the `guard` keyword. distinct from
+        // `die` so `--no-stdlib` can mint one without a `string` type and without the stdlib
+        // declaration
+        t_unwrap_abort,
+
+        // the crash-hook trio. they exist so AbortCodegen is the only thing that touches
+        // `__eco_crash_hook` and the default print: set/take are the store, default_hook is the
+        // print with no exit. not library functions, because the store is a compiler global
+        t_crash_set_hook,
+        t_crash_take_hook,
+        t_crash_default_hook,
+
         // how many strong references a class handle has. the **first builtin that is both generic and
         // takes an argument** - the two above take arguments and are concrete, the two at the top are
         // generic and argument-less - so it fits neither family's shape and owns its own arm.
@@ -223,14 +236,17 @@ namespace AST
     BuiltinKind builtin_kind_for(const std::string &name);
 
     // **which argument is the message, if any?** the position `die`/`assert` fold into the abort
-    // text along with the source location, and therefore the one argument that has to be a string
-    // literal rather than any expression of the right type
+    // text along with the source location when that argument is a literal.
     //
-    // one owner because two subsystems ask and they must agree: AST::TypeChecker validates the
-    // shape at that index, and ExprCodegen reads the text from it. spelled 0 and 1 in both, they
-    // could drift into checking one argument and folding another - and the failure is silent,
-    // because a non-literal simply yields no detail rather than an error
+    // the index is the one ExprCodegen reads, so a literal `die` and a runtime `die` cannot
+    // fold different arguments. whether that argument *must* be a literal is
+    // builtin_message_must_be_literal - a different question, asked by TypeChecker
     std::optional<size_t> builtin_message_index(BuiltinKind kind);
+
+    // **must the message argument be a compile-time literal?** `assert` yes: the call is compiled
+    // out in release, so a runtime string would vanish with the check. `die` no: its location is
+    // still folded, the text is written at the crash. every other builtin has no message
+    bool builtin_message_must_be_literal(BuiltinKind kind);
 
     // **does a call to this builtin never come back?** `die` and `exit` do not, so a statement that is
     // one leaves the function just as surely as a `return` does.

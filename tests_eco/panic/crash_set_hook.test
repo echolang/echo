@@ -1,0 +1,7 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error
+from main
+11

@@ -1,0 +1,7 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: wrapped
+  at crash_default_wrap.eco:10
+extra

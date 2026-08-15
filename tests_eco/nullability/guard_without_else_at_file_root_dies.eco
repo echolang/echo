@@ -1,0 +1,5 @@
+// a missing value at the file root stops the program. the echo above must appear first
+int32? $maybe = null;
+echo 1;
+int32 $v = guard $maybe;
+echo $v;

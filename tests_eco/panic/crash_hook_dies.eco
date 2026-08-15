@@ -1,0 +1,11 @@
+// a hook that dies cannot recurse: the store is cleared before the call, so the
+// second stop is the default report of the hook's own die
+function boom(const crash::info& $info) : void
+{
+    die("from hook");
+}
+
+crash::set_hook(&boom);
+echo 1;
+die("from main");
+echo 2;

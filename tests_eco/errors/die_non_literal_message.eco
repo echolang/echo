@@ -1,6 +1,0 @@
-// the message is folded into a constant with the source location, so it has to be readable at
-// compile time. the parameter's *type* is satisfied here - `$m` is a `string`, which is what the
-// overload takes - so this is the case that shows the requirement is about literal-ness and not
-// about types, and that it does not lift now that a `string` type exists
-string $m = "not a literal at the call site";
-die($m);

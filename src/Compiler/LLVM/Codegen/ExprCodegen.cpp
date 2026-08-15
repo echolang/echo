@@ -35,7 +35,6 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/TemporaryBindExprNode.h"
 #include "AST/VarNode.h"
-#include "AST/TypeDeclNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ASTCoreTypes.h"
@@ -1050,8 +1049,34 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             gen_die_builtin(node);
             return;
 
+        case AST::BuiltinKind::t_unwrap_abort:
+            _ctx.abort->gen_abort(
+                "fatal error", "unwrapped an absent value", node.token_function_name);
+            return;
+
         case AST::BuiltinKind::t_assert:
             gen_assert_builtin(node);
+            return;
+
+        case AST::BuiltinKind::t_crash_set_hook:
+            if (node.arguments.empty() || node.arguments[0] == nullptr) {
+                throw _ctx.error(fmt::format("'set_hook' has no hook {}", _ctx.function_context()));
+            }
+            node.arguments[0]->accept(*_ctx.visitor);
+            _ctx.push(_ctx.abort->swap_hook(_ctx.pop()));
+            return;
+
+        case AST::BuiltinKind::t_crash_take_hook:
+            _ctx.push(_ctx.abort->take_hook());
+            return;
+
+        case AST::BuiltinKind::t_crash_default_hook:
+            if (node.arguments.empty() || node.arguments[0] == nullptr) {
+                throw _ctx.error(fmt::format(
+                    "'default_hook' has no info {}", _ctx.function_context()));
+            }
+            node.arguments[0]->accept(*_ctx.visitor);
+            _ctx.abort->gen_default_hook(_ctx.pop());
             return;
 
         case AST::BuiltinKind::t_ref_count:
@@ -1184,8 +1209,29 @@ void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::Bu
 
 void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
 {
-    _ctx.abort->gen_abort(
-        "fatal error", _ctx.abort->detail_of(node), _ctx.abort->location_of(node));
+    const auto index = AST::builtin_message_index(AST::BuiltinKind::t_die);
+
+    if (!index.has_value() || node.arguments.size() <= *index || node.arguments[*index] == nullptr) {
+        _ctx.abort->gen_abort("fatal error", "", node.token_function_name);
+        return;
+    }
+
+    AST::ExprNode *message = node.arguments[*index];
+
+    // the same question TypeChecker asks. `folded.empty()` is not it: `die("")` is a literal
+    if (const auto literal = AST::literal_string_value(message)) {
+        _ctx.abort->gen_abort("fatal error", *literal, node.token_function_name);
+        return;
+    }
+
+    // a runtime string: fold the location around the bytes the program already holds. the
+    // argument is a `string` by the declaration, so the window is the same two words `echo`
+    // reads
+    message->accept(*_ctx.visitor);
+    llvm::Value *value = _ctx.pop();
+    const auto [bytes, size] = _ctx.gen_string_window(value, message->result_type(), "");
+
+    _ctx.abort->gen_abort_dynamic("fatal error", bytes, size, node.token_function_name);
 }
 
 void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
@@ -1207,7 +1253,7 @@ void ExprCodegen::gen_assert_builtin(AST::FunctionCallExprNode &node)
     // stop on the *false* path, so the branch reads the way the source does
     _ctx.abort->gen_abort_if(
         _ctx.builder->CreateNot(condition, "assert.failed"),
-        "assertion failed", _ctx.abort->detail_of(node), _ctx.abort->location_of(node));
+        "assertion failed", _ctx.abort->detail_of(node), node.token_function_name);
 }
 
 void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)
@@ -1273,6 +1319,10 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         }
 
         case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_unwrap_abort:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_assert:
         case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_init:
@@ -1544,8 +1594,7 @@ void ExprCodegen::gen_null_assert(llvm::Value *address, const TokenReference &at
     // through the same runtime *and the same message shape* `die` and `assert` use. the location
     // is the operand's token - a cast node carries none of its own
     _ctx.abort->gen_abort_if(is_null,
-        "fatal error", "null pointer cast to a reference",
-        _ctx.abort->location_of(at));
+        "fatal error", "null pointer cast to a reference", at);
 }
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)

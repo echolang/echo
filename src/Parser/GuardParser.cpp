@@ -8,6 +8,8 @@
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ASTUnwrap.h"
+#include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/VarDeclNode.h"
@@ -90,9 +92,30 @@ AST::GuardNode *Parser::parse_guard(
     binding.binds_unwrapped = true;
 
     if (!cursor.is_type(Token::Type::t_else)) {
-        payload.collect_unexpected_token(Token::Type::t_else);
-        cursor.try_skip_to_next_statement();
-        return nullptr;
+        // omitted else is abort: mint a real never-returning call so scope_always_exits,
+        // OwnershipPass and gen_guard all keep seeing an arm that leaves
+        auto &abort = payload.context.emplace_node<AST::FunctionCallExprNode>(
+            guard_token, std::vector<AST::ExprNode *>{});
+
+        abort.decl = &AST::ensure_unwrap_abort(payload.context.module, guard_token);
+        abort.settlement = AST::CallSettlement::t_settled;
+
+        auto &else_scope = payload.context.emplace_node<AST::ScopeNode>();
+        else_scope.children.push_back(AST::make_ref(abort));
+
+        auto &node = payload.context.emplace_node<AST::GuardNode>(&binding, &else_scope, guard_token);
+        node.implicit_abort = true;
+        node.plan_decided = decide_now;
+
+        // a written else ends at the block. an omitted one ends like any other declaration
+        if (!cursor.is_type(Token::Type::t_semicolon)) {
+            payload.collect_unexpected_token(Token::Type::t_semicolon);
+            cursor.try_skip_to_next_statement();
+            return &node;
+        }
+        cursor.skip();
+
+        return &node;
     }
     cursor.skip();
 

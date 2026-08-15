@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: unwrapped an absent value
+  at guard_without_else_unprintable_e.eco:45

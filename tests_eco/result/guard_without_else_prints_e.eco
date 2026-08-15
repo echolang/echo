@@ -1,0 +1,15 @@
+// want E in the abort text? write the else. omitted else is unwrap_abort
+function pick(int32 $n) : result<int32, string>
+{
+    if ($n < 0) {
+        return .error('negative');
+    }
+
+    return .ok($n * 2);
+}
+
+echo 1;
+int32 $v = guard pick(-1) else ($e) {
+    die("unwrapped a failure: {$e}");
+}
+echo $v;

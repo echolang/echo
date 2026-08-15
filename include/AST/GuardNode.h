@@ -103,6 +103,11 @@ namespace AST
         // `IndexExprNode::resolution_decided` and `ArrayLiteralExprNode::expansion_decided` already own
         bool plan_decided = false;
 
+        // the author omitted `else`. the else_scope still holds a never-returning abort, so
+        // AST::scope_always_exits stays the sole owner of "does this leave?". this bit is what
+        // a dump reads, so the tree does not have to be expanded just to say so
+        bool implicit_abort = false;
+
         // the `guard` keyword, for the diagnostics that are about the form rather than about its parts
         TokenReference token;
 
@@ -130,6 +135,11 @@ namespace AST
 
             if (failure != nullptr) {
                 desc += " failure " + failure->node_description();
+            }
+
+            if (implicit_abort) {
+                desc += " implicit-abort";
+                return desc;
             }
 
             desc += " else\n";

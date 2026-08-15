@@ -1,0 +1,44 @@
+// omitted else over a type of the author's own, with no failable and so no E to print
+struct parsed : contract::unwrappable<int32>
+{
+    private int32 $value;
+    private bool $ok;
+
+    constructor(int32 $value)
+    {
+        $this->value = $value;
+        $this->ok = true;
+    }
+
+    constructor(bool $ok)
+    {
+        $this->value = 0;
+        $this->ok = $ok;
+    }
+
+    public const function has_value() : bool
+    {
+        return $this->ok;
+    }
+
+    public function unwrap() : int32&
+    {
+        return &$this->value;
+    }
+}
+
+function parse(int32 $n) : parsed
+{
+    if ($n < 0) {
+        return parsed(false);
+    }
+
+    return parsed($n * 2);
+}
+
+int32 $ok = guard parse(10);
+echo $ok;
+
+echo 1;
+int32 $v = guard parse(-1);
+echo $v;

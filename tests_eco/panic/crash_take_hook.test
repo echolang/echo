@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: after take
+  at crash_take_hook.eco:10

@@ -81,6 +81,17 @@ namespace Compiler::LLVM
             return string_layout.value();
         }
 
+        // the same fact for `crash::info`: resolved once beside the binding, not per abort.
+        // nullopt when nothing declared one - `--no-stdlib`, and a program that never bound
+        // `#[core: crash_info]`. the abort thunk is still piece-wise then; only hook *dispatch*
+        // needs this
+        std::optional<AST::CoreCrashInfoLayout> crash_info_layout;
+
+        const AST::CoreCrashInfoLayout &core_crash_info_layout() const {
+            assert(crash_info_layout.has_value() && "crash info layout not resolved - compile_bundle must resolve it");
+            return crash_info_layout.value();
+        }
+
         // the two words a string is read as: the bytes and how many of them.
         //
         // **the other half of what PrintfConversion.h was extracted for.** the same two printers ask -
@@ -137,8 +148,8 @@ namespace Compiler::LLVM
         // the file each function declaration was written in, so a body's own source position does not
         // depend on which walk reached it.
         //
-        // a body's *content* no longer reads this: AbortCodegen::location_of asks the call's own
-        // token. the map remains for the declaration-site question A40 will retire onto
+        // a body's *content* no longer reads this: the abort path asks the call's own token.
+        // the map remains for the declaration-site question A40 will retire onto
         // DeclarationOrigin - an ODR-shared body's DISubprogram file must not depend on which walk
         // reached it.
         //

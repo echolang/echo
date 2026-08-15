@@ -1,0 +1,13 @@
+// omitted else at the file root: the declaration pass and the body pass still have to consume
+// the same tokens, or the function below is never collected. same pin as guard_at_file_root,
+// without an else arm to hide a brace-count mismatch
+
+function afterwards(int32 $n) : int32
+{
+    return $n * 2;
+}
+
+int32? $maybe = 21;
+int32 $v = guard $maybe;
+echo $v;
+echo afterwards($v);

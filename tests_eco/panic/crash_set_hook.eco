@@ -1,0 +1,12 @@
+// a named function replaces the default report. the process still exits 1
+function report(const crash::info& $info) : void
+{
+    echo $info->headline;
+    echo $info->message;
+    echo $info->line;
+}
+
+crash::set_hook(&report);
+echo 1;
+die("from main");
+echo 2;

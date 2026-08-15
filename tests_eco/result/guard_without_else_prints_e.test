@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: unwrapped a failure: negative
+  at guard_without_else_prints_e.eco:13

@@ -1,0 +1,9 @@
+// implicit abort is die, not assert: a release build still stops
+function pick() : int32?
+{
+    return null;
+}
+
+echo 1;
+int32 $v = guard pick();
+echo $v;

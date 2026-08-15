@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: from hook
+  at crash_hook_dies.eco:5

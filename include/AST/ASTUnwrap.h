@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTValueType.h"
+#include "Token.h"
 
 #include <optional>
 #include <string>
@@ -133,6 +134,11 @@ namespace AST
         const ValueType &payload,
         const ValueType &subject
     );
+
+    // the unspellable `#[builtin: unwrap_abort]` a `guard` without `else` lowers to. one per
+    // module, created on first use. `--no-stdlib` gets the same decl: a `T?` without an arm
+    // must still stop
+    FunctionDeclNode &ensure_unwrap_abort(class Module &module, const TokenReference &at);
 };
 
 #endif

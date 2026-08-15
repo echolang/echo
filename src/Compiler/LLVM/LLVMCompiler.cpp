@@ -151,6 +151,18 @@ void LLVMCompiler::compile_bundle(const AST::Bundle &bundle, const std::set<std:
         }
     }
 
+    // the same fact for crash::info: a bound type of the wrong shape is a stdlib error, not
+    // something the first `die` should discover. absence of the binding is not an error -
+    // `--no-stdlib` still stops, just without a hook
+    if (_ctx.core_types().has(AST::CoreTypeKind::t_crash_info)) {
+        std::string layout_error;
+        _ctx.crash_info_layout = AST::resolve_core_crash_info_layout(_ctx.core_types(), layout_error);
+
+        if (!_ctx.crash_info_layout.has_value()) {
+            throw _ctx.error(fmt::format("the declared #[core: crash_info] is unusable: {}", layout_error));
+        }
+    }
+
     // resolve the host target first: create_cmp_units stamps its data layout onto every module,
     // and a compile-time size_of<T>() reads it
     _backend.init_target();

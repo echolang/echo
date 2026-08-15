@@ -200,8 +200,8 @@ namespace AST
 
     // **is this expression a string literal, and what does it say?** the text if it is, nullopt if
     // it is not, one question because two subsystems ask it about the same argument and must agree:
-    // AST::TypeChecker rejects a `die`/`assert` message that has no answer, and ExprCodegen folds
-    // the answer into the abort text
+    // AST::TypeChecker rejects an `assert` message that has no answer, and ExprCodegen folds
+    // the answer into the abort text (a `die` takes the dynamic path when this is nullopt)
     //
     // spelled separately they were a silent failure rather than a diagnostic - codegen's copy
     // returned "" for a shape the checker had let through, so the message simply lost its detail

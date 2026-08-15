@@ -1,0 +1,6 @@
+expect: fail
+
+--- OUT --->
+1
+fatal error: boom: 7
+  at die_interpolated_message.eco:5

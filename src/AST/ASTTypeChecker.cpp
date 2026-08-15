@@ -1118,10 +1118,17 @@ void TypeChecker::check_abort_message(FunctionCallExprNode &node)
         return;
     }
 
-    // which argument the message is comes from AST::builtin_message_index, shared with the
-    // ExprCodegen site that folds it - spelled here as well, the two could check one argument and
-    // fold another, and a message that is not a literal folds to *nothing* rather than to an error
-    const auto index = builtin_message_index(builtin_kind_for(node.decl->builtin.value()));
+    // which argument the message is, and whether it must be a literal, come from AST:: - shared
+    // with the ExprCodegen site that folds it. spelled here as well, the two could check one
+    // argument and fold another, and a message that is not a literal folds to *nothing* rather
+    // than to an error
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (!builtin_message_must_be_literal(kind)) {
+        return;
+    }
+
+    const auto index = builtin_message_index(kind);
 
     if (!index.has_value() || node.arguments.size() <= *index) {
         return;
@@ -1147,7 +1154,7 @@ void TypeChecker::check_abort_message(FunctionCallExprNode &node)
 
     // the message is folded into a constant at the call site, together with the source location -
     // that is what makes these builtins rather than library functions, and it is why the text has
-    // to be readable at compile time. lifts when there is a `string` type to hand one at runtime
+    // to be readable at compile time
     if (!literal_string_value(message).has_value()) {
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(node.token_function_name),

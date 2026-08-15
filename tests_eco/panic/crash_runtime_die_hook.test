@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+1
+computed

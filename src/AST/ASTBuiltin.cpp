@@ -17,6 +17,10 @@ namespace
             { "init", AST::BuiltinKind::t_init },
             { "die", AST::BuiltinKind::t_die },
             { "assert", AST::BuiltinKind::t_assert },
+            { "unwrap_abort", AST::BuiltinKind::t_unwrap_abort },
+            { "crash_set_hook", AST::BuiltinKind::t_crash_set_hook },
+            { "crash_take_hook", AST::BuiltinKind::t_crash_take_hook },
+            { "crash_default_hook", AST::BuiltinKind::t_crash_default_hook },
             { "ref_count", AST::BuiltinKind::t_ref_count },
             { "weak_count", AST::BuiltinKind::t_weak_count },
             { "dprint", AST::BuiltinKind::t_dprint },
@@ -69,6 +73,10 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_unwrap_abort:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_ref_count:
         case AST::BuiltinKind::t_weak_count:
         case AST::BuiltinKind::t_dprint:
@@ -92,10 +100,14 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
     switch (kind) {
         // `assert` is deliberately not here: it returns when it holds
         case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
             return true;
 
         case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
@@ -134,8 +146,12 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_dprint:
 
         case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_exit:
         case AST::BuiltinKind::t_assert:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_size_of:
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
@@ -189,9 +205,49 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_unwrap_abort:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_exit:
             return std::nullopt;
     }
 
     return std::nullopt;
+}
+
+bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
+{
+    // no tail, for builtin_message_index's reason: a builtin added without an arm would silently
+    // accept a runtime message that the call then compiled out
+    switch (kind) {
+        case AST::BuiltinKind::t_assert:
+            return true;
+
+        case AST::BuiltinKind::t_die:
+        case AST::BuiltinKind::t_unwrap_abort:
+        case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_crash_set_hook:
+        case AST::BuiltinKind::t_crash_take_hook:
+        case AST::BuiltinKind::t_crash_default_hook:
+        case AST::BuiltinKind::t_size_of:
+        case AST::BuiltinKind::t_align_of:
+        case AST::BuiltinKind::t_is_trivially_copyable:
+        case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_take:
+        case AST::BuiltinKind::t_init:
+        case AST::BuiltinKind::t_ref_count:
+        case AST::BuiltinKind::t_weak_count:
+        case AST::BuiltinKind::t_dprint:
+        case AST::BuiltinKind::t_alloc_bytes:
+        case AST::BuiltinKind::t_realloc_bytes:
+        case AST::BuiltinKind::t_free_bytes:
+        case AST::BuiltinKind::t_live_allocations:
+        case AST::BuiltinKind::t_process_argc:
+        case AST::BuiltinKind::t_process_argv:
+        case AST::BuiltinKind::t_process_envp:
+            return false;
+    }
+
+    return false;
 }

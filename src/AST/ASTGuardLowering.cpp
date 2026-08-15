@@ -7,6 +7,7 @@
 #include "AST/ASTModule.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/GuardNode.h"
 #include "AST/ScopeNode.h"
 #include "AST/TypeNode.h"

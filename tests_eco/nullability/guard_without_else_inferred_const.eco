@@ -1,0 +1,8 @@
+// the `const` the author wrote survives onto an inferred binding, with no else
+function pick() : int32?
+{
+    return 6;
+}
+
+const $v = guard pick();
+echo $v;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] assert_non_literal_message.eco:4:1
+
+  the message of 'assert' must be a string literal - it is folded into the binary along with the source location, so it has to be known at compile time
+
+  3 | string $m = "not a literal at the call site";
+  4 | assert(false, $m);
+    : ^^^^^^
+  5 | 
+
+1 error, nothing was compiled.
