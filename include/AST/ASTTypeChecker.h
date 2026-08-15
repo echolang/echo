@@ -65,6 +65,11 @@ namespace AST
         // *constructor* with no arm of its own - AST::enclosing_type_of answers for both member shapes
         void check_call_visibility(FunctionCallExprNode &node);
 
+        // the file, module and owner axes of the same question, asked of a bound declaration
+        // rather than of a call. AST::TypeChecker::visit_function_ref_expr is the other reader -
+        // a call and an address-of of one name have to agree
+        void check_named_function_visibility(const FunctionDeclNode &decl, const TokenReference &at);
+
         // **where the site being walked was written.** off the enclosing declaration rather than off the
         // walk, and that is the whole of why this is a function: the monomorphizer appends an instance to
         // `files().first()` of its template's module, so `_current_file` names a file the instantiated body
@@ -98,6 +103,7 @@ namespace AST
         void visitBinaryExpr(BinaryExprNode &node) override;
         void visitUnaryExpr(UnaryExprNode &node) override;
         void visit_addr_of_expr(AddrOfExprNode &node) override;
+        void visit_function_ref_expr(FunctionRefExprNode &node) override;
         void visitReturn(ReturnNode &node) override;
 
     private:
@@ -171,6 +177,10 @@ namespace AST
         // where a `#[core: variadic_args]` may be written, asked of the declaration as a whole -
         // see AST::variadic_args_refusal for why it is one question rather than four
         void check_variadic_args_position(FunctionDeclNode &node);
+
+        // every `extern function<R(P...)>` that appears on a declaration, through the one
+        // sentence-writer in AST::c_function_signature_refusal
+        void check_c_function_type(const ValueType &type, const TokenReference &at);
 
         // what may arrive at one: a list written right here, holding primitives and addresses
         void check_variadic_argument(FunctionCallExprNode &node);

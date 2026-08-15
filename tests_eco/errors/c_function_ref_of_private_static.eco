@@ -1,0 +1,13 @@
+// `&name` asks the same visibility question a call does. a private static is
+// the owner axis: the type's own bodies reach it, and taking its address from
+// outside does not
+
+struct Point
+{
+    private static function origin() : int32
+    {
+        return 0;
+    }
+}
+
+extern function<int32()> $f = &Point::origin;

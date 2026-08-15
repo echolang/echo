@@ -242,6 +242,17 @@ namespace
             RecursiveVisitor::visit_guard(node);
         }
 
+        // an undecided `&name` has no type yet. a walk now would decide the ownership of a
+        // value about to be typed by a destination, and this pass walks a body exactly once
+        void visit_function_ref_expr(FunctionRefExprNode &node) override
+        {
+            if (!node.resolved) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visit_function_ref_expr(node);
+        }
+
         // **an unlowered interpolation is never answerable**, and this is the second arm whose absence
         // is silent. it stands for a chain of calls none of which exist yet - each one allocating a
         // `string` that owes a drop - so a walk now would decide the ownership of a statement whose

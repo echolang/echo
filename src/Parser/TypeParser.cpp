@@ -26,6 +26,12 @@ bool Parser::starts_callable_type(Parser::Cursor &cursor, size_t offset)
         cursor.peek_is_type(offset + 1, Token::Type::t_open_angle);
 }
 
+bool Parser::starts_c_function_type(Parser::Cursor &cursor, size_t offset)
+{
+    return cursor.peek_is_type(offset, Token::Type::t_extern)
+        && starts_callable_type(cursor, offset + 1);
+}
+
 bool Parser::can_parse_type(Parser::Payload &payload)
 {
     // a type can be preceded by a const keyword
@@ -43,7 +49,8 @@ bool Parser::can_parse_type(Parser::Payload &payload)
         return true;
     }
 
-    return starts_callable_type(payload.cursor, offset);
+    return starts_c_function_type(payload.cursor, offset)
+        || starts_callable_type(payload.cursor, offset);
 }
 
 // advances past one type if the tokens at the cursor form one, and answers whether they did
@@ -109,6 +116,12 @@ static bool skip_type_list(Parser::Cursor &cursor, IsEnd is_end)
 static bool skip_type_shape(Parser::Cursor &cursor)
 {
     if (cursor.is_type(Token::Type::t_const)) {
+        cursor.skip();
+    }
+
+    // `extern function<R(P...)>` is the callable shape with one more word in front. skip the
+    // `extern` and fall into the same walk, so the two cannot disagree about where the type ends
+    if (Parser::starts_c_function_type(cursor)) {
         cursor.skip();
     }
 
@@ -908,6 +921,13 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         payload.cursor.skip();
     }
 
+    // `extern function<R(P...)>`, the C function-pointer type. the `extern` is the calling shape;
+    // the interior is the same signature the callable arm below walks, so they share the rest
+    const bool c_function = Parser::starts_c_function_type(payload.cursor);
+    if (c_function) {
+        payload.cursor.skip();
+    }
+
     // `function<R(P...)>`, the callable type. spelled return-type-first inside the brackets, which is
     // the shape CONCEPT.md specifies
     if (Parser::starts_callable_type(payload.cursor)) {
@@ -956,8 +976,10 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
         }
         payload.cursor.consume_generic_close();
 
-        auto callable = AST::ValueType::make_callable(return_type.value(), std::move(parameter_types));
-        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(callable) : callable);
+        auto built = c_function
+            ? AST::ValueType::make_c_function(return_type.value(), std::move(parameter_types))
+            : AST::ValueType::make_callable(return_type.value(), std::move(parameter_types));
+        return parse_ref_suffix(payload, is_const ? AST::ValueType::make_const(built) : built);
     }
 
     // `ptr<T>` is a real type constructor, so it recurses: the pointee is an arbitrary type,

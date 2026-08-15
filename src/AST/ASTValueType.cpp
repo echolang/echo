@@ -348,6 +348,15 @@ std::string AST::ValueType::get_mangled_name() const
             mangled_name += param.get_mangled_name();
         }
         mangled_name += "E";
+    } else if (is_c_function()) {
+        // `K` rather than `F`, so `function<void()>` and `extern function<void()>` cannot share a
+        // symbol. same self-delimiting shape, same reason
+        mangled_name += "K";
+        mangled_name += _signature->return_type.get_mangled_name();
+        for (const auto &param : _signature->parameter_types) {
+            mangled_name += param.get_mangled_name();
+        }
+        mangled_name += "E";
     } else {
         assert(kind == ValueTypeKind::t_unknown && "a ValueType kind with no mangling would share the unknown token");
         mangled_name += "U"; // unknown type
@@ -408,8 +417,9 @@ std::string AST::ValueType::get_type_desciption() const
         return prefix + _type_param->name + suffix;
     }
 
-    if (is_callable()) {
-        std::string buffer = prefix + "function<" + _signature->return_type.get_type_desciption() + "(";
+    if (has_signature()) {
+        const char *ctor = is_c_function() ? "extern function<" : "function<";
+        std::string buffer = prefix + ctor + _signature->return_type.get_type_desciption() + "(";
 
         for (size_t i = 0; i < _signature->parameter_types.size(); i++) {
             buffer += (i > 0 ? ", " : "") + _signature->parameter_types[i].get_type_desciption();
@@ -833,8 +843,9 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
     }
 
     // structurally, like a pointer: `function<void(T)>` is as unresolved as `ptr<T>` is. answering
-    // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away
-    if (type.is_callable()) {
+    // false here would make the monomorphizer stop chasing it and TypeLowering throw on the T far away.
+    // a C function pointer is the same walk over the same signature
+    if (type.has_signature()) {
         if (contains_type_param(type.signature().return_type, param)) {
             return true;
         }
@@ -896,8 +907,9 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
     }
 
     // and structurally through a signature, for the same reason - returning it unchanged would leave
-    // `function<void(T)>` generic forever inside an instantiated body
-    if (type.is_callable()) {
+    // `function<void(T)>` generic forever inside an instantiated body. a C function pointer rebuilds
+    // through make_c_function so the kind survives
+    if (type.has_signature()) {
         // a concrete signature substitutes to itself, and rebuilding one mints a fresh
         // shared_ptr that then compares structurally rather than by identity. asked here rather
         // than at the top: the arms above are cheap to redo, a signature is not
@@ -912,8 +924,10 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             params.push_back(substitute_type(param, subst, registry));
         }
 
-        ValueType result = ValueType::make_callable(
-            substitute_type(type.signature().return_type, subst, registry), std::move(params));
+        const ValueType ret = substitute_type(type.signature().return_type, subst, registry);
+        ValueType result = type.is_c_function()
+            ? ValueType::make_c_function(ret, std::move(params))
+            : ValueType::make_callable(ret, std::move(params));
 
         return type.is_const() ? ValueType::make_const(result) : result;
     }

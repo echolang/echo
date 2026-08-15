@@ -1,0 +1,6 @@
+struct Point
+{
+    int32 $x;
+}
+
+extern function<void(Point)> $f;

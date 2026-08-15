@@ -1,0 +1,6 @@
+function id<T>(T $v) : T
+{
+    return $v;
+}
+
+extern function<int32(int32)> $f = &id;

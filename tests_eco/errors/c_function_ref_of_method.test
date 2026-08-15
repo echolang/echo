@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_ref_of_method.eco:9:31
+
+  cannot take the address of 'origin' - a method or constructor has a receiver C has nowhere to put.
+
+   8 | 
+   9 | extern function<int32()> $f = &Point::origin;
+     :                               ^
+  10 | 
+
+1 error, nothing was compiled.

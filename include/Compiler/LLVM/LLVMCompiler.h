@@ -107,6 +107,7 @@ public:
     void visit_chain_base(AST::ChainBaseNode &node);
     void visit_closure_expr(AST::ClosureExprNode &node);
     void visit_indirect_call_expr(AST::IndirectCallExprNode &node);
+    void visit_function_ref_expr(AST::FunctionRefExprNode &node);
     void visit_instanceof_expr(AST::InstanceOfExprNode &node);
     void visit_temporary_bind(AST::TemporaryBindExprNode &node);
     void visit_match(AST::MatchExprNode &node);

@@ -6,6 +6,8 @@
 #include "AST/ASTOps.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTLiteralTyping.h"
+#include "AST/ASTCFunction.h"
+#include "AST/ASTConstantExpander.h"
 #include "AST/ExprNode.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/VarRefNode.h"
@@ -1318,7 +1320,8 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
                 ? base_type.get_complex_type()->find_property(member_token.value())
                 : nullptr;
 
-            if (property != nullptr && property->type.is_callable()
+            if (property != nullptr
+                && property->type.has_signature()
                 && AST::find_member_functions(base_type.get_complex_type(), member_token.value()).empty())
             {
                 auto &member_access =
@@ -1425,6 +1428,98 @@ const AST::NodeReference parse_suffix_operator_chain(Parser::Payload &payload, A
     }
 
     return current_ref;
+}
+
+// `&name` - a C function pointer. the grammar is free: a glued `&` cannot be a
+// variable, variables carry `$`. spelling refusals stay here (`&f(...)` is a
+// call result; `&CONST` is the bitwise-and hint). resolution does not: a unique
+// candidate is bound even when it cannot be addressed, an empty set is left
+// unresolved, and TypeChecker is the only reporter of either
+const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    auto &cursor = payload.cursor;
+
+    const TokenReference amp = cursor.current();
+    cursor.skip();
+
+    const auto start = cursor.snapshot();
+    AST::TypeNode *owner = Parser::try_parse_static_owner(payload, /*want_property=*/false);
+
+    const AST::Namespace *ns = payload.context.current_namespace;
+    bool qualified = false;
+    AST::ValueType static_owner;
+
+    if (owner != nullptr && cursor.is_type(Token::Type::t_identifier)) {
+        static_owner = owner->type;
+    }
+    else {
+        cursor.restore(start);
+
+        if (cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_namespace_sep })) {
+            auto *ns_node = parse_namespace(payload);
+            ns = ns_node != nullptr ? ns_node->ast_namespace : ns;
+            qualified = true;
+        }
+
+        if (!cursor.is_type(Token::Type::t_identifier)) {
+            payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.context.code_ref(amp),
+                "'&' expected a function name.");
+            cursor.try_skip_to_next_statement();
+            return AST::make_void_ref();
+        }
+    }
+
+    auto &ref = payload.context.emplace_node<AST::FunctionRefExprNode>(amp, cursor.current());
+    ref.lookup_namespace = ns;
+    ref.is_qualified = qualified;
+    ref.static_owner = static_owner;
+
+    if (cursor.peek_is_type(1, Token::Type::t_open_paren)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(amp),
+            "cannot take the address of a call - '&f(...)' is the address of a result, "
+            "and a result has none. Write '&f' for the function itself.");
+        cursor.try_skip_to_next_statement();
+        ref.resolved = true;
+        return AST::make_ref(ref);
+    }
+
+    cursor.skip();
+
+    const auto candidates = AST::function_ref_candidates(ref, payload.collector.functions);
+
+    if (!ref.is_static()
+        && AST::find_constant(
+            payload.collector.namespaces,
+            ref.token_name.value(),
+            ns,
+            qualified) != nullptr
+        && candidates.empty())
+    {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(amp),
+            fmt::format(
+                "a constant has no address - '&{}' cannot be taken. Write '& {}' with a "
+                "space if you meant bitwise and.",
+                ref.token_name.value(),
+                ref.token_name.value()));
+        ref.resolved = true;
+        return AST::make_ref(ref);
+    }
+
+    // bind a unique candidate even when it cannot be addressed: TypeChecker reports the
+    // refusal against a chosen name rather than an empty set
+    if (candidates.size() == 1) {
+        ref.decl = candidates[0];
+        ref.resolved = true;
+    }
+
+    if (expected_type != nullptr) {
+        AST::bind_function_ref_to(&ref, expected_type->type, payload.collector.functions);
+    }
+
+    return Parser::parse_postfix_chain(payload, AST::make_ref(ref));
 }
 
 const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode *expected_type)
@@ -1629,6 +1724,12 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
         auto &move_expr = payload.context.emplace_node<AST::MoveExprNode>(operand, move_token);
         return AST::make_ref(move_expr);
+    }
+
+    else if (cursor.is_type(Token::Type::t_ref)
+        && cursor.peek_is_type(1, Token::Type::t_identifier))
+    {
+        return parse_function_ref(payload, expected_type);
     }
 
     else if (

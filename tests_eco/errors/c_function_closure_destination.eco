@@ -1,0 +1,1 @@
+extern function<int32(int32)> $f = function(int32 $x) : int32 { return $x; };

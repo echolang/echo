@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  c_function_closure_destination.eco:1:31
+
+  Invalid type conversion: cannot implicitly convert 'function<int32(int32)>' to 'extern function<int32(int32)>' - a C function pointer has no environment, so name the function and pass '&name'
+
+  1 | extern function<int32(int32)> $f = function(int32 $x) : int32 { return $x; };
+    :                               ^^
+  2 | 
+
+1 error, nothing was compiled.

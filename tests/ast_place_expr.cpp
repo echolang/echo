@@ -172,6 +172,7 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         // asking for the address of a value the compiler worked out, which is the literal's answer and not
         // this node's. the same reasoning n_expr_const_ref above is here for
         { NodeType::n_expr_const, StorageClass::t_addressless },
+        { NodeType::n_expr_function_ref, StorageClass::t_addressless },
 
         // and everything else is a value the program computed and did not name. the last five are the
         // ones the allow-list had lost: `f($a ?? $b)` against a `T&` parameter could not resolve, with

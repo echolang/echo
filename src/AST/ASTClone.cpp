@@ -137,6 +137,14 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
     return c;
 }
 
+Node *FunctionRefExprNode::clone(CloneContext &cc) const
+{
+    FunctionRefExprNode *c = cc.shallow(this);
+    c->decl = cc.rebind(c->decl);
+    c->static_owner = cc.substitute(c->static_owner);
+    return c;
+}
+
 Node *BinaryExprNode::clone(CloneContext &cc) const
 {
     BinaryExprNode *c = cc.shallow(this);

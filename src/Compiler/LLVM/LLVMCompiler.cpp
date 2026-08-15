@@ -559,6 +559,7 @@ void LLVMCompiler::visitLiteralBoolExpr(AST::LiteralBoolExprNode &node) { _expr.
 void LLVMCompiler::visitLiteralStringExpr(AST::LiteralStringExprNode &node) { _expr.gen_literal_string(node); }
 void LLVMCompiler::visitFunctionCallExpr(AST::FunctionCallExprNode &node) { _expr.gen_function_call(node); }
 void LLVMCompiler::visit_addr_of_expr(AST::AddrOfExprNode &node) { _expr.gen_addr_of(node); }
+void LLVMCompiler::visit_function_ref_expr(AST::FunctionRefExprNode &node) { _expr.gen_function_ref(node); }
 void LLVMCompiler::visit_deref_expr(AST::DerefExprNode &node) { _expr.gen_deref(node); }
 void LLVMCompiler::visit_index_expr(AST::IndexExprNode &node) { _expr.gen_index(node); }
 

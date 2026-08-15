@@ -49,6 +49,7 @@ namespace AST
         n_expr_chain_base,
         n_expr_closure,
         n_expr_indirect_call,
+        n_expr_function_ref,
         n_expr_instanceof,
         n_expr_temp_bind,
         n_expr_match,

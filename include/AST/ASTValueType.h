@@ -77,6 +77,12 @@ namespace AST
         // a callable value: `function<R(P...)>`. structural like a pointer and for the same reason -
         // it carries nothing but its signature, so two spellings of one signature must be one type
         t_callable,
+        // a C function pointer: `extern function<R(P...)>`. the same signature a callable has, and
+        // deliberately a kind rather than a flag on t_callable - weak's argument, verbatim. as a flag,
+        // every is_callable() site keeps compiling and several are silently wrong: gen_indirect_call
+        // would extractvalue a second word past the end of a one-word value. as a kind each site has
+        // to be visited on purpose. one opaque ptr, C's convention, no environment
+        t_c_function,
         t_unknown
     };
 
@@ -346,6 +352,7 @@ namespace AST
         // `function<R(P...)>`. the signature is shared rather than interned, so equality is structural
         // all the way down - see CallableSignature
         static ValueType make_callable(ValueType return_type, std::vector<ValueType> parameter_types);
+        static ValueType make_c_function(ValueType return_type, std::vector<ValueType> parameter_types);
 
         ValueType() = default;
         ValueType(ValueTypePrimitive primitive) :
@@ -387,6 +394,18 @@ namespace AST
             return kind == ValueTypeKind::t_callable;
         }
 
+        bool is_c_function() const {
+            return kind == ValueTypeKind::t_c_function;
+        }
+
+        // **does this type carry a CallableSignature and can it be invoked?** the shared
+        // question `is_callable()` and `is_c_function()` both answer yes to. the kind split
+        // stays for the sites that do different work - one word vs two, C's convention vs
+        // Echo's. every other `||` of the two is this
+        bool has_signature() const {
+            return is_callable() || is_c_function();
+        }
+
         bool is_weak() const {
             return kind == ValueTypeKind::t_weak;
         }
@@ -403,7 +422,7 @@ namespace AST
         // lowering that picks the shape, the coercion that wraps and unwraps, and the comparison that
         // tests one against `null`. two of them answering differently is a wrong load with no diagnostic
         bool has_null_representation() const {
-            return is_pointer() || is_class() || is_weak();
+            return is_pointer() || is_class() || is_weak() || is_c_function();
         }
 
         // `T?` over something with no spare null value, so it is a tagged pair rather than the payload
@@ -652,8 +671,11 @@ namespace AST
                     return _complex_type == other._complex_type;
 
                 // structural, like a pointer: a signature carries no identity of its own, so two
-                // separately written `function<void(int32)>`s are one type
+                // separately written `function<void(int32)>`s are one type. a C function pointer
+                // shares the comparison and not the kind, so `function<void()>` and
+                // `extern function<void()>` stay distinct
                 case ValueTypeKind::t_callable:
+                case ValueTypeKind::t_c_function:
                     return signatures_are_equal(*this, other);
 
                 // identity is the declaration itself, mirroring how struct/class compare their
@@ -701,8 +723,9 @@ namespace AST
         // cannot cross from one kind to the other without saying which it meant
         std::shared_ptr<const ValueType> _pointee = nullptr;
 
-        // for the t_callable kind: the signature. shared and structurally compared, for the same
-        // reason _pointee is
+        // for the t_callable and t_c_function kinds: the signature. shared and structurally
+        // compared, for the same reason _pointee is. the *signature* is the same question; the
+        // calling shape is the kind
         std::shared_ptr<const CallableSignature> _signature = nullptr;
 
         ValueType(ValueTypeKind kind, ValueTypePrimitive primitive) : kind(kind), primitive(primitive) {}
@@ -736,9 +759,17 @@ namespace AST
         return type;
     }
 
+    inline ValueType ValueType::make_c_function(ValueType return_type, std::vector<ValueType> parameter_types)
+    {
+        ValueType type(ValueTypeKind::t_c_function, ValueTypePrimitive::t_void);
+        type._signature = std::make_shared<const CallableSignature>(
+            CallableSignature { std::move(return_type), std::move(parameter_types) });
+        return type;
+    }
+
     inline const CallableSignature &ValueType::signature() const
     {
-        assert(is_callable() && "only a callable has a signature");
+        assert(has_signature() && "only a callable or a C function pointer has a signature");
         return *_signature;
     }
 
@@ -1307,7 +1338,7 @@ namespace std
             // structural, so the hash has to be too - mixed for the reason above, and over the
             // return type as well as the parameters, since `function<int32()>` and
             // `function<void()>` differ only there
-            else if (vt.is_callable()) {
+            else if (vt.has_signature()) {
                 h ^= (*this)(vt.signature().return_type) + 0x9e3779b9 + (h << 6) + (h >> 2);
                 for (const auto &param : vt.signature().parameter_types) {
                     h ^= (*this)(param) + 0x9e3779b9 + (h << 6) + (h >> 2);

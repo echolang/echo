@@ -4,6 +4,7 @@
 
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCFunction.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTFunctionMatcher.h"
@@ -192,6 +193,7 @@ namespace AST
                 const ValueType expected = call.decl->args[i]->type();
 
                 bind_null_to(call.arguments[i], expected);
+                bind_function_ref_to(call.arguments[i], expected, collector.functions);
 
                 // **the one destination a shorthand cannot reach at parse time**, which is why it is
                 // here rather than only in the expression parser: a parameter's type sits on a

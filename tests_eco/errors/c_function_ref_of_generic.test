@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_ref_of_generic.eco:6:36
+
+  cannot take the address of 'id' - a generic function has no single symbol to take the address of.
+
+  5 | 
+  6 | extern function<int32(int32)> $f = &id;
+    :                                    ^
+  7 | 
+
+1 error, nothing was compiled.

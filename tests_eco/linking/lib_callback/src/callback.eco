@@ -1,0 +1,10 @@
+namespace callback;
+
+extern {
+    function eco_cb_apply(extern function<int32(int32)> $fn, int32 $v) : int32;
+}
+
+public function apply(extern function<int32(int32)> $fn, int32 $v) : int32
+{
+    return eco_cb_apply($fn, $v);
+}

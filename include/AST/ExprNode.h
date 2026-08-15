@@ -579,6 +579,58 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
     };
 
+    // `&name` - the address of a named function, as a C function pointer.
+    //
+    // the sole producer of an `extern function<R(P...)>` value. the operand is a name path, not a
+    // word: `&f`, `&math::clamp`, `&Point::origin`. resolved through the same overloads() /
+    // find_static_functions a call site uses. no thunk: a non-closure FunctionDeclNode already
+    // lowers with no environment, so this is the direct address of the mangled llvm::Function
+    //
+    // **GuardNode is the transient precedent, not ForeachNode.** the node reaches codegen either
+    // way, so it owes OwnershipPass::body_is_concrete a false while undecided, owes
+    // PointerAdjuster no throw, and a refused one is kept in the tree rather than forgotten
+    class FunctionRefExprNode : public ExprNode
+    {
+    public:
+        ECO_AST_NODE_TYPE(n_expr_function_ref);
+
+        TokenReference token_amp;
+        TokenReference token_name;
+
+        // the namespace a free-function name is looked up in. unused when the ref is static
+        const Namespace *lookup_namespace = nullptr;
+        bool is_qualified = false;
+
+        // set for `&Type::name`. unknown when the name is free
+        ValueType static_owner;
+
+        FunctionDeclNode *decl = nullptr;
+
+        // true once there is exactly one candidate, or a refusal has been reported. false while
+        // several candidates remain and a destination has not spoken. keyed the way
+        // GuardNode::plan_decided is
+        bool resolved = false;
+
+        FunctionRefExprNode(TokenReference token_amp, TokenReference token_name) :
+            token_amp(token_amp), token_name(std::move(token_name)) {};
+
+        ~FunctionRefExprNode() {}
+
+        bool is_static() const {
+            return static_owner.has_complex_type();
+        }
+
+        ValueType result_type() const override;
+
+        const std::string node_description() override;
+
+        void accept(Visitor &visitor) override {
+            visitor.visit_function_ref_expr(*this);
+        }
+
+        Node *clone(CloneContext &cc) const override;
+    };
+
     // true when the expression is a call, whichever of the two kinds above it is. a caller asking this
     // is asking "may this expression stand alone as a statement" or "is a value being produced by
     // invoking something" - neither question cares which, and spelling out one of the two tags is how

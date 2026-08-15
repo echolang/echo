@@ -3,7 +3,8 @@
 AST::AccessFamily AST::access_family_of(const AST::ValueType &type)
 {
     // an address is one family whatever it addresses - see the header
-    if (type.is_pointer() || type.is_class() || type.is_weak() || type.is_callable() || type.is_interface()) {
+    if (type.is_pointer() || type.is_class() || type.is_weak() || type.has_signature()
+        || type.is_interface()) {
         return AST::AccessFamily::t_address;
     }
 

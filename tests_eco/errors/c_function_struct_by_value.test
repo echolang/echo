@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_struct_by_value.eco:6:30
+
+  'extern function<void(Point)>' is not a C-callable signature - 'Point' cannot cross a C function-pointer boundary by value - echoc and clang classify a struct differently, and the disagreement is silent. Pass a 'ptr<Point>' instead.
+
+  5 | 
+  6 | extern function<void(Point)> $f;
+    :                              ^^
+  7 | 
+
+1 error, nothing was compiled.

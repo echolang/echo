@@ -44,7 +44,8 @@ namespace AST
     bool conforms_to(const ComplexType *ct, const ValueType &interface);
 
     // the same question asked of a type rather than a layout, so a caller with a ValueType in hand does
-    // not have to unwrap it and guard the null. a primitive, a pointer or a callable conforms to nothing
+    // not have to unwrap it and guard the null. a primitive, a pointer, a callable or a C
+    // function pointer conforms to nothing
     bool conforms_to(const ValueType &type, const ValueType &interface);
 
     // the requirements `interface` declares, in **declaration order** - which is also vtable slot order,

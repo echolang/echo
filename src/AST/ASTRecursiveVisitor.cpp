@@ -392,6 +392,11 @@ void RecursiveVisitor::visit_indirect_call_expr(IndirectCallExprNode &node)
     value_edges(node.arguments);
 }
 
+void RecursiveVisitor::visit_function_ref_expr(FunctionRefExprNode &)
+{
+    // a name, not an operand. the declaration it resolves to is a cross-reference
+}
+
 void RecursiveVisitor::visit_instanceof_expr(InstanceOfExprNode &node)
 {
     value_edge(node.operand);

@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] address_of_call_result.eco:6:11
 
-  Cannot take the address of an expression that has no storage
+  cannot take the address of a call - '&f(...)' is the address of a result, and a result has none. Write '&f' for the function itself.
 
   5 | 
   6 | int& $r = &get();

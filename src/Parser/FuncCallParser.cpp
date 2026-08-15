@@ -210,7 +210,7 @@ AST::IndirectCallExprNode *Parser::parse_indirect_call(
 
     // reported here rather than in the type checker because the *shape* is what is wrong: `$x(1)` on a
     // non-callable is not a call with bad arguments, it is not a call at all
-    if (!callee_type.is_callable()) {
+    if (!callee_type.has_signature()) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(at),
             fmt::format(

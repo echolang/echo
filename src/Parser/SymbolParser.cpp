@@ -318,7 +318,7 @@ void Parser::parse_declaration_surface(
 
             parse_testdecl(payload, /*symbol_only=*/true);
         }
-        else if (cursor.is_type(Token::Type::t_extern)) {
+        else if (cursor.is_type(Token::Type::t_extern) && !starts_c_function_type(cursor)) {
             // walked in this pass too, so the node it produces already knows it is extern. otherwise
             // a cross-module call would resolve to this node and mangle the Echo name while codegen
             // emitted the raw C symbol - an undefined symbol at link time. registration happens

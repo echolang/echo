@@ -32,6 +32,7 @@ namespace AST
     class FunctionCallExprNode;
     class ClosureExprNode;
     class IndirectCallExprNode;
+    class FunctionRefExprNode;
     class AddrOfExprNode;
     class StrongExprNode;
     class NullCoalesceExprNode;
@@ -84,6 +85,7 @@ namespace Compiler::LLVM
         // has no symbol at all. dispatches on AST::BuiltinKind to one of the three below
         void gen_builtin_call(AST::FunctionCallExprNode &node);
         void gen_addr_of(AST::AddrOfExprNode &node);
+        void gen_function_ref(AST::FunctionRefExprNode &node);
 
         // `strong($w)`. the branch-and-phi lives in ClassCodegen beside the counts it reads, so this arm
         // only evaluates the operand and routes - the same split gen_ref_count_builtin makes

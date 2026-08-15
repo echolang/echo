@@ -269,7 +269,7 @@ void PointerAdjuster::visit_indirect_call_expr(IndirectCallExprNode &node)
     const ValueType callee_type = node.callee_type();
     node.callee = as_value_for(node.callee, callee_type);
 
-    if (!callee_type.is_callable()) {
+    if (!callee_type.has_signature()) {
         return;
     }
 

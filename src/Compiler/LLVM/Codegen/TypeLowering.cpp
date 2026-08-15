@@ -1002,14 +1002,19 @@ llvm::Constant *TypeLowering::get_or_create_vtable(
 
 llvm::FunctionType *TypeLowering::get_llvm_function_type(
     const AST::CallableSignature &signature,
-    const Compiler::LLVM::CmpUnit &cmp_unit
+    const Compiler::LLVM::CmpUnit &cmp_unit,
+    FunctionCallingShape shape
 )
 {
     std::vector<llvm::Type *> param_types;
     param_types.reserve(signature.parameter_types.size() + 1);
 
-    // the environment first, always - see the header. a non-capturing target ignores it
-    param_types.push_back(llvm::PointerType::get(*_ctx.llvm_context, 0));
+    // the environment first, under Echo's shape - see the header. a non-capturing target ignores it.
+    // a C function pointer has no environment, and saying so at the call site is the whole of
+    // FunctionCallingShape
+    if (shape == FunctionCallingShape::t_echo) {
+        param_types.push_back(llvm::PointerType::get(*_ctx.llvm_context, 0));
+    }
 
     for (const auto &param : signature.parameter_types) {
         param_types.push_back(get_llvm_type(param, cmp_unit));
@@ -1078,6 +1083,12 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     // Echo type and must be one llvm::Type, which an anonymous StructType gives for free
     if (type.is_callable()) {
         return callable_llvm_type();
+    }
+
+    // a C function pointer is one opaque word - C's shape, no environment. a kind rather than a
+    // flag on the callable so this cannot silently share the two-word lowering above
+    if (type.is_c_function()) {
+        return llvm::PointerType::get(*_ctx.llvm_context, 0);
     }
 
     // an interface *value* is a fat pointer too, `{ ptr object, ptr vtable }`, and for the callable's

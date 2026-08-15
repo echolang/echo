@@ -87,6 +87,9 @@ namespace AST
             // question would be incoherent anyway - the address of a value the compiler worked out is not
             // a thing the program can be given
             case NodeType::n_expr_const:
+            // a function's address is already a value. giving it a slot would hand
+            // MaterializationScope storage it does not need
+            case NodeType::n_expr_function_ref:
             // already carries its own request outward through the pending queue
             case NodeType::n_expr_temp_bind:
                 return StorageClass::t_addressless;

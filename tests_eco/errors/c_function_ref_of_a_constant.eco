@@ -1,0 +1,3 @@
+const BITS = 7;
+
+$x = &BITS;

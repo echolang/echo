@@ -1,6 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTCFunction.h"
 #include "AST/ASTVariadic.h"
 
 
@@ -99,7 +100,8 @@ static bool demands_exact_conversion(const ValueType &type)
     // agree on nothing, and the only thing that catches a wrong `fn` slot afterwards is a crash
     // and a weak, for the third time the same reason: there is no conversion into or out of one, so a cast
     // that claimed otherwise would be reinterpreting a handle whose object may already be gone
-    return type.is_pointer() || type.has_complex_type() || type.is_callable() || type.is_weak();
+    return type.is_pointer() || type.has_complex_type() || type.has_signature()
+        || type.is_weak();
 }
 
 // names the storage an assignment target denotes, so a const diagnostic can say what the user
@@ -215,6 +217,21 @@ void TypeChecker::visitFunctionDecl(FunctionDeclNode &node)
     check_has_implementation(node);
     check_variadic_args_position(node);
 
+    if (node.name_token.has_value()) {
+        check_c_function_type(node.get_return_type(), node.name_token.value());
+
+        // a generic template returns before the args are walked as VarDecls, so they
+        // are asked here. a concrete body walks them through visitVarDecl instead -
+        // checking both is two sentences for one parameter
+        if (node.is_generic()) {
+            for (VarDeclNode *arg : node.args) {
+                if (arg != nullptr && arg->has_type()) {
+                    check_c_function_type(arg->type(), node.name_token.value());
+                }
+            }
+        }
+    }
+
     // a generic template's body legitimately mentions its type parameters; it is only
     // meaningful once cloned into a concrete instance, which is checked separately
     if (node.is_generic()) {
@@ -317,23 +334,28 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
         }
     }
 
-    if (decl->visibility == Visibility::t_public) {
+    check_named_function_visibility(*decl, node.token_function_name);
+}
+
+void TypeChecker::check_named_function_visibility(const FunctionDeclNode &decl, const TokenReference &at)
+{
+    if (decl.visibility == Visibility::t_public) {
         return;
     }
 
     // the *owner* axis: a `private` method or constructor. asked through AST::enclosing_type_of on both
     // sides rather than off `owner_type`, which is null on a constructor - the one shape that has to reach
     // its own type's privates and the reason that function exists at all
-    if (decl->visibility == Visibility::t_owner) {
-        const ComplexType *owner = enclosing_type_of(*decl);
+    if (decl.visibility == Visibility::t_owner) {
+        const ComplexType *owner = enclosing_type_of(decl);
 
         if (can_reach_private_member(enclosing_type(), owner)) {
             return;
         }
 
         _collector.collect_issue<Issue::PrivateMethod>(
-            code_ref_for(node.token_function_name),
-            decl->signature_description(),
+            code_ref_for(at),
+            decl.signature_description(),
             owner != nullptr ? owner->namespaced_name() : std::string("<unknown type>"));
 
         return;
@@ -346,15 +368,15 @@ void TypeChecker::check_call_visibility(FunctionCallExprNode &node)
     // the answer first and the sentence only if it is no - see the split's comment in ASTVisibility.h.
     // `signature_description()` walks the namespace chain and renders every parameter type, and this runs
     // at every call to every declaration that did not say `public`
-    if (visible_from(decl->visibility, decl->declared_in, from)) {
+    if (visible_from(decl.visibility, decl.declared_in, from)) {
         return;
     }
 
     _collector.collect_issue<Issue::InaccessibleDeclaration>(
-        code_ref_for(node.token_function_name),
-        visibility_refusal(decl->visibility, decl->declared_in, from, decl->signature_description()),
-        decl->declared_in,
-        std::optional<TokenReference>(decl->declaration_site_token()));
+        code_ref_for(at),
+        visibility_refusal(decl.visibility, decl.declared_in, from, decl.signature_description()),
+        decl.declared_in,
+        std::optional<TokenReference>(decl.declaration_site_token()));
 }
 
 void TypeChecker::check_variadic_argument(FunctionCallExprNode &node)
@@ -404,6 +426,46 @@ void TypeChecker::check_variadic_argument(FunctionCallExprNode &node)
         _collector.collect_issue<Issue::GenericError>(
             code_ref_for(location_of_expression(element)),
             std::move(refusal.value()));
+    }
+}
+
+void TypeChecker::check_c_function_type(const ValueType &type, const TokenReference &at)
+{
+    if (type.is_pointer()) {
+        check_c_function_type(type.pointee(), at);
+        return;
+    }
+
+    if (type.is_weak()) {
+        check_c_function_type(type.weak_target(), at);
+        return;
+    }
+
+    if (type.has_signature()) {
+        if (type.is_c_function()) {
+            if (auto refusal = c_function_signature_refusal(type.signature(), _collector.core_types)) {
+                _collector.collect_issue<Issue::GenericError>(
+                    code_ref_for(at),
+                    fmt::format(
+                        "'{}' is not a C-callable signature - {}",
+                        type.get_type_desciption(),
+                        refusal.value()));
+            }
+        }
+
+        check_c_function_type(type.signature().return_type, at);
+
+        for (const auto &parameter : type.signature().parameter_types) {
+            check_c_function_type(parameter, at);
+        }
+
+        return;
+    }
+
+    if (type.has_complex_type() && type.get_complex_type()->is_instantiated()) {
+        for (const auto &arg : type.get_complex_type()->instantiation_args) {
+            check_c_function_type(arg, at);
+        }
     }
 }
 
@@ -1366,7 +1428,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
                     fmt::format("'echo' has no way to print a '{}' - print its members instead",
                         type.get_type_desciption()));
             }
-            else if (type.is_callable()) {
+            else if (type.has_signature()) {
                 // reported here for the reason the two above are: ExprCodegen has no printf conversion
                 // for it and throws an *internal compiler error*, which is not the user's mistake to read
                 _collector.collect_issue<Issue::GenericError>(
@@ -1404,7 +1466,7 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
     // ("this is not callable") and the arity are the parser's, reported where the call was written; what
     // is left is whether each argument reaches its parameter, which is the same question a direct call
     // asks and the same one answer
-    if (callee_type.is_callable()) {
+    if (callee_type.has_signature()) {
         const auto &signature = callee_type.signature();
 
         if (node.arguments.size() == signature.parameter_types.size()) {
@@ -1775,9 +1837,21 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     // scoped to the destinations that have no conversion to fall back on: that is the surface where
     // a mismatch is a real error rather than a widening. `T&` widens to `ptr<T>` freely while the
     // narrowing back asserts non-nullness and needs the explicit cast, and a struct slot takes
-    // nothing but that struct. null answers to its own rules, and an undeterminable type to other
-    // diagnostics
+    // nothing but that struct. null answers to its own rules.
+    //
+    // a `&name` that is unfinished or already refused answers to visit_function_ref_expr (or
+    // the parser's spelling refusal). a bound legal one still has to fit, so `&add1` at
+    // `extern function<float64(float64)>` is this check. waving every undetermined type
+    // through here let an untyped array literal reach a property as if it fitted
+    const FunctionRefExprNode *ref = function_ref_of(&value);
+    const bool function_ref_is_elsewhere =
+        ref != nullptr
+        && (!ref->resolved
+            || ref->decl == nullptr
+            || c_function_ref_refusal(*ref->decl).has_value());
+
     if (to.is_void() || from.is_void()
+        || function_ref_is_elsewhere
         || is_written_null(&value)
         || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
         || is_implicitly_convertible(from, to)) {
@@ -1807,7 +1881,10 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     // the hints are properties of the type pair rather than of the destination, so they are
     // phrased once here
     std::string hint;
-    if (!to.is_pointer() && from.is_pointer() && dest == Destination::t_assignment) {
+    if (to.is_c_function() && from.is_callable()) {
+        hint = " - a C function pointer has no environment, so name the function and pass '&name'";
+    }
+    else if (!to.is_pointer() && from.is_pointer() && dest == Destination::t_assignment) {
         hint = " - to change where a pointer points, assign to ':$'";
     }
     // only when the value is an address too: the cast the hint asks for narrows a nullable
@@ -1869,8 +1946,50 @@ void TypeChecker::visit_assign(AssignNode &node)
     RecursiveVisitor::visit_assign(node);
 }
 
+void TypeChecker::visit_function_ref_expr(FunctionRefExprNode &node)
+{
+    if (!node.resolved) {
+        const auto candidates = function_ref_candidates(node, _collector.functions);
+
+        std::string named;
+        for (size_t i = 0; i < candidates.size(); i++) {
+            named += (i > 0 ? ", " : "") + candidates[i]->signature_description();
+        }
+
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(node.token_amp),
+            candidates.empty()
+                ? fmt::format(
+                    "'&{}' names no function.",
+                    node.token_name.value())
+                : fmt::format(
+                    "'&{}' is ambiguous without a destination - could be {}. Give it a type, or "
+                    "pass it where an 'extern function<...>' is expected.",
+                    node.token_name.value(), named));
+    }
+    else if (node.decl != nullptr) {
+        if (auto refusal = c_function_ref_refusal(*node.decl)) {
+            _collector.collect_issue<Issue::GenericError>(
+                code_ref_for(node.token_amp),
+                fmt::format(
+                    "cannot take the address of '{}' - {}",
+                    node.token_name.value(),
+                    refusal.value()));
+        }
+        else {
+            check_named_function_visibility(*node.decl, node.token_name);
+        }
+    }
+
+    RecursiveVisitor::visit_function_ref_expr(node);
+}
+
 void TypeChecker::visitVarDecl(VarDeclNode &node)
 {
+    if (node.has_type()) {
+        check_c_function_type(node.type(), node.token_varname);
+    }
+
     if (node.has_type() && contains_type_param(node.type())) {
         _collector.collect_issue<Issue::UnresolvedTypeParameter>(
             code_ref_for(node.token_varname),

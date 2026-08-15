@@ -850,7 +850,10 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
     // agree only by grace of opaque pointers. callable_type() strips the receiver, implicit_arg_count()'s
     // own job, and get_llvm_function_type puts it back
     llvm::FunctionType *fn_type =
-        _ctx.types->get_llvm_function_type(node.decl->callable_type().signature(), *_ctx.current_cmp_unit);
+        _ctx.types->get_llvm_function_type(
+            node.decl->callable_type().signature(),
+            *_ctx.current_cmp_unit,
+            TypeLowering::FunctionCallingShape::t_echo);
 
     emit_call({ fn_type, callee }, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
 }
@@ -956,23 +959,30 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
 {
     const AST::ValueType callee_type = node.callee_type();
 
-    if (!callee_type.is_callable()) {
+    if (!callee_type.has_signature()) {
         throw _ctx.error(fmt::format(
             "An indirect call reached codegen over a '{}', which is not callable {}",
             callee_type.get_type_desciption(), _ctx.function_context()));
     }
 
     node.callee->accept(*_ctx.visitor);
-    llvm::Value *callable = _ctx.value_stack.top();
+    llvm::Value *callee_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
-    llvm::Value *fn = _ctx.builder->CreateExtractValue(callable, 0, "call.fn");
-    llvm::Value *env = _ctx.builder->CreateExtractValue(callable, 1, "call.env");
+    const bool c_function = callee_type.is_c_function();
 
-    // the environment leads, always - see TypeLowering::get_llvm_function_type. one shape for both kinds
-    // of target is what lets this site call either without asking which it has
+    // a C function pointer is one word and has no environment. a callable is two, and the
+    // environment leads - see TypeLowering::get_llvm_function_type. one lowering, the branch
+    // is only which word(s) we load
+    llvm::Value *fn = c_function
+        ? callee_value
+        : _ctx.builder->CreateExtractValue(callee_value, 0, "call.fn");
+
     std::vector<llvm::Value *> args;
-    args.push_back(env);
+
+    if (!c_function) {
+        args.push_back(_ctx.builder->CreateExtractValue(callee_value, 1, "call.env"));
+    }
 
     const auto &signature = callee_type.signature();
 
@@ -994,8 +1004,12 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         args.push_back(value);
     }
 
-    llvm::FunctionType *fn_type =
-        _ctx.types->get_llvm_function_type(signature, *_ctx.current_cmp_unit);
+    llvm::FunctionType *fn_type = _ctx.types->get_llvm_function_type(
+        signature,
+        *_ctx.current_cmp_unit,
+        c_function
+            ? TypeLowering::FunctionCallingShape::t_c
+            : TypeLowering::FunctionCallingShape::t_echo);
 
     emit_call(
         { fn_type, fn },
@@ -1472,6 +1486,25 @@ void ExprCodegen::gen_addr_of(AST::AddrOfExprNode &node)
     // `&E` is the address of E's slot, with no transparency peeling - gen_lvalue, not
     // gen_place. so `&$buf` on a `ptr<uint8>` yields the address of $buf itself
     _ctx.value_stack.push(_ctx.lvalues->gen_lvalue(*node.operand).address);
+}
+
+void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
+{
+    if (node.decl == nullptr) {
+        throw _ctx.error(fmt::format(
+            "an unresolved function reference reached codegen {}",
+            _ctx.function_context()));
+    }
+
+    llvm::Function *fn = find_llvm_function(node.decl);
+
+    if (fn == nullptr) {
+        throw _ctx.error(fmt::format(
+            "function reference '&{}' has no symbol {}",
+            node.token_name.value(), _ctx.function_context()));
+    }
+
+    _ctx.value_stack.push(fn);
 }
 
 void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)

@@ -759,6 +759,25 @@ llvm::DIType *DebugInfoCodegen::type_of(const AST::ValueType &type, CmpUnit &cmp
         return class_type_of(type, cmp_unit);
     }
 
+    if (type.is_c_function()) {
+        // a pointer to a subroutine type - the correct DWARF, and lldb formats it for free. the
+        // callable beside it is a synthetic `{ __fn, __env }` because that *is* two words
+        std::vector<llvm::Metadata *> signature;
+        signature.push_back(type_of(type.signature().return_type, cmp_unit));
+
+        for (const auto &parameter : type.signature().parameter_types) {
+            signature.push_back(type_of(parameter, cmp_unit));
+        }
+
+        llvm::DISubroutineType *subroutine =
+            unit->builder->createSubroutineType(unit->builder->getOrCreateTypeArray(signature));
+        llvm::DIType *result =
+            unit->builder->createPointerType(subroutine, ECO_TARGET_POINTER_SIZE * 8);
+
+        unit->types[type] = result;
+        return result;
+    }
+
     // the two shapes that are a pair of addresses and nothing else. one call site, because they differ
     // only in what the two halves are called
     if (type.is_callable() || type.is_interface()) {

@@ -1,0 +1,16 @@
+// a C function pointer is one word and copies as bytes, so storing and passing one
+// must not allocate. the point of classify_copy reaching t_bytes
+function add1(int32 $x) : int32
+{
+    return $x + 1;
+}
+
+echo mem::live_allocations();
+
+extern function<int32(int32)> $f = &add1;
+echo $f(41);
+
+extern function<int32(int32)> $copy = $f;
+echo $copy(41);
+
+echo mem::live_allocations();

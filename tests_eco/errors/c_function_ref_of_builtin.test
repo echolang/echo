@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_ref_of_builtin.eco:1:30
+
+  cannot take the address of 'die' - a builtin has no symbol at all - there is nothing to take the address of.
+
+  1 | extern function<void()> $f = &die;
+    :                              ^
+  2 | 
+
+1 error, nothing was compiled.

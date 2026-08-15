@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_callable_param.eco:1:41
+
+  'extern function<void(function<void()>)>' is not a C-callable signature - 'function<void()>' has no C spelling - it is two words the other side has no declaration for.
+
+  1 | extern function<void(function<void()>)> $f;
+    :                                         ^^
+  2 | 
+
+1 error, nothing was compiled.

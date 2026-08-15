@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_ref_of_a_constant.eco:3:6
+
+  a constant has no address - '&BITS' cannot be taken. Write '& BITS' with a space if you meant bitwise and.
+
+  2 | 
+  3 | $x = &BITS;
+    :      ^
+  4 | 
+
+1 error, nothing was compiled.

@@ -132,7 +132,7 @@ std::optional<std::string> AST::variadic_argument_refusal(const AST::ValueType &
             "a variadic argument has to be a value, and 'void' is not one.");
     }
 
-    if (type.is_primitive() || type.is_pointer()) {
+    if (type.is_primitive() || type.is_pointer() || type.is_c_function()) {
         return std::nullopt;
     }
 

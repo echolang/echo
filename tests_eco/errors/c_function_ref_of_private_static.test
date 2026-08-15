@@ -1,0 +1,16 @@
+expect: fail
+
+# `&name` asks the same visibility question a call does. a private static is
+# the owner axis, so taking its address from outside the type is the same
+# refusal as calling it
+--- OUT --->
+[error] PrivateMethod  c_function_ref_of_private_static.eco:13:39
+
+  'Point::origin()' is private to 'Point' and cannot be called from here. Only that type's own bodies reach it - if it is part of what 'Point' offers, drop the 'private'.
+
+  12 | 
+  13 | extern function<int32()> $f = &Point::origin;
+     :                                       ^^^^^^
+  14 | 
+
+1 error, nothing was compiled.

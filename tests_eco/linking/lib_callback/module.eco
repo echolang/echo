@@ -1,0 +1,11 @@
+/*
+ * A C function that takes a function pointer and calls it. The ABI proof for
+ * `extern function<...>`: Echo hands C the address of a function it compiled.
+ */
+
+#[module: "linkcallback"]
+#[version: "0.1.0"]
+
+#[cc: sources "c/*.c"]
+
+#[sources: "src/*.eco"]

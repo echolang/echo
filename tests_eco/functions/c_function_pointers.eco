@@ -1,0 +1,95 @@
+// the C function-pointer type in every position callable_values.eco covers, plus `&name`
+// of a plain function, an extern and a static, and calling one. no C library: `&f` is
+// the address of a function this compiler emitted, and calling it is the same
+// indirect-call node a callable uses
+
+function add1(int32 $x) : int32
+{
+    return $x + 1;
+}
+
+// a parameter, and calling through it
+function apply(extern function<int32(int32)> $f, int32 $v) : int32
+{
+    return $f($v);
+}
+
+echo apply(&add1, 41);
+
+// a return type
+function pick() : extern function<int32(int32)>
+{
+    return &add1;
+}
+
+extern function<int32(int32)> $picked = pick();
+echo $picked(41);
+
+// a const local
+const extern function<int32(int32)> $frozen = &add1;
+echo $frozen(41);
+
+// a borrow
+extern function<int32(int32)> $plain = &add1;
+
+function apply_ref(extern function<int32(int32)>& $f) : int32
+{
+    return $f(41);
+}
+
+echo apply_ref($plain);
+
+// a pointer to one
+ptr<extern function<int32(int32)>> $via = &$plain;
+echo $via(41);
+
+// a struct property
+struct Handler
+{
+    extern function<int32(int32)> $op;
+    int32 $tag;
+}
+
+Handler $h = Handler(&add1, 7);
+echo $h->op(41);
+echo $h->tag;
+
+// a class property
+class Cell
+{
+    extern function<int32(int32)> $get;
+}
+
+Cell $c = Cell(&add1);
+echo $c->get(41);
+
+// a generic argument
+struct Box<T> { T $value; }
+
+Box<extern function<int32(int32)>> $boxed = Box<extern function<int32(int32)>>(&add1);
+echo $boxed->value(41);
+
+// a static function
+struct Point
+{
+    static function origin() : int32
+    {
+        return 42;
+    }
+}
+
+extern function<int32()> $origin = &Point::origin;
+echo $origin();
+
+// nullable, null, and guard
+extern function<int32(int32)>? $maybe = null;
+$maybe = &add1;
+
+function unwrap_cb(extern function<int32(int32)>? $f) : int32
+{
+    $g = guard $f else { return 0; }
+    return $g(41);
+}
+
+echo unwrap_cb($maybe);
+echo unwrap_cb(null);

@@ -24,6 +24,11 @@ namespace Parser
     // file owns that grammar: can_parse_type, skip_type_shape and parse_value_type all ask it
     bool starts_callable_type(Cursor &cursor, size_t offset = 0);
 
+    // does the C function-pointer type `extern function<R(P...)>` start at `offset`? `extern`
+    // then the callable type, and the angle bracket is what keeps `extern function foo()` from
+    // being a type - that is still a missing `{`
+    bool starts_c_function_type(Cursor &cursor, size_t offset = 0);
+
     // true when the cursor sits on a variable declaration in any of its spellings - inferred
     // (`$x = ...`), typed (`int32 $x`), qualified, generic, borrowed, const or ptr. the one owner
     // of "what a declaration looks like", so a scope body and a struct body cannot disagree about

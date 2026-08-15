@@ -2,8 +2,6 @@
 
 #include "Parser/ExprParser.h"
 
-#include "AST/ASTMemberLookup.h"
-#include "AST/ASTNullability.h"
 #include "AST/TypeNode.h"
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
@@ -50,39 +48,14 @@ AST::ReturnNode &Parser::parse_return(Parser::Payload &payload)
         return payload.context.emplace_node<AST::ReturnNode>(nullptr, return_token);
     }
 
-    // parse the expression that follows the return keyword, typed against the declared return
-    // type the same way a variable declaration's initializer is typed against its variable
-    //
-    // operand arms re-ask AST::can_type_a_literal before using the hint, so a type that is only a
-    // *finished*-expression destination is inert for them. `bool` is that case: the shunting yard
-    // must not retype the `3` and `4` of `return 3 < 4;`, but parse_expr_ref must still see the
-    // hint so `return 1;` becomes `true` and `return 3;` is refused rather than compiled as
-    // truthiness. stripping bool here left that step with nothing to apply
-    //
-    // **except for a destination that admits absence**, which a `null` in this position genuinely needs:
-    // the empty value's *shape* depends on it. an address-like nullable is a null pointer and a wrapped
-    // one is a cleared tag, and a null that never learned which it was reached codegen as the former and
-    // was then wrapped as if it were present - `return null;` from a `Point?` function answered a
-    // `{ i1 true, ptr null }`, which is a value that says it is there and is not
-    //
-    // it was harmless while `null` could only ever go somewhere pointer-shaped. generalising the flag is
-    // what made the destination decide the representation, and this is the site that had to hear about it
-    //
-    // **and for a destination that names a static owner**, which `return .ok($v);` needs for the same
-    // reason: a shorthand has no type of its own, and the return type is the only thing in scope that
-    // says which one it is. widening the gate is inert for every other form - the three literal parsers
-    // each re-ask can_type_a_literal before *using* the hint, so a `result<T, E>` reaching them changes
-    // nothing about how a `1` or a `'x'` is typed
-    AST::TypeNode *expected_type = payload.context.return_type_ptr;
-    if (expected_type != nullptr
-        && !AST::can_type_a_literal(expected_type->type)
-        && !expected_type->type.is_boolean_type()
-        && !AST::destination_admits_null(expected_type->type)
-        && !AST::destination_names_a_static_owner(expected_type->type)) {
-        expected_type = nullptr;
-    }
-
-    auto expr = parse_expr(payload, expected_type);
+    // the declared return type, always. operand arms re-ask AST::can_type_a_literal before
+    // using the hint, so a type that is only a *finished*-expression destination is inert for
+    // them - the shunting yard must not retype the `3` and `4` of `return 3 < 4;`. the
+    // finished expression still sees it: `return 1;` at `bool` becomes `true`, `return null;`
+    // learns which empty value it is, `return .ok($v);` learns its owner, and `return &add;`
+    // picks the overload that matches. a growing allow-list of those cases was the previous
+    // shape, and the next destination that needed the hint was always the one left off it
+    auto expr = parse_expr(payload, payload.context.return_type_ptr);
 
     // ensure we have a semicolon at the end of the return statement
     if (payload.cursor.is_type(Token::Type::t_semicolon)) {

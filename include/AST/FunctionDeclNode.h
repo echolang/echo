@@ -225,11 +225,14 @@ namespace AST
         // it is how a closure reaches its captures, not something a caller passes or a signature
         // promises, exactly as a method's receiver is absent from `signature_description`
         ValueType callable_type() const {
-            std::vector<ValueType> params;
-            for (size_t i = implicit_arg_count(); i < args.size(); i++) {
-                params.push_back(parameter_type(i));
-            }
-            return ValueType::make_callable(get_return_type(), std::move(params));
+            return ValueType::make_callable(get_return_type(), written_parameter_types());
+        }
+
+        // the C function-pointer type of the same written parameters. `&f` produces this, not a
+        // callable: the calling shape is the kind, and the parameters a caller writes stay in one
+        // place
+        ValueType c_function_type() const {
+            return ValueType::make_c_function(get_return_type(), written_parameter_types());
         }
 
         // the 1-based position a reader would count `args[index]` at. the implicit receiver is not
@@ -431,6 +434,15 @@ namespace AST
         Node *clone(CloneContext &cc) const override;
 
     private:
+        // which parameters a caller writes, folded once so callable_type and c_function_type
+        // cannot drift about the implicit prefix
+        std::vector<ValueType> written_parameter_types() const {
+            std::vector<ValueType> params;
+            for (size_t i = implicit_arg_count(); i < args.size(); i++) {
+                params.push_back(parameter_type(i));
+            }
+            return params;
+        }
 
     };
 };

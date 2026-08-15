@@ -116,6 +116,12 @@ void DebugPrintCodegen::render(
         return;
     }
 
+    if (type.is_c_function()) {
+        text(fmt::format("[{}] {}fn=", type_name, label));
+        address(_ctx.lvalues->gen_load(place, "dprint.cfn"));
+        return;
+    }
+
     // the concrete type is a word in the heap block at runtime, and there is no name stored beside it to
     // print. no address either, so the output stays deterministic and a golden can assert on it
     if (type.is_interface()) {

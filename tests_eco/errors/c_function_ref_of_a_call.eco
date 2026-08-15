@@ -1,0 +1,6 @@
+function get() : int32
+{
+    return 5;
+}
+
+extern function<int32()> $f = &get();

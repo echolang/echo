@@ -1,0 +1,4 @@
+modules: linking/lib_callback
+
+--- OUT --->
+42

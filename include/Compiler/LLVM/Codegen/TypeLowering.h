@@ -196,12 +196,23 @@ namespace Compiler::LLVM
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
 
-        // the llvm::FunctionType a callable's `fn` slot points at. the environment is parameter 0,
-        // always, exactly the way a method's `$this` is - a capturing closure has nowhere else to read
-        // its captures from, and a uniform shape is what lets one indirect call site invoke either kind
+        // the calling shape get_llvm_function_type prepends an environment for, or does not. one
+        // argument rather than a second function, so the unconditional env prepend keeps one owner
+        // and both callers say which they meant
+        enum class FunctionCallingShape
+        {
+            t_echo,
+            t_c,
+        };
+
+        // the llvm::FunctionType a callable's `fn` slot points at. the environment is parameter 0
+        // under t_echo, always, exactly the way a method's `$this` is - a capturing closure has
+        // nowhere else to read its captures from, and a uniform shape is what lets one indirect
+        // call site invoke either kind. t_c is C's one-word shape: no environment
         llvm::FunctionType *get_llvm_function_type(
             const AST::CallableSignature &signature,
-            const Compiler::LLVM::CmpUnit &cmp_unit
+            const Compiler::LLVM::CmpUnit &cmp_unit,
+            FunctionCallingShape shape
         );
 
         // converts `value` from one echo type to another, emitting the widening, narrowing or

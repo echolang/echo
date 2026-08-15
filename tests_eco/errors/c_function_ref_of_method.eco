@@ -1,0 +1,9 @@
+struct Point
+{
+    function origin() : int32
+    {
+        return 0;
+    }
+}
+
+extern function<int32()> $f = &Point::origin;

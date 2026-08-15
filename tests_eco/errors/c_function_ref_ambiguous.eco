@@ -1,0 +1,11 @@
+function add(int32 $x) : int32
+{
+    return $x;
+}
+
+function add(float64 $x) : float64
+{
+    return $x;
+}
+
+$f = &add;

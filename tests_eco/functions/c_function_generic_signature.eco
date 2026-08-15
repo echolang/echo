@@ -1,0 +1,15 @@
+// a type parameter inside `extern function<...>` is legal on a template. the
+// signature becomes concrete at the instance, which is when a non-C component
+// is refused. `apply<int32>` is the instance that stays legal
+
+function apply<T>(extern function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+function add1(int32 $x) : int32
+{
+    return $x + 1;
+}
+
+echo apply<int32>(&add1, 41);

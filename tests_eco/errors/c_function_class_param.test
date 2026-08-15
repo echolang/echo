@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] c_function_class_param.eco:6:29
+
+  'extern function<void(Node)>' is not a C-callable signature - 'Node' is a reference counted handle, and handing its address to C leaves nothing holding a reference. Pass a 'ptr<...>' instead.
+
+  5 | 
+  6 | extern function<void(Node)> $f;
+    :                             ^^
+  7 | 
+
+1 error, nothing was compiled.

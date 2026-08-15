@@ -261,6 +261,9 @@ const TokenReference *source_token_of(const Node &node)
         case NodeType::n_expr_indirect_call:
             return &static_cast<const IndirectCallExprNode &>(node).token;
 
+        case NodeType::n_expr_function_ref:
+            return &static_cast<const FunctionRefExprNode &>(node).token_amp;
+
         case NodeType::n_expr_instanceof:
             return &static_cast<const InstanceOfExprNode &>(node).token_instanceof;
 

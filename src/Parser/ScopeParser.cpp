@@ -194,7 +194,7 @@ AST::ScopeNode & Parser::parse_scope(
             // diagnostic that appears twice
             parse_testdecl(payload, /*symbol_only=*/false);
         }
-        else if (cursor.is_type(Token::Type::t_extern)) {
+        else if (cursor.is_type(Token::Type::t_extern) && !starts_c_function_type(cursor)) {
             parse_extern_block(payload, visibility);
         }
         else if (cursor.is_type(Token::Type::t_return)) {

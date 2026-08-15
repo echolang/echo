@@ -1,0 +1,6 @@
+class Node
+{
+    int32 $id;
+}
+
+extern function<void(Node)> $f;

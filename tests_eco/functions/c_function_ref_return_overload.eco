@@ -1,0 +1,21 @@
+// an overloaded `&name` at a return destination has to bind against the
+// declared return type. parse_return used to strip that hint, so this read as
+// "ambiguous without a destination" while the destination sat on the function
+
+function add(int32 $x) : int32
+{
+    return $x;
+}
+
+function add(float64 $x) : float64
+{
+    return $x;
+}
+
+function pick() : extern function<int32(int32)>
+{
+    return &add;
+}
+
+extern function<int32(int32)> $f = pick();
+echo $f(41);

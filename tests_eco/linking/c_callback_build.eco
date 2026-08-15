@@ -1,0 +1,6 @@
+function double_it(int32 $x) : int32
+{
+    return $x * 2;
+}
+
+echo callback::apply(&double_it, 21);

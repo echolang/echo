@@ -1,0 +1,20 @@
+// the template is legal - T is not a refusal. the instance is not: Point cannot
+// cross a C function-pointer boundary by value, and that sentence has to land
+// on apply<Point>, not on the template
+
+struct Point
+{
+    int32 $x;
+}
+
+function apply<T>(extern function<T(T)> $f, T $v) : T
+{
+    return $f($v);
+}
+
+function id(Point $p) : Point
+{
+    return $p;
+}
+
+Point $out = apply<Point>(&id, Point(1));

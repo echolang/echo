@@ -299,7 +299,7 @@ AST::ValueType AST::IndirectCallExprNode::result_type() const
     // FunctionCallExprNode with no decl answers under
     const ValueType type = callee_type();
 
-    if (!type.is_callable()) {
+    if (!type.has_signature()) {
         return ValueType::make_void();
     }
 
@@ -312,6 +312,21 @@ const std::string AST::ClosureExprNode::node_description()
         + (decl != nullptr ? decl->decorated_func_name() : "<null>")
         + (captured_values.empty() ? ", no captures" : ", captures " + std::to_string(captured_values.size()))
         + ")";
+}
+
+AST::ValueType AST::FunctionRefExprNode::result_type() const
+{
+    if (decl == nullptr) {
+        return ValueType::make_unknown();
+    }
+
+    return decl->c_function_type();
+}
+
+const std::string AST::FunctionRefExprNode::node_description()
+{
+    return "function_ref &" + token_name.value()
+        + (decl != nullptr ? " -> " + result_type().get_type_desciption() : "");
 }
 
 const std::string AST::IndirectCallExprNode::node_description()
