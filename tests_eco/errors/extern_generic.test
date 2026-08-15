@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] extern_generic.eco:4:24
+[error] ExternGeneric  extern_generic.eco:4:24
 
   An extern function cannot be generic - a single C symbol has no per-instantiation body
 

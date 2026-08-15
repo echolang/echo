@@ -17,7 +17,7 @@ FixpointLowering::FixpointLowering(Bundle &bundle)
 
 CodeRef FixpointLowering::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 size_t FixpointLowering::next_hoist_index()

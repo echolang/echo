@@ -2,6 +2,11 @@ modules: modules/empty_sources
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] EmptySourcePattern  module.eco:1:1
 
-  module.eco: the sources pattern 'nope/*.eco' matched no files.
+  the sources pattern 'nope/*.eco' matched no files.
+
+  1 | #[module: "emptysrc"]
+    : ^
+  2 | #[sources: "nope/*.eco"]
+

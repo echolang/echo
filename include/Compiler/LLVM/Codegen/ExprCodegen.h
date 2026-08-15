@@ -6,6 +6,7 @@
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
 #include "Compiler/LLVM/Codegen/ReturnAbi.h"
+#include "Token.h"
 
 #include <llvm/IR/DerivedTypes.h>
 
@@ -250,7 +251,7 @@ namespace Compiler::LLVM
         // stops when `address` is null. emitted where a nullable pointer is narrowed to a
         // borrow, which is the one conversion that asserts rather than merely reinterprets
         // debug builds only - in release the narrowing is unchecked, as the doc says
-        void gen_null_assert(llvm::Value *address);
+        void gen_null_assert(llvm::Value *address, const TokenReference &at);
     };
 };
 

@@ -191,7 +191,7 @@ AST::ExprNode *Parser::parse_assigned_value(
     // storage behind it, so `$p:$:$ = &$q` reached the lvalue codegen's "not addressable" throw with
     // no location at all
     if (!AST::is_assignable_target(*target)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::AssignToNonPlace>(
             payload.context.code_ref(assign_token),
             "cannot assign to this expression - it has no storage to write into");
         cursor.try_skip_to_next_statement();
@@ -345,7 +345,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
         if (cursor.is_type(Token::Type::t_op_inc) || cursor.is_type(Token::Type::t_op_dec)) {
             // the same destination rule the `=` path applies - `$p:$` is legal, `$p:$:$++` is not
             if (!AST::is_assignable_target(*target)) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.collector.collect_issue<AST::Issue::AssignToNonPlace>(
                     payload.context.code_ref(assign_token),
                     "'" + assign_token.value() + "' needs an expression with storage to step");
                 cursor.try_skip_to_next_statement();

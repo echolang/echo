@@ -378,7 +378,7 @@ namespace AST
 
     CodeRef code_ref_at_literal(const CodeRef &within, const ExprNode *literal)
     {
-        return CodeRef { within.module, within.file, literal_token_of(literal).make_slice() };
+        return CodeRef { within.module, literal_token_of(literal).make_slice() };
     }
 
     void report_literal_refusal(
@@ -560,11 +560,10 @@ namespace AST
     void report_binary_reconciliation(
         Collector &collector,
         const Module *module,
-        const File *file,
         const BinaryReconciliation &reconciled)
     {
         const auto at = [&](const ExprNode *literal) {
-            return CodeRef { module, file, literal_token_of(literal).make_slice() };
+            return CodeRef { module, literal_token_of(literal).make_slice() };
         };
 
         if (reconciled.warning.has_value()) {
@@ -716,7 +715,7 @@ namespace AST
                 return;
             }
 
-            const CodeRef here = code_ref_at_literal(CodeRef{&_module, file, at.make_slice()}, slot);
+            const CodeRef here = code_ref_at_literal(CodeRef{&_module, at.make_slice()}, slot);
 
             report_literal_warning(_collector, here, typing);
 

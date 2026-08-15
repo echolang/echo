@@ -37,7 +37,7 @@ ArrayLiteralExpansion::ArrayLiteralExpansion(
 
 CodeRef ArrayLiteralExpansion::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{&_module, _file, token.make_slice()};
+    return CodeRef{&_module, token.make_slice()};
 }
 
 ArrayLiteralExpansion::Destination ArrayLiteralExpansion::destination_of(Node *statement)

@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] destructor_with_return_type.eco:7:5
+[error] DestructorHasReturnType  destructor_with_return_type.eco:7:5
 
   A destructor returns nothing - drop the ': type'.
 

@@ -2,6 +2,12 @@ modules: linking/lib_bad_scheme
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidAttributeValue  module.eco:10:9
 
-  module.eco:10: 'framwork' is not a link scheme, expected one of: lib, framework, search, object.
+  'framwork' is not a link scheme, expected one of: lib, framework, search, object.
+
+   9 | 
+  10 | #[link: framwork "OpenGL"]
+     :         ^^^^^^^^
+  11 | 
+

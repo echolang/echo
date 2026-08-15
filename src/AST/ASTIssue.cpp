@@ -322,10 +322,7 @@ ISSUE_MESSAGE_FNC(InaccessibleDeclaration)
 
 std::vector<AST::IssueLabel> AST::Issue::InaccessibleDeclaration::labels() const
 {
-    // the label only where the renderer can place it: a token another module owns resolves to no file
-    // through the module this issue was built against, and the fallback would draw its line numbers
-    // inside the file the diagnostic is already showing - see the kind's comment
-    if (!declaration_token.has_value() || declared_in.module != code_ref.module) {
+    if (!declaration_token.has_value()) {
         return {};
     }
 
@@ -350,3 +347,57 @@ std::vector<AST::IssueNote> AST::Issue::ConflictingAccess::notes() const
 
     return { IssueNote { NoteKind::t_help, remedy } };
 }
+
+namespace
+{
+    std::vector<AST::IssueNote> help_if(const std::string &remedy)
+    {
+        if (remedy.empty()) {
+            return {};
+        }
+
+        return { AST::IssueNote { AST::NoteKind::t_help, remedy } };
+    }
+};
+
+ISSUE_MESSAGE_FNC(AddressOfTemporary) { return _message; }
+
+ISSUE_MESSAGE_FNC(TemporaryMember) { return _message; }
+std::vector<AST::IssueNote> AST::Issue::TemporaryMember::notes() const { return help_if(remedy); }
+
+ISSUE_MESSAGE_FNC(AssignToNonPlace) { return _message; }
+ISSUE_MESSAGE_FNC(UseAfterMove) { return _message; }
+ISSUE_MESSAGE_FNC(ConditionalMove) { return _message; }
+ISSUE_MESSAGE_FNC(PartialMove) { return _message; }
+ISSUE_MESSAGE_FNC(MoveOfTemporary) { return _message; }
+ISSUE_MESSAGE_FNC(MoveRequired) { return _message; }
+
+ISSUE_MESSAGE_FNC(CannotCopy) { return _message; }
+std::vector<AST::IssueNote> AST::Issue::CannotCopy::notes() const { return help_if(remedy); }
+
+ISSUE_MESSAGE_FNC(NotIterable) { return _message; }
+ISSUE_MESSAGE_FNC(ForeachBinding) { return _message; }
+ISSUE_MESSAGE_FNC(ForeachKey) { return _message; }
+ISSUE_MESSAGE_FNC(ForeachConstBorrow) { return _message; }
+
+ISSUE_MESSAGE_FNC(BodylessFunction) { return _message; }
+ISSUE_MESSAGE_FNC(ExternHasBody) { return _message; }
+ISSUE_MESSAGE_FNC(ExternGeneric) { return _message; }
+ISSUE_MESSAGE_FNC(DestructorHasParameters) { return _message; }
+ISSUE_MESSAGE_FNC(DestructorHasReturnType) { return _message; }
+ISSUE_MESSAGE_FNC(DuplicateDestructor) { return _message; }
+ISSUE_MESSAGE_FNC(InvalidImplicitConversion) { return _message; }
+ISSUE_MESSAGE_FNC(InvalidAttributeValue) { return _message; }
+
+ISSUE_MESSAGE_FNC(UnknownManifestAttribute) { return _message; }
+ISSUE_MESSAGE_FNC(RepeatedManifestAttribute) { return _message; }
+ISSUE_MESSAGE_FNC(MissingModuleAttribute) { return _message; }
+ISSUE_MESSAGE_FNC(UnusableModuleName) { return _message; }
+ISSUE_MESSAGE_FNC(InvalidManifestScope) { return _message; }
+ISSUE_MESSAGE_FNC(EmptySourcePattern) { return _message; }
+ISSUE_MESSAGE_FNC(UnresolvableDependency) { return _message; }
+ISSUE_MESSAGE_FNC(DuplicateModuleName) { return _message; }
+ISSUE_MESSAGE_FNC(ModuleDependencyCycle) { return _message; }
+ISSUE_MESSAGE_FNC(NoSuchManifest) { return _message; }
+ISSUE_MESSAGE_FNC(UnusableTargetName) { return _message; }
+ISSUE_MESSAGE_FNC(TargetEntryNotASource) { return _message; }

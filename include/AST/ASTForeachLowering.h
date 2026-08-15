@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTCollector.h"
 #include "AST/ASTFixpointLowering.h"
 #include "AST/ASTIteration.h"
 #include "AST/ASTValueType.h"
@@ -82,7 +83,9 @@ namespace AST
         void lower(ScopeNode &scope, size_t index);
 
         // reports and discards, in that order - one function, because forgetting the discard is the
-        // silent half and there are three arms that must not forget it
+        // silent half and there are three arms that must not forget it. the kind is the thing that
+        // went wrong, not a place in this pass
+        template <typename Issue>
         void refuse(
             ScopeNode &scope, size_t index, ForeachNode &loop, const TokenReference &at, std::string why);
 
@@ -98,5 +101,13 @@ namespace AST
         );
     };
 };
+
+template <typename Issue>
+void AST::ForeachLowering::refuse(
+    ScopeNode &scope, size_t index, ForeachNode &loop, const TokenReference &at, std::string why)
+{
+    _collector.collect_issue<Issue>(code_ref_for(at), std::move(why));
+    discard(scope, index, loop);
+}
 
 #endif

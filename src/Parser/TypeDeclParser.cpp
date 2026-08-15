@@ -687,7 +687,7 @@ static void parse_destructor(
     }
 
     if (dtor_decl->args.size() > dtor_decl->implicit_arg_count()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::DestructorHasParameters>(
             payload.context.code_ref(dtor_token),
             fmt::format("A destructor takes no parameters - '{}' declares {}.",
                 struct_node->type_name(),
@@ -701,7 +701,7 @@ static void parse_destructor(
     // a declared return type is rejected outright rather than checked against void. `destructor() :
     // void` reads as though the colon were meaningful, and it never is
     if (cursor.is_type(Token::Type::t_colon)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::DestructorHasReturnType>(
             payload.context.code_ref(dtor_token),
             "A destructor returns nothing - drop the ': type'.");
         cursor.skip(); // the colon
@@ -717,7 +717,7 @@ static void parse_destructor(
     AST::FunctionDeclNode *existing = struct_node->complex_type().destructor();
 
     if (existing != nullptr && existing != dtor_decl) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::DuplicateDestructor>(
             payload.context.code_ref(dtor_token),
             fmt::format("'{}' already has a destructor.", struct_node->type_name()));
 
@@ -1610,7 +1610,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
                 return;
             }
 
-            payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.collector.collect_issue<AST::Issue::BodylessFunction>(
                 payload.context.code_ref(member->declaration_site_token()),
                 fmt::format("'{}' was declared but never given a body.", member->signature_description()));
         };

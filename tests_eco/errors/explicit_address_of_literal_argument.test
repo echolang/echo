@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] explicit_address_of_literal_argument.eco:11:10
+[error] AddressOfTemporary  explicit_address_of_literal_argument.eco:11:10
 
   Cannot take the address of an expression that has no storage
 

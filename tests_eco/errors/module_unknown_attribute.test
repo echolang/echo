@@ -2,6 +2,12 @@ modules: modules/bad_attribute
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] UnknownManifestAttribute  module.eco:4:3
 
-  module.eco:4: unknown manifest attribute 'source', expected one of: module, version, depends, sources, target, link, cc, build_dir
+  unknown manifest attribute 'source', expected one of: module, version, depends, sources, target, link, cc, build_dir
+
+  3 | #[module: "badattr"]
+  4 | #[source: "*.eco"]
+    :   ^^^^^^
+  5 | 
+

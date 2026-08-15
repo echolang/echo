@@ -2,6 +2,12 @@ modules: modules/target_duplicate_name
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] RepeatedManifestAttribute  module.eco:5:1
 
-  module.eco:5: 'tool' is declared twice - two targets of one module cannot share a name, because the name is the binary.
+  'tool' is declared twice - two targets of one module cannot share a name, because the name is the binary.
+
+  4 | #[target: exe { name: "tool", entry: "src/one.eco" }]
+  5 | #[target: exe { name: "tool", entry: "src/two.eco" }]
+    : ^
+  6 | 
+

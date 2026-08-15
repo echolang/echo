@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] move_on_break_reaches_after_loop.eco:31:6
+[error] UseAfterMove  move_on_break_reaches_after_loop.eco:31:6
 
   '$a' may have been moved out of.
 

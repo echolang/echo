@@ -137,16 +137,13 @@ namespace Compiler::LLVM
         // the file each function declaration was written in, so a body's own source position does not
         // depend on which walk reached it.
         //
-        // it exists because a body's *content* can read `current_file`: AbortCodegen::location_of folds
-        // `<file>:<line>` into the private string an `assert` or a `die` aborts with. A body emitted from
-        // its own file root got the right answer by luck of the walk, and the moment a definition is
-        // emitted into a unit other than the one owning its declaration - which is what a generic
-        // instantiation shared by two units needs - the same linkonce_odr symbol would carry two different
-        // messages and the linker would keep an arbitrary one.
+        // a body's *content* no longer reads this: AbortCodegen::location_of asks the call's own
+        // token. the map remains for the declaration-site question A40 will retire onto
+        // DeclarationOrigin - an ODR-shared body's DISubprogram file must not depend on which walk
+        // reached it.
         //
-        // a lookup miss is legitimate and falls back to the ambient file: a declaration reached other than
-        // through a file root has no better answer available, and the fallback is exactly today's
-        // behaviour
+        // a lookup miss is legitimate and falls back to the ambient file: a declaration reached other
+        // than through a file root has no better answer available
         std::unordered_map<const AST::FunctionDeclNode *, AST::File *> function_file_map;
 
         AST::File *file_of(const AST::FunctionDeclNode *decl) const {
@@ -154,24 +151,9 @@ namespace Compiler::LLVM
             return found != function_file_map.end() ? found->second : current_file;
         }
 
-        // **every module in the bundle, for the one question a single module cannot answer about a
-        // token.** A TokenCollection belongs to one module, and AST::Module::file_of says so - it
-        // answers null both for a token this compiler minted *and* for one belonging to somebody else's
-        // collection. Asked of the unit being lowered, those two are indistinguishable, and a generic
-        // instantiated out of the stdlib into a user module hits the second case every time.
-        //
-        // that is not a cosmetic gap: it made a t_odr_shared body's debug info depend on which unit was
-        // emitting it - the same `map<K,V>` method described as living in `arr.eco` in one object and in
-        // the user's file in the next - which is exactly what verify_odr_consistency refuses
-        std::vector<AST::Module *> token_modules;
-
-        // which file this token was lexed from, or null if no source spells it
-        AST::File *file_of_token(const TokenReference &token) const;
-
-        // did this compiler mint the token rather than lex it - a synthesized drop's callee, a `$__it`,
-        // a decorated operator name. **Asked of the bundle**, so a token another module's collection
-        // owns still answers with the file it was lexed from rather than reading as minted
-        bool is_virtual_token(const TokenReference &token) const;
+        // a token names its own file (`TokenReference::file`) and whether this compiler minted it
+        // (`TokenReference::is_minted`). there is no bundle-wide scan and no ambient fallback for
+        // either question
 
         // **and where each declared type was written**, for the map above's reason rather than as a
         // convenience: a type's description is emitted into every unit that mentions it, so anything in
@@ -462,14 +444,6 @@ namespace Compiler::LLVM
         // a human-readable description of the current codegen location, e.g. "in function 'foo'"
         // or "at global scope", suffixed onto codegen error messages
         std::string function_context() const;
-
-        // the name of the file being emitted. the *file name*, not the path: the e2e runner passes
-        // an absolute source directory, so a path would make every golden machine-specific
-        //
-        // beside function_context() rather than on a subsystem, because it answers the same kind of
-        // question from the same state, and the one caller that needs both would otherwise reach
-        // through two different owners for one sentence of output
-        std::string current_file_name() const;
 
         Compiler::InternalCompilerException error(std::string message);
     };

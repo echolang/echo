@@ -77,13 +77,49 @@ TEST_CASE("the issue class name is the diagnostic code", "[diagnostics]")
 
 TEST_CASE("a generic error carries no code, because it is not a classification", "[diagnostics]")
 {
-    auto bundle = EchoTests::tests_make_parsed_bundle("int32 $r = &5;\n");
+    // a site this batch deliberately left unclassified - not a leftover `&5`, which is now
+    // AddressOfTemporary
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f() : void { int32 $n = 1; echo $n->x; }\n");
 
     const Diagnostic diagnostic = first_diagnostic(*bundle);
 
-    // an editor is told nothing rather than told that 148 unrelated refusals are one kind. Splitting
-    // them into coded kinds is the follow-up; claiming they already are would be the lie
+    // an editor is told nothing rather than told that the unclassified remainder is one kind
     REQUIRE(!diagnostic.code.has_value());
+}
+
+TEST_CASE("place refusals carry an AddressOfTemporary code", "[diagnostics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle("int32 $r = &5;\n");
+
+    REQUIRE(first_diagnostic(*bundle).code == std::string("AddressOfTemporary"));
+}
+
+TEST_CASE("mv of a temporary carries a MoveOfTemporary code", "[diagnostics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function make() : int32 { return 1; }\n"
+        "$a = mv make();\n");
+
+    REQUIRE(first_diagnostic(*bundle).code == std::string("MoveOfTemporary"));
+}
+
+TEST_CASE("a bodyless function carries a BodylessFunction code", "[diagnostics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle("function missing() : void;\n");
+
+    REQUIRE(first_diagnostic(*bundle).code == std::string("BodylessFunction"));
+}
+
+TEST_CASE("an owning copy refusal carries a CannotCopy code", "[diagnostics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Own { destructor() {}\n    int32 $x;\n }\n"
+        "Own $a = Own(1);\n"
+        "Own $b = $a;\n");
+
+    REQUIRE(first_diagnostic(*bundle).code == std::string("CannotCopy"));
+    REQUIRE(!first_diagnostic(*bundle).notes.empty());
 }
 
 TEST_CASE("a redeclaration points at the declaration that survived", "[diagnostics]")

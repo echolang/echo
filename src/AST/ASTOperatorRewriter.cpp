@@ -45,7 +45,7 @@ OperatorRewriter::OperatorRewriter(Bundle &bundle)
 
 CodeRef OperatorRewriter::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 bool OperatorRewriter::run_round()
@@ -173,7 +173,7 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
         bin.rhs,
         _current_module->nodes);
 
-    report_binary_reconciliation(_collector, _current_module, _current_file, reconciled);
+    report_binary_reconciliation(_collector, _current_module, reconciled);
 
     if (reconciled.result == BinaryReconciliation::Result::t_refused) {
         // no `_changed`: nothing moved, and the identical sentence at the identical token is what

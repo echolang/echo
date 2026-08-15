@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] destructor_declared_twice.eco:13:5
+[error] DuplicateDestructor  destructor_declared_twice.eco:13:5
 
   'Buffer' already has a destructor.
 

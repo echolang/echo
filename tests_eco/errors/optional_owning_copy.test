@@ -1,13 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] optional_owning_copy.eco:22:13
+[error] CannotCopy  optional_owning_copy.eco:22:13
 
-  'Noisy?' may hold a 'Noisy', which owns a resource and cannot be copied. Write 'mv $a' to transfer it, bind it with 'guard' and copy what that gives you, or give 'Noisy' a copy constructor ('constructor(Noisy& $other)') to say what a copy of the value inside is.
+  'Noisy?' may hold a 'Noisy', which owns a resource and cannot be copied.
 
   21 | Noisy? $a = Noisy();
   22 | Noisy? $b = $a;
      :             ^^
   23 | 
+
+  help: Write 'mv $a' to transfer it. Bind it with 'guard' and copy what that gives you, or give 'Noisy' a copy constructor ('constructor(Noisy& $other)') to say what a copy of the value inside is.
 
 1 error, nothing was compiled.

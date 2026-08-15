@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
 
 #include "AST/ASTBuiltin.h"
+#include "AST/ASTFile.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
@@ -16,6 +17,15 @@
 
 namespace Compiler::LLVM
 {
+
+static std::string file_basename(const TokenReference &token)
+{
+    if (token.file() == nullptr) {
+        return "<unknown>";
+    }
+
+    return token.file()->get_path().filename().string();
+}
 
 llvm::FunctionCallee AbortCodegen::get_exit()
 {
@@ -138,7 +148,12 @@ void AbortCodegen::gen_abort_if(
 
 std::string AbortCodegen::location_of(const AST::FunctionCallExprNode &node) const
 {
-    return fmt::format("{}:{}", _ctx.current_file_name(), node.token_function_name.line());
+    return location_of(node.token_function_name);
+}
+
+std::string AbortCodegen::location_of(const TokenReference &token) const
+{
+    return fmt::format("{}:{}", file_basename(token), token.line());
 }
 
 std::string AbortCodegen::detail_of(const AST::FunctionCallExprNode &node) const

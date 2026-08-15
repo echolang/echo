@@ -1,13 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] address_of_member_of_temporary.eco:14:25
+[error] TemporaryMember  address_of_member_of_temporary.eco:14:25
 
-  'Inner' has no storage of its own, so the address of its member 'tag' would point into a value destroyed at the end of this statement. Bind it to a variable first.
+  'Inner' has no storage of its own, so the address of its member 'tag' would point into a value destroyed at the end of this statement.
 
   13 | $o = Outer(Inner(5));
   14 | int32& $r = &$o->get()->tag;
      :                         ^^^
   15 | 
+
+  help: Bind it to a variable first.
 
 1 error, nothing was compiled.

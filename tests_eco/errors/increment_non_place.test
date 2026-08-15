@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] increment_non_place.eco:5:7
+[error] AssignToNonPlace  increment_non_place.eco:5:7
 
   '++' needs an expression with storage to step
 

@@ -2,6 +2,12 @@ modules: modules/scope_on_several_targets
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidManifestScope  module.eco:5:3
 
-  module.eco:5: a '{ ... }' scope belongs to one target, and this '#[target: ...]' declares 2 - write each of them its own.
+  a '{ ... }' scope belongs to one target, and this '#[target: ...]' declares 2 - write each of them its own.
+
+  4 | #[sources: "src/*.eco"]
+  5 | #[target: [ test, exe { name: "tool", entry: "src/main.eco" } ]] {
+    :   ^^^^^^
+  6 |     #[sources: "src/*.eco"]
+

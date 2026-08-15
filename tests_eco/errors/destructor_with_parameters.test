@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] destructor_with_parameters.eco:8:5
+[error] DestructorHasParameters  destructor_with_parameters.eco:8:5
 
   A destructor takes no parameters - 'Buffer' declares 1.
 

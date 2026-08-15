@@ -11,14 +11,16 @@ expect: fail
      :                                   ^^^^^^
   23 | 
 
-[error] unique_owner_cannot_be_forged.eco:27:37
+[error] CannotCopy  unique_owner_cannot_be_forged.eco:27:37
 
-  'mem::buffer<int32>' is unique: exactly one value may name its storage, so it is moved and never copied. Move the whole value rather than a part of it, or take a borrow ('mem::buffer<int32>&') if it is only being read.
+  'mem::buffer<int32>' is unique: exactly one value may name its storage, so it is moved and never copied.
 
   26 | // *duplicated*, and a type could easily have one without the other
   27 | mem::buffer<int32> $duplicate = $a->storage;
      :                                     ^^^^^^^
   28 | 
+
+  help: Move the whole value rather than a part of it. Or take a borrow ('mem::buffer<int32>&') if it is only being read.
 
 [error] PrivateMember  unique_owner_cannot_be_forged.eco:16:35
 

@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] owning_conditional_move.eco:17:1
+[error] ConditionalMove  owning_conditional_move.eco:17:1
 
   '$a' owns a resource and is moved out of on only one branch, so nothing would destroy it on the other. Move it on every branch, or after the 'if'.
 

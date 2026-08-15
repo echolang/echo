@@ -77,7 +77,7 @@ namespace AST
     //   single caret the old excerpt printer drew.
     // - a **string literal stores its value without the quotes**, so its span is two characters short.
     //   Known and accepted.
-    Span span_of(const Module *module, const File *fallback_file, const TokenSlice &slice);
+    Span span_of(const TokenSlice &slice, const File *fallback_file = nullptr);
 
     Diagnostic to_diagnostic(const IssueRecord &issue);
 };

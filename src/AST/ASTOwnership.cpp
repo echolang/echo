@@ -354,7 +354,7 @@ OwnershipPass::OwnershipPass(Bundle &bundle)
 
 CodeRef OwnershipPass::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 TokenReference OwnershipPass::virtual_token(const std::string &value, Token::Type type, const TokenReference &at)
@@ -375,15 +375,15 @@ void OwnershipPass::build_type_module_map()
             // **the file, not just the module.** the stdlib is 21 files, so the module's first file is
             // `arr.eco` for every type in it - and a body written there takes its DWARF *file* from the
             // root that holds it while its *line* comes from the type's own token, which is a subprogram
-            // no debugger can open. file_of answers null for a token another module owns or one nothing
-            // spells, and then the module's first file is all there is to say
-            const File *declared_in = type_decl->name_token.has_value()
-                ? module_ptr->file_of(type_decl->name_token.value())
+            // no debugger can open. a token with no file of its own (nothing stamped one) leaves
+            // the home's file null, and then the module's first file is all there is to say
+            File *declared_in = type_decl->name_token.has_value()
+                ? type_decl->name_token.value().file()
                 : nullptr;
 
             _type_module[&type_decl->complex_type()] = TypeHome{
                 module_ptr.get(),
-                const_cast<File *>(declared_in),
+                declared_in,
                 type_decl,
             };
         }
@@ -1454,14 +1454,16 @@ void OwnershipPass::refuse_pending_temporaries(size_t mark, const char *action, 
     for (size_t i = mark; i < _pending_temporaries.size(); i++) {
         ExprNode *owner = _pending_temporaries[i];
 
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(owner)), fmt::format(
-                "'{}' has no storage of its own, so {} {} {}. Bind it to a variable first.",
+        _collector.collect_issue<Issue::TemporaryMember>(
+            code_ref_for(location_of_expression(owner)),
+            fmt::format(
+                "'{}' has no storage of its own, so {} {} {}.",
                 pending_edge(owner).get()->result_type().get_type_desciption(),
                 action,
                 describe_pending(owner),
                 outcome
-            )
+            ),
+            "Bind it to a variable first."
         );
     }
 
@@ -1485,7 +1487,7 @@ void OwnershipPass::report_conditional_move(const VarDeclNode *decl)
         return;
     }
 
-    _collector.collect_issue<Issue::GenericError>(
+    _collector.collect_issue<Issue::ConditionalMove>(
         code_ref_for(decl->token_varname), fmt::format(
             "'{}' owns a resource and is moved out of on only one branch, so nothing would destroy it "
             "on the other. Move it on every branch, or after the 'if'.",
@@ -1525,7 +1527,7 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             VarDeclNode *decl = place_root_of(expr);
 
             if (decl != nullptr && _moved.count(decl) > 0) {
-                _collector.collect_issue<Issue::GenericError>(
+                _collector.collect_issue<Issue::UseAfterMove>(
                     code_ref_for(location_of_expression(expr)), fmt::format(
                         "'{}' {} moved out of.",
                         decl->name_full(),
@@ -2004,7 +2006,7 @@ ExprNode *OwnershipPass::arrive_value(
         VarDeclNode *source = whole_variable_moved(move->operand);
 
         if (source == nullptr) {
-            _collector.collect_issue<Issue::GenericError>(
+            _collector.collect_issue<Issue::PartialMove>(
                 code_ref_for(move->token_move),
                 "'mv' can only move a whole variable - moving a field or an element out of a value "
                 "is not supported yet");
@@ -2035,7 +2037,7 @@ ExprNode *OwnershipPass::arrive_value(
     if (param != nullptr && param->takes_ownership && is_place_expression(*expr)) {
         // reported at the *argument*, not at the parameter: the annotation is the declaration's, but
         // the `mv` that has to be written is the caller's
-        _collector.collect_issue<Issue::GenericError>(
+        _collector.collect_issue<Issue::MoveRequired>(
             code_ref_for(location_of_expression(expr)), fmt::format(
                 "'{}' takes ownership of this argument - write 'mv' in front of it, or the value would "
                 "be handed over without the call site saying so.",
@@ -2274,17 +2276,18 @@ void OwnershipPass::reject_uncopyable(
     if (wanted.is_wrapped_optional()) {
         const ValueType payload = wanted.optional_payload();
 
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)), fmt::format(
-                "'{}' may hold a '{}', which owns a resource and cannot be copied. {}, bind it with "
-                "'guard' and copy what that gives you, or give '{}' a copy constructor "
-                "('constructor({}& $other)') to say what a copy of the value inside is.",
+        _collector.collect_issue<Issue::CannotCopy>(
+            code_ref_for(location_of_expression(expr)),
+            fmt::format(
+                "'{}' may hold a '{}', which owns a resource and cannot be copied.",
                 wanted.get_type_desciption(),
-                payload.get_type_desciption(),
+                payload.get_type_desciption()),
+            fmt::format(
+                "{}. Bind it with 'guard' and copy what that gives you, or give '{}' a copy constructor "
+                "('constructor({}& $other)') to say what a copy of the value inside is.",
                 transfer,
                 payload.get_type_desciption(),
-                payload.get_type_desciption()
-            )
+                payload.get_type_desciption())
         );
 
         return;
@@ -2296,14 +2299,15 @@ void OwnershipPass::reject_uncopyable(
     // AST::classify_copy's reading of the same flag: asked of any type that can carry it, a class and
     // an interface being refused it where it is written
     if (wanted.has_complex_type() && wanted.get_complex_type()->is_unique) {
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)), fmt::format(
-                "'{}' is unique: exactly one value may name its storage, so it is moved and never "
-                "copied. {}, or take a borrow ('{}&') if it is only being read.",
-                wanted.get_type_desciption(),
+        _collector.collect_issue<Issue::CannotCopy>(
+            code_ref_for(location_of_expression(expr)),
+            fmt::format(
+                "'{}' is unique: exactly one value may name its storage, so it is moved and never copied.",
+                wanted.get_type_desciption()),
+            fmt::format(
+                "{}. Or take a borrow ('{}&') if it is only being read.",
                 transfer,
-                wanted.get_type_desciption()
-            )
+                wanted.get_type_desciption())
         );
 
         return;
@@ -2313,34 +2317,35 @@ void OwnershipPass::reject_uncopyable(
     // `mv $doc->body` is rejected too, so there is nothing to suggest. reported at the assignment's
     // own token when the source names no variable at all
     if (source == nullptr) {
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(location_of_expression(expr)), fmt::format(
-                "'{}' owns a resource, so this {} would copy a value that cannot be copied. Give '{}' a "
-                "copy constructor ('constructor({}& $other)') to say what a copy is - moving a field or "
-                "an element out of a value is not supported yet.",
+        _collector.collect_issue<Issue::CannotCopy>(
+            code_ref_for(location_of_expression(expr)),
+            fmt::format(
+                "'{}' owns a resource, so this {} would copy a value that cannot be copied.",
                 wanted.get_type_desciption(),
-                describe(destination),
+                describe(destination)),
+            fmt::format(
+                "Give '{}' a copy constructor ('constructor({}& $other)') to say what a copy is - "
+                "moving a field or an element out of a value is not supported yet.",
                 wanted.get_type_desciption(),
-                wanted.get_type_desciption()
-            )
+                wanted.get_type_desciption())
         );
 
         return;
     }
 
-    _collector.collect_issue<Issue::GenericError>(
-        code_ref_for(location_of_expression(expr)), fmt::format(
-            "'{}' owns a resource and cannot be copied implicitly at this {}. Write 'mv {}' to "
-            "transfer ownership, take a borrow ('{}&') if the value is only being read, or give '{}' a "
-            "copy constructor ('constructor({}& $other)').",
+    _collector.collect_issue<Issue::CannotCopy>(
+        code_ref_for(location_of_expression(expr)),
+        fmt::format(
+            "'{}' owns a resource and cannot be copied implicitly at this {}.",
             wanted.get_type_desciption(),
-            describe(destination),
+            describe(destination)),
+        fmt::format(
+            "Write 'mv {}' to transfer ownership, take a borrow ('{}&') if the value is only being "
+            "read, or give '{}' a copy constructor ('constructor({}& $other)').",
             source->name_full(),
             wanted.get_type_desciption(),
             wanted.get_type_desciption(),
-            wanted.get_type_desciption()
-        )
-    );
+            wanted.get_type_desciption()));
 }
 
 void OwnershipPass::collect_unwind(size_t floor_frame, std::vector<NodeReference> &out)

@@ -16,6 +16,11 @@ expect: fail
      :           ^^^^^^
   14 | 
 
+  152 | internal const uint8 CH_SPACE = 32;
+  153 | internal const uint8 CH_DOT = 46;
+      :                      ------ declared here
+  154 | internal const uint8 CH_ZERO = 48;
+
 [error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:15:12
 
   'MIX_A' is private to 'hash.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
@@ -24,6 +29,11 @@ expect: fail
   15 | echo hash::MIX_A;
      :            ^^^^^
   16 | 
+
+  109 |  */
+  110 | private const uint64 MIX_A = 13787848793156543929;
+      :                      ----- declared here
+  111 | private const uint64 MIX_B = 10723151780598845931;
 
 [error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:11:24
 
@@ -34,6 +44,11 @@ expect: fail
      :                        ^^^^^^^^^^^
   12 | 
 
+  35 | #[builtin: alloc_bytes]
+  36 | private function alloc_bytes(usize $bytes) : ptr<uint8>;
+     :                  ----------- declared here
+  37 | 
+
 [error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:17:36
 
   'std::env::raw_argv()' is private to 'process.eco', so it can only be named in that file. Remove the 'private' to reach it from the rest of its module, or write 'public' to reach it from anywhere.
@@ -42,6 +57,11 @@ expect: fail
   17 | ptr<ptr<uint8>> $block = std::env::raw_argv();
      :                                    ^^^^^^^^
   18 | 
+
+  32 | #[builtin: process_argv]
+  33 | private function raw_argv() : ptr<ptr<uint8>>;
+     :                  -------- declared here
+  34 | 
 
 [error] PrivateMember  stdlib_internals_are_not_reachable.eco:21:10
 

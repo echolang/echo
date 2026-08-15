@@ -256,9 +256,9 @@ static bool resolve_manifests(
         return true;
     }
 
-    std::string error;
-    if (!Parser::resolve_module_graph(roots, facts, out, error)) {
-        diagnostics.render_untyped("Module Manifest Error", error);
+    Parser::ManifestScratch scratch(facts);
+    if (!Parser::resolve_module_graph(roots, scratch, out)) {
+        scratch.bundle.collector.print_issues(diagnostics);
         return false;
     }
 
@@ -487,7 +487,7 @@ static void collect_shared_top_level_code(const Parser::ModuleManifest &manifest
         // through the collector rather than through the manifest's own `<file>:<line>:` channel: this is
         // a mistake in a *source* file, so it gets the underline and the note every other one gets
         bundle.collector.collect_issue<AST::Issue::TopLevelCodeOutsideEntry>(
-            AST::CodeRef{ module, &file, token->make_slice() },
+            AST::CodeRef{ module, token->make_slice() },
             manifest.name,
             file.get_path().filename().string());
     }

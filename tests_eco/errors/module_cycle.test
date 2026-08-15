@@ -2,6 +2,9 @@ modules: modules/cycle_a
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] ModuleDependencyCycle  module.eco:1:1
 
   the module dependencies form a cycle: cyclea -> cycleb -> cyclea. A module is parsed completely before the next one starts, so it can only name symbols from modules parsed before it - which makes a cycle unsatisfiable rather than merely unsupported.
+
+  <source unavailable>
+

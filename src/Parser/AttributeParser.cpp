@@ -9,7 +9,7 @@
 void Parser::report_attribute_refusals(Parser::Payload &payload, const AST::AttributeReader &reader)
 {
     for (const AST::AttributeRefusal &refusal : reader.refusals()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::InvalidAttributeValue>(
             payload.context.code_ref(refusal.span.slice()), refusal.message);
     }
 }

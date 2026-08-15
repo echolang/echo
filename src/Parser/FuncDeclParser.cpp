@@ -480,7 +480,7 @@ void Parser::publish_implicit_conversion(
     }
 
     const auto report = [&](const std::string &message) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::InvalidImplicitConversion>(
             payload.context.code_ref(implicit_attr->attribute_tokens), message);
     };
 
@@ -910,7 +910,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         // this is why `mem::alloc<T>` is Echo code over a concrete `alloc_bytes` rather than an
         // extern of its own
         if (funcdecl->is_generic()) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.collector.collect_issue<AST::Issue::ExternGeneric>(
                 payload.context.code_ref(nametoken),
                 "An extern function cannot be generic - a single C symbol has no per-instantiation body");
             Parser::skip_refused_function(payload);
@@ -920,7 +920,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
         // the body lives in another object file. a body here would be compiled under the raw
         // symbol and collide with the real definition at link time
         if (!cursor.is_type(Token::Type::t_semicolon)) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.collector.collect_issue<AST::Issue::ExternHasBody>(
                 payload.context.code_ref(nametoken),
                 "An extern function declaration cannot have a body - it must end with ';'");
             Parser::skip_refused_function(payload);

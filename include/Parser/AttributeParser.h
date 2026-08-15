@@ -26,11 +26,8 @@ namespace Parser
         const std::string &attribute_name
     );
 
-    // drains a reader's refusals into the collector as located issues.
-    //
-    // the *source file* half of AST::AttributeReader's two channels - a manifest drains the same
-    // refusals into its own `<file>:<line>: <what>` string, which is why the reader accumulates them
-    // rather than reporting them itself
+    // drains a reader's refusals into the collector as located `InvalidAttributeValue` issues.
+    // the one drain: a source `#[...]` and a manifest both come through here
     void report_attribute_refusals(Parser::Payload &payload, const AST::AttributeReader &reader);
 
     // reads an attribute's one value through a fresh reader and hands back what survived.

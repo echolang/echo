@@ -30,10 +30,8 @@ namespace AST
     // scope answers null because a brace has no equivalent to borrow from. So a new arm decides what
     // *its* kind means rather than reaching for the nearest precedent.
     //
-    // **the file is not part of the answer**, deliberately. A token knows its line and column and not
-    // its file (see AST::Module::file_of), and the two consumers want the file from somewhere better
-    // anyway: a diagnostic has AST::CodeRef, and a DILocation takes its file from the scope it hangs
-    // off rather than from itself
+    // **the file is on the token**, not on this answer. A DILocation still takes its file from the
+    // scope it hangs off rather than from itself; a diagnostic reads `token.file()` through the slice
     const TokenReference *source_token_of(const Node &node);
 
     // the expression half, kept at its old name and signature for its four callers - all of which

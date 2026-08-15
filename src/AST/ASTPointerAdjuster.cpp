@@ -29,7 +29,7 @@ PointerAdjuster::PointerAdjuster(Bundle &bundle)
 
 CodeRef PointerAdjuster::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 void PointerAdjuster::run()

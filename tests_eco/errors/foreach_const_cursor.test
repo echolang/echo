@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] foreach_const_cursor.eco:8:1
+[error] NotIterable  foreach_const_cursor.eco:8:1
 
   'const slice_iterator<int32>' cannot be iterated - stepping a cursor writes to the cursor, and 'contract::iterator::advance()' is not declared const. Iterate what it was taken from instead.
 

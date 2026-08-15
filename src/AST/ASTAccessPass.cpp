@@ -108,7 +108,7 @@ void AccessPass::visit_assign(AssignNode &node)
     }
 
     _collector.collect_issue<Issue::GenericError>(
-        CodeRef{_current_module, _current_file, node.token_assign.make_slice()},
+        CodeRef{_current_module, node.token_assign.make_slice()},
         fmt::format(
             "'{}' takes 'read' access, so this writes to storage the parameter promised only to read. "
             "Declare it 'inout' if the body is meant to write through it.",
@@ -199,7 +199,7 @@ void AccessPass::check_read_escape(FunctionCallExprNode &node, size_t index)
     }
 
     _collector.collect_issue<Issue::GenericError>(
-        CodeRef{_current_module, _current_file, location_of_expression(node.arguments[index]).make_slice()},
+        CodeRef{_current_module, location_of_expression(node.arguments[index]).make_slice()},
         fmt::format(
             "'{}' takes 'read' access, so its storage cannot be handed to '{}', which does not. "
             "Declare '{}' 'read' as well, or take '{}' as 'inout' if it is meant to be written.",
@@ -265,7 +265,7 @@ void AccessPass::report_conflict(
     // anyway: the parser synthesises it, so its varref carries the declaration's token and a
     // diagnostic pointed there lands on a line that has nothing to do with the problem
     _collector.collect_issue<Issue::ConflictingAccess>(
-        CodeRef{_current_module, _current_file, node.token_function_name.make_slice()},
+        CodeRef{_current_module, node.token_function_name.make_slice()},
         message,
         location_of_expression(node.arguments[other]),
         remedy);

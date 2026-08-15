@@ -2,6 +2,12 @@ modules: modules/scope_nested
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidManifestScope  module.eco:6:7
 
-  module.eco:6: 'target' cannot be written inside a '{ ... }' scope - a scope is one target speaking for itself, so it holds no targets of its own.
+  'target' cannot be written inside a '{ ... }' scope - a scope is one target speaking for itself, so it holds no targets of its own.
+
+  5 | #[target: test] {
+  6 |     #[target: test] {
+    :       ^^^^^^
+  7 |     }
+

@@ -78,33 +78,10 @@ namespace AST
         typedef std::function<bool(TokenCollection &tokens, size_t from, std::string &out_error)>
             TokenFilter;
 
-        TokenizedFile tokenize(Lexer &lexer, const File &file, const TokenFilter &filter = nullptr);
+        TokenizedFile tokenize(Lexer &lexer, File &file, const TokenFilter &filter = nullptr);
 
         bool is_owner_of(const TokenReference &tokenref) const {
             return tokenref.belongs_to(tokens);
-        }
-
-        // which file did this token come from. the module-level half of the answer a token cannot give
-        // about itself: the files of a module share one TokenCollection and a TokenizedFile is a slice
-        // into it, so the mapping is a scan over those slices and nothing has to be stored per token.
-        //
-        // **null is a real answer, not a failure** - `make_virtual_token` appends past every slice, so a
-        // decorated operator name or a synthesized drop's callee belongs to no file at all. A caller
-        // rendering a location falls back to whatever file it was already talking about
-        const File *file_of(const TokenReference &tokenref) const {
-            if (!is_owner_of(tokenref)) {
-                return nullptr;
-            }
-
-            const size_t handle = tokenref.get_handle();
-
-            for (const auto &tokenized : _tokenized_files) {
-                if (handle >= tokenized.token_slice.start_index && handle <= tokenized.token_slice.end_index) {
-                    return tokenized.file;
-                }
-            }
-
-            return nullptr;
         }
 
         // a token no source file spells, appended to this module's collection at the position of an
@@ -112,10 +89,14 @@ namespace AST
         //
         // the module owns `tokens`, so it owns minting: AST::Context and the passes that rewrite the
         // tree after parsing all reach for the same two steps, and a copy per site is a copy of "push
-        // then read back the handle" that has to keep answering the same way
+        // then read back the handle" that has to keep answering the same way.
+        //
+        // **inherits `at`'s file and is marked minted.** The file is what lets a location name a line
+        // after the token was invented; the bit is what keeps `$__it` and `$this` artificial in
+        // DWARF. Those are two questions - a token another module owns has a file and is not minted
         TokenReference make_virtual_token(
             const std::string &value, Token::Type type, const TokenReference &at) {
-            return tokens[tokens.push(value, type, at.line(), at.char_offset())];
+            return tokens[tokens.push_minted(value, type, at.line(), at.char_offset(), at.file())];
         }
 
         // file iterator

@@ -47,16 +47,14 @@ ConstantExpander::ConstantExpander(Bundle &bundle)
 
 CodeRef ConstantExpander::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 CodeRef ConstantExpander::code_ref_at_declaration(const ConstDeclNode &decl)
 {
-    // the declaring file, not the walked one: the excerpt is read out of the file's own content, and a cycle
-    // is as likely to be noticed from another file as from the one that wrote it
-    const File *file = decl.declared_in.file != nullptr ? decl.declared_in.file : _current_file;
-
-    return CodeRef{_current_module, file, decl.token_name.make_slice()};
+    // the token names its own file, so a cycle noticed from another file still excerpts the
+    // declaration's
+    return CodeRef{_current_module, decl.token_name.make_slice()};
 }
 
 bool ConstantExpander::module_may_name(const ConstDeclNode &decl) const

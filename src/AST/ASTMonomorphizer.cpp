@@ -44,8 +44,7 @@ namespace AST
 
     CodeRef Monomorphizer::code_ref_for(Module &mod, const TokenReference &token)
     {
-        const File *file = mod.files().first();
-        return CodeRef{&mod, file, token.make_slice()};
+        return CodeRef{&mod, token.make_slice()};
     }
 
     std::optional<std::vector<ValueType>> Monomorphizer::determine_type_args(FunctionCallExprNode *call, Module &mod, bool &is_error)

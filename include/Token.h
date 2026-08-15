@@ -10,6 +10,8 @@
 
 #include <cstdint>
 
+namespace AST { class File; };
+
 struct Token
 {
 public:
@@ -117,8 +119,18 @@ public:
     uint32_t line;
     uint32_t char_offset; // if you have a file source file thats 2GB, you're have other problems
 
-    Token(Type type, uint32_t line, uint32_t char_offset)
-        : type(type), line(line), char_offset(char_offset) {}
+    // the missing third of a source location. line and column were always here; the file was a
+    // slice scan on the module, then a walk over every module in the bundle. a token that names
+    // its own file needs neither. incomplete type: this header must not include AST
+    AST::File *file = nullptr;
+
+    // this compiler invented the token rather than lexing it - a `$__it`, a decorated operator
+    // name, a synthesized drop's callee. **not** "file is null": a minted token inherits `at`'s
+    // file so a location can still name a line, and a token another module owns has a file too
+    bool minted = false;
+
+    Token(Type type, uint32_t line, uint32_t char_offset, AST::File *file = nullptr, bool minted = false)
+        : type(type), line(line), char_offset(char_offset), file(file), minted(minted) {}
 
     inline bool is_a(Type type) const {
         return this->type == type;
@@ -165,8 +177,25 @@ struct TokenCollection
     std::vector<Token> tokens;
     std::vector<std::string> token_values;
 
+    // stamped onto every `push` that is not minted. Module::tokenize sets this to the file it is
+    // about to lex, then clears it; lexer tests leave it null
+    AST::File *appending_file = nullptr;
+
     size_t push(const std::string &value, Token::Type type, size_t line, size_t char_offset) {
-        tokens.emplace_back(type, line, char_offset);
+        tokens.emplace_back(type, line, char_offset, appending_file, false);
+        token_values.push_back(value);
+        return tokens.size() - 1;
+    }
+
+    // a token no source file spells, at the position (and file) of an existing one
+    size_t push_minted(
+        const std::string &value,
+        Token::Type type,
+        uint32_t line,
+        uint32_t char_offset,
+        AST::File *file
+    ) {
+        tokens.emplace_back(type, line, char_offset, file, true);
         token_values.push_back(value);
         return tokens.size() - 1;
     }
@@ -174,6 +203,7 @@ struct TokenCollection
     void clear() {
         tokens.clear();
         token_values.clear();
+        appending_file = nullptr;
     }
 
     inline size_t size() const {
@@ -248,6 +278,19 @@ public:
     inline uint32_t column() const {
         assert(is_valid());
         return tokens.tokens[index].char_offset;
+    }
+
+    // which file this lexeme was written in, or null if nothing stamped one - a standalone
+    // lexer test, a mint from a no-file `at`
+    inline AST::File *file() const {
+        assert(is_valid());
+        return tokens.tokens[index].file;
+    }
+
+    // did this compiler invent the token rather than lex it
+    inline bool is_minted() const {
+        assert(is_valid());
+        return tokens.tokens[index].minted;
     }
 
     inline TokenReference next() const {

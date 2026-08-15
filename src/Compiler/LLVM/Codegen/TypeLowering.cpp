@@ -94,16 +94,6 @@ void TypeLowering::create_cmp_units(
     // that mentions it. Built here because a ComplexType has no back-pointer to its TypeDeclNode
     _ctx.type_site_map.clear();
 
-    // every module, so a token can be resolved to its file regardless of which unit is being lowered -
-    // see CodegenContext::token_modules. Recorded here beside the maps below, and over *every* module
-    // including the cached ones, because a cached module still owns the tokens a live one's
-    // instantiations point at
-    _ctx.token_modules.clear();
-
-    for (auto &module : bundle.modules) {
-        _ctx.token_modules.push_back(module.get());
-    }
-
     for (auto &module : bundle.modules) {
         for (auto &file : module->files()) {
             if (file.root == nullptr) {
@@ -168,7 +158,7 @@ void TypeLowering::create_cmp_units(
             // a token belongs to exactly one module's collection, and a clone appended to another
             // module still carries its template's - so this asks the bundle rather than this module
             if (const TokenReference *token = AST::source_token_of(*decl)) {
-                if (AST::File *written_in = _ctx.file_of_token(*token)) {
+                if (AST::File *written_in = token->file()) {
                     _ctx.function_file_map[decl] = written_in;
                     continue;
                 }

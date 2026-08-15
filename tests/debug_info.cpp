@@ -198,12 +198,11 @@ public function answer() : int32 { return 42; }
 TEST_CASE("a synthesized teardown is described at the type it belongs to", "[debuginfo]")
 {
     // **the file and the line have to come from one place, and nothing else checks that they did.** A
-    // `$deinit` is built out of virtual tokens, so `AST::Module::file_of` answers null for it and
-    // DebugInfoCodegen falls back to `function_file_map` for the *file* while taking the *line* from the
-    // token - which is the type's own declaration. The two agree only because OwnershipPass writes the
-    // declaration into the file that declares the type: while it used the module's first file instead, a
-    // stdlib type's teardown claimed `arr.eco` at a line belonging to `string.eco`, and a debugger asked
-    // to step into it opened the wrong file or none.
+    // `$deinit` is built out of virtual tokens that inherit the type's file, so the token names both
+    // the file and the line. The two agree because OwnershipPass writes the declaration into the file
+    // that declares the type: while it used the module's first file instead, a stdlib type's teardown
+    // claimed `arr.eco` at a line belonging to `string.eco`, and a debugger asked to step into it
+    // opened the wrong file or none.
     //
     // Two files in the module is what makes it visible, and the corpus cannot: it has no way to read
     // DWARF, and a `CHECK` over rendered IR cannot follow `file: !13` to the DIFile it names. So this

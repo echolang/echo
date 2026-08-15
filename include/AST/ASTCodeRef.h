@@ -10,7 +10,8 @@
 
 namespace AST
 {
-    // where a diagnostic points: a module, the file it was written in, and the tokens it is about.
+    // where a diagnostic points: a module and the tokens it is about. the file is the first
+    // token's, not a third stored field.
     //
     // **it does not render itself.** It used to - `get_referenced_code_excerpt()` drew the source frame
     // here, inline in this header, with a caret indented by a hardcoded five spaces against a gutter whose
@@ -20,8 +21,14 @@ namespace AST
     struct CodeRef
     {
         const Module *module;
-        const File *file;
         const TokenSlice token_slice;
+
+        // the file the slice's first token names. a stored copy was a second answer to a question
+        // the token now owns, and it could lie: Context::code_ref stamped the *file being parsed*,
+        // which is the wrong file when the token is from a sibling of the same module
+        const File *file() const {
+            return token_slice.start_ref().file();
+        }
 
         std::tuple<uint32_t, uint32_t> line_range() const
         {
@@ -44,7 +51,7 @@ namespace AST
         }
     };
 
-    // **the same place in the source, at a different token.** a CodeRef is a module, a file and a token
+    // **the same place in the source, at a different token.** a CodeRef is a module and a token
     // range, so moving a diagnostic to a token the caller already holds is rebasing the range onto the
     // one it was handed - there is nothing else in it to get wrong.
     //
@@ -53,7 +60,7 @@ namespace AST
     // reportable when nothing recorded one, and every caller's fallback is the ref it started from
     inline CodeRef at_token(const CodeRef &at, const std::optional<TokenReference> &token)
     {
-        return CodeRef { at.module, at.file, token.has_value() ? token.value().make_slice() : at.token_slice };
+        return CodeRef { at.module, token.has_value() ? token.value().make_slice() : at.token_slice };
     }
 };
 

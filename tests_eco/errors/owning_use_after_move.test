@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] owning_use_after_move.eco:18:6
+[error] UseAfterMove  owning_use_after_move.eco:18:6
 
   '$a' has been moved out of.
 

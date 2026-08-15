@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] implicit_conversion_on_free_function.eco:4:3
+[error] InvalidImplicitConversion  implicit_conversion_on_free_function.eco:4:3
 
   Only a method can declare an implicit conversion - 'window' is a free function, and a conversion converts the type it is declared on.
 

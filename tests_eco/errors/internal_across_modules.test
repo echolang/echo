@@ -2,8 +2,8 @@ modules: errors/lib_internal_surface
 expect: fail
 
 # **the default is the module**, so a consumer is refused every name the library did not write `public` on
-# while its stated surface stays callable. deliberately also the case with **no label** on any refusal - a
-# cross-module declaration resolves to no file through the module the diagnostic was built against
+# while its stated surface stays callable. the label is the declaration in the *library's* file - the
+# token names its own file, so a cross-module span no longer falls back to the consumer
 --- OUT --->
 [error] InaccessibleDeclaration  internal_across_modules.eco:10:1
 
@@ -14,6 +14,11 @@ expect: fail
      : ^^^^^^
   11 | echo detail_of($d->n) + DETAIL_SCALE;
 
+  2 | // here is wrong: the refusals belong to the consumer, which is the only place the module boundary is visible
+  3 | struct Detail
+    :        ------ declared here
+  4 | {
+
 [error] InaccessibleDeclaration  internal_across_modules.eco:11:25
 
   'DETAIL_SCALE' is internal to the module 'sealedlib', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'sealedlib' offers.
@@ -22,6 +27,11 @@ expect: fail
   11 | echo detail_of($d->n) + DETAIL_SCALE;
      :                         ^^^^^^^^^^^^
   12 | 
+
+  12 | 
+  13 | const int32 DETAIL_SCALE = 4;
+     :             ------------ declared here
+  14 | 
 
 [error] InaccessibleDeclaration  internal_across_modules.eco:10:13
 
@@ -32,6 +42,11 @@ expect: fail
      :             ^^^^^^
   11 | echo detail_of($d->n) + DETAIL_SCALE;
 
+  2 | // here is wrong: the refusals belong to the consumer, which is the only place the module boundary is visible
+  3 | struct Detail
+    :        ------ declared here
+  4 | {
+
 [error] InaccessibleDeclaration  internal_across_modules.eco:11:6
 
   'detail_of(int32)' is internal to the module 'sealedlib', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'sealedlib' offers.
@@ -40,5 +55,10 @@ expect: fail
   11 | echo detail_of($d->n) + DETAIL_SCALE;
      :      ^^^^^^^^^
   12 | 
+
+  7 | 
+  8 | function detail_of(int32 $v) : int32
+    :          --------- declared here
+  9 | {
 
 4 errors, nothing was compiled.

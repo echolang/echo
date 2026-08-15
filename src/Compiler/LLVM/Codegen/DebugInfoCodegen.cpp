@@ -138,9 +138,9 @@ llvm::DIFile *DebugInfoCodegen::file_for(UnitDebug &unit, const AST::File *file)
         return found->second;
     }
 
-    // the **full path**, split the way DWARF wants it - unlike CodegenContext::current_file_name, which
-    // deliberately answers the file name alone so that an abort message stays machine-independent. A
-    // debugger has to find the source on disk, so it needs the directory the goldens must never see.
+    // the **full path**, split the way DWARF wants it - unlike an abort message, which prints only
+    // the file name so a golden stays machine-independent. A debugger has to find the source on
+    // disk, so it needs the directory the goldens must never see.
     //
     // **made absolute**, which is not cosmetic: a manifest's sources already arrive absolute, but a
     // loose file named on the command line arrives exactly as it was typed, so `echoc build -g test.eco`
@@ -205,7 +205,7 @@ void DebugInfoCodegen::begin_function(const AST::FunctionDeclNode &node, llvm::F
     // the two objects disagreed. A token names one collection, and one module owns it, in every unit
     const TokenReference *token = AST::source_token_of(node);
 
-    AST::File *file = token != nullptr ? _ctx.file_of_token(*token) : nullptr;
+    AST::File *file = token != nullptr ? token->file() : nullptr;
 
     if (file == nullptr) {
         file = _ctx.file_of(&node);
@@ -426,10 +426,9 @@ void DebugInfoCodegen::declare_local(
     // of `frame variable` until somebody asks - where dropping the declaration outright would be the
     // debugger seeing storage the program has.
     //
-    // **asked of the bundle, not of this unit.** A single module answers "not mine" for a token
-    // belonging to another module's collection, which is every stdlib `$this` seen from a user unit -
-    // indistinguishable from minted, so this read one way in one object and the other way in the next
-    const bool synthesized = _ctx.is_virtual_token(decl.token_varname);
+    // the token says whether this compiler minted it. a stdlib `$this` seen from a user unit has a
+    // file and is not minted - those used to be indistinguishable when "no file" meant both
+    const bool synthesized = decl.token_varname.is_minted();
 
     llvm::DINode::DIFlags flags =
         synthesized ? llvm::DINode::FlagArtificial : llvm::DINode::FlagZero;

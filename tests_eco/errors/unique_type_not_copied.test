@@ -1,22 +1,26 @@
 expect: fail
 
 --- OUT --->
-[error] unique_type_not_copied.eco:16:13
+[error] CannotCopy  unique_type_not_copied.eco:16:13
 
-  'Handle' is unique: exactly one value may name its storage, so it is moved and never copied. Write 'mv $a' to transfer it, or take a borrow ('Handle&') if it is only being read.
+  'Handle' is unique: exactly one value may name its storage, so it is moved and never copied.
 
   15 | Handle $a = Handle(1);
   16 | Handle $b = $a;
      :             ^^
   17 | 
 
-[error] unique_type_not_copied.eco:19:13
+  help: Write 'mv $a' to transfer it. Or take a borrow ('Handle&') if it is only being read.
 
-  'Holder' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $x' to transfer ownership, take a borrow ('Holder&') if the value is only being read, or give 'Holder' a copy constructor ('constructor(Holder& $other)').
+[error] CannotCopy  unique_type_not_copied.eco:19:13
+
+  'Holder' owns a resource and cannot be copied implicitly at this declaration.
 
   18 | Holder $x = Holder(Handle(2), 3);
   19 | Holder $y = $x;
      :             ^^
   20 | 
+
+  help: Write 'mv $x' to transfer ownership, take a borrow ('Holder&') if the value is only being read, or give 'Holder' a copy constructor ('constructor(Holder& $other)').
 
 2 errors, nothing was compiled.

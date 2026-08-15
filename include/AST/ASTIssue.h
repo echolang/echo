@@ -98,8 +98,8 @@ namespace AST
 
     // a *second* place the reader has to look at - the previous declaration, the other candidate, the
     // borrow that is still live. carried as a token slice rather than a CodeRef because the sites that
-    // have one to give are holding a token: `AST::to_diagnostic` resolves which file it came from through
-    // `Module::file_of`, which is a question the issue has no business answering
+    // have one to give are holding a token: the token names its file, which is a question the issue
+    // has no business answering
     struct IssueLabel
     {
         TokenSlice span;
@@ -297,17 +297,11 @@ namespace AST
         // that worded it here would be a second answer to "what does this modifier mean"
         //
         // `declaration_token` is a *label*: the second place to look is where the declaration was written,
-        // and the message already says which scope it named.
+        // and the message already says which scope it named. the token names its own file, so a
+        // refusal across modules draws the declaration in *its* file rather than the caller's
         //
-        // **not drawn for a refusal across modules**, and that is not an omission. AST::span_of resolves a
-        // label's file through `Module::file_of` on the module the *issue* was built against, which answers
-        // null for a token another module owns - and then falls back to the file the diagnostic is already
-        // drawing. A cross-module label would therefore point at the declaration's line numbers inside the
-        // *caller's* file, which is worse than pointing nowhere.
-        //
-        // `declared_in` is here for exactly that: the module the token belongs to, against `code_ref`'s -
-        // which is the module `span_of` will resolve it through. Asked here rather than by the four sites
-        // that report this, none of which has any other use for the answer
+        // `declared_in` still travels: visibility's module axis reads it, and a token-less origin
+        // (a compiler-minted declaration) has no label to draw
         MAKE_ISSUE_DEF3(InaccessibleDeclaration, IssueSeverity::Error, const std::string, _message, const DeclarationOrigin, declared_in, const std::optional<TokenReference>, declaration_token,
             std::vector<IssueLabel> labels() const override;);
 
@@ -322,6 +316,55 @@ namespace AST
         MAKE_ISSUE_DEF3(ConflictingAccess, IssueSeverity::Error, const std::string, _message, const TokenReference, other_argument_token, const std::string, remedy,
             std::vector<IssueLabel> labels() const override;
             std::vector<IssueNote> notes() const override;);
+
+        // -- D1 families -------------------------------------------------------------------------
+
+        // `&` / `:$` / `weak(...)` of something that is not a place
+        MAKE_ISSUE_DEF1(AddressOfTemporary, IssueSeverity::Error, const std::string, _message);
+        // address or increment of a member of a temporary
+        MAKE_ISSUE_DEF2(TemporaryMember, IssueSeverity::Error, const std::string, _message, const std::string, remedy,
+            std::vector<IssueNote> notes() const override;);
+        MAKE_ISSUE_DEF1(AssignToNonPlace, IssueSeverity::Error, const std::string, _message);
+
+        MAKE_ISSUE_DEF1(UseAfterMove, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ConditionalMove, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(PartialMove, IssueSeverity::Error, const std::string, _message);
+        // `mv` of a value that is already a temporary - a call result, not a field
+        MAKE_ISSUE_DEF1(MoveOfTemporary, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(MoveRequired, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF2(CannotCopy, IssueSeverity::Error, const std::string, _message, const std::string, remedy,
+            std::vector<IssueNote> notes() const override;);
+
+        MAKE_ISSUE_DEF1(NotIterable, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ForeachBinding, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ForeachKey, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ForeachConstBorrow, IssueSeverity::Error, const std::string, _message);
+
+        MAKE_ISSUE_DEF1(BodylessFunction, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ExternHasBody, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ExternGeneric, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DestructorHasParameters, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DestructorHasReturnType, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DuplicateDestructor, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InvalidImplicitConversion, IssueSeverity::Error, const std::string, _message);
+
+        // AttributeReader refusals, from a source `#[...]` or a manifest - one drain
+        MAKE_ISSUE_DEF1(InvalidAttributeValue, IssueSeverity::Error, const std::string, _message);
+
+        // -- M9 manifest -------------------------------------------------------------------------
+
+        MAKE_ISSUE_DEF1(UnknownManifestAttribute, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(RepeatedManifestAttribute, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(MissingModuleAttribute, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(UnusableModuleName, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InvalidManifestScope, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(EmptySourcePattern, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(UnresolvableDependency, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DuplicateModuleName, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ModuleDependencyCycle, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(UnusableTargetName, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(TargetEntryNotASource, IssueSeverity::Error, const std::string, _message);
 
     };
 };

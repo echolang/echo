@@ -3,6 +3,12 @@ flags: --target-os linux
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidAttributeValue  module.eco:10:9
 
-  module.eco:10: 'framework "OpenGL"' is a Darwin framework and this build targets linux. Gate it with '#[if: os == darwin]' and name the platform's own library in the other arm.
+  'framework "OpenGL"' is a Darwin framework and this build targets linux. Gate it with '#[if: os == darwin]' and name the platform's own library in the other arm.
+
+   9 | 
+  10 | #[link: framework "OpenGL"]
+     :         ^^^^^^^^^^^^^^^^^^
+  11 | 
+

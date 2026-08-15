@@ -2,6 +2,12 @@ modules: modules/target_bad_kind
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidAttributeValue  module.eco:5:11
 
-  module.eco:5: 'binary' is not a target kind, expected one of: exe, test.
+  'binary' is not a target kind, expected one of: exe, test.
+
+  4 | #[sources: "src/*.eco"]
+  5 | #[target: binary { name: "tool", entry: "src/main.eco" }]
+    :           ^^^^^^
+  6 | 
+

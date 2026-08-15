@@ -1,18 +1,15 @@
 #include "AST/ASTDiagnostic.h"
 #include "AST/ASTModule.h"
 
-AST::Span AST::span_of(const Module *module, const File *fallback_file, const TokenSlice &slice)
+AST::Span AST::span_of(const TokenSlice &slice, const File *fallback_file)
 {
     Span span;
 
-    // a virtual token belongs to no file, and neither does a slice from a module the issue was not built
-    // against. falling back to the file the diagnostic is already talking about is the honest answer:
-    // the alternative is naming a file the token is not in
-    span.file = fallback_file;
-    if (module != nullptr) {
-        if (const File *owner = module->file_of(slice.start_ref())) {
-            span.file = owner;
-        }
+    // the token names its own file. fallback is only for a token nothing stamped - a lexer-only
+    // test, a mint from a no-file `at` - so the frame still has somewhere to draw
+    span.file = slice.start_ref().file();
+    if (span.file == nullptr) {
+        span.file = fallback_file;
     }
 
     const Token &start = slice.startt();
@@ -47,12 +44,12 @@ AST::Diagnostic AST::to_diagnostic(const IssueRecord &issue)
     diagnostic.code = issue.code();
     diagnostic.message = issue.message();
     diagnostic.module_name = code_ref.module != nullptr ? code_ref.module->name : std::string();
-    diagnostic.primary = span_of(code_ref.module, code_ref.file, code_ref.token_slice);
+    diagnostic.primary = span_of(code_ref.token_slice, code_ref.file());
     diagnostic.primary_label = issue.primary_label();
 
     for (const auto &label : issue.labels()) {
         diagnostic.labels.push_back(
-            DiagnosticLabel { span_of(code_ref.module, code_ref.file, label.span), label.message });
+            DiagnosticLabel { span_of(label.span, code_ref.file()), label.message });
     }
 
     for (const auto &note : issue.notes()) {

@@ -1,13 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] owning_copy_rejected.eco:15:6
+[error] CannotCopy  owning_copy_rejected.eco:15:6
 
-  'Buffer' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, take a borrow ('Buffer&') if the value is only being read, or give 'Buffer' a copy constructor ('constructor(Buffer& $other)').
+  'Buffer' owns a resource and cannot be copied implicitly at this declaration.
 
   14 | $a = Buffer(mem::alloc<uint8>(1));
   15 | $b = $a;
      :      ^^
   16 | 
+
+  help: Write 'mv $a' to transfer ownership, take a borrow ('Buffer&') if the value is only being read, or give 'Buffer' a copy constructor ('constructor(Buffer& $other)').
 
 1 error, nothing was compiled.

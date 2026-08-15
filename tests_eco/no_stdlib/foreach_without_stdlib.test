@@ -2,7 +2,7 @@ stdlib: off
 expect: fail
 
 --- OUT --->
-[error] foreach_without_stdlib.eco:11:1
+[error] NotIterable  foreach_without_stdlib.eco:11:1
 
   'foreach' needs the iteration protocol, and nothing in this program declares '#[core: iterator]'. it lives in the standard library, which this compilation left out.
 

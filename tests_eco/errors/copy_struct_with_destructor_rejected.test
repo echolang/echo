@@ -1,13 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] copy_struct_with_destructor_rejected.eco:23:6
+[error] CannotCopy  copy_struct_with_destructor_rejected.eco:23:6
 
-  'Pool' owns a resource and cannot be copied implicitly at this declaration. Write 'mv $a' to transfer ownership, take a borrow ('Pool&') if the value is only being read, or give 'Pool' a copy constructor ('constructor(Pool& $other)').
+  'Pool' owns a resource and cannot be copied implicitly at this declaration.
 
   22 | $a = Pool(Handle(1));
   23 | $b = $a;
      :      ^^
   24 | 
+
+  help: Write 'mv $a' to transfer ownership, take a borrow ('Pool&') if the value is only being read, or give 'Pool' a copy constructor ('constructor(Pool& $other)').
 
 1 error, nothing was compiled.

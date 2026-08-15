@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] implicit_conversion_with_parameters.eco:9:7
+[error] InvalidImplicitConversion  implicit_conversion_with_parameters.eco:9:7
 
   An implicit conversion takes no parameters - 'Buffer::window' declares 1.
 

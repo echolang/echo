@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] foreach_over_int.eco:5:1
+[error] NotIterable  foreach_over_int.eco:5:1
 
   'int32' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'.
 

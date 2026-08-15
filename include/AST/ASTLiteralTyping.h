@@ -163,12 +163,11 @@ namespace AST
         const Operator *op, ExprNode *lhs, ExprNode *rhs, NodeCollection &nodes);
 
     // the two binary sites' reporting, written once: a warning if the retype moved, a refusal
-    // on the channel `refusal_kind` names. module and file come from the caller; the caret
-    // is the operand's own token
+    // on the channel `refusal_kind` names. the caret is the operand's own token, which names
+    // its file
     void report_binary_reconciliation(
         Collector &collector,
         const Module *module,
-        const File *file,
         const BinaryReconciliation &reconciled);
 
     // **the post-parse moment of type_literal_at**, walked on the live tree.

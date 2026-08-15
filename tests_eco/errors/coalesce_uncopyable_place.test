@@ -1,13 +1,15 @@
 expect: fail
 
 --- OUT --->
-[error] coalesce_uncopyable_place.eco:16:16
+[error] CannotCopy  coalesce_uncopyable_place.eco:16:16
 
-  'Buffer' owns a resource, so this declaration would copy a value that cannot be copied. Give 'Buffer' a copy constructor ('constructor(Buffer& $other)') to say what a copy is - moving a field or an element out of a value is not supported yet.
+  'Buffer' owns a resource, so this declaration would copy a value that cannot be copied.
 
   15 | Buffer? $a = Buffer(mem::alloc<uint8>(1));
   16 | Buffer $x = $a ?? Buffer(mem::alloc<uint8>(1));
      :                ^^^^^^^
   17 | 
+
+  help: Give 'Buffer' a copy constructor ('constructor(Buffer& $other)') to say what a copy is - moving a field or an element out of a value is not supported yet.
 
 1 error, nothing was compiled.

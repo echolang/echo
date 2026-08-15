@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] implicit_conversion_on_constructor.eco:8:7
+[error] InvalidImplicitConversion  implicit_conversion_on_constructor.eco:8:7
 
   Only a method can declare an implicit conversion - a constructor cannot be one.
 

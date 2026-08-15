@@ -54,17 +54,7 @@ FunctionCallExprNode &ForeachLowering::iterator_call(
     return make_unresolved_member_call(*_current_module, iterator, name, at);
 }
 
-void ForeachLowering::refuse(
-    ScopeNode &scope,
-    size_t index,
-    ForeachNode &loop,
-    const TokenReference &at,
-    std::string why
-)
-{
-    _collector.collect_issue<Issue::GenericError>(code_ref_for(at), std::move(why));
-    discard(scope, index, loop);
-}
+
 
 void ForeachLowering::discard(ScopeNode &scope, size_t index, ForeachNode &loop)
 {
@@ -110,7 +100,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
                 discard(scope, index, *loop);
             }
             else {
-                refuse(scope, index, *loop, loop->token_foreach, fmt::format(
+                refuse<Issue::NotIterable>(scope, index, *loop, loop->token_foreach, fmt::format(
                     "'{}' never got a type, so there is nothing to iterate.",
                     loop->source->result_type().get_type_desciption()));
             }
@@ -120,7 +110,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     }
 
     if (look.result == IterationLookup::Result::t_refused) {
-        refuse(scope, index, *loop, loop->token_foreach, look.refusal);
+        refuse<Issue::NotIterable>(scope, index, *loop, loop->token_foreach, look.refusal);
         return;
     }
 
@@ -129,7 +119,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     // the keyed form needs a key contract, and the `=>` is where that belongs - it is the token that
     // asked for one
     if (loop->key != nullptr && !plan.key_type.has_value()) {
-        refuse(scope, index, *loop, loop->token_arrow.value_or(loop->token_foreach), fmt::format(
+        refuse<Issue::ForeachKey>(scope, index, *loop, loop->token_arrow.value_or(loop->token_foreach), fmt::format(
             "'{}' iterates, but its cursor declares no key contract - so there is no '$k' to bind. "
             "Declare '{}<...>' on it, or drop the '=>'.",
             loop->source->result_type().get_type_desciption(),
@@ -141,7 +131,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
     // known: the parser cannot know it, and AST::TypeChecker would arrive as a conversion error about a
     // `V&` declaration the author never wrote, with no `&` token left to point at
     if (loop->binding == ForeachNode::Binding::t_borrow && plan.element_type.is_const()) {
-        refuse(scope, index, *loop, loop->token_binding.value_or(loop->token_foreach), fmt::format(
+        refuse<Issue::ForeachConstBorrow>(scope, index, *loop, loop->token_binding.value_or(loop->token_foreach), fmt::format(
             "'{}' asks for a borrow it could write through, but '{}' hands out '{}' elements. "
             "Write 'const &{}' to borrow it read-only, or drop the '&' for a copy.",
             loop->element->name_full(),

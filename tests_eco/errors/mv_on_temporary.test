@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] mv_on_temporary.eco:9:6
+[error] MoveOfTemporary  mv_on_temporary.eco:9:6
 
   'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own
 

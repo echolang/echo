@@ -422,7 +422,7 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
         reconcile_op, lhs_expr, rhs_expr, payload.context.module.nodes);
 
     AST::report_binary_reconciliation(
-        payload.collector, &payload.context.module, payload.context.file.file, reconciled);
+        payload.collector, &payload.context.module, reconciled);
 
     if (reconciled.result == AST::BinaryReconciliation::Result::t_refused) {
         return AST::make_void_ref();
@@ -658,7 +658,7 @@ AST::ExprNode *Parser::parse_weak_expr(Parser::Payload &payload)
     // would be released the moment the statement ended, so the weak would be dead before it was named -
     // refusing here says that, rather than letting the program discover it at runtime
     if (!AST::is_place_expression(*operand)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::AddressOfTemporary>(
             payload.context.code_ref(weak_token),
             "'weak' needs an expression with storage to reference - a value nothing owns is already "
             "gone by the time a weak reference to it could be read");
@@ -1227,7 +1227,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             }
 
             if (!AST::is_place_expression(*operand)) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.collector.collect_issue<AST::Issue::AddressOfTemporary>(
                     payload.context.code_ref(peel_token),
                     "':$' needs an expression with storage to reach the pointer of");
                 return AST::make_void_ref();
@@ -1676,7 +1676,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         // empty. a non-place is already a move - a call result is nobody else's - so writing `mv` on
         // one is not an error to work around but a sign the author expected a copy to be happening
         if (!AST::is_place_expression(*operand)) {
-            payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.collector.collect_issue<AST::Issue::MoveOfTemporary>(
                 payload.context.code_ref(move_token),
                 "'mv' needs an expression with storage to move out of - this value is already a temporary, so it moves on its own");
             return AST::make_void_ref();
@@ -1788,7 +1788,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             // had already replaced with a MemberAccessNode
             auto *target = current_ref.unsafe_ptr<AST::ExprNode>();
             if (!AST::is_place_expression(*target)) {
-                payload.collector.collect_issue<AST::Issue::GenericError>(
+                payload.collector.collect_issue<AST::Issue::AddressOfTemporary>(
                     payload.context.code_ref(var_token),
                     "Cannot take the address of an expression that has no storage");
                 return AST::make_void_ref();
@@ -2011,7 +2011,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // same message the place check further up uses, rather than falling into the catch-all
     // (`&5` and `&get()` have no storage)
     if (cursor.is_type(Token::Type::t_ref) || cursor.is_type(Token::Type::t_and)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::AddressOfTemporary>(
             payload.context.code_ref(cursor.current()),
             "Cannot take the address of an expression that has no storage");
         cursor.try_skip_to_next_statement();

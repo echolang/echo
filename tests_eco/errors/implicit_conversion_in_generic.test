@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] implicit_conversion_in_generic.eco:12:7
+[error] InvalidImplicitConversion  implicit_conversion_in_generic.eco:12:7
 
   'Bag' is generic, and an implicit conversion on a generic type is not supported yet - the target type would have to be substituted per instantiation.
 

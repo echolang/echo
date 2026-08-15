@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include "AST/ASTBundle.h"
 #include "Compiler/CBuild.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/TargetFacts.h"
+#include "Parser/ModuleParser.h"
 
 #include <filesystem>
 #include <map>
@@ -210,6 +212,29 @@ namespace Parser
     // or not this invocation would compile it, or a cycle would be a cycle only on some targets
     ActiveTargets all_targets_active(const ModuleManifest &manifest);
 
+    // the throwaway parse of every manifest this invocation reads. the driver owns it so the
+    // files and tokens a refusal names still exist when the collector is printed
+    struct ManifestScratch
+    {
+        AST::Bundle bundle;
+        ModuleParser parser;
+        size_t next_module = 0;
+
+        explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
+
+        AST::Module &fresh_module()
+        {
+            AST::module_handle_t handle =
+                bundle.modules.add_module("manifest$" + std::to_string(next_module++));
+            return bundle.modules.get_module(handle);
+        }
+
+        // a graph-level refusal that has no attribute token: mint a pin on a throwaway
+        // file named `path` so the collector can still draw a location
+        template <typename Issue>
+        void report(const std::filesystem::path &path, uint32_t line, std::string message);
+    };
+
     // the paths one source pattern names, in no particular order and unfiltered - a directory can come back,
     // exactly as it can from a glob. **one owner for "what files does this pattern name"**, asked by the
     // manifest reader and by the wildcards on the command line, so the two cannot answer differently.
@@ -228,26 +253,19 @@ namespace Parser
     // is no manifest there at all
     std::optional<std::filesystem::path> manifest_at(const std::filesystem::path &target);
 
-    // reads one manifest. `out_error` is a located message on failure - `<file>:<line>: <what>` - in the
-    // shape EchoTests::parse_eco_test_file uses, and for the same reason: **anything the format does not
-    // understand is an error, never a no-op.**
-    //
-    // An unknown attribute, a missing or repeated `module`, a `sources` pattern matching nothing, a
-    // `depends` path that does not exist. Each of those is a manifest that does not describe what its
-    // author meant, and silently compiling something else is worse than refusing.
+    // reads one manifest. refusals go on `scratch.bundle.collector` as located issues - anything
+    // the format does not understand is an error, never a no-op.
     //
     // a `depends` entry may name either a manifest file or the directory holding one, in which case
     // `module.eco` inside it is used.
     //
-    // `facts` is what a `#[if: ...]` in the manifest is evaluated against, and it is a parameter rather than
-    // a host default for the reason the whole feature exists: a manifest may gate its own `#[sources:]`, and
-    // a source list chosen for one platform while the files in it are filtered for another is silent. It
-    // must be the same facts the module's sources will be parsed with - the invocation's, not the machine's
+    // `#[if: ...]` is evaluated against the facts `scratch` was constructed with, and those must be
+    // the invocation's - a manifest may gate its own `#[sources:]`, and a source list chosen for one
+    // platform while the files in it are filtered for another is silent
     bool read_module_manifest(
         const std::filesystem::path &path,
-        const Compiler::TargetFacts &facts,
-        ModuleManifest &out,
-        std::string &out_error);
+        ManifestScratch &scratch,
+        ModuleManifest &out);
 
     // every manifest reachable from `roots`, in the order the modules must be parsed: a dependency before
     // whatever depends on it.
@@ -259,9 +277,8 @@ namespace Parser
     // depended on twice is parsed once.
     bool resolve_module_graph(
         const std::vector<std::filesystem::path> &roots,
-        const Compiler::TargetFacts &facts,
-        std::vector<ModuleManifest> &out,
-        std::string &out_error);
+        ManifestScratch &scratch,
+        std::vector<ModuleManifest> &out);
 };
 
 #endif

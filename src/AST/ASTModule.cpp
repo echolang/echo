@@ -31,7 +31,7 @@ AST::File &AST::Module::add_file(const std::filesystem::path &path)
 
 AST::TokenizedFile AST::Module::tokenize(
     Lexer &lexer,
-    const AST::File &file,
+    AST::File &file,
     const AST::Module::TokenFilter &filter
 )
 {
@@ -51,6 +51,23 @@ AST::TokenizedFile AST::Module::tokenize(
     // symbol declared in one file be used in another, since the operator table is filled by the
     // module's first parse pass rather than per file at lex time
     size_t startindex = tokens.size();
+
+    // the collection stamps this onto every push; a throw from the lexer must not leave it set
+    struct AppendingFile
+    {
+        TokenCollection &tokens;
+
+        AppendingFile(TokenCollection &tokens, AST::File *file) : tokens(tokens)
+        {
+            tokens.appending_file = file;
+        }
+
+        ~AppendingFile() {
+            tokens.appending_file = nullptr;
+        }
+    };
+
+    AppendingFile stamp(tokens, &file);
     lexer.tokenize(tokens, file.content.value());
 
     // **between lexing and the slice**, which is the whole of why the filter is a parameter here rather

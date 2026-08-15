@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] implicit_conversion_duplicate_target.eco:11:7
+[error] InvalidImplicitConversion  implicit_conversion_duplicate_target.eco:11:7
 
   'Buffer' already declares an implicit conversion to 'Window'.
 

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "Token.h"
+
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Value.h>
 
@@ -62,12 +64,14 @@ namespace Compiler::LLVM
         void gen_abort_if(llvm::Value *condition,
             const std::string &headline, const std::string &detail, const std::string &location);
 
-        // "<file>:<line>" for a call site, the suffix every message carries
+        // "<file>:<line>" for a call site, the suffix every message carries.
         //
-        // the file is the one being emitted, which for a call inside an instantiated generic need
-        // not be the file it was written in, and it is a real hole: the
-        // location it prints in that case exists, and is not where the call is
+        // the file is the call's own token's, so a `die` inside a generic instantiated elsewhere
+        // still names the file it was written in
         std::string location_of(const AST::FunctionCallExprNode &node) const;
+
+        // the same spelling for a site that is not a call - the null-narrowing check
+        std::string location_of(const TokenReference &token) const;
 
         // the text a `die`/`assert` call site folds in, or "" when the call carries none. the
         // literal is read rather than lowered - the whole message is a compile-time constant, so

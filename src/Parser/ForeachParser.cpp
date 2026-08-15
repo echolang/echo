@@ -84,14 +84,14 @@ AST::ForeachNode *Parser::parse_foreach(Parser::Payload &payload)
     // `&const $el` - spelled the other way round. refused rather than accepted, because the two orders
     // reading alike is what makes one of them a typo nobody notices
     if (cursor.is_type(Token::Type::t_const)) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::ForeachBinding>(
             payload.context.code_ref(cursor.current()),
             "write 'const &$el' - the 'const' describes the element, so it goes before the '&'.");
         return give_up();
     }
 
     if (wrote_const && !wrote_ref) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
+        payload.collector.collect_issue<AST::Issue::ForeachBinding>(
             payload.context.code_ref(node.token_binding.value()),
             "'const' on a by-value binding promises nothing - the copy is already yours to write. "
             "write 'const &$el' to borrow the element read-only, or drop the 'const'.");

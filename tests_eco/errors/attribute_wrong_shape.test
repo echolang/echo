@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] attribute_wrong_shape.eco:3:9
+[error] InvalidAttributeValue  attribute_wrong_shape.eco:3:9
 
   the 'core' attribute wants a name here, not a string.
 

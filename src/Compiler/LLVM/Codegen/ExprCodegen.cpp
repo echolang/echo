@@ -5,6 +5,7 @@
 #include "AST/StaticPropertyExprNode.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTSourceToken.h"
 #include "AST/ASTVariadic.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 
@@ -82,7 +83,7 @@ void ExprCodegen::gen_type_cast(AST::TypeCastNode &node)
     // same conjunction decides whether the author is asked to write `unsafe`, and a copy here lets a
     // cast emit the assert and hand back a trusted borrow that nobody was asked to promise
     if (AST::narrowing_promotes_raw_storage(from, to)) {
-        gen_null_assert(value);
+        gen_null_assert(value, AST::location_of_expression(node.expr));
     }
 
     // the conversion table lives on TypeLowering, shared with every declaration, assignment
@@ -1526,7 +1527,7 @@ void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)
         _ctx.classes->gen_strong_upgrade(_ctx.pop(), operand_type.weak_target()));
 }
 
-void ExprCodegen::gen_null_assert(llvm::Value *address)
+void ExprCodegen::gen_null_assert(llvm::Value *address, const TokenReference &at)
 {
     // a property of the *program being compiled*, not of how echoc was built. this used to be an
     // `#if` over the host compiler's NDEBUG, which meant the language rule
@@ -1540,12 +1541,11 @@ void ExprCodegen::gen_null_assert(llvm::Value *address)
         llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0)),
         "isnull");
 
-    // through the same runtime *and the same message shape* `die` and `assert` use, so this finally
-    // says what went wrong instead of raising SIGILL. a cast node carries no token, so its location
-    // is the enclosing function rather than a line
+    // through the same runtime *and the same message shape* `die` and `assert` use. the location
+    // is the operand's token - a cast node carries none of its own
     _ctx.abort->gen_abort_if(is_null,
         "fatal error", "null pointer cast to a reference",
-        fmt::format("{}, {}", _ctx.current_file_name(), _ctx.function_context()));
+        _ctx.abort->location_of(at));
 }
 
 void ExprCodegen::gen_index(AST::IndexExprNode &node)

@@ -160,7 +160,7 @@ TypeChecker::TypeChecker(Bundle &bundle, Compiler::CompilerOptions options) :
 
 CodeRef TypeChecker::code_ref_for(const TokenReference &token)
 {
-    return CodeRef{_current_module, _current_file, token.make_slice()};
+    return CodeRef{_current_module, token.make_slice()};
 }
 
 DeclarationOrigin TypeChecker::current_origin() const
@@ -482,7 +482,7 @@ void TypeChecker::check_has_implementation(FunctionDeclNode &node)
         return;
     }
 
-    _collector.collect_issue<Issue::GenericError>(
+    _collector.collect_issue<Issue::BodylessFunction>(
         code_ref_for(node.declaration_site_token()),
         fmt::format("'{}' was declared but never given a body - write one, or say where its "
                     "implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an "

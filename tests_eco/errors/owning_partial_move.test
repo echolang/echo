@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] owning_partial_move.eco:21:6
+[error] PartialMove  owning_partial_move.eco:21:6
 
   'mv' can only move a whole variable - moving a field or an element out of a value is not supported yet
 

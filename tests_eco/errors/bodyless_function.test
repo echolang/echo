@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] bodyless_function.eco:5:10
+[error] BodylessFunction  bodyless_function.eco:5:10
 
   'mystery(int32)' was declared but never given a body - write one, or say where its implementation comes from with '#[intrinsic: ...]', '#[builtin: ...]' or an 'extern' block.
 

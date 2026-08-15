@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] foreach_keyed_without_key_contract.eco:28:19
+[error] ForeachKey  foreach_keyed_without_key_contract.eco:28:19
 
   'Plain' iterates, but its cursor declares no key contract - so there is no '$k' to bind. Declare 'contract::keyed<...>' on it, or drop the '=>'.
 

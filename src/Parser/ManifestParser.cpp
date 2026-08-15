@@ -11,8 +11,11 @@
 
 #include "AST/ASTAttributes.h"
 #include "AST/ASTBundle.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTIssue.h"
 #include "AST/AttributeNode.h"
 #include "AST/LiteralValueNode.h"
+#include "Parser/AttributeParser.h"
 
 #include <glob.hpp>
 
@@ -34,18 +37,26 @@ namespace
 // which is the one rule the whole format rests on: `#[sources: ...]` misspelled `#[source: ...]` would
 // otherwise produce a module with no files and no complaint
 
-// `<file>:<line>: <what>`, the spelling the .test reader uses. One helper so every message from this file
-// is locatable the same way
-std::string locate(const std::filesystem::path &path, uint32_t line, const std::string &message)
+// a pin on a manifest file, so a refusal that has no attribute token still has a CodeRef.
+// minted: nothing in the source spells this token
+TokenReference pin_manifest(AST::Module &module, AST::File *file, uint32_t line)
 {
-    return fmt::format("{}:{}: {}", path.filename().string(), line, message);
+    return module.tokens[module.tokens.push_minted("", Token::Type::t_unknown, line, 1, file)];
 }
 
-std::string locate(const std::filesystem::path &path, const std::string &message)
+template <typename Issue>
+void report_manifest(
+    AST::Collector &collector,
+    AST::Module &module,
+    AST::File *file,
+    uint32_t line,
+    std::string message
+)
 {
-    return fmt::format("{}: {}", path.filename().string(), message);
+    collector.collect_issue<Issue>(
+        AST::CodeRef{ &module, pin_manifest(module, file, line).make_slice() },
+        std::move(message));
 }
-
 
 // true when a path component carries a glob metacharacter
 bool has_wildcard(std::string_view text)
@@ -125,36 +136,6 @@ std::optional<std::vector<std::filesystem::path>> expand_directory_pattern(
     return matches;
 }
 
-// the scratch state reading a manifest needs, built **once for a whole graph** rather than once per
-// manifest.
-//
-// per manifest is what this was, and it dominated the entire front end: a Parser::ModuleParser builds a
-// Lexer, whose constructor registers 74 token matchers, and an AST::Bundle brings up a namespace tree, an
-// operator registry and a type registry. Reading one 6-line manifest therefore cost more than lexing and
-// parsing the whole standard library. `--timings` is what found it, on the first run of the flag
-struct ManifestScratch
-{
-    AST::Bundle bundle;
-    Parser::ModuleParser parser;
-    size_t next_module = 0;
-
-    // the facts come from the caller and there is no default: this parser is a *second* one, beside the one
-    // the module's sources are parsed with, and the two have to agree about what platform this is. When it
-    // resolved the host's facts for itself, `--target-os linux` read a gated manifest's darwin arm and then
-    // compiled those files as linux
-    explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
-
-    // a *fresh module* per manifest even so, because the attributes are read back out of the module's own
-    // NodeCollection - reusing one would hand the second manifest every attribute the first declared.
-    // The collector is deliberately shared: a manifest declares nothing into it
-    AST::Module &fresh_module()
-    {
-        AST::module_handle_t handle =
-            bundle.modules.add_module(fmt::format("manifest${}", next_module++));
-        return bundle.modules.get_module(handle);
-    }
-};
-
 };
 
 std::optional<std::filesystem::path> Parser::manifest_at(const std::filesystem::path &target)
@@ -187,26 +168,17 @@ std::vector<std::filesystem::path> Parser::expand_source_pattern(const std::file
 namespace
 {
 
-// the critical issues the parser recorded for *this* manifest, located, as one message - empty when it
-// parsed. A manifest that does not lex or parse fails on the parser's own messages, which are better than
-// anything this file could invent
-std::string manifest_parse_errors(
-    const AST::Collector &collector, size_t issues_before, const std::filesystem::path &path)
+struct ManifestReport
 {
-    std::string reported;
+    AST::Collector &collector;
+    AST::Module &module;
+    AST::File *file;
+};
 
-    for (size_t i = issues_before; i < collector.issues.size(); i++) {
-        const auto &issue = collector.issues[i];
-
-        if (!issue->is_critical()) {
-            continue;
-        }
-
-        reported += locate(path, std::get<0>(issue->code_ref.line_range()), issue->message());
-        reported += "\n";
-    }
-
-    return reported;
+template <typename Issue>
+void report_at(const ManifestReport &into, uint32_t line, std::string message)
+{
+    report_manifest<Issue>(into.collector, into.module, into.file, line == 0 ? 1 : line, std::move(message));
 }
 
 // the attribute values, straight off the nodes the declaration pass collected. `sources` and `depends` come
@@ -486,8 +458,7 @@ bool read_manifest_attributes(
     Parser::ModuleManifest &out,
     std::vector<std::string> &out_sources,
     std::vector<std::string> &out_depends,
-    std::vector<WrittenTarget> &out_targets,
-    std::string &out_error)
+    std::vector<WrittenTarget> &out_targets)
 {
     // which `WrittenTarget` an attribute's `{ ... }` fills. **The arena order is what makes one pass
     // enough**: an owner is parsed before anything written inside it, so its slot is always registered by
@@ -501,8 +472,11 @@ bool read_manifest_attributes(
         const uint32_t line = attribute->attribute_id.line();
 
         if (!AST::is_known_manifest_attribute(name)) {
-            out_error = locate(out.path, line, fmt::format(
-                "unknown manifest attribute '{}', expected one of: {}", name, AST::known_manifest_attribute_list()));
+            payload.collector.collect_issue<AST::Issue::UnknownManifestAttribute>(
+                payload.context.code_ref(attribute->attribute_id),
+                fmt::format(
+                    "unknown manifest attribute '{}', expected one of: {}",
+                    name, AST::known_manifest_attribute_list()));
             return false;
         }
 
@@ -516,9 +490,11 @@ bool read_manifest_attributes(
         // number is, and it is the only place an *empty* scope is visible at all - nobody names the owner
         // of a scope with nothing in it
         if (attribute->opens_scope && scoping != AST::AttributeScoping::t_opens_a_scope) {
-            out_error = locate(out.path, line, fmt::format(
-                "'{}' cannot carry a '{{ ... }}' scope - only a '#[target: ...]' can, a scope being "
-                "what one target says for itself.", name));
+            payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
+                payload.context.code_ref(attribute->attribute_id),
+                fmt::format(
+                    "'{}' cannot carry a '{{ ... }}' scope - only a '#[target: ...]' can, a scope being "
+                    "what one target says for itself.", name));
             return false;
         }
 
@@ -527,7 +503,8 @@ bool read_manifest_attributes(
 
         if (attribute->scope_owner != nullptr) {
             if (scoping != AST::AttributeScoping::t_scopable) {
-                out_error = locate(out.path, line,
+                payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
+                    payload.context.code_ref(attribute->attribute_id),
                     scoping == AST::AttributeScoping::t_opens_a_scope
                         ? fmt::format(
                             "'{}' cannot be written inside a '{{ ... }}' scope - a scope is one target "
@@ -545,32 +522,21 @@ bool read_manifest_attributes(
         }
 
         if (!attribute->value.has_value()) {
-            out_error = locate(out.path, line,
+            payload.collector.collect_issue<AST::Issue::InvalidAttributeValue>(
+                payload.context.code_ref(attribute->attribute_id),
                 fmt::format("the '{}' attribute needs a value - write '#[{}: ...]'.", name, name));
             return false;
         }
 
         const AST::AttributeValue &written = attribute->value.value();
 
-        // **the reader accumulates, this loop drains.** A manifest has no diagnostic renderer of its
-        // own yet, so every refusal has to come back out as one `<file>:<line>: <what>` sentence - and
-        // the span the reader carried is what points the line at the offending value rather than at the
-        // attribute it sat in
         AST::AttributeReader reader(name);
-
-        const auto drained = [&]() {
-            if (!reader.has_refusals()) {
-                return false;
-            }
-
-            const AST::AttributeRefusal &first = reader.refusals().front();
-            out_error = locate(out.path, first.span.is_valid() ? first.span.line() : line, first.message);
-            return true;
-        };
 
         if (name == "module") {
             if (!out.name.empty()) {
-                out_error = locate(out.path, line, "'module' is declared twice.");
+                payload.collector.collect_issue<AST::Issue::RepeatedManifestAttribute>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    "'module' is declared twice.");
                 return false;
             }
 
@@ -580,7 +546,9 @@ bool read_manifest_attributes(
         }
         else if (name == "version") {
             if (!out.version.empty()) {
-                out_error = locate(out.path, line, "'version' is declared twice.");
+                payload.collector.collect_issue<AST::Issue::RepeatedManifestAttribute>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    "'version' is declared twice.");
                 return false;
             }
 
@@ -619,9 +587,11 @@ bool read_manifest_attributes(
             // is already waiting to be drained
             if (attribute->opens_scope && !reader.has_refusals()) {
                 if (out_targets.size() != before + 1) {
-                    out_error = locate(out.path, line, fmt::format(
-                        "a '{{ ... }}' scope belongs to one target, and this '#[target: ...]' declares "
-                        "{} - write each of them its own.", out_targets.size() - before));
+                    payload.collector.collect_issue<AST::Issue::InvalidManifestScope>(
+                        payload.context.code_ref(attribute->attribute_id),
+                        fmt::format(
+                            "a '{{ ... }}' scope belongs to one target, and this '#[target: ...]' declares "
+                            "{} - write each of them its own.", out_targets.size() - before));
                     return false;
                 }
 
@@ -639,7 +609,9 @@ bool read_manifest_attributes(
         }
         else if (name == "build_dir") {
             if (!out.build_dir.empty()) {
-                out_error = locate(out.path, line, "'build_dir' is declared twice.");
+                payload.collector.collect_issue<AST::Issue::RepeatedManifestAttribute>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    "'build_dir' is declared twice.");
                 return false;
             }
 
@@ -651,7 +623,8 @@ bool read_manifest_attributes(
 
                 if (!Compiler::resolve_declared_build_dir(
                         value.value(), out.directory, out.build_dir, reason)) {
-                    out_error = locate(out.path, line, reason);
+                    payload.collector.collect_issue<AST::Issue::InvalidAttributeValue>(
+                        payload.context.code_ref(attribute->attribute_id), reason);
                     return false;
                 }
             }
@@ -667,20 +640,25 @@ bool read_manifest_attributes(
         // **drained once, after every arm.** A refusal the reader accumulated is what makes an arm's value
         // absent, so a drain per arm is a check the next attribute added here has to remember - and the
         // one it forgets accepts a value the reader already turned down
-        if (drained()) {
+        Parser::report_attribute_refusals(payload, reader);
+
+        if (payload.collector.has_critical_issues()) {
             return false;
         }
     }
 
     if (out.name.empty()) {
-        out_error = locate(out.path, "no '#[module: \"...\"]' - a manifest has to name its module.");
+        payload.collector.collect_issue<AST::Issue::MissingModuleAttribute>(
+            payload.context.code_ref(),
+            "no '#[module: \"...\"]' - a manifest has to name its module.");
         return false;
     }
 
     // the name becomes an AST module name, which codegen requires to be unique across the bundle and
     // the mangler never reads - so the only rule it needs is that it is spellable
     if (out.name.find_first_of(" \t\"") != std::string::npos) {
-        out_error = locate(out.path,
+        payload.collector.collect_issue<AST::Issue::UnusableModuleName>(
+            payload.context.code_ref(),
             fmt::format("'{}' is not a usable module name - no spaces or quotes.", out.name));
         return false;
     }
@@ -714,7 +692,7 @@ bool expand_manifest_patterns(
     const std::string &noun,
     const std::filesystem::path &exclude,
     std::vector<std::filesystem::path> &out_files,
-    std::string &out_error
+    const ManifestReport &into
 )
 {
     Compiler::ScopedPhase glob_phase("sources glob");
@@ -741,8 +719,8 @@ bool expand_manifest_patterns(
         }
 
         if (kept == 0) {
-            out_error = locate(out.path,
-                fmt::format("the {} pattern '{}' matched no files.", noun, pattern));
+            report_at<AST::Issue::EmptySourcePattern>(into, 1, fmt::format(
+                "the {} pattern '{}' matched no files.", noun, pattern));
             return false;
         }
     }
@@ -762,7 +740,7 @@ bool resolve_manifest_depend_paths(
     const std::vector<std::string> &written,
     const Parser::ModuleManifest &out,
     std::vector<std::filesystem::path> &into,
-    std::string &out_error
+    const ManifestReport &report
 )
 {
     for (const std::string &spelled : written) {
@@ -770,7 +748,7 @@ bool resolve_manifest_depend_paths(
         const std::optional<std::filesystem::path> resolved = Parser::manifest_at(target);
 
         if (!resolved.has_value()) {
-            out_error = locate(out.path, fmt::format(
+            report_at<AST::Issue::UnresolvableDependency>(report, 1, fmt::format(
                 "the dependency '{}' resolves to '{}', which is neither a manifest nor a directory "
                 "holding a 'module.eco'.", spelled, target.string()));
             return false;
@@ -789,15 +767,17 @@ bool resolve_manifest_depend_paths(
 // being built. Excluded here rather than by asking authors to write a pattern that avoids it: the obvious
 // pattern is the one that breaks
 bool expand_manifest_sources(
-    const std::vector<std::string> &patterns, Parser::ModuleManifest &out, std::string &out_error)
+    const std::vector<std::string> &patterns,
+    Parser::ModuleManifest &out,
+    const ManifestReport &into)
 {
     if (patterns.empty()) {
-        out_error = locate(out.path,
+        report_at<AST::Issue::EmptySourcePattern>(into, 1,
             "no '#[sources: \"...\"]' - a manifest has to say which files the module is made of.");
         return false;
     }
 
-    return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, out_error);
+    return expand_manifest_patterns(patterns, out, "sources", out.path, out.sources, into);
 }
 
 // spec.sources, through the same expander and the same policy `#[sources:]` uses - so `*` means one thing
@@ -815,7 +795,7 @@ bool expand_cc_sources(
     Compiler::CBuildSpec &spec,
     const Parser::ModuleManifest &out,
     const std::string &owner,
-    std::string &out_error
+    const ManifestReport &into
 )
 {
     if (spec.source_patterns.empty()) {
@@ -823,13 +803,13 @@ bool expand_cc_sources(
             return true;
         }
 
-        out_error = locate(out.path, fmt::format(
+        report_at<AST::Issue::EmptySourcePattern>(into, 1, fmt::format(
             "{} has '#[cc: ...]' options but no '#[cc: \"sources:...\"]' to apply them to.", owner));
         return false;
     }
 
     return expand_manifest_patterns(
-        spec.source_patterns, out, "C sources", /*exclude=*/{}, spec.sources, out_error);
+        spec.source_patterns, out, "C sources", /*exclude=*/{}, spec.sources, into);
 }
 
 // out.targets, with every entry resolved against the manifest and proved to be one of this module's own
@@ -842,20 +822,20 @@ bool expand_cc_sources(
 bool resolve_manifest_targets(
     const std::vector<WrittenTarget> &written,
     Parser::ModuleManifest &out,
-    std::string &out_error
+    const ManifestReport &into
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
     // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
-    const auto expand_scope = [&out, &out_error](
+    const auto expand_scope = [&out, &into](
         const WrittenTarget &target, Parser::ModuleTarget &settled) {
         if (!target.scoped_sources.empty()
             && !expand_manifest_patterns(
-                target.scoped_sources, out, "sources", out.path, settled.sources, out_error)) {
+                target.scoped_sources, out, "sources", out.path, settled.sources, into)) {
             return false;
         }
 
-        if (!resolve_manifest_depend_paths(target.scoped_depends, out, settled.depends, out_error)) {
+        if (!resolve_manifest_depend_paths(target.scoped_depends, out, settled.depends, into)) {
             return false;
         }
 
@@ -871,7 +851,7 @@ bool resolve_manifest_targets(
         settled.cc.module_name = out.name;
 
         return expand_cc_sources(
-            settled.cc, out, fmt::format("target '{}'", target.name), out_error);
+            settled.cc, out, fmt::format("target '{}'", target.name), into);
     };
 
     for (const WrittenTarget &target : written) {
@@ -886,7 +866,7 @@ bool resolve_manifest_targets(
                 [](unsigned char c) {
                     return std::isalnum(c) != 0 || c == '_' || c == '-';
                 })) {
-            out_error = locate(out.path, target.line, fmt::format(
+            report_at<AST::Issue::UnusableTargetName>(into, target.line, fmt::format(
                 "'{}' is not a usable target name - it becomes the name of a binary, so it may hold "
                 "only letters, digits, '_' and '-'.", target.name));
             return false;
@@ -897,7 +877,7 @@ bool resolve_manifest_targets(
                 continue;
             }
 
-            out_error = locate(out.path, target.line, fmt::format(
+            report_at<AST::Issue::RepeatedManifestAttribute>(into, target.line, fmt::format(
                 "'{}' is declared twice - two targets of one module cannot share a name, because the "
                 "name is the binary.", target.name));
             return false;
@@ -938,7 +918,7 @@ bool resolve_manifest_targets(
         if (std::find(out.sources.begin(), out.sources.end(), resolved) == out.sources.end()
             && std::find(settled.sources.begin(), settled.sources.end(), resolved)
                 == settled.sources.end()) {
-            out_error = locate(out.path, target.line, fmt::format(
+            report_at<AST::Issue::TargetEntryNotASource>(into, target.line, fmt::format(
                 "'{}' is target '{}'s entry but is not one of this module's sources - a target's entry "
                 "has to be a file the module is made of.", target.entry, target.name));
             return false;
@@ -970,14 +950,18 @@ std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest
 
 // the body of the read, taking the scratch state so a graph walk can reuse it
 bool read_manifest_with(
-    ManifestScratch &scratch,
+    Parser::ManifestScratch &scratch,
     const std::filesystem::path &path,
-    Parser::ModuleManifest &out,
-    std::string &out_error)
+    Parser::ModuleManifest &out)
 {
+    AST::Module &module = scratch.fresh_module();
+    AST::File &file = module.add_file(path);
+    const ManifestReport into{ scratch.bundle.collector, module, &file };
+
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec)) {
-        out_error = fmt::format("{}: no such manifest file.", path.string());
+        report_at<AST::Issue::NoSuchManifest>(into, 1, fmt::format(
+            "{}: no such manifest file.", path.string()));
         return false;
     }
 
@@ -985,19 +969,14 @@ bool read_manifest_with(
     out.path = Compiler::canonical_or_absolute(path);
     out.directory = out.path.parent_path();
 
-    // a throwaway module and a throwaway collector: the manifest declares nothing, and parsing it into the
-    // bundle being built would put its attributes into the program's own tree
-    AST::Module &module = scratch.fresh_module();
-
     // where this manifest's own issues start. The collector is shared across a graph walk, so "did *this*
     // manifest parse" cannot be asked as has_critical_issues() - that answers for every manifest read so
-    // far. Today a critical issue aborts the walk immediately so the two agree, but that is a property of
-    // the caller rather than of this check, and it is not one worth depending on
+    // far
     const size_t issues_before = scratch.bundle.collector.issues.size();
 
-    AST::File &file = module.add_file(out.path);
-
-    if (!file.read_from_disk(out_error)) {
+    std::string io_error;
+    if (!file.read_from_disk(io_error)) {
+        report_at<AST::Issue::NoSuchManifest>(into, 1, io_error);
         return false;
     }
 
@@ -1028,27 +1007,24 @@ bool read_manifest_with(
         payload.is_manifest = true;
         Parser::parse_symbols(payload);
 
-        std::string reported =
-            manifest_parse_errors(scratch.bundle.collector, issues_before, out.path);
-
-        if (!reported.empty()) {
-            out_error = std::move(reported);
+        if (scratch.bundle.collector.issues.size() > issues_before
+            && scratch.bundle.collector.has_critical_issues()) {
             return false;
         }
 
         if (!read_manifest_attributes(
                 payload, module, scratch.parser.target_facts, out, sources_written, depends_written,
-                targets_written, out_error)) {
+                targets_written)) {
             return false;
         }
     }
 
     // targets after the sources they name, and before everything else - an entry has to be checked
     // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
-    return expand_manifest_sources(sources_written, out, out_error)
-        && resolve_manifest_targets(targets_written, out, out_error)
-        && expand_cc_sources(out.cc, out, "this module", out_error)
-        && resolve_manifest_depend_paths(depends_written, out, out.depends, out_error);
+    return expand_manifest_sources(sources_written, out, into)
+        && resolve_manifest_targets(targets_written, out, into)
+        && expand_cc_sources(out.cc, out, "this module", into)
+        && resolve_manifest_depend_paths(depends_written, out, out.depends, into);
 }
 
 };
@@ -1161,28 +1137,31 @@ Parser::ActiveTargets Parser::all_targets_active(const Parser::ModuleManifest &m
     return active;
 }
 
+template <typename Issue>
+void Parser::ManifestScratch::report(
+    const std::filesystem::path &path, uint32_t line, std::string message)
+{
+    AST::Module &module = fresh_module();
+    AST::File &file = module.add_file(path);
+    report_manifest<Issue>(bundle.collector, module, &file, line == 0 ? 1 : line, std::move(message));
+}
+
 bool Parser::read_module_manifest(
     const std::filesystem::path &path,
-    const Compiler::TargetFacts &facts,
-    Parser::ModuleManifest &out,
-    std::string &out_error
+    Parser::ManifestScratch &scratch,
+    Parser::ModuleManifest &out
 )
 {
-    ManifestScratch scratch(facts);
-    return read_manifest_with(scratch, path, out, out_error);
+    return read_manifest_with(scratch, path, out);
 }
 
 bool Parser::resolve_module_graph(
     const std::vector<std::filesystem::path> &roots,
-    const Compiler::TargetFacts &facts,
-    std::vector<Parser::ModuleManifest> &out,
-    std::string &out_error
+    Parser::ManifestScratch &scratch,
+    std::vector<Parser::ModuleManifest> &out
 )
 {
     out.clear();
-
-    // one scratch for the whole reachable set - see ManifestScratch
-    ManifestScratch scratch(facts);
 
     std::map<std::filesystem::path, ModuleManifest> loaded;
 
@@ -1196,9 +1175,12 @@ bool Parser::resolve_module_graph(
     for (const std::filesystem::path &root : roots) {
         const std::optional<std::filesystem::path> resolved = Parser::manifest_at(root);
         if (!resolved.has_value()) {
-            out_error = fmt::format(
-                "{}: no such manifest - expected a manifest file or a directory holding a 'module.eco'.",
-                root.string());
+            scratch.report<AST::Issue::NoSuchManifest>(
+                root,
+                1,
+                fmt::format(
+                    "{}: no such manifest - expected a manifest file or a directory holding a 'module.eco'.",
+                    root.string()));
             return false;
         }
         pending.push_back(Compiler::canonical_or_absolute(resolved.value()));
@@ -1214,7 +1196,7 @@ bool Parser::resolve_module_graph(
         }
 
         ModuleManifest manifest;
-        if (!read_manifest_with(scratch, next, manifest, out_error)) {
+        if (!read_manifest_with(scratch, next, manifest)) {
             return false;
         }
 
@@ -1231,9 +1213,12 @@ bool Parser::resolve_module_graph(
     for (const auto &[path, manifest] : loaded) {
         auto [existing, inserted] = by_name.emplace(manifest.name, path);
         if (!inserted) {
-            out_error = fmt::format(
-                "two manifests declare the module name '{}': '{}' and '{}'. Module names must be unique "
-                "within a build.", manifest.name, existing->second.string(), path.string());
+            scratch.report<AST::Issue::DuplicateModuleName>(
+                path,
+                1,
+                fmt::format(
+                    "two manifests declare the module name '{}': '{}' and '{}'. Module names must be unique "
+                    "within a build.", manifest.name, existing->second.string(), path.string()));
             return false;
         }
     }
@@ -1257,10 +1242,13 @@ bool Parser::resolve_module_graph(
                 }
                 chain += loaded.at(path).name;
 
-                out_error = fmt::format(
-                    "the module dependencies form a cycle: {}. A module is parsed completely before the "
-                    "next one starts, so it can only name symbols from modules parsed before it - which "
-                    "makes a cycle unsatisfiable rather than merely unsupported.", chain);
+                scratch.report<AST::Issue::ModuleDependencyCycle>(
+                    path,
+                    1,
+                    fmt::format(
+                        "the module dependencies form a cycle: {}. A module is parsed completely before the "
+                        "next one starts, so it can only name symbols from modules parsed before it - which "
+                        "makes a cycle unsatisfiable rather than merely unsupported.", chain));
                 return false;
             }
 

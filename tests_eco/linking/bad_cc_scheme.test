@@ -2,6 +2,12 @@ modules: linking/lib_bad_cc
 expect: fail
 
 --- OUT --->
-[error] Module Manifest Error
+[error] InvalidAttributeValue  module.eco:9:7
 
-  module.eco:9: 'headers' is not a C build scheme, expected one of: sources, include, define, flag.
+  'headers' is not a C build scheme, expected one of: sources, include, define, flag.
+
+   8 | 
+   9 | #[cc: headers "c/include"]
+     :       ^^^^^^^
+  10 | 
+

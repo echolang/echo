@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] foreach_const_by_ref.eco:9:21
+[error] ForeachConstBorrow  foreach_const_by_ref.eco:9:21
 
   '$x' asks for a borrow it could write through, but 'const array<int32>' hands out 'const int32' elements. Write 'const &$x' to borrow it read-only, or drop the '&' for a copy.
 

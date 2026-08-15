@@ -1,7 +1,7 @@
 expect: fail
 
 --- OUT --->
-[error] foreach_not_iterable.eco:10:1
+[error] NotIterable  foreach_not_iterable.eco:10:1
 
   'Bag' cannot be iterated - it declares neither 'contract::iterator' nor 'contract::iterable'. Declare one, e.g. 'struct Bag : contract::iterable<...>'.
 

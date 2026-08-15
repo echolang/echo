@@ -39,7 +39,7 @@ namespace Compiler
 
     public:
         ASTCompilerException(const AST::IssueRecord &issue) :
-            CompilerException(issue.message(), issue.code_ref.file),
+            CompilerException(issue.message(), issue.code_ref.file()),
             _issue(issue)
         {}
 
