@@ -63,7 +63,7 @@ namespace AST
         // `mem::buffer<T>` claims that exactly one value names its allocation, and until this existed
         // that claim was a convention: `$b->data:$ = $a->data;` built a second owner by hand, so
         // "two live buffers are two allocations" was something the standard library kept rather than
-        // something the compiler knew. see notes/aliasing.md
+        // something the compiler knew.
         //
         // only ever true of a *property*. a local has no outside to be hidden from
         bool is_private = false;

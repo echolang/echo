@@ -733,36 +733,26 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             _ctx.value_stack.pop();
         }
 
-        emit_call(func, node.decl->get_return_type(), args);
+        emit_call(func, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
     }
 }
 
 void ExprCodegen::emit_call(
     llvm::FunctionCallee callee,
-    const AST::ValueType &return_type,
-    std::vector<llvm::Value *> &args
+    std::vector<llvm::Value *> &args,
+    const ReturnAbi &abi
 )
 {
-    llvm::FunctionType *fn_type = callee.getFunctionType();
-
     // **an aggregate too big for registers comes back through storage this call site provides.**
-    // Compiler::LLVM::return_abi_for is the one owner and the signature asked it the same way, so a caller
-    // and its callee cannot disagree about where the answer is. the slot is an ordinary entry alloca, which
-    // is what lets SROA promote it into scalars once the callee is inlined
+    // `abi` is the same answer the signature asked, so a caller and its callee cannot disagree about
+    // where the answer is. the slot is an ordinary entry alloca, which is what lets SROA promote it
+    // into scalars once the callee is inlined
     //
-    // **the slot's type comes from the declaration, never from the `sret` attribute on the callee.**
-    // reading it off the attribute is the same answer right up until the modules are merged: the JIT and
-    // `--optimize whole` both link every unit into one and `llvm::Linker` brings each unit's own named
-    // struct types along, so the attribute can name the *other* unit's `%string` while this unit allocates
-    // and reads its own
-    // the return type is lowered only where the answer is about to need storage - a callee answering
-    // anything but `void` cannot be writing through a hidden pointer, and lowering a struct return can
-    // mint a layout into this unit
-    const ReturnAbi abi =
-        fn_type != nullptr && fn_type->getReturnType()->isVoidTy()
-            ? return_abi_for(
-                _ctx.types->get_llvm_type(return_type, *_ctx.current_cmp_unit), _ctx.layout())
-            : ReturnAbi{};
+    // **the slot's type comes from this unit's lowering of the ABI, never from the `sret` attribute
+    // on the callee.** reading it off the attribute is the same answer right up until the modules are
+    // merged: the JIT and `--optimize whole` both link every unit into one and `llvm::Linker` brings
+    // each unit's own named struct types along, so the attribute can name the *other* unit's `%string`
+    // while this unit allocates and reads its own
 
     if (abi.is_indirect()) {
         llvm::Value *slot = _ctx.entry_alloca(abi.indirect_type, "call.sret");
@@ -862,7 +852,7 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
     llvm::FunctionType *fn_type =
         _ctx.types->get_llvm_function_type(node.decl->callable_type().signature(), *_ctx.current_cmp_unit);
 
-    emit_call({ fn_type, callee }, node.decl->get_return_type(), args);
+    emit_call({ fn_type, callee }, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
 }
 
 // the callee symbol *in the current unit*, declared on demand if this unit has not named it yet.
@@ -1007,7 +997,12 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
     llvm::FunctionType *fn_type =
         _ctx.types->get_llvm_function_type(signature, *_ctx.current_cmp_unit);
 
-    emit_call({ fn_type, fn }, signature.return_type, args);
+    emit_call(
+        { fn_type, fn },
+        args,
+        return_abi_for(
+            _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit),
+            _ctx.layout()));
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
@@ -1500,7 +1495,7 @@ void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)
 void ExprCodegen::gen_null_assert(llvm::Value *address)
 {
     // a property of the *program being compiled*, not of how echoc was built. this used to be an
-    // `#if` over the host compiler's NDEBUG, which meant book/concept/pointers_and_refs_v2.md's
+    // `#if` over the host compiler's NDEBUG, which meant the language rule
     // "in release builds it is unchecked" described nothing
     if (!_ctx.options.assertions_enabled()) {
         return;

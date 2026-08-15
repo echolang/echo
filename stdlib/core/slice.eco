@@ -12,7 +12,7 @@
  * The lifetime rule is the pointer chapter's, unchanged: **a slice must not outlive the array it
  * came from**, and growing that array ends the slice just as decisively as destroying it. Nothing
  * enforces this - there is no borrow checker - so it is a rule you keep rather than one you are
- * held to. See book/concept/arrays.md, "Growth and invalidation".
+ * held to. See docs/collections/arrays.md.
  *
  * Counts and indices are `usize` throughout, matching `mem::`.
  */
@@ -99,7 +99,7 @@ public struct slice<T> : contract::iterable<T>, contract::const_iterable<const T
      *
      * A `const slice<T>` therefore yields `const` elements rather than being a const *window* over
      * mutable ones. That is a deliberate exception to the per-level rule, matching the read-only
-     * element operator below - see book/concept/pointers_and_refs_v2.md.
+     * element operator below. See docs/memory/pointers.md.
      */
     const function iterate() : slice_iterator<const T>
     {
@@ -137,7 +137,7 @@ public struct slice<T> : contract::iterable<T>, contract::const_iterable<const T
 
 /**
  * The element contract. `$s[$i]` reads, writes, takes `&` and chains with `->`, all through the
- * borrow this hands back - see book/concept/arrays.md, "Elements".
+ * borrow this hands back. See docs/collections/slices.md.
  *
  * There is deliberately **no** one-operand `operator (slice<T>& $s)[]`: a slice does not own its
  * storage, so it has nothing to grow. `$s[] = $v` is then an ordinary "no overload accepts these
@@ -183,7 +183,7 @@ operator<T> (const slice<T>& $s)[usize $index] : const T&
  * then an ordinary local the optimiser can prove loop-invariant, which gives the loop a computable
  * trip count and with it unrolling and vectorisation. A cursor holding an `array<T>&` and asking it
  * `->count()` each turn would force a reload through a pointer nothing can prove unaliased, and the
- * loop would be measurably worse for no gain. See book/concept/iteration.md, "What it costs".
+ * loop would be measurably worse for no gain. See docs/collections/iteration.md.
  *
  * The usual borrow rule applies, unchanged: growing the array ends this window, exactly as it ends
  * every other borrow into it.

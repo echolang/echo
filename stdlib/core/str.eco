@@ -35,7 +35,7 @@ namespace str;
  * `private` on a member is the *owner type* axis, and what these want is the module one - string.eco,
  * format.eco and str.eco all call them - but `internal` is refused on a member, a member having no module
  * of its own. So the shape is what is enforced instead: every mutator is `private` on `string`'s side, so
- * no caller reaches one through the owner it holds. See notes/visibility.md.
+ * no caller reaches one through the owner it holds.
  */
 public class buf
 {

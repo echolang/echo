@@ -1,54 +1,26 @@
 /**
  * `result<T, E>` - a value, or the reason there is not one.
  *
- * ```
- * function request(string::view $url) : result<string, int32>
- * {
- *     if (...) {
- *         return .error(404);
- *     }
+ * `T?` is the cheap answer when absence is enough. This is the other one: a value of type `T`, or a
+ * failure of type `E`. Nothing in the compiler knows what a result is. There is no `#[core:]` binding
+ * and there is deliberately none. `guard` reaches it through the two interfaces below, and
+ * `.ok(...)` / `.error(...)` are the ordinary static shorthand every enum's cases get.
  *
- *     return .ok($body);
- * }
+ * Why an enum and not a struct with a flag: a struct's copy and teardown walk every property, so an
+ * `ok` would still retain and release the failure it is not holding. An enum's copy and teardown are
+ * per case. Same-type arms (`result<string, string>`) would also collide as two constructors of one
+ * signature; cases are told apart by name.
  *
- * $body = guard request('https://example.com') else ($code) {
- *     die('the request failed');
- * }
- * ```
- *
- * **Nothing in the compiler knows what a result is.** There is no `#[core:]` binding here and there is
- * deliberately none - a core name exists so the compiler can *say* a type it mints itself, and the
- * compiler never mints a result, exactly as it never mints a `range<T>` or a `slice<T>`. `guard` reaches
- * this through the same two interfaces a type of your own would declare, and `.ok(...)` / `.error(...)`
- * are the ordinary static shorthand every enum's cases get.
- *
- * **Why this is an enum and not a struct with a flag.** A struct could hold `bool $ok` beside both
- * payloads and answer every function below. What it could not do is answer them *cheaply*: the compiler
- * synthesizes a struct's copy and its teardown over **every** property, so an `ok` result would retain
- * and release the failure slot it is not holding, and a struct cannot opt out - declaring a destructor to
- * branch by hand makes `AST::classify_copy` answer `t_none` and takes the synthesized copy with it. An
- * enum's copy and teardown are per case by construction, so a `result<string, string>` holding an `ok`
- * touches one payload and not two. That is the whole argument, and it is why the language grew
- * `unwrap() : T&` rather than this file growing a `bool`.
- *
- * **What it costs.** An enum's layout is flat - a tag, then one slot per payload field of every case - so
- * this is `T` *and* `E` wide rather than the larger of the two. See [Enums](/language/enums) for why, and
- * for the note that overlapping them is an optimisation that can land later without changing a line of
- * Echo. Nothing here would change if it did.
- *
- * **The borrow `unwrap()` hands back points into the result**, so it lives exactly as long as the result
- * does. That is the same promise `map<K, V>::at()` and `slice<T>::at()` make, and the same one the
- * language declines to check: a borrow kept past its subject is yours to keep straight.
+ * The layout is `T` and `E` wide, not the larger of the two. `unwrap()` hands back a `T&` into this
+ * value, so the borrow lives exactly as long as the result does. See docs/stdlib/result.md.
  */
 
 /**
  * A value of type `T`, or a failure of type `E`.
  *
- * Built with `result<T, E>::ok($v)` and `result<T, E>::error($e)`, or with `.ok($v)` / `.error($e)`
- * wherever the destination already names the type - a return type, a declared variable, or the parameter
- * of a call that has been chosen. Read with `guard`, which is what the two conformances are for;
- * `has_value()`, `unwrap()`, `failure()` and `value_or()` are the same thing spelled by hand, and `match`
- * over one reads it as the ordinary enum it is.
+ * Built with `ok` / `error`, or `.ok` / `.error` wherever the destination already names the type.
+ * Read with `guard`. The methods below are the same thing spelled by hand. `match` reads it as the
+ * ordinary enum it is.
  */
 public enum result<T, E> : contract::unwrappable<T>, contract::failable<E>
 {

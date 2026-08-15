@@ -67,8 +67,8 @@ namespace AST
         static ConstFoldResult refused(std::string why);
     };
 
-    // **this is not an evaluator, and this is the line.** notes/constants.md states that a constant is
-    // its *expression*, cloned per use site, and that there is no evaluator and should not be. that is
+    // **this is not an evaluator, and this is the line.** a constant is
+    // its *expression*, cloned per use site, and there is no evaluator and should not be. that is
     // unchanged: this is never asked what a constant denotes, and it *cannot* be - AST::ConstantExpander
     // runs before the monomorphizer's fixpoint, so an AST::ConstRefExprNode is already gone by the time
     // anything calls this, and there is no arm for one. a constant still has no value; it has an

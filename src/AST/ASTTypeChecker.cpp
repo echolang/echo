@@ -64,7 +64,7 @@ static const char *null_rejection_reason(const ValueType &to)
     }
 
     // a borrow is the type that promises it is never null, so seeding one with null defeats the only
-    // guarantee it carries (book/concept/pointers_and_refs_v2.md, "Two pointer types"). it keeps its own
+    // guarantee it carries. it keeps its own
     // message because it has its own *other* spelling - `ptr<T>`, not `T&?`
     if (to.is_pointer()) {
         return "declare it as a nullable pointer instead";
@@ -250,7 +250,7 @@ void TypeChecker::visitScope(ScopeNode &node)
 // the modifier is what turns an invariant from something a library keeps into something the compiler
 // knows. `mem::buffer<T>` says exactly one value names its allocation; without this,
 // `$b->data:$ = $a->data;` builds a second owner by hand, in ordinary safe code, and the claim every
-// aliasing conclusion rests on is a convention. see notes/aliasing.md
+// aliasing conclusion rests on is a convention.
 //
 // reported here rather than at the layout, because privacy is about the *site* and the layout has no
 // idea where it is being read from
@@ -477,7 +477,7 @@ void TypeChecker::visitReturn(ReturnNode &node)
         }
 
         // the storage a local names is gone before the caller can read it, so handing back its
-        // address is always wrong (book/concept/pointers_and_refs_v2.md, "Lifetimes")
+        // address is always wrong
         // a parameter is the caller's storage and outlives the call, so it is the legal case
         if (declared.is_pointer() && actual.is_pointer()) {
             VarDeclNode *root = place_root_of(node.expr);
@@ -671,7 +671,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
     //
     // **a pointer is excluded**, and that is deliberate rather than an oversight. `ptr<T>` carries this
     // same flag, but `->` through one is the language's established auto-deref and
-    // book/concept/pointers_and_refs_v2.md documents null-checking the *address* instead. changing that
+    // null-checking the *address* is the established pointer rule instead. changing that
     // is a separate decision about pointers, not part of introducing `T?`
     //
     // **a property the optional itself declares is not a reach *through* it.** a tagged `T?` is a layout
@@ -1685,7 +1685,7 @@ void TypeChecker::visitUnaryExpr(UnaryExprNode &node)
 // target's shape says which level that is: a deref means the write goes *through* a pointer, so the
 // pointee's const decides it, while any other place names the slot itself. the parser cannot make
 // this call - writing through and re-seating are the same token sequence until the adjuster has
-// inserted the deref (book/concept/pointers_and_refs_v2.md, "Const")
+// inserted the deref
 void TypeChecker::check_const_target(AssignNode &node)
 {
     ExprNode &target = *node.target;
@@ -1774,9 +1774,9 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
 
     // scoped to the destinations that have no conversion to fall back on: that is the surface where
     // a mismatch is a real error rather than a widening. `T&` widens to `ptr<T>` freely while the
-    // narrowing back asserts non-nullness and needs the explicit cast
-    // (book/concept/pointers_and_refs_v2.md, "Two pointer types"), and a struct slot takes nothing
-    // but that struct. null answers to its own rules, and an undeterminable type to other diagnostics
+    // narrowing back asserts non-nullness and needs the explicit cast, and a struct slot takes
+    // nothing but that struct. null answers to its own rules, and an undeterminable type to other
+    // diagnostics
     if (to.is_void() || from.is_void()
         || is_written_null(&value)
         || (!demands_exact_conversion(to) && !demands_exact_conversion(from))
@@ -1849,7 +1849,7 @@ void TypeChecker::visit_assign(AssignNode &node)
     // this is what rejects `$p = &$b`: after the adjustment pass the target is a deref of $p,
     // so the storage is an int32 while the value is an int32& - assigning an address into the
     // pointee's slot. re-seating is spelled `$p:$ = &$b`, whose target *is* the slot
-    // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+    // (re-seating is `$p:$ = &$b`)
     if (node.target && node.value_expr) {
         const ValueType target_type = node.target->result_type();
 

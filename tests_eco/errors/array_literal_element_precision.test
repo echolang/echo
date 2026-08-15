@@ -1,6 +1,15 @@
 expect: fail
 
 --- OUT --->
+[error] InvalidTypeConversion  array_literal_element_precision.eco:9:23
+
+  Invalid type conversion: The floating point number literal '2.5' cannot be implicitly converted to an integer type due to non zero decimal values.
+
+   8 | 
+   9 | array<int32> $a = [1, 2.5];
+     :                       ^^^
+  10 | 
+
 [error] InvalidTypeConversion  array_literal_element_precision.eco:12:8
 
   Invalid type conversion: The floating point number literal '2.5' cannot be implicitly converted to an integer type due to non zero decimal values.
@@ -18,15 +27,6 @@ expect: fail
   13 | $b[0] = 3.9;
      :         ^^^
   14 | 
-
-[error] InvalidTypeConversion  array_literal_element_precision.eco:9:23
-
-  Invalid type conversion: The floating point number literal '2.5' cannot be implicitly converted to an integer type due to non zero decimal values.
-
-   8 | 
-   9 | array<int32> $a = [1, 2.5];
-     :                       ^^^
-  10 | 
 
 [error] InvalidTypeConversion  array_literal_element_precision.eco:17:10
 

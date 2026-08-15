@@ -624,8 +624,7 @@ bool is_expr_token(Parser::Payload &payload, Parser::Cursor &cursor)
            // start of a call - does not change meaning just because some suffix operator is spelled
            // that way somewhere in the program. neither arm changes anything for a symbol spelled as a
            // word, and the shunting yard's `expects_operand` still refuses an infix one written in
-           // operand position - see notes/operators.md, "A custom infix symbol is not an operator in
-           // operand position"
+           // operand position
            //
            // **last**, because it is the only arm that costs a lookup: the precedence test above is a
            // switch on the token type and answers for every built-in operator token, so only a token
@@ -1255,7 +1254,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
             // `:$` walks one level outward each time. applied to an already peeled expression
             // there is no transparency left to strip, so it means the address of the slot -
             // which makes `$out:$:$` identical to `&$out` rather than a special case
-            // (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+            // (`$out:$:$` is `&$out`)
             if (operand->get_node_type() == AST::NodeType::n_expr_peel) {
                 // no weak reading here, and it needs no destination to decide: `:$` requires a pointer
                 // operand, and a class handle is not one - so `$out:$:$` is always the slot's address,
@@ -1284,7 +1283,7 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
         // `->` already reaches through every pointer level, so `$p:$->x` could only ever mean what
         // `$p->x` means. it is rejected rather than aliased: `:$` marks an operation *on the
         // address*, and the pointer object itself has no members
-        // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
+        // (`:$` names the pointer, which has no members)
         if (current_ref.type() == AST::NodeType::n_expr_peel) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
                 payload.context.code_ref(accessor_token),
@@ -1813,7 +1812,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // an explicit pointer cast, `ptr<uint8>($ints:$)` or `int32&($p:$)`. it reinterprets an
     // address as pointing at a different type, so its argument is almost always a `:$`
-    // expression (book/concept/pointers_and_refs_v2.md, "Casting")
+    // expression
     //
     // `ptr` always starts one; a plain identifier only does when a `&` and a `(` follow, which
     // no other production spells - `Foo(...)` is a constructor call and `Foo &$x` a declaration
@@ -1949,7 +1948,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // `&` reached here means it was not followed by a variable name, so there is no storage to
     // take the address of - `&5` and `&get()` are the two ways to spell that. reported with the
     // same message the place check further up uses, rather than falling into the catch-all
-    // (book/concept/pointers_and_refs_v2.md, "Taking addresses")
+    // (`&5` and `&get()` have no storage)
     if (cursor.is_type(Token::Type::t_ref) || cursor.is_type(Token::Type::t_and)) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(cursor.current()),

@@ -277,12 +277,11 @@ namespace AST
     //
     // deliberately takes the *storage* type, with no transparency peeling, so `&$buf` on a
     // `ptr<uint8>` is a `ptr<ptr<uint8>>`: the address of $buf's own slot, not the address
-    // $buf holds (book/concept/pointers_and_refs_v2.md, "Pointers to pointers")
+    // $buf holds
     //
     // **over a class, where a weak reference is what is being asked for, it means one instead.** a class
     // handle already *is* an address, so the address of a slot holding one is rarely what a program wants;
-    // what it wants is a second reference that does not own. `weak<Foo> $w = &$obj;` says so, and that
-    // see book/concept/ownership_and_moving.md, "Weak references and cycles"
+    // what it wants is a second reference that does not own. `weak<Foo> $w = &$obj;` says so.
     //
     // **the destination decides, not the operand's type.** that is the rule this chapter already runs
     // on: a destination decides how far a value is read (`as_value_for`), and a `Foo&` parameter is what
@@ -402,8 +401,7 @@ namespace AST
     // otherwise have been there, minus the leaving-behind. so the node's only job is to mark the
     // position, and AST::OwnershipPass then reads it twice - to skip the copy diagnostic, and to add
     // E's root variable to the moved set - before erasing it. nothing about a move survives into the
-    // IR except the absence of the copy (book/concept/ownership_and_moving.md, "`mv` should erase
-    // itself")
+    // IR except the absence of the copy
     //
     // deliberately *not* a place expression: the whole point is that E has stopped holding the
     // value, so `&(mv $a)` and `mv $a = ...` are nonsense. reaching codegen is a compiler bug, and
@@ -868,7 +866,7 @@ namespace AST
     //
     //  - **a pointer**, and then only when the base was written `:$`. the element n positions along
     //    from the address, offset scaled by the size of the pointee, never by bytes
-    //    (book/concept/pointers_and_refs_v2.md, "Pointer arithmetic")
+    //    (offset scaled by the pointee, never by bytes)
     //  - **a container**, and then `element_call` holds the `operator []` the base's type declares.
     //    the operator returns a borrow, so what the call yields *is* the element's address, which is
     //    exactly what gen_lvalue's other arm produces itself
@@ -986,8 +984,8 @@ namespace AST
     //
     // Where the author named that storage - a declaration's initializer, an assignment to a variable -
     // the expansion fills it. Everywhere else the compiler names it, hoisting a synthesized declaration
-    // ahead of the statement and wrapping the pair in a scope, so it dies with the statement rather
-    // than with the frame
+    // ahead of the statement. a declaration is a sibling of that hoist so the name outlives it; any
+    // other statement is wrapped so the hoist dies with the statement rather than the frame
     class ArrayLiteralExprNode : public ExprNode
     {
     public:

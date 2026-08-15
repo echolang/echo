@@ -436,7 +436,7 @@ namespace AST
         // it used to assert `is_pointer()`, because a pointer level was the only place nullability could
         // sit and `ptr<T>` versus `T&` was the whole of it. generalising the flag is what gives the
         // language `T?` over anything, and it makes `ptr<T>` fall out as the pointer level's spelling of
-        // a question every level can now be asked - see book/concept/nullability.md
+        // a question every level can now be asked
         //
         // **two encodings, one question.** where the flag *is* the implementation - a pointer, a class
         // handle, a weak - it answers from the flag. where `T?` needs a tagged pair it answers from the
@@ -1519,7 +1519,6 @@ namespace AST
     // one primitive behind two rules that are the same rule: the auto-deref that makes a pointer
     // behave like the value it points at, and the generic decay that binds T=int32 when a
     // ptr<int32> is passed to `function box<T>(T $v)`
-    // (book/concept/pointers_and_refs_v2.md, "Pointers and generics")
     ValueType value_type_of(const ValueType &type);
 
     // the type ultimately addressed, following every pointer level rather than one
@@ -1527,7 +1526,6 @@ namespace AST
     // deliberately separate from value_type_of, which is the *read* rule and must stay at one
     // level. this is the `->` rule: a member lives on the struct, however many addresses deep
     // the base happens to be, so `ptr<ptr<Point>>` still finds Point's fields
-    // (book/concept/pointers_and_refs_v2.md, "Structs and classes")
     ValueType target_type_of(const ValueType &type);
 
     // true when a value of `from` may be used where `to` is expected without an explicit cast

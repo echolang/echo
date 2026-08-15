@@ -1,14 +1,23 @@
 #include "AST/ASTLiteralTyping.h"
 
+#include "AST/ASTBundle.h"
 #include "AST/ASTCodeRef.h"
 #include "AST/ASTCollector.h"
+#include "AST/ASTFile.h"
 #include "AST/ASTIssue.h"
+#include "AST/ASTModule.h"
 #include "AST/ASTNode.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
+#include "AST/ASTPlaceExpr.h"
+#include "AST/ASTRecursiveVisitor.h"
+#include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
+#include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
+#include "AST/ReturnNode.h"
 #include "AST/TypeCastNode.h"
+#include "AST/VarDeclNode.h"
 #include "External/infint.h"
 
 #include <fmt/core.h>
@@ -567,6 +576,121 @@ namespace AST
                 reconciled.refusal_kind,
                 reconciled.refusal);
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // the post-parse moment, on the live tree
+    // ---------------------------------------------------------------------------
+
+    class DestinationLiteralTyping : public RecursiveVisitor
+    {
+    public:
+        DestinationLiteralTyping(Module &module, Collector &collector)
+            : _module(module), _collector(collector)
+        {}
+
+        File *file = nullptr;
+        bool changed = false;
+
+        void visitFunctionDecl(FunctionDeclNode &node) override
+        {
+            if (node.is_generic()) {
+                return;
+            }
+
+            const ValueType enclosing = _return;
+            _return = value_type_of(node.get_return_type());
+
+            RecursiveVisitor::visitFunctionDecl(node);
+
+            _return = enclosing;
+        }
+
+        void visitVarDecl(VarDeclNode &node) override
+        {
+            // a guard's binding is not this walk's: its declared type is deliberately one level
+            // less nullable than what the initializer produces
+            if (node.has_type() && node.init_expr != nullptr && !node.binds_unwrapped) {
+                write_at(node.init_expr, value_type_of(node.type()), node.token_varname);
+            }
+
+            RecursiveVisitor::visitVarDecl(node);
+        }
+
+        void visit_assign(AssignNode &node) override
+        {
+            if (node.target != nullptr && node.value_expr != nullptr) {
+                // the *storage's* type, peeled through the borrow an element operator hands back -
+                // AST::value_result_type, the same peel Parser::parse_varexpr makes for a written
+                // assignment. an index that has not resolved yet answers void and waits a round
+                write_at(
+                    node.value_expr,
+                    value_result_type(*node.target),
+                    node.token_assign);
+            }
+
+            RecursiveVisitor::visit_assign(node);
+        }
+
+        void visitReturn(ReturnNode &node) override
+        {
+            if (node.expr != nullptr && node.token_return.has_value()) {
+                write_at(node.expr, _return, *node.token_return);
+            }
+
+            RecursiveVisitor::visitReturn(node);
+        }
+
+    private:
+        void write_at(ExprNode *&slot, const ValueType &destination, const TokenReference &at)
+        {
+            if (!is_untyped_literal(slot) || is_undetermined_type(destination)) {
+                return;
+            }
+
+            const LiteralTyping typing = type_literal_at(slot, destination, _module.nodes);
+
+            if (typing.result == LiteralTyping::Result::t_unchanged) {
+                return;
+            }
+
+            const CodeRef here = code_ref_at_literal(CodeRef{&_module, file, at.make_slice()}, slot);
+
+            report_literal_warning(_collector, here, typing);
+
+            if (typing.result == LiteralTyping::Result::t_refused) {
+                report_literal_refusal(_collector, here, typing);
+                return;
+            }
+
+            slot = typing.node;
+            changed = true;
+        }
+
+        Module &_module;
+        Collector &_collector;
+        ValueType _return = ValueType::void_type();
+    };
+
+    bool type_destination_literals(Bundle &bundle)
+    {
+        bool progressed = false;
+
+        for (auto &module_ptr : bundle.modules) {
+            DestinationLiteralTyping walker(*module_ptr, bundle.collector);
+
+            for (auto &file : module_ptr->files()) {
+                walker.file = &file;
+
+                if (file.root != nullptr) {
+                    file.root->accept(walker);
+                }
+            }
+
+            progressed |= walker.changed;
+        }
+
+        return progressed;
     }
 
 };  // namespace AST

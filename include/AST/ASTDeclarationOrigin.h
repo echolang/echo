@@ -18,7 +18,7 @@ namespace AST
     // this family today, each built by its own sweep over an arena or over the file roots
     // (Monomorphizer::_decl_module, OwnershipPass::_type_module, CodegenContext::function_file_map), and
     // every one of them is a *derivation* of what the parser already had in its hand and threw away. They
-    // are still there; retiring them onto this field is `todo/A40`, and the reason to state the direction
+    // are still there; retiring them onto this field is the direction, and the reason to state it
     // here is that a fourth sweep added later would have nothing to be the fourth answer to.
     //
     // a **generic instantiation inherits its template's origin**, which falls out of

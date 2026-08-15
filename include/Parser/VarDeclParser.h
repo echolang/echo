@@ -31,7 +31,7 @@ namespace Parser
     // the same in both - **can this be written to**, reported here on the `=` rather than left to the
     // lvalue codegen's locationless "not addressable" throw, and **at what type**, which is the type the
     // *storage* holds so a pointer target writes through it rather than being re-seated
-    // (book/concept/pointers_and_refs_v2.md, "Binding, writing, and re-seating")
+    // (re-seating is spelled `:$`, writing through is the deref)
     //
     // one function because the alternative was two, which is how the day one of them grows a rule the
     // other wants it ends with only one of them having it

@@ -177,7 +177,7 @@ AST::ValueType AST::AddrOfExprNode::result_type() const
 
     // `&$x` yields the non-nullable borrow `T&`, which widens implicitly to `ptr<T>`. that one
     // rule is what makes both `int32& $r = &$var;` and `ptr<int32> $p = &$var;` legal without a
-    // cast (book/concept/pointers_and_refs_v2.md, "Two pointer types")
+    // cast
     //
     // built over the operand's own result type, with no peeling: taking the address of a
     // pointer variable must yield a pointer to that variable's slot
@@ -205,7 +205,7 @@ AST::ValueType AST::StrongExprNode::result_type() const
     }
 
     // the class it names, **nullable** - a dead object is a real answer, and it is the type that makes the
-    // program acknowledge it rather than a convention. see book/concept/nullability.md
+    // program acknowledge it rather than a convention
     return ValueType::make_nullable(operand_type.weak_target());
 }
 

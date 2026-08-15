@@ -1,0 +1,10 @@
+// the const from a literal is real: writing through it is the same refusal a const copy already
+// gets. arrays/const_array_from_literal pins that the declaration compiles; this pins that the
+// name is frozen afterwards, not that the appends ran against a mutable leftover
+const $c = [1, 2];
+
+// the element contract a const array reaches hands back `const T&`
+$c[0] = 5;
+
+// and a method that did not declare itself a reader is refused by name
+$c->push(3);

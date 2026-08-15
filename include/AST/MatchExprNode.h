@@ -30,7 +30,7 @@ namespace AST
     //
     // **a node that reaches codegen, rather than a lowering inside the fixpoint.** the three passes that
     // rewrite in there - AST::ConstFolding, AST::ForeachLowering, AST::InterpolationLowering - each turn
-    // a statement into statements, and notes/control_flow.md's rule is what separates this from them:
+    // a statement into statements, and the rule is what separates this from them:
     // `for` is a node because the difference it makes is a basic block, `foreach` is not because it
     // makes none. a match makes N of them and a phi, and lowering it would mean hoisting a declaration
     // out of an arbitrary expression position, which changes the order the operands around it evaluate

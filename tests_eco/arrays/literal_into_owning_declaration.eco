@@ -1,0 +1,8 @@
+// the same hoist-scoping bug without a user type: a declaration whose initializer contains an array
+// literal, whose declared type has a destructor. `array<array<int32>>` is that shape
+array<array<int32>> $nested = [[7, 9]];
+
+echo $nested->count();
+echo $nested[0]->count();
+echo $nested[0][0];
+echo $nested[0][1];

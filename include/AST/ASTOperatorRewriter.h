@@ -21,11 +21,7 @@ namespace AST
     class ExprNode;
     class FunctionCallExprNode;
     class IndexExprNode;
-    class ArrayLiteralExprNode;
     class ScopeNode;
-    class VarDeclNode;
-    class ComplexType;
-    class Namespace;
 
     // **turns operand syntax into calls, once the types that decide what it means are known.**
     //
@@ -157,45 +153,15 @@ namespace AST
         // unchanged. answers the operand or its replacement, so every caller reseats its edge
         ExprNode *upgrade_optional_operand(ExprNode *operand, const TokenReference &at);
 
-        // rule 2 - `[1, 2, 3]` becomes a constructor of the destination type plus one append per
-        // element, spliced into `scope` after `index`. only the enclosing scope can do this: the
-        // expansion is several statements, and an expression has nowhere to put them
+        // rule 2 - `[1, 2, 3]` becomes a constructor plus one append per element.
+        // AST::ArrayLiteralExpansion is the rewrite; this walk places what it returns. a statement
+        // whose type is not concrete yet is left for a later round, exactly as an index is
         //
-        // `scope.children[index]` is the statement to look at. a destination whose type is not
-        // concrete yet is left for a later round, exactly as an index is
-        void expand_array_literal(ScopeNode &scope, size_t index);
-
-        // **rule 2 where the author named no storage** - `f([1, 2, 3])`. the compiler names it: a
-        // synthesized declaration is hoisted *ahead* of the statement and the literal's edge becomes
-        // that declaration's name, so what reaches the parameter is an ordinary place taking an
-        // ordinary `t_borrow`. none of AST::OwnershipPass's temporary machinery is involved, which is
-        // the point - a literal is `t_addressless` precisely because it fills storage rather than
-        // occupying some
-        //
-        // answers the replacement for the edge, or null when the literal is not ready - it has no
-        // AST::bind_array_literal_to type yet, so the round that settles the call has not happened.
-        // the caller leaves the literal in place, and finalize() is what turns a permanent "not yet"
-        // into the diagnostic
-        ExprNode *hoist_array_literal(ArrayLiteralExprNode &literal);
-
-        // the constructor of `type` written into `slot`, plus one `$into[] = element` per element.
-        // shared by the two rules above because it is the whole of what an expansion *is*; what
-        // differs between them is only where the storage came from and where the appends go
-        //
-        // answers false when the destination cannot be built from a literal, having reported it
-        bool build_literal_expansion(
-            ArrayLiteralExprNode &literal,
-            VarDeclNode &into,
-            const ValueType &type,
-            ExprNode **slot,
-            std::vector<NodeReference> &appends);
-
-        // the declarations and appends hoist_array_literal produced while walking the current
-        // statement, innermost first. buffered rather than spliced on the spot because the walk is
-        // *inside* statement_edge and the scope's child list is what would be mutated under it
-        //
-        // saved and restored around a nested scope's own loop, so a literal in an inner block is
-        // wrapped there rather than escaping to the outer one
+        // the declarations and appends an expression-position hoist produced while walking the
+        // current statement. buffered rather than spliced on the spot because the walk is *inside*
+        // statement_edge and the scope's child list is what would be mutated under it. saved and
+        // restored around a nested scope's own loop, so a literal in an inner block is placed there
+        // rather than escaping to the outer one
         std::vector<NodeReference> _hoisted;
 
         // **the statements rule 6 discarded, batched.** AST::forget_subtree hands its walk to
@@ -227,44 +193,6 @@ namespace AST
             OperatorRewriter &_pass;
         };
 
-        // moves `scope.children[index]` into a scope of its own, preceded by whatever _hoisted holds.
-        // that scope *is* the lifetime: the declarations are its locals, so the statement's end is
-        // where AST::OwnershipPass destroys them
-        void wrap_statement_with_hoists(ScopeNode &scope, size_t index);
-
-        // the two statement shapes an array literal may sit in, resolved to the one thing the
-        // expansion needs: the declaration whose storage is being filled, and the literal filling it.
-        // `decl` null means this statement is not one of them
-        struct LiteralDestination
-        {
-            VarDeclNode *decl = nullptr;
-            ArrayLiteralExprNode *literal = nullptr;
-            ExprNode **slot = nullptr;
-
-            // is this statement the declaration itself? **only a declaration may be typed *from* its
-            // elements** - an assignment writes storage somebody else already named, and taking a
-            // type off the right-hand side there would let `$a = ["x"];` silently retype an
-            // `array<int32>` rather than being the mismatch it is
-            bool declares = false;
-        };
-
-        static LiteralDestination literal_destination(Node *statement);
-
-        // **what type is being filled** - the declaration's own, or the one its elements give it when
-        // it was written without one. answers false when the expansion must not proceed: refused,
-        // or not decided yet, which are the two states that own the literal's diagnostic.
-        //
-        // its own function because it is the whole of "which type", and expand_array_literal above is
-        // the whole of "emit the constructor and the appends" - one scope holding both was the two
-        // sets of locals in each other's way
-        bool settle_destination_type(const LiteralDestination &destination, ValueType &settled);
-
-        // **an array literal no statement claimed.** the two positions that can hold one are the
-        // vardecl and assign arms above; every other position reports, and reports the same thing -
-        // one function, because the two askers are the statement walk and the expression walk and a
-        // string each is a string that drifts. quiet once decided, so a round does not report twice
-        void report_unplaced_literal(ArrayLiteralExprNode &literal);
-
         // the call an operator lowers to. the node is AST::build_operator_call_node's, the same one
         // Parser::build_operator_call builds - this only records that a round changed something.
         // resolution is left to the fixpoint's own settle_calls, where every other pending call is
@@ -274,17 +202,6 @@ namespace AST
             OpFixity fixity,
             const TokenReference &at,
             std::vector<ExprNode *> operands
-        );
-
-        // a pending call that is *not* an operator's - the destination type's constructor, which the
-        // array literal expansion names. its own function rather than a flag on the one above,
-        // because the lookup point is the whole difference: an operator resolves in the root
-        // namespace and a type's constructor resolves where the type was declared
-        FunctionCallExprNode &build_call(
-            const std::string &name,
-            const TokenReference &at,
-            std::vector<ExprNode *> operands,
-            const Namespace *lookup
         );
 
         CodeRef code_ref_for(const TokenReference &token);

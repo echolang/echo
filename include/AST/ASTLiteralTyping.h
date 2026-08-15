@@ -10,6 +10,7 @@
 
 namespace AST
 {
+    class Bundle;
     class Collector;
     class ExprNode;
     class File;
@@ -169,6 +170,17 @@ namespace AST
         const Module *module,
         const File *file,
         const BinaryReconciliation &reconciled);
+
+    // **the post-parse moment of type_literal_at**, walked on the live tree.
+    //
+    // three written destinations: a declaration's initializer, an assignment's right-hand side, a
+    // return. generic bodies are skipped - a template's `T $sum = 0` is only meaningful once cloned.
+    // of_type is deliberately not this: a detached assign stays in the arena forever, and a walk
+    // that does not inherit visitFunctionDecl's skip would stamp the template
+    //
+    // after AST::rederive_stale_variable_types in the fixpoint, because that step may be what makes
+    // a declaration's type concrete in this same round
+    bool type_destination_literals(Bundle &bundle);
 };
 
 #endif

@@ -111,7 +111,7 @@ namespace AST
         // AST::UnwrapPlan, through AST::make_resolved_member_call - which owns the receiver rule and the
         // settlement, shared with AST::ForeachLowering's `iterate()`.
         //
-        // **not a name**, and that is `todo/A44`: this pass used to mint `"has_value"`, `"unwrap"` and
+        // **not a name**: this pass used to mint `"has_value"`, `"unwrap"` and
         // `"failure"` as unresolved by-name calls and let AST::CallResolver choose all over again -
         // a second answer to which declaration the conformance had accepted, over a requirement whose
         // *spelling* in stdlib/core/contract.eco was therefore load-bearing in a compiler pass.

@@ -5,6 +5,7 @@
 
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTValueType.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 
 #include <llvm/IR/DerivedTypes.h>
 
@@ -113,10 +114,13 @@ namespace Compiler::LLVM
         // are not: a call site that allocated the slot and forgot the attribute is a *miscompile*, and one
         // that reads the value off the `void` call is a crash. `llvm::FunctionCallee` is what lets the
         // three shapes share it, being a Function or a (type, pointer) alike
+        //
+        // `abi` is the same answer the signature asked - TypeLowering::return_abi_of for a declaration,
+        // return_abi_for for a callable value. this does not re-derive it from the LLVM return kind
         void emit_call(
             llvm::FunctionCallee callee,
-            const AST::ValueType &return_type,
-            std::vector<llvm::Value *> &args);
+            std::vector<llvm::Value *> &args,
+            const ReturnAbi &abi);
 
         // `A?->b`: evaluate A, test it, and run the continuation only when it is there. the same shape as
         // `??` with the arms the other way round, and the absent arm supplying the destination's null

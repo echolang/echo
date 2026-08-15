@@ -7,8 +7,8 @@
 
 // the tiers are spaced by ten, and the spacing is the point rather than decoration: a custom
 // operator declares its precedence as a number on *this* scale (`operator(45, left)`), so there has
-// to be room between two built-in levels to declare into. the numbers themselves are published in
-// book/concept/operators.md, which makes them a contract rather than an implementation detail
+// to be room between two built-in levels to declare into. the numbers themselves are a contract
+// rather than an implementation detail
 //
 // **a smaller sequence binds tighter**, which is the one thing about this table that is easy to
 // read backwards. AST::CUSTOM_OP_DEFAULT_PRECEDENCE sits at 95, between `|` and comparison

@@ -58,7 +58,7 @@ namespace AST
 
         // innermost-last stack of the generic type parameters currently in scope. a stack rather
         // than one flat list so a generic member of a generic struct sees both its own parameters
-        // and its owner's — lookup walks outward, and leaving an inner scope restores the outer
+        // and its owner's: lookup walks outward, and leaving an inner scope restores the outer
         // one instead of wiping everything
         std::vector<std::vector<TypeParamDecl *>> type_param_scopes;
 
@@ -136,7 +136,7 @@ namespace AST
         void push_scope(ScopeNode &scope);
         void pop_scope();
 
-        // enters a nested type-parameter scope. pushing an empty scope is fine and normal — a
+        // enters a nested type-parameter scope. pushing an empty scope is fine and normal: a
         // non-generic member of a generic owner still needs its own frame so leaving it cannot
         // disturb the owner's parameters
         void push_type_param_scope(const std::vector<TypeParamDecl *> &params) {
@@ -206,7 +206,7 @@ namespace AST
         /**
          * Creates a virtual token with the same position as the reference token
          *
-         * minting belongs to the module, which owns the collection — see Module::make_virtual_token
+         * minting belongs to the module, which owns the collection. see Module::make_virtual_token
          */
         TokenReference make_virtual_token(const std::string &value, Token::Type type, const TokenReference &ref) {
             return module.make_virtual_token(value, type, ref);
@@ -234,7 +234,7 @@ namespace AST
     };
 
     // scopes a type-parameter frame to a parser function, so every early return unwinds it.
-    // the one guard for all declaration parsers — a hand-rolled copy per parser is how the
+    // the one guard for all declaration parsers: a hand-rolled copy per parser is how the
     // previous flat list ended up being cleared instead of restored
     struct TypeParamScope
     {

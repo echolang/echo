@@ -46,7 +46,7 @@ namespace AST
 
         // a body the compiler can write itself: a struct whose properties each have an answer of their
         // own, which is copied by copying each of them. the one case
-        // book/concept/ownership_and_moving.md leaves to the compiler rather than to the author
+        // left to the compiler rather than to the author
         t_synthesizable,
 
         // nobody has said what a copy would mean, and the compiler will not guess. the ownership

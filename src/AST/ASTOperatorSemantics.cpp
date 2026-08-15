@@ -406,7 +406,7 @@ namespace AST
         // comparing against null only means something on an address. `$p == null` would read the int32
         // at address zero - exactly the crash the check is meant to prevent - so it is rejected and
         // `$p:$ == null` is the way to ask
-        // (book/concept/pointers_and_refs_v2.md, "Nullability")
+        // (`$p:$ == null` is the way to ask)
         if (lhs_facts.is_null != rhs_facts.is_null) {
             const ValueType &other = lhs_facts.is_null ? rhs : lhs;
 

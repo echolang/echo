@@ -4,7 +4,7 @@ namespace mem;
  * Memory: raw heap allocation, and reading the reference counts.
  *
  * Nothing here frees anything for you. Every `mem::alloc` needs a matching `mem::free`, and
- * using memory after freeing it is undefined. See book/concept/pointers_and_refs_v2.md.
+ * using memory after freeing it is undefined. See docs/memory/pointers.md.
  *
  * Counts are always counts of *elements*, never bytes. The byte-level functions below are the
  * single exception, and the only place a size in bytes appears at all.
@@ -265,7 +265,7 @@ public function bit_cast<To, From>(From $value) : To
  *
  * Here beside `alloc` rather than at the root, because it asks about the same thing they do: a
  * reference count is a word inside the heap block these functions hand out. "May I write to this"
- * is a memory question. See book/concept/ownership_and_moving.md.
+ * is a memory question. See docs/memory/ownership.md.
  *
  * A compiler builtin rather than a library function, because the count is a word inside the heap
  * block - `{ i64 __strong, i64 __weak, ptr __typeinfo, %Foo }` - and no Echo spelling reaches it.

@@ -35,8 +35,8 @@ namespace AST
         // this arm had no corpus case, and a call through an erased *generic* interface had no vtable
         // slot at all - AST::interface_method_slot matched the requirement by pointer identity against
         // the template's methods while the call carries the instantiation's - so every program that
-        // reached here died with an internal error. `todo/B53`, found from the unwrapping protocol's
-        // identical arm; `tests_eco/iteration/erased_iterator` is this one, and it exists now
+        // reached here died with an internal error. the unwrapping protocol had the identical arm.
+        // `tests_eco/iteration/erased_iterator` is this one, and it exists now
         t_erased_iterator,
     };
 

@@ -4,7 +4,7 @@
  * A contract is a capability a type declares, and nothing more - no storage, no behaviour of its own.
  * There are two protocols here. The first four are the iteration one: `foreach` knows these and nothing
  * else, and there is no arm anywhere in the compiler that knows what an `array<T>` is. A type of your own
- * conforms exactly the way `array<T>` does, and loops exactly as well. See book/concept/iteration.md.
+ * conforms exactly the way `array<T>` does, and loops exactly as well. See docs/collections/iteration.md.
  *
  * The last two are the **unwrapping** protocol, which is to `guard` what iteration is to `foreach`. It
  * has one asymmetry worth knowing: a `T?` is answered by the compiler directly, so `guard` over a

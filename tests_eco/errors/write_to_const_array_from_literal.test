@@ -1,0 +1,22 @@
+expect: fail
+
+--- OUT --->
+[error] ConstViolation  write_to_const_array_from_literal.eco:7:7
+
+  Const violation: cannot assign to const storage of type 'const int32'
+
+  6 | // the element contract a const array reaches hands back `const T&`
+  7 | $c[0] = 5;
+    :       ^
+  8 | 
+
+[error] ConstViolation  write_to_const_array_from_literal.eco:10:5
+
+  Const violation: cannot call 'array::push(int32)' on a const 'array<int32>' - the method is not declared const, so it may write. Mark it `const function push(...)` if it only reads.
+
+   9 | // and a method that did not declare itself a reader is refused by name
+  10 | $c->push(3);
+     :     ^^^^
+  11 | 
+
+2 errors, nothing was compiled.

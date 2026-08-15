@@ -153,7 +153,7 @@ void ForeachLowering::lower(ScopeNode &scope, size_t index)
 
     // **the copy elision.** a by-value binding nothing writes is bound `const V&` instead, which is
     // indistinguishable for any program that keeps the "do not mutate while iterating" contract - see
-    // book/concept/iteration.md. asked here, exactly once, on a body still shaped as it was parsed
+    // asked here, exactly once, on a body still shaped as it was parsed
     ForeachNode::Binding effective = loop->binding;
 
     if (effective == ForeachNode::Binding::t_value && is_never_written(*loop->element, *loop->body)) {

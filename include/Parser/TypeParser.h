@@ -98,7 +98,7 @@ namespace Parser
     // list reuses the declarations already installed, so a parameter has exactly one declaration
     // no matter how often its owner is re-parsed
     //
-    // a constructor of a generic struct must NOT call this — it shares the struct's declarations by
+    // a constructor of a generic struct must NOT call this: it shares the struct's declarations by
     // copying the pointer vector, which is what lets one substitution bind the parameters mentioned
     // in both the owner's and the constructor's types
     void declare_type_parameters(Payload &payload, AST::ComplexType &owner, const std::vector<ParsedTypeParam> &parsed);
@@ -107,7 +107,7 @@ namespace Parser
     // FunctionDeclNode::type_parameters, inherited_type_param_count included: a method of a generic
     // struct passes the owner's declarations as `inherited` and they are shared, not re-declared
     // stripping the prefix before declaring and re-prefixing after lives here rather than at the call
-    // site, because the reuse rule that forces it is here — see the implementation
+    // site, because the reuse rule that forces it is here. see the implementation
     void declare_type_parameters(
         Payload &payload,
         AST::FunctionDeclNode &owner,

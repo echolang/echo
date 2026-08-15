@@ -11,11 +11,8 @@
 #include "AST/VarNode.h"
 #include "AST/ASTCallResolution.h"
 #include "AST/ASTLiteralTyping.h"
-#include "AST/AssignNode.h"
 #include "AST/ASTOwnership.h"
 #include "AST/ASTPlaceExpr.h"
-#include "AST/ASTRecursiveVisitor.h"
-#include "AST/ReturnNode.h"
 #include "Debugging.h"
 
 #include <fmt/core.h>
@@ -316,119 +313,6 @@ namespace AST
                 auto &type_node = mod.nodes.emplace_back<TypeNode>(derived);
                 decl->set_type_node(&type_node);
                 progressed = true;
-            }
-        }
-
-        return progressed;
-    }
-
-    // step B1: a literal whose destination only became concrete after the parse
-    //
-    // **the mirror of step B, and the direction matters.** that one derives a declaration's type from
-    // its initializer; this one writes a literal at the type the declaration already has. two shapes
-    // reach it, and neither could have been answered by the parser:
-    //
-    //   T $sum = 0;              inside a generic. `T` cannot type a literal, correctly, so the `0`
-    //                            defaulted to int32 - and CloneContext::shallow copies a literal
-    //                            verbatim, so the `float64` instance kept an int32 zero and quietly
-    //                            computed something else
-    //
-    //   $a[] = 2.5;              an append AST::OperatorRewriter minted, whose destination is an
-    //                            `int32&` place nobody had written. every *written* destination
-    //                            refuses a literal it cannot hold; this one truncated in silence
-    //
-    // asked of AST::is_untyped_literal, so a literal a destination already typed is never revisited -
-    // which is what keeps this idempotent across rounds and keeps an explicit cast the author wrote
-    // from being undone
-    bool Monomorphizer::type_pending_literals()
-    {
-        bool progressed = false;
-
-        for (auto &module_ptr : _bundle.modules) {
-            Module &mod = *module_ptr;
-
-            const auto write_at = [&](ExprNode *&slot, const ValueType &destination,
-                                      const TokenReference &at) {
-                if (!is_untyped_literal(slot) || is_undetermined_type(destination)) {
-                    return;
-                }
-
-                const LiteralTyping typing = type_literal_at(slot, destination, mod.nodes);
-
-                if (typing.result == LiteralTyping::Result::t_unchanged) {
-                    return;
-                }
-
-                const CodeRef here = code_ref_at_literal(code_ref_for(mod, at), slot);
-
-                report_literal_warning(_collector, here, typing);
-
-                if (typing.result == LiteralTyping::Result::t_refused) {
-                    // no `progressed`: nothing moved, and the identical sentence at the identical
-                    // token is what Collector::collect_issue de-duplicates on
-                    report_literal_refusal(_collector, here, typing);
-
-                    return;
-                }
-
-                slot = typing.node;
-                progressed = true;
-            };
-
-            for (auto *decl : mod.nodes.of_type<VarDeclNode>()) {
-                // a guard's binding is not this sweep's either, and for step B's reason: its declared
-                // type is deliberately one level less nullable than what the initializer produces
-                if (!decl->has_type() || decl->init_expr == nullptr || decl->binds_unwrapped) {
-                    continue;
-                }
-
-                write_at(decl->init_expr, value_type_of(decl->type()), decl->token_varname);
-            }
-
-            for (auto *assign : mod.nodes.of_type<AssignNode>()) {
-                if (assign->target == nullptr || assign->value_expr == nullptr) {
-                    continue;
-                }
-
-                // the *storage's* type, peeled through the borrow an element operator hands back -
-                // AST::value_result_type, the same peel Parser::parse_varexpr makes for a written
-                // assignment. an index that has not resolved yet answers void and waits a round
-                write_at(
-                    assign->value_expr,
-                    value_result_type(*assign->target),
-                    assign->token_assign);
-            }
-
-            // the third written destination, and the one the parser cannot type when the return
-            // is still a `T`. `function f<T>() : T { return 2.5; }` defaulted the literal at parse
-            // and TypeChecker waved float→int through, so `T = int32` truncated in silence - the
-            // same hole `T $sum = 0` and `$a[] = 2.5` just stopped having
-            struct ReturnWalker : RecursiveVisitor
-            {
-                decltype(write_at) &write;
-                ValueType dest;
-
-                ReturnWalker(decltype(write_at) &write, ValueType dest) : write(write), dest(dest) {}
-
-                void visitFunctionDecl(FunctionDeclNode &) override {}
-
-                void visitReturn(ReturnNode &node) override
-                {
-                    if (node.expr != nullptr && node.token_return.has_value()) {
-                        write(node.expr, dest, *node.token_return);
-                    }
-
-                    RecursiveVisitor::visitReturn(node);
-                }
-            };
-
-            for (auto *fn : mod.nodes.of_type<FunctionDeclNode>()) {
-                if (fn->body == nullptr || fn->return_type == nullptr || fn->is_generic()) {
-                    continue;
-                }
-
-                ReturnWalker walker(write_at, value_type_of(fn->get_return_type()));
-                fn->body->accept(walker);
             }
         }
 
@@ -780,8 +664,9 @@ namespace AST
 
             // **after the re-derivation, and that order is the content**: step B may be what makes a
             // declaration's type concrete in this very round, and a literal written at a type that is
-            // still undetermined would simply be skipped
-            progressed |= type_pending_literals();
+            // still undetermined would simply be skipped. AST::type_destination_literals is the
+            // live-tree walk; this is only the moment
+            progressed |= type_destination_literals(_bundle);
 
             progressed |= rederive_stale_capture_types();
             progressed |= settle_calls();

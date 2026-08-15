@@ -2100,8 +2100,8 @@ ExprNode *OwnershipPass::arrive_value(
 
         // **a struct says what its copy is by declaring a constructor that takes a borrow of itself.**
         // the type holding the raw pointer is the only one that knows what duplicating it means, and
-        // this is it saying so. It is the hole book/concept/ownership_and_moving.md's "Not yet
-        // specified" lists first, and the one the others hang off.
+        // this is it saying so. It is the hole a type that owns a raw pointer has to fill first,
+        // and the one the others hang off.
         //
         // Recognised rather than newly spelled, so the explicit `Foo($a)` and this implicit copy are
         // one declaration - one way to copy a value rather than two to keep in step.
@@ -2480,7 +2480,7 @@ IfStatementNode &OwnershipPass::branch_when_case(
 
     // the literal is typed to the discriminant's own primitive rather than left to default to int32:
     // the comparison is performed at AST::binary_operation_type's answer for the pair, and a `uint8`
-    // tag beside a signed literal is exactly the shape todo/B51 is about
+    // tag beside a signed literal is exactly the shape a defaulted int32 would lose against a uint8
     const ValueType tag_type = ct->get_property_type(k_enum_tag_index);
 
     auto &literal = _current_module->nodes.emplace_back<LiteralIntExprNode>(

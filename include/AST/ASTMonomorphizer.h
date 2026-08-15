@@ -144,11 +144,6 @@ namespace AST
         // one round's steps, in the order they have to run in - see the comments on each
         bool instantiate_generic_calls(size_t round);
         bool rederive_stale_variable_types();
-
-        // the mirror of the above: a literal written at a destination that only became concrete after
-        // the parse - a `T` the clone substituted, or an append AST::OperatorRewriter minted
-        bool type_pending_literals();
-
         bool rederive_stale_capture_types();
         bool settle_calls();
 

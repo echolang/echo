@@ -21,7 +21,7 @@ namespace Compiler
     // **the boundary is one sentence and it is hard: a C build contributes objects and nothing else.**
     // Never an include path, never a macro, never anything that reaches Echo's front end. Echo does not
     // read C headers and is not going to; an `extern { }` block is still written by hand and still the
-    // author's to get right, which book/concept/cbinding.md already says. Everything below is a build
+    // author's to get right. Everything below is a build
     // step that happens to run before the link, and it is deliberately not a build system: there is no
     // dependency between two modules' C, no library target, and no install step
     enum class CcScheme

@@ -76,7 +76,7 @@ namespace AST
     //   width of its text. That is why the underline can span a whole expression rather than being the
     //   single caret the old excerpt printer drew.
     // - a **string literal stores its value without the quotes**, so its span is two characters short.
-    //   Known and accepted; see notes/diagnostics.md
+    //   Known and accepted.
     Span span_of(const Module *module, const File *fallback_file, const TokenSlice &slice);
 
     Diagnostic to_diagnostic(const IssueRecord &issue);

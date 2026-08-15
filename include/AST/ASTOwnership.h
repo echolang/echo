@@ -69,7 +69,7 @@ namespace AST
         t_return,
     };
 
-    // single ownership, as book/concept/ownership_and_moving.md specifies it: one owner per value,
+    // single ownership: one owner per value,
     // destroyed exactly once when that owner's scope ends, `mv` to hand it elsewhere.
     //
     // Three jobs in one tree walk, because they answer each other:

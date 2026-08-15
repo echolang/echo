@@ -270,7 +270,7 @@ void TypeLowering::apply_function_attributes(
         //
         // **and no `noalias`, from here or from anywhere.** a call-site conflict check does not
         // license one: a callee can reach the same storage through a class handle it holds or a
-        // pointer it stored, neither of which appears at the call. see notes/aliasing.md
+        // pointer it stored, neither of which appears at the call.
         if (AST::declared_access_effect(*arg) == AST::AccessEffect::t_read && type.is_pointer()) {
             func->getArg(static_cast<unsigned>(at))->addAttr(llvm::Attribute::ReadOnly);
         }

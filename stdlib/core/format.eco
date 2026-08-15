@@ -24,7 +24,7 @@
  * **Why this is not `str::fmt(...)`.** A function taking a format string and the values after it is
  * variadic, and `AST::match_function` matches arity exactly. Interpolation removes the need
  * entirely: each hole is a *unary* call, so nothing here asks the language for a feature it does
- * not have. See `notes/interpolation.md`.
+ * not have.
  */
 
 namespace str;

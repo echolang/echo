@@ -204,8 +204,8 @@ AST::UnwrapLookup AST::unwrap_plan_for(
     // it did not run at first, and not for a reason that lived here: a call through an erased *generic*
     // interface had no vtable slot, AST::interface_method_slot matching the requirement by pointer
     // identity against the template's methods while the call carries the instantiation's. that was
-    // `todo/B53`, it predated this protocol - `foreach` over an erased `contract::iterator<V>` failed the
-    // same way, which is why `IterationSource::t_erased_iterator` had never been exercised either - and
+    // it predated this protocol: `foreach` over an erased `contract::iterator<V>` failed the
+    // same way, which is why `IterationSource::t_erased_iterator` had never been exercised either.
     // it is fixed. `tests_eco/nullability/unwrappable_erased` is this arm
     if (peeled.is_interface()) {
         if (subject_ct->template_or_self() != unwrappable_tmpl->template_or_self()) {
@@ -225,7 +225,7 @@ AST::UnwrapLookup AST::unwrap_plan_for(
         // the dispatch through the vtable is ExprCodegen::gen_function_call's question, asked of
         // FunctionDeclNode::is_interface_requirement(). read through interface_requirements so the
         // `template_or_self` redirect is taken once and in one place - a generic interface's own
-        // application declares nothing, which is what `todo/B53` settled
+        // application declares nothing, which is what the template_or_self redirect settled
         const std::vector<FunctionDeclNode *> &requirements = AST::interface_requirements(subject_ct);
 
         if (!slots_are_the_protocol(requirements)) {

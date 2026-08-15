@@ -750,7 +750,7 @@ bool AST::is_implicitly_convertible(const ValueType &from, const ValueType &to)
     //
     // so `Foo? $x = $foo;` and `f($foo)` against a `Foo?` parameter are free, and `Foo $y = $maybe;` is a
     // located error naming the three ways through - `guard`, `??`, `?->`. that refusal is the entire
-    // safety story of book/concept/nullability.md: a dead weak upgrades to `Foo?`, and there is no step from
+    // safety story: a dead weak upgrades to `Foo?`, and there is no step from
     // to a `Foo` anybody can read
     //
     // pointer levels are excluded and keep their own arm below: on one of them this same flag is the

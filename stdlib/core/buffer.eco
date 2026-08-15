@@ -28,7 +28,7 @@ namespace mem;
  * read out, cannot be written in, and cannot be taken together by a field-wise constructor, because
  * a private property suppresses that constructor outright. So the only ways to obtain a buffer are
  * `mem::buffer<T>()` and `resize`, one of which produces a fresh region and the other of which
- * consumes the old one. See notes/aliasing.md.
+ * consumes the old one.
  */
 #[core: buffer]
 #[unique]

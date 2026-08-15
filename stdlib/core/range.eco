@@ -79,7 +79,7 @@ public struct range<T> : contract::iterable<T>, contract::const_iterable<T>
  *
  * **It materializes the value it yields into a field of its own**, which every cursor over computed
  * values has to do: `contract::iterator<V>::current()` returns a `V&`, so there has to be storage to
- * borrow. It costs one slot and nothing else - see book/concept/iteration.md.
+ * borrow. It costs one slot and nothing else. See docs/collections/iteration.md.
  *
  * It holds its bound by value, for `slice_iterator<T>`'s reason: the end is then an ordinary local
  * the optimiser can prove loop-invariant, which is what gives the loop a computable trip count.

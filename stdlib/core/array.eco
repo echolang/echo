@@ -169,7 +169,7 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      * Use `reserve_exact()` when you want a small array sized to the byte.
      *
      * **This may move the buffer**, so every borrow into the array is stale afterwards: every
-     * `slice<T>` you took, every `&$a[$i]`. See book/concept/arrays.md, "Growth and invalidation".
+     * `slice<T>` you took, every `&$a[$i]`. See docs/collections/arrays.md.
      */
     function reserve(usize $count) : void
     {
@@ -289,9 +289,8 @@ public struct array<T> : contract::iterable<T>, contract::const_iterable<const T
      *
      * **`$a->extend($a)` is refused**, and that is a rule rather than an oversight: `$this` takes
      * `inout` access by being a method's receiver, `$other` takes `read` by being a const borrow, and
-     * one array cannot be both at once. Neither word is written here - see
-     * book/concept/pointers_and_refs_v2.md, "Addresses may alias, accesses may not conflict".
-     * `extend_from_within` below is how you append an array to itself.
+     * one array cannot be both at once. Neither word is written here. See
+     * docs/memory/unsafe.md. `extend_from_within` below is how you append an array to itself.
      */
     function extend(const array<T>& $other) : void
     {

@@ -15,8 +15,8 @@ namespace AST
     // is present, and PointerAdjuster throwing for a survivor.
     //
     // **the marker is the feature.** an expression the compiler happens to be able to fold is folded by
-    // nothing today and does not need to be - LLVM does that better, and notes/constants.md is emphatic
-    // that a constant is its expression rather than a value. what has no spelling without this is the
+    // nothing today and does not need to be - LLVM does that better, and a constant is its
+    // expression rather than a value. what has no spelling without this is the
     // *demand*: "work this out now, and say so if you cannot". so a `const(...)` whose operand does not
     // fold is a located error rather than an expression that quietly runs.
     //

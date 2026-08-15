@@ -27,7 +27,7 @@ namespace AST
     //
     // `array<int32> $a = [1, 2, 3];` never asks: the declaration said what holds them, and
     // AST::OperatorRewriter fills that. This is the other half - `$a = [1, 2, 3];`, where the elements
-    // are all there is, which is what book/concept/arrays.md promises they are enough for.
+    // are all there is, and they are enough.
     //
     // three results and not an optional, for AST::iteration_plan_for's reason: an element may be a call
     // the fixpoint has not settled, and `t_pending` has to be distinguishable from a refusal - otherwise

@@ -1,0 +1,7 @@
+// a const array from a literal. the expansion's appends want `array<T>&`, so they fill a mutable
+// hoist and the declaration takes it with `mv`. both spellings: inferred and written out
+const $c = [1, 2];
+echo $c[0];
+
+const array<int32> $typed = [1, 2];
+echo $typed[0];

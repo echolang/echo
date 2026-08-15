@@ -1,6 +1,7 @@
 #include "AST/ASTOperatorRewriter.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTArrayLiteralExpansion.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTDetach.h"
@@ -87,29 +88,6 @@ void OperatorRewriter::finalize()
     _finalizing = true;
     run_round();
     _finalizing = false;
-}
-
-FunctionCallExprNode &OperatorRewriter::build_call(
-    const std::string &name,
-    const TokenReference &at,
-    std::vector<ExprNode *> operands,
-    const Namespace *lookup
-)
-{
-    const TokenReference name_token =
-        _current_module->make_virtual_token(name, Token::Type::t_identifier, at);
-
-    auto &call = _current_module->nodes.emplace_back<FunctionCallExprNode>(
-        name_token, std::move(operands));
-
-    call.lookup_namespace = lookup;
-
-    // left unresolved on purpose. the fixpoint's own settle_calls is what finishes every other
-    // pending call, and a call built here may name a *generic* declaration that the next round still
-    // has to instantiate - which is the whole reason this pass runs inside the fixpoint
-    _changed = true;
-
-    return call;
 }
 
 FunctionCallExprNode &OperatorRewriter::build_operator_call(
@@ -460,294 +438,17 @@ void OperatorRewriter::resolve_index_write(ScopeNode &scope, size_t index)
     scope.children[index] = make_ref(call);
 }
 
-void OperatorRewriter::report_unplaced_literal(ArrayLiteralExprNode &literal)
-{
-    if (literal.expansion_decided) {
-        return;
-    }
-
-    literal.expansion_decided = true;
-
-    _collector.collect_issue<Issue::GenericError>(
-        code_ref_for(literal.token_bracket),
-        "an array literal fills storage, so it has to name it - write it as a declaration's "
-        "initializer or as an assignment to a variable.");
-}
-
-OperatorRewriter::LiteralDestination OperatorRewriter::literal_destination(Node *statement)
-{
-    if (statement == nullptr) {
-        return {};
-    }
-
-    // a declaration's initializer: `array<int32> $a = [1, 2, 3];`
-    if (statement->get_node_type() == NodeType::n_vardecl) {
-        auto *decl = static_cast<VarDeclNode *>(statement);
-
-        if (auto *literal = array_literal_of(decl->init_expr)) {
-            return {decl, literal, &decl->init_expr, true};
-        }
-
-        return {};
-    }
-
-    // an assignment's right-hand side, and **only over a plain variable**: `$a = [1, 2, 3];`. the
-    // expansion needs one fresh place per append, and a variable is what can be respelled from its
-    // declaration. any other target - `$s->items = [...]` - would need the target subtree cloned per
-    // element, which is A13b's temporary problem wearing different clothes
-    if (statement->get_node_type() == NodeType::n_assign) {
-        auto *assign = static_cast<AssignNode *>(statement);
-        auto *literal = array_literal_of(assign->value_expr);
-
-        if (literal == nullptr) {
-            return {};
-        }
-
-        if (assign->target == nullptr || assign->target->get_node_type() != NodeType::n_varref) {
-            return {nullptr, literal, nullptr};
-        }
-
-        return {place_root_of(assign->target), literal, &assign->value_expr};
-    }
-
-    return {};
-}
-
-bool OperatorRewriter::settle_destination_type(
-    const LiteralDestination &destination,
-    ValueType &settled
-)
-{
-    ArrayLiteralExprNode &literal = *destination.literal;
-
-    ValueType destination_type =
-        destination.decl->has_type() ? destination.decl->type() : ValueType::make_unknown();
-
-    // **the declaration said nothing about what holds these, so the elements are asked.**
-    // AST::array_literal_type_for owns that question and answers three ways, so `[f(), g()]` is asked
-    // again next round rather than refused on the first - `$a = [1, 2, 3]` is an `array<int32>`
-    // because its elements say so, which is what book/concept/arrays.md specifies
-    if (destination.declares && is_undetermined_type(destination_type)) {
-        const ArrayLiteralLookup look =
-            array_literal_type_for(literal, _collector.core_types, _collector.type_registry);
-
-        if (look.result == ArrayLiteralLookup::Result::t_refused) {
-            literal.expansion_decided = true;
-
-            _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(destination.decl->token_varname), look.refusal);
-
-            return false;
-        }
-
-        if (look.result == ArrayLiteralLookup::Result::t_ok) {
-            // the `const` the declaration was written with, put back on top - the same half
-            // AST::infer_declaration_type applies at the two other moments, and the half its own
-            // comment records getting dropped once already
-            destination_type = infer_declaration_type(look.type, destination_type.is_const());
-
-            destination.decl->set_type_node(
-                &_current_module->nodes.emplace_back<TypeNode>(destination_type));
-
-            _changed = true;
-        }
-    }
-
-    // not decided yet: the declaration may be typed from a call this fixpoint has not settled, or an
-    // element above may be. **out of rounds is out of answers** - see finalize()
-    if (is_undetermined_type(destination_type)) {
-        // the message is only for the case where nothing else explained it, which
-        // has_critical_issues() is already the compiler's answer to - deciding it either way is what
-        // keeps a literal from reaching codegen unexpanded
-        if (_finalizing) {
-            literal.expansion_decided = true;
-
-            if (!_collector.has_critical_issues()) {
-                _collector.collect_issue<Issue::GenericError>(
-                    code_ref_for(literal.token_bracket),
-                    fmt::format(
-                        "nothing ever said what '{}' holds - an array literal takes its type from "
-                        "where it is going, and this destination never became concrete.",
-                        destination.decl->token_varname.value()));
-            }
-        }
-
-        return false;
-    }
-
-    settled = destination_type;
-    return true;
-}
-
-void OperatorRewriter::expand_array_literal(ScopeNode &scope, size_t index)
-{
-    const LiteralDestination destination = literal_destination(scope.children[index].node());
-
-    if (destination.literal == nullptr || destination.literal->expansion_decided) {
-        return;
-    }
-
-    ArrayLiteralExprNode &literal = *destination.literal;
-
-    if (destination.decl == nullptr) {
-        report_unplaced_literal(literal);
-        return;
-    }
-
-    ValueType destination_type;
-
-    if (!settle_destination_type(destination, destination_type)) {
-        return;
-    }
-
-    literal.expansion_decided = true;
-
-    std::vector<NodeReference> appends;
-
-    if (!build_literal_expansion(
-            literal, *destination.decl, destination_type, destination.slot, appends)) {
-        return;
-    }
-
-    scope.children.insert(scope.children.begin() + index + 1, appends.begin(), appends.end());
-
-    _changed = true;
-}
-
-bool OperatorRewriter::build_literal_expansion(
-    ArrayLiteralExprNode &literal,
-    VarDeclNode &into,
-    const ValueType &type,
-    ExprNode **slot,
-    std::vector<NodeReference> &appends
-)
-{
-    // has_property_layout, not has_complex_type: the expansion below asks the destination for a
-    // zero-argument constructor and appends into the places it makes, and an interface declares
-    // neither. so an array literal assigned to an interface-typed destination is the "cannot be built
-    // from a literal" diagnostic below rather than a lookup that finds nothing
-    ComplexType *ct = type.has_property_layout() ? type.get_complex_type() : nullptr;
-
-    if (ct == nullptr) {
-        _collector.collect_issue<Issue::GenericError>(
-            code_ref_for(literal.token_bracket),
-            fmt::format(
-                "'{}' cannot be built from an array literal - a literal fills a collection, through "
-                "its constructor and its append operator.",
-                type.get_type_desciption()));
-        return false;
-    }
-
-    // **the constructor of the destination type, named rather than looked up.** an instantiation
-    // carries its template's name and its own type arguments, which is exactly what a call site
-    // writes as `array<int32>()` - so this builds the call a user would have written and lets
-    // AST::CallResolver choose the overload, with no rule of its own about what a collection is
-    const ComplexType *tmpl = ct->template_or_self();
-
-    std::vector<TypeNode *> type_args;
-    for (const auto &arg : ct->instantiation_args) {
-        type_args.push_back(&_current_module->nodes.emplace_back<TypeNode>(arg));
-    }
-
-    auto &ctor = build_call(
-        tmpl->name.value_or(std::string()), literal.token_bracket, {},
-        tmpl->ast_namespace != nullptr ? tmpl->ast_namespace : &_collector.namespaces.root());
-
-    ctor.explicit_type_args = std::move(type_args);
-
-    *slot = &ctor;
-
-    // one `$dest[] = element` per element. each gets its **own** place naming the destination - one
-    // subtree per append, because PointerAdjuster rewrites edges in place and a shared one would be
-    // adjusted once per use
-    appends.reserve(literal.elements.size());
-
-    for (auto *element : literal.elements) {
-        auto &var = _current_module->nodes.emplace_back<VarNode>(&into);
-        auto &var_ref = _current_module->nodes.emplace_back<VarRefNode>(&var);
-
-        auto &slot_expr = _current_module->nodes.emplace_back<IndexExprNode>(
-            &var_ref, std::vector<ExprNode *>{}, literal.token_bracket);
-
-        // the three facts the parser records for a hand-written `$a[] = v`, recorded here for the same
-        // reasons: the slot is bound rather than read, there is an `=` behind the bracket, and the write
-        // into it initializes storage that holds nothing, so no teardown is owed
-        //
-        // the middle one buys nothing for an `array<T>`, which declares no element-write contract - it is
-        // recorded because resolve_index's guard rail reads it, and a producer that leaves it unset is a
-        // producer that guard rail cannot speak for
-        slot_expr.slot_is_bound = true;
-        slot_expr.is_assignment_target = true;
-
-        auto &assign = _current_module->nodes.emplace_back<AssignNode>(
-            &slot_expr, element, literal.token_bracket);
-        assign.is_initialization = true;
-
-        appends.push_back(make_ref(assign));
-    }
-
-    return true;
-}
-
-ExprNode *OperatorRewriter::hoist_array_literal(ArrayLiteralExprNode &literal)
-{
-    // under a `?->` or a `??`, where hoisting would move the construction above the branch that
-    // decides whether it happens at all. refused outright rather than waited on - no later round makes
-    // it safe - so report_unplaced_literal is the answer, and its message is already the right one:
-    // the literal has to name its storage, which here means the author writing the declaration
-    if (_hoist_barrier > 0) {
-        report_unplaced_literal(literal);
-        return nullptr;
-    }
-
-    // no destination has spoken yet. AST::CallResolver types an argument's literal when it settles the
-    // call, which is a later step of this same round - so this is the ordinary "ask again next round",
-    // and finalize() is what makes being out of rounds a refusal
-    if (!literal.bound_type.has_value()) {
-        return nullptr;
-    }
-
-    literal.expansion_decided = true;
-
-    // minted after parsing, so no lexical namespace and no block token - nothing reads
-    // ScopeNode::lookup_variable past the parser. the name is numbered for the reason a temporary's
-    // is: a statement may hold two, and a dump in which both read `$__lit` cannot be asserted about
-    auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(
-        _current_module->make_virtual_token(
-            fmt::format("$__lit{}", ++_hoist_count), Token::Type::t_varname, literal.token_bracket),
-        &_current_module->nodes.emplace_back<TypeNode>(*literal.bound_type));
-
-    std::vector<NodeReference> appends;
-
-    if (!build_literal_expansion(literal, decl, *literal.bound_type, &decl.init_expr, appends)) {
-        return nullptr;
-    }
-
-    // the declaration first, then its appends: the statement being walked comes after all of them,
-    // and visitScope wraps the lot in a scope of its own
-    _hoisted.push_back(make_ref(decl));
-    _hoisted.insert(_hoisted.end(), appends.begin(), appends.end());
-
-    _changed = true;
-
-    auto &var = _current_module->nodes.emplace_back<VarNode>(&decl);
-
-    return &_current_module->nodes.emplace_back<VarRefNode>(&var);
-}
-
 ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
 {
     if (expr == nullptr) {
         return nullptr;
     }
 
-    // an array literal reaching here is one no *statement* claimed - the vardecl and assign arms hand
-    // theirs to expand_array_literal above and do not descend into them. so this is a literal in an
-    // expression position: an argument, which a destination can type, or a position nothing will ever
-    // type, which report_unplaced_literal is still for
+    // an array literal reaching here is one no *statement* claimed - visitVarDecl and visit_assign
+    // hand theirs to ArrayLiteralExpansion::expand_statement and do not descend into them. so this
+    // is a literal in an expression position: an argument, which a destination can type, or a
+    // position nothing will ever type
     //
-    // the hoist answers null while it is waiting, and the literal is then left exactly as written -
-    // the three-state shape expansion_decided exists for. only finalize() turns waiting into a refusal
     // **a variadic pack is the one bracket that is not a collection**, so it is left alone by the
     // question rather than by the state: `expansion_decided` says "the rewriter is finished with this
     // one", which a pack also happens to be, and resting the C variadic path on that coincidence puts
@@ -757,16 +458,12 @@ ExprNode *OperatorRewriter::rewrite_value_edge(ExprNode *expr)
     }
 
     if (auto *literal = array_literal_of(expr)) {
-        if (literal->expansion_decided) {
-            return expr;
-        }
+        ArrayLiteralExpansion expansion(
+            *_current_module, _collector, _current_file, _finalizing, _hoist_count);
 
-        if (ExprNode *hoisted = hoist_array_literal(*literal)) {
-            return hoisted;
-        }
-
-        if (_finalizing) {
-            report_unplaced_literal(*literal);
+        if (ExprNode *place = expansion.expand_expression(*literal, _hoisted, _hoist_barrier)) {
+            _changed = true;
+            return place;
         }
 
         return expr;
@@ -830,6 +527,9 @@ void OperatorRewriter::visitScope(ScopeNode &node)
     // the base already walks children by index, but the literal expansion has to run *before* the
     // child is rewritten - so the constructor and the appends it produces are walked by this same
     // pass rather than waiting a round. that ordering is this pass's, so the loop is too
+    ArrayLiteralExpansion expansion(
+        *_current_module, _collector, _current_file, _finalizing, _hoist_count);
+
     for (size_t i = 0; i < node.children.size(); i++) {
         // **ahead of both the literal expansion and the descent**, and see resolve_index_write for why
         // each of those orderings is the content rather than a preference: after the descent the bracket
@@ -837,44 +537,30 @@ void OperatorRewriter::visitScope(ScopeNode &node)
         // against a destination this rewrite was about to remove
         resolve_index_write(node, i);
 
-        expand_array_literal(node, i);
+        // statement-level hoists are placed *before* the descent, so `_hoisted` is empty going in and
+        // a nested block cannot steal them. sibling insertion shifts this statement down; the loop
+        // then walks the hoists and the original in later iterations, so there is no index patch
+        if (expansion.expand_statement(node, i, _hoisted)) {
+            _changed = true;
+        }
 
-        // **saved and restored around the descent**, because a nested block runs this very loop: a
-        // literal hoisted inside it belongs to *its* statement, and an inner scope finishing would
-        // otherwise hand its leftovers to whatever statement this level was in the middle of
+        if (!_hoisted.empty()) {
+            place_array_literal_hoists(node, i, *_current_module, _hoisted);
+        }
+
+        // saved around the descent, because a nested block runs this very loop: a literal hoisted
+        // inside it belongs to *its* statement
         std::vector<NodeReference> outer;
         outer.swap(_hoisted);
 
         statement_edge(node.children[i].node());
 
         if (!_hoisted.empty()) {
-            wrap_statement_with_hoists(node, i);
+            place_array_literal_hoists(node, i, *_current_module, _hoisted);
         }
 
         _hoisted.swap(outer);
     }
-}
-
-void OperatorRewriter::wrap_statement_with_hoists(ScopeNode &scope, size_t index)
-{
-    // **a scope of its own, rather than the declarations spliced into this one.** the difference is
-    // the lifetime: a local of the enclosing frame is dropped when *that* frame ends, so
-    // `f([1, 2, 3])` in a loop body would hold one live collection per iteration until the whole
-    // block ended. wrapped, the frame is the statement's, and AST::OwnershipPass's ordinary
-    // reverse-order scope drop destroys it where the statement finishes - no new mechanism, and a
-    // `return` or a `break` inside the statement unwinds through it like any other frame
-    //
-    // the same shape AST::ForeachLowering's wrapper has, for the same reason, down to carrying no
-    // block token and no lexical namespace
-    auto &wrapper = _current_module->nodes.emplace_back<ScopeNode>();
-    wrapper.parent_ptr = &scope;
-
-    wrapper.children = std::move(_hoisted);
-    wrapper.children.push_back(scope.children[index]);
-
-    _hoisted.clear();
-
-    scope.children[index] = make_ref(wrapper);
 }
 
 void OperatorRewriter::visitFunctionDecl(FunctionDeclNode &node)

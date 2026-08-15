@@ -1,0 +1,50 @@
+// a declaration whose initializer contains an array literal used to be scoped to the literal's hoist:
+// `$b = Bag([7, 9])` compiled, then every read of `$b` was a use after destruction. no diagnostic.
+// the hoist is a sibling now, so `$b` lives as long as this scope does
+//
+// three constructor shapes, because the first guess was that only the field-wise one was wrong. all
+// three share the hoist, not the constructor
+struct Bag
+{
+    array<int32> $items;
+}
+
+struct Holder
+{
+    array<int32> $items;
+
+    constructor(array<int32> $init)
+    {
+        $this->items = $init;
+    }
+}
+
+enum Box
+{
+    case full(array<int32> $items);
+}
+
+{
+    $b = Bag([7, 9]);
+
+    echo $b->items->count();
+    echo $b->items[0];
+    echo $b->items[1];
+}
+
+assert(mem::live_allocations() == 0, "the bag and the hoist both went back");
+
+$h = Holder([7, 9]);
+echo $h->items->count();
+echo $h->items[0];
+echo $h->items[1];
+
+$boxed = Box::full([7, 9]);
+
+match ($boxed) {
+    Box::full($items) => {
+        echo $items->count();
+        echo $items[0];
+        echo $items[1];
+    },
+}

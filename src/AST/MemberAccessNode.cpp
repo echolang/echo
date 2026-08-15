@@ -19,8 +19,7 @@ AST::ValueType AST::MemberAccessNode::base_target_type() const
 
     // `->` reaches through a pointer to any depth: a `ptr<Point>` base addresses a Point, and so
     // does a `ptr<ptr<Point>>` - the member lives on the struct either way. target_type_of, not
-    // value_type_of, is what says "every level" (book/concept/pointers_and_refs_v2.md,
-    // "Structs and classes")
+    // value_type_of, is what says "every level"
     return target_type_of(_base_node.unsafe_ptr<AST::ExprNode>()->result_type());
 }
 

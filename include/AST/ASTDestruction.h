@@ -9,7 +9,7 @@ namespace AST
 {
     // does a value of this type have to be destroyed when its owner goes out of scope?
     //
-    // the transitive flag book/concept/ownership_and_moving.md asks for: true when the type declares
+    // the transitive flag: true when the type declares
     // a destructor, or when any of its properties needs one
     //
     // **a class always answers true, without looking at its properties.** a class value is one

@@ -5,7 +5,8 @@
 --- RAST --->
 # **the statement is wrapped in a scope of its own**, and that scope is the lifetime: the hoisted
 # declaration is its local, so the ordinary reverse-order frame drop destroys it where the statement
-# ends rather than where the enclosing block does
+# ends rather than where the enclosing block does. a declaration is the one statement that is *not*
+# wrapped - that is B33, and a different case
 CHECK: vardecl<type<array<int32>>>($__lit1) = call array()
 CHECK: call echo(call total(call array(addrof<array<int32>&>(varref<array<int32>>(var($__lit1)))
 CHECK: call $deinit(addrof<array<int32>&>(varref<array<int32>>(var($__lit1))))

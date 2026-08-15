@@ -771,8 +771,8 @@ std::vector<Parser::ParsedTypeParam> Parser::parse_type_param_list(Parser::Paylo
 
 // mints (or reuses) the owned declarations for a freshly parsed parameter list
 //
-// reuse matters for correctness, not just allocation: a module is parsed twice — a symbol pass
-// then a full pass — each with a fresh Context, and both reach this point for the same list
+// reuse matters for correctness, not just allocation: a module is parsed twice, a symbol pass
+// then a full pass, each with a fresh Context, and both reach this point for the same list
 // minting new declarations the second time would give the two passes distinct parameters, so a
 // generic struct's self-application Foo<T> would intern twice and the two Foo<T> would compare
 // unequal. reusing whenever the shape is unchanged keeps a single declaration per parameter

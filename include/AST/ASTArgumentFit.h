@@ -171,8 +171,8 @@ namespace AST
     // bound (`bump<T>(T &$v)` called as `bump($a)` has to bind T=int32 from a bare value).
     //
     // a nullable `ptr<T>` deliberately does not auto-borrow: taking an address is a decision the
-    // caller should be able to see in the source (book/concept/pointers_and_refs_v2.md, "Passing to
-    // functions"). that exclusion is the whole reason this is one predicate rather than two spellings -
+    // caller should be able to see in the source. that exclusion is the whole
+    // reason this is one predicate rather than two spellings -
     // the inference and the coercion disagreeing about it would name an instance the coercion then
     // never produces
     inline bool parameter_auto_borrows(const ValueType &param)
@@ -382,7 +382,7 @@ namespace AST
         //
         // **non-nullable only.** reading through a `ptr<T>` that may be null is an unchecked
         // dereference, and the one narrowing that does emit a check goes the other way
-        // (book/concept/pointers_and_refs_v2.md, "Nullability"). A nullable argument stays t_none,
+        // A nullable argument stays t_none,
         // which is what it already was
         //
         // asked of AST::read_reaches_storage rather than of is_place_expression, so a **call**

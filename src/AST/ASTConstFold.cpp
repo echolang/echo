@@ -509,7 +509,7 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             }
 
             // **no short-circuit.** Echo's `&&` is a CreateAnd and `||` a CreateOr - both operands are
-            // always evaluated, which notes/stdlib.md leans on in str::buf::make_unique() - so folding
+            // always evaluated, which str::buf::make_unique() relies on - so folding
             // `false && <pending>` to false here would be a second and *different* answer to what `&&`
             // means. both sides fold or the whole thing is pending
             const ConstFoldResult lhs = const_fold(binary.lhs);

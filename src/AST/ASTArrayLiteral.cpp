@@ -103,9 +103,8 @@ AST::ArrayLiteralLookup AST::array_literal_type_for(
             array_tmpl->name.value_or("the core array type")));
     }
 
-    // an empty literal is the one shape the elements cannot answer for, which is the whole of what
-    // book/concept/arrays.md says about it: it takes its type from where it is going, and here it is
-    // going nowhere in particular
+    // an empty literal is the one shape the elements cannot answer for: it takes its type from
+    // where it is going, and here it is going nowhere in particular
     if (literal.elements.empty()) {
         return refuse(fmt::format(
             "an empty array literal has nothing to go on - it takes its type from where it is going. "
