@@ -1,0 +1,31 @@
+// a transform answers a new string. the input, and any window into it, stay
+string $s = 'hello';
+string $u = str::upper($s);
+echo $s;
+echo $u;
+
+string $t = 'HELLO';
+string $l = str::lower($t);
+echo $t;
+echo $l;
+
+// a substring of a cloned buffer: lowering the window does not write the parent
+string $whole = 'xxHELLO';
+$whole = $whole->clone();
+string $part = $whole->sub(2, 5);
+echo str::lower($part);
+echo $whole;
+echo $part;
+
+// an invalid byte in the middle is copied, and the letters around it still map
+string $mid = 'ab';
+$mid->push(255);
+$mid->append('cd');
+string $up = str::upper($mid);
+echo $up->size();
+echo $up->byte(0);
+echo $up->byte(1);
+echo $up->byte(2);
+echo $up->byte(3);
+echo $up->byte(4);
+echo $mid->byte(2);

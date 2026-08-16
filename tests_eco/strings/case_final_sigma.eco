@@ -1,0 +1,15 @@
+// Final Sigma is the only contextual mapping. Σ becomes ς only when a cased
+// letter sits before it (skipping marks) and none sits after
+echo str::lower('Σ');
+echo str::lower('ΑΣ');
+echo str::lower('ΣΑ');
+
+// a combining acute on Α is case-ignorable, so ΆΣ is still word-final
+echo str::lower("Α\u{301}Σ");
+
+// a cased letter after the sigma, even with a mark in between, is not final
+echo str::lower("Σ\u{301}Α");
+
+// the whole-word case rustc quotes
+echo str::lower('ὈΔΥΣΣΕΎΣ');
+echo str::upper('ὀδυσσεύς');

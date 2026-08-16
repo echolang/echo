@@ -1,0 +1,35 @@
+// already-cased text shares the input. a literal that needs no work allocates
+// nothing; one that does pays the usual two allocations of a fresh buffer
+echo mem::live_allocations();
+
+string $upper = str::upper('ABC');
+echo $upper;
+echo mem::live_allocations();
+
+string $lower = str::lower('abc');
+echo $lower;
+echo mem::live_allocations();
+
+string $first = str::ucfirst('Hello');
+echo $first;
+echo mem::live_allocations();
+
+string $changed = str::upper('abc');
+echo $changed;
+echo mem::live_allocations();
+
+// the generated tables are seated on first Unicode probe. charge that once,
+// then the already-cased walks must add nothing
+string $warm = str::upper('é');
+usize $base = mem::live_allocations();
+
+string $accent = str::upper('CAFÉ');
+echo $accent;
+echo mem::live_allocations() - $base;
+
+string $built = '';
+$built->append('abc');
+usize $after_build = mem::live_allocations();
+string $again = str::lower($built);
+echo $again;
+echo mem::live_allocations() - $after_build;

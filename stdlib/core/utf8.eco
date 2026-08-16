@@ -1,0 +1,220 @@
+/**
+ * UTF-8 encode and decode for walks that need a scalar, not a count.
+ *
+ * `string::chars()` only asks whether a byte begins a character. Case conversion, and anything
+ * else that maps a codepoint, has to know which scalar the bytes spell - or that they spell
+ * none. Invalid sequences are one raw byte; the same contract `chars()` already has, so a
+ * later feature does not invent a stricter one.
+ */
+
+namespace str;
+
+// one decoded step. `$raw` means the bytes are not a scalar - copy them, do not encode `$cp`
+internal struct utf8_step
+{
+    uint32 $cp;
+    usize $len;
+    bool $raw;
+}
+
+#[inline]
+internal function utf8_width(uint8 $lead) : usize
+{
+    if ($lead < 128) {
+        return 1;
+    }
+
+    if ($lead < 224) {
+        return 2;
+    }
+
+    if ($lead < 240) {
+        return 3;
+    }
+
+    if ($lead < 248) {
+        return 4;
+    }
+
+    return 0;
+}
+
+/**
+ * How many bytes `write_cp` will emit for `$cp`. A well-formed scalar is 1..4.
+ */
+#[inline]
+internal function utf8_encoded_width(uint32 $cp) : usize
+{
+    if ($cp < 128) {
+        return 1;
+    }
+
+    if ($cp < 2048) {
+        return 2;
+    }
+
+    if ($cp < 65536) {
+        return 3;
+    }
+
+    return 4;
+}
+
+/**
+ * One scalar at `$from`, or a raw byte when the sequence is not a scalar.
+ *
+ * Overlong encodings, surrogate halves, values above U+10FFFF and stray continuation bytes are
+ * raw: the walk copies that one byte and moves on.
+ */
+internal function decode_at_ptr(ptr<const uint8> $bytes, usize $n, usize $from) : utf8_step
+{
+    if ($from >= $n) {
+        return utf8_step(0, 0, true);
+    }
+
+    uint8 $lead = $bytes:$[$from];
+    usize $width = utf8_width($lead);
+
+    if ($width == 0) {
+        return utf8_step($lead, 1, true);
+    }
+
+    if ($width == 1) {
+        return utf8_step($lead, 1, false);
+    }
+
+    if ($from + $width > $n) {
+        return utf8_step($lead, 1, true);
+    }
+
+    uint32 $cp = $lead;
+    uint32 $min = 0;
+
+    if ($width == 2) {
+        $cp = $lead & 31;
+        $min = 128;
+    }
+    else if ($width == 3) {
+        $cp = $lead & 15;
+        $min = 2048;
+    }
+    else {
+        $cp = $lead & 7;
+        $min = 65536;
+    }
+
+    usize $k = 1;
+
+    while ($k < $width) {
+        uint8 $cont = $bytes:$[$from + $k];
+
+        if (($cont & 192) != 128) {
+            return utf8_step($lead, 1, true);
+        }
+
+        $cp = ($cp << 6) | ($cont & 63);
+        $k = $k + 1;
+    }
+
+    if ($cp < $min) {
+        return utf8_step($lead, 1, true);
+    }
+
+    if ($cp > 1114111) {
+        return utf8_step($lead, 1, true);
+    }
+
+    if ($cp >= 55296) {
+        if ($cp <= 57343) {
+            return utf8_step($lead, 1, true);
+        }
+    }
+
+    return utf8_step($cp, $width, false);
+}
+
+internal function decode_at(const string& $text, usize $from) : utf8_step
+{
+    return decode_at_ptr($text->data(), $text->size(), $from);
+}
+
+/**
+ * The scalar that ends at `$end`, for a backward walk.
+ */
+internal function decode_before(const string& $text, usize $end) : utf8_step
+{
+    if ($end == 0) {
+        return utf8_step(0, 0, true);
+    }
+
+    ptr<const uint8> $bytes = $text->data();
+    usize $i = $end - 1;
+    usize $steps = 0;
+
+    while ($i > 0) {
+        uint8 $b = $bytes:$[$i];
+
+        if (($b & 192) != 128) {
+            break;
+        }
+
+        if ($steps >= 3) {
+            break;
+        }
+
+        $i = $i - 1;
+        $steps = $steps + 1;
+    }
+
+    return decode_at_ptr($bytes, $text->size(), $i);
+}
+
+/**
+ * Encodes `$cp` at `$dst[$used]`. Caller has reserved enough room. Answers the new used count.
+ */
+#[inline]
+internal function write_cp(ptr<uint8> $dst, usize $used, uint32 $cp) : usize
+{
+    if ($cp < 128) {
+        uint8 $b = $cp;
+        $dst:$[$used] = $b;
+        return $used + 1;
+    }
+
+    if ($cp < 2048) {
+        uint32 $b0 = 192 | ($cp >> 6);
+        uint32 $b1 = 128 | ($cp & 63);
+        uint8 $u0 = $b0;
+        uint8 $u1 = $b1;
+        $dst:$[$used] = $u0;
+        $dst:$[$used + 1] = $u1;
+        return $used + 2;
+    }
+
+    if ($cp < 65536) {
+        uint32 $b0 = 224 | ($cp >> 12);
+        uint32 $b1 = 128 | (($cp >> 6) & 63);
+        uint32 $b2 = 128 | ($cp & 63);
+        uint8 $u0 = $b0;
+        uint8 $u1 = $b1;
+        uint8 $u2 = $b2;
+        $dst:$[$used] = $u0;
+        $dst:$[$used + 1] = $u1;
+        $dst:$[$used + 2] = $u2;
+        return $used + 3;
+    }
+
+    uint32 $b0 = 240 | ($cp >> 18);
+    uint32 $b1 = 128 | (($cp >> 12) & 63);
+    uint32 $b2 = 128 | (($cp >> 6) & 63);
+    uint32 $b3 = 128 | ($cp & 63);
+    uint8 $u0 = $b0;
+    uint8 $u1 = $b1;
+    uint8 $u2 = $b2;
+    uint8 $u3 = $b3;
+    $dst:$[$used] = $u0;
+    $dst:$[$used + 1] = $u1;
+    $dst:$[$used + 2] = $u2;
+    $dst:$[$used + 3] = $u3;
+    return $used + 4;
+}

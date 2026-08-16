@@ -1,0 +1,34 @@
+// empty stays empty, already-cased text is unchanged, and the four functions
+// do what their PHP names suggest for ASCII
+echo str::upper('')->size();
+echo str::lower('')->size();
+echo str::ucfirst('')->size();
+echo str::lcfirst('')->size();
+
+echo str::upper('hello');
+echo str::lower('HELLO');
+echo str::ucfirst('hello');
+echo str::lcfirst('HELLO');
+
+echo str::upper('Hello');
+echo str::lower('Hello');
+echo str::ucfirst('HELLO');
+echo str::lcfirst('hello');
+
+// digits, punctuation and spaces are not letters
+echo str::upper('sg-1 42');
+echo str::lower('SG-1 42');
+echo str::ucfirst('sg-1');
+echo str::lcfirst('SG-1');
+
+// a single letter, and a string that is only one already-cased letter
+echo str::upper('a');
+echo str::lower('Z');
+echo str::ucfirst('a');
+echo str::lcfirst('Z');
+
+// first character is not a letter, so ucfirst and lcfirst leave it
+echo str::ucfirst('42abc');
+echo str::lcfirst('42ABC');
+echo str::ucfirst(' hello');
+echo str::lcfirst(' HELLO');

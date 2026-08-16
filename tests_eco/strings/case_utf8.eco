@@ -1,0 +1,40 @@
+// full Unicode mapping, not a byte flip that would break a multi-byte letter
+echo str::upper('café');
+echo str::lower('CAFÉ');
+echo str::ucfirst('écho');
+echo str::lcfirst('ÉCHO');
+
+// ß is the 1:N case everybody quotes: upper is SS, title of the letter is Ss.
+// ucfirst of 'straße' titles the leading s, so the ß in the middle stays
+echo str::upper('straße');
+echo str::ucfirst('ß');
+echo str::ucfirst('straße');
+
+// a ligature expands to two letters
+echo str::upper('ﬁ');
+
+// scripts without case, and an emoji, come back as themselves
+echo str::upper('农历新年');
+echo str::lower('😀');
+
+// Cyrillic
+echo str::upper('привет');
+echo str::lower('ПРИВЕТ');
+
+// Final Sigma: capital Σ at the end of a word is ς, otherwise σ
+echo str::lower('ὈΔΥΣΣΕΎΣ');
+echo str::lower('Σ');
+
+// mixed ASCII and Latin-1 in one string
+echo str::upper('Hello, Café!');
+echo str::lower('Hello, Café!');
+
+// titlecase is not uppercase: ǳ titles to ǲ and uppers to Ǳ
+echo str::upper('ǳ');
+echo str::ucfirst('ǳ');
+echo str::lower('Ǳ');
+
+// İ lowercases to i plus a combining dot, the one 1:N lowercase
+string $idot = str::lower('İ');
+echo $idot;
+echo $idot->size();

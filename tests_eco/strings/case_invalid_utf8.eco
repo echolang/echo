@@ -1,0 +1,10 @@
+// 0xFF cannot start a UTF-8 sequence. chars() still counts the lead, and
+// case conversion copies the byte through rather than refusing the string
+string $raw = '';
+$raw->push(255);
+
+string $out = str::upper($raw);
+
+echo $out->size();
+echo $out->byte(0);
+echo $out->chars();

@@ -1,0 +1,765 @@
+/**
+ * Case conversion.
+ *
+ * Four functions, Unicode Default Case Conversion, locale-independent. `upper` and `lower` map every
+ * codepoint; `ucfirst` titles the first one and leaves the rest; `lcfirst` lowers the first one.
+ * Full mapping, so `ß` becomes `SS` and `ﬁ` becomes `FI`. Turkish `I` is not a different letter
+ * here - there is no locale, and libc's `towupper` would have been one.
+ *
+ * Greek capital sigma at the end of a word becomes `ς` rather than `σ`. That is the only
+ * conditional mapping, and it is hard-coded rather than a condition engine - it is the only
+ * language-independent row in SpecialCasing.
+ *
+ * Invalid UTF-8 is copied, not rejected. `chars()` already counts it rather than validating, and
+ * this file does not invent a stricter contract. A raw byte that is not a scalar has no mapping.
+ *
+ * Already-cased text shares the input buffer. Changing case always allocates; leaving it alone
+ * never does. That is `trim`'s bargain, and the reason the parameter is a `string` rather than a
+ * view - a view has no owner to hand back.
+ *
+ * Tables come from case_data.eco as integer arrays, minted by tools/gen_unicode_case.py.
+ */
+
+namespace str;
+
+// 1, 2 or 3 output scalars. `$n` is 0 when a special table missed, so the simple table can run
+private struct mapped
+{
+    uint32 $a;
+    uint32 $b;
+    uint32 $c;
+    usize $n;
+}
+
+// parsed tables. a dummy field so the type has a constructor; nothing constructs one
+private struct case_tables
+{
+    int32 $pad;
+
+    static bool $ready = false;
+
+    static array<uint32> $up_from = array<uint32>();
+    static array<uint32> $up_to = array<uint32>();
+    static array<uint32> $lo_from = array<uint32>();
+    static array<uint32> $lo_to = array<uint32>();
+    static array<uint32> $ti_from = array<uint32>();
+    static array<uint32> $ti_to = array<uint32>();
+
+    // special rows are five words: from, n, a, b, c
+    static array<uint32> $up_spec = array<uint32>();
+    static array<uint32> $lo_spec = array<uint32>();
+    static array<uint32> $ti_spec = array<uint32>();
+
+    static array<uint32> $cased_lo = array<uint32>();
+    static array<uint32> $cased_hi = array<uint32>();
+    static array<uint32> $ign_lo = array<uint32>();
+    static array<uint32> $ign_hi = array<uint32>();
+}
+
+private const uint32 CP_SIGMA = 931;
+private const uint32 CP_SMALL_SIGMA = 963;
+private const uint32 CP_FINAL_SIGMA = 962;
+
+/**
+ * Seat the generated arrays. After this every probe is an integer compare.
+ */
+private function ensure_tables() : void
+{
+    if (case_tables::$ready) {
+        return;
+    }
+
+    case_upper_from(case_tables::$up_from);
+    case_upper_to(case_tables::$up_to);
+    case_lower_from(case_tables::$lo_from);
+    case_lower_to(case_tables::$lo_to);
+    case_title_from(case_tables::$ti_from);
+    case_title_to(case_tables::$ti_to);
+
+    case_upper_special(case_tables::$up_spec);
+    case_lower_special(case_tables::$lo_spec);
+    case_title_special(case_tables::$ti_spec);
+
+    case_cased_lo(case_tables::$cased_lo);
+    case_cased_hi(case_tables::$cased_hi);
+    case_ignorable_lo(case_tables::$ign_lo);
+    case_ignorable_hi(case_tables::$ign_hi);
+
+    case_tables::$ready = true;
+}
+
+#[inline]
+private function find_simple(const array<uint32>& $from, const array<uint32>& $to, uint32 $cp) : uint32
+{
+    usize $lo = 0;
+    usize $hi = $from->count();
+
+    while ($lo < $hi) {
+        usize $mid = $lo + ($hi - $lo) / 2;
+        uint32 $key = $from[$mid];
+
+        if ($cp < $key) {
+            $hi = $mid;
+        }
+        else if ($cp > $key) {
+            $lo = $mid + 1;
+        }
+        else {
+            return $to[$mid];
+        }
+    }
+
+    return $cp;
+}
+
+#[inline]
+private function find_special(const array<uint32>& $rows, uint32 $cp) : mapped
+{
+    usize $count = $rows->count() / 5;
+    usize $lo = 0;
+    usize $hi = $count;
+
+    while ($lo < $hi) {
+        usize $mid = $lo + ($hi - $lo) / 2;
+        usize $at = $mid * 5;
+        uint32 $key = $rows[$at];
+
+        if ($cp < $key) {
+            $hi = $mid;
+        }
+        else if ($cp > $key) {
+            $lo = $mid + 1;
+        }
+        else {
+            uint32 $n = $rows[$at + 1];
+            usize $count_out = $n;
+
+            return mapped($rows[$at + 2], $rows[$at + 3], $rows[$at + 4], $count_out);
+        }
+    }
+
+    return mapped(0, 0, 0, 0);
+}
+
+#[inline]
+private function in_ranges(const array<uint32>& $lo_tab, const array<uint32>& $hi_tab, uint32 $cp) : bool
+{
+    usize $lo = 0;
+    usize $hi = $lo_tab->count();
+
+    while ($lo < $hi) {
+        usize $mid = $lo + ($hi - $lo) / 2;
+        uint32 $start = $lo_tab[$mid];
+        uint32 $end = $hi_tab[$mid];
+
+        if ($cp < $start) {
+            $hi = $mid;
+        }
+        else if ($cp > $end) {
+            $lo = $mid + 1;
+        }
+        else {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+private function is_cased(uint32 $cp) : bool
+{
+    if ($cp < 128) {
+        if ($cp >= 65) {
+            if ($cp <= 90) {
+                return true;
+            }
+        }
+
+        if ($cp >= 97) {
+            if ($cp <= 122) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    ensure_tables();
+
+    return in_ranges(case_tables::$cased_lo, case_tables::$cased_hi, $cp);
+}
+
+private function is_case_ignorable(uint32 $cp) : bool
+{
+    if ($cp < 128) {
+        return false;
+    }
+
+    ensure_tables();
+
+    return in_ranges(case_tables::$ign_lo, case_tables::$ign_hi, $cp);
+}
+
+#[inline]
+private function ascii_upper_byte(uint8 $b) : uint8
+{
+    if ($b >= 97) {
+        if ($b <= 122) {
+            return $b - 32;
+        }
+    }
+
+    return $b;
+}
+
+#[inline]
+private function ascii_lower_byte(uint8 $b) : uint8
+{
+    if ($b >= 65) {
+        if ($b <= 90) {
+            return $b + 32;
+        }
+    }
+
+    return $b;
+}
+
+#[inline]
+private function ascii_upper_cp(uint32 $cp) : uint32
+{
+    if ($cp >= 97) {
+        if ($cp <= 122) {
+            return $cp - 32;
+        }
+    }
+
+    return $cp;
+}
+
+#[inline]
+private function ascii_lower_cp(uint32 $cp) : uint32
+{
+    if ($cp >= 65) {
+        if ($cp <= 90) {
+            return $cp + 32;
+        }
+    }
+
+    return $cp;
+}
+
+/**
+ * Full uppercase of one scalar. ASCII is answered here so mixed text does not search the table
+ * for `A-Z`.
+ */
+private function map_upper(uint32 $cp) : mapped
+{
+    if ($cp < 128) {
+        return mapped(ascii_upper_cp($cp), 0, 0, 1);
+    }
+
+    ensure_tables();
+
+    mapped $special = find_special(case_tables::$up_spec, $cp);
+
+    if ($special->n > 0) {
+        return $special;
+    }
+
+    return mapped(find_simple(case_tables::$up_from, case_tables::$up_to, $cp), 0, 0, 1);
+}
+
+/**
+ * Full lowercase of one scalar, without Final Sigma. The walk substitutes `ς` when it must.
+ */
+private function map_lower(uint32 $cp) : mapped
+{
+    if ($cp < 128) {
+        return mapped(ascii_lower_cp($cp), 0, 0, 1);
+    }
+
+    ensure_tables();
+
+    mapped $special = find_special(case_tables::$lo_spec, $cp);
+
+    if ($special->n > 0) {
+        return $special;
+    }
+
+    return mapped(find_simple(case_tables::$lo_from, case_tables::$lo_to, $cp), 0, 0, 1);
+}
+
+/**
+ * Titlecase of one scalar. Almost always the uppercase mapping; a small table holds the rest.
+ */
+private function map_title(uint32 $cp) : mapped
+{
+    if ($cp < 128) {
+        return mapped(ascii_upper_cp($cp), 0, 0, 1);
+    }
+
+    ensure_tables();
+
+    mapped $special = find_special(case_tables::$ti_spec, $cp);
+
+    if ($special->n > 0) {
+        return $special;
+    }
+
+    uint32 $one = find_simple(case_tables::$ti_from, case_tables::$ti_to, $cp);
+
+    if ($one != $cp) {
+        return mapped($one, 0, 0, 1);
+    }
+
+    return map_upper($cp);
+}
+
+/**
+ * After skipping case-ignorable marks from `$from` toward the end, is the next scalar cased?
+ */
+private function cased_after(const string& $text, usize $from) : bool
+{
+    ptr<const uint8> $bytes = $text->data();
+    usize $n = $text->size();
+    usize $i = $from;
+
+    while ($i < $n) {
+        utf8_step $step = decode_at_ptr($bytes, $n, $i);
+
+        if ($step->len == 0) {
+            return false;
+        }
+
+        if ($step->raw) {
+            return false;
+        }
+
+        if (!is_case_ignorable($step->cp)) {
+            return is_cased($step->cp);
+        }
+
+        $i = $i + $step->len;
+    }
+
+    return false;
+}
+
+/**
+ * After skipping case-ignorable marks left of `$end`, is the previous scalar cased?
+ */
+private function cased_before(const string& $text, usize $end) : bool
+{
+    usize $i = $end;
+
+    while ($i > 0) {
+        utf8_step $step = decode_before($text, $i);
+
+        if ($step->len == 0) {
+            return false;
+        }
+
+        if ($step->raw) {
+            return false;
+        }
+
+        if (!is_case_ignorable($step->cp)) {
+            return is_cased($step->cp);
+        }
+
+        $i = $i - $step->len;
+    }
+
+    return false;
+}
+
+/**
+ * `Σ` at the end of a word. The only contextual mapping, hard-coded because it is the only
+ * language-independent condition in SpecialCasing.
+ */
+private function final_sigma(const string& $text, usize $at, usize $len) : bool
+{
+    if (!cased_before($text, $at)) {
+        return false;
+    }
+
+    if (cased_after($text, $at + $len)) {
+        return false;
+    }
+
+    return true;
+}
+
+private function map_lower_at(const string& $text, uint32 $cp, usize $at, usize $len) : mapped
+{
+    if ($cp == CP_SIGMA) {
+        if (final_sigma($text, $at, $len)) {
+            return mapped(CP_FINAL_SIGMA, 0, 0, 1);
+        }
+
+        return mapped(CP_SMALL_SIGMA, 0, 0, 1);
+    }
+
+    return map_lower($cp);
+}
+
+#[inline]
+private function mapped_equals(const mapped& $got, uint32 $cp) : bool
+{
+    if ($got->n != 1) {
+        return false;
+    }
+
+    if ($got->a != $cp) {
+        return false;
+    }
+
+    return true;
+}
+
+#[inline]
+private function mapped_bytes(const mapped& $got) : usize
+{
+    usize $n = 0;
+
+    if ($got->n > 0) {
+        $n = $n + utf8_encoded_width($got->a);
+    }
+
+    if ($got->n > 1) {
+        $n = $n + utf8_encoded_width($got->b);
+    }
+
+    if ($got->n > 2) {
+        $n = $n + utf8_encoded_width($got->c);
+    }
+
+    return $n;
+}
+
+#[inline]
+private function write_mapped(ptr<uint8> $dst, usize $used, const mapped& $got) : usize
+{
+    if ($got->n > 0) {
+        $used = write_cp($dst, $used, $got->a);
+    }
+
+    if ($got->n > 1) {
+        $used = write_cp($dst, $used, $got->b);
+    }
+
+    if ($got->n > 2) {
+        $used = write_cp($dst, $used, $got->c);
+    }
+
+    return $used;
+}
+
+/**
+ * Commit what is already in the spare and grow so `$need` more bytes fit. The spare pointer
+ * is stale afterwards; the caller takes a new one and resets its used count.
+ */
+private function grow_spare(string& $out, usize $used, usize $need) : ptr<uint8>
+{
+    $out->commit($used);
+    $out->reserve($out->size() + $need);
+    return $out->spare();
+}
+
+/**
+ * All-ASCII rewrite. Output is the same length as input, so the spare is reserved
+ * once and never grown. A byte >= 128 hands off to the Unicode walk.
+ *
+ * `$b >= 97` is a byte against a literal, which widens first. two uint8s compared
+ * with `>=` would lower signed, and 128 would read as -1.
+ */
+private function apply_ascii(const string& $text, bool $to_upper) : string
+{
+    usize $n = $text->size();
+    ptr<const uint8> $src = $text->data();
+    usize $i = 0;
+    bool $change = false;
+
+    while ($i < $n) {
+        uint8 $b = $src:$[$i];
+
+        if ($b >= 128) {
+            return apply_unicode($text, $to_upper);
+        }
+
+        if ($to_upper) {
+            if ($b >= 97) {
+                if ($b <= 122) {
+                    $change = true;
+                }
+            }
+        }
+        else {
+            if ($b >= 65) {
+                if ($b <= 90) {
+                    $change = true;
+                }
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    if (!$change) {
+        return $text->sub(0, $n);
+    }
+
+    string $out = '';
+    $out->reserve($n);
+
+    ptr<uint8> $dst = $out->spare();
+    $i = 0;
+
+    while ($i < $n) {
+        uint8 $b = $src:$[$i];
+
+        if ($to_upper) {
+            $dst:$[$i] = ascii_upper_byte($b);
+        }
+        else {
+            $dst:$[$i] = ascii_lower_byte($b);
+        }
+
+        $i = $i + 1;
+    }
+
+    $out->commit($n);
+
+    return $out;
+}
+
+/**
+ * One Unicode walk. Scan until a scalar maps; if none does, share the input. On
+ * the first change, allocate, copy the unchanged prefix, and continue. The spare
+ * grows if a mapping will not fit, so a later SpecialCasing row that exceeds a
+ * 3× guess is still in bounds.
+ */
+private function apply_unicode(const string& $text, bool $to_upper) : string
+{
+    usize $n = $text->size();
+    ptr<const uint8> $src = $text->data();
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint8 $lead = $src:$[$i];
+
+        if ($lead < 128) {
+            uint8 $mapped = $lead;
+
+            if ($to_upper) {
+                $mapped = ascii_upper_byte($lead);
+            }
+            else {
+                $mapped = ascii_lower_byte($lead);
+            }
+
+            if ($mapped != $lead) {
+                break;
+            }
+
+            $i = $i + 1;
+        }
+        else {
+            utf8_step $step = decode_at_ptr($src, $n, $i);
+
+            if ($step->raw) {
+                $i = $i + $step->len;
+            }
+            else {
+                mapped $got = mapped(0, 0, 0, 0);
+
+                if ($to_upper) {
+                    $got = map_upper($step->cp);
+                }
+                else {
+                    $got = map_lower_at($text, $step->cp, $i, $step->len);
+                }
+
+                if (!mapped_equals($got, $step->cp)) {
+                    break;
+                }
+
+                $i = $i + $step->len;
+            }
+        }
+    }
+
+    if ($i == $n) {
+        return $text->sub(0, $n);
+    }
+
+    string $out = '';
+    $out->reserve($n);
+
+    ptr<uint8> $dst = $out->spare();
+    usize $used = 0;
+    usize $left = $out->room();
+    usize $k = 0;
+
+    while ($k < $i) {
+        $dst:$[$k] = $src:$[$k];
+        $k = $k + 1;
+    }
+
+    $used = $i;
+    $left = $left - $i;
+
+    while ($i < $n) {
+        uint8 $lead = $src:$[$i];
+
+        if ($lead < 128) {
+            uint8 $mapped = $lead;
+
+            if ($to_upper) {
+                $mapped = ascii_upper_byte($lead);
+            }
+            else {
+                $mapped = ascii_lower_byte($lead);
+            }
+
+            if ($left < 1) {
+                $dst:$ = grow_spare($out, $used, 1);
+                $used = 0;
+                $left = $out->room();
+            }
+
+            $dst:$[$used] = $mapped;
+            $used = $used + 1;
+            $left = $left - 1;
+            $i = $i + 1;
+        }
+        else {
+            utf8_step $step = decode_at_ptr($src, $n, $i);
+
+            if ($step->raw) {
+                if ($left < $step->len) {
+                    $dst:$ = grow_spare($out, $used, $step->len);
+                    $used = 0;
+                    $left = $out->room();
+                }
+
+                usize $r = 0;
+
+                while ($r < $step->len) {
+                    $dst:$[$used] = $src:$[$i + $r];
+                    $used = $used + 1;
+                    $left = $left - 1;
+                    $r = $r + 1;
+                }
+            }
+            else {
+                mapped $got = mapped(0, 0, 0, 0);
+
+                if ($to_upper) {
+                    $got = map_upper($step->cp);
+                }
+                else {
+                    $got = map_lower_at($text, $step->cp, $i, $step->len);
+                }
+
+                usize $need = mapped_bytes($got);
+
+                if ($left < $need) {
+                    $dst:$ = grow_spare($out, $used, $need);
+                    $used = 0;
+                    $left = $out->room();
+                }
+
+                $used = write_mapped($dst, $used, $got);
+                $left = $left - $need;
+            }
+
+            $i = $i + $step->len;
+        }
+    }
+
+    $out->commit($used);
+
+    return $out;
+}
+
+private function apply_first(const string& $text, bool $to_title) : string
+{
+    if ($text->empty()) {
+        return $text->sub(0, 0);
+    }
+
+    utf8_step $step = decode_at($text, 0);
+
+    if ($step->raw) {
+        return $text->sub(0, $text->size());
+    }
+
+    mapped $got = mapped(0, 0, 0, 0);
+
+    if ($to_title) {
+        $got = map_title($step->cp);
+    }
+    else {
+        $got = map_lower_at($text, $step->cp, 0, $step->len);
+    }
+
+    if (mapped_equals($got, $step->cp)) {
+        return $text->sub(0, $text->size());
+    }
+
+    usize $need = mapped_bytes($got);
+    usize $rest = $text->size() - $step->len;
+
+    string $out = '';
+    $out->reserve($need + $rest);
+
+    ptr<uint8> $dst = $out->spare();
+    usize $left = $out->room();
+
+    if ($left < $need) {
+        $dst:$ = grow_spare($out, 0, $need);
+        $left = $out->room();
+    }
+
+    usize $used = write_mapped($dst, 0, $got);
+    $out->commit($used);
+    $out->append($text->sub($step->len, $rest));
+
+    return $out;
+}
+
+/**
+ * `$text` in uppercase. Already-upper text is the same string, sharing its buffer.
+ */
+public function upper(const string& $text) : string
+{
+    return apply_ascii($text, true);
+}
+
+/**
+ * `$text` in lowercase. Already-lower text is the same string, sharing its buffer.
+ */
+public function lower(const string& $text) : string
+{
+    return apply_ascii($text, false);
+}
+
+/**
+ * `$text` with the first codepoint titlecased, the rest unchanged.
+ *
+ * Titlecase, not uppercase: they agree for almost every letter and disagree on a handful of
+ * digraphs. `ß` at the start becomes `Ss`. An empty string is empty.
+ */
+public function ucfirst(const string& $text) : string
+{
+    return apply_first($text, true);
+}
+
+/**
+ * `$text` with the first codepoint lowercased, the rest unchanged.
+ */
+public function lcfirst(const string& $text) : string
+{
+    return apply_first($text, false);
+}

@@ -1,0 +1,19 @@
+// ucfirst and lcfirst touch only the first codepoint. the rest is a shared tail
+echo str::ucfirst('écho');
+echo str::lcfirst('ÉCHO');
+echo str::ucfirst('straße');
+echo str::lcfirst('STRASSE');
+
+// ß titles to Ss, which is why a string that *starts* with ß grows
+echo str::ucfirst('ß');
+echo str::ucfirst('ßeta');
+
+// an emoji has no case, so it is the first codepoint and nothing changes
+echo str::ucfirst('😀hello');
+echo str::lcfirst('😀HELLO');
+
+// the original is not rewritten
+string $src = 'écho';
+string $titled = str::ucfirst($src);
+echo $src;
+echo $titled;
