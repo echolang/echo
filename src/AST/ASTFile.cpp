@@ -40,8 +40,8 @@ bool AST::File::read_from_disk(std::string &out_error)
     // we probably should use a stream in the future
     auto istrm = std::ifstream(_path);
 
-    // **an unreadable file used to parse as an empty one, silently.** The stream was never checked, so a
-    // path that is not there - or is there and cannot be opened - produced a file with no declarations,
+    // **an unreadable file must not parse as an empty one, silently.** without the check, a
+    // path that is not there - or is there and cannot be opened - produces a file with no declarations,
     // and the module simply lost everything that was supposed to be in it. Nothing downstream can tell
     // that from a genuinely empty file.
     //

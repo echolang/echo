@@ -1,0 +1,32 @@
+// **writing an owning value into a static is a re-assignment like any other**: the old
+// value is destroyed, the new one is stored. a static has no index to evaluate twice,
+// so the element's reason is not true of it - the drop is emit_drop_of_place over a
+// fresh access, rebuilt so the assignment still owns its target
+//
+// the destructor prints the id, so a missing drop is a missing line rather than a leak
+// the allocation report would have to notice
+struct Tracked
+{
+    public int32 $id;
+
+    constructor(int32 $i)
+    {
+        $this->id = $i;
+    }
+
+    destructor()
+    {
+        echo $this->id;
+    }
+}
+
+struct Registry
+{
+    public static Tracked $cur = Tracked(1);
+}
+
+echo Registry::$cur->id;
+
+Registry::$cur = Tracked(2);
+
+echo Registry::$cur->id;

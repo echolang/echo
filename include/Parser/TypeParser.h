@@ -32,7 +32,7 @@ namespace Parser
     // true when the cursor sits on a variable declaration in any of its spellings - inferred
     // (`$x = ...`), typed (`int32 $x`), qualified, generic, borrowed, const or ptr. the one owner
     // of "what a declaration looks like", so a scope body and a struct body cannot disagree about
-    // it; they used to keep a token list each and the struct's silently lagged behind
+    // it; a token list in each parser would silently lag behind the other
     //
     // the question is answered by scanning the *type grammar* and looking at what follows it,
     // rather than by enumerating token sequences. an enumeration needs an arm per spelling and had

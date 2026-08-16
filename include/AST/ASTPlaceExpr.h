@@ -15,8 +15,7 @@ namespace AST
     class VarDeclNode;
 
     // **what storage does this expression have?** the one taxonomy behind every question the compiler
-    // asks about an expression's address, where there used to be two switches and a type predicate that
-    // had to agree and were written three different ways
+    // asks about an expression's address
     //
     // total by construction: the switch below names only the two answers that are *not* the common case,
     // so a node kind added later lands in `t_materializable` - the useful default - instead of silently
@@ -143,8 +142,8 @@ namespace AST
     // value-position read of it reads *through* it and owes a copy of what it found, exactly as a place's
     // read does. four mirrors of that one answer - the deref AST::PointerAdjuster writes, the type
     // value_result_type yields below, AST::argument_fit's t_read_through rank, and the copy
-    // AST::OwnershipPass owes - and they used to be four spellings of is_place_expression, which left
-    // three of them wrong for a call. two of those three failed silently
+    // AST::OwnershipPass owes. they have to agree, or a call returning a borrow is copied as a
+    // handle with no retain
     //
     // a *different* question from AST::storage_of, which stays a deny-list about the address an
     // expression **has**: a call has none, so `&$o->get()` is still refused, a call is still not an
@@ -266,8 +265,7 @@ namespace AST
     // unsafe seams in `mem::` are allowed to touch: `mem::take` empties one, `mem::init` fills one.
     //
     // Two readers, one rule. AST::TypeChecker refuses both the same way, so "which storage may I move
-    // through" cannot come to two answers. It used to be spelled inline in the `take` check alone, and
-    // `init` arriving is what made a second copy of it a question of when rather than whether.
+    // through" cannot come to two answers
     //
     // The index arm asks AST::IndexExprNode::indexed_base_type rather than looking at the base's node
     // kind, because that is the sole owner of "is this a pointer index". `$a[$i]` on an `array<T>`
@@ -371,9 +369,9 @@ namespace AST
     // `E:$`, which change what is being said about an address without changing whose it is
     // null when the expression names no variable at all
     //
-    // lives next to the predicates above because it encodes the same taxonomy. it used to be a
-    // private switch in the type checker, so a new place kind updated the predicate and left the
-    // walk behind - and the walk fails silently, by simply not finding the variable
+    // lives next to the predicates above because it encodes the same taxonomy. a new place kind
+    // that updates the predicate and not this walk fails silently, by simply not finding the
+    // variable
     VarDeclNode *place_root_of(ExprNode *expr);
 
     // **where does a diagnostic about this expression point?** re-exported here, where its four callers
@@ -414,9 +412,9 @@ namespace AST
     //
     // two askers at two moments, which is the only difference between them: the parser, where the
     // declaration is written, and the monomorphizer's re-derivation sweep, for a declaration whose
-    // initializer was a call that could not be settled yet. they used to spell it out separately, and
-    // the sweep's spelling dropped both halves - so `const $x = f();` silently lost its `const`, and
-    // lost it only for the initializers the fixpoint had to finish
+    // initializer was a call that could not be settled yet. a second spelling that dropped either
+    // half would make `const $x = f();` silently lose its `const` for the initializers the
+    // fixpoint has to finish
     //
     // the overload below is the second half on its own, for the **third** moment: an array literal's
     // `result_type()` is unknown by construction, so a declaration initialized by one is typed from

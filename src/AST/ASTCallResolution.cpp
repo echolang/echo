@@ -112,21 +112,29 @@ namespace AST
                 return arg;
             }
 
-            // the same expression argument_fit ranked with, so this is retrieval. a borrow parameter is
-            // answered by a conversion to its pointee, and the borrow of the conversion's result is the
-            // separate rank the re-ask below picks up
-            FunctionDeclNode *conversion =
-                find_implicit_conversion(arg->result_type(), implicit_conversion_target(expected));
+            // read once: MemberAccessNode::result_type() recurses the whole `->` chain, and the
+            // receiver rule below asks the same question
+            const ValueType arg_type = arg->result_type();
 
-            // the rank identifies the case, so this is retrieval and not a second decision - the two
-            // used to share t_conversion with the primitive casts one step below, and a null answer
-            // here was how this told them apart
+            // the same expression argument_fit ranked with, and through the same function, so this is
+            // retrieval. a borrow parameter is answered by a conversion to its pointee, a borrowed
+            // argument by the conversions its pointee declares, and the borrow of the conversion's
+            // result is the separate rank the re-ask below picks up
+            FunctionDeclNode *conversion = implicit_conversion_for(arg_type, arg, expected);
+
+            // the rank identifies the case, so this is retrieval and not a second decision. sharing
+            // t_conversion with the primitive casts one step below would make a null answer here
+            // the only way to tell them apart
             assert(conversion != nullptr && "the fit rank promised a declared conversion");
 
-            // the receiver is addressed here, exactly as the parser addresses a method's and as
-            // OwnershipPass::emit_resolved_member_call does: the conversion's `$this` is a borrow
+            // the conversion's `$this` is a borrow, so the receiver is addressed - **unless the
+            // argument already is one**, which is the whole of what makes the conversion reachable
+            // through a `const T&` parameter. asked of AST::receiver_for_member_call, which owns that
+            // rule for every synthesized member call: addressing a borrow a second time builds a
+            // `ptr<ptr<T>>`, which unifies against nothing, and the call is then silently never
+            // instantiated rather than refused - a failure mode with no room for a second copy
             auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
-                at, std::vector<ExprNode *>{ &nodes.emplace_back<AddrOfExprNode>(arg) });
+                at, std::vector<ExprNode *>{ receiver_for_member_call(nodes, arg) });
 
             // settled outright, unlike the ownership pass's calls: the callee is known *and* its one
             // argument is the address just built, which is exactly what its borrow parameter wants. so
@@ -178,7 +186,7 @@ namespace AST
         // it also completes the other half of a bound type parameter: `can_instantiate` no longer lets
         // an untyped literal decide what `T` is, and this is what then types it *at* whatever the
         // concrete arguments decided. so `pick(0, $n)` over a `usize $n` binds `usize` and the `0` is
-        // written at it, where it used to bind `int32` and truncate `$n`
+        // written at it, rather than binding `int32` and truncating `$n`
         bool bind_destination_typed_arguments(
             FunctionCallExprNode &call, const CoreTypes &core, NodeCollection &nodes,
             Collector &collector, const CodeRef &at)
@@ -469,10 +477,9 @@ namespace AST
             // An empty tie is the fallback below reaching for every declaration in the root namespace,
             // and that list is the same in every program whatever it was written about.
             //
-            // It used to reach the type checker's wording by accident wherever the set held one
-            // declaration. Match rule 2 takes a lone candidate without consulting types at all, so the
-            // refusal came from the coercion, which knows it is an operator. A second `==` pair in the
-            // stdlib turned that into a real choice, and the message degraded with it
+            // match rule 2 takes a lone candidate without consulting types at all, so a one-declaration
+            // set would reach the type checker's wording by accident. a second `==` pair makes it a
+            // real choice, and the message has to stay an operator refusal rather than degrade with it
             if (!candidates.empty() && candidates.front()->is_operator()) {
                 const std::string spelling = candidates.front()->operator_spelling();
                 const Operator *op = _collector.operators.get_operator(spelling);

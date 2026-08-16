@@ -498,8 +498,8 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
             //
             // the wording covers both halves of what a false answer means, because the folder cannot
             // tell them apart and neither one is foldable: a symbol somebody declared runs, and a pair
-            // the language spells no meaning for - `1 << 2` - has nothing to fold *to*. it used to name
-            // only the first, and said "here is a declared operator" about `<<`
+            // the language spells no meaning for - `1 << 2` - has nothing to fold *to*. naming only
+            // the first would say "here is a declared operator" about `<<`
             if (!binary_has_builtin_meaning(
                     binary.op_node->op, parse_time_operand(binary.lhs), parse_time_operand(binary.rhs))) {
                 return ConstFoldResult::refused(fmt::format(

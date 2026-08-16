@@ -60,8 +60,8 @@ uint8_t AST::get_primitive_size(ValueTypePrimitive primitive)
 // this reaches the LLVM symbol table through decorated_func_name, so two primitives sharing a
 // char means two functions sharing a symbol
 //
-// deliberately exhaustive with no `default`. the default used to answer 'u' - the same char as
-// t_complex - so a newly added primitive silently collided instead of failing the build
+// deliberately exhaustive with no `default`. a default answering 'u' - the same char as
+// t_complex - would make a newly added primitive silently collide instead of failing the build
 // 'y' and 'z' are chosen because the surrounding grammar already reserves a lot: 'T' prefixes a
 // type parameter, 'C'/'M' mark const/mutable, 'L'/'R' mark leaf/ref, 'N'/'B' mark
 // nullable/borrow, 'G' marks a type argument, and decorated_func_name uses 'Z' as its separator
@@ -886,8 +886,8 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
     // a type-parameter reference resolves to its bound type, carrying the reference's flags
     // an *unbound* parameter is returned unchanged rather than asserting: that is what makes a
     // partial substitution well defined, so a generic member of a generic owner can have the
-    // owner's parameters resolved while its own stay generic. the arity check that used to live
-    // here now sits in TypeSubstitution::positional, which knows what full coverage means
+    // owner's parameters resolved while its own stay generic. the arity check sits in
+    // TypeSubstitution::positional, which knows what full coverage means
     // a pointer substitutes through its pointee and is rebuilt, so `ptr<T>` with T := ptr<int>
     // now yields ptr<ptr<int>> instead of collapsing onto a single idempotent flag
     if (type.is_pointer()) {
@@ -949,11 +949,10 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
         // this level is being replaced by what it named. `const T` with T := Node is a `const Node`, and
         // `T?` is a `Node?` - both are properties the *use* declared, not the bound type's to have
         //
-        // it used to carry only const, from when nullability could sit nowhere but a pointer level. once
-        // `T?` became writable that omission made a generic silently disagree with itself: the declared
-        // type of `T? $s` substituted to `Node` while its initializer substituted to `Node?`, so a body
-        // that compiled as a template failed at every instantiation, naming a conversion neither half of
-        // the program had asked for
+        // it carries const *and* nullability. carrying only const would make a generic silently
+        // disagree with itself: the declared type of `T? $s` would substitute to `Node` while its
+        // initializer substituted to `Node?`, so a body that compiled as a template would fail at
+        // every instantiation, naming a conversion neither half of the program had asked for
         //
         // OR'd rather than re-derived, so a bound type that is *already* nullable stays so - `T?` with
         // T := Node? is a Node?, which is idempotence, and both spellings of `T?` have it

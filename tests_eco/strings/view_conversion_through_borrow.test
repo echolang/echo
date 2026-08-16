@@ -1,0 +1,13 @@
+# the last two lines are the half that would be missed by a fix that only made the conversion fire:
+# `describe` has both overloads, and the borrowed argument must still pick the `const string&` one.
+# a declared conversion ranking above a borrow would silently change which overload every forwarding
+# function in a library resolves to
+
+--- OUT --->
+5
+5
+5
+5
+5
+string
+string

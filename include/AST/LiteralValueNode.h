@@ -149,7 +149,7 @@ namespace AST
 
         // **the sole owner of the decimal integer default** - int32, unless the digits do not fit one,
         // in which case int64. out of line because deciding it exactly means arbitrary precision, and
-        // the parser used to spell this rule beside the node rather than on it
+        // owned here rather than spelled beside the node in the parser
         static ValueTypePrimitive spelled_width(const TokenReference &token);
 
         LiteralIntExprNode(TokenReference token) :
@@ -306,8 +306,8 @@ namespace AST
             return "literal<string>(\"" + token_literal.value() + "\")";
         }
 
-        // by reference: this used to substr the token's interior and had to answer by value, but the
-        // decoding now happens once at construction and the bytes of a literal are unbounded
+        // by reference: the decoding happens once at construction and the bytes of a literal are
+        // unbounded
         const std::string &get_string_value() const;
     };
 };

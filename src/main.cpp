@@ -573,8 +573,8 @@ static int build_bundle(
         step.finish(true);
     }
 
-    // regenerating the embeddable header is a build step, not a compile step. it used to run on
-    // every single `echoc run`, which rewrote a tracked file as a side effect of compiling
+    // regenerating the embeddable header is a build step, not a compile step. running it on
+    // every `echoc run` would rewrite a tracked file as a side effect of compiling
     if (driver.emit_stdlib_header) {
         if (AST::Module *stdlib = bundle.modules.find_module_ptr("stdlib")) {
             AST::write_embedded_module(*stdlib, STDLIB_SOURCE_DIR "/build/stdlib_embedded.h");
@@ -891,9 +891,9 @@ static bool emit_and_link_modules(
     std::vector<std::filesystem::path> objects = plan.reused;
 
     // a module with nowhere to be stored - the entry module, or anything not from a manifest - gets a
-    // scratch object. **inside the build directory and not beside the executable**, which is where these
-    // used to land: an `out.main.o` nobody asked for, that no command removed, and that every project's
-    // .gitignore had to know about
+    // scratch object. **inside the build directory and not beside the executable**: an
+    // `out.main.o` nobody asked for, that no command removes, and that every project's
+    // .gitignore would have to know about
     const auto object_for = [&](const std::string &module_name) -> std::filesystem::path {
         auto found = plan.emit_to.find(module_name);
         if (found != plan.emit_to.end()) {
@@ -934,9 +934,9 @@ static void store_module_records(
 // one function for the same reason resolve_options is one: both subcommands answer this the same way
 // and a second spelling would let them drift. the status is part of the rule, not the caller's - a
 // module whose codegen threw part way through a function is neither runnable nor linkable, and
-// printing the diagnostic and then carrying on is how both paths used to report success on a failed
-// compile: the exit code said 0 while MCJIT ran over a half-built module, or the emit path wrote
-// objects for one that may be null or only partly linked. the e2e corpus' `expect:` now asserts it
+// printing the diagnostic and then carrying on would report success on a failed compile: the
+// exit code would say 0 while MCJIT ran over a half-built module, or the emit path would write
+// objects for one that may be null or only partly linked. the e2e corpus' `expect:` asserts it
 static int report_compiler_exception(
     const AST::DiagnosticRenderer &diagnostics,
     const Compiler::ASTCompilerException &e
@@ -1208,9 +1208,9 @@ static std::set<std::string> resolve_test_modules(
 
 // **which programs this invocation produces, and where each one goes.**
 //
-// the one owner of a question `build_bundle` used to answer in one sentence - *"a build that points at
-// several roots and gives no sources has no answer to which of these is the program"*. A manifest naming
-// its targets is that answer written down, so this is where the two meet
+// the one owner of *"a build that points at several roots and gives no sources has no answer
+// to which of these is the program"*. a manifest naming its targets is that answer written
+// down, so this is where the two meet
 static bool resolve_programs(
     const Compiler::DriverOptions &driver,
     const AST::DiagnosticRenderer &diagnostics,
@@ -1351,8 +1351,8 @@ static bool resolve_programs(
         }
 
         if (driver.subcommand == Compiler::Subcommand::t_build && driver.output.empty()) {
-            // **the refusal the `-o` row used to make from argv alone.** It moved here the moment a
-            // manifest could name its own binaries: this is the function that knows whether one did
+            // **the refusal `-o` cannot make from argv alone.** this is the function that knows
+            // whether a manifest named its own binaries
             diagnostics.render_untyped("No Output File", fmt::format(
                 "'build' needs '-o, --output <file>' - nothing here names the binary. {}",
                 entry == nullptr
@@ -1509,9 +1509,9 @@ static bool run_front_end(
         }
     }
 
-    // **settled before anything is parsed now**, where it used to be resolved here from a parser this
-    // function was handed. AST::TypeChecker reads it - it refuses `mem::live_allocations()` when nothing
-    // is counting - so it has to exist by the semantic passes, and that is the whole of what it owes
+    // **settled before anything is parsed.** AST::TypeChecker reads it - it refuses
+    // `mem::live_allocations()` when nothing is counting - so it has to exist by the semantic
+    // passes, and that is the whole of what it owes
     out.options = driver.options;
 
     {
@@ -1832,9 +1832,9 @@ std::string program_name(const Compiler::DriverOptions &driver, const Program &p
 
 // the whole-program optimizer, run iff `-O` asked for it - the same answer for both subcommands.
 //
-// read off the flag rather than off the resolved options. On `build` this used to be unconditional, which
-// made `-O` a switch it accepted and silently ignored, and left no way at all to see what codegen emitted
-// for a release build, since `-p` only ever showed the optimizer's output
+// read off the flag rather than off the resolved options. making this unconditional on `build`
+// would make `-O` a switch it accepted and silently ignored, and leave no way at all to see
+// what codegen emitted for a release build, since `-p` only ever showed the optimizer's output
 static void optimize_if_asked(const Compiler::DriverOptions &driver, LLVMCompiler &compiler)
 {
     if (!driver.optimize_is_whole_program()) {
@@ -2352,11 +2352,12 @@ static int build_one_program(
             Compiler::ProgressPhase::t_emit,
             std::filesystem::path(output).filename().string());
 
-        // **one emit-and-link path, whichever build this is.** The whole-program arm used to be a second
-        // spelling of it - an emit_object plus a link_executable over the one unit `emit_objects` skips
-        // its way down to anyway, `link_into_main()` having consumed all the others. What
-        // `--optimize whole` depends on is that merge, which happened above and is not in question; with
-        // an empty plan `object_for` answers the scratch path, which is the object that arm was handed.
+        // **one emit-and-link path, whichever build this is.** a second spelling - an emit_object
+        // plus a link_executable over the one unit `emit_objects` skips its way down to anyway,
+        // `link_into_main()` having consumed all the others - would drift from this one. what
+        // `--optimize whole` depends on is that merge, which happened above and is not in question;
+        // with an empty plan `object_for` answers the scratch path, which is the object that arm
+        // was handed.
         // The tool that failed has already said what it could, and what it could not say is which
         // manifest asked for each requirement
         const bool linked = emit_and_link_modules(compiler, front.layout(), output, plan, link);

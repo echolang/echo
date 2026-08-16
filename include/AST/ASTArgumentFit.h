@@ -4,6 +4,7 @@
 #pragma once
 
 #include "AST/ASTConformance.h"
+#include "AST/ASTConstness.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
@@ -77,14 +78,9 @@ namespace AST
         // nothing to say against a conversion, which pays that same materialisation cost anyway - its
         // result needs somewhere to live too.
         //
-        // It used to sit last, below t_declared_conversion, and that made an ordinary overload pair
-        // unusable. `==` over `string` beside `==` over its `#[implicit]` view scored the string pair
-        // better on a place operand and the view pair better on a literal one. Neither dominated, so
-        // `$s == 'hello'` - the comparison people actually write - was ambiguous.
-        //
         // The arm order inside argument_fit is **not** this order. The declared-conversion arm is
-        // still asked first, so an argument that can convert is still scored a conversion. What moved
-        // is only what that score is worth against a competing candidate.
+        // asked first, so an argument that can convert is scored a conversion even though this rank
+        // sits above that one.
         //
         // One thing this does not protect you from: the compiler cannot tell a mutating callee from a
         // reading one, so a write through a `T&` bound to a literal lands in storage nobody will read
@@ -119,9 +115,6 @@ namespace AST
         // makes an overload taking the owning type always beat one taking the window: this is the
         // fallback that lets a caller take the cheap view without writing anything, never a way to
         // hide a better-matching overload. see AST::find_implicit_conversion
-        //
-        // it out-ranked the two temporary-borrow ranks once, which had it beating a parameter of the
-        // argument's *own* type wherever that argument was a literal
         //
         // the two still **compose** on one argument - `f('hello')` against a view parameter converts
         // first and then borrows the conversion's result - and CallResolver::coerce_arguments re-asks
@@ -267,6 +260,65 @@ namespace AST
         return parameter_auto_borrows(param) ? ValueType::make_mutable(param.pointee()) : param;
     }
 
+    // **does the argument arrive through a borrow this conversion reads past?**
+    //
+    // the same predicate t_read_through uses: a place or a call that returned a borrow, and
+    // **non-nullable only**. a `ptr<T>` place still answers read_reaches_storage - the slot is
+    // certainly there - so without that last conjunct a conversion would be found on the pointee
+    // and PointerAdjuster would then deref `$p` with no null check.
+    //
+    // two readers that have to agree or the receiver is addressed twice: the source peel below,
+    // and the const gate in implicit_conversion_for. `const` is dropped for the target's reason;
+    // whether a const source may reach a non-const conversion is AST::const_receiver_refused
+    inline bool implicit_conversion_peels_borrow(const ValueType &from, const ExprNode *expr)
+    {
+        return expr != nullptr
+            && from.is_pointer()
+            && !from.is_nullable()
+            && read_reaches_storage(*expr, from);
+    }
+
+    inline ValueType implicit_conversion_source(const ValueType &from, const ExprNode *expr)
+    {
+        return implicit_conversion_peels_borrow(from, expr)
+            ? ValueType::make_mutable(value_type_of(from))
+            : from;
+    }
+
+    // **which conversion answers this argument at this parameter, or none.** the two peels
+    // plus the one thing neither can say: a peeled `const` borrow may only reach a
+    // `const function` conversion. asked of AST::const_receiver_refused, which owns that
+    // question. two readers for implicit_conversion_target's reason - argument_fit decides
+    // *that* a conversion applies and CallResolver retrieves *which*
+    inline FunctionDeclNode *implicit_conversion_for(
+        const ValueType &from,
+        const ExprNode *expr,
+        const ValueType &to
+    )
+    {
+        const ValueType source = implicit_conversion_source(from, expr);
+
+        if (!source.has_complex_type()) {
+            return nullptr;
+        }
+
+        FunctionDeclNode *conversion =
+            find_implicit_conversion(source, implicit_conversion_target(to));
+
+        if (conversion == nullptr) {
+            return nullptr;
+        }
+
+        // only when a borrow was actually peeled: a value argument has no const-ness of its own
+        // to launder, and the temporary the conversion's receiver binds to is the compiler's
+        if (implicit_conversion_peels_borrow(from, expr)
+            && const_receiver_refused(*conversion, from)) {
+            return nullptr;
+        }
+
+        return conversion;
+    }
+
     // **the** rule for "does this argument answer this parameter" - the only implementation, with
     // three readers that each take a different amount of it:
     //
@@ -275,11 +327,6 @@ namespace AST
     //    accepted on the borrow arm is a candidate the coercion then actually wraps;
     //  - AST::TypeChecker reads only `!= t_none`, so a call it reports is a call resolution could
     //    not have chosen.
-    //
-    // It used to be three separate case analyses. The third was a hand-written copy in the type
-    // checker whose pointer arm was plain is_implicitly_convertible, and the "first" was consulted for
-    // concrete candidates while unify_type's tail filtered generic ones by yet another rule. So a
-    // generic overload could be admitted by one and scored by the other, with nothing to notice.
     //
     // `expr` may be null when only the argument's type is known. The borrow rule needs the expression,
     // because only an expression can be a place, so a caller that passes null declines the borrow arm.
@@ -434,9 +481,12 @@ namespace AST
         // does: from the temporary AST::OwnershipPass mints for the `&` CallResolver writes around it.
         //
         // So `f('hello')` composes. The literal is bound, the conversion reads it, and the borrow of
-        // *that* is scored by the arm below when coerce_arguments re-asks
-        if (expr != nullptr
-            && find_implicit_conversion(from, implicit_conversion_target(to)) != nullptr) {
+        // *that* is scored by the arm below when coerce_arguments re-asks.
+        //
+        // **and through implicit_conversion_for rather than the bare lookup**, so an argument that
+        // arrived as a borrow declares what the value behind it declares - and so a `const` one cannot
+        // reach a conversion that would write through it
+        if (expr != nullptr && implicit_conversion_for(from, expr, to) != nullptr) {
             return ArgumentFit::t_declared_conversion;
         }
 

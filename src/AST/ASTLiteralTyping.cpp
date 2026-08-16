@@ -32,7 +32,7 @@ namespace AST
     // ---------------------------------------------------------------------------
 
     // trailing zeros off, at least one digit after the dot. the rendering an autocast writes into
-    // override_literal_value, kept byte for byte from where this rule used to live in the parser
+    // override_literal_value, kept byte for byte with the parser's rendering
     static std::string trimmed_float_literal(std::string value)
     {
         value.erase(value.find_last_not_of('0') + 1, std::string::npos);
@@ -643,8 +643,8 @@ namespace AST
         }
 
         // **a `??` RHS takes the unwrapped left type**, which is the destination the form itself
-        // names. `type_destination_literals` used to stop at the three shallow slots, so
-        // `$o ?? -1` over a `uint32?` reached codegen untyped and `coerce_value` bit-cast it
+        // names. stopping at the three shallow slots would leave `$o ?? -1` over a `uint32?`
+        // untyped at codegen, and `coerce_value` would bit-cast it
         void visit_null_coalesce(NullCoalesceExprNode &node) override
         {
             if (node.lhs != nullptr && node.rhs != nullptr) {
@@ -659,7 +659,7 @@ namespace AST
         }
 
         // **a match arm's value takes the unified type**, once resolution has one. the same hole
-        // as `??`: `match { .a => 300 }` at an `int8` destination used to wrap in coerce_value
+        // as `??`: `match { .a => 300 }` at an `int8` destination would otherwise wrap in coerce_value
         void visit_match(MatchExprNode &node) override
         {
             if (node.patterns_decided && !is_undetermined_type(node.result)) {

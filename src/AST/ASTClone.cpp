@@ -649,8 +649,8 @@ Node *TypeDeclNode::clone(CloneContext &cc) const
 {
     // a type declaration is not instantiated: a clone *shares* it. Which ComplexType a generic
     // application means is TypeRegistry::get_or_create_instantiation's answer and only its - struct
-    // equality is ComplexType* identity, so a second substituted layout minted here (which is what
-    // this used to do) was one type wearing two, unequal to itself across the two paths
+    // equality is ComplexType* identity, so a second substituted layout minted here would be one
+    // type wearing two, unequal to itself across the two paths
     //
     // sound because parse_typedecl refuses a type written where a type parameter is visible, the way
     // parse_funcdecl refuses a nested function - and every body the monomorphizer clones is a generic

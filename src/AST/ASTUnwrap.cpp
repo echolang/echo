@@ -42,7 +42,7 @@ namespace
     // `tests_eco/nullability/unwrappable_erased` pins by name in the emitted table.
     //
     // **this file is the one place in the compiler that knows which slot is which**, which is the whole
-    // point: the requirements' *names* used to be string literals in AST::GuardLowering, so
+    // point: if the requirements' *names* were string literals in AST::GuardLowering,
     // stdlib/core/contract.eco could not rename what it declares without silently breaking a pass
     enum : size_t
     {
@@ -77,8 +77,8 @@ namespace
     // answer to it.
     //
     // it returns the caller's own answer rather than a record the caller then has to translate, because
-    // the two shapes of "no answer yet" are not the same answer and both arms below used to spell the
-    // translation out: `pending()` is a half-derived instantiation, which a later round leaves behind,
+    // the two shapes of "no answer yet" are not the same answer and both arms below spell the
+    // translation: `pending()` is a half-derived instantiation, which a later round leaves behind,
     // and `unanswered()` is a conformance declared with its `failure()` missing, which no round will ever
     // fix and which AST::TypeChecker reports at the implementor. only the second silences the asker - see
     // UnwrapLookup::reported_elsewhere. **nullopt is the success**: the plan has been written, carry on

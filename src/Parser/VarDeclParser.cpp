@@ -299,10 +299,10 @@ AST::VarDeclNode *Parser::parse_varexpr(
 
     // we have a previous declaration, this might be a mutable variable
     if (prev_vardecl != nullptr) {
-        // const is *not* checked here. it used to be, on the declared type's top level, which is
-        // the wrong level twice over: `const int& $r` is a mutable borrow of a const pointee, so
-        // the guard never fired on the write it should reject, while `const ptr<int> $p` is a const
-        // pointer whose pointee may legally be written, so it fired on a write it should allow
+        // const is *not* checked here. checking the declared type's top level is the wrong level
+        // twice over: `const int& $r` is a mutable borrow of a const pointee, so the guard would
+        // never fire on the write it should reject, while `const ptr<int> $p` is a const pointer
+        // whose pointee may legally be written, so it would fire on a write it should allow
         // telling those apart needs the deref AST::PointerAdjuster inserts, so the check now lives
         // in AST::TypeChecker::check_const_target, keyed on the assignment target's shape
 

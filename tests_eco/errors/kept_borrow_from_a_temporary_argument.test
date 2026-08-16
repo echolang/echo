@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] TemporaryMember  kept_borrow_from_a_temporary_argument.eco:19:29
+
+  'string' has no storage of its own, so a borrow of it would point into a value destroyed at the end of this statement.
+
+  18 | 
+  19 | Request& $held = $r->header('a: 1');
+     :                             ^^^^^^
+  20 | 
+
+  help: Bind it to a variable first.
+
+1 error, nothing was compiled.

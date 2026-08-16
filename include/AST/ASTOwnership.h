@@ -156,9 +156,21 @@ namespace AST
         class MaterializationScope
         {
         public:
+            // **does anything read the bound value after this statement?**
+            //
+            // only asked by the binding form, and only to decide one thing: whether a *pointer* the
+            // bound value hands back could still be read once the temporaries under it are gone.
+            // a discarded statement expression reads nothing, so a borrow it produced is no
+            // hazard even when the statement's own type happens to be a pointer
+            enum class BoundValue
+            {
+                t_kept,
+                t_discarded,
+            };
+
             // the binding form. `pass` outlives it by construction: every scope is a local of a
             // method on the pass
-            explicit MaterializationScope(OwnershipPass &pass);
+            explicit MaterializationScope(OwnershipPass &pass, BoundValue kept = BoundValue::t_kept);
 
             // the refusing form. `action` and `outcome` are the two halves the refusing positions
             // differ in - an address dangles, a write is simply lost - and they are constructor
@@ -180,6 +192,7 @@ namespace AST
         private:
             OwnershipPass &_pass;
             size_t _mark;
+            BoundValue _kept = BoundValue::t_kept;
             const char *_action = nullptr;
             const char *_outcome = nullptr;
             bool _closed = false;
@@ -332,7 +345,13 @@ namespace AST
         // its counterpart is a plain walk_expression, which is what a **place** edge does: a member
         // base, an index base, `&`, a deref, `:$`. those are still addressing the temporary's storage,
         // so the request travels outward through them - exactly the set AST::place_root_of walks
-        ExprNode *walk_value_edge(ExprNode *expr);
+        //
+        // `kept` has exactly one caller that does not take the default, the statement-that-is-an-
+        // expression arm of walk_statement. see MaterializationScope::BoundValue
+        ExprNode *walk_value_edge(
+            ExprNode *expr,
+            MaterializationScope::BoundValue kept = MaterializationScope::BoundValue::t_kept
+        );
 
         // the nodes walked so far that need storage for their operand, innermost first. two owners, and
         // between them every way a value with no home is reached into: a **member access**, whose base is
@@ -370,7 +389,14 @@ namespace AST
         // binds every request above `mark` into a TemporaryBindExprNode wrapping `value`, in binding
         // order, with the drops in reverse. answers `value` unchanged when there are none, which is
         // every edge in almost every program
-        ExprNode *bind_pending_temporaries(ExprNode *value, size_t mark);
+        //
+        // `kept` decides one arm and nothing else - the escape guard over a pointer-typed value. see
+        // MaterializationScope::BoundValue
+        ExprNode *bind_pending_temporaries(
+            ExprNode *value,
+            size_t mark,
+            MaterializationScope::BoundValue kept
+        );
 
         // discards every request above `mark`, reporting each: the position wanted the temporary's
         // *address*, and an address into a value destroyed at the end of the statement is the one thing
@@ -430,11 +456,11 @@ namespace AST
         // destroying a value of `type` at `root`->`path`: one call to whatever ensure_deinit answers for
         // it, or one release when the value is a handle rather than the thing.
         //
-        // **the teardown is not written here.** it used to be - the destructor and then a drop per owning
-        // property, inlined into whichever scope held the value - and the member accesses that took were
-        // the compiler reaching inside a type from outside it, which is a `private` refusal against a line
-        // nobody wrote. what a synthesized declaration could not answer *in the parser* is whether a
-        // generic property needs destroying, and this pass runs after instantiation, so it can.
+        // **the teardown is not written here.** inlining a destructor and a drop per owning property
+        // into the scope that held the value would mint member accesses from outside the type,
+        // which is a `private` refusal against a line nobody wrote. what a synthesized declaration
+        // could not answer *in the parser* is whether a generic property needs destroying, and this
+        // pass runs after instantiation, so it can.
         //
         // `path` is the member path from `root` down to the value being destroyed, and it is one
         // vector pushed and popped in step with the recursion rather than a copy per property: a

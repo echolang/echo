@@ -385,8 +385,8 @@ static void leave_member_body(Parser::Payload &payload)
 
 // the attributes written ahead of a constructor or a destructor: drained onto the declaration they
 // were written for, then handed to the one owner of every marker that has something to say about a
-// member. neither used to drain, so an attribute sat on the scope's stack until whatever declaration
-// came next picked it up
+// member. without the drain, an attribute sits on the scope's stack until whatever declaration
+// comes next picks it up
 //
 // both halves are the shared ones - Parser::drain_attributes and Parser::publish_declaration_markers,
 // the same two parse_funcdecl calls around its own registration - so no rule about an attribute is
@@ -1008,8 +1008,8 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
     // make this declaration depend on a substitution nothing hands it. A type is the case where that
     // would be *silent* rather than a link error, because there is nowhere for the substituted layout to
     // come from: TypeRegistry::get_or_create_instantiation interns one ComplexType per (template, args)
-    // and this declaration is no template, so the monomorphizer's clone used to mint a second layout of
-    // its own - and struct equality is ComplexType* identity, so that was one type wearing two. see
+    // and this declaration is no template, so a monomorphizer clone that minted a second layout of
+    // its own would be one type wearing two - struct equality is ComplexType* identity. see
     // all three are lifted together, once closures can be generic
     //
     // asked here, before MemberTypeScope is opened and before the node is found or created, so the
@@ -1113,7 +1113,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     // the attributes written ahead of the declaration, through the same drain a function uses - an
     // undrained attribute attaches itself to whatever declaration comes next, and this site is the
-    // half of that bug that used to pick up a method's `#[implicit]`
+    // half of the bug that would pick up a method's `#[implicit]`
     Parser::drain_attributes(payload, struct_node->attributes);
 
     bind_core_type_attribute(payload, struct_node);
@@ -1282,9 +1282,9 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
         // ahead of the dispatch because the arms that follow all scan from the head of the member:
         // `public const int32 $x;` is a property, `public const MAX = 5;` is a constant and
         // `public const function f()` is a const method, and only starts_constdecl's `$` test and
-        // starts_funcdecl's `function` keyword tell the three apart. this used to be a bare `t_private`
-        // test inside the property arm, which is exactly why `private function` did not parse: the method
-        // arm is asked first and never saw the keyword
+        // starts_funcdecl's `function` keyword tell the three apart. a bare `t_private` test inside
+        // the property arm would miss `private function`: the method arm is asked first and would
+        // never see the keyword
         VisibilityPrefix visibility = parse_visibility_prefix(payload, VisibilityPosition::t_member);
 
         if (cursor.is_type(Token::Type::t_hash)) {

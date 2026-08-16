@@ -192,7 +192,7 @@ void GuardLowering::lower(ScopeNode &scope, size_t index)
 
     // **the deferred nullable case mints nothing at all.** a `T?` that only became one after
     // substitution runs the same four lines the parser's immediate path runs, which is also what fixes a
-    // latent bug: `$v = guard $w` in a template over `T = int32?` used to type the binding
+    // latent bug: `$v = guard $w` in a template over `T = int32?` would type the binding
     // `unwrapped_type_of(T)` = `T`, substituting back to `int32?` - one level too nullable
     if (plan.kind == UnwrapSource::t_builtin_nullable) {
         if (!bind_payload_type(*guard, plan.payload_type, subject_type)) {

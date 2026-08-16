@@ -1269,10 +1269,10 @@ bool Parser::resolve_module_graph(
 
     // **the roots in the order they were given, first.**
     //
-    // This used to walk `loaded`, a path-keyed map, on the theory that a canonical-path order is more
-    // reproducible than a command line. It is reproducible and it is also wrong: two modules that do not
+    // walking `loaded`, a path-keyed map, on the theory that a canonical-path order is more
+    // reproducible than a command line, is reproducible and also wrong: two modules that do not
     // depend on each other are still ordered relative to each other, because a module can name symbols from
-    // any module parsed before it. So the order is part of what a build *means*, and the caller is the only
+    // any module parsed before it. so the order is part of what a build *means*, and the caller is the only
     // thing that knows it - the standard library is passed as the first root precisely because everything may
     // use it.
     //

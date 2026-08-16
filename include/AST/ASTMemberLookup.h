@@ -16,6 +16,7 @@ namespace AST
     class FunctionCallExprNode;
     class FunctionDeclNode;
     class Module;
+    class NodeCollection;
     class VarDeclNode;
     class VarRefNode;
 
@@ -105,18 +106,10 @@ namespace AST
     // declared type that owns nothing - was decided at the declaration by Parser's
     // publish_implicit_conversion. That is what lets this be a comparison rather than a filter.
     //
-    // This used to recognise the conversion by the member's *spelling*, a published `view_method_name`
-    // constant the compiler compared every method against. The comment there said operator overloading
-    // would eventually replace it with a declarable operator, and **that was wrong**.
-    //
-    // Every form the operator grammar has is operand syntax the user writes - infix, prefix, suffix,
-    // each with operands and a precedence. An implicit conversion is inserted at an argument position
-    // where the user wrote nothing at all. There is no operand to hang it on, so `operator` could never
-    // have taken it over, and the mislabel is what let a magic name look temporary. The spelling is
-    // `#[implicit]`, and it is declared.
-    //
-    // The **bracket** is the genuinely different case, and it did turn out to be the operator grammar's
-    // to take: `$a[$i]` *is* operand syntax, and it is a declared `operator []` now
+    // an implicit conversion is inserted at an argument position where the user wrote nothing, so
+    // it is not an `operator` - every form that grammar has is operand syntax. the spelling is
+    // `#[implicit]`, and it is declared. `$a[$i]` *is* operand syntax and is a declared
+    // `operator []`
     //
     // three readers, mirroring how argument_fit is already consumed: AST::argument_fit ranks it (as
     // t_declared_conversion, below every built-in conversion, so an overload taking the owning type
@@ -171,6 +164,11 @@ namespace AST
     // all, silently**, and only the type checker notices, far away. one function, because a rule whose
     // failure mode is silence must not have two copies of itself to keep in step - and it is asked of the
     // *expression*, so a receiver whose declaration is not typed yet answers `unknown` and gets addressed
+    //
+    // the arena overload is for a caller holding one without the module around it: AST::CallResolver
+    // addresses an `#[implicit]` conversion's receiver while coercing, and coercion is handed the
+    // NodeCollection alone. one body, so the rule stays single even where the seam differs
+    ExprNode *receiver_for_member_call(NodeCollection &nodes, ExprNode *place);
     ExprNode *receiver_for_member_call(Module &module, ExprNode *place);
 
     // **`$local` as a place expression**, for a pass minting a call on a local it just declared. two

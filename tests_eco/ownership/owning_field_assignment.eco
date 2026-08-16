@@ -1,0 +1,91 @@
+// **writing an owning value into a field is a re-assignment like any other**: the old value is
+// destroyed, the new one is stored. it used to be refused outright, on the grounds that a *field*'s
+// drop is a partial-ownership case the enclosing destructor would have to know about - but it does
+// not, because only a whole local is ever marked moved, so after a drop-then-store the field holds a
+// live value again and the owner's property-wise teardown is still right
+//
+// the refusal was a node-kind test rather than an analysis, and the machinery it needed was ten lines
+// below it: emit_drop already takes a member path, and AST::member_path_of already fills one
+struct Client
+{
+    string $baseUrl;
+    array<int32> $codes;
+
+    constructor()
+    {
+        $this->baseUrl = '';
+        $this->codes = array<int32>();
+    }
+
+    function base(const string& $url) : void
+    {
+        $this->baseUrl = $url;
+    }
+
+    function reset() : void
+    {
+        // an owning *container* into a field, which is the shape that would leak loudest
+        $this->codes = array<int32>();
+    }
+}
+
+{
+    Client $c = Client();
+
+    $c->base('https://example.com');
+    echo $c->baseUrl;
+
+    // written again, so the first value is the one that has to be destroyed
+    $c->base('https://echoc.dev');
+    echo $c->baseUrl;
+
+    $c->codes->push(200);
+    $c->codes->push(404);
+    echo $c->codes->count();
+
+    $c->reset();
+    echo $c->codes->count();
+
+    // in a loop, where a leak is a leak per iteration rather than once
+    for (int32 $i = 0; $i < 4; $i = $i + 1) {
+        $c->base('https://example.com/');
+        $c->baseUrl->append(str::from($i));
+    }
+
+    echo $c->baseUrl;
+
+    // through a **pointer base**, which needs nothing new: this pass runs before AST::PointerAdjuster,
+    // so the target is still a plain member path here and the deref is written into the teardown after
+    // the fact - which is exactly why visit_assign walks `teardown_old` as a statement edge
+    ptr<Client> $p = &$c;
+
+    $p->baseUrl = 'https://through-a-pointer/';
+
+    echo $c->baseUrl;
+}
+
+assert(mem::live_allocations() == 0, "every value a field held was ended exactly once");
+
+// a nested path - `$doc->head->title` is as static an identity as `$this->url`
+struct Head
+{
+    string $title;
+}
+
+struct Doc
+{
+    Head $head;
+}
+
+{
+    Doc $doc = Doc(Head('first'));
+
+    $doc->head->title = 'second';
+    $doc->head->title->append('!');
+
+    echo $doc->head->title;
+}
+
+assert(mem::live_allocations() == 0, "and so did the one two levels in");
+
+echo 'balanced';

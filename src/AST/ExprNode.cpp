@@ -8,7 +8,7 @@
 #include <map>
 
 // **`!` answers bool whatever it was applied to, and `-` answers its operand.** the two are not one
-// rule, which is why this is a switch and not the one-liner it used to be: `!` over a nullable is a
+// rule, which is why this is a switch and not a one-liner: `!` over a nullable is a
 // presence test, so the operand's type is `T?` and the answer is `bool` - the same divergence
 // BinaryExprNode::result_type records below for a comparison
 AST::ValueType AST::UnaryExprNode::result_type() const
@@ -77,8 +77,8 @@ AST::ValueType AST::BinaryExprNode::result_type() const
     }
 
     // **a comparison is a bool, whatever it compared.** the two arms above answer this for a pointer,
-    // a class, a nullable and a weak; every other operand pair used to fall through to the "same type on
-    // both sides" rule at the bottom, so `$a == $b` over two `int32`s answered **`int32`**.
+    // a class, a nullable and a weak; every other operand pair would otherwise fall through to the
+    // "same type on both sides" rule at the bottom, so `$a == $b` over two `int32`s would answer **`int32`**.
     //
     // which mostly hid: `echo $a == $b` prints 1 or 0 either way, and a `bool` destination accepts the
     // integer. what it did not survive is a comparison becoming an *operand*:

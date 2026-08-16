@@ -1,0 +1,14 @@
+# 1 is the seated value; the next 1 is its destructor on the assignment; 2 is the
+# replacement; the last 2 is the epilogue tearing that one down. a store with no
+# drop prints 1 / 2 / 2
+--- OUT --->
+1
+1
+2
+2
+--- RAST --->
+# the drop hangs off the assignment, over the static itself. Tracked declares a
+# destructor, so that is the call - $deinit is only synthesized when the teardown
+# has to reach inside
+CHECK: destroys old:
+CHECK: call destructor(addrof<Tracked&>(static_property<Tracked>

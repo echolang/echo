@@ -189,10 +189,10 @@ namespace AST
         }
 
         // **the arms below are ExprCodegen::gen_binary_expr's, in its order.** that mirroring is the
-        // whole contract: this function's `true` *is* the claim that that one has an arm, and it used to
-        // end in "neither operand is a struct, a class or an interface" - which promised an arm for every
+        // whole contract: this function's `true` *is* the claim that that one has an arm. ending in
+        // "neither operand is a struct, a class or an interface" would promise an arm for every
         // operator over every other pair. it has far fewer, so `1 << 2`, `$a == $b` over two bools, and a
-        // weak against null all type-checked and then reached a throw with no location at all. an arm
+        // weak against null would type-check and then reach a throw with no location at all. an arm
         // added there wants one added here, and the reverse
         //
         // **not decided yet, so nothing is claimed either way.** an unresolved call's result type is
@@ -235,7 +235,7 @@ namespace AST
         }
 
         // **a written null against something that cannot be absent.** deliberately still *true* for a
-        // primitive and *false* for a named type, which is the answer the tail used to give and which
+        // primitive and *false* for a named type, which is the answer the tail gives and which
         // both goldens rest on: `$i == null` is the built-in comparison and AST::binary_operand_refusal
         // explains why it cannot work, one message; `$p == null` on a struct becomes an operator call,
         // because a declared `==` is a thing an author could reach for there

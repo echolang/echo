@@ -31,8 +31,7 @@ namespace AST
         // *lexical* namespace rather than anything the user wrote - for a type exactly as for a function.
         // deliberately one field and not two: a `namespace a::b;`
         // statement writes this one mid-file, and a parallel "the namespace I really meant" would desync
-        // from it silently - every function in a namespaced file would quietly lose its prefix. there
-        // used to be such a second reading, `declaring_namespace()`, and every type site asked it
+        // from it silently - every function in a namespaced file would quietly lose its prefix
         Namespace *current_namespace;
 
         ScopeNode *scope_ptr = nullptr;
@@ -221,12 +220,12 @@ namespace AST
          * The suffix that tells two compiler-minted names of the same kind apart: where in the source
          * the thing being named was written, as `<file>L<line>C<column>`.
          *
-         * Two names need one - a block's lexical namespace and a closure - and both used to take a
-         * monotonic counter instead. A counter is only unique within one *bundle*, and both of these
-         * names reach the mangler, so the emitted symbol of a block-local function depended on how many
-         * blocks and closures had been parsed before it anywhere in the program. The same declaration in
-         * the same library got a different symbol depending on who else was in the build, which makes a
-         * compiled artifact unreusable and is what this replaces.
+         * Two names need one - a block's lexical namespace and a closure. A counter is only unique
+         * within one *bundle*, and both of these names reach the mangler, so a numbered suffix
+         * would make the emitted symbol of a block-local function depend on how many blocks and
+         * closures had been parsed before it anywhere in the program. The same declaration in the
+         * same library would get a different symbol depending on who else was in the build, which
+         * makes a compiled artifact unreusable.
          *
          * Derived from the position rather than numbered because that is the property actually wanted:
          * unique without coordination, and unchanged by an edit somewhere else. The file tag is

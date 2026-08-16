@@ -1,0 +1,31 @@
+// **a `ptr<T>` in a C variadic tail is the pointer, however it was produced.** a tail is the one
+// argument list with no parameters opposite it, so nothing supplies a destination type - and a value
+// edge with no destination reads a pointer *place* all the way through, which handed C the pointee.
+// `->cstr()` never had the problem, a call returning a nullable pointer not being a read that reaches
+// storage, so the same type passed one way worked and the other way segfaulted inside libc
+extern {
+    function snprintf as c_snprintf(
+        ptr<uint8> $out, usize $size, ptr<const uint8> $format, variadic_args $args) : int32;
+}
+
+ptr<uint8> $buf = mem::alloc<uint8>(64);
+
+// a NUL-terminated "AB", built by hand so the pointer is a plain local rather than a call result
+ptr<uint8> $text = mem::alloc<uint8>(8);
+$text:$[0] = 65;
+$text:$[1] = 66;
+$text:$[2] = 0;
+
+string $format = '<%s|%s>';
+
+// the bare read and the explicit peel are the same address, which is the whole assertion
+c_snprintf($buf, 64, $format->cstr(), [$text, $text:$]);
+echo str::cview($buf);
+
+// and a pointer the *stdlib* produced still behaves as it always did
+string $word = 'hi';
+c_snprintf($buf, 64, $format->cstr(), [$word->cstr(), $text]);
+echo str::cview($buf);
+
+mem::free($text);
+mem::free($buf);

@@ -154,8 +154,8 @@ bool AST::unify_type(const AST::ValueType &param, const AST::ValueType &arg, AST
     // **type-parameter free**: there was nothing to bind, so unification has no opinion. whether the
     // argument can *reach* the parameter is deliberately not asked here - that is AST::argument_fit's,
     // and the matcher asks it of every candidate, generic and concrete alike, once this has
-    // substituted. this arm used to answer it too (is_implicitly_convertible, then a
-    // primitive/primitive catch-all), so a generic candidate was filtered by one rule and then scored
-    // by another, with nothing to notice when the two disagreed
+    // substituted. answering it here too (is_implicitly_convertible, then a primitive/primitive
+    // catch-all) would filter a generic candidate by one rule and then score it by another, with
+    // nothing to notice when the two disagreed
     return !contains_type_param(param);
 }

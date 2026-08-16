@@ -1,0 +1,20 @@
+# **the tail is where a pointer stops meaning the pointer**, and the IR is what says so. with the
+# deref back, `[$text]` reads the byte at `$text[0]` - 65 - and hands `%s` an address of `0x41`. the
+# `OUT` above does catch that, unlike the promotion story next door: no platform prints `AB` from a
+# byte reinterpreted as a pointer. what the IR adds is *where* it went wrong, so a regression reads as
+# "the pointee is being loaded again" rather than as a crash inside libc
+
+--- OUT --->
+<AB|AB>
+<hi|AB>
+--- IR --->
+# the declaration is still variadic, the tail parameter being no parameter at all in LLVM. first
+# because a positive CHECK advances a cursor and the declarations come out above the definitions
+CHECK: declare i32 @snprintf(ptr, i64, ptr, ...)
+CHECK: define i32 @main(
+
+# nothing between the entry and the call reads *through* either pointer. the bytes of "AB" are
+# written with `store i8`, and a `load i8` in this window is the auto-deref coming back - which is
+# the whole regression, stated without naming an SSA number that a later change would renumber
+CHECK-NOT: load i8
+CHECK: @snprintf(ptr

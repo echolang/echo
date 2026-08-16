@@ -1,0 +1,56 @@
+// **a statement discards what it evaluated to, so a borrow it produced escapes nothing.** the
+// materialization guard that refuses to bind a temporary under a pointer-typed value is about what
+// reads that pointer *after* the statement - and here nothing does. before it asked, a fluent chain
+// was refused with a sentence about its string literals: the pending temporaries were the two
+// `const string&` arguments, the closing value was a `Request&` into `$r`, and the two had nothing to
+// do with each other
+struct Request
+{
+    string $url;
+    string $log;
+
+    constructor(const string& $url)
+    {
+        $this->url = $url;
+
+        // a heap buffer, so a temporary nobody released would be visible in the count below
+        $this->log = '';
+        $this->log->append('|');
+    }
+
+    function header(const string& $line) : Request&
+    {
+        echo $line;
+        $this->log->append($line);
+        $this->log->append('|');
+
+        return $this;
+    }
+}
+
+{
+    Request $r = Request('https://example.com/');
+
+    // two literals, each needing a slot for the duration of the statement, under a value that is an
+    // address into `$r`
+    $r->header('a: 1')->header('b: 2');
+
+    // the same chain over a place, which never needed a slot at all
+    string $c = 'c: 3';
+    $r->header($c)->header($c);
+
+    // the unchained shape reaches the identical predicate - the statement's value is a `Request&`
+    // there too - so it is asserted beside the chain rather than assumed to differ
+    $r->header('d: 4');
+
+    echo $r->url;
+    echo $r->log;
+}
+
+// **the assertion that matters, and the only one worth pinning a number to.** binding a temporary is
+// only half of it - each one is owed a release at the end of the statement that bound it, and a chain
+// binds several under one value. a slot that outlived its statement, or one released twice, shows up
+// here and nowhere in the output above
+assert(mem::live_allocations() == 0, "every slot the chain bound was given back");
+
+echo 'balanced';

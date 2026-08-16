@@ -76,8 +76,8 @@ namespace AST
         // enforces everywhere else by construction - a reference expanded after the whole program is parsed
         // has to check it, or a library could hold a clone of an application's expression in its own arena
         //
-        // this used to be two fields spelled here and nowhere else. AST::DeclarationOrigin is the same pair
-        // on every declaration that carries one, so the visibility rules ask one shape rather than three
+        // AST::DeclarationOrigin is the same pair on every declaration that carries one, so the
+        // visibility rules ask one shape rather than three
         DeclarationOrigin declared_in;
 
         // **who may name this constant.** the file and module axes only: a constant declared in a struct body

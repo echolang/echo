@@ -98,9 +98,9 @@ namespace Compiler
 
     // where this invocation's build artifacts go.
     //
-    // **one owner for "where does a build artifact go".** That question used to have four answers in three
-    // files - a cache directory beside each manifest, a `cc` join in the driver, and two string concatenations
-    // against the output path - so a build scattered objects nothing collected and nothing could remove.
+    // **one owner for "where does a build artifact go".** four answers in three files - a cache
+    // directory beside each manifest, a `cc` join in the driver, and two string concatenations
+    // against the output path - would scatter objects nothing collected and nothing could remove.
     //
     // Resolved once, in run_front_end, and carried on FrontEnd: a second resolution is a second answer, and
     // the two can disagree about a directory one of them has already written into

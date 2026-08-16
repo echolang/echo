@@ -1,0 +1,42 @@
+// **an `#[implicit]` conversion is reachable through a borrow, and `const` is the one thing the type
+// comparison cannot say.** the lookup matches a source type against a return type; whether reading a
+// `const Feet&` through a conversion that takes a mutable `Feet&` is allowed is a different question,
+// and AST::receiver_is_const owns it. without that gate the fit rule admits the call and the type
+// checker then reports an argument mismatch inside a call the author never wrote
+struct Meters
+{
+    float64 $value;
+}
+
+struct Feet
+{
+    float64 $value;
+
+    // not a `const function`, so it may write through its receiver
+    #[implicit]
+    function to_meters() : Meters
+    {
+        return Meters($this->value * 0.3048);
+    }
+}
+
+function show(Meters $m) : void
+{
+    echo $m->value;
+}
+
+// the mutable borrow reaches it, and that half is asserted in tests_eco/strings
+function viaMutable(Feet& $f) : void
+{
+    show($f);
+}
+
+function viaConst(const Feet& $f) : void
+{
+    show($f);
+}
+
+Feet $f = Feet(10.0);
+
+viaMutable(&$f);
+viaConst($f);

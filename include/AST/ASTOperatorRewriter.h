@@ -47,11 +47,10 @@ namespace AST
     //
     // **one walk, five rules**, and the walk is not this file's.
     //
-    // It used to be a second complete expression-edge switch parallel to PointerAdjuster's, which is
-    // exactly where a forgotten arm is a silent miss. Both of them had forgotten the same four
-    // (`guard`, `??`, `?->`, `strong`). AST::RecursiveVisitor owns the descent now, so this pass
-    // overrides rewrite_value_edge and inherits an enumeration it cannot fall behind. The rules do
-    // not differ by edge *position* the way the adjuster's policies do, so both seams answer alike.
+    // AST::RecursiveVisitor owns the descent, so this pass overrides rewrite_value_edge and
+    // inherits an enumeration it cannot fall behind. a second complete expression-edge switch
+    // would silently miss a new node (`guard`, `??`, `?->`, `strong`). the rules do not differ
+    // by edge *position* the way the adjuster's policies do, so both seams answer alike.
     //
     // runs **inside the monomorphizer's fixpoint**, per round, the way AST::OwnershipPass does and
     // for the same reason: it needs the concrete types the round produced, and the call it builds may

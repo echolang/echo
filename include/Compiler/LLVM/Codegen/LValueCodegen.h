@@ -89,8 +89,7 @@ namespace Compiler::LLVM
         // pointer wants: `$p = 20` stores into the pointee, never into the slot
         //
         // two callers, and between them the whole of the rule: gen_lvalue's own deref arm - so this
-        // *is* what a DerefExprNode lowers to, which is the collapse this comment used to predict
-        // rather than the retirement it expected - and a member access's base, which
+        // *is* what a DerefExprNode lowers to - and a member access's base, which
         // AST::PointerAdjuster deliberately leaves un-derefed because `->` reaches through every
         // level where that pass only ever inserts one (its n_member_access arm says so)
         //

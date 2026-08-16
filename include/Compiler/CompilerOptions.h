@@ -10,8 +10,8 @@ namespace Compiler
     // how much the compiler owes the running program in checks it could skip
     //
     // this is a property of *the program being compiled*, not of how echoc itself was built. the
-    // distinction is the whole reason the type exists: the null-narrowing check used to be gated on
-    // the host compiler's NDEBUG, which meant a release build of a user's program still carried
+    // distinction is the whole reason the type exists: gating the null-narrowing check on
+    // the host compiler's NDEBUG would mean a release build of a user's program still carried
     // every check as long as echoc had been built with assertions on
     enum class BuildMode
     {

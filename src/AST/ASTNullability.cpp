@@ -122,6 +122,11 @@ bool AST::arrival_wraps_optional(const AST::ValueType &from, const AST::ValueTyp
     return to.is_wrapped_optional() && !from.is_nullable();
 }
 
+AST::ValueType AST::arrival_destination_of(const AST::ValueType &from, const AST::ValueType &to)
+{
+    return arrival_wraps_optional(from, to) ? to.optional_payload() : to;
+}
+
 AST::ValueType AST::echo_printed_type_of(const AST::ValueType &type)
 {
     if (type.is_wrapped_optional() && type.optional_payload().is_primitive()) {

@@ -23,7 +23,7 @@ namespace Parser
     //
     // shared by every declaration that can carry one - a function, a method, a constructor, a
     // destructor, a struct - because a declaration that does *not* drain leaves its attributes on the
-    // stack for whatever comes along next, which is how a method's `#[implicit]` used to land on the
+    // stack for whatever comes along next, which is how a method's `#[implicit]` would land on the
     // following `struct`. taken as an AttributeList rather than a FunctionDeclNode for exactly that
     // reason: the struct site is the other half of that bug and drains through here too. called once
     // the declaration node is in hand, which is also the earliest point at which an attribute has
@@ -172,8 +172,7 @@ namespace Parser
     // `decl` and declaring it in `into`. the cursor must already be past the opening one
     //
     // shared with the struct parser's `constructor(...)`, which is an ordinary declaration in every
-    // respect the signature is concerned with - the two used to carry a copy each, and the copies had
-    // already drifted in how they recovered
+    // respect the signature is concerned with. a copy in each parser would drift in how they recover
     //
     // `closing` is what encloses the list, and the only caller that does not want a parenthesis is an
     // index operator's `[usize $i]` - a parameter list in every other respect, so it is this function

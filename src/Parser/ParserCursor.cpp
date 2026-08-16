@@ -77,7 +77,7 @@ void Parser::Cursor::try_skip_to_next_statement(std::initializer_list<Token::Typ
     // open, and the parser that opened it is waiting for exactly that token - so eating it here ends
     // somebody else's block and every statement after it is read one level too deep
     //
-    // it used to skip whatever it landed on, and two recoveries over one failure is all it took: a
+    // skipping whatever it landed on takes two recoveries over one failure: a
     // failed call argument recovers past the `;`, the `return` around it then finds no `;` and
     // recovers again, and the second skip takes the function's closing brace. the *body* pass walks
     // a block token by token and is unaffected, so the two passes then disagree about which scope a

@@ -13,8 +13,8 @@ namespace Compiler::LLVM
 {
     // where two definitions of one symbol stopped agreeing. `what` names the thing that diverged and
     // the position it diverged at - "block 3, instruction 5: operand" - because the two rendered
-    // bodies a human is handed alongside it are long, and a diff of them is what this used to make
-    // somebody do by eye
+    // bodies a human is handed alongside it are long, and a diff of them is what somebody
+    // would otherwise have to do by eye
     struct OdrDifference
     {
         std::string what;

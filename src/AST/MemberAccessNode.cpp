@@ -54,7 +54,7 @@ AST::ValueType AST::MemberAccessNode::result_type() const
     // whose result_type() says const.
     //
     // asked of AST::member_type_through, and asked *here* because base_target_type() above is the
-    // single owner of "what does this base address" (B16). the type checker used to keep a second
-    // copy of that question and this is exactly the rule that would have gone into both
+    // single owner of "what does this base address" (B16). a second copy in the type checker
+    // would be this exact rule written twice
     return member_type_through(base_type, prop->type);
 }

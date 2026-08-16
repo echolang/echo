@@ -34,11 +34,10 @@ namespace AST
     // **why may this type not appear on a declaration, given it may hide an `extern function<...>`?**
     // nullopt when every C function pointer it contains is legal.
     //
-    // the walk TypeChecker used to own, and the one that was not total: it descended through
-    // pointers, weaks, signatures and instantiation *arguments*, then stopped, so a property of
-    // `Handler<Point>` whose type was `extern function<Point(Point)>` never reached the refusal.
     // asked of the type as a whole, including layout properties and statics, with a seen-set so a
-    // recursive `S { S& $next }` does not loop
+    // recursive `S { S& $next }` does not loop. a walk that descended through pointers, weaks,
+    // signatures and instantiation *arguments* and then stopped would miss a property of
+    // `Handler<Point>` whose type was `extern function<Point(Point)>`
     std::optional<std::string> c_function_type_refusal(
         const ValueType &type,
         const CoreTypes &core

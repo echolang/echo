@@ -45,7 +45,7 @@ namespace AST
     // **does evaluating this expression never come back?** the expression half of the question above, and
     // the reason it is worth naming separately is that a value can be written where a statement was
     // expected and both readings have to agree: `die('...')` is the same call whether it stands alone or
-    // sits in a `match` arm, and only one of the two used to notice.
+    // sits in a `match` arm, and both readings have to notice.
     //
     // AST::builtin_never_returns is what actually decides, through AST::BuiltinKind rather than by name,
     // so nothing here can drift from what stops the program. this is the walk down to the call: an

@@ -1,0 +1,26 @@
+# the output says the *new* value arrived; the allocation counts say the *old* one left. neither
+# alone is the assertion - a store with no drop prints exactly the same lines and leaks one buffer
+# per write, which in the loop above is four
+flags: --track-allocations
+
+--- OUT --->
+https://example.com
+https://echoc.dev
+2
+0
+https://example.com/3
+https://through-a-pointer/
+second!
+balanced
+--- RAST --->
+# **the drop hangs off the assignment rather than sitting ahead of it**, which is the one window in
+# which both the old value and the new one exist: gen_assign runs it after the right-hand side and
+# before the store. and it reaches the *field*, not the whole struct
+CHECK: function base -> type<void>
+CHECK: destroys old:
+CHECK: call $deinit(addrof<string&>(ma<string>(varref<Client&>(var($this))->baseUrl)))
+
+# an owning container is the same statement with a different type - one call, not a per-element walk
+CHECK: function reset -> type<void>
+CHECK: destroys old:
+CHECK: call $deinit(addrof<array<int32>&>(ma<array<int32>>(varref<Client&>(var($this))->codes)))

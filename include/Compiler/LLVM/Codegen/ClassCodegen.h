@@ -223,9 +223,9 @@ namespace Compiler::LLVM
         // the shared header, and `TypeLowering::class_header_llvm_type()` is a prefix of every box by
         // construction - the payload is wrapped, never prefixed
         //
-        // it exists because the strong count stopped being at offset 0 the moment __weak joined it. that
-        // used to let an environment treat the handle *as* the count's address, and the two callers that
-        // did so would have silently decremented the wrong word
+        // it exists because the strong count is not at offset 0 once __weak joins it.
+        // letting an environment treat the handle *as* the count's address would silently
+        // decrement the wrong word
         llvm::Value *gen_header_ptr(
             llvm::Value *handle,
             llvm::Type *box_type,

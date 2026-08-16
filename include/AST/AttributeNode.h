@@ -21,10 +21,8 @@ namespace AST
 
         // what was written after the colon, or nothing for a flag like `#[inline]`.
         //
-        // **a value, not an expression.** This used to be a NodeReferenceList holding whatever
-        // Parser::parse_expr_ref made of the tokens, which put a live LiteralStringExprNode into the
-        // module's arena for every `#[core: ...]` in the program and left every consumer to test node
-        // types by hand. See AST::AttributeValue for why an expression is the wrong tool here
+        // **a value, not an expression.** see AST::AttributeValue for why an expression is the
+        // wrong tool here
         std::optional<AttributeValue> value;
 
         // the attribute this one was written inside - `#[target: test] { #[sources: "..."] }` - or null

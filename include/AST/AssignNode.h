@@ -15,9 +15,7 @@ namespace AST
     //
     // one node for every left hand side shape. `$x = e`, `$s->f = e` and every place expression
     // added later resolve through the same lvalue path in codegen, so a new spelling on the left
-    // costs nothing here. the previous design had one node per shape (VarMutNode, MemberMutNode),
-    // each with its own codegen and its own copy of the numeric coercion cascade, and every new
-    // left hand side form would have added a third and a fourth
+    // costs nothing here
     //
     // still a statement, not an expression: `$a = $b = 1` remains unrepresentable, which is what
     // the scope parser expects
@@ -50,10 +48,10 @@ namespace AST
         // parameter was given to it to be built into the struct, there is nowhere to put a `mv`, and
         // the constructor is the only thing that ever writes that field
         //
-        // deliberately separate from is_initialization above, which it used to be folded into. a
-        // *hand-written* constructor writes fresh storage too, but its transfers are visible and must
-        // stay so - it says `$this->data = mv $data`. folding the two would make
-        // `$this->inner = $other->inner` silently move, and move out of a *borrowed* source at that
+        // deliberately separate from is_initialization above. a *hand-written* constructor writes
+        // fresh storage too, but its transfers are visible and must stay so - it says
+        // `$this->data = mv $data`. folding the two would make `$this->inner = $other->inner`
+        // silently move, and move out of a *borrowed* source at that
         bool hands_over_value = false;
 
         // --- the old value's teardown ------------------------------------------------------------
@@ -69,8 +67,9 @@ namespace AST
         //  - a **struct** is destroyed in place by an ordinary teardown call in the tree - the same
         //    node emit_drop appends at a scope end, so -ar shows it, the type checker validates it
         //    and a generic teardown instantiates from this call site like any other. it runs
-        //    before the store that overwrites those bytes. only ever set for a whole variable:
-        //    writing an owning struct into a field is the unspecified partial-ownership case
+        //    before the store that overwrites those bytes. set for a whole local, a member_path_of
+        //    field, and a static property; never for an indexed place, whose target would be
+        //    addressed twice
         //  - a **class** owes one reference less, and that cannot be a node. the release needs the old
         //    handle out of the slot codegen already addressed, and a class target may be `$node->next`
         //    or an element whose index expression must not be evaluated twice. so the handle is read

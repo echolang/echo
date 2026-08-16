@@ -26,11 +26,10 @@ namespace AST
     // this pass wraps every pointer read in a value position with a DerefExprNode, so after it
     // runs `result_type()` means what it says and nobody has to compensate
     //
-    // it is a *rewriter*: it replaces the parent's edge to a child rather than only reading it. that
-    // used to mean driving its own traversal, and the traversal was a switch over NodeType ending in a
-    // `default:` that treated an unknown tag as a leaf - so a `guard`, a `??`, a `?->` and a `strong`
-    // had their whole subtrees silently skipped. AST::RecursiveVisitor owns the descent now, and
-    // rewrite_value_edge / rewrite_place_edge are the two seams that make a walker a rewriter
+    // it is a *rewriter*: it replaces the parent's edge to a child rather than only reading it.
+    // AST::RecursiveVisitor owns the descent, and rewrite_value_edge / rewrite_place_edge are the
+    // two seams that make a walker a rewriter. a switch over NodeType ending in a `default:` that
+    // treats an unknown tag as a leaf would silently skip a `guard`, a `??`, a `?->` or a `strong`
     //
     // **what stayed here is the destination type**, and only that: the six positions below where a
     // value is read *toward* something. the destination comes from a sibling field, a cross-reference

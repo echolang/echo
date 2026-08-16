@@ -111,10 +111,10 @@ namespace AST
         // AST::UnwrapPlan, through AST::make_resolved_member_call - which owns the receiver rule and the
         // settlement, shared with AST::ForeachLowering's `iterate()`.
         //
-        // **not a name**: this pass used to mint `"has_value"`, `"unwrap"` and
-        // `"failure"` as unresolved by-name calls and let AST::CallResolver choose all over again -
-        // a second answer to which declaration the conformance had accepted, over a requirement whose
-        // *spelling* in stdlib/core/contract.eco was therefore load-bearing in a compiler pass.
+        // **not a name**: minting `"has_value"`, `"unwrap"` and `"failure"` as unresolved by-name
+        // calls would let AST::CallResolver choose all over again - a second answer to which
+        // declaration the conformance had accepted, over a requirement whose *spelling* in
+        // stdlib/core/contract.eco would then be load-bearing in a compiler pass.
         //
         // a **fresh** receiver subtree per call: AST::PointerAdjuster rewrites edges in place, so a
         // shared one would collect a deref per use

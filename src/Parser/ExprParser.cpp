@@ -42,10 +42,10 @@ bool Parser::starts_const_expr(const Parser::Cursor &cursor)
 
 // **report what AST::type_literal_at decided**, and hand back whatever the literal became.
 //
-// the rule itself is AST::ASTLiteralTyping's now - it used to be `autocast_literal_int` and
-// `autocast_literal_float` right here, which is why the five positions that are not this parser each
-// grew their own answer or none at all. what stays behind is the half that has a CodeRef, the same
-// split AST::ArrayLiteralLookup and AST::interface_erasure_refusal both make
+// the rule itself is AST::ASTLiteralTyping's. a helper living here would leave the five
+// positions that are not this parser to grow their own answer or none at all. what stays
+// behind is the half that has a CodeRef, the same split AST::ArrayLiteralLookup and
+// AST::interface_erasure_refusal both make
 //
 // this is the rule. apply_literal_typing_if_wanted is the operand-hint gate
 // (AST::can_type_a_literal); parse_expr_ref calls this directly so a bool destination
@@ -413,9 +413,9 @@ const AST::NodeReference parse_binary_expr(Parser::Payload &payload, AST::Operat
     }
 
     // **the numeric reconciliation, and it is AST::reconcile_binary_operands' whole answer** - the same
-    // one AST::OperatorRewriter asks for the operands only a later pass gives a type to. it used to be
-    // written out here and again there, and neither copy had any notion of which side *knows* what it
-    // is, so a literal's default cast the variable beside it down to meet it
+    // one AST::OperatorRewriter asks for the operands only a later pass gives a type to. a second
+    // copy here would have no notion of which side *knows* what it is, so a literal's default
+    // would cast the variable beside it down to meet it
     const AST::Operator *reconcile_op = op_node != nullptr ? op_node->op : nullptr;
 
     const AST::BinaryReconciliation reconciled = AST::reconcile_binary_operands(
@@ -1599,9 +1599,9 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         auto &node = payload.context.emplace_node<AST::NullNode>(cursor.current());
 
         // **any destination that admits absence**, which is one question rather than a list of kinds:
-        // a `ptr<T>`, a `weak<T>`, and any `T?` whatever T is. it used to be `is_pointer() || is_class()`,
-        // from when a class was implicitly nullable and nothing else could be - so `int32? $x = null;`
-        // bound nothing and reached codegen as an untyped null
+        // a `ptr<T>`, a `weak<T>`, and any `T?` whatever T is. `is_pointer() || is_class()` would
+        // miss `int32? $x = null;` and leave it untyped at codegen, and would accept
+        // `Foo $x = null;` whether the author asked for absence or not
         //
         // a *class* is no longer on the list on its own, and that is the flip: `Foo $x = null;` leaves this
         // unbound and is reported against the destination, naming `Foo?`
@@ -1784,8 +1784,8 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
         if (is_creating_ptr) {
             // `&` applies to whatever the postfix chain produced, so `&$s->field` works and is
-            // not the assert it used to be - the old code took the address of a VarRefNode it
-            // had already replaced with a MemberAccessNode
+            // not an assert: taking the address of a VarRefNode that has already been replaced
+            // with a MemberAccessNode is the wrong node to ask about
             auto *target = current_ref.unsafe_ptr<AST::ExprNode>();
             if (!AST::is_place_expression(*target)) {
                 payload.collector.collect_issue<AST::Issue::AddressOfTemporary>(
@@ -1963,10 +1963,10 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
 
     // potential function call - `name(...)` or, with explicit type arguments, `name<...>(...)`
     //
-    // `name<` is only a call if a `(` follows the type argument list. It used to be unconditional, on the
-    // grounds that a bare identifier could not be a comparison operand - values carry a `$` - and a
-    // compile-time constant is exactly that, so `LIMIT < $n` would have been read as a call to `LIMIT<$n>`.
-    // parse_funccall speculates for us and hands the tokens back untouched when it declines
+    // `name<` is only a call if a `(` follows the type argument list. a bare identifier can be a
+    // comparison operand - a compile-time constant is one - so `LIMIT < $n` would otherwise be
+    // read as a call to `LIMIT<$n>`. parse_funccall speculates for us and hands the tokens back
+    // untouched when it declines
     if (
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren }) ||
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
@@ -2265,8 +2265,8 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         }
 
         // **two operands with nothing joining them**, `echo 1 2`. caught here, where the cursor still
-        // says where the second one starts - it used to fall through to a `node_stack.size() == 1`
-        // assert at the bottom of this function, which takes the compiler down instead of reporting
+        // says where the second one starts. falling through to a `node_stack.size() == 1`
+        // assert at the bottom of this function would take the compiler down instead of reporting
         //
         // the array literal production widened the ways to arrive here, because a `[` that no postfix
         // chain claimed now parses as one operand rather than being an unexpected token - `5[0]` and
@@ -2304,7 +2304,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
     if (expr_parts.size() == 1) {
         // **an operator with nothing to apply**, which the loop above reaches whenever it stops on a
         // token `is_expr_token` declines: `if (` claims the paren as an operator part and the loop
-        // then breaks, leaving it alone. it used to be an assert, so the compiler aborted naming this
+        // then breaks, leaving it alone. an assert here would abort the compiler naming this
         // function - which is how a missing production reads to whoever hit it, `!` having been one
         if (expr_parts[0].opnode != nullptr) {
             payload.collector.collect_issue<AST::Issue::GenericError>(
@@ -2325,7 +2325,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
     for (auto &part : postfix_expr) {
         if (part.opnode != nullptr) {
             // a binary operator needs two operands. writing one where a value belongs -
-            // `&($a + $b)`, or a stray leading `*` - used to pop an empty stack and take the
+            // `&($a + $b)`, or a stray leading `*` - would pop an empty stack and take the
             // compiler down with it, so report it as the syntax error it is
             if (node_stack.size() < 2) {
                 payload.collector.collect_issue<AST::Issue::UnexpectedToken>(

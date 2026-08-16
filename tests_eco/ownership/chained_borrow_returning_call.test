@@ -1,0 +1,14 @@
+# `--track-allocations` is what makes `mem::live_allocations()` answer at all - without it the call is
+# refused rather than answered 0, which is the point of the flag being a property of the emitted
+# program rather than of the build mode
+flags: --track-allocations
+
+--- OUT --->
+a: 1
+b: 2
+c: 3
+c: 3
+d: 4
+https://example.com/
+|a: 1|b: 2|c: 3|c: 3|d: 4|
+balanced

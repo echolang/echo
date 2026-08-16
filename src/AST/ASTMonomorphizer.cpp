@@ -198,9 +198,9 @@ namespace AST
     // step A: a call naming a template becomes a call naming a concrete instance
     //
     // only the declaration is rewired here. fitting the arguments to it is step C's, through the one
-    // implementation the parser also uses - this used to keep a second copy of that loop, and the two
-    // disagreed about exactly the case B23 is: the parser's ran for a concrete callee whose arguments
-    // were not typed yet, this one only ever ran after substitution
+    // implementation the parser also uses. a second copy of that loop would disagree about the
+    // case B23 is: the parser runs for a concrete callee whose arguments are not typed yet, this
+    // one only ever runs after substitution
     bool Monomorphizer::instantiate_generic_calls(size_t round)
     {
         bool progressed = false;
@@ -473,8 +473,8 @@ namespace AST
 
         for (auto &[call, mod] : ordered) {
             // t_failed among the terminal states is what keeps this sweep from reporting a second
-            // time on a call some round already reported - it used to rely on the collector
-            // de-duplicating the identical message
+            // time on a call some round already reported. relying on the collector to
+            // de-duplicate the identical message is not enough
             if (call_is_terminal(call->settlement)) {
                 continue;
             }

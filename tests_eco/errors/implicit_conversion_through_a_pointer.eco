@@ -1,0 +1,35 @@
+// **an `#[implicit]` conversion does not fire through a `ptr<T>`.** the peel is
+// t_read_through's predicate, including the non-nullable conjunct. without it
+// CallResolver would wrap a conversion whose receiver is `$p` and PointerAdjuster
+// would deref it with no null check. the argument is still read as a value, so
+// the diagnostic names `Feet` - the same shape the const-borrow case names
+// `const Feet`. the conversion is a `const function` so the only gate is the peel
+struct Meters
+{
+    float64 $value;
+}
+
+struct Feet
+{
+    float64 $value;
+
+    #[implicit]
+    const function to_meters() : Meters
+    {
+        return Meters($this->value * 0.3048);
+    }
+}
+
+function show(Meters $m) : void
+{
+    echo $m->value;
+}
+
+function viaPtr(ptr<Feet> $p) : void
+{
+    show($p);
+}
+
+Feet $f = Feet(10.0);
+
+viaPtr(&$f);

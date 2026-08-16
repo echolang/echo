@@ -30,8 +30,8 @@ const std::string AST::TypeDeclNode::namespaced_type_name() const
 const std::string AST::TypeDeclNode::node_description()
 {
     // the keyword the declaration was written with, so --print-ast says which of the four kinds this
-    // is. an interface used to print as `struct`, which made the one dump that could have shown the
-    // difference say there was none - AST::type_kind_keyword is why a fourth kind could not repeat it
+    // is. printing an interface as `struct` would make the one dump that could show the
+    // difference say there was none - AST::type_kind_keyword is why a fourth kind cannot repeat it
     std::string result =
         std::string(AST::type_kind_keyword(complex_type().kind)) + " " + namespaced_type_name() + "\n{\n";
 

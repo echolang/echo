@@ -21,10 +21,9 @@ namespace AST
     // which of the five species a declaration is. spelled out rather than inferred because each is
     // a different shape: a method's `$this` is a borrow parameter, a constructor's is a body-local
     // of value type and its name is the struct's, a destructor takes nothing and returns nothing,
-    // an operator's name is a decorated spelling of a symbol nobody can write. it used to be
-    // readable off the tokens alone (a constructor is the only thing whose name token differs from
-    // its declaration token), which stopped being true the moment a second keyword-declared member
-    // existed
+    // an operator's name is a decorated spelling of a symbol nobody can write. it is not
+    // readable off the tokens alone: a constructor is not the only thing whose name token
+    // differs from its declaration token
     enum class MemberKind
     {
         t_free,

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <AST/ASTArgumentFit.h>
 #include <AST/ASTNodeReference.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/ExprNode.h>
@@ -612,4 +613,43 @@ TEST_CASE("infer_declaration_type collapses a pointer to no information", "[AST]
     REQUIRE(infer_declaration_type(
         ValueType::make_pointer(ValueType(ValueTypePrimitive::t_int32), false),
         false).is_pointer());
+}
+
+TEST_CASE("an implicit conversion peels a borrow and leaves a ptr", "[AST][pointer]")
+{
+    // implicit_conversion_peels_borrow is t_read_through's predicate, including the non-nullable
+    // conjunct. a `ptr<T>` place still answers read_reaches_storage, so without that line a
+    // conversion would be found on the pointee and PointerAdjuster would deref `$p` with no
+    // null check
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function f(int32& $b, ptr<int32> $p) : void {\n"
+        "    echo $b;\n"
+        "    echo $p;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &module = bundle->modules.find_module("test");
+
+    bool saw_ptr = false;
+    bool saw_borrow = false;
+
+    for (auto *ref : module.nodes.of_type<VarRefNode>()) {
+        const ValueType type = ref->result_type();
+
+        if (!type.is_pointer()) {
+            continue;
+        }
+
+        if (type.is_nullable()) {
+            REQUIRE_FALSE(implicit_conversion_peels_borrow(type, ref));
+            saw_ptr = true;
+        } else {
+            REQUIRE(implicit_conversion_peels_borrow(type, ref));
+            saw_borrow = true;
+        }
+    }
+
+    REQUIRE(saw_ptr);
+    REQUIRE(saw_borrow);
 }

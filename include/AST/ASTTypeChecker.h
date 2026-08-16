@@ -199,9 +199,8 @@ namespace AST
         };
 
         // the single "does this value fit this destination" rule, shared by a declaration's
-        // initializer, an assignment target and a return. it used to be written out at each of the
-        // three, and had already drifted: the return copy gated on "a pointer is involved" and so
-        // never checked a struct return at all
+        // initializer, an assignment target and a return. a copy gated on "a pointer is involved"
+        // would never check a struct return at all
         void check_destination_fits(Destination dest, const ValueType &to, const ExprNode &value, const TokenReference &at);
 
         // the single "does this argument reach this parameter" rule, shared by a direct call - which

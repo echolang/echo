@@ -42,7 +42,7 @@ namespace AST
         ValueType payload_type;
 
         // **the two callees, named through the conformance rather than by their spelling** - the rule
-        // IterationPlan::iterate states and this plan used to break. null on the t_builtin_nullable arm,
+        // IterationPlan::iterate states. null on the t_builtin_nullable arm,
         // where the compiler answers the presence question itself and there is nothing to call.
         //
         // this matters three ways, and only the first is tidiness. `stdlib/core/contract.eco` could

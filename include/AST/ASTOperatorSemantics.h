@@ -156,8 +156,8 @@ namespace AST
     // **why these two operands cannot answer this operator - said about the operands, not about a
     // candidate's parameters.** nullopt when there is nothing operand-level to say.
     //
-    // One owner, because there are three moments that refuse an operator and each used to phrase it
-    // its own way. `TypeChecker::visitBinaryExpr` holds the built-in path. `AST::CallResolver` holds an
+    // One owner, because there are three moments that refuse an operator. `TypeChecker::visitBinaryExpr`
+    // holds the built-in path. `AST::CallResolver` holds an
     // operator *call* nothing matched. The type checker's argument coercion holds the case where the
     // matcher took a lone candidate without consulting types.
     //
@@ -245,9 +245,9 @@ namespace AST
     //
     // two readers, and the split is the point. AST::const_fold refuses `const(1 << 32)` because it was
     // asked to produce a value; TypeChecker::visitBinaryExpr refuses the plain `1 << 32` beside it,
-    // which used to compile to poison in silence. Refusing in one place only is the shape this file
-    // warns about everywhere else - a `const if` and the `if` beside it disagreeing - and here it was
-    // worse than a disagreement, because the runtime half had no diagnostic at all
+    // which would otherwise compile to poison in silence. refusing in one place only is the shape
+    // this file warns about everywhere else - a `const if` and the `if` beside it disagreeing -
+    // and here the runtime half would have no diagnostic at all
     std::optional<std::string> shift_count_refusal(const ValueType &shifted, uint64_t count);
 };
 

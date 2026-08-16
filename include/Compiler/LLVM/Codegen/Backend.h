@@ -36,10 +36,10 @@ namespace Compiler::LLVM
         // llvm::Module can be created with a layout already attached. must run before
         // create_cmp_units
         //
-        // the layout used to be set only at emission, i.e. after all IR had been built and never
-        // at all on the JIT path - so anything asking "how big is this type" during codegen got
-        // LLVM's default layout (which aligns i64 to 4, unlike any real 64-bit target) and the
-        // optimizer ran over layout-less modules
+        // the layout cannot wait until emission, after all IR has been built, and cannot be
+        // skipped on the JIT path - anything asking "how big is this type" during codegen would
+        // get LLVM's default layout (which aligns i64 to 4, unlike any real 64-bit target) and
+        // the optimizer would run over layout-less modules
         void init_target();
 
         // which CPU everything downstream compiles for, resolved off the options rather than held: the
@@ -118,10 +118,10 @@ namespace Compiler::LLVM
         // a compile prints is the driver's question, and the driver is the only place that sees the flag
         const std::string &prune_report() const { return _prune_report; }
 
-        // **one unit to one object file, and one link, and that is the whole of emission.** A third
-        // entry point used to sit beside these two that was exactly the pair of them over the one unit
-        // a merge leaves behind, so the driver branched between two spellings of one path and the one
-        // exercised least was the one a change would miss.
+        // **one unit to one object file, and one link, and that is the whole of emission.** a
+        // third entry point sitting beside these two would be exactly the pair of them over the
+        // one unit a merge leaves behind, so the driver would branch between two spellings of one
+        // path and the one exercised least would be the one a change would miss.
         //
         // both report by return value rather than only by printing, because a caller that cannot tell
         // exits 0 having produced no binary - a build that looks successful to a shell, a Makefile and

@@ -864,7 +864,7 @@ void Parser::declare_type_parameters(
 //
 // both t_ref and t_and are accepted. the lexer only emits t_ref when the `&` is immediately
 // followed by a name character (src/Lexer.cpp, LexerFunction::ReferenceFrom), so `int32 & $x`
-// arrives as t_and and used to lose its reference silently. in type position a following `&`
+// arrives as t_and and would lose its reference silently. in type position a following `&`
 // can never be a binary operator, so accepting both is unambiguous and needs no lexer change -
 // which matters, because the binary/reference distinction elsewhere depends on that rule
 // `T?` - the nullable suffix, read before the borrow suffix so it binds to the type it is written on:

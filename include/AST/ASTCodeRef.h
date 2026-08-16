@@ -13,11 +13,8 @@ namespace AST
     // where a diagnostic points: a module and the tokens it is about. the file is the first
     // token's, not a third stored field.
     //
-    // **it does not render itself.** It used to - `get_referenced_code_excerpt()` drew the source frame
-    // here, inline in this header, with a caret indented by a hardcoded five spaces against a gutter whose
-    // width grew with the line number, so every two-digit line was off by one. Drawing is
-    // AST::DiagnosticRenderer's question now, and turning a token slice into a character range is
-    // AST::span_of's; what is left here is the reference itself
+    // **it does not render itself.** drawing is AST::DiagnosticRenderer's question, and turning a
+    // token slice into a character range is AST::span_of's; what is left here is the reference itself
     struct CodeRef
     {
         const Module *module;

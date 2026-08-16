@@ -88,15 +88,24 @@ private function ensure_tables() : void
     case_tables::$ready = true;
 }
 
+/**
+ * The row whose key is `$cp`, or the row count when there is none.
+ *
+ * Keys sit at `$at * $stride`, which is the whole of what the two mapping tables differ in: a simple
+ * mapping is one column, a SpecialCasing row is five. Written once because the bound arithmetic is
+ * the half that goes wrong silently - a search that is off by one answers a neighbouring codepoint's
+ * mapping rather than failing.
+ */
 #[inline]
-private function find_simple(const array<uint32>& $from, const array<uint32>& $to, uint32 $cp) : uint32
+private function find_row(const array<uint32>& $keys, usize $stride, uint32 $cp) : usize
 {
+    usize $count = $keys->count() / $stride;
     usize $lo = 0;
-    usize $hi = $from->count();
+    usize $hi = $count;
 
     while ($lo < $hi) {
         usize $mid = $lo + ($hi - $lo) / 2;
-        uint32 $key = $from[$mid];
+        uint32 $key = $keys[$mid * $stride];
 
         if ($cp < $key) {
             $hi = $mid;
@@ -105,8 +114,20 @@ private function find_simple(const array<uint32>& $from, const array<uint32>& $t
             $lo = $mid + 1;
         }
         else {
-            return $to[$mid];
+            return $mid;
         }
+    }
+
+    return $count;
+}
+
+#[inline]
+private function find_simple(const array<uint32>& $from, const array<uint32>& $to, uint32 $cp) : uint32
+{
+    usize $at = find_row($from, 1, $cp);
+
+    if ($at < $from->count()) {
+        return $to[$at];
     }
 
     return $cp;
@@ -116,26 +137,14 @@ private function find_simple(const array<uint32>& $from, const array<uint32>& $t
 private function find_special(const array<uint32>& $rows, uint32 $cp) : mapped
 {
     usize $count = $rows->count() / 5;
-    usize $lo = 0;
-    usize $hi = $count;
+    usize $at = find_row($rows, 5, $cp);
 
-    while ($lo < $hi) {
-        usize $mid = $lo + ($hi - $lo) / 2;
-        usize $at = $mid * 5;
-        uint32 $key = $rows[$at];
+    if ($at < $count) {
+        usize $base = $at * 5;
+        uint32 $n = $rows[$base + 1];
+        usize $count_out = $n;
 
-        if ($cp < $key) {
-            $hi = $mid;
-        }
-        else if ($cp > $key) {
-            $lo = $mid + 1;
-        }
-        else {
-            uint32 $n = $rows[$at + 1];
-            usize $count_out = $n;
-
-            return mapped($rows[$at + 2], $rows[$at + 3], $rows[$at + 4], $count_out);
-        }
+        return mapped($rows[$base + 2], $rows[$base + 3], $rows[$base + 4], $count_out);
     }
 
     return mapped(0, 0, 0, 0);
@@ -184,8 +193,6 @@ private function is_cased(uint32 $cp) : bool
         return false;
     }
 
-    ensure_tables();
-
     return in_ranges(case_tables::$cased_lo, case_tables::$cased_hi, $cp);
 }
 
@@ -194,8 +201,6 @@ private function is_case_ignorable(uint32 $cp) : bool
     if ($cp < 128) {
         return false;
     }
-
-    ensure_tables();
 
     return in_ranges(case_tables::$ign_lo, case_tables::$ign_hi, $cp);
 }
@@ -249,6 +254,31 @@ private function ascii_lower_cp(uint32 $cp) : uint32
 }
 
 /**
+ * A SpecialCasing probe then a simple one, which is the whole of a case mapping once the tables are
+ * seated. Three callers over three table triples; titlecase adds the one arm the others do not.
+ *
+ * The tables are *not* seated here. Everything below reaches a table only underneath `apply_unicode`
+ * or `apply_first`, and both call `ensure_tables()` once before they walk - so the seating is paid
+ * per string rather than per scalar. A new root owes that call.
+ */
+#[inline]
+private function map_through(
+    const array<uint32>& $spec,
+    const array<uint32>& $from,
+    const array<uint32>& $to,
+    uint32 $cp
+) : mapped
+{
+    mapped $special = find_special($spec, $cp);
+
+    if ($special->n > 0) {
+        return $special;
+    }
+
+    return mapped(find_simple($from, $to, $cp), 0, 0, 1);
+}
+
+/**
  * Full uppercase of one scalar. ASCII is answered here so mixed text does not search the table
  * for `A-Z`.
  */
@@ -258,15 +288,7 @@ private function map_upper(uint32 $cp) : mapped
         return mapped(ascii_upper_cp($cp), 0, 0, 1);
     }
 
-    ensure_tables();
-
-    mapped $special = find_special(case_tables::$up_spec, $cp);
-
-    if ($special->n > 0) {
-        return $special;
-    }
-
-    return mapped(find_simple(case_tables::$up_from, case_tables::$up_to, $cp), 0, 0, 1);
+    return map_through(case_tables::$up_spec, case_tables::$up_from, case_tables::$up_to, $cp);
 }
 
 /**
@@ -278,15 +300,7 @@ private function map_lower(uint32 $cp) : mapped
         return mapped(ascii_lower_cp($cp), 0, 0, 1);
     }
 
-    ensure_tables();
-
-    mapped $special = find_special(case_tables::$lo_spec, $cp);
-
-    if ($special->n > 0) {
-        return $special;
-    }
-
-    return mapped(find_simple(case_tables::$lo_from, case_tables::$lo_to, $cp), 0, 0, 1);
+    return map_through(case_tables::$lo_spec, case_tables::$lo_from, case_tables::$lo_to, $cp);
 }
 
 /**
@@ -298,18 +312,12 @@ private function map_title(uint32 $cp) : mapped
         return mapped(ascii_upper_cp($cp), 0, 0, 1);
     }
 
-    ensure_tables();
+    mapped $got = map_through(case_tables::$ti_spec, case_tables::$ti_from, case_tables::$ti_to, $cp);
 
-    mapped $special = find_special(case_tables::$ti_spec, $cp);
-
-    if ($special->n > 0) {
-        return $special;
-    }
-
-    uint32 $one = find_simple(case_tables::$ti_from, case_tables::$ti_to, $cp);
-
-    if ($one != $cp) {
-        return mapped($one, 0, 0, 1);
+    // the titlecase tables hold only what differs from uppercase, so a miss - which find_simple
+    // answers as the codepoint itself - is the uppercase mapping rather than "no mapping"
+    if (!mapped_equals($got, $cp)) {
+        return $got;
     }
 
     return map_upper($cp);
@@ -403,6 +411,36 @@ private function map_lower_at(const string& $text, uint32 $cp, usize $at, usize 
     return map_lower($cp);
 }
 
+/**
+ * The ASCII byte rule in the direction the walk is going.
+ */
+#[inline]
+private function ascii_case_byte(uint8 $b, bool $to_upper) : uint8
+{
+    if ($to_upper) {
+        return ascii_upper_byte($b);
+    }
+
+    return ascii_lower_byte($b);
+}
+
+/**
+ * The per-scalar mapping in the direction the walk is going.
+ *
+ * One function because two loops have to agree on it: `apply_unicode` scans to decide *whether* to
+ * allocate and then writes to decide *what* to emit, and a rule changed in one and not the other
+ * produces a short or truncated string with nothing anywhere to report it.
+ */
+#[inline]
+private function map_case_at(const string& $text, uint32 $cp, usize $at, usize $len, bool $to_upper) : mapped
+{
+    if ($to_upper) {
+        return map_upper($cp);
+    }
+
+    return map_lower_at($text, $cp, $at, $len);
+}
+
 #[inline]
 private function mapped_equals(const mapped& $got, uint32 $cp) : bool
 {
@@ -487,19 +525,8 @@ private function apply_ascii(const string& $text, bool $to_upper) : string
             return apply_unicode($text, $to_upper);
         }
 
-        if ($to_upper) {
-            if ($b >= 97) {
-                if ($b <= 122) {
-                    $change = true;
-                }
-            }
-        }
-        else {
-            if ($b >= 65) {
-                if ($b <= 90) {
-                    $change = true;
-                }
-            }
+        if (ascii_case_byte($b, $to_upper) != $b) {
+            $change = true;
         }
 
         $i = $i + 1;
@@ -516,15 +543,7 @@ private function apply_ascii(const string& $text, bool $to_upper) : string
     $i = 0;
 
     while ($i < $n) {
-        uint8 $b = $src:$[$i];
-
-        if ($to_upper) {
-            $dst:$[$i] = ascii_upper_byte($b);
-        }
-        else {
-            $dst:$[$i] = ascii_lower_byte($b);
-        }
-
+        $dst:$[$i] = ascii_case_byte($src:$[$i], $to_upper);
         $i = $i + 1;
     }
 
@@ -541,6 +560,9 @@ private function apply_ascii(const string& $text, bool $to_upper) : string
  */
 private function apply_unicode(const string& $text, bool $to_upper) : string
 {
+    // once for the whole walk, rather than once per scalar behind every table probe
+    ensure_tables();
+
     usize $n = $text->size();
     ptr<const uint8> $src = $text->data();
     usize $i = 0;
@@ -549,16 +571,7 @@ private function apply_unicode(const string& $text, bool $to_upper) : string
         uint8 $lead = $src:$[$i];
 
         if ($lead < 128) {
-            uint8 $mapped = $lead;
-
-            if ($to_upper) {
-                $mapped = ascii_upper_byte($lead);
-            }
-            else {
-                $mapped = ascii_lower_byte($lead);
-            }
-
-            if ($mapped != $lead) {
+            if (ascii_case_byte($lead, $to_upper) != $lead) {
                 break;
             }
 
@@ -571,14 +584,7 @@ private function apply_unicode(const string& $text, bool $to_upper) : string
                 $i = $i + $step->len;
             }
             else {
-                mapped $got = mapped(0, 0, 0, 0);
-
-                if ($to_upper) {
-                    $got = map_upper($step->cp);
-                }
-                else {
-                    $got = map_lower_at($text, $step->cp, $i, $step->len);
-                }
+                mapped $got = map_case_at($text, $step->cp, $i, $step->len, $to_upper);
 
                 if (!mapped_equals($got, $step->cp)) {
                     break;
@@ -613,14 +619,7 @@ private function apply_unicode(const string& $text, bool $to_upper) : string
         uint8 $lead = $src:$[$i];
 
         if ($lead < 128) {
-            uint8 $mapped = $lead;
-
-            if ($to_upper) {
-                $mapped = ascii_upper_byte($lead);
-            }
-            else {
-                $mapped = ascii_lower_byte($lead);
-            }
+            uint8 $mapped = ascii_case_byte($lead, $to_upper);
 
             if ($left < 1) {
                 $dst:$ = grow_spare($out, $used, 1);
@@ -653,15 +652,7 @@ private function apply_unicode(const string& $text, bool $to_upper) : string
                 }
             }
             else {
-                mapped $got = mapped(0, 0, 0, 0);
-
-                if ($to_upper) {
-                    $got = map_upper($step->cp);
-                }
-                else {
-                    $got = map_lower_at($text, $step->cp, $i, $step->len);
-                }
-
+                mapped $got = map_case_at($text, $step->cp, $i, $step->len, $to_upper);
                 usize $need = mapped_bytes($got);
 
                 if ($left < $need) {
@@ -695,6 +686,15 @@ private function apply_first(const string& $text, bool $to_title) : string
         return $text->sub(0, $text->size());
     }
 
+    // the other root that reaches a table, and the second half of the invariant map_through states -
+    // behind the ASCII test, because unlike apply_unicode this one is entered for every string. both
+    // mappings answer an ASCII scalar from the range arms without probing, so seating there would
+    // charge `ucfirst('Hello')` the whole table
+    if ($step->cp >= 128) {
+        ensure_tables();
+    }
+
+    // not map_case_at: titlecase is a third direction, and only the first scalar takes it
     mapped $got = mapped(0, 0, 0, 0);
 
     if ($to_title) {

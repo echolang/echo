@@ -188,8 +188,9 @@ namespace AST
     //
     // one predicate because three passes have to agree about it - the parser, which settles the node
     // on the spot since there is nothing to look up; the type checker, which owns the "printf has a
-    // conversion for this argument" diagnostic; and codegen, which lowers it. they used to compare the
-    // *name* against a literal, once each, so a second construct of this kind meant finding all three
+    // conversion for this argument" diagnostic; and codegen, which lowers it. comparing the
+    // *name* against a literal, once each, would mean a second construct of this kind has three
+    // sites to find
     //
     // the token type, not the name: `echo` is a whole-word lexer keyword (ECHO_LEX_FNC_KEYWORD), so
     // nothing else can carry that token, and a declaration can never be spelled with one

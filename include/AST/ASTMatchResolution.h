@@ -36,7 +36,7 @@ namespace AST
     //
     // **the walk, the exit obligation and the generic-body skip are AST::FixpointLowering's.** this
     // pass hoists nothing, so it never asks next_hoist_index(); what it needed from the chassis is
-    // exactly the three invariants that used to be a fourth copy here
+    // exactly the three invariants, so they are not a fourth copy here
     class MatchResolution : private FixpointLowering
     {
     public:

@@ -72,10 +72,10 @@ AST::IterationLookup AST::iteration_plan_for(
     // the loop reads *through* a borrow exactly as every other reader does; `foreach ($a as ...)` over a
     // `array<int32>&` parameter is the ordinary case, not a special one
     //
-    // **the borrow is peeled and the const is not.** they used to go together, and the result was that
-    // `const array<int32>` and `array<int32>` reached this function as one question - so no answer here
-    // could depend on which of them the loop was handed, and the const path was unreachable by
-    // construction. nothing below needs the const stripped: every lookup here reads the ComplexType, and
+    // **the borrow is peeled and the const is not.** peeling both would make `const array<int32>`
+    // and `array<int32>` one question - so no answer here could depend on which of them the loop
+    // was handed, and the const path would be unreachable by construction. nothing below needs
+    // the const stripped: every lookup here reads the ComplexType, and
     // a flag on the level above it never changed which one that is
     const AST::ValueType subject = AST::target_type_of(source);
     const bool subject_is_const = subject.is_const();

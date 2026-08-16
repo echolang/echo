@@ -1,0 +1,21 @@
+// the other half of the discarded-statement rule: a borrow a *statement* throws away escapes nothing,
+// but one bound to a declaration outlives the slot the literal argument was given. echo has no
+// lifetimes, so whether `header` hands back an address into `$r` or into `$line` is unknowable here
+// and the conservative answer is the only sound one
+struct Request
+{
+    string $url;
+
+    constructor(const string& $url) { $this->url = $url; }
+
+    function header(const string& $line) : Request&
+    {
+        return $this;
+    }
+}
+
+Request $r = Request('https://example.com/');
+
+Request& $held = $r->header('a: 1');
+
+echo $held->url;

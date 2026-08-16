@@ -18,13 +18,9 @@ namespace AST
     // declaration's parameters
     //
     // **one implementation, because there is one question.** the parser and the monomorphizer are two
-    // askers of it at two moments, and the moment is the only difference between them. they used to be
-    // two copies - Parser::resolve_funccall's coercion loop and Monomorphizer::insert_argument_casts -
-    // and the copies disagreed about the case that matters: the parser's ran for a *concrete* callee
-    // whose argument types were not necessarily known yet, and coerced against a type that said
-    // nothing, while the monomorphizer's ran only for a generic one and always after substitution. so
-    // `f($q)` with `$q` initialized from a generic constructor got a TypeCastNode where an
-    // AddrOfExprNode belonged, and the identical non-generic program did not
+    // askers of it at two moments, and the moment is the only difference between them. a second
+    // copy that coerced against a type that said nothing would give `f($q)` a TypeCastNode where
+    // an AddrOfExprNode belongs, and only when `$q` was initialized from a generic constructor
     //
     // **the moment is a state on the node**, AST::CallSettlement, not something a pass remembers.
     // that is what lets the fixpoint re-enter this: it already re-derives the variable types a call is

@@ -26,10 +26,9 @@ namespace AST
     // when it also declares a `Foo&` constructor - which builds a *new* object, a different
     // operation. see AST::OwnershipPass::arrive_value, which switches on this
     //
-    // both readers used to spell the ladder out for themselves - the pass, of the value arriving
-    // somewhere, and the synthesis question, of a *part* of that value - so the recursion and the
-    // decision it feeds were two implementations held in step by nothing but being written in the
-    // same order
+    // both readers switch on this rather than spelling the ladder out for themselves - the pass,
+    // of the value arriving somewhere, and the synthesis question, of a *part* of that value - so
+    // the recursion and the decision it feeds cannot drift
     enum class CopyKind
     {
         // nothing to arrange: a primitive, a pointer, or a struct whose properties are all this. copied

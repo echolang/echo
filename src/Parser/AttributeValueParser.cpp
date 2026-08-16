@@ -41,7 +41,7 @@ namespace
     bool parse_atom(Parser::Payload &payload, AST::AttributeValue &out);
 
     // the three sites that accept a number have to agree, or `#[foo: 0b1]` is a token the
-    // grammar does not know - the same class of miss hex used to be
+    // grammar does not know - the same class of miss hex would be
     bool is_number_token(Token::Type type)
     {
         return type == Token::Type::t_integer_literal

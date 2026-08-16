@@ -727,6 +727,29 @@ TEST_CASE("the class path carries a flag rather than nodes", "[ownership]")
     REQUIRE(assign->teardown_old == nullptr);
 }
 
+TEST_CASE("a static property assignment carries the old value's teardown", "[ownership]")
+{
+    // a static is a destination like a field: emit_drop_of_place over a fresh access, because
+    // a global has no index to evaluate twice and no VarDeclNode root for make_place
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "struct Reg { static Buffer $cur; }\n"
+        "function f() : void {\n"
+        "    Reg::$cur = Buffer(1, null);\n"
+        "    Reg::$cur = Buffer(2, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto &body = body_of(m, "f");
+
+    auto *assign = first_assign_in(body);
+    REQUIRE(assign != nullptr);
+    REQUIRE(assign->teardown_old != nullptr);
+    REQUIRE(assign->teardown_old->children.size() == 1);
+}
+
 TEST_CASE("a constructor's write to its own `$this` is that field's first write", "[ownership]")
 {
     // `$this` is a fresh zero-filled slot, so there is no old value owed a teardown - which is what

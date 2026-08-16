@@ -82,9 +82,9 @@ namespace AST
     // chosen between, so nothing else has to know that a `T?` is a flag over an address and an interned
     // pair over anything else - and a second name in front of it would be a second answer to grep for
     //
-    // **does a value arriving at `to` have to be wrapped into an absence?** the one question five sites
-    // used to ask in four vocabularies, and they have to agree or a program is accepted by resolution and
-    // mis-lowered by codegen: AST::argument_fit peels the destination to rank the arrival,
+    // **does a value arriving at `to` have to be wrapped into an absence?** the one question five
+    // sites ask, and they have to agree or a program is accepted by resolution and mis-lowered by
+    // codegen: AST::argument_fit peels the destination to rank the arrival,
     // AST::TypeChecker::check_destination_fits peels it to accept one, AST::CallResolver mints the cast and
     // TypeLowering::coerce_value emits the two `insertvalue`s.
     //
@@ -95,6 +95,16 @@ namespace AST
     // at each - and here rather than in ASTArgumentFit.h because codegen reads it too and must not depend
     // on the overload ranking to do so
     bool arrival_wraps_optional(const ValueType &from, const ValueType &to);
+
+    // **the type the value itself arrives at**, which is the payload wherever the answer above is yes.
+    //
+    // the peel, and not only the predicate. sharing the question and respelling the answer is what let a
+    // reader forget it: AST::OwnershipPass classified the *copy* against the pair rather than the
+    // payload, built a copy constructor whose parameter is `const T?&`, and reported "cannot implicitly
+    // convert 'string&' to 'const string?&'" at a `return` - a sentence about a type nobody wrote. that
+    // is the shape AST::implicit_conversion_target has for the same reason, and having it here means a
+    // fifth reader cannot ask the question and then get the answer wrong
+    ValueType arrival_destination_of(const ValueType &from, const ValueType &to);
 
     // **what `echo` prints when handed a `T?`** - the payload, and only when the payload is a primitive.
     //
@@ -144,13 +154,10 @@ namespace AST
     // **does a written `null` belong at this destination?** the companion to is_written_null above: that
     // one is the question about the node, this one is the question about the type it is arriving at.
     //
-    // one question, and it used to be spelled by hand at every asker with the spellings already drifted:
-    // the expression parser said `is_nullable() || is_weak()`, the return parser said the same inverted
-    // and folded into its literal hint gate, and PointerAdjuster said `is_nullable() || is_class() ||
-    // is_weak()`. a fourth asker - AST::CallResolver, for an argument - is what made the drift worth
-    // removing rather than describing. most of them now reach it through `bind_null_to`; the direct
-    // callers are the return parser's hint gate and AST::null_rejection_reason, which need the answer
-    // without a node to bind
+    // one question. most askers reach it through `bind_null_to`; the direct callers are the return
+    // parser's hint gate and AST::null_rejection_reason, which need the answer without a node to
+    // bind. a second spelling (`is_nullable() || is_weak()` here, `is_nullable() || is_class() ||
+    // is_weak()` there) is a program accepted by one site and refused by another
     //
     // a `ptr<T>` needs no arm: nullability is a per-level flag on any kind, so a pointer that admits null
     // *is* `is_nullable()` on its pointer level
@@ -181,9 +188,8 @@ namespace AST
     // of theirs mentions - `$p == null` on a struct answered with a sentence about 'const string&'
     std::string null_operand_refusal(const std::string &operator_spelling);
 
-    // `guard`'s "the else arm must leave" rule used to live here, back when `guard` was its only caller.
-    // it is AST::scope_always_exits ([AST/ASTControlFlow.h]) now - control flow is not a nullability
-    // question, and it has a second asker
+    // `guard`'s "the else arm must leave" rule is AST::scope_always_exits ([AST/ASTControlFlow.h]) -
+    // control flow is not a nullability question, and it has a second asker
 };
 
 #endif

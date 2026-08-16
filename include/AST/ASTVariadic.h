@@ -27,6 +27,12 @@ namespace AST
     // elements rather than on the list, `CallResolver` promotes them, `TypeChecker` refuses the shapes C
     // cannot carry and codegen writes them out after the fixed arguments. `OperatorRewriter` is the
     // fifth, and it asks in the negative - a pack is the one bracket it must leave alone
+    //
+    // `PointerAdjuster` is the sixth, asking inside `adjust_call_arguments` - a pack is only ever a call
+    // argument, so it is one more answer to "how far is a call argument read" rather than a position of
+    // its own. it decides what an element *means*: a tail has no parameter opposite it, so each element
+    // is its own destination and a `ptr<T>` place in one keeps its address instead of collecting the
+    // deref a destinationless value edge would give it
     ArrayLiteralExprNode *variadic_pack_of(ExprNode *expr);
 
     // **does this declaration end in a C variadic tail?** the whole of what makes a call to it

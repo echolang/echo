@@ -164,9 +164,9 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
         return;
     }
 
-    // **the rule is AST::reconcile_binary_operands', in one place with the parser's.** it used to be
-    // written out here and again there, and neither copy knew which side *knows* what it is - so a
-    // literal's default cast the typed operand beside it down to meet it
+    // **the rule is AST::reconcile_binary_operands', in one place with the parser's.** a second
+    // copy here would not know which side *knows* what it is - so a literal's default would cast
+    // the typed operand beside it down to meet it
     const BinaryReconciliation reconciled = reconcile_binary_operands(
         bin.op_node != nullptr ? bin.op_node->op : nullptr,
         bin.lhs,

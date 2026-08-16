@@ -276,9 +276,9 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
 
     // optional explicit type arguments: name<int, float>(...)
     //
-    // **speculative when the caller can reinterpret**, and that is not a nicety: a bare identifier used to
-    // be impossible as a comparison operand - values carry a `$` - and a compile-time constant is one, so
-    // `LIMIT < $n` arrives here with the cursor on a `<` that opens no type argument list. The only thing
+    // **speculative when the caller can reinterpret**, and that is not a nicety: a bare identifier
+    // can be a comparison operand - a compile-time constant is one - so `LIMIT < $n` arrives
+    // here with the cursor on a `<` that opens no type argument list. The only thing
     // that settles it is whether a `(` follows the close, which is the rule parse_member_call already
     // lives by for the same reason: `$a->count < 3`
     std::vector<AST::TypeNode *> explicit_type_args;
@@ -325,8 +325,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     // recorded on the node rather than only used here, because the lookup has to be repeatable: a
     // call the parser cannot settle is re-resolved from the fixpoint, and by then there is no
     // enclosing namespace to read off the parser context. one lookup against one store, either way -
-    // it used to be two, the enclosing scope chain first and the namespace symbol table as a
-    // fallback, which meant `a::foo()` preferred a same-named scope entry over the namespace it
+    // two lookups - the enclosing scope chain first and the namespace symbol table as a
+    // fallback - would make `a::foo()` prefer a same-named scope entry over the namespace it
     // explicitly asked for
     //
     // a **static** call names neither: its candidates come from the type, so the namespace is left
@@ -504,8 +504,8 @@ AST::FunctionCallExprNode *Parser::parse_member_call(
     //
     // the same standing a pending free call already has, and the same reason: `resolve_funccall`'s
     // header says a null `decl` between here and codegen is legitimate, and the fixpoint's
-    // finalizing sweep reports whatever never resolved. this used to report at parse time, which is
-    // one round too early for every receiver whose type a later round answers
+    // finalizing sweep reports whatever never resolved. reporting at parse time is one round too
+    // early for every receiver whose type a later round answers
     const bool receiver_is_undetermined = AST::is_undetermined_type(receiver_type);
 
     // the receiver's type says where to look - the type the deref walk above landed on, which is

@@ -25,7 +25,7 @@ namespace AST
     // they hook* is genuinely theirs. everything around it is this class: the walk, the position it
     // walks from, the exit obligation and the generic-body skip.
     //
-    // it exists because the three invariants below used to live in three copies, and **none of them
+    // it exists because the three invariants below must live in one place, and **none of them
     // breaks loudly**: forgetting one is a golden diff or a round that stalls, never a compile error.
     //
     //   - **finalize() is one more round, not a sweep.** a round inherits visitFunctionDecl's

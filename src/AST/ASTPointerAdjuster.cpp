@@ -4,6 +4,7 @@
 #include "AST/ASTCollector.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTPlaceExpr.h"
+#include "AST/ASTVariadic.h"
 #include "AST/AssignNode.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -138,6 +139,19 @@ void PointerAdjuster::adjust_call_arguments(std::vector<ExprNode *> &arguments, 
         if (arg != nullptr && arg->get_node_type() == NodeType::n_expr_addrof) {
             auto *addr = static_cast<AddrOfExprNode *>(arg);
             addr->operand = adjust_place(addr->operand);
+            continue;
+        }
+
+        // a pack is the one argument list with no parameter opposite it, so each element is its
+        // own destination. as_value_for still owns how far that destination is read: a `ptr<T>`
+        // element keeps its address, anything else reads through
+        if (ArrayLiteralExprNode *pack = variadic_pack_of(arg)) {
+            for (auto *&element : pack->elements) {
+                if (element != nullptr) {
+                    element = as_value_for(element, element->result_type());
+                }
+            }
+
             continue;
         }
 
@@ -379,7 +393,7 @@ void PointerAdjuster::visit_string_interpolation(StringInterpolationExprNode &no
 void PointerAdjuster::visit_foreach(ForeachNode &node)
 {
     // a transient node AST::ForeachLowering was supposed to have erased - by lowering it, or by
-    // discarding it after a refusal. one reaching here used to have every deref inside its body
+    // discarding it after a refusal. one reaching here would have every deref inside its body
     // silently skipped, and codegen would read the wrong number of levels with no diagnostic.
     // AST::PointerValueNode's contract
     throw std::runtime_error(

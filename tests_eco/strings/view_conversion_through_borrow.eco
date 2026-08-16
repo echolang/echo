@@ -1,0 +1,54 @@
+// **an `#[implicit]` conversion fires through a borrow**, which is the position it is most needed in
+// and the one it used to miss: a library takes its parameters as `const string&`, so every helper
+// wanting a `string::view` had to be called with an explicit `->view()` from anywhere that had been
+// handed one. the peel is on both sides now - a borrow parameter is answered by a conversion to its
+// pointee, and a borrowed argument declares what its pointee declares
+function widthOf(string::view $v) : usize
+{
+    return $v->size;
+}
+
+// a `const string&` handed on, which is the reported shape
+function throughConstBorrow(const string& $s) : usize
+{
+    return widthOf($s);
+}
+
+// and a mutable borrow, which reaches the same `const function` conversion
+function throughBorrow(string& $s) : usize
+{
+    return widthOf($s);
+}
+
+string $s = 'hello';
+
+// the value case, which always worked
+echo widthOf($s);
+echo throughConstBorrow($s);
+echo throughBorrow(&$s);
+
+// **a call that returned a borrow is on the same side of the line**, which is what asking through
+// AST::read_reaches_storage buys rather than a second predicate: `at()` hands back a `string&`, and
+// the receiver the conversion needs is that address, so nothing is addressed twice
+array<string> $rows = array<string>();
+$rows->push('hello');
+
+echo widthOf($rows->at(0));
+
+function firstWidth(const array<string>& $a) : usize
+{
+    return widthOf($a->at(0));
+}
+
+echo firstWidth($rows);
+
+// **the rank is unchanged**: a declared conversion still sits below every built-in one, so an
+// overload taking the string itself wins outright even where the conversion would apply
+function describe(const string& $s) : string { return 'string'; }
+function describe(string::view $v) : string { return 'view'; }
+
+echo describe($s);
+
+function forward(const string& $s) : string { return describe($s); }
+
+echo forward($s);

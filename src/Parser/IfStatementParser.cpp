@@ -102,10 +102,10 @@ namespace
         }
 
         // **the chained arm holds exactly one statement, and reading it here is what makes that true.**
-        // this used to go through parse_scope with no block token, and parse_scope reads statements until
-        // it meets a `}` or runs out - so everything written *after* an `else if` chain was swallowed into
-        // the else arm. silently: `if (true) { echo 1; } else if ($x) { } else { } echo 5;` printed only 1,
-        // because the `echo 5` had become part of the branch that was not taken.
+        // going through parse_scope with no block token would read statements until it meets a `}`
+        // or runs out - so everything written *after* an `else if` chain would be swallowed into
+        // the else arm. silently: `if (true) { echo 1; } else if ($x) { } else { } echo 5;` would
+        // print only 1, because the `echo 5` would become part of the branch that was not taken.
         //
         // the wrapper scope opens no lexical namespace, exactly as before: it has no brace of its own, and
         // a chained `else` declares nothing

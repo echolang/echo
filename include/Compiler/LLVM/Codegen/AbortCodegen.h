@@ -23,9 +23,9 @@ namespace Compiler::LLVM
 
     // the one owner of how a program stops
     //
-    // three sites stop a program and they used to share nothing: `die`, a failed `assert`, and the
-    // null check the `ptr<T>` -> `T&` narrowing emits. the last of those was an `llvm.trap` with no
-    // message, gated on how *echoc itself* had been compiled. collecting them here is what makes
+    // three sites stop a program and they share one runtime: `die`, a failed `assert`, and the
+    // null check the `ptr<T>` -> `T&` narrowing emits. the last of those cannot be an `llvm.trap`
+    // with no message, gated on how *echoc itself* was compiled. collecting them here is what makes
     // one runtime, one message shape and one release-mode gate possible - and it is why this is a
     // subsystem rather than two more private methods on ExprCodegen
     //
@@ -43,9 +43,9 @@ namespace Compiler::LLVM
         // branch on the same question. nothing else needed a change for `die` to be legal anywhere
         //
         // the message is taken in *parts* rather than finished, because that is what makes the
-        // "one message shape" claim above true rather than aspirational: the null check used to
-        // hand-format its own and had already drifted to `in {}` where the other two said `at {}`,
-        // on the day both were written. `detail` may be empty, and then the headline stands alone
+        // "one message shape" claim above true rather than aspirational: a null check that
+        // hand-formats its own would drift to `in {}` where the other two said `at {}`.
+        // `detail` may be empty, and then the headline stands alone
         void gen_abort(
             const std::string &headline,
             const std::string &detail,

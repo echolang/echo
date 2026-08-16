@@ -43,8 +43,8 @@ namespace Compiler
     unsigned int bit_of(Subcommand id);
 
     // **every option echoc accepts, as an id.** reading one is `Opt::t_optimize` and never the string
-    // `"--optimize"`, which is the whole point of the type: forty call sites used to spell a flag name
-    // back to a parser, so a rename was a value that silently defaulted rather than a compile error
+    // `"--optimize"`, which is the whole point of the type: forty call sites spelling a flag name
+    // back to a parser would make a rename a value that silently defaulted rather than a compile error
     enum class Opt
     {
         t_output,
@@ -100,7 +100,7 @@ namespace Compiler
         t_time
     };
 
-    // how hard, and over what. three answers where there used to be two flags that were not each other's
+    // how hard, and over what. three answers rather than two flags that are not each other's
     // inverse: `-O` said what is compiled *together* and `--no-optimize` said whether the per-unit
     // pipeline ran, so `-O --no-optimize` was expressible and meant almost nothing.
     //
@@ -183,9 +183,9 @@ namespace Compiler
     // registration loops in main() were the *only* statement of which subcommand accepted what - so the
     // question "does clean take -g" had no answer anything could ask, only a loop somebody had to read.
     //
-    // `description` is the long paragraph that used to live as a `//` comment beside each add_argument.
-    // Those comments were the best documentation this command line had and no user could ever see one;
-    // moving them here is most of what this table is for
+    // `description` is the long paragraph `--help <option>` prints. a `//` comment beside each
+    // registration is the best documentation nobody can see; putting it here is most of what
+    // this table is for
     struct CommandLineOption
     {
         Opt id;
@@ -229,10 +229,9 @@ namespace Compiler
         // the line `--help` prints beside the flag: one line, lowercase, no trailing period, short enough
         // for the summary column - so a whole command fits on a screen and can be scanned.
         //
-        // `description` is what `--help <option>` prints, and is where the paragraphs that used to live as
-        // `//` comments beside each registration went. Embedded newlines are paragraph breaks. Inlining
-        // these on the page was the first thing tried and made `echoc build --help` two hundred and fifty
-        // lines - complete, correct, and nothing anybody reads
+        // `description` is what `--help <option>` prints. embedded newlines are paragraph breaks.
+        // inlining these on the page would make `echoc build --help` two hundred and fifty lines -
+        // complete, correct, and nothing anybody reads
         const char *summary;
         const char *description;
 

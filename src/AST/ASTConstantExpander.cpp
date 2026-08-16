@@ -289,7 +289,7 @@ void ConstantExpander::visitFunctionDecl(FunctionDeclNode &node)
     // a member's body may write `self::MAX`; a free function's may not, and gets the null
     // AST::enclosing_type_of already answers with rather than whatever type happened to be walked
     // before it. that is the one owner of "which type is this body inside", shared with the `private`
-    // rule - this file used to keep its own copy, and the two disagreed about a constructor
+    // rule. a second copy here would disagree about a constructor
     _current_self = enclosing_type_of(node);
 
     RecursiveVisitor::visitFunctionDecl(node);

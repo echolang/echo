@@ -18,7 +18,7 @@ namespace Compiler::LLVM
     // those registers.
     //
     // **why it is not simply "return the struct".** LLVM lets a function return a first-class aggregate and
-    // Echo used to do exactly that, which is correct and slow: a function with three `return`s of a struct
+    // returning the struct as a first-class aggregate is correct and slow: a function with three `return`s of a struct
     // becomes a phi of that struct, LLVM's if-conversion refuses to speculate a phi of an aggregate, and a
     // loop calling it keeps a branch per return - so LoopVectorize cannot widen it. Measured at 4.7x against
     // the same program in Rust, and 1.00x once the aggregate is out of the signature. Both clang and rustc

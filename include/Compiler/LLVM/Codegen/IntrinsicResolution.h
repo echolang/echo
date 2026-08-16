@@ -20,8 +20,8 @@ namespace Compiler::LLVM
     // the one owner of "which LLVM intrinsic does this name denote, and does a given signature fit
     // it"
     //
-    // it used to be a hand-written string -> ID table that answered only the first half, and the
-    // second half was *guessed*: the whole argument list was handed to getOrInsertDeclaration as
+    // a hand-written string -> ID table would answer only the first half, and the
+    // second half would be *guessed*: the whole argument list handed to getOrInsertDeclaration as
     // the overload-type vector. that conflates two different counts. `llvm.pow` is
     // `T @llvm.pow.T(T, T)` - two arguments, one overload type - so a two-argument declaration
     // mangled a name LLVM never defined, and the same held for copysign, minnum, fma, ctlz, powi

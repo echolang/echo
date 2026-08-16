@@ -51,11 +51,9 @@ namespace AST
 
     // **the sole answer to "what does this literal become at this destination, and why not".**
     //
-    // it used to be `autocast_literal_int` / `autocast_literal_float` / `parse_literal_boolean`, three
-    // Parser::Payload-shaped helpers inside src/Parser/ExprParser.cpp - which is why the four positions
-    // that are not the parser (a binary operand, a call argument, a bound type parameter, a substituted
-    // declaration) each grew their own answer or none at all. Moving it here is the whole of what makes
-    // one rule serve all six.
+    // one rule for all six positions: the parser, a binary operand, a call argument, a bound type
+    // parameter, a substituted declaration. a helper living in the parser would leave the other
+    // four to grow their own answer or none at all.
     //
     // three results and not an optional, for AST::ArrayLiteralLookup's reason: "the destination cannot
     // decide this" is not a refusal, and a caller that read it as one would report against a hint that

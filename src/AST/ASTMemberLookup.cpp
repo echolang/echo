@@ -151,8 +151,8 @@ AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from,
     }
 
     // the published slot, not a walk of every method: this runs from the bottom of argument_fit, once
-    // per candidate per argument per fixpoint round, and it used to be a string comparison against
-    // every member the owner declares. a type has one or two entries here, so a flat scan of them is
+    // per candidate per argument per fixpoint round. a type has one or two entries here, so a flat
+    // scan of them is
     // the whole cost - and the list holds only declarations publish_implicit_conversion accepted, so
     // there is nothing left to check but the target
     for (AST::FunctionDeclNode *candidate : owner->implicit_conversions()) {
@@ -212,13 +212,18 @@ AST::FunctionDeclNode *AST::find_copy_constructor(const AST::ComplexType *ct)
     return ct->is_instantiated() ? ct->template_ref->copy_constructor() : nullptr;
 }
 
-AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode *place)
+AST::ExprNode *AST::receiver_for_member_call(AST::NodeCollection &nodes, AST::ExprNode *place)
 {
     if (place->result_type().is_pointer()) {
         return place;
     }
 
-    return &module.nodes.emplace_back<AST::AddrOfExprNode>(place);
+    return &nodes.emplace_back<AST::AddrOfExprNode>(place);
+}
+
+AST::ExprNode *AST::receiver_for_member_call(AST::Module &module, AST::ExprNode *place)
+{
+    return receiver_for_member_call(module.nodes, place);
 }
 
 AST::VarRefNode &AST::local_place(AST::Module &module, AST::VarDeclNode &local)

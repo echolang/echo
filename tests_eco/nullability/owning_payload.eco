@@ -102,4 +102,52 @@ assert(mem::live_allocations() == 0, "a property is torn down like a local");
 
 assert(mem::live_allocations() == 0, "moved once, destroyed once");
 
+// **an owning *field* arriving at a `T?`, which is a copy where every case above is a move.**
+// `return $s` of a whole local is a handover and never asks what a copy of it would be, so the whole
+// feature worked out of a local and refused out of a field: the copy was classified against the
+// **pair**, whose synthesized copy constructor takes a `const string?&`, and the `string&` place
+// handed to it came out as "cannot implicitly convert 'string&' to 'const string?&'". the peel is the
+// one AST::arrival_wraps_optional's three other readers already make
+struct Note
+{
+    string $text;
+    int32 $tag;
+}
+
+struct Sheet
+{
+    Note $only;
+
+    constructor(const string& $text)
+    {
+        $this->only = Note($text, 1);
+    }
+
+    const function text() : string?
+    {
+        return $this->only->text;
+    }
+}
+
+{
+    Sheet $sheet = Sheet('written');
+
+    echo $sheet->text() ?? 'absent';
+
+    // the same wrap at a declaration rather than a return, and a payload the copy did not move out
+    string? $copied = $sheet->only->text;
+
+    echo $copied ?? 'absent';
+    echo $sheet->only->text;
+
+    // and the copy is a copy: appending to one leaves the other alone
+    string $mine = guard $sheet->text() else { die('the field is there'); }
+    $mine->append('!');
+
+    echo $mine;
+    echo $sheet->only->text;
+}
+
+assert(mem::live_allocations() == 0, "each copy of the payload was ended exactly once");
+
 echo "balanced";

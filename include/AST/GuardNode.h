@@ -53,12 +53,11 @@ namespace AST
         // be copied rather than moved out from under a value somebody else still holds - and the copy
         // cannot live on `decl->init_expr`, because on that form that edge is also the value being tested.
         //
-        // **written by AST::OwnershipPass and by nothing else**, which is the invariant rather than an
-        // incidental fact. AST::GuardLowering used to write it too, for the protocol form, and the
-        // ownership pass knew about only one of the two producers - so the protocol's payload was
-        // byte-copied out of storage somebody else still owned and both ends were then destroyed. the
-        // protocol form puts its `deref(unwrap())` on `decl->init_expr` instead, where the ordinary
-        // arrival machinery covers it with no arm at all
+        // **written by AST::OwnershipPass and by nothing else.** a lowering that handed the binding
+        // its value on an edge of its own would skip the copy constructor: the payload would be
+        // byte-copied out of storage somebody else still owns, and both ends would then be
+        // destroyed. the protocol form puts its `deref(unwrap())` on `decl->init_expr` instead,
+        // where the ordinary arrival machinery covers it with no arm at all
         ExprNode *bound_value = nullptr;
 
         // **the presence question, when the type answers it rather than the machine.**

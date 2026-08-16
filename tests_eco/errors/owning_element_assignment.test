@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] owning_element_assignment.eco:13:12
+
+  Cannot assign a 'string' into an element - it owns a resource, and the old value would have to be destroyed through an index this assignment has already evaluated. Assign a variable or a field, or clear the element first.
+
+  12 | 
+  13 | $rows[$at] = 'replaced';
+     :            ^
+  14 | 
+
+1 error, nothing was compiled.

@@ -452,10 +452,9 @@ namespace AST
         // **may this level be absent?** true for `ptr<T>` and for any `T?`, false for the borrow `T&` and
         // for a bare `T`. one flag on the level it sits on, exactly like const
         //
-        // it used to assert `is_pointer()`, because a pointer level was the only place nullability could
-        // sit and `ptr<T>` versus `T&` was the whole of it. generalising the flag is what gives the
-        // language `T?` over anything, and it makes `ptr<T>` fall out as the pointer level's spelling of
-        // a question every level can now be asked
+        // a pointer level is one place nullability can sit (`ptr<T>` versus `T&`); the flag is
+        // also what gives the language `T?` over anything else. `ptr<T>` is the pointer level's
+        // spelling of a question every level can be asked
         //
         // **two encodings, one question.** where the flag *is* the implementation - a pointer, a class
         // handle, a weak - it answers from the flag. where `T?` needs a tagged pair it answers from the
@@ -624,7 +623,7 @@ namespace AST
 
         // a pointer has no primitive of its own - reaching here with one means a caller wanted
         // the pointee and forgot to say so. assert rather than silently answering t_void, which
-        // used to reach LLVM as PointerType::get(voidTy) and assert far from the actual mistake
+        // would reach LLVM as PointerType::get(voidTy) and assert far from the actual mistake
         inline ValueTypePrimitive get_primitive_type() const {
             assert(!is_pointer() && "use value_type_of() / pointee() to reach through a pointer");
             return primitive;
@@ -1277,8 +1276,8 @@ namespace AST
         // there is deliberately no way to mint a substituted copy of a layout here.
         // TypeRegistry::get_or_create_instantiation is the *only* thing that produces a ComplexType for
         // an instantiation, because struct equality is ComplexType* identity and a second minter is a
-        // second identity for one type. TypeDeclNode::clone used to be that second minter; it now shares
-        // the declaration instead
+        // second identity for one type. TypeDeclNode::clone shares the declaration instead of
+        // minting a second layout
 
     private:
         std::vector<Property> _properties;
@@ -1539,7 +1538,7 @@ namespace AST
     // the single spelling of "no information", because every pass that reasons about types before
     // they are all known needs the same three-way distinction - a wrong type, a right type, and no
     // type yet. overload ranking reads it as neutral, generic inference as "cannot bind from this,
-    // ask again later", and both used to say it in their own words
+    // ask again later"
     inline bool is_undetermined_type(const ValueType &type) {
         return type.is_unknown() || type.is_void() || contains_type_param(type);
     }

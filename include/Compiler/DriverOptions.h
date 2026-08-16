@@ -29,8 +29,8 @@ namespace Compiler
     //   `run` defaults to --debug and `build` to --release
     //   `--print ir` or `--optimize whole` means one merged module and no object cache
     //
-    // - and three of those used to sit in resolve_options while the fourth sat in
-    // wants_whole_program_module, which is two owners for one question
+    // - and splitting three of those into resolve_options while the fourth sat in
+    // wants_whole_program_module would be two owners for one question
     struct DriverOptions
     {
         Subcommand subcommand = Subcommand::t_none;

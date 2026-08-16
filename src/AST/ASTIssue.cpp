@@ -55,9 +55,8 @@ std::string AST::Issue::UnexpectedToken::primary_label() const
     return "expected " + token_type_string(expected);
 }
 
-// the line and column the message used to carry are a *label* now - the renderer shows the previous
-// declaration in its own frame, quoting the line. Same fact, and the reader no longer has to go and find
-// it. See AST::to_diagnostic for how the token is resolved back to a file
+// the previous declaration is a *label* - the renderer shows it in its own frame, quoting the line.
+// see AST::to_diagnostic for how the token is resolved back to a file
 ISSUE_MESSAGE_FNC(VariableRedeclaration)
 {
     return fmt::format(

@@ -858,7 +858,7 @@ AST::FunctionDeclNode * Parser::parse_funcdecl(
 
     funcdecl->return_type = parse_type(payload);
 
-    // **here rather than after the body**, which is where this used to sit: the return type one line
+    // **here rather than after the body**: the return type one line
     // up is the last thing an attribute could have something to say about, and `#[implicit]` below
     // needs the whole signature. it also has to run in *both* passes - the declaration pass returns
     // further down without ever reaching a body - and that is what fixes a leak rather than works

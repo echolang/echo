@@ -48,10 +48,10 @@ namespace AST
 // Answers with the reason rather than a bool, so each site can frame it for the destination it is
 static const char *null_rejection_reason(const ValueType &to)
 {
-    // **one question now: does this destination admit absence at all?** it used to be a list of the kinds
-    // that happened to reject null, which meant every kind not on the list quietly accepted it - and a
-    // class was the big one. `Foo $x = null;` compiled, so a class handle was nullable whether its author
-    // wanted it or not, and nothing could be relied on to hold an object
+    // **one question: does this destination admit absence at all?** a list of the kinds that happen
+    // to reject null would mean every kind not on the list quietly accepts it - and a class is the
+    // big one. `Foo $x = null;` would compile, so a class handle would be nullable whether its
+    // author wanted it or not, and nothing could be relied on to hold an object
     //
     // a weak reference is admitted without carrying the flag: an empty weak is an ordinary value, and
     // `weak<T>` has no non-empty spelling to contrast with the way `ptr<T>` has `T&`
@@ -90,9 +90,8 @@ static const char *null_rejection_reason(const ValueType &to)
 // Primitive-to-primitive is deliberately *not* in here. Fitting an int32 literal into a float64 slot
 // is TypeLowering::coerce_value's job, which is why this is not simply `!is_implicitly_convertible`.
 //
-// The struct half is what catches `Foo $x = 42;`. The parser used to reject that while typing the
-// literal, but a hint that cannot type a literal is now ignored there, and coerce_value passes a
-// non-primitive destination straight through
+// The struct half is what catches `Foo $x = 42;`. a hint that cannot type a literal is ignored
+// in the parser, and coerce_value passes a non-primitive destination straight through
 static bool demands_exact_conversion(const ValueType &type)
 {
     // a callable joins the list for the same reason a pointer is on it: there is no conversion between
@@ -126,8 +125,8 @@ static std::string place_description(const ExprNode &expr)
 // **can this argument reach this parameter?** one rule, AST::argument_fit.
 //
 // It is also what the overload matcher ranks with and what the implicit borrow is decided by, so a
-// call this pass accepts is a call resolution could have chosen, and vice versa. This used to be a
-// fourth hand-written copy of the same case analysis, and it disagreed with argument_fit about the
+// call this pass accepts is a call resolution could have chosen, and vice versa. a fourth
+// hand-written copy of the same case analysis would disagree with argument_fit about the
 // borrow arm, which additionally requires the argument to be a place.
 //
 // Numeric conversions are inserted as casts by AST::CallResolver, so a t_conversion answer is a legal
@@ -632,9 +631,9 @@ void TypeChecker::check_conformances(TypeDeclNode &node)
 
 void TypeChecker::visitMemberAccess(MemberAccessNode &node)
 {
-    // the node answers this itself now. it used to be a second copy of the switch in
-    // MemberAccessNode::result_type(), and the two drifted exactly as such pairs do: neither knew
-    // an index base, so a typo'd member behind `$items:$[0]->` went unreported
+    // the node answers this itself. a second copy of the switch in
+    // MemberAccessNode::result_type() would drift exactly as such pairs do: neither knew
+    // an index base, so a typo'd member behind `$items:$[0]->` would go unreported
     ValueType base_type = node.base_target_type();
 
     // does the name denote a property of the **tagged optional itself** - `__has` or `__value` - rather
@@ -733,10 +732,9 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
                 base_type.get_type_desciption()));
     }
 
-    // **a base with no storage is no longer this pass's question**. it used to be reported
-    // here - "has no storage to read a member from" - because there was no answer to give: a member is
-    // reached from an address, and a value nobody stored has none. both halves have one now, and both
-    // live where the answer is rather than where the shape is visible:
+    // **a base with no storage is not this pass's question**. a member is reached from an
+    // address, and a value nobody stored has none. both halves have an answer, and both live
+    // where the answer is rather than where the shape is visible:
     //
     //  - a *borrow*-returning call already **is** the address, so it is simply lowered (A13a, the arm in
     //    LValueCodegen::gen_place)
@@ -1367,7 +1365,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
 
     // echo is a decl-less builtin, and its codegen has a printf conversion for every primitive and
     // nothing else. reported here so each gap is a located diagnostic instead of the uncaught codegen
-    // throw it used to be. AST::is_print_call owns the recognition, including the "has a declaration,
+    // throw it would otherwise be. AST::is_print_call owns the recognition, including the "has a declaration,
     // so the ordinary argument checks above apply instead" half of it
     //
     // two shapes are worth naming. an *address*, because after the adjustment pass a pointer here
@@ -1485,7 +1483,7 @@ void TypeChecker::visit_closure_expr(ClosureExprNode &node)
     // here rather than at the capture site in the parser, where the read is written: the captured
     // variable's type is not final until the monomorphizer has settled the call it was inferred from,
     // so `$b = Box<int32>(5)` was still a `Box<T>` when the parser saw it - and a bare type parameter
-    // owns nothing, which is how an owning capture used to pass unnoticed
+    // owns nothing, which is how an owning capture would pass unnoticed
     if (node.environment_type != nullptr) {
         for (size_t i = 0; i < node.environment_type->property_count(); i++) {
             const ComplexType::Property &property = node.environment_type->get_property(i);
@@ -1669,7 +1667,7 @@ void TypeChecker::visitBinaryExpr(BinaryExprNode &node)
 
         // **the one predicate**, AST::binary_has_builtin_meaning, which the parser reads to decide
         // whether to look for a declared `operator` and this reads to report that none was found. it
-        // used to be spelled out here, and the parser asking the same question its own way is exactly
+        // a second spelling here, with the parser asking the same question its own way, is exactly
         // how the two would come to different answers - one of them silently
         //
         // an undeterminable operand needs no guard here: has_complex_type() is false for unknown, void
@@ -1747,7 +1745,7 @@ void TypeChecker::check_const_target(AssignNode &node)
     // *pointer* legitimately gets - both of which are decided below. what it is never entitled to is
     // the write-*through* above: a `ptr<const T>` property means the pointee is not this constructor's
     // to write, however fresh the slot holding the pointer is. so the exemption starts here rather
-    // than at the call site, which used to skip this function whole
+    // than at the call site, which would skip this function whole
     //
     // the flag is the whole question, and this exemption is why it has to stay that way: anything folded in
     // here becomes a way to launder a `const` away. a container that seats an element on demand declares an
@@ -1842,9 +1840,9 @@ void TypeChecker::check_destination_fits(Destination dest, const ValueType &to, 
     //
     // asked of the *payload* when the destination is a tagged optional and the value is not itself one:
     // `Drawable? $d = Circle(4)` is two widenings, and an optional accepts whatever its payload accepts.
-    // one peel here rather than an arm per question, and through AST::arrival_wraps_optional so it is the
-    // same peel AST::argument_fit and TypeLowering::coerce_value make
-    const ValueType destination = arrival_wraps_optional(from, to) ? to.optional_payload() : to;
+    // one peel here rather than an arm per question, and through AST::arrival_destination_of so it is the
+    // same peel AST::argument_fit and AST::OwnershipPass make
+    const ValueType destination = arrival_destination_of(from, to);
 
     if (destination.is_interface()) {
         if (check_interface_erasure(destination, value, at)) {

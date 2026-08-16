@@ -13,8 +13,8 @@ namespace AST
     // **where did the author write this node.**
     //
     // one taxonomy behind every source position the compiler attaches to anything - a diagnostic's
-    // caret, an `assert` message's `<file>:<line>`, a DILocation. It used to exist only for
-    // expressions, as location_of_expression, which is now a spelling over this.
+    // caret, an `assert` message's `<file>:<line>`, a DILocation. location_of_expression is a
+    // spelling over this, for expressions only
     //
     // **null is a real answer and not a failure.** A node the parser never built out of a token has no
     // position of its own - a synthesized release, an implicit cast, a scope - and a caller wanting one

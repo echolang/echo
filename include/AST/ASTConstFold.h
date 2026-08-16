@@ -76,9 +76,8 @@ namespace AST
     //
     // what this owns is narrower: **does a marked expression decide itself, and to what**. it is asked
     // by AST::ConstFolding for a `const if`'s condition and for a `const(...)`, and by
-    // ExprCodegen::gen_type_query_builtin for the two AST-fact builtins - which used to fold them
-    // itself, two spellings of one fact held in step by nothing. so this is a net *reduction* in owners
-    // rather than a second one to keep in step.
+    // ExprCodegen::gen_type_query_builtin for the two AST-fact builtins. so this is one owner
+    // rather than a second spelling of the same fold in codegen.
     //
     // side-effect free and independent of any pass's state, which is what lets codegen and a fixpoint
     // round ask the same question and rely on the same answer

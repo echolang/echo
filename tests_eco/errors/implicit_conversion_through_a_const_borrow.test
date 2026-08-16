@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  implicit_conversion_through_a_const_borrow.eco:36:5
+
+  Invalid type conversion: cannot implicitly convert 'const Feet' to 'Meters'
+
+  35 | {
+  36 |     show($f);
+     :     ^^^^
+  37 | }
+
+1 error, nothing was compiled.

@@ -81,7 +81,7 @@ namespace Parser
         // answers whether the cursor is on the token this position requires, and when it is not, reports
         // it and recovers to the next statement. the recovery ritual a positional check shares, so the
         // sites differ only in what they expect - here rather than in one parser, because every one of
-        // them performs it and they used to spell it out a copy each
+        // them performs it and a copy in each parser would drift
         //
         // deliberately does *not* consume the token it matched: the caller decides, and a member body's
         // opening brace is looked at without being skipped
