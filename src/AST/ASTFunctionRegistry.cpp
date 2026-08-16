@@ -269,6 +269,31 @@ const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::overloads(
     return none;
 }
 
+const std::vector<AST::FunctionDeclNode *> &AST::FunctionRegistry::declared_overloads(
+    const std::string &name,
+    const AST::Namespace &ns
+) const
+{
+    static const std::vector<FunctionDeclNode *> none;
+
+    const auto in_namespace = _by_name.find(&ns);
+    if (in_namespace == _by_name.end()) {
+        return none;
+    }
+
+    const auto candidates = in_namespace->second.find(name);
+    if (candidates == in_namespace->second.end()) {
+        return none;
+    }
+
+    return candidates->second;
+}
+
+bool AST::FunctionRegistry::declares(const std::string &name, const AST::Namespace &ns) const
+{
+    return !declared_overloads(name, ns).empty();
+}
+
 AST::FunctionDeclNode *AST::FunctionRegistry::find_by_declaration_site(const TokenReference &declaration_token) const
 {
     const auto found = _by_decl_site.find(make_declaration_site(declaration_token));

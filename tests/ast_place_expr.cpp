@@ -231,7 +231,8 @@ TEST_CASE("storage_of answers for every expression node kind", "[AST][pointer]")
         NodeType::n_var, NodeType::n_assign, NodeType::n_type, NodeType::n_release,
         NodeType::n_func_decl, NodeType::n_func_return, NodeType::n_if_statement, NodeType::n_guard,
         NodeType::n_while_statement, NodeType::n_for_statement, NodeType::n_loop_control,
-        NodeType::n_foreach, NodeType::n_const_if, NodeType::n_namespace_decl, NodeType::n_namespace,
+        NodeType::n_foreach, NodeType::n_const_if, NodeType::n_namespace_decl, NodeType::n_use_decl,
+        NodeType::n_namespace,
         NodeType::n_attribute, NodeType::n_type_decl,
     };
 

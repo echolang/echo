@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] DuplicateUse  use_duplicate.eco:18:8
+
+  'f' is already imported in this file.
+
+  17 | use a::f;
+  18 | use b::f;
+     :        ^
+  19 | 
+
+1 error, nothing was compiled.

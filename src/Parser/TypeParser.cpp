@@ -2,10 +2,12 @@
 #include "Parser/VisibilityParser.h"
 #include "Parser/NamespaceParser.h"
 #include "Parser/IfStatementParser.h"
+#include "AST/ASTImport.h"
 #include "AST/ASTNullability.h"
 #include "AST/ASTValueType.h"
 #include "AST/ASTInstantiation.h"
 #include "AST/ASTNamespace.h"
+#include "AST/ASTSymbol.h"
 #include "AST/ASTTypeParam.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
@@ -17,6 +19,16 @@
 // the type grammar is mutually recursive: a generic argument is a type, and a type may be a
 // generic application. both work on bare ValueTypes, only the public entry point makes a node
 static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload);
+
+AST::Symbol *Parser::find_unqualified_type(Parser::Payload &payload, const std::string &name, const AST::Namespace &from)
+{
+    if (const AST::ImportBinding *imp = AST::item_import_for(
+            AST::file_of(payload.context), payload.collector, name)) {
+        return payload.collector.namespaces.find_symbol(imp->target_name, *imp->target_namespace);
+    }
+
+    return payload.collector.namespaces.find_symbol_in_scope(name, from);
+}
 
 bool Parser::starts_callable_type(Parser::Cursor &cursor, size_t offset)
 {
@@ -410,8 +422,7 @@ static std::optional<std::vector<AST::ValueType>> resolve_constraint_atom(Parser
 
     // the namespace this constraint is *written* in, searched outward - so a block-local type is
     // nameable inside the block that declared it and a file-scope one still resolves from inside a block
-    auto symbol = payload.collector.namespaces.find_symbol_in_scope(
-        name, *payload.context.current_namespace);
+    auto symbol = find_unqualified_type(payload, name, *payload.context.current_namespace);
     if (symbol && symbol->type() == AST::SymbolType::t_type) {
         auto *decl = symbol->node.unsafe_ptr<AST::TypeDeclNode>();
         refuse_invisible_type(payload, *decl, payload.cursor.current());
@@ -444,8 +455,8 @@ static AST::TypeDeclNode *try_parse_member_type_chain(Parser::Payload &payload, 
     // searched *outward* from it, so an owner written unqualified is found wherever it is in scope -
     // including from inside another nested type's body, which parses in a namespace named after its own
     // owner, and including a block-local owner declared beside this use
-    auto *symbol = payload.collector.namespaces.find_symbol_in_scope(
-        cursor.current().value(), *payload.context.current_namespace);
+    auto *symbol = find_unqualified_type(
+        payload, cursor.current().value(), *payload.context.current_namespace);
 
     if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
         return nullptr;
@@ -1114,7 +1125,7 @@ static std::optional<AST::ValueType> parse_value_type(Parser::Payload &payload)
             // the same name, or `geometry::Point` would quietly answer with the root's `Point`
             auto struct_symbol = is_qualified
                 ? payload.collector.namespaces.find_symbol(token.value(), *lookup_namespace)
-                : payload.collector.namespaces.find_symbol_in_scope(token.value(), *lookup_namespace);
+                : find_unqualified_type(payload, token.value(), *lookup_namespace);
 
             if (struct_symbol && struct_symbol->type() == AST::SymbolType::t_type) {
                 user_type_decl = struct_symbol->node.unsafe_ptr<AST::TypeDeclNode>();

@@ -1,0 +1,2 @@
+// the library arrives because pkgapp requires it, and vendor/libhello is on disk
+echo libhello::answer();

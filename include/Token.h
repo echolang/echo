@@ -89,6 +89,7 @@ public:
         t_break,                    // break
         t_continue,                 // continue
         t_namespace,                // namespace
+        t_use,                      // use
         t_namespace_sep,            // ::
         t_ptr,                      // ptr
         t_weak,                     // weak

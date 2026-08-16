@@ -4,7 +4,7 @@ expect: fail
 --- OUT --->
 [error] InvalidAttributeValue  module.eco:10:12
 
-  git dependencies are not resolved yet - a dependency is a path to a manifest that is already on disk. Vendor the module and name it with a path.
+  git dependencies are not resolved yet - write '#[requires: "name" { git: "...", version: "..." }]' and run `epm install`, or vendor the module and name it with a path.
 
    9 | 
   10 | #[depends: git { url: "https://github.com/example/thing", rev: "v1.2.0" }]

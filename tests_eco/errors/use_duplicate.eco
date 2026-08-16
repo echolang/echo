@@ -1,0 +1,18 @@
+namespace a;
+
+function f() : int32
+{
+    return 1;
+}
+
+namespace b;
+
+function f() : int32
+{
+    return 2;
+}
+
+namespace app;
+
+use a::f;
+use b::f;

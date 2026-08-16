@@ -60,6 +60,11 @@ namespace AST
         // payload sitting beside it
         TokenSpan tag_span;
 
+        // the tag's decoded text, or empty when there is none. stored rather than re-read off
+        // tag_span: a string tag's token still holds its quotes, and tag() has to answer the
+        // decoded name - `"libcurl" { ... }` is the package libcurl
+        std::string tag_text;
+
         std::string text;                     // t_string, decoded - or t_name, verbatim
         int64_t integer = 0;                  // t_int
         double number = 0.0;                  // t_float

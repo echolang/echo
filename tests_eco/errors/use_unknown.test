@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] UnknownUse  use_unknown.eco:1:1
+
+  Unknown namespace 'no::such'.
+
+  1 | use no::such::thing;
+    : ^^^^^^^^^^^^^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

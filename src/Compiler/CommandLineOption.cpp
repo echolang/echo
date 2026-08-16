@@ -230,6 +230,24 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             {}, nullptr
         },
         {
+            Opt::t_package_dir, "package-dir", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_inputs,
+            accepts::compiling, 0, ExclusionGroup::t_none,
+            "<dir>", "",
+            "directory that holds vendored packages",
+            "Override the search for 'vendor/':\n"
+            "  echoc build --package-dir /tmp/pkgs -o app\n"
+            "A '#[requires: \"libcurl\"]' resolves to '<dir>/libcurl'. Without this flag the "
+            "package directory is 'vendor/' beside the entry manifest, or the ancestor named "
+            "'vendor' when the entry itself sits inside 'vendor/<pkg>' or "
+            "'vendor/<vendor>/<pkg>' - so 'cd vendor/echolang/libcurl && echoc test' still "
+            "finds the project's other packages. A 'vendor/' further up, past another "
+            "module.eco, is not consulted.\n"
+            "It is not an input to a module's cache key: paths are folded as basenames, and "
+            "swapping one vendored tree for another changes the source bytes.",
+            {}, nullptr
+        },
+        {
             Opt::t_link, "link", nullptr, '\0',
             OptionArity::t_repeated_value, OptionCategory::t_inputs,
             accepts::compiling, 0, ExclusionGroup::t_none,
@@ -531,6 +549,16 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
                     "generic instances and rewired calls",
                     "Which generic instances were minted, which call sites were rewired to them, and which structs "
                     "were instantiated. When a generic goes wrong, start here rather than in the IR."
+                },
+                {
+                    "manifest", accepts::compiling, code_of(PrintKind::t_manifest),
+                    "the named manifests, as JSON",
+                    "Dump each named manifest as JSON and stop. Unlike every other --print value this is an "
+                    "answer, not a dump of something the compiler built: it does not resolve the module graph, "
+                    "so a '#[requires:]' that is not on disk yet is still readable.\n"
+                    "epm is why. It must not re-implement the attribute grammar, and it reads a manifest "
+                    "*before* it has fetched anything. Combine this with another --print value and it is "
+                    "refused: those other values need a compile."
                 }
             },
             nullptr

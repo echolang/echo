@@ -15,6 +15,7 @@
 #include "AST/LoopControlNode.h"
 #include "AST/MemberAccessNode.h"
 #include "AST/NamespaceDeclNode.h"
+#include "AST/UseDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/NullNode.h"
 #include "AST/OperatorNode.h"
@@ -153,6 +154,7 @@ const TokenReference *source_token_of(const Node &node)
         // a namespace declaration is a header line with no single token standing for it, and a
         // NamespaceNode is a marker a pass left behind. Neither is ever a position anybody wants
         case NodeType::n_namespace_decl:
+        case NodeType::n_use_decl:
         case NodeType::n_namespace:
             return nullptr;
 

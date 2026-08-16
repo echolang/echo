@@ -19,6 +19,7 @@ namespace
         case AST::NodeType::n_const_decl:
         case AST::NodeType::n_attribute:
         case AST::NodeType::n_namespace_decl:
+        case AST::NodeType::n_use_decl:
         case AST::NodeType::n_namespace:
             return true;
 

@@ -1,0 +1,13 @@
+modules: packages/bad_name
+expect: fail
+
+--- OUT --->
+[error] InvalidAttributeValue  module.eco:2:13
+
+  '../escape' is not a usable package name - it becomes a directory under 'vendor/', so each component must be a real segment (not '.', '..', empty, or a backslash).
+
+  1 | #[module: "badname"]
+  2 | #[requires: "../escape" { git: "https://x", version: "^1" }]
+    :             ^^^^^^^^^^^
+  3 | #[sources: "src/*.eco"]
+

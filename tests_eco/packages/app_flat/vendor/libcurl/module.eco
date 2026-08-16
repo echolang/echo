@@ -1,0 +1,11 @@
+/*
+ * This package requires libjson. The compiler must resolve that against the
+ * *root* vendor/, not a nested vendor/libcurl/vendor/.
+ */
+
+#[module: "libcurl"]
+#[version: "0.1.0"]
+
+#[requires: "libjson" { git: "https://example.com/libjson", version: "^0.2" }]
+
+#[sources: "src/*.eco"]

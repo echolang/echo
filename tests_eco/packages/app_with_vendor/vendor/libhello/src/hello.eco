@@ -1,0 +1,6 @@
+namespace libhello;
+
+public function answer() : int32
+{
+    return 42;
+}

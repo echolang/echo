@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] attribute_unknown.eco:7:3
 
-  unknown attribute 'bultin', expected one of: inline, implicit, intrinsic, builtin, core, unique, group, module, version, depends, sources, target, link, cc, build_dir
+  unknown attribute 'bultin', expected one of: inline, implicit, intrinsic, builtin, core, unique, group, module, version, depends, sources, target, link, cc, build_dir, requires
 
   6 | // here without a word, taking a whole platform's block with it.
   7 | #[bultin: "size"]

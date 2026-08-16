@@ -3,6 +3,8 @@
 #include "AST/ASTBundle.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTFile.h"
+#include "AST/ASTImport.h"
 #include "AST/ASTNamespace.h"
 #include "AST/ASTSymbol.h"
 #include "AST/ConstRefExprNode.h"
@@ -190,8 +192,25 @@ ConstDeclNode *ConstantExpander::resolve(ConstRefExprNode &ref)
         return refuse_if_later_module(*decl, ref) ? nullptr : decl;
     }
 
+    const Namespace *lookup = ref.lookup_namespace;
+    bool qualified = ref.is_qualified;
+    std::string imported_name = ref.imported_name;
+
+    // a same-module constant may not have existed when the reference was parsed, so the stamp
+    // is missing. by now pass 2 has finished and finalize_file_imports has classified the
+    // binding - ask again rather than trusting only the parse-time rewrite
+    if (!qualified) {
+        File *file = ref.token_name.file() != nullptr ? ref.token_name.file() : _current_file;
+        if (file != nullptr
+            && apply_item_import(*file, _collector, ref.token_name.value(), lookup, imported_name)) {
+            qualified = true;
+        }
+    }
+
+    const std::string &name = imported_name.empty() ? ref.token_name.value() : imported_name;
+
     ConstDeclNode *decl = find_constant(
-        _collector.namespaces, ref.token_name.value(), ref.lookup_namespace, ref.is_qualified);
+        _collector.namespaces, name, lookup, qualified);
 
     if (decl == nullptr) {
         _collector.collect_issue<Issue::UnknownConstant>(

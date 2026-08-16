@@ -1,0 +1,5 @@
+use std::math;
+use std::math::sqrt;
+
+echo math::sqrt(9.0);
+echo sqrt(16.0);

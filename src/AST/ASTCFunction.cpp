@@ -239,7 +239,7 @@ std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(
 )
 {
     if (node.is_static()) {
-        auto statics = find_static_functions(node.static_owner.get_complex_type(), node.token_name.value());
+        auto statics = find_static_functions(node.static_owner.get_complex_type(), node.lookup_name());
 
         if (!statics.empty()) {
             return statics;
@@ -247,14 +247,14 @@ std::vector<AST::FunctionDeclNode *> AST::function_ref_candidates(
 
         // a method of that name, so `&Type::method` is refused by c_function_ref_refusal
         // rather than as an unknown name
-        return find_member_functions(node.static_owner.get_complex_type(), node.token_name.value());
+        return find_member_functions(node.static_owner.get_complex_type(), node.lookup_name());
     }
 
     if (node.lookup_namespace == nullptr) {
         return {};
     }
 
-    return functions.overloads(node.token_name.value(), *node.lookup_namespace);
+    return functions.overloads(node.lookup_name(), *node.lookup_namespace);
 }
 
 AST::FunctionRefExprNode *AST::function_ref_of(AST::ExprNode *expr)

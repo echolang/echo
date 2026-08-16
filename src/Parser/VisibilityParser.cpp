@@ -91,6 +91,12 @@ Parser::VisibilityPrefix Parser::consume_declaration_visibility(
     else if (starts_testdecl(payload.cursor)) {
         refuse_visibility_prefix(payload, prefix, k_test_visibility_refusal);
     }
+    else if (payload.cursor.is_type(Token::Type::t_use)) {
+        refuse_visibility_prefix(
+            payload,
+            prefix,
+            "A 'use' is a file-local alias, not a declaration - there is nobody for a modifier to describe.");
+    }
     else if (!starts_funcdecl(payload.cursor) && !starts_typedecl(payload.cursor)
         && !starts_constdecl(payload) && !payload.cursor.is_type(Token::Type::t_extern)) {
         refuse_visibility_prefix(

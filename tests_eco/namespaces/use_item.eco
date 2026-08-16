@@ -1,0 +1,14 @@
+namespace geometry;
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+namespace app;
+
+use geometry::Point;
+
+Point $p = Point(3, 4);
+echo $p->x + $p->y;

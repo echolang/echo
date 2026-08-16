@@ -44,6 +44,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
+#include "AST/UseDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/AttributeNode.h"
 #include "AST/TypeDeclNode.h"

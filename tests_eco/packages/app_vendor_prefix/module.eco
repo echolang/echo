@@ -1,0 +1,11 @@
+/*
+ * Requires a package whose name is a vendor prefix. The compiler resolves
+ * echolang/libhello against vendor/echolang/libhello.
+ */
+
+#[module: "prefixapp"]
+#[version: "0.1.0"]
+
+#[requires: "echolang/libhello" { git: "https://example.com/libhello", version: "^1.0" }]
+
+#[sources: "src/*.eco"]

@@ -9,6 +9,7 @@
 #include "AST/VarNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/ASTCallResolution.h"
+#include "AST/ASTImport.h"
 #include "AST/ASTMemberLookup.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
@@ -271,6 +272,18 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
 
     auto funcname_token = payload.cursor.current();
 
+    const AST::Namespace *imported_ns = nullptr;
+    std::string imported_name;
+    const bool may_import = requested_namespace == nullptr
+        && !lookup.shorthand_dot.has_value()
+        && !lookup.static_owner.has_complex_type();
+    const bool imported = may_import && AST::apply_item_import(
+        AST::file_of(payload.context),
+        payload.collector,
+        funcname_token.value(),
+        imported_ns,
+        imported_name);
+
     // skip the function name
     payload.cursor.skip();
 
@@ -338,6 +351,10 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     }
     else if (lookup.static_owner.has_complex_type()) {
         funcall.static_owner = lookup.static_owner;
+    }
+    else if (imported) {
+        funcall.lookup_namespace = imported_ns;
+        funcall.imported_name = std::move(imported_name);
     }
     else {
         funcall.lookup_namespace = requested_namespace ? requested_namespace : payload.context.current_namespace;

@@ -1,0 +1,2 @@
+// this module is only here so the manifest has a source; the program is the case file
+function unused() : void {}

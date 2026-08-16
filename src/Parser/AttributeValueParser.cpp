@@ -289,15 +289,31 @@ bool Parser::parse_attribute_value(Parser::Payload &payload, AST::AttributeValue
     Parser::Cursor &cursor = payload.cursor;
     const Parser::Cursor::Snapshot start = cursor.snapshot();
 
-    // `name atom` is a tag applied to a payload; a name with nothing that starts a value after it is
-    // just a name. that is the whole of the lookahead, and the reason `#[core: array]` reads as one
-    const bool is_tagged = at_a_word(cursor)
+    // `tag atom` is a tag applied to a payload; a name or string with nothing that starts a value
+    // after it is just that atom. a string tag is what lets a package name stay free text:
+    // `#[requires: "libcurl" { ... }]` - a hyphenated name is not an identifier
+    const bool is_tagged =
+        (at_a_word(cursor) || cursor.is_type(Token::Type::t_string_literal))
         && Parser::starts_attribute_value(cursor, 1);
 
     TokenSpan tag_span;
+    std::string tag_text;
 
     if (is_tagged) {
-        tag_span = TokenSpan::of(cursor.current());
+        const TokenReference tag = cursor.current();
+        tag_span = TokenSpan::of(tag);
+
+        if (tag.type() == Token::Type::t_string_literal) {
+            if (std::optional<AST::StringLiteralError> error =
+                    AST::decode_string_literal(tag.value(), tag_text)) {
+                refuse(payload, tag, error->message);
+                return false;
+            }
+        }
+        else {
+            tag_text = tag.value();
+        }
+
         cursor.skip(); // the tag
     }
 
@@ -306,6 +322,7 @@ bool Parser::parse_attribute_value(Parser::Payload &payload, AST::AttributeValue
     }
 
     out.tag_span = tag_span;
+    out.tag_text = std::move(tag_text);
     out.span = span_between(cursor, start);
 
     return true;

@@ -8,6 +8,8 @@
 #include "Parser/ScopeParser.h"
 #include "Parser/SymbolParser.h"
 
+#include "AST/ASTImport.h"
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -149,6 +151,13 @@ void Parser::ModuleParser::parse_module(AST::Module &module, AST::Collector &col
         auto parser_payload = make_parser_payload(tfile, module, collector, Pass::t_declarations);
         parse_symbols(parser_payload);
     }
+    }
+
+    // lookups classify a `use` on demand. this sweep is only the refuse: after pass 2 every
+    // function and constant of this module exists, so a path that is still unknown is an error
+    // at the `use`, not at every call
+    for (auto &[file, tfile] : file_payloads) {
+        AST::finalize_file_imports(*file, collector);
     }
 
     // dump symbols

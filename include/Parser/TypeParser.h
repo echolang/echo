@@ -10,11 +10,17 @@
 namespace AST
 {
     class FunctionDeclNode;
+    class Namespace;
+    class Symbol;
 };
 
 namespace Parser
 {
     bool can_parse_type(Payload &payload);
+
+    // an unqualified type name, after a file-local `use`. the type grammar and the static-owner
+    // speculation share this so `use geometry::Point` then `Point::origin()` and `Point $p` agree
+    AST::Symbol *find_unqualified_type(Payload &payload, const std::string &name, const AST::Namespace &from);
 
     // does the callable type `function<R(P...)>` start at `offset`? the third of the three things the
     // `function` keyword introduces, and the only one that is a type - the sibling of

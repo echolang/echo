@@ -1,0 +1,3 @@
+#[module: "badname"]
+#[requires: "../escape" { git: "https://x", version: "^1" }]
+#[sources: "src/*.eco"]

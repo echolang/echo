@@ -21,6 +21,7 @@
 #include "Parser/LoopControlParser.h"
 #include "Parser/ForeachParser.h"
 #include "Parser/NamespaceParser.h"
+#include "Parser/UseParser.h"
 #include "Parser/AttributeParser.h"
 #include "Parser/TypeDeclParser.h"
 #include "Parser/ExternParser.h"
@@ -175,6 +176,9 @@ AST::ScopeNode & Parser::parse_scope(
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
+        }
+        else if (cursor.is_type(Token::Type::t_use)) {
+            parse_usedecl(payload, !block_token.has_value());
         }
         else if (starts_funcdecl(cursor)) {
             parse_funcdecl(payload, FuncDeclKind::t_normal, visibility);

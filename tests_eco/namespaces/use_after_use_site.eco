@@ -1,0 +1,18 @@
+namespace geometry;
+
+struct Point
+{
+    int32 $x;
+}
+
+namespace app;
+
+function run() : int32
+{
+    Point $p = Point(4);
+    return $p->x;
+}
+
+use geometry::Point;
+
+echo run();

@@ -78,6 +78,19 @@ TEST_CASE("a name followed by a value is a tag", "[attributes]")
     REQUIRE(parsed.value().text == "OpenGL");
 }
 
+TEST_CASE("a string may be a tag, so a package name stays free text", "[attributes]")
+{
+    // `#[requires: "libcurl" { version:, git: }]` - a hyphenated name is not an identifier
+    ParsedAttribute parsed = attribute_of(
+        "core: \"lib-curl\" { version: \"^0.1\", git: \"https://x\" }");
+
+    REQUIRE(parsed.value().has_tag());
+    REQUIRE(parsed.value().tag() == "lib-curl");
+    REQUIRE(parsed.value().kind == AttributeValueKind::t_record);
+    REQUIRE(parsed.value().find_field("version") != nullptr);
+    REQUIRE(AST::attribute_value_spelling(parsed.value()).find("\"lib-curl\"") != std::string::npos);
+}
+
 TEST_CASE("one token of lookahead is what separates a tag from a name", "[attributes]")
 {
     // `array` is followed by the `]` that closes the attribute, which starts no value - so it is a

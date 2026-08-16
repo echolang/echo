@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] use_public.eco:1:1
+
+  'public' cannot be written here. A 'use' is a file-local alias, not a declaration - there is nobody for a modifier to describe.
+
+  1 | public use std::math;
+    : ^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

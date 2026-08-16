@@ -1,5 +1,7 @@
 #include "Parser/NamespaceParser.h"
 
+#include "AST/ASTImport.h"
+
 bool is_part_of_namespace_token(Token::Type type)
 {
     return type == Token::Type::t_identifier || type == Token::Type::t_namespace_sep;
@@ -15,9 +17,9 @@ size_t Parser::peek_past_namespace_prefix(Payload &payload, size_t offset)
 
 AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
 {
-    std::vector<std::string> ns_parts;
-
     auto start = payload.cursor.snapshot();
+
+    std::vector<std::string> ns_parts;
 
     while (
         !payload.cursor.is_done() &&
@@ -25,17 +27,21 @@ AST::NamespaceNode *Parser::parse_namespace(Payload &payload)
     {
         ns_parts.emplace_back(payload.cursor.current().value());
 
-        // skip the identifier
         payload.cursor.skip();
-
-        // skip the namespace separator
         payload.cursor.skip();
     }
 
-    // create the namespace node
     auto slice = payload.cursor.slice(start, payload.cursor.snapshot());
-    auto &ns = payload.collector.namespaces.retrieve(ns_parts);
-    auto &ns_node = payload.context.emplace_node<AST::NamespaceNode>(slice, &ns);
+
+    // mint: a missing child is created under the imported prefix so `math::nope::sqrt` is
+    // looked up in an empty set, not as `math::sqrt`. parse_static_owner passes false
+    AST::Namespace *ns = AST::namespace_from_written_path(
+        AST::file_of(payload.context),
+        payload.collector,
+        ns_parts,
+        /*mint=*/true);
+
+    auto &ns_node = payload.context.emplace_node<AST::NamespaceNode>(slice, ns);
 
     return &ns_node;
 }

@@ -1,0 +1,13 @@
+#[module: "printable"]
+#[version: "0.3.1"]
+#[epm::license: "MIT"]
+#[epm::description: "a thing that does a thing"]
+
+#[depends: "../scratch-lib"]
+#[requires: "libcurl" { git: "https://x", version: "^0.1" }]
+
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

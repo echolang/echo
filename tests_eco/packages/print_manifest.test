@@ -1,0 +1,13 @@
+flags: -p manifest
+modules: packages/print_manifest
+
+--- OUT --->
+{
+  "name": "printable",
+  "version": "0.3.1",
+  "depends": ["../scratch-lib"],
+  "requires": [{ "name": "libcurl", "version": "^0.1", "git": "https://x", "rev": null }],
+  "sources": ["src/*.eco"],
+  "targets": [{ "name": "tests", "kind": "test", "requires": [], "depends": [], "sources": ["tests/*.eco"] }],
+  "tools": [{ "namespace": "epm", "name": "license", "value": { "kind": "string", "text": "MIT" } }, { "namespace": "epm", "name": "description", "value": { "kind": "string", "text": "a thing that does a thing" } }]
+}

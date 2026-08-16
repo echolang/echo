@@ -1,0 +1,20 @@
+namespace geometry;
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+function make(int32 $x, int32 $y) : Point
+{
+    return Point($x, $y);
+}
+
+namespace app;
+
+use geometry;
+
+geometry::Point $p = geometry::make(3, 4);
+echo $p->x;
+echo $p->y;

@@ -307,7 +307,7 @@ namespace AST
         // the owner is the one that decides - falling through would let the registry's outward walk
         // answer with a free `f` from an enclosing scope
         if (call.static_owner.has_complex_type()) {
-            return find_static_functions(call.static_owner.get_complex_type(), call.token_function_name.value());
+            return find_static_functions(call.static_owner.get_complex_type(), call.lookup_name());
         }
 
         // a shorthand whose destination has not named an owner yet. empty rather than falling through
@@ -320,7 +320,7 @@ namespace AST
 
         // a free call: the namespace it was written in, searched outward by the registry
         if (call.lookup_namespace != nullptr) {
-            return _collector.functions.overloads(call.token_function_name.value(), *call.lookup_namespace);
+            return _collector.functions.overloads(call.lookup_name(), *call.lookup_namespace);
         }
 
         // a member call. the receiver is argument 0, already addressed by the parser as
@@ -335,7 +335,7 @@ namespace AST
             return {};
         }
 
-        return find_member_functions(receiver_type.get_complex_type(), call.token_function_name.value());
+        return find_member_functions(receiver_type.get_complex_type(), call.lookup_name());
     }
 
     CallResolver::Result CallResolver::choose_declaration(

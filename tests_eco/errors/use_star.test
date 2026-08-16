@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidUse  use_star.eco:1:16
+
+  There is no star import. Name the namespace, or name the items inside '{ }'.
+
+  1 | use std::math::*;
+    :                ^
+  2 | 
+
+1 error, nothing was compiled.

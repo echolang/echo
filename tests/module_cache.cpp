@@ -1,5 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "Parser/ManifestParser.h"
+#include "Parser/ManifestPackage.h"
+#include "Compiler/SettledPath.h"
+
 #include "subprocess.h"
 
 #include <filesystem>
@@ -588,4 +592,160 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         const ProcessResult ran = run_capturing(quoted(app_dir / "out") + " 2>&1");
         REQUIRE(ran.output.find("42") != std::string::npos);
     }
+}
+
+TEST_CASE("a vendor path change alone does not change a module's key", "[cache][packages]")
+{
+    // paths are folded as basenames, so copying a vendored tree to another directory must not
+    // perturb the hex. swapping the *content* of vendor/libhello would, and that is the point
+    auto write_vendored = [](const fs::path &root) {
+        write_file(root / "module.eco",
+            "#[module: \"pkgapp\"]\n"
+            "#[version: \"0.1.0\"]\n"
+            "#[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+            "#[sources: \"src/*.eco\"]\n");
+        write_file(root / "src" / "app.eco", "echo libhello::answer();\n");
+        write_file(root / "vendor" / "libhello" / "module.eco",
+            "#[module: \"libhello\"]\n"
+            "#[version: \"1.0.0\"]\n"
+            "#[sources: \"src/*.eco\"]\n");
+        write_file(root / "vendor" / "libhello" / "src" / "hello.eco",
+            "namespace libhello;\n"
+            "public function answer() : int32 { return 42; }\n");
+    };
+
+    auto hex_of = [](const std::string &output, const std::string &module) {
+        const std::string line = line_starting_with(output, module);
+        std::istringstream fields(line);
+        std::string name;
+        std::string hex;
+        fields >> name >> hex;
+        return hex;
+    };
+
+    ScopedProject first("vendor_here");
+    write_vendored(first.root());
+
+    const ProcessResult a = first.echoc("build -o app --explain cache");
+    REQUIRE(a.exit_code == 0);
+    INFO(a.output);
+
+    const std::string hello_a = hex_of(a.output, "libhello");
+    const std::string app_a = hex_of(a.output, "pkgapp");
+    REQUIRE_FALSE(hello_a.empty());
+    REQUIRE_FALSE(app_a.empty());
+
+    ScopedProject second("vendor_elsewhere");
+    write_vendored(second.root());
+
+    const ProcessResult b = second.echoc("build -o app --explain cache");
+    REQUIRE(b.exit_code == 0);
+    INFO(b.output);
+
+    REQUIRE(hex_of(b.output, "libhello") == hello_a);
+    REQUIRE(hex_of(b.output, "pkgapp") == app_a);
+}
+
+TEST_CASE("resolve_package_dir does not pick an ancestor vendor/", "[cache][packages]")
+{
+    ScopedProject project("walk_bound");
+    const fs::path app = project.root() / "app";
+    const fs::path ancestor_vendor = project.root() / "vendor";
+    fs::create_directories(app);
+    fs::create_directories(ancestor_vendor);
+    // the stop: an ancestor `module.eco` is a project, not a package. without it the
+    // bounded walk would keep climbing and could hit an unrelated vendor/ on the machine
+    write_file(project.root() / "module.eco", "#[module: \"walk_bound\"]\n");
+
+    const fs::path got = Parser::resolve_package_dir(app, {});
+    REQUIRE(got == Compiler::canonical_or_absolute(app / "vendor"));
+    REQUIRE(got != Compiler::canonical_or_absolute(ancestor_vendor));
+}
+
+TEST_CASE("resolve_package_dir from inside a vendored package is the vendor dir", "[cache][packages]")
+{
+    ScopedProject project("inside_vendor");
+    const fs::path pkg = project.root() / "vendor" / "libhello";
+    fs::create_directories(pkg);
+
+    const fs::path got = Parser::resolve_package_dir(pkg, {});
+    REQUIRE(got == Compiler::canonical_or_absolute(project.root() / "vendor"));
+}
+
+TEST_CASE("resolve_package_dir from a vendor-prefixed package is still vendor/", "[cache][packages]")
+{
+    ScopedProject project("inside_prefixed");
+    const fs::path pkg = project.root() / "vendor" / "echolang" / "libhello";
+    fs::create_directories(pkg);
+
+    const fs::path got = Parser::resolve_package_dir(pkg, {});
+    REQUIRE(got == Compiler::canonical_or_absolute(project.root() / "vendor"));
+}
+
+TEST_CASE("a package name may be a vendor prefix", "[cache][packages]")
+{
+    REQUIRE(Parser::package_name_is_usable("libcurl"));
+    REQUIRE(Parser::package_name_is_usable("echolang/libcurl"));
+    REQUIRE(Parser::package_name_is_usable("github.com/echolang/libcurl"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("../escape"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("foo/../bar"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("foo//bar"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("/abs"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("foo/"));
+    REQUIRE_FALSE(Parser::package_name_is_usable("foo\\bar"));
+
+    std::string too_deep = "a";
+    for (int i = 1; i < Parser::k_max_package_name_depth; i++) {
+        too_deep += "/a";
+    }
+    REQUIRE(Parser::package_name_is_usable(too_deep));
+    REQUIRE_FALSE(Parser::package_name_is_usable(too_deep + "/a"));
+}
+
+TEST_CASE("a prefixed #[requires:] resolves under vendor/<prefix>/", "[cache][packages]")
+{
+    ScopedProject project("prefixed_require");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"prefapp\"]\n"
+        "#[requires: \"echolang/libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "src" / "app.eco", "echo libhello::answer();\n");
+    write_file(project.root() / "vendor" / "echolang" / "libhello" / "module.eco",
+        "#[module: \"libhello\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "vendor" / "echolang" / "libhello" / "src" / "hello.eco",
+        "namespace libhello;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    const ProcessResult ran = project.echoc("run");
+    INFO(ran.output);
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("42") != std::string::npos);
+}
+
+TEST_CASE("--package-dir overrides the vendor search", "[cache][packages]")
+{
+    ScopedProject project("package_dir_override");
+
+    write_file(project.root() / "module.eco",
+        "#[module: \"overapp\"]\n"
+        "#[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "src" / "app.eco", "echo libhello::answer();\n");
+    write_file(project.root() / "pkgs" / "libhello" / "module.eco",
+        "#[module: \"libhello\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+    write_file(project.root() / "pkgs" / "libhello" / "src" / "hello.eco",
+        "namespace libhello;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    const ProcessResult missing = project.echoc("run");
+    REQUIRE(missing.exit_code != 0);
+    REQUIRE(missing.output.find("not in 'vendor/'") != std::string::npos);
+
+    const ProcessResult found = project.echoc("run --package-dir pkgs");
+    INFO(found.output);
+    REQUIRE(found.exit_code == 0);
+    REQUIRE(found.output.find("42") != std::string::npos);
 }

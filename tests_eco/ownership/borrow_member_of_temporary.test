@@ -6,7 +6,7 @@
 2
 --- RAST --->
 // the borrow is taken out of the temporary, and the teardown runs after the call returns
-CHECK: call use(addrof<Node&>(ma<Node>(varref<Pair>(var($__temp1))->node)))
+CHECK: call read_node(addrof<Node&>(ma<Node>(varref<Pair>(var($__temp1))->node)))
 CHECK: call $deinit(addrof<Pair&>(varref<Pair>(var($__temp1))))
 
 // and the release of the member is *inside* `Pair`'s own teardown rather than beside the call. that is

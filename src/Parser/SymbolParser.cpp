@@ -9,6 +9,7 @@
 #include "Parser/OperatorDeclParser.h"
 #include "Parser/ConstDeclParser.h"
 #include "Parser/TestDeclParser.h"
+#include "Parser/UseParser.h"
 #include "Parser/VisibilityParser.h"
 
 #include "AST/ASTSymbol.h"
@@ -85,6 +86,14 @@ void Parser::parse_type_names(Parser::Payload &payload)
             }
 
             cursor.skip();
+            continue;
+        }
+
+        // a grouped `use` holds `{ }`, and this pass treats every `{` as a region. leaving those
+        // braces to the generic walk would put every later type in the file inside a fake block
+        if (cursor.is_type(Token::Type::t_use)) {
+            pending = Pending {};
+            parse_usedecl(payload, open_regions.empty());
             continue;
         }
 
@@ -346,6 +355,9 @@ void Parser::parse_declaration_surface(
         }
         else if (cursor.is_type(Token::Type::t_namespace)) {
             parse_namespacedecl(payload);
+        }
+        else if (cursor.is_type(Token::Type::t_use)) {
+            parse_usedecl(payload, !block_token.has_value());
         }
         else if (starts_constdecl(payload)) {
             // a compile-time constant, name *and* initializer, in this pass - the same standing a struct

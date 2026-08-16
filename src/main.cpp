@@ -207,6 +207,7 @@ static bool resolve_manifests(
     bool allow_project_discovery,
     const AST::DiagnosticRenderer &diagnostics,
     const Compiler::TargetFacts &facts,
+    const std::filesystem::path &package_dir_override,
     std::vector<Parser::ModuleManifest> &out,
     std::vector<std::filesystem::path> &out_roots
 )
@@ -257,6 +258,17 @@ static bool resolve_manifests(
     }
 
     Parser::ManifestScratch scratch(facts);
+
+    // one package directory for the whole invocation. a vendored module's own `#[requires:]`
+    // resolve here too, so the tree stays flat
+    if (!out_roots.empty()) {
+        scratch.package_dir = Parser::resolve_package_dir(
+            out_roots.front().parent_path(), package_dir_override);
+    }
+    else if (!package_dir_override.empty()) {
+        scratch.package_dir = Parser::resolve_package_dir({}, package_dir_override);
+    }
+
     if (!Parser::resolve_module_graph(roots, scratch, out)) {
         scratch.bundle.collector.print_issues(diagnostics);
         return false;
@@ -1456,7 +1468,7 @@ static bool resolve_invocation(
                 driver.modules,
                 !driver.no_stdlib,
                 driver.sources.empty(),
-                diagnostics, out.target_facts, out.manifests, out.roots)) {
+                diagnostics, out.target_facts, driver.package_dir, out.manifests, out.roots)) {
             return false;
         }
     }
@@ -2472,7 +2484,7 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
             driver.modules,
             /*with_stdlib=*/true,
             /*allow_project_discovery=*/true,
-            diagnostics, facts, manifests, roots)) {
+            diagnostics, facts, driver.package_dir, manifests, roots)) {
         return 1;
     }
 
@@ -2576,6 +2588,60 @@ int main_clean(const Compiler::DriverOptions &driver, const AST::DiagnosticRende
 // `environ` symbol it would otherwise have to read is spelled `_NSGetEnviron()` on Darwin and is not
 // portably addressable from IR anywhere. `run` forwards this to the JIT'd program; a `build`'s binary
 // gets its own from the OS
+// `--print manifest` is an answer: read the named manifests and stop, without resolving the
+// graph. epm uses this to parse a module.eco whose packages are not on disk yet
+static int main_print_manifest(
+    const Compiler::DriverOptions &driver,
+    const AST::DiagnosticRenderer &diagnostics
+)
+{
+    Compiler::TargetFacts facts;
+
+    if (!resolve_target_facts(driver, diagnostics, facts)) {
+        return 1;
+    }
+
+    std::vector<std::filesystem::path> named;
+
+    for (const std::string &module : driver.modules) {
+        named.push_back(module);
+    }
+
+    if (named.empty()) {
+        if (const std::optional<std::filesystem::path> discovered = discover_project_manifest()) {
+            named.push_back(discovered.value());
+        }
+    }
+
+    if (named.empty()) {
+        diagnostics.render_untyped(
+            "No Manifest",
+            "'--print manifest' needs a '-m' or a module.eco in the working directory.");
+        return 1;
+    }
+
+    Parser::ManifestScratch scratch(facts);
+    std::optional<std::filesystem::path> missing;
+    const std::optional<std::string> json = Parser::written_manifests_json(named, scratch, missing);
+
+    if (!json.has_value()) {
+        if (missing.has_value()) {
+            diagnostics.render_untyped(
+                "No Such Manifest",
+                fmt::format("{}: no such manifest - expected a manifest file or a directory holding "
+                    "a 'module.eco'.", missing->string()));
+        }
+        else {
+            scratch.bundle.collector.print_issues(diagnostics);
+        }
+
+        return 1;
+    }
+
+    std::cout << json.value();
+    return 0;
+}
+
 int main(int argc, char *argv[], char *envp[])
 {
     // **parse, then answer, then resolve.** Compiler::parse_command_line owns every rule about what the
@@ -2656,6 +2722,10 @@ int main(int argc, char *argv[], char *envp[])
     // onto
     if (capabilities.interactive && !driver.silent && !diagnostics.is_machine_readable()) {
         Compiler::ProgressReporter::instance().enable(std::cerr, capabilities);
+    }
+
+    if (driver.prints(Compiler::PrintKind::t_manifest)) {
+        return main_print_manifest(driver, diagnostics);
     }
 
     switch (driver.subcommand) {

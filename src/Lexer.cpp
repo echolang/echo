@@ -246,6 +246,7 @@ void Lexer::tokenize(TokenCollection &tokens, const std::string &input)
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_break);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_continue);
     ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_namespace);
+    ECHO_LEX_FNC_KEYWORD(lx_functions, Token::Type::t_use);
 
     // not a word keyword - `::` cannot collide with an identifier, so it stays a plain string
     ECHO_LEX_FNC_STRING(lx_functions, Token::Type::t_namespace_sep);

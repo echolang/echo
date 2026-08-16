@@ -19,8 +19,8 @@ namespace AST
     //
     // **an allow-list, not a deny-list**, and that direction is the content: a NodeType added without an
     // arm here counts as executable, so it is refused in a shared file rather than silently dropped from
-    // one. The six that pass are the shapes a file scope can hold that emit nothing on their own -
-    // a function, a type, a constant, an attribute and the two namespace nodes. **A `$var` is not among
+    // one. The seven that pass are the shapes a file scope can hold that emit nothing on their own -
+    // a function, a type, a constant, an attribute, a `use`, and the two namespace nodes. **A `$var` is not among
     // them**: a module-scope variable is storage plus an initializer that runs, which is the case that
     // reads most like a declaration and is not one.
     //

@@ -30,7 +30,7 @@ struct Box
     }
 }
 
-function use(Node& $n) : int32
+function read_node(Node& $n) : int32
 {
     echo 500;
     return $n->v;
@@ -38,5 +38,5 @@ function use(Node& $n) : int32
 
 $b = Box(4);
 echo 1;
-echo use($b->make()->node);
+echo read_node($b->make()->node);
 echo 2;

@@ -1,0 +1,6 @@
+namespace libcurl;
+
+public function via_json() : int32
+{
+    return libjson::tag();
+}

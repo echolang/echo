@@ -1,0 +1,12 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidUse  use_empty_group.eco:1:1
+
+  A grouped 'use' has to name at least one item.
+
+  1 | use std::math::{};
+    : ^^^^^^^^^^^^^^^^^^
+  2 | 
+
+1 error, nothing was compiled.

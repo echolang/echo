@@ -82,6 +82,11 @@ namespace Compiler
         // empty means "no --build-dir"; Compiler::BuildLayout::resolve is still the one arm order
         std::filesystem::path build_dir;
 
+        // empty means vendor/ beside the entry (or the ancestor named vendor when already
+        // inside vendor/<pkg> or vendor/<vendor>/<pkg>);
+        // the directory `#[requires:]` names are joined onto
+        std::filesystem::path package_dir;
+
         // `build` only, and **empty is legitimate**: a project whose manifest declares targets names its
         // own binaries. Whether an invocation that gave none needed one is settled where the manifest is
         std::filesystem::path output;

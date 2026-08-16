@@ -1,7 +1,10 @@
 #include "Parser/ExprParser.h"
 #include "Parser/MatchParser.h"
+#include "Parser/TypeParser.h"
 
 #include "AST/ConstRefExprNode.h"
+#include "AST/ASTImport.h"
+#include "AST/ASTSymbol.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTOps.h"
 #include "AST/ASTNullability.h"
@@ -868,19 +871,29 @@ namespace
             const auto &parts = shape.namespace_parts;
             const std::string owner_name = cursor.tokens[shape.name_offset].value();
 
-            const AST::Namespace *in = payload.context.current_namespace;
+            AST::Symbol *symbol = nullptr;
 
-            if (!parts.empty()) {
-                in = payload.collector.namespaces.get(parts);
+            if (parts.empty()) {
+                // a bare `Point::origin` after `use geometry::Point` - the same lookup a
+                // type in type position uses, so the two spellings cannot drift
+                symbol = Parser::find_unqualified_type(
+                    payload, owner_name, *payload.context.current_namespace);
+            }
+            else {
+                // `geometry::Point::origin` after `use geometry` - the same path walk
+                // parse_namespace uses, without minting, so a name that is a type stays silent
+                const AST::Namespace *in = AST::namespace_from_written_path(
+                    AST::file_of(payload.context),
+                    payload.collector,
+                    parts,
+                    /*mint=*/false);
 
                 if (in == nullptr) {
                     return nullptr;
                 }
-            }
 
-            auto *symbol = parts.empty()
-                ? payload.collector.namespaces.find_symbol_in_scope(owner_name, *in)
-                : payload.collector.namespaces.find_symbol(owner_name, *in);
+                symbol = payload.collector.namespaces.find_symbol(owner_name, *in);
+            }
 
             if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
                 return nullptr;
@@ -1456,6 +1469,17 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     ref.is_qualified = qualified;
     ref.static_owner = static_owner;
 
+    if (!qualified && !ref.is_static()) {
+        if (AST::apply_item_import(
+                AST::file_of(payload.context),
+                payload.collector,
+                cursor.current().value(),
+                ref.lookup_namespace,
+                ref.imported_name)) {
+            ref.is_qualified = true;
+        }
+    }
+
     cursor.skip();
 
     const auto candidates = AST::function_ref_candidates(ref, payload.collector.functions);
@@ -2018,10 +2042,26 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     // the name and where to look for it, and AST::ConstantExpander replaces it with a clone of the
     // constant's value - or reports an unknown constant, at this token
     if (cursor.is_type(Token::Type::t_identifier)) {
+        const AST::Namespace *lookup = ast_namespace != nullptr
+            ? ast_namespace
+            : payload.context.current_namespace;
+        bool qualified = ast_namespace != nullptr;
+        std::string imported_name;
+
+        if (!qualified) {
+            if (AST::apply_item_import(
+                    AST::file_of(payload.context),
+                    payload.collector,
+                    cursor.current().value(),
+                    lookup,
+                    imported_name)) {
+                qualified = true;
+            }
+        }
+
         auto &const_ref = payload.context.emplace_node<AST::ConstRefExprNode>(
-            cursor.current(),
-            ast_namespace != nullptr ? ast_namespace : payload.context.current_namespace,
-            /*is_qualified=*/ast_namespace != nullptr);
+            cursor.current(), lookup, qualified);
+        const_ref.imported_name = std::move(imported_name);
 
         cursor.skip();
 

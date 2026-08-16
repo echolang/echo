@@ -634,6 +634,7 @@ void LLVMCompiler::visitVar(AST::VarNode &node) { _struct.gen_var(node); }
 // structural nodes with no codegen of their own
 void LLVMCompiler::visitType(AST::TypeNode &node) {}
 void LLVMCompiler::visitNamespaceDecl(AST::NamespaceDeclNode &node) {}
+void LLVMCompiler::visit_use_decl(AST::UseDeclNode &node) {}
 void LLVMCompiler::visitNamespace(AST::NamespaceNode &node) {}
 void LLVMCompiler::visitAttribute(AST::AttributeNode &node) {}
 

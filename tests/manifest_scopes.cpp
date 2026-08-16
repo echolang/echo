@@ -337,3 +337,49 @@ TEST_CASE("a scoped dependency's own dependencies are compiled too", "[manifest_
     REQUIRE(ran.exit_code == 0);
     REQUIRE(ran.output.find("the_kit_answers") != std::string::npos);
 }
+
+TEST_CASE("a scoped #[requires:] is present for test and absent for build", "[manifest_scopes][packages]")
+{
+    ScopedProject project("scoped_requires");
+
+    write_file(project.root() / "app/module.eco",
+        "#[module: \"app\"]\n"
+        "#[sources: \"src/*.eco\"]\n"
+        "#[target: test] {\n"
+        "    #[sources: \"tests/*.eco\"]\n"
+        "    #[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "}\n");
+
+    write_file(project.root() / "app/src/api.eco",
+        "function real_value() : int32\n"
+        "{\n"
+        "    return 42;\n"
+        "}\n");
+
+    write_file(project.root() / "app/tests/api_test.eco",
+        "test the_package_agrees\n"
+        "{\n"
+        "    assert(real_value() == libhello::answer());\n"
+        "}\n");
+
+    write_file(project.root() / "app/vendor/libhello/module.eco",
+        "#[module: \"libhello\"]\n"
+        "#[sources: \"src/*.eco\"]\n");
+
+    write_file(project.root() / "app/vendor/libhello/src/hello.eco",
+        "namespace libhello;\n"
+        "public function answer() : int32 { return 42; }\n");
+
+    const ProcessResult ran = project.echoc("test --explain cache", project.root() / "app");
+    INFO(ran.output);
+
+    REQUIRE(ran.exit_code == 0);
+    REQUIRE(ran.output.find("the_package_agrees") != std::string::npos);
+    REQUIRE(ran.output.find("libhello") != std::string::npos);
+
+    const ProcessResult built = project.echoc("build --explain cache -o prog", project.root() / "app");
+    INFO(built.output);
+
+    REQUIRE(built.exit_code == 0);
+    REQUIRE(built.output.find("libhello") == std::string::npos);
+}

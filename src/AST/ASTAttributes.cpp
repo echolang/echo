@@ -4,7 +4,9 @@
 #include <fmt/ranges.h>
 
 #include <algorithm>
+#include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -21,7 +23,7 @@ namespace
     constexpr std::string_view k_declaration_attributes[] = {
         "inline", "implicit", "intrinsic", "builtin", "core", "unique", "group" };
 
-    // and the manifest's eight, which reach this parser too: a `module.eco` is **Echo**, read by the real
+    // and the manifest's nine, which reach this parser too: a `module.eco` is **Echo**, read by the real
     // lexer and the real attribute parser into a scratch bundle. Leaving them out of the union made every
     // manifest in the tree report four unknown attributes at once.
     //
@@ -35,7 +37,7 @@ namespace
     // a build may need linked - or produce - can grow without this list growing with it, which is also why
     // neither name says what it is for beyond the tool it reaches
     constexpr std::string_view k_manifest_attributes[] = {
-        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir" };
+        "module", "version", "depends", "sources", "target", "link", "cc", "build_dir", "requires" };
 
     // and what each of them may do with a `{ ... }` scope. **A column of the table above rather than name
     // comparisons at the point of use**: a ninth manifest attribute has to state this or it does not
@@ -50,12 +52,33 @@ namespace
         { "sources",   AST::AttributeScoping::t_scopable },
         { "link",      AST::AttributeScoping::t_scopable },
         { "cc",        AST::AttributeScoping::t_scopable },
+        { "requires",  AST::AttributeScoping::t_scopable },
     };
 
     template <size_t N>
     bool contains(const std::string_view (&names)[N], const std::string &name)
     {
         return std::find(std::begin(names), std::end(names), name) != std::end(names);
+    }
+
+    bool split_tool_attribute_name(
+        std::string_view name,
+        std::string_view &ns,
+        std::string_view &rest)
+    {
+        const size_t sep = name.find("::");
+
+        if (sep == 0 || sep == std::string::npos || sep + 2 >= name.size()) {
+            return false;
+        }
+
+        if (name.find(":::") != std::string::npos || name.ends_with("::")) {
+            return false;
+        }
+
+        ns = name.substr(0, sep);
+        rest = name.substr(sep + 2);
+        return !ns.empty() && !rest.empty();
     }
 };
 
@@ -78,9 +101,29 @@ std::string AST::known_attribute_list()
         fmt::join(k_declaration_attributes, ", "), fmt::join(k_manifest_attributes, ", "));
 }
 
+std::optional<std::pair<std::string, std::string>> AST::tool_attribute_name(const std::string &name)
+{
+    std::string_view ns;
+    std::string_view rest;
+
+    if (!split_tool_attribute_name(name, ns, rest) || ns == "echoc") {
+        return std::nullopt;
+    }
+
+    return std::make_pair(std::string(ns), std::string(rest));
+}
+
+bool AST::is_reserved_manifest_namespace(const std::string &name)
+{
+    std::string_view ns;
+    std::string_view rest;
+
+    return split_tool_attribute_name(name, ns, rest) && ns == "echoc";
+}
+
 bool AST::is_known_manifest_attribute(const std::string &name)
 {
-    return contains(k_manifest_attributes, name);
+    return contains(k_manifest_attributes, name) || tool_attribute_name(name).has_value();
 }
 
 std::string AST::known_manifest_attribute_list()
@@ -94,8 +137,10 @@ AST::AttributeScoping AST::manifest_attribute_scoping(const std::string &name)
         std::begin(k_manifest_scoping), std::end(k_manifest_scoping),
         [&name](const auto &row) { return row.first == name; });
 
-    // only asked of a name is_known_manifest_attribute already accepted, and the two lists are the same
-    // eight - so this is the arm that says a ninth was added to one of them and not to the other
+    // a name missing from the scoping table is `t_module_only`. that is the right answer for a
+    // tool-namespace attribute (`#[epm::license:]`), which is accepted by is_known_manifest_attribute
+    // without a row here. it is also the arm that says a closed name was added to k_manifest_attributes
+    // and not to this table
     return found == std::end(k_manifest_scoping)
         ? AST::AttributeScoping::t_module_only : found->second;
 }

@@ -1,0 +1,11 @@
+/*
+ * A project that names a package. The compiler resolves the name against vendor/
+ * next to this manifest; epm is what would have put it there.
+ */
+
+#[module: "pkgapp"]
+#[version: "0.1.0"]
+
+#[requires: "libhello" { git: "https://example.com/libhello", version: "^1.0" }]
+
+#[sources: "src/*.eco"]

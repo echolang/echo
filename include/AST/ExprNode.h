@@ -102,6 +102,15 @@ namespace AST
         TokenReference token_function_name;
         std::vector<ExprNode*> arguments;
 
+        // the name the registry knows, when a `use` aliased it. empty means the token's own spelling.
+        // the token stays what was written, so a diagnostic still points at `sq` after
+        // `use std::math::sqrt as sq`
+        std::string imported_name;
+
+        const std::string &lookup_name() const {
+            return imported_name.empty() ? token_function_name.value() : imported_name;
+        }
+
         // explicit type arguments written at the call site, e.g. foo<int>(...). Empty when the
         // call relies on inference. The monomorphizer prefers these over inferred type args
         std::vector<TypeNode*> explicit_type_args;
@@ -597,6 +606,12 @@ namespace AST
 
         TokenReference token_amp;
         TokenReference token_name;
+
+        std::string imported_name;
+
+        const std::string &lookup_name() const {
+            return imported_name.empty() ? token_name.value() : imported_name;
+        }
 
         // the namespace a free-function name is looked up in. unused when the ref is static
         const Namespace *lookup_namespace = nullptr;

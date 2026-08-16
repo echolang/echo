@@ -1,0 +1,6 @@
+#[module: "missingpkg"]
+#[version: "0.1.0"]
+
+#[requires: "libhello" { git: "https://x", version: "^1" }]
+
+#[sources: "src/*.eco"]

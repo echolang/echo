@@ -1,0 +1,4 @@
+modules: packages/app_with_vendor
+
+--- OUT --->
+42

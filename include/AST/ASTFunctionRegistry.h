@@ -86,6 +86,16 @@ namespace AST
         // CallResolver::candidates_for, still hands back a copy by its own return type
         const std::vector<FunctionDeclNode *> &overloads(const std::string &name, const Namespace &ns) const;
 
+        // this namespace only, no outward walk. what a `use` asks when deciding whether a path
+        // names a function here, rather than one further out that a qualified call would still find
+        bool declares(const std::string &name, const Namespace &ns) const;
+
+        // the overload set in `ns` itself, or empty. no outward walk
+        const std::vector<FunctionDeclNode *> &declared_overloads(
+            const std::string &name,
+            const Namespace &ns
+        ) const;
+
         // the declaration already registered as written at this token, or null on the first pass
         // over it. this is the declaration-pass / body-pass reconciliation
         FunctionDeclNode *find_by_declaration_site(const TokenReference &declaration_token) const;

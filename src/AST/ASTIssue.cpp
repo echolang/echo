@@ -102,6 +102,26 @@ ISSUE_MESSAGE_FNC(UnknownConstant)
         constant_name, constant_name, constant_name);
 }
 
+ISSUE_MESSAGE_FNC(UnknownUse)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(DuplicateUse)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(AmbiguousUse)
+{
+    return _message;
+}
+
+ISSUE_MESSAGE_FNC(InvalidUse)
+{
+    return _message;
+}
+
 ISSUE_MESSAGE_FNC(LossOfPrecision)
 {
     return fmt::format("This operation results in a loss of precision: {}", _message);
@@ -389,12 +409,21 @@ ISSUE_MESSAGE_FNC(InvalidImplicitConversion) { return _message; }
 ISSUE_MESSAGE_FNC(InvalidAttributeValue) { return _message; }
 
 ISSUE_MESSAGE_FNC(UnknownManifestAttribute) { return _message; }
+ISSUE_MESSAGE_FNC(ReservedManifestAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(RepeatedManifestAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(MissingModuleAttribute) { return _message; }
 ISSUE_MESSAGE_FNC(UnusableModuleName) { return _message; }
 ISSUE_MESSAGE_FNC(InvalidManifestScope) { return _message; }
 ISSUE_MESSAGE_FNC(EmptySourcePattern) { return _message; }
 ISSUE_MESSAGE_FNC(UnresolvableDependency) { return _message; }
+
+ISSUE_MESSAGE_FNC(PackageNotVendored) { return _message; }
+
+std::vector<AST::IssueNote> AST::Issue::PackageNotVendored::notes() const
+{
+    return { IssueNote { NoteKind::t_note, "run `epm install`" } };
+}
+
 ISSUE_MESSAGE_FNC(DuplicateModuleName) { return _message; }
 ISSUE_MESSAGE_FNC(ModuleDependencyCycle) { return _message; }
 ISSUE_MESSAGE_FNC(NoSuchManifest) { return _message; }

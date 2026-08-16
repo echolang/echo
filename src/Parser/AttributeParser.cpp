@@ -71,23 +71,48 @@ AST::AttributeNode *Parser::parse_attribute(
         return nullptr;
     }
 
-    auto name_token = payload.cursor.current();
+    const TokenReference first_name = payload.cursor.current();
+
+    auto att_token_start = payload.cursor.snapshot();
+    payload.cursor.skip(); // skip the identifier
+
+    // a manifest accepts `ns::name` so a tool can carry metadata echoc does not own. parsed here
+    // rather than as two attributes, because the name is one token as far as every reader is
+    // concerned - AttributeNode::attribute_id is a TokenReference
+    std::string joined = first_name.value();
+
+    while (payload.cursor.is_type(Token::Type::t_namespace_sep)) {
+        payload.cursor.skip(); // `::`
+
+        if (!payload.cursor.is_type(Token::Type::t_identifier)) {
+            payload.collect_unexpected_token(Token::Type::t_identifier);
+            return step_over_the_bracket();
+        }
+
+        joined += "::";
+        joined += payload.cursor.current().value();
+        payload.cursor.skip();
+    }
+
+    const TokenReference name_token = joined == first_name.value()
+        ? first_name
+        : payload.context.make_virtual_token(joined, Token::Type::t_identifier, first_name);
 
     // **an unknown attribute is refused here**, at the name, rather than accepted and left for a consumer
     // that will never come looking. Until this check existed, `#[bultin: "size_of"]` parsed, attached and
     // did nothing - leaving a bodyless function with no implementation and no diagnostic anywhere.
     //
     // reported and then *skipped past* rather than returned as null, so that the declaration after it still
-    // parses: one misspelled attribute should cost one message, not the whole file
+    // parses: one misspelled attribute should cost one message, not the whole file.
+    //
+    // a manifest leaves this to read_manifest_attributes, which knows the closed list *and* the
+    // tool-namespace escape - a source file has no such escape
     if (!payload.is_manifest && !AST::is_known_attribute(name_token.value())) {
         payload.collector.collect_issue<AST::Issue::GenericError>(
             payload.context.code_ref(name_token),
             "unknown attribute '" + name_token.value() + "', expected one of: "
                 + AST::known_attribute_list());
     }
-
-    auto att_token_start = payload.cursor.snapshot();
-    payload.cursor.skip(); // skip the identifier
 
     // if the next token is a closing square bracket, then we have a simple attribute
     if (payload.cursor.is_type(Token::Type::t_close_bracket)) {

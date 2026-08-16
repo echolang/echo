@@ -1,0 +1,6 @@
+namespace libjson;
+
+public function tag() : int32
+{
+    return 7;
+}

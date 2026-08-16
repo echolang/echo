@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace AST
 {
@@ -35,6 +37,12 @@ namespace AST
     // direction nothing catches
     bool is_known_manifest_attribute(const std::string &name);
     std::string known_manifest_attribute_list();
+
+    // a `<ns>::<name>` whose namespace echoc does not own. nullopt for a closed name, a reserved
+    // `echoc::` name, or a malformed `::`. `is_reserved_manifest_namespace` is the reserved half, so
+    // a diagnostic can say reserved rather than unknown
+    std::optional<std::pair<std::string, std::string>> tool_attribute_name(const std::string &name);
+    bool is_reserved_manifest_namespace(const std::string &name);
 
     // what a manifest attribute may do with a `#[target: ...] { ... }` scope.
     //

@@ -537,6 +537,7 @@ TEST_CASE( "Keywords are whole words", "[lexer]" )
         { "break", Token::Type::t_break },
         { "continue", Token::Type::t_continue },
         { "namespace", Token::Type::t_namespace },
+        { "use", Token::Type::t_use },
         { "ptr", Token::Type::t_ptr },
         { "null", Token::Type::t_null },
         { "struct", Token::Type::t_struct },

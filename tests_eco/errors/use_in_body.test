@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidUse  use_in_body.eco:3:9
+
+  A 'use' cannot appear inside a body - it is a file-local alias, like 'namespace'.
+
+  2 | {
+  3 |     use std::math;
+    :         ^^^
+  4 | }
+
+1 error, nothing was compiled.

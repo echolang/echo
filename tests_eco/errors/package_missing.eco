@@ -1,0 +1,2 @@
+// the named manifest requires a package that is not in vendor/
+echo 1;

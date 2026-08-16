@@ -6,6 +6,7 @@
 #include "Compiler/SettledPath.h"
 
 #include "Parser/AttributeParser.h"
+#include "Parser/ManifestPackage.h"
 #include "Parser/ModuleParser.h"
 #include "Parser/SymbolParser.h"
 
@@ -181,6 +182,19 @@ void report_at(const ManifestReport &into, uint32_t line, std::string message)
     report_manifest<Issue>(into.collector, into.module, into.file, line == 0 ? 1 : line, std::move(message));
 }
 
+template <typename Issue>
+void report_span(const ManifestReport &into, const TokenSpan &span, std::string message)
+{
+    if (!span.is_valid()) {
+        report_at<Issue>(into, 1, std::move(message));
+        return;
+    }
+
+    into.collector.collect_issue<Issue>(
+        AST::CodeRef { &into.module, span.slice() },
+        std::move(message));
+}
+
 // the attribute values, straight off the nodes the declaration pass collected. `sources` and `depends` come
 // back as written, because both resolve against the manifest's directory and neither can be checked here.
 // `#[depends: ...]`, in every shape it takes.
@@ -216,8 +230,8 @@ void read_manifest_depends(
             }
 
             reader.refuse(entry->span,
-                "git dependencies are not resolved yet - a dependency is a path to a manifest that is "
-                "already on disk. Vendor the module and name it with a path.");
+                "git dependencies are not resolved yet - write '#[requires: \"name\" { git: \"...\", "
+                "version: \"...\" }]' and run `epm install`, or vendor the module and name it with a path.");
             continue;
         }
 
@@ -306,6 +320,7 @@ struct WrittenTarget
     bool has_scope = false;
     std::vector<std::string> scoped_sources;
     std::vector<std::string> scoped_depends;
+    std::vector<Parser::ModuleRequirement> scoped_requirements;
     std::vector<Compiler::LinkRequirement> scoped_link;
     Compiler::CBuildSpec scoped_cc;
 };
@@ -472,11 +487,18 @@ bool read_manifest_attributes(
         const uint32_t line = attribute->attribute_id.line();
 
         if (!AST::is_known_manifest_attribute(name)) {
-            payload.collector.collect_issue<AST::Issue::UnknownManifestAttribute>(
-                payload.context.code_ref(attribute->attribute_id),
-                fmt::format(
-                    "unknown manifest attribute '{}', expected one of: {}",
-                    name, AST::known_manifest_attribute_list()));
+            if (AST::is_reserved_manifest_namespace(name)) {
+                payload.collector.collect_issue<AST::Issue::ReservedManifestAttribute>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    "the 'echoc::' namespace is reserved for the compiler.");
+            }
+            else {
+                payload.collector.collect_issue<AST::Issue::UnknownManifestAttribute>(
+                    payload.context.code_ref(attribute->attribute_id),
+                    fmt::format(
+                        "unknown manifest attribute '{}', expected one of: {}",
+                        name, AST::known_manifest_attribute_list()));
+            }
             return false;
         }
 
@@ -561,6 +583,13 @@ bool read_manifest_attributes(
                 written, reader,
                 scope.has_value() ? out_targets[scope.value()].scoped_depends : out_depends);
         }
+        else if (name == "requires") {
+            Parser::read_manifest_requires(
+                written, reader,
+                scope.has_value()
+                    ? out_targets[scope.value()].scoped_requirements
+                    : out.requirements);
+        }
         else if (name == "sources") {
             std::vector<std::string> &into =
                 scope.has_value() ? out_targets[scope.value()].scoped_sources : out_sources;
@@ -635,6 +664,14 @@ bool read_manifest_attributes(
             Compiler::apply_cc_attribute(
                 written, out.directory, reader,
                 scope.has_value() ? out_targets[scope.value()].scoped_cc : out.cc);
+        }
+        else if (const auto tool_name = AST::tool_attribute_name(name)) {
+            // a namespace echoc does not own. shape of the value is the tool's job
+            Parser::ToolAttribute tool;
+            tool.ns = tool_name->first;
+            tool.name = tool_name->second;
+            tool.value = written;
+            out.tools.push_back(std::move(tool));
         }
 
         // **drained once, after every arm.** A refusal the reader accumulated is what makes an arm's value
@@ -760,6 +797,32 @@ bool resolve_manifest_depend_paths(
     return true;
 }
 
+// each requirement's name against the invocation's package directory, appended to the same
+// `depends` vector path dependencies already fill - so the DFS, the cycle report and the cache
+// key never learn that a requirement was not a path
+bool resolve_manifest_require_paths(
+    const std::vector<Parser::ModuleRequirement> &requirements,
+    const std::filesystem::path &package_dir,
+    std::vector<std::filesystem::path> &into,
+    const ManifestReport &report
+)
+{
+    for (const Parser::ModuleRequirement &requirement : requirements) {
+        const std::optional<std::filesystem::path> resolved =
+            Parser::manifest_for_requirement(requirement, package_dir);
+
+        if (!resolved.has_value()) {
+            report_span<AST::Issue::PackageNotVendored>(report, requirement.span, fmt::format(
+                "the package \"{}\" is not in 'vendor/'.", requirement.name));
+            return false;
+        }
+
+        into.push_back(Compiler::canonical_or_absolute(resolved.value()));
+    }
+
+    return true;
+}
+
 // out.sources, from the patterns as written.
 //
 // **a manifest is never one of its own sources.** It is an Echo file living in the directory it describes,
@@ -822,12 +885,13 @@ bool expand_cc_sources(
 bool resolve_manifest_targets(
     const std::vector<WrittenTarget> &written,
     Parser::ModuleManifest &out,
+    const std::filesystem::path &package_dir,
     const ManifestReport &into
 )
 {
     // a scope's own patterns, through the same expander the module's went through - so `*` means one thing
     // in a manifest wherever it is written, and a pattern matching nothing is the same refusal either way
-    const auto expand_scope = [&out, &into](
+    const auto expand_scope = [&out, &into, &package_dir](
         const WrittenTarget &target, Parser::ModuleTarget &settled) {
         if (!target.scoped_sources.empty()
             && !expand_manifest_patterns(
@@ -836,6 +900,11 @@ bool resolve_manifest_targets(
         }
 
         if (!resolve_manifest_depend_paths(target.scoped_depends, out, settled.depends, into)) {
+            return false;
+        }
+
+        if (!resolve_manifest_require_paths(
+                target.scoped_requirements, package_dir, settled.depends, into)) {
             return false;
         }
 
@@ -888,6 +957,9 @@ bool resolve_manifest_targets(
         settled.kind = target.kind;
         settled.groups = target.groups;
         settled.has_scope = target.has_scope;
+        settled.sources_as_written = target.scoped_sources;
+        settled.depends_as_written = target.scoped_depends;
+        settled.requirements = target.scoped_requirements;
 
         if (!expand_scope(target, settled)) {
             return false;
@@ -949,10 +1021,28 @@ std::vector<std::filesystem::path> every_dependency(const Parser::ModuleManifest
 }
 
 // the body of the read, taking the scratch state so a graph walk can reuse it
+void record_written_targets(
+    const std::vector<WrittenTarget> &written,
+    Parser::ModuleManifest &out)
+{
+    for (const WrittenTarget &target : written) {
+        Parser::ModuleTarget settled;
+        settled.name = target.name;
+        settled.kind = target.kind;
+        settled.groups = target.groups;
+        settled.has_scope = target.has_scope;
+        settled.sources_as_written = target.scoped_sources;
+        settled.depends_as_written = target.scoped_depends;
+        settled.requirements = target.scoped_requirements;
+        out.targets.push_back(std::move(settled));
+    }
+}
+
 bool read_manifest_with(
     Parser::ManifestScratch &scratch,
     const std::filesystem::path &path,
-    Parser::ModuleManifest &out)
+    Parser::ModuleManifest &out,
+    Parser::ManifestRead read)
 {
     AST::Module &module = scratch.fresh_module();
     AST::File &file = module.add_file(path);
@@ -991,7 +1081,7 @@ bool read_manifest_with(
             parser.make_parser_payload(tokenized, module, scratch.bundle.collector, Parser::Pass::t_type_names);
 
         // so parse_attribute leaves the unknown-name diagnostic to read_manifest_attributes below, which
-        // knows the four names a manifest actually accepts
+        // knows the closed list and the tool-namespace escape
         payload.is_manifest = true;
         Parser::parse_type_names(payload);
     }
@@ -1019,12 +1109,25 @@ bool read_manifest_with(
         }
     }
 
+    out.sources_as_written = sources_written;
+    out.depends_as_written = depends_written;
+
+    // `-p manifest` stops here: epm reads a module whose packages are not on disk yet, so
+    // expanding sources or resolving a `#[depends:]` / `#[requires:]` would be a fatal error
+    // about a path the author has not fetched
+    if (read == Parser::ManifestRead::t_written) {
+        record_written_targets(targets_written, out);
+        return true;
+    }
+
     // targets after the sources they name, and before everything else - an entry has to be checked
     // against the expanded list, and there is nothing in `cc` or `depends` that it depends on
     return expand_manifest_sources(sources_written, out, into)
-        && resolve_manifest_targets(targets_written, out, into)
+        && resolve_manifest_targets(targets_written, out, scratch.package_dir, into)
         && expand_cc_sources(out.cc, out, "this module", into)
-        && resolve_manifest_depend_paths(depends_written, out, out.depends, into);
+        && resolve_manifest_depend_paths(depends_written, out, out.depends, into)
+        && resolve_manifest_require_paths(
+            out.requirements, scratch.package_dir, out.depends, into);
 }
 
 };
@@ -1149,10 +1252,11 @@ void Parser::ManifestScratch::report(
 bool Parser::read_module_manifest(
     const std::filesystem::path &path,
     Parser::ManifestScratch &scratch,
-    Parser::ModuleManifest &out
+    Parser::ModuleManifest &out,
+    Parser::ManifestRead read
 )
 {
-    return read_manifest_with(scratch, path, out);
+    return read_manifest_with(scratch, path, out, read);
 }
 
 bool Parser::resolve_module_graph(
@@ -1196,7 +1300,7 @@ bool Parser::resolve_module_graph(
         }
 
         ModuleManifest manifest;
-        if (!read_manifest_with(scratch, next, manifest)) {
+        if (!read_manifest_with(scratch, next, manifest, Parser::ManifestRead::t_full)) {
             return false;
         }
 
@@ -1292,3 +1396,5 @@ bool Parser::resolve_module_graph(
 
     return true;
 }
+
+

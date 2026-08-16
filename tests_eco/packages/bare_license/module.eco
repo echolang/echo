@@ -1,0 +1,3 @@
+#[module: "barelicense"]
+#[license: "MIT"]
+#[sources: "src/*.eco"]

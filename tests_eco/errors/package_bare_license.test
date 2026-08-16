@@ -1,0 +1,13 @@
+modules: packages/bare_license
+expect: fail
+
+--- OUT --->
+[error] UnknownManifestAttribute  module.eco:2:3
+
+  unknown manifest attribute 'license', expected one of: module, version, depends, sources, target, link, cc, build_dir, requires
+
+  1 | #[module: "barelicense"]
+  2 | #[license: "MIT"]
+    :   ^^^^^^^
+  3 | #[sources: "src/*.eco"]
+

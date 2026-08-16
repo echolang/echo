@@ -66,6 +66,7 @@ namespace AST
         n_loop_control,
         n_foreach,
         n_namespace_decl,
+        n_use_decl,
         n_namespace,
         n_attribute,
         n_type_decl,

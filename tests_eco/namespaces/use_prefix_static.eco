@@ -1,0 +1,20 @@
+namespace geometry;
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+
+    static function origin() : Point
+    {
+        return Point(0, 0);
+    }
+}
+
+namespace app;
+
+use geometry;
+
+geometry::Point $p = geometry::Point::origin();
+echo $p->x;
+echo $p->y;

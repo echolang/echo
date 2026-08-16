@@ -1,0 +1,15 @@
+modules: packages/app_missing
+expect: fail
+
+--- OUT --->
+[error] PackageNotVendored  module.eco:4:13
+
+  the package "libhello" is not in 'vendor/'.
+
+  3 | 
+  4 | #[requires: "libhello" { git: "https://x", version: "^1" }]
+    :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  5 | 
+
+  note: run `epm install`
+

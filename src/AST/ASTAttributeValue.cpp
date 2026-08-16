@@ -21,11 +21,11 @@ const std::string &AST::AttributeValue::tag() const
 {
     static const std::string none;
 
-    if (!tag_span.is_valid()) {
+    if (!has_tag()) {
         return none;
     }
 
-    return tag_span.first().value();
+    return tag_text;
 }
 
 const AST::AttributeField *AST::AttributeValue::find_field(const std::string &key) const
@@ -44,7 +44,14 @@ std::string AST::attribute_value_spelling(const AST::AttributeValue &value)
     std::string spelled;
 
     if (value.has_tag()) {
-        spelled += value.tag() + " ";
+        // a string tag is re-quoted the same way a string atom is: this is a message quoting a
+        // value back, not a re-escape of the source
+        if (value.tag_span.first().type() == Token::Type::t_string_literal) {
+            spelled += "\"" + value.tag() + "\" ";
+        }
+        else {
+            spelled += value.tag() + " ";
+        }
     }
 
     switch (value.kind) {

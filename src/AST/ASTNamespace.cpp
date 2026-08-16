@@ -188,6 +188,35 @@ const AST::Namespace *AST::NamespaceManager::get(const std::vector<std::string> 
     return current;
 }
 
+const AST::Namespace *AST::NamespaceManager::get(
+    const AST::Namespace &parent,
+    const std::string &name
+) const
+{
+    const auto found = parent._children.find(name);
+
+    if (found == parent._children.end()) {
+        return nullptr;
+    }
+
+    return found->second.get();
+}
+
+AST::Namespace *AST::NamespaceManager::get(const std::string &name)
+{
+    return const_cast<Namespace *>(std::as_const(*this).get(name));
+}
+
+AST::Namespace *AST::NamespaceManager::get(const std::vector<std::string> &parts)
+{
+    return const_cast<Namespace *>(std::as_const(*this).get(parts));
+}
+
+AST::Namespace *AST::NamespaceManager::get(AST::Namespace &parent, const std::string &name)
+{
+    return const_cast<Namespace *>(std::as_const(*this).get(std::as_const(parent), name));
+}
+
 bool AST::NamespaceManager::exists(const std::vector<std::string> &parts) const
 {
     return get(parts) != nullptr;

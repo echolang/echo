@@ -1,0 +1,2 @@
+// never compiled: -p manifest answers and stops
+echo 1;

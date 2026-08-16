@@ -191,7 +191,7 @@ TEST_CASE("a flag carries no value machinery and a valued one carries exactly on
     // free text: a value nothing in this subsystem is entitled to judge. an explicit list, so adding a
     // valued option with no acceptance rule fails here rather than accepting anything forever
     const std::set<Opt> free_text = {
-        Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_link, Opt::t_define,
+        Opt::t_output, Opt::t_module, Opt::t_target, Opt::t_build_dir, Opt::t_package_dir, Opt::t_link, Opt::t_define,
         Opt::t_target_os, Opt::t_target_arch, Opt::t_target_cpu, Opt::t_target_features
     };
 
@@ -274,7 +274,7 @@ TEST_CASE("every row carries a short summary and a full description", "[cli]")
 TEST_CASE("a value's code is its enumerator", "[cli]")
 {
     const std::vector<Compiler::OptionValue> &prints = Compiler::option_for(Opt::t_print).values;
-    REQUIRE(prints.size() == 6);
+    REQUIRE(prints.size() == 7);
 
     REQUIRE(prints[0].code == static_cast<unsigned int>(PrintKind::t_ast));
     REQUIRE(prints[1].code == static_cast<unsigned int>(PrintKind::t_ast_resolved));
@@ -282,6 +282,7 @@ TEST_CASE("a value's code is its enumerator", "[cli]")
     REQUIRE(prints[3].code == static_cast<unsigned int>(PrintKind::t_ir_units));
     REQUIRE(prints[4].code == static_cast<unsigned int>(PrintKind::t_symbols));
     REQUIRE(prints[5].code == static_cast<unsigned int>(PrintKind::t_instances));
+    REQUIRE(prints[6].code == static_cast<unsigned int>(PrintKind::t_manifest));
 
     const std::vector<Compiler::OptionValue> &explains = Compiler::option_for(Opt::t_explain).values;
     REQUIRE(explains.size() == 4);
@@ -594,6 +595,20 @@ TEST_CASE("a repeated dump request is every dump rather than the last", "[cli]")
     REQUIRE_FALSE(driver.explains(ExplainKind::t_cache));
 }
 
+TEST_CASE("manifest is an answer and cannot be combined with another dump", "[cli]")
+{
+    CommandLine cli;
+    std::string error;
+    REQUIRE(parse({ "build", "-p", "manifest", "-p", "ast", "a.eco" }, cli, error));
+
+    DriverOptions mixed;
+    REQUIRE_FALSE(Compiler::resolve_driver_options(cli, mixed, error));
+    REQUIRE(error.find("cannot be combined") != std::string::npos);
+
+    const DriverOptions driver = resolved({ "build", "-p", "manifest", "a.eco" });
+    REQUIRE(driver.prints(PrintKind::t_manifest));
+}
+
 // **structure rather than a golden, and deliberately.** A two-hundred-line string literal would make
 // every wording improvement a test edit, which trains people to regenerate rather than read - and the
 // descriptions being prose somebody improves is the whole point of moving them into the table
@@ -674,10 +689,12 @@ TEST_CASE("the value tree is drawn with the terminal's own repertoire", "[cli]")
     const std::string ascii = page(Subcommand::t_run, TerminalCapabilities::plain());
 
     REQUIRE(contains(unicode, "\u251c\u2500 ast"));
-    REQUIRE(contains(unicode, "\u2514\u2500 instances"));
+    REQUIRE(contains(unicode, "\u251c\u2500 instances"));
+    REQUIRE(contains(unicode, "\u2514\u2500 manifest"));
 
     REQUIRE(contains(ascii, "|- ast"));
-    REQUIRE(contains(ascii, "`- instances"));
+    REQUIRE(contains(ascii, "|- instances"));
+    REQUIRE(contains(ascii, "`- manifest"));
 
     // the plain page is ascii to the byte, so a golden or a CI log never carries a glyph
     for (const unsigned char byte : ascii) {

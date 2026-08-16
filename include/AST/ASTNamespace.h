@@ -157,6 +157,13 @@ namespace AST
         // returns the namespace for the given name, or nullptr if it doesn't exist
         const Namespace *get(const std::string &name) const;
         const Namespace *get(const std::vector<std::string> &parts) const;
+        Namespace *get(const std::string &name);
+        Namespace *get(const std::vector<std::string> &parts);
+
+        // one child of `parent`, or null. does not mint - an imported prefix walks remaining
+        // segments through this so `use std::math` then `math::nope` cannot create `math::nope`
+        const Namespace *get(const Namespace &parent, const std::string &name) const;
+        Namespace *get(Namespace &parent, const std::string &name);
 
         bool exists(const std::string &name) const;
         bool exists(const std::vector<std::string> &parts) const;

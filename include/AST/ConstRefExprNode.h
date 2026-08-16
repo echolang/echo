@@ -30,6 +30,13 @@ namespace AST
         // the identifier, which is both the name to look up and where a diagnostic points
         TokenReference token_name;
 
+        // the name the namespace table knows, when a `use` aliased it. empty means the token's spelling
+        std::string imported_name;
+
+        const std::string &lookup_name() const {
+            return imported_name.empty() ? token_name.value() : imported_name;
+        }
+
         // where to look: the namespace a qualified name named, or the one the reference was *written* in for
         // a bare name, which then resolves outward from there by the mirror rule types already follow.
         //

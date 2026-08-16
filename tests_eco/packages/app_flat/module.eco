@@ -1,0 +1,11 @@
+/*
+ * Requires libcurl, which itself requires libjson. Both live as siblings under
+ * this project's vendor/ - the flat-tree proof.
+ */
+
+#[module: "flatapp"]
+#[version: "0.1.0"]
+
+#[requires: "libcurl" { git: "https://example.com/libcurl", version: "^0.1" }]
+
+#[sources: "src/*.eco"]

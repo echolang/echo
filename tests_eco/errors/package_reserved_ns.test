@@ -1,0 +1,13 @@
+modules: packages/reserved_ns
+expect: fail
+
+--- OUT --->
+[error] ReservedManifestAttribute  module.eco:2:3
+
+  the 'echoc::' namespace is reserved for the compiler.
+
+  1 | #[module: "reserved"]
+  2 | #[echoc::x: "no"]
+    :   ^^^^^^^^
+  3 | #[sources: "src/*.eco"]
+

@@ -195,6 +195,11 @@ namespace AST
         // GenericError because it is one of the two things a reader could have meant, and the message has to
         // offer the other: a value carries a `$`, so a missing one lands here rather than at UnknownVariable
         MAKE_ISSUE_DEF1(UnknownConstant, IssueSeverity::Error, const std::string, constant_name);
+
+        MAKE_ISSUE_DEF1(UnknownUse, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(DuplicateUse, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(AmbiguousUse, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(InvalidUse, IssueSeverity::Error, const std::string, _message);
         // MAKE_ISSUE_DEF2(ValueTypeConflict, IssueSeverity::Error, const ValueType *, expected, ValueType *, actual);
 
         MAKE_ISSUE_DEF1(LossOfPrecision, IssueSeverity::Warning, const std::string, _message);
@@ -354,12 +359,15 @@ namespace AST
         // -- M9 manifest -------------------------------------------------------------------------
 
         MAKE_ISSUE_DEF1(UnknownManifestAttribute, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(ReservedManifestAttribute, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(RepeatedManifestAttribute, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(MissingModuleAttribute, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnusableModuleName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(InvalidManifestScope, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(EmptySourcePattern, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvableDependency, IssueSeverity::Error, const std::string, _message);
+        MAKE_ISSUE_DEF1(PackageNotVendored, IssueSeverity::Error, const std::string, _message,
+            std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(DuplicateModuleName, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(ModuleDependencyCycle, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(NoSuchManifest, IssueSeverity::Error, const std::string, _message);

@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "Token.h"
+#include "AST/ASTImport.h"
 #include "AST/ScopeNode.h"
 
 namespace AST
@@ -54,6 +55,11 @@ namespace AST
         Module *module = nullptr;
 
         ScopeNode *root = nullptr;
+
+        // file-local `use` aliases, in written order. AST::file_import_for is the reader.
+        // **mutable** because TokenizedFile holds a const File* - the identity is settled at lex
+        // time, the table is filled in pass 1 on that same object
+        mutable std::vector<ImportBinding> imports;
 
         // the plain text content of the file
         std::optional<std::string> content;

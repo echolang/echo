@@ -1,0 +1,4 @@
+#[module: "libhello"]
+#[version: "1.0.0"]
+
+#[sources: "src/*.eco"]

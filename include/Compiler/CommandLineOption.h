@@ -52,6 +52,7 @@ namespace Compiler
         t_target,
         t_filter,
         t_build_dir,
+        t_package_dir,
         t_link,
         t_debug,
         t_release,
@@ -87,7 +88,8 @@ namespace Compiler
         t_ir,
         t_ir_units,
         t_symbols,
-        t_instances
+        t_instances,
+        t_manifest
     };
 
     // what `--explain <what>` names. **`t_prune` is legal on `run` alone**, because only the JIT prunes -

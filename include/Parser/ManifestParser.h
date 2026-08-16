@@ -3,14 +3,17 @@
 
 #pragma once
 
+#include "AST/ASTAttributeValue.h"
 #include "AST/ASTBundle.h"
 #include "Compiler/CBuild.h"
 #include "Compiler/LinkRequirement.h"
 #include "Compiler/TargetFacts.h"
 #include "Parser/ModuleParser.h"
+#include "Token.h"
 
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -54,6 +57,26 @@ namespace Parser
         // it: there is no entry file, no binary and nothing in the build directory - only `groups` and
         // `files`, which are the same selection `--filter` states on the command line
         t_test
+    };
+
+    // one `#[requires: "name" { version:, git:, rev: }]`. the compiler reads the name and
+    // resolves it against the package directory; version / git / rev are recorded only
+    struct ModuleRequirement
+    {
+        std::string name;
+        std::string version;
+        std::string git;
+        std::string rev;
+        TokenSpan span;
+    };
+
+    // an attribute whose name carries a namespace echoc does not own - `#[epm::license:]`.
+    // carried so a tool can read it back off `-p manifest` without a compiler edit per field
+    struct ToolAttribute
+    {
+        std::string ns;
+        std::string name;
+        AST::AttributeValue value;
     };
 
     // one program a module produces.
@@ -104,6 +127,11 @@ namespace Parser
         std::vector<std::filesystem::path> depends;
         std::vector<Compiler::LinkRequirement> link;
         Compiler::CBuildSpec cc;
+
+        // as written, so `-p manifest` can dump a target without resolving its paths
+        std::vector<std::string> sources_as_written;
+        std::vector<std::string> depends_as_written;
+        std::vector<ModuleRequirement> requirements;
     };
 
     struct ModuleManifest
@@ -129,6 +157,16 @@ namespace Parser
 
         // the manifests this module needs parsed before it, absolute and canonical
         std::vector<std::filesystem::path> depends;
+
+        // as written, so `-p manifest` dumps what the author typed rather than resolved paths
+        std::vector<std::string> sources_as_written;
+        std::vector<std::string> depends_as_written;
+
+        // `#[requires:]`, as written. resolved into `depends` at read time against the package dir
+        std::vector<ModuleRequirement> requirements;
+
+        // every `<ns>::<name>` the compiler does not own, in written order
+        std::vector<ToolAttribute> tools;
 
         // the programs this module produces, in the order they were written - empty for a module that
         // declares none, which is every module that existed before targets did and still means "every
@@ -220,6 +258,10 @@ namespace Parser
         ModuleParser parser;
         size_t next_module = 0;
 
+        // the directory names from `#[requires:]` are joined onto. empty until the driver
+        // settles it, once per invocation, from the first user root
+        std::filesystem::path package_dir;
+
         explicit ManifestScratch(const Compiler::TargetFacts &facts) : parser(facts) {}
 
         AST::Module &fresh_module()
@@ -262,10 +304,43 @@ namespace Parser
     // `#[if: ...]` is evaluated against the facts `scratch` was constructed with, and those must be
     // the invocation's - a manifest may gate its own `#[sources:]`, and a source list chosen for one
     // platform while the files in it are filtered for another is silent
+    // how far to settle a manifest. `t_written` is the `-p manifest` path: attributes and
+    // shape, no source expansion and no dependency resolution, so epm can read a module
+    // whose `#[requires:]` are not on disk yet
+    enum class ManifestRead
+    {
+        t_full,
+        t_written
+    };
+
     bool read_module_manifest(
         const std::filesystem::path &path,
         ManifestScratch &scratch,
-        ModuleManifest &out);
+        ModuleManifest &out,
+        ManifestRead read = ManifestRead::t_full);
+
+    // the directory `#[requires:]` names are resolved against. `--package-dir` wins; otherwise
+    // `vendor/` beside the entry, or the ancestor named `vendor` when the entry itself sits
+    // inside `vendor/<pkg>` or `vendor/<vendor>/<pkg>`. default to `<entry_directory>/vendor`
+    // even if it does not exist yet. stops at another `module.eco`, so a project that happens
+    // to live under a directory named vendor is not treated as a package
+    std::filesystem::path resolve_package_dir(
+        const std::filesystem::path &entry_directory,
+        const std::filesystem::path &override_dir);
+
+    // the written form, as JSON. no absolute paths - goldens and lockfiles have to be
+    // machine-independent. several manifests become a JSON array
+    std::string manifest_as_json(const ModuleManifest &manifest);
+    std::string manifests_as_json(const std::vector<ModuleManifest> &manifests);
+
+    // `-p manifest`: read each named path as written and return the JSON. a path that is not a
+    // manifest sets `out_missing` and answers nullopt; a shape refusal leaves issues on
+    // `scratch.collector` and answers nullopt
+    std::optional<std::string> written_manifests_json(
+        const std::vector<std::filesystem::path> &named,
+        ManifestScratch &scratch,
+        std::optional<std::filesystem::path> &out_missing
+    );
 
     // every manifest reachable from `roots`, in the order the modules must be parsed: a dependency before
     // whatever depends on it.

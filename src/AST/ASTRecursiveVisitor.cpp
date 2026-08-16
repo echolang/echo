@@ -40,6 +40,7 @@
 #include "AST/MemberAccessNode.h"
 #include "AST/NullNode.h"
 #include "AST/NamespaceDeclNode.h"
+#include "AST/UseDeclNode.h"
 #include "AST/NamespaceNode.h"
 #include "AST/AttributeNode.h"
 #include "AST/TypeDeclNode.h"
@@ -507,6 +508,7 @@ void RecursiveVisitor::visitLiteralStringExpr(LiteralStringExprNode &node) {}
 void RecursiveVisitor::visitNull(NullNode &node) {}
 void RecursiveVisitor::visitOperator(OperatorNode &node) {}
 void RecursiveVisitor::visitNamespaceDecl(NamespaceDeclNode &node) {}
+void RecursiveVisitor::visit_use_decl(UseDeclNode &node) {}
 void RecursiveVisitor::visitNamespace(NamespaceNode &node) {}
 void RecursiveVisitor::visitAttribute(AttributeNode &node) {}
 

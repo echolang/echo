@@ -39,6 +39,7 @@ bool Compiler::resolve_driver_options(
     out.target_os = cli.value(Opt::t_target_os);
     out.target_arch = cli.value(Opt::t_target_arch);
     out.build_dir = cli.value(Opt::t_build_dir);
+    out.package_dir = cli.value(Opt::t_package_dir);
     out.output = cli.value(Opt::t_output);
 
     out.no_stdlib = cli.flag(Opt::t_no_stdlib);
@@ -121,6 +122,18 @@ bool Compiler::resolve_driver_options(
         || out.subcommand == Subcommand::t_test
         || out.optimize_is_whole_program()
         || out.prints(PrintKind::t_ir);
+
+    // `--print manifest` is an answer, not a dump. combining it with another `-p` value would
+    // then try to compile a graph whose packages may not be on disk
+    if (out.prints(PrintKind::t_manifest)) {
+        unsigned int others = out._prints & ~bit_for(static_cast<unsigned int>(PrintKind::t_manifest));
+
+        if (others != 0) {
+            out_error = "'--print manifest' is an answer, not a dump, and cannot be combined "
+                "with other --print values.";
+            return false;
+        }
+    }
 
     return true;
 }

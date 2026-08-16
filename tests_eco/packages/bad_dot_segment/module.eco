@@ -1,0 +1,3 @@
+#[module: "baddot"]
+#[requires: "foo/../bar" { git: "https://x", version: "^1" }]
+#[sources: "src/*.eco"]

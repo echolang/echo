@@ -1,0 +1,4 @@
+function run() : void
+{
+    use std::math;
+}

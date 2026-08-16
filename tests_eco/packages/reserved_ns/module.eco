@@ -1,0 +1,3 @@
+#[module: "reserved"]
+#[echoc::x: "no"]
+#[sources: "src/*.eco"]

@@ -1,0 +1,12 @@
+namespace geometry;
+
+function make(int32 $x) : int32
+{
+    return $x + 1;
+}
+
+namespace app;
+
+use geometry::make as build;
+
+echo build(8);
