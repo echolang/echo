@@ -108,17 +108,32 @@ namespace Compiler::LLVM
         // the address it lives at. the seam pointer indexing and arithmetic need
         llvm::Value *gen_address_value(AST::ExprNode &expr);
 
-        // the address of one AST property in a lowered aggregate. a 1:1 layout is a field GEP;
-        // a packed enum payload is an `i8` GEP from the base by `property_byte_offset`
+        // the lowered structure for `complex`, creating it on first use. the one lookup
+        // member access, match and dprint share
+        const Structure &structure_of(const AST::ComplexType *complex, const AST::ValueType &type);
+
+        // one AST property of a lowered aggregate: the address *and* the provenance. a packed
+        // payload field of a typed base becomes overlapping; a raw base stays raw. the tag
+        // stays typed. this is the one GEP
+        LValue property_place(
+            const Structure &structure,
+            const LValue &base,
+            size_t property_index,
+            const AST::ValueType &property_type,
+            const char *name
+        );
+
+    private:
+        CodegenContext &_ctx;
+
+        // the address of one AST property. a 1:1 layout is a field GEP; a packed enum payload
+        // is an i8 GEP from the base by property_byte_offset
         llvm::Value *gep_property(
             const Structure &structure,
             llvm::Value *base,
             size_t property_index,
             const char *name
         );
-
-    private:
-        CodegenContext &_ctx;
 
         // one level of transparency: loads the address out of a pointer-holding place, so the
         // result addresses the pointee. returns `place` untouched when it holds no pointer

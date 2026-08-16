@@ -289,39 +289,63 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
             member_name, complex->name.value_or("<anonymous>"), _ctx.function_context()));
     }
 
+    const std::string slot_name = member_name + "_ptr";
+
+    return property_place(
+        structure_of(complex, base_place.storage_type),
+        base_place,
+        member->index,
+        member->type,
+        slot_name.c_str());
+}
+
+const Structure &LValueCodegen::structure_of(const AST::ComplexType *complex, const AST::ValueType &type)
+{
     auto struct_id = _ctx.current_cmp_unit->structure_table->get_structure_id(complex);
     if (struct_id == 0) {
-        // a generic instantiation is lowered lazily on first use
-        _ctx.types->get_llvm_type(base_place.storage_type, *_ctx.current_cmp_unit);
+        // a generic instantiation is lowered lazily on first use. a class value's llvm type is
+        // the handle, so the layout comes from the box, not from get_llvm_type
+        if (type.is_class() || (complex != nullptr && complex->is_class_kind())) {
+            _ctx.types->get_or_create_class_layout(complex, *_ctx.current_cmp_unit);
+        } else {
+            _ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit);
+        }
+
         struct_id = _ctx.current_cmp_unit->structure_table->get_structure_id(complex);
     }
 
     if (struct_id == 0) {
         throw _ctx.error(fmt::format(
             "Struct '{}' is not declared in this compilation unit {}",
-            complex->name.value_or("<anonymous>"), _ctx.function_context()));
+            complex != nullptr ? complex->name.value_or("<anonymous>") : "<anonymous>",
+            _ctx.function_context()));
     }
 
-    auto &structure = _ctx.current_cmp_unit->structure_table->get_structure(struct_id);
+    return _ctx.current_cmp_unit->structure_table->get_structure(struct_id);
+}
 
-    llvm::Value *address = gep_property(
-        structure, base_place.address, member->index, (member_name + "_ptr").c_str());
+LValue LValueCodegen::property_place(
+    const Structure &structure,
+    const LValue &base,
+    size_t property_index,
+    const AST::ValueType &property_type,
+    const char *name
+)
+{
+    llvm::Value *address = gep_property(structure, base.address, property_index, name);
 
     // **inherited from the base, never assumed.** a field of a local is typed; the same field
-    // reached through a `ptr<Point>` that a reinterpretation produced is not, and the peel loop above
-    // is where that was decided. a field is only ever as knowable as the thing holding it
-    //
-    // a packed enum payload overlays another case's field, so even a typed base becomes overlapping
-    // once the access leaves `__tag`. `t_raw` stays `t_raw`: the pointer that got us here already
-    // left the compiler's accounting
-    Provenance provenance = base_place.provenance;
+    // reached through a `ptr<Point>` that a reinterpretation produced is not. a packed enum
+    // payload overlays another case's field, so even a typed base becomes overlapping once
+    // the access leaves `__tag`. `t_raw` stays `t_raw`
+    Provenance provenance = base.provenance;
     if (provenance == Provenance::t_typed
         && structure.has_packed_payload()
-        && member->index != AST::k_enum_tag_index) {
+        && property_index != AST::k_enum_tag_index) {
         provenance = Provenance::t_overlapping;
     }
 
-    return LValue{ address, member->type, provenance };
+    return LValue{ address, property_type, provenance };
 }
 
 llvm::Value *LValueCodegen::gep_property(

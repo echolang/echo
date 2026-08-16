@@ -229,11 +229,6 @@ namespace Compiler::LLVM
         llvm::Value *coerce_value(llvm::Value *value, const AST::ValueType &from, const AST::ValueType &to, const Compiler::LLVM::CmpUnit &cmp_unit);
 
     private:
-        // the LLVM body of a registered aggregate: one field per property, or a packed enum overlay.
-        // takes the id, not a Structure&, because lowering a field type can push another structure
-        // and reallocate the table
-        void fill_structure_body(structure_id_t struct_id, const AST::ComplexType *type, const Compiler::LLVM::CmpUnit &cmp_unit);
-
         // wraps an already-lowered payload in its heap block and mints the class's typeinfo global
         // idempotent - a second call over a structure that already has a box does nothing
         //

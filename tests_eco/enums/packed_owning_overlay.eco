@@ -1,0 +1,16 @@
+// two owning cases overlay: a copy of `a` must not copy-construct `b` out of the
+// same bytes, and dropping the copy must free the one string, not two
+enum Text
+{
+    case a(string $s);
+    case b(string $t);
+}
+
+function take(Text $v) : void {}
+
+$x = Text::a("hello");
+$y = $x;
+take($y);
+
+echo "done";
+echo mem::live_allocations();

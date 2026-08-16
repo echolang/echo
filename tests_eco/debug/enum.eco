@@ -1,0 +1,10 @@
+// dprint of a packed enum prints the tag and the live case only. walking every
+// property would load $s as a string handle out of the int64 42
+enum Slot
+{
+    case text(string $s);
+    case number(int64 $n);
+}
+
+dprint(Slot::number(42));
+dprint(Slot::text("hi"));

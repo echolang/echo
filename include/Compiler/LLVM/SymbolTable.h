@@ -32,13 +32,17 @@ namespace Compiler::LLVM
         // one storage region, so size is the tag plus the widest case rather than the sum
         llvm::StructType *llvm_struct;
 
-        // byte offset of each AST property from the aggregate base. empty when the LLVM fields are
-        // still 1:1 with properties. a packed enum fills this so a payload field can be addressed
-        // after the LLVM type stopped being one field per property
+        // byte offset of each AST property from the aggregate base. always filled, from the
+        // DataLayout after the LLVM body is set, so debug info and gep_property share one table
         std::vector<uint64_t> property_byte_offset;
 
+        // true only for a payload enum, whose LLVM fields are no longer 1:1 with AST properties.
+        // that is a TBAA fact (payload accesses are overlapping) and a GEP fact, not "the vector
+        // is nonempty"
+        bool packed_payload = false;
+
         bool has_packed_payload() const {
-            return !property_byte_offset.empty();
+            return packed_payload;
         }
 
         // a class only: the heap block wrapping that payload, and the per-class identity global

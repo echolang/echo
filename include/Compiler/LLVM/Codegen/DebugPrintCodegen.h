@@ -36,10 +36,11 @@ namespace Compiler::LLVM
     // wrapped optional cost. neither belongs on a class whose whole contract is "leave one value on the
     // stack". it is the same split gen_ref_count_builtin already makes against ClassCodegen::gen_count
     //
-    // **the whole shape is static.** which properties exist, their names, their types and the
-    // indentation are all known while lowering, so the only things that are not compile-time constants
-    // are the leaf values themselves. that is what makes the buffer possible: a struct of ten scalars is
-    // one printf with ten varargs, not twenty-one calls
+    // **the whole shape is static for a struct.** which properties exist, their names, their types and
+    // the indentation are all known while lowering, so the only things that are not compile-time
+    // constants are the leaf values themselves. that is what makes the buffer possible: a struct of
+    // ten scalars is one printf with ten varargs, not twenty-one calls. an enum is the exception:
+    // the live case is a runtime question, so the payload fields sit in their own arms
     class DebugPrintCodegen
     {
     public:
@@ -71,9 +72,9 @@ namespace Compiler::LLVM
         // -- the buffer --------------------------------------------------------------------------
         //
         // pending static text, and the varargs it refers to. text accumulates until something forces a
-        // flush, which is only ever a *branch*: a class handle's null test and a wrapped optional's
-        // `__has` test are the two runtime questions this printer asks, and one printf cannot straddle a
-        // branch
+        // flush, which is only ever a *branch*: a class handle's null test, a wrapped optional's
+        // `__has` test, and an enum's discriminant are the runtime questions this printer asks, and
+        // one printf cannot straddle a branch
         //
         // `_pending_block` is the block the buffer was opened in, asserted against the builder's current
         // block on every append - a buffer carried across a block boundary emits its text into the wrong
@@ -109,26 +110,25 @@ namespace Compiler::LLVM
 
         // `[T] <label>{ ... }` over a property layout, or `[T] <label>{}` when there are none.
         //
-        // `address` points at the properties themselves and `layout` is the struct they sit in - for a
-        // class that is the *payload*, already GEP'd past the header, which is exactly what lets a class
-        // and a struct share this. the caller resolves both because only it knows which of the two it
-        // has: a class value's own llvm type is an opaque handle, not its layout
-        // takes the *name* rather than the type for render's display_type reason: a present `Point?`
-        // reads as a `Point` and must still print as `[Point?]`
+        // `aggregate.address` points at the properties themselves - for a class that is the
+        // *payload*, already GEP'd past the header, which is exactly what lets a class and a
+        // struct share this. takes the *name* rather than the type for render's display_type
+        // reason: a present `Point?` reads as a `Point` and must still print as `[Point?]`
         void render_properties(
-            llvm::Value *address, llvm::StructType *layout, const AST::ComplexType &complex,
+            const LValue &aggregate, const AST::ComplexType &complex,
             std::string_view type_name, std::string_view label, size_t depth);
 
-        // one line of a struct body: the indent, the recursive render, the newline. property order is
-        // declaration order. a 1:1 layout uses the property's own index as the GEP index; a packed
-        // enum payload goes through LValueCodegen::gep_property and the offset table
+        // one line of a body: the indent, the recursive render, the newline. goes through
+        // property_place so a packed payload carries t_overlapping
         void render_property(
-            llvm::Value *address, llvm::StructType *layout, const AST::ComplexType &complex,
+            const LValue &aggregate, const Structure &structure, const AST::ComplexType &complex,
             size_t index, size_t depth);
 
-        // the llvm struct a value's properties sit in: its own type for a struct, its payload for a
-        // class. one place, because getting it wrong for a class GEPs into the reference count
-        llvm::StructType *property_layout_of(const AST::ValueType &type, const AST::ComplexType &complex);
+        // an enum: `__tag` always, then only the live case's payload. walking every property
+        // would load a dead `string` slot as a handle after the cases overlay
+        void render_enum(
+            const LValue &place, const AST::ValueType &type, std::string_view type_name,
+            std::string_view label, size_t depth);
 
         // **why this recursion stops**, as one answer rather than one per descending arm: `<cycle>` when
         // the type is already on the path being rendered, `<max depth>` past the depth limit, and null to

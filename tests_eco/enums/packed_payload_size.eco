@@ -38,3 +38,31 @@ echo match (Mixed::wide(9)) {
     Mixed::wide($y) => $y,
     Mixed::small($x) => $zero,
 };
+
+// a zero-sized payload still overlays: the AST has a slot, the LLVM type is the tag
+// plus the other case, and addressing the empty field must not CreateStructGEP a
+// missing LLVM field
+struct Nothing {}
+
+enum Wrapper
+{
+    case empty(Nothing $n);
+    case wide(int64 $v);
+}
+
+echo mem::size<Wrapper>();
+echo match (Wrapper::empty(Nothing())) {
+    Wrapper::empty($n) => $zero,
+    Wrapper::wide($v) => $v,
+};
+
+// intra-case padding: the i64 sits at offset 8 of the payload, not 4
+enum Padded
+{
+    case pair(int32 $a, int64 $b);
+}
+
+echo mem::size<Padded>();
+echo match (Padded::pair(1, 2)) {
+    Padded::pair($a, $b) => $b,
+};

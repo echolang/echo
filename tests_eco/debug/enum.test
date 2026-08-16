@@ -1,0 +1,9 @@
+--- OUT --->
+[Slot] {
+  [uint8] $__tag = 1
+  [int64] $__c1_n = 42
+}
+[Slot] {
+  [uint8] $__tag = 0
+  [string] $__c0_s = "hi"
+}

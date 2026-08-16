@@ -174,17 +174,15 @@ namespace Compiler::LLVM
         // wrong answer
         llvm::DIType *struct_type_of(const AST::ValueType &type, CmpUnit &cmp_unit);
         llvm::DIType *class_type_of(const AST::ValueType &type, CmpUnit &cmp_unit);
-        // a type's own properties as DIMemberTypes, appended at their offsets in `layout` shifted by
-        // `base_offset_bits` - zero for a struct, the payload's offset in the box for a class, which
-        // is the whole of what separates the two
+        // a type's own properties as DIMemberTypes, appended at their offsets from the
+        // structure table shifted by `base_offset_bits` - zero for a struct, the payload's
+        // offset in the box for a class, which is the whole of what separates the two
         void append_property_members(
             UnitDebug &unit,
             const AST::ComplexType *complex,
             CmpUnit &cmp_unit,
             llvm::DIFile *decl_file,
             unsigned decl_line,
-            const llvm::StructLayout &layout,
-            size_t element_count,
             uint64_t base_offset_bits,
             std::vector<llvm::Metadata *> &elements
         );

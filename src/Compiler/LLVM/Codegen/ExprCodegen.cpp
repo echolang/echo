@@ -1946,19 +1946,14 @@ void ExprCodegen::gen_match(AST::MatchExprNode &node)
 
     // the discriminant, read as the ordinary property it is - the same GEP any member read emits, which
     // is the whole dividend of `__tag` being in the layout rather than a shape codegen invents
-    llvm::Value *tag_address = _ctx.builder->CreateStructGEP(
-        _ctx.types->get_llvm_type(subject_type, *_ctx.current_cmp_unit),
-        subject_address,
-        AST::k_enum_tag_index,
-        "match.tag_ptr");
-
-    // **and read through the seam, not with a CreateLoad of its own.** LValueCodegen::gen_load is where
-    // the `!tbaa` tag is attached, and an untagged load is the conservative answer said by omission - so
-    // reading the tag by hand would make the one access this node emits alias everything, while every
-    // ordinary member read beside it stays described. the place is `t_typed`: the address is the
-    // subject's own slot and has been nowhere near a `ptr<T>`
+    LValue subject_place { subject_address, subject_type, Provenance::t_typed };
     llvm::Value *tag = _ctx.lvalues->gen_load(
-        LValue { tag_address, ct->get_property_type(AST::k_enum_tag_index), Provenance::t_typed },
+        _ctx.lvalues->property_place(
+            _ctx.lvalues->structure_of(ct, subject_type),
+            subject_place,
+            AST::k_enum_tag_index,
+            ct->get_property_type(AST::k_enum_tag_index),
+            "match.tag_ptr"),
         "match.tag");
 
     auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "match.done", function);

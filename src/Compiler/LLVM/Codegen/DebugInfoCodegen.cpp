@@ -19,6 +19,8 @@
 
 #include <fmt/core.h>
 
+#include <cassert>
+
 namespace Compiler::LLVM
 {
 
@@ -546,8 +548,6 @@ llvm::DIType *DebugInfoCodegen::struct_type_of(const AST::ValueType &type, CmpUn
         cmp_unit,
         decl_file,
         decl_line,
-        *_ctx.layout().getStructLayout(llvm_struct),
-        llvm_struct->getNumElements(),
         /*base_offset_bits=*/0,
         elements);
 
@@ -579,37 +579,28 @@ void DebugInfoCodegen::append_property_members(
     CmpUnit &cmp_unit,
     llvm::DIFile *decl_file,
     unsigned decl_line,
-    const llvm::StructLayout &layout,
-    size_t element_count,
     uint64_t base_offset_bits,
     std::vector<llvm::Metadata *> &elements
 )
 {
-    // a 1:1 layout: the LLVM element index *is* Property::index. a packed enum overlays its
-    // payload fields, so the offset comes from the structure table rather than the LLVM field
-    const Structure *structure = nullptr;
-    if (auto struct_id = cmp_unit.structure_table->get_structure_id(complex); struct_id != 0) {
-        structure = &cmp_unit.structure_table->get_structure(struct_id);
+    // the structure is in the table: struct_type_of and class_type_of both lower first
+    auto struct_id = cmp_unit.structure_table->get_structure_id(complex);
+    if (struct_id == 0) {
+        return;
     }
 
+    const Structure &structure = cmp_unit.structure_table->get_structure(struct_id);
     const size_t count = complex->property_count();
-    const bool packed = structure != nullptr && structure->has_packed_payload();
+
+    assert(structure.property_byte_offset.size() == count);
 
     for (size_t i = 0; i < count; i++) {
-        if (!packed && i >= element_count) {
-            break;
-        }
-
         const AST::ComplexType::Property &property = complex->get_property(i);
         llvm::DIType *member_type = type_of(property.type, cmp_unit);
 
         if (member_type == nullptr) {
             continue;
         }
-
-        const uint64_t offset_bits = packed
-            ? structure->property_byte_offset[i] * 8
-            : layout.getElementOffsetInBits(i);
 
         elements.push_back(unit.builder->createMemberType(
             unit.cu,
@@ -618,7 +609,7 @@ void DebugInfoCodegen::append_property_members(
             decl_line,
             member_type->getSizeInBits(),
             member_type->getAlignInBits(),
-            base_offset_bits + offset_bits,
+            base_offset_bits + structure.property_byte_offset[i] * 8,
             property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
             member_type));
     }
@@ -689,8 +680,6 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
         cmp_unit,
         decl_file,
         decl_line,
-        *_ctx.layout().getStructLayout(class_layout.payload),
-        class_layout.payload->getNumElements(),
         box_layout->getElementOffsetInBits(ClassBox::payload_index),
         elements);
 

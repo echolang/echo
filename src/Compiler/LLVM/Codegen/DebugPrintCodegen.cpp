@@ -135,11 +135,15 @@ void DebugPrintCodegen::render(
         return;
     }
 
+    if (type.is_enum()) {
+        render_enum(place, type, type_name, label, depth);
+        return;
+    }
+
     if (type.has_property_layout()) {
         const AST::ComplexType *complex = type.get_complex_type();
         if (complex != nullptr) {
-            render_properties(
-                place.address, property_layout_of(type, *complex), *complex, type_name, label, depth);
+            render_properties(place, *complex, type_name, label, depth);
             return;
         }
     }
@@ -157,21 +161,6 @@ void DebugPrintCodegen::render(
         type.get_type_desciption(), _ctx.function_context()));
 }
 
-llvm::StructType *DebugPrintCodegen::property_layout_of(
-    const AST::ValueType &type,
-    const AST::ComplexType &complex
-)
-{
-    // a class value's own llvm type is an opaque handle, so the layout comes from the block - which is
-    // also the one call that lowers a class on first use in this unit
-    if (type.is_class()) {
-        return _ctx.types->get_or_create_class_layout(&complex, *_ctx.current_cmp_unit).payload;
-    }
-
-    // a struct *is* its layout, and get_llvm_type is what lowers a generic instantiation lazily
-    return llvm::cast<llvm::StructType>(_ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit));
-}
-
 const char *DebugPrintCodegen::cut_reason(const AST::ComplexType &complex, size_t depth) const
 {
     // checked *before* the push, so a type is cut on its second occurrence and not its first
@@ -185,8 +174,7 @@ const char *DebugPrintCodegen::cut_reason(const AST::ComplexType &complex, size_
 }
 
 void DebugPrintCodegen::render_properties(
-    llvm::Value *address,
-    llvm::StructType *layout,
+    const LValue &aggregate,
     const AST::ComplexType &complex,
     std::string_view type_name,
     std::string_view label,
@@ -207,45 +195,120 @@ void DebugPrintCodegen::render_properties(
 
     PathGuard guard(_path, &complex);
 
+    const Structure &structure = _ctx.lvalues->structure_of(&complex, aggregate.storage_type);
+
     text(fmt::format("[{}] {}{{\n", type_name, label));
 
     for (size_t i = 0; i < count; i++) {
-        render_property(address, layout, complex, i, depth + 1);
+        render_property(aggregate, structure, complex, i, depth + 1);
     }
 
     text(fmt::format("{}}}", indent_for(depth)));
 }
 
 void DebugPrintCodegen::render_property(
-    llvm::Value *address,
-    llvm::StructType *layout,
+    const LValue &aggregate,
+    const Structure &structure,
     const AST::ComplexType &complex,
     size_t index,
     size_t depth
 )
 {
     const AST::ComplexType::Property &property = complex.get_property(index);
+    const std::string slot_name = fmt::format("dprint.{}", property.name);
 
-    // property_layout_of has already lowered this type, so the structure is in the table
-    auto struct_id = _ctx.current_cmp_unit->structure_table->get_structure_id(&complex);
-    llvm::Value *slot = nullptr;
-
-    if (struct_id != 0) {
-        slot = _ctx.lvalues->gep_property(
-            _ctx.current_cmp_unit->structure_table->get_structure(struct_id),
-            address,
-            property.index,
-            fmt::format("dprint.{}", property.name).c_str());
-    }
-    else {
-        slot = _ctx.builder->CreateStructGEP(
-            layout, address, static_cast<unsigned>(property.index),
-            fmt::format("dprint.{}", property.name));
-    }
+    LValue slot = _ctx.lvalues->property_place(
+        structure, aggregate, property.index, property.type, slot_name.c_str());
 
     text(indent_for(depth));
-    render(LValue{slot, property.type}, fmt::format("${} = ", property.name), depth);
+    render(slot, fmt::format("${} = ", property.name), depth);
     text("\n");
+}
+
+void DebugPrintCodegen::render_enum(
+    const LValue &place,
+    const AST::ValueType &type,
+    std::string_view type_name,
+    std::string_view label,
+    size_t depth
+)
+{
+    const AST::ComplexType *complex = type.get_complex_type();
+    if (complex == nullptr) {
+        text(fmt::format("[{}] {}<opaque>", type_name, label));
+        return;
+    }
+
+    if (const char *cut = cut_reason(*complex, depth)) {
+        text(fmt::format("[{}] {}{}", type_name, label, cut));
+        return;
+    }
+
+    (void)_ctx.types->get_llvm_type(type, *_ctx.current_cmp_unit);
+
+    const Structure &structure = _ctx.lvalues->structure_of(complex, type);
+    PathGuard guard(_path, complex);
+
+    text(fmt::format("[{}] {}{{\n", type_name, label));
+    render_property(place, structure, *complex, AST::k_enum_tag_index, depth + 1);
+
+    bool any_payload = false;
+    for (const AST::ComplexType::EnumCase &entry : complex->enum_cases()) {
+        if (entry.has_payload()) {
+            any_payload = true;
+            break;
+        }
+    }
+
+    if (!any_payload) {
+        text(fmt::format("{}}}", indent_for(depth)));
+        return;
+    }
+
+    const AST::ValueType tag_type = complex->get_property_type(AST::k_enum_tag_index);
+    llvm::Value *tag = _ctx.lvalues->gen_load(
+        _ctx.lvalues->property_place(
+            structure, place, AST::k_enum_tag_index, tag_type, "dprint.enum.tag"),
+        "dprint.enum.tag");
+
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *join = llvm::BasicBlock::Create(*_ctx.llvm_context, "dprint.enum.join", function);
+
+    llvm::Type *tag_ty = _ctx.types->get_llvm_type(tag_type, *_ctx.current_cmp_unit);
+
+    for (const AST::ComplexType::EnumCase &entry : complex->enum_cases()) {
+        if (!entry.has_payload()) {
+            continue;
+        }
+
+        llvm::BasicBlock *arm = llvm::BasicBlock::Create(*_ctx.llvm_context, "dprint.enum.arm", function);
+        llvm::BasicBlock *next = llvm::BasicBlock::Create(*_ctx.llvm_context, "dprint.enum.next", function);
+
+        flush();
+        llvm::Value *want = llvm::ConstantInt::get(
+            tag_ty, static_cast<uint64_t>(entry.discriminant), /*isSigned=*/true);
+        _ctx.builder->CreateCondBr(
+            _ctx.builder->CreateICmpEQ(tag, want, "dprint.enum.hit"), arm, next);
+
+        _ctx.set_insert_point(arm);
+        _pending_block = nullptr;
+
+        for (size_t i = 0; i < entry.payload_field_count; i++) {
+            render_property(
+                place, structure, *complex, entry.first_payload_property + i, depth + 1);
+        }
+
+        close_arm(join);
+
+        _ctx.set_insert_point(next);
+        _pending_block = nullptr;
+    }
+
+    close_arm(join);
+    _ctx.set_insert_point(join);
+    _pending_block = nullptr;
+
+    text(fmt::format("{}}}", indent_for(depth)));
 }
 
 void DebugPrintCodegen::render_class(
@@ -292,7 +355,8 @@ void DebugPrintCodegen::render_class(
     llvm::Value *payload = _ctx.builder->CreateStructGEP(
         layout.box, handle, ClassBox::payload_index, "dprint.payload");
 
-    render_properties(payload, layout.payload, *complex, type_name, label, depth);
+    LValue payload_place { payload, type, place.provenance };
+    render_properties(payload_place, *complex, type_name, label, depth);
     close_arm(join);
 
     _ctx.set_insert_point(join);
