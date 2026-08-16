@@ -2,6 +2,7 @@
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/CompilationUnit.h"
 
 #include "eco.h"
 
@@ -584,16 +585,31 @@ void DebugInfoCodegen::append_property_members(
     std::vector<llvm::Metadata *> &elements
 )
 {
-    // the LLVM element index *is* Property::index - the lowering pushes members in declaration order
-    // and inserts no padding fields - so the offset is read off the real layout rather than
-    // recomputed from the property types
-    for (size_t i = 0; i < complex->property_count() && i < element_count; i++) {
+    // a 1:1 layout: the LLVM element index *is* Property::index. a packed enum overlays its
+    // payload fields, so the offset comes from the structure table rather than the LLVM field
+    const Structure *structure = nullptr;
+    if (auto struct_id = cmp_unit.structure_table->get_structure_id(complex); struct_id != 0) {
+        structure = &cmp_unit.structure_table->get_structure(struct_id);
+    }
+
+    const size_t count = complex->property_count();
+    const bool packed = structure != nullptr && structure->has_packed_payload();
+
+    for (size_t i = 0; i < count; i++) {
+        if (!packed && i >= element_count) {
+            break;
+        }
+
         const AST::ComplexType::Property &property = complex->get_property(i);
         llvm::DIType *member_type = type_of(property.type, cmp_unit);
 
         if (member_type == nullptr) {
             continue;
         }
+
+        const uint64_t offset_bits = packed
+            ? structure->property_byte_offset[i] * 8
+            : layout.getElementOffsetInBits(i);
 
         elements.push_back(unit.builder->createMemberType(
             unit.cu,
@@ -602,7 +618,7 @@ void DebugInfoCodegen::append_property_members(
             decl_line,
             member_type->getSizeInBits(),
             member_type->getAlignInBits(),
-            base_offset_bits + layout.getElementOffsetInBits(i),
+            base_offset_bits + offset_bits,
             property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
             member_type));
     }

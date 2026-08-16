@@ -120,9 +120,8 @@ namespace Compiler::LLVM
             std::string_view type_name, std::string_view label, size_t depth);
 
         // one line of a struct body: the indent, the recursive render, the newline. property order is
-        // declaration order, which is also llvm element order - see
-        // TypeLowering::create_llvm_struct_for_instance - so the property's own index is the GEP index,
-        // with no second table to keep in step
+        // declaration order. a 1:1 layout uses the property's own index as the GEP index; a packed
+        // enum payload goes through LValueCodegen::gep_property and the offset table
         void render_property(
             llvm::Value *address, llvm::StructType *layout, const AST::ComplexType &complex,
             size_t index, size_t depth);

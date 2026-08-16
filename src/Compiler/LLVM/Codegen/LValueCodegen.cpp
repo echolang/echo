@@ -2,11 +2,9 @@
 
 #include "AST/StaticPropertyExprNode.h"
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
-#include <llvm/IR/Metadata.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Instructions.h>
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/CodegenContext.h"
+#include "Compiler/LLVM/CompilationUnit.h"
 
 #include "AST/ExprNode.h"
 #include "AST/MemberAccessNode.h"
@@ -17,6 +15,9 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Metadata.h>
 
 #include <fmt/core.h>
 
@@ -163,9 +164,9 @@ llvm::StoreInst *LValueCodegen::gen_store(const LValue &place, llvm::Value *valu
 
 void LValueCodegen::tag_access(llvm::Instruction *access, const LValue &place)
 {
-    // **a raw place is left untagged, and that is the answer rather than a gap.** an instruction with
-    // no `!tbaa` may alias anything, which is exactly what an address that came through a `ptr<T>`
-    // deserves in a language whose reinterpretations are only a promise
+    // **only a typed place is tagged.** a raw place went through a `ptr<T>`; an overlapping place
+    // is an enum payload that shares bytes with another case. both are left untagged, and an
+    // instruction with no `!tbaa` may alias anything - the conservative answer, said by omission
     if (place.provenance != Provenance::t_typed || _ctx.tbaa == nullptr
         || _ctx.options.no_tbaa) {
         return;
@@ -303,18 +304,46 @@ LValue LValueCodegen::gen_member_lvalue(AST::ExprNode &expr)
 
     auto &structure = _ctx.current_cmp_unit->structure_table->get_structure(struct_id);
 
-    std::vector<llvm::Value *> indices = {
-        llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), 0),
-        llvm::ConstantInt::get(llvm::Type::getInt32Ty(*_ctx.llvm_context), member->index)
-    };
-
-    llvm::Value *address = _ctx.builder->CreateGEP(
-        structure.llvm_struct, base_place.address, indices, member_name + "_ptr");
+    llvm::Value *address = gep_property(
+        structure, base_place.address, member->index, (member_name + "_ptr").c_str());
 
     // **inherited from the base, never assumed.** a field of a local is typed; the same field
     // reached through a `ptr<Point>` that a reinterpretation produced is not, and the peel loop above
     // is where that was decided. a field is only ever as knowable as the thing holding it
-    return LValue{ address, member->type, base_place.provenance };
+    //
+    // a packed enum payload overlays another case's field, so even a typed base becomes overlapping
+    // once the access leaves `__tag`. `t_raw` stays `t_raw`: the pointer that got us here already
+    // left the compiler's accounting
+    Provenance provenance = base_place.provenance;
+    if (provenance == Provenance::t_typed
+        && structure.has_packed_payload()
+        && member->index != AST::k_enum_tag_index) {
+        provenance = Provenance::t_overlapping;
+    }
+
+    return LValue{ address, member->type, provenance };
+}
+
+llvm::Value *LValueCodegen::gep_property(
+    const Structure &structure,
+    llvm::Value *base,
+    size_t property_index,
+    const char *name
+)
+{
+    if (structure.has_packed_payload()) {
+        assert(property_index < structure.property_byte_offset.size());
+
+        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+        llvm::Value *offset = llvm::ConstantInt::get(
+            llvm::Type::getInt64Ty(*_ctx.llvm_context),
+            structure.property_byte_offset[property_index]);
+
+        return _ctx.builder->CreateGEP(i8, base, offset, name);
+    }
+
+    return _ctx.builder->CreateStructGEP(
+        structure.llvm_struct, base, static_cast<unsigned>(property_index), name);
 }
 
 llvm::Value *LValueCodegen::gen_address_value(AST::ExprNode &expr)

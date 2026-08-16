@@ -49,8 +49,9 @@ namespace Compiler::LLVM
 
     // **two registers' worth is the line**, which is the same one AArch64 and x86-64 both draw and is why
     // it is a size and not a field count: what decides is whether the backend can hand the thing back in
-    // registers at all, and below the line it already does. a `{ i8, i64, i32 }` - which is what a
-    // `result<int64, int32>` lowers to - is 24 bytes and goes indirect; a `string` view pair does not.
+    // registers at all, and below the line it already does. a packed `result<int64, int32>` is 16 bytes
+    // and comes back directly; a value over the line still goes through `sret`. a `string` view pair
+    // does not.
     //
     // asked of the **lowered** type rather than the ValueType, because the answer is about machine
     // registers and only the DataLayout knows the size. a `void` return and an opaque pointer both answer

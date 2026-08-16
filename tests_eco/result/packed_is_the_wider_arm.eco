@@ -1,0 +1,14 @@
+// the number docs/stdlib/result.md used to print as 24: the int32 sat beside the int64.
+// overlaying the two arms makes this 16, and align follows the int64.
+enum step_error
+{
+    case not_found;
+}
+
+echo mem::size<result<int64, int32>>();
+echo mem::align<result<int64, int32>>();
+echo mem::size<result<int32, int32>>();
+echo mem::size<result<int64, step_error>>();
+
+result<int64, int32> $ok = .ok(7);
+echo $ok->unwrap();

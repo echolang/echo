@@ -58,9 +58,9 @@ TEST_CASE("an enum is a declared type of its own kind", "[enum]")
     REQUIRE(decl->field_wise_constructor() == nullptr);
 }
 
-// the layout is **flat** - one property per payload field, all present at once - and that is what buys
-// every other question its answer with no arm of its own. the ordering is what the case table indexes
-// into, so it is pinned rather than left to how the walk happens to run
+// the AST layout is **flat** - one property per payload field, all present at once - and that is
+// what buys classify_copy and the case table their answers with no arm of their own. LLVM storage
+// overlays the cases; that is TypeLowering, and it must not become a `[N x i8]` *property*
 TEST_CASE("an enum's layout is the tag then one property per payload field", "[enum]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(k_curl_error);

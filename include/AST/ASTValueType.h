@@ -51,9 +51,10 @@ namespace AST
         // exists only over a class, because dispatch needs the runtime identity only a class carries
         t_interface,
         // a closed set of alternatives: `enum DistanceUnit`. a named type reached through the same
-        // ComplexType as the three above, with a layout like a struct's - `__tag` first, then one
-        // property per payload field - so member access, TBAA, debug info and the whole copy and
-        // teardown taxonomy apply to it unchanged.
+        // ComplexType as the three above, with an AST layout like a struct's - `__tag` first, then one
+        // property per payload field - so member access, debug info and the whole copy and
+        // teardown taxonomy apply to it unchanged. LLVM storage overlays the cases; that is
+        // TypeLowering::fill_structure_body, not a second property list
         //
         // **a kind rather than a flag on the layout, which is the opposite call from is_optional** and
         // for t_weak's reason. an optional is a flag precisely so the is_struct() sites go on answering

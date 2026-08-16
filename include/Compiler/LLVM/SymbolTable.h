@@ -9,6 +9,9 @@
 
 #include <llvm/IR/Function.h>
 
+#include <cstdint>
+#include <vector>
+
 namespace Compiler::LLVM
 {
     typedef size_t function_id_t;
@@ -24,9 +27,19 @@ namespace Compiler::LLVM
     {
         const AST::TypeDeclNode *ast_structdecl;
 
-        // the payload layout, built identically for both storage classes - the properties, in
-        // declaration order, and nothing else
+        // the payload layout. for a struct, and for a payload-free enum, this is the properties in
+        // declaration order. for a payload enum it is `{ tag, [N x iAlign] }` - the cases overlay
+        // one storage region, so size is the tag plus the widest case rather than the sum
         llvm::StructType *llvm_struct;
+
+        // byte offset of each AST property from the aggregate base. empty when the LLVM fields are
+        // still 1:1 with properties. a packed enum fills this so a payload field can be addressed
+        // after the LLVM type stopped being one field per property
+        std::vector<uint64_t> property_byte_offset;
+
+        bool has_packed_payload() const {
+            return !property_byte_offset.empty();
+        }
 
         // a class only: the heap block wrapping that payload, and the per-class identity global
         // both null for a struct, which has no block and no runtime metadata at all. see

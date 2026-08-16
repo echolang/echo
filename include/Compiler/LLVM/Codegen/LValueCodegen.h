@@ -20,6 +20,7 @@ namespace llvm
 namespace Compiler::LLVM
 {
     struct CodegenContext;
+    struct Structure;
 
     // an addressable location: where the storage lives, and what it holds
     //
@@ -36,10 +37,16 @@ namespace Compiler::LLVM
     // `mem::copy` walks bytes through, the one an FFI call hands back. an access through it is
     // emitted with no `!tbaa` at all, and an untagged instruction may alias anything: the
     // conservative answer, said by omission
+    //
+    // an *overlapping* place is an enum payload field (or a member reached through one). the bytes
+    // are typed for the live case, but another case's field sits at the same offset, so a per-type
+    // `!tbaa` tag would be C's union lie. omission again, and not `t_raw`: the address never left
+    // the compiler's accounting
     enum class Provenance
     {
         t_typed,
         t_raw,
+        t_overlapping,
     };
 
     struct LValue
@@ -100,6 +107,15 @@ namespace Compiler::LLVM
         // evaluates `expr` as a pointer-typed rvalue, i.e. the address it holds rather than
         // the address it lives at. the seam pointer indexing and arithmetic need
         llvm::Value *gen_address_value(AST::ExprNode &expr);
+
+        // the address of one AST property in a lowered aggregate. a 1:1 layout is a field GEP;
+        // a packed enum payload is an `i8` GEP from the base by `property_byte_offset`
+        llvm::Value *gep_property(
+            const Structure &structure,
+            llvm::Value *base,
+            size_t property_index,
+            const char *name
+        );
 
     private:
         CodegenContext &_ctx;

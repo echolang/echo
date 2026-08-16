@@ -1,0 +1,17 @@
+// two cases, same payload width: DWARF must describe both fields at the payload start,
+// not one after the other. that is the overlay, visible to a debugger
+enum Slot
+{
+    case a(int64 $x);
+    case b(int64 $y);
+}
+
+function read(Slot $s) : int64
+{
+    return match ($s) {
+        Slot::a($x) => $x,
+        Slot::b($y) => $y,
+    };
+}
+
+echo read(Slot::a(5));

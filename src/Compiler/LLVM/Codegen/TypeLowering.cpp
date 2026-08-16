@@ -28,7 +28,9 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -467,25 +469,13 @@ llvm::StructType *TypeLowering::create_llvm_struct_decl(const AST::TypeDeclNode 
 
     auto type_name = node->type_name();
 
-    // make the prop types
-    std::vector<llvm::Type *> member_types;
-    for (const auto &prop : node->properties()) {
-        llvm::Type *llvm_type = get_llvm_type(prop->type_node()->type, cmp_unit);
-        if (!llvm_type) {
-            assert(false);
-            throw _ctx.error(fmt::format(
-                "Unknown type for field '{}' in struct '{}'.",
-                prop->name(), type_name
-            ));
-        }
-        member_types.push_back(llvm_type);
-    }
-
-    // define the llvm struct type
-    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, member_types, type_name);
-
-    // store the struct in the struct table
+    // opaque first, then the body: a packed enum has to measure its payload field types before it
+    // can name the storage array, and a self-referential struct has to find itself in the table
+    // while those fields are being lowered
+    llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
     auto struct_id = cmp_unit.structure_table->push_structure(node, llvm_struct_type);
+
+    fill_structure_body(struct_id, &node->complex_type(), cmp_unit);
 
     // a class needs the block around that payload before anything can allocate one. built eagerly
     // here, alongside the payload, so the unit that declares the class always has it
@@ -505,11 +495,7 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
     llvm::StructType *llvm_struct_type = llvm::StructType::create(*_ctx.llvm_context, type_name);
     auto struct_id = cmp_unit.structure_table->push_structure(type, llvm_struct_type);
 
-    std::vector<llvm::Type *> member_types;
-    for (size_t i = 0; i < type->property_count(); i++) {
-        member_types.push_back(get_llvm_type(type->get_property_type(i), cmp_unit));
-    }
-    llvm_struct_type->setBody(member_types);
+    fill_structure_body(struct_id, type, cmp_unit);
 
     // the block, once the payload is complete - it is a member of the block, so it has to be
     if (type->is_class_kind()) {
@@ -517,6 +503,132 @@ llvm::StructType *TypeLowering::create_llvm_struct_for_instance(const AST::Compl
     }
 
     return llvm_struct_type;
+}
+
+namespace
+{
+    uint64_t align_up(uint64_t value, uint64_t alignment)
+    {
+        if (alignment <= 1) {
+            return value;
+        }
+
+        return (value + alignment - 1) & ~(alignment - 1);
+    }
+
+    llvm::Type *alignment_unit_type(llvm::LLVMContext &context, uint64_t align)
+    {
+        switch (align) {
+            case 1:  return llvm::Type::getInt8Ty(context);
+            case 2:  return llvm::Type::getInt16Ty(context);
+            case 4:  return llvm::Type::getInt32Ty(context);
+            case 8:  return llvm::Type::getInt64Ty(context);
+            case 16: return llvm::Type::getInt128Ty(context);
+            default: return llvm::Type::getInt8Ty(context);
+        }
+    }
+
+    bool enum_has_payload(const AST::ComplexType &type)
+    {
+        for (const AST::ComplexType::EnumCase &entry : type.enum_cases()) {
+            if (entry.has_payload()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+void TypeLowering::fill_structure_body(
+    structure_id_t struct_id,
+    const AST::ComplexType *type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
+{
+    auto body_of = [&]() -> Structure & {
+        return cmp_unit.structure_table->get_structure(struct_id);
+    };
+
+    assert(body_of().llvm_struct != nullptr);
+
+    if (type == nullptr) {
+        body_of().llvm_struct->setBody(std::vector<llvm::Type *>{});
+        return;
+    }
+
+    // a payload enum overlays its cases in one storage region. the AST properties stay one field
+    // per payload slot - that is what classify_copy and the per-case drop still fold over - and
+    // only this LLVM type is packed. a `[N x i8]` *property* would fold to t_bytes
+    if (type->is_enum_kind() && enum_has_payload(*type)) {
+        const llvm::DataLayout &layout = _ctx.layout();
+        llvm::Type *tag_ty = get_llvm_type(type->get_property_type(AST::k_enum_tag_index), cmp_unit);
+
+        std::vector<uint64_t> relative(type->property_count(), 0);
+        uint64_t max_size = 0;
+        uint64_t max_align = 1;
+
+        for (const AST::ComplexType::EnumCase &entry : type->enum_cases()) {
+            if (!entry.has_payload()) {
+                continue;
+            }
+
+            uint64_t offset = 0;
+            uint64_t case_align = 1;
+
+            for (size_t i = 0; i < entry.payload_field_count; i++) {
+                const size_t prop_i = entry.first_payload_property + i;
+                llvm::Type *field_ty = get_llvm_type(type->get_property_type(prop_i), cmp_unit);
+                const uint64_t field_align = layout.getABITypeAlign(field_ty).value();
+                const uint64_t field_size = layout.getTypeAllocSize(field_ty);
+
+                offset = align_up(offset, field_align);
+                relative[prop_i] = offset;
+                offset += field_size;
+                case_align = std::max(case_align, field_align);
+            }
+
+            max_size = std::max(max_size, offset);
+            max_align = std::max(max_align, case_align);
+        }
+
+        if (max_size == 0 || max_align == 0) {
+            body_of().llvm_struct->setBody(std::vector<llvm::Type *>{ tag_ty });
+            return;
+        }
+
+        const uint64_t tag_size = layout.getTypeAllocSize(tag_ty);
+        const uint64_t payload_start = align_up(tag_size, max_align);
+        const uint64_t storage_size = align_up(max_size, max_align);
+        const uint64_t units = storage_size / max_align;
+
+        llvm::Type *unit_ty = alignment_unit_type(*_ctx.llvm_context, max_align);
+        llvm::Type *storage_ty = llvm::ArrayType::get(unit_ty, units);
+
+        Structure &packed = body_of();
+        packed.llvm_struct->setBody({ tag_ty, storage_ty });
+        packed.property_byte_offset.assign(type->property_count(), 0);
+        for (size_t i = 1; i < type->property_count(); i++) {
+            packed.property_byte_offset[i] = payload_start + relative[i];
+        }
+
+        return;
+    }
+
+    std::vector<llvm::Type *> member_types;
+    for (size_t i = 0; i < type->property_count(); i++) {
+        llvm::Type *llvm_type = get_llvm_type(type->get_property_type(i), cmp_unit);
+        if (!llvm_type) {
+            assert(false);
+            throw _ctx.error(fmt::format(
+                "Unknown type for field '{}' in struct '{}'.",
+                type->get_property(i).name, type->name.value_or("<anonymous>")
+            ));
+        }
+        member_types.push_back(llvm_type);
+    }
+
+    body_of().llvm_struct->setBody(member_types);
 }
 
 void TypeLowering::build_class_box(
@@ -1100,10 +1212,9 @@ llvm::Type *TypeLowering::get_llvm_type(const AST::ValueType &type, const Compil
     if (type.is_primitive()) {
         base_type = get_llvm_type(type.get_primitive_type());
     }
-    // an enum shares the arm because it shares the shape: a layout of ordinary properties, `__tag`
-    // first, reached through the same structure table and lowered by the same two entry points. the
-    // discriminant and the payload slots are not codegen's invention, which is what keeps this from
-    // being a second layout minter beside ClassBox
+    // an enum shares the arm because the *AST* shape is still ordinary properties, `__tag` first.
+    // the LLVM type may overlay the payload slots - fill_structure_body owns that - but the
+    // structure table and these two entry points stay the one way a layout is found
     else if (type.is_struct() || type.is_enum()) {
         auto *complex = type.get_complex_type();
         auto struct_id = cmp_unit.structure_table->get_structure_id(complex);

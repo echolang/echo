@@ -1,0 +1,40 @@
+// size is the tag plus the widest case, not the sum of every case's fields.
+// two int64 pairs side by side would be 32 bytes of payload plus the tag;
+// overlaid they are 16, and the whole value is 24.
+enum Pair
+{
+    case left(int64 $a, int64 $b);
+    case right(int64 $c, int64 $d);
+}
+
+// mixed alignment: an i32 and an i64 overlay, payload starts at 8, size 16
+enum Mixed
+{
+    case small(int32 $x);
+    case wide(int64 $y);
+}
+
+// two owning payloads overlay: a number does not carry both strings
+enum Text
+{
+    case a(string $s);
+    case b(string $t);
+}
+
+echo mem::size<Pair>();
+echo mem::align<Pair>();
+echo mem::size<Mixed>();
+echo mem::align<Mixed>();
+echo mem::size<Text>();
+
+// the overlay does not change what a value holds: match still reads the live case
+echo match (Pair::left(1, 2)) {
+    Pair::left($a, $b) => $a,
+    Pair::right($c, $d) => $c,
+};
+
+int64 $zero = 0;
+echo match (Mixed::wide(9)) {
+    Mixed::wide($y) => $y,
+    Mixed::small($x) => $zero,
+};

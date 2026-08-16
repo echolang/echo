@@ -1,6 +1,7 @@
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
+#include "Compiler/LLVM/CompilationUnit.h"
 #include "Compiler/LLVM/Codegen/PrintfConversion.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
@@ -225,9 +226,22 @@ void DebugPrintCodegen::render_property(
 {
     const AST::ComplexType::Property &property = complex.get_property(index);
 
-    llvm::Value *slot = _ctx.builder->CreateStructGEP(
-        layout, address, static_cast<unsigned>(property.index),
-        fmt::format("dprint.{}", property.name));
+    // property_layout_of has already lowered this type, so the structure is in the table
+    auto struct_id = _ctx.current_cmp_unit->structure_table->get_structure_id(&complex);
+    llvm::Value *slot = nullptr;
+
+    if (struct_id != 0) {
+        slot = _ctx.lvalues->gep_property(
+            _ctx.current_cmp_unit->structure_table->get_structure(struct_id),
+            address,
+            property.index,
+            fmt::format("dprint.{}", property.name).c_str());
+    }
+    else {
+        slot = _ctx.builder->CreateStructGEP(
+            layout, address, static_cast<unsigned>(property.index),
+            fmt::format("dprint.{}", property.name));
+    }
 
     text(indent_for(depth));
     render(LValue{slot, property.type}, fmt::format("${} = ", property.name), depth);
