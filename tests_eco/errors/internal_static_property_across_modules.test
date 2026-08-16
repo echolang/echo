@@ -1,0 +1,21 @@
+modules: visibility/lib_member_internal
+expect: fail
+
+# the static half on its own, so a regression that only broke Type::$name would not hide behind
+# the instance-property errors in internal_member_across_modules
+--- OUT --->
+[error] InaccessibleDeclaration  internal_static_property_across_modules.eco:5:12
+
+  'Node::$empty' is internal to the module 'doc', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'doc' offers.
+
+  4 | 
+  5 | echo Node::$empty;
+    :            ^^^^^^
+  6 | 
+
+  19 | 
+  20 |     internal static int32 $empty = 0;
+     :                           ------ declared here
+  21 | }
+
+1 error, nothing was compiled.

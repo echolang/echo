@@ -603,7 +603,7 @@ void DebugInfoCodegen::append_property_members(
             member_type->getSizeInBits(),
             member_type->getAlignInBits(),
             base_offset_bits + layout.getElementOffsetInBits(i),
-            property.is_private ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
+            property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
             member_type));
     }
 }

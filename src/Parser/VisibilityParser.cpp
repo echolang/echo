@@ -64,19 +64,6 @@ Parser::VisibilityPrefix Parser::parse_visibility_prefix(
     }
 
     if (position == VisibilityPosition::t_member) {
-        // `internal` is the module axis, and a member does not sit on one: what another module may reach is
-        // the *type*, and a member of a reachable type is reachable with it
-        if (written == AST::Visibility::t_module) {
-            refuse_visibility_prefix(
-                payload,
-                prefix,
-                "A member has no module of its own - it is reachable exactly where the type that owns it "
-                "is. Write 'internal' on the type instead, or 'private' here to keep the member inside "
-                "its own type.");
-
-            return VisibilityPrefix { std::nullopt, fallback };
-        }
-
         prefix.value = AST::member_visibility(written);
         return prefix;
     }

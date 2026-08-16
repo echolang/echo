@@ -1,0 +1,7 @@
+// same module, different file: $n->kind is visible here. a second module is
+// errors/internal_member_across_modules
+
+public function write(const Node& $n) : int32
+{
+    return $n->kind + $n->hidden();
+}

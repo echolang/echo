@@ -1,0 +1,17 @@
+// an overload that takes the source type still wins. the conversion is the last real rank
+
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Quantity
+    {
+        return Quantity($n);
+    }
+}
+
+function put(Quantity $q) : void { echo 1; }
+function put(int32 $n) : void { echo 2; }
+
+put(7);

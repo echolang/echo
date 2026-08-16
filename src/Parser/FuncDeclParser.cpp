@@ -5,6 +5,7 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/TypeDeclNode.h"
+#include "AST/ASTArgumentFit.h"
 #include "AST/ASTBuiltin.h"
 #include "AST/ASTDestruction.h"
 #include "AST/ASTMemberLookup.h"
@@ -454,9 +455,9 @@ void Parser::publish_declaration_markers(
     funcdecl->is_inline = funcdecl->attributes.get_first("inline") != nullptr;
 }
 
-// publishes a method marked `#[implicit]` as one of its owner's implicit conversions, and reports
-// every way of marking something that cannot be one. the contract, and why it is here rather than on
-// FunctionRegistry, are in the header
+// publishes a method or static marked `#[implicit]` as one of its owner's implicit conversions, and
+// reports every way of marking something that cannot be one. the contract, and why it is here rather
+// than on FunctionRegistry, are in the header
 //
 // this is publish_copy_constructor's situation exactly - a second fact about an already-registered
 // declaration - and it is that function's shape, down to comparing the slot by identity so the body
@@ -495,24 +496,14 @@ void Parser::publish_implicit_conversion(
     }
 
     // a constructor builds its own type and a destructor tears one down; neither converts anything,
-    // and neither is reachable from an argument position - AST::find_implicit_conversion is asked for
-    // a *method* to call on the value that is already there. asked of member_kind rather than of the
-    // call site's spelling, so the two struct-member parsers do not each carry a copy of the rule
-    if (funcdecl->member_kind != AST::MemberKind::t_method) {
+    // and neither is reachable from an argument position. asked of member_kind rather than of the
+    // call site's spelling, so the two struct-member parsers do not each carry a copy of the rule.
+    // a static method is the inbound shape and is admitted below
+    if (funcdecl->member_kind != AST::MemberKind::t_method
+        && funcdecl->member_kind != AST::MemberKind::t_static_method) {
         report(fmt::format(
             "Only a method can declare an implicit conversion - a {} cannot be one.",
             funcdecl->is_constructor() ? "constructor" : "destructor"));
-        return;
-    }
-
-    // the receiver and nothing else. a `view(usize, usize)` beside it is a substring accessor - a
-    // different operation on the same name - and nothing would pass it arguments at a call site the
-    // user did not write
-    if (funcdecl->args.size() != funcdecl->implicit_arg_count()) {
-        report(fmt::format(
-            "An implicit conversion takes no parameters - '{}::{}' declares {}.",
-            owner_struct->type_name(), nametoken.value(),
-            funcdecl->args.size() - funcdecl->implicit_arg_count()));
         return;
     }
 
@@ -565,6 +556,69 @@ void Parser::publish_implicit_conversion(
         return;
     }
 
+    AST::ComplexType &owner = owner_struct->complex_type();
+
+    // compared by identity, so the body pass arriving at the node the declaration pass published is
+    // not a second declaration. this is the question the slot answers that the lookup does not - "is
+    // this declaration already here" rather than "what converts to that type"
+    if (std::ranges::find(owner.implicit_conversions(), funcdecl) != owner.implicit_conversions().end()) {
+        return;
+    }
+
+    if (funcdecl->member_kind == AST::MemberKind::t_static_method) {
+        // inbound: a static of the destination, one parameter, return type exactly the owner.
+        // the conversion *constructs* the destination, so a class that allocates is allowed -
+        // owns-nothing is an outbound rule about a window appearing in an argument list
+        if (funcdecl->args.size() != 1) {
+            report(fmt::format(
+                "An inbound conversion takes one parameter - the source. '{}::{}' declares {}.",
+                owner_struct->type_name(), nametoken.value(), funcdecl->args.size()));
+            return;
+        }
+
+        if (!(target == owner_struct->value_type())) {
+            report(fmt::format(
+                "An inbound conversion must return '{}' - the type it is declared on.",
+                owner_struct->type_name()));
+            return;
+        }
+
+        const AST::ValueType source = funcdecl->parameter_type(0);
+
+        // by value, so find_inbound_implicit_conversion stays `parameter_type(0) == from`. a
+        // borrow would force the lookup to re-rank, and implicit_conversion_source already
+        // peels a T& argument before the lookup is asked
+        if (AST::parameter_auto_borrows(source)) {
+            report(fmt::format(
+                "An inbound conversion takes the source by value - '{}::{}' takes '{}'.",
+                owner_struct->type_name(), nametoken.value(), source.get_type_desciption()));
+            return;
+        }
+
+        // asked through the lookup rather than by re-walking the slot, so "which conversion does
+        // this type have from that source" stays one rule
+        if (AST::find_inbound_implicit_conversion(&owner, source) != nullptr) {
+            report(fmt::format(
+                "'{}' already declares an implicit conversion from '{}'.",
+                owner_struct->type_name(), source.get_type_desciption()));
+            return;
+        }
+
+        owner.add_implicit_conversion(funcdecl);
+        return;
+    }
+
+    // outbound: the receiver and nothing else. a `view(usize, usize)` beside it is a substring
+    // accessor - a different operation on the same name - and nothing would pass it arguments at
+    // a call site the user did not write
+    if (funcdecl->args.size() != funcdecl->implicit_arg_count()) {
+        report(fmt::format(
+            "An implicit conversion takes no parameters - '{}::{}' declares {}.",
+            owner_struct->type_name(), nametoken.value(),
+            funcdecl->args.size() - funcdecl->implicit_arg_count()));
+        return;
+    }
+
     // a conversion to its own type can never fire: AST::argument_fit answers t_exact for an identical
     // type long before it reaches the conversion arm. so this is a marker that does nothing, which is
     // the thing this whole spelling exists to stop being possible
@@ -579,7 +633,8 @@ void Parser::publish_implicit_conversion(
     // hand over. a return value that has to be destroyed means an allocation or a retain appearing
     // out of an argument list - which is the property `tests_eco/strings/view_conversion.test` pins
     // with `CHECK-NOT: strong.inc`. nothing would leak (a callee destroys an owning by-value
-    // parameter), so this is a rule about what belongs in an invisible conversion, not a fix
+    // parameter), so this is a rule about what belongs in an invisible conversion, not a fix.
+    // inbound is the other direction and does not owe this: it constructs the destination
     if (AST::needs_destruction(target)) {
         report(fmt::format(
             "An implicit conversion must return a value that owns nothing - '{}' has to be "
@@ -588,21 +643,11 @@ void Parser::publish_implicit_conversion(
         return;
     }
 
-    AST::ComplexType &owner = owner_struct->complex_type();
-
-    // compared by identity, so the body pass arriving at the node the declaration pass published is
-    // not a second declaration. this is the question the slot answers that the lookup does not - "is
-    // this declaration already here" rather than "what converts to that type"
-    if (std::ranges::find(owner.implicit_conversions(), funcdecl) != owner.implicit_conversions().end()) {
-        return;
-    }
-
     // and a *different* declaration converting to the same target does need saying: nothing would
-    // decide which of them an invisible conversion meant. asked through the lookup rather than by
-    // re-walking the slot, so "which conversion does this type have to that one" stays one rule - if
-    // matching ever stops being exact return-type equality, a copy here would keep the old answer and
-    // quietly stop reporting the clash
-    if (AST::find_implicit_conversion(owner_struct->value_type(), target) != nullptr) {
+    // decide which of them an invisible conversion meant. asked through the directed lookup rather
+    // than find_implicit_conversion, which now also walks the *target* for inbound and would refuse
+    // a legal outbound the moment the other type declared the reverse
+    if (AST::find_outbound_implicit_conversion(&owner, target) != nullptr) {
         report(fmt::format(
             "'{}' already declares an implicit conversion to '{}'.",
             owner_struct->type_name(), target.get_type_desciption()));

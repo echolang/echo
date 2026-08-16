@@ -780,7 +780,7 @@ static void synthesize_field_wise_constructor(
     // `mem::buffer<int32>($stolen, 8)` would be a second owner of one allocation, built with no cast
     // and no `unsafe` anywhere. such a type builds itself through the constructors it wrote
     for (const auto &prop : struct_node->properties()) {
-        if (prop->is_private) {
+        if (prop->is_private()) {
             return;
         }
     }
@@ -1471,7 +1471,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
             auto var = parse_varexpr(payload, &structscope);
 
             if (var != nullptr) {
-                var->is_private = visibility.value == AST::Visibility::t_owner;
+                var->visibility = visibility.value;
             }
 
             // a requirement is behaviour, not storage. a required *property* would fix the layout of

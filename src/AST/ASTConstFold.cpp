@@ -508,14 +508,24 @@ AST::ConstFoldResult AST::const_fold(const AST::ExprNode *expr)
                     binary.op_node->token_literal.value()));
             }
 
-            // **no short-circuit.** Echo's `&&` is a CreateAnd and `||` a CreateOr - both operands are
-            // always evaluated, which str::buf::make_unique() relies on - so folding
-            // `false && <pending>` to false here would be a second and *different* answer to what `&&`
-            // means. both sides fold or the whole thing is pending
             const ConstFoldResult lhs = const_fold(binary.lhs);
 
             if (lhs.result != Result::t_folded) {
                 return lhs;
+            }
+
+            // **short-circuit.** `false && _` is false and `true || _` is true, without folding the
+            // right side - which is what codegen does, and what `false && die("no")` needs of a
+            // `const if`. a pending or refused right side is not a reason to refuse the whole thing
+            // once the left has already decided
+            const Token::Type op_after_lhs = binary.op_node->op->type;
+
+            if (op_after_lhs == Token::Type::t_logical_and && is_foldable_bool(lhs.type) && !lhs.as_bool()) {
+                return fold_bool(false);
+            }
+
+            if (op_after_lhs == Token::Type::t_logical_or && is_foldable_bool(lhs.type) && lhs.as_bool()) {
+                return fold_bool(true);
             }
 
             const ConstFoldResult rhs = const_fold(binary.rhs);

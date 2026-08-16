@@ -606,7 +606,7 @@ void AST::TypeRegistry::derive_instantiation(
         // can answer for `mem::buffer<int32>` what `mem::buffer<T>` declared. without it privacy held
         // for a template and evaporated for every instance - which is to say, for every value anyone
         // actually builds
-        inst->add_property(prop.name, substitute_type(prop.type, subst, *this), prop.is_private);
+        inst->add_property(prop.name, substitute_type(prop.type, subst, *this), prop.visibility);
     }
 
     // the conformances, at the same moment and through the same substitution as the properties, because

@@ -793,10 +793,16 @@ namespace AST
             std::string name;
             ValueType type;
 
-            // reachable only from inside the declaring type. here as well as on the VarDeclNode for
-            // `kind`'s reason: an *instantiation* has properties and no declaration nodes, so this is
-            // the only thing that can answer for `mem::buffer<int32>` what `mem::buffer` said
-            bool is_private = false;
+            // who may name this property. here as well as on the VarDeclNode for `kind`'s reason: an
+            // *instantiation* has properties and no declaration nodes, so this is the only thing that
+            // can answer for `mem::buffer<int32>` what `mem::buffer` said. `t_owner` is `private`
+            // (the declaring type); `t_module` is `internal` (this module, no further); `t_public`
+            // is the default, reached exactly where the type is
+            Visibility visibility = Visibility::t_public;
+
+            bool is_private() const {
+                return visibility == Visibility::t_owner;
+            }
         };
 
         std::optional<std::string> name;
@@ -937,7 +943,9 @@ namespace AST
         // knows how a t_generic ValueType maps back to a declaration
         bool declares_type_param(const ValueType &type) const;
 
-        void add_property(const std::string &name, ValueType type, bool is_private = false) {
+        void add_property(
+            const std::string &name, ValueType type, Visibility visibility = Visibility::t_public
+        ) {
             // on a template, a `T`-typed property must reference one of this type's own declared
             // parameters. instantiations carry no type_parameters of their own, so the check only
             // applies while a template is being built
@@ -945,7 +953,7 @@ namespace AST
                 assert(declares_type_param(type));
             }
             _property_map[name] = _properties.size();
-            _properties.push_back(Property { _properties.size(), name, type, is_private });
+            _properties.push_back(Property { _properties.size(), name, type, visibility });
         }
 
         // retypes a property that is already there. the *layout* is fixed by the order properties were
@@ -1197,13 +1205,16 @@ namespace AST
             return _deinit;
         }
 
-        // the methods that declare an implicit conversion *from* this type - the ones the user marked
-        // `#[implicit]`.
+        // the methods that declare an implicit conversion involving this type - the ones the user
+        // marked `#[implicit]`. outbound is a parameterless method *from* this type; inbound is a
+        // static of this type whose one parameter is the source. same list, distinguished by
+        // `has_receiver()`.
         //
-        // A value handed to a parameter of one of their return types is converted by a call to it, with
-        // nothing written at the call site. AST::find_implicit_conversion is the lookup, and
-        // AST::argument_fit ranks the result last of the real ranks - below even a borrow of a
-        // temporary, so an overload taking the owning type always beats one taking the window.
+        // A value handed to a parameter of the conversion's return type is converted by a call to it,
+        // with nothing written at the call site. AST::find_implicit_conversion is the lookup, source
+        // walk first, and AST::argument_fit ranks the result last of the real ranks - below even a
+        // borrow of a temporary, so an overload taking the owning type always beats one taking the
+        // window.
         //
         // **declarations only, never the target type.** the declaration's return type already *is* the
         // target. A second copy of it here would be a member field on ComplexType carrying a type, which

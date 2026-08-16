@@ -287,9 +287,13 @@ namespace AST
 
     // **which conversion answers this argument at this parameter, or none.** the two peels
     // plus the one thing neither can say: a peeled `const` borrow may only reach a
-    // `const function` conversion. asked of AST::const_receiver_refused, which owns that
-    // question. two readers for implicit_conversion_target's reason - argument_fit decides
-    // *that* a conversion applies and CallResolver retrieves *which*
+    // `const function` outbound conversion. asked of AST::const_receiver_refused, which owns that
+    // question. inbound has no receiver; `const_receiver_refused` already answers false for a
+    // static, so the gate is a no-op there rather than a second rule.
+    //
+    // **`from` no longer has to be a declared type.** that was what made `int32 → Quantity`
+    // impossible: only the source's `_implicit_conversions` was searched. inbound lives on `to`,
+    // and find_implicit_conversion asks both
     inline FunctionDeclNode *implicit_conversion_for(
         const ValueType &from,
         const ExprNode *expr,
@@ -297,10 +301,6 @@ namespace AST
     )
     {
         const ValueType source = implicit_conversion_source(from, expr);
-
-        if (!source.has_complex_type()) {
-            return nullptr;
-        }
 
         FunctionDeclNode *conversion =
             find_implicit_conversion(source, implicit_conversion_target(to));
@@ -310,7 +310,8 @@ namespace AST
         }
 
         // only when a borrow was actually peeled: a value argument has no const-ness of its own
-        // to launder, and the temporary the conversion's receiver binds to is the compiler's
+        // to launder, and the temporary the conversion's receiver binds to is the compiler's.
+        // inbound is a static, so const_receiver_refused is already false for it
         if (implicit_conversion_peels_borrow(from, expr)
             && const_receiver_refused(*conversion, from)) {
             return nullptr;
@@ -464,8 +465,9 @@ namespace AST
             return ArgumentFit::t_interface_widening;
         }
 
-        // a value converts to another type when its own type declared how - a method marked
-        // `#[implicit]`, found by AST::find_implicit_conversion.
+        // a value converts to another type when either type declared how - an outbound method
+        // marked `#[implicit]` on the source, or an inbound static on the destination, found by
+        // AST::find_implicit_conversion.
         //
         // Last, and its own rank, so CallResolver can tell this case apart from the primitive
         // conversions above by the rank alone rather than by asking the lookup a second time.

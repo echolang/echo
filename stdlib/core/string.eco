@@ -27,15 +27,6 @@
  * and `$size` on the view. So the fields may be reordered but not renamed, `$window` has to *be*
  * the view type, and `$owner` has to stay a class - a class is what carries a reference count.
  *
- * Two shapes recur below and are deliberate rather than clumsy:
- *
- *  - a `bool` is a branch and two `return`s, never `return $a == $b;`. A `return` types its
- *    literals against the declared return type, and there is no reason to find out the hard way
- *    which side of that a comparison lands on.
- *  - no comparison between two `uint8`s is ever `<` or `>`. Integer comparison lowers *signed*, so
- *    `0xff` would read as -1; only `==` and `!=`, which do not consult signedness, are safe on a
- *    byte. Comparing a byte against an integer *literal* is fine - it widens to int32 first, and
- *    the widening follows the source's signedness, so a `uint8` zero-extends.
  */
 
 /**
@@ -74,11 +65,7 @@ public struct string
          */
         const function empty() : bool
         {
-            if ($this->size > 0) {
-                return false;
-            }
-
-            return true;
+            return $this->size == 0;
         }
 
         /**
@@ -489,18 +476,15 @@ public struct string
      *    `from + size <= used`, so a window as long as the buffer is used has to start at offset
      *    zero and *is* the whole buffer.
      *
-     * The two conditions are nested rather than joined with `&&`, and have to be: `&&` lowers to a
-     * plain `and` with no short circuit, and the second reads through `$owner`, which the first has
-     * only just established is not null.
+     * `&&` short-circuits, so a null `$owner` is not read: the first condition is the
+     * uniqueness gate, and the second only runs once that handle is known to be there.
      *
      * `private`, so only `string`'s own bodies reach it.
      */
     private function make_unique() : void
     {
-        if (mem::refs($this->owner) == 1) {
-            if ($this->window->size == $this->owner->used) {
-                return;
-            }
+        if (mem::refs($this->owner) == 1 && $this->window->size == $this->owner->used) {
+            return;
         }
 
         string $fresh = $this->clone();

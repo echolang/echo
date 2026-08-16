@@ -1,0 +1,10 @@
+# put(int32) wins; the conversion is the last real rank and is not inserted
+stdlib: off
+
+--- OUT --->
+2
+--- IR --->
+CHECK: define i32 @main(
+CHECK: call void @_putZZMLPi(i32 7)
+CHECK-NOT: call %Quantity @_M8Quantity_from
+CHECK: ret i32 0

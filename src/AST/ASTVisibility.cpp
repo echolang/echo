@@ -1,5 +1,6 @@
 #include "AST/ASTVisibility.h"
 
+#include "AST/ASTCollector.h"
 #include "AST/ASTFile.h"
 #include "AST/ASTModule.h"
 
@@ -64,6 +65,13 @@ AST::Visibility AST::member_visibility(const std::optional<AST::Visibility> &wri
         return AST::Visibility::t_owner;
     }
 
+    // `internal` on a member is the module axis the top level already has: this module, and no
+    // further. a public type may have internal fields; a second module that can name the type still
+    // cannot name those members
+    if (written == AST::Visibility::t_module) {
+        return AST::Visibility::t_module;
+    }
+
     // a member with nothing written, or `public` written out, carries no restriction of its own: what bounds
     // it is the visibility of the type that owns it, which is that type's answer to give
     return AST::Visibility::t_public;
@@ -123,4 +131,28 @@ std::string AST::visibility_refusal(
         "'{}' is private to '{}', so it can only be named in that file. Remove the 'private' to reach it "
         "from the rest of its module, or write 'public' to reach it from anywhere.",
         what, describe_origin_file(origin));
+}
+
+void AST::refuse_invisible_property(
+    Collector &collector,
+    const CodeRef &at,
+    Visibility visibility,
+    const DeclarationOrigin &origin,
+    const DeclarationOrigin &from,
+    const std::string &what,
+    const std::optional<TokenReference> &declaration_token
+)
+{
+    // not this function's axis. t_owner is AST::can_reach_private_member; t_public and t_file
+    // are not a property's module-axis question
+    if (visibility != Visibility::t_module) {
+        return;
+    }
+
+    if (visible_from(visibility, origin, from)) {
+        return;
+    }
+
+    collector.collect_issue<Issue::InaccessibleDeclaration>(
+        at, visibility_refusal(visibility, origin, from, what), origin, declaration_token);
 }

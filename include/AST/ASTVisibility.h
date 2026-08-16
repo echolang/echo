@@ -11,6 +11,9 @@
 
 namespace AST
 {
+    class Collector;
+    struct CodeRef;
+
     // **the scope a declaration is reachable from**, and the whole of what a visibility modifier says.
     //
     // three levels on a declaration and one ladder: the file it was written in, the module that owns that
@@ -55,8 +58,8 @@ namespace AST
     Visibility declaration_visibility(const std::optional<Visibility> &written);
 
     // and the level a **member** carries. `t_public` when nothing was written - a member has no restriction
-    // of its own and is reached exactly where its type is, which is the type's answer to give. `t_module`
-    // cannot arrive here: the parser refuses `internal` on a member, a member having no module axis
+    // of its own and is reached exactly where its type is, which is the type's answer to give. `internal`
+    // is `t_module`: this module, and no further, the same rung a top-level declaration already has
     Visibility member_visibility(const std::optional<Visibility> &written);
 
     // **may a site written in `from` name a declaration of this visibility declared in `origin`?**
@@ -79,6 +82,27 @@ namespace AST
         const DeclarationOrigin &origin,
         const DeclarationOrigin &from,
         const std::string &what
+    );
+
+    // **refuses a site that cannot name this property on the module axis.** no-op when the
+    // property is not `t_module`, or when visible_from says yes. the owner axis stays
+    // AST::can_reach_private_member; the two are not folded together.
+    //
+    // `what` is already spelled (`Node::$empty`, `Node::kind`) because this cannot know which
+    // site named it. `declaration_token` is the label when the caller has one (a static's
+    // VarDeclNode); a layout Property has none
+    //
+    // two readers: TypeChecker::check_member_visibility for an instance property, and the
+    // parse-time Type::$name walk. the sentence, origin and issue live here so a third
+    // spelling does not grow a third copy
+    void refuse_invisible_property(
+        Collector &collector,
+        const CodeRef &at,
+        Visibility visibility,
+        const DeclarationOrigin &origin,
+        const DeclarationOrigin &from,
+        const std::string &what,
+        const std::optional<TokenReference> &declaration_token
     );
 };
 

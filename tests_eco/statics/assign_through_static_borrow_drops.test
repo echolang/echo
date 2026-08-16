@@ -1,0 +1,9 @@
+# the output says the new value arrived; the resolved tree says the old one was destroyed.
+# a store with no drop prints the same two lines and leaks
+--- OUT --->
+new
+new
+--- RAST --->
+CHECK: deref<string>(varref<string&>(var($p))) = literal<string>("'new'")
+CHECK: destroys old:
+CHECK: $deinit

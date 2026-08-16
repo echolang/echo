@@ -1,0 +1,12 @@
+// inbound must return the type it is declared on
+struct Window { usize $count; }
+
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Window { return Window(1); }
+}
+
+echo 1;

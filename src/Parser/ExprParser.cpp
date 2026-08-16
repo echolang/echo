@@ -22,6 +22,7 @@
 #include "AST/NullNode.h"
 #include "AST/TypeDeclNode.h"
 #include "AST/ASTConstness.h"
+#include "AST/ASTVisibility.h"
 
 #include "External/infint.h"
 
@@ -1056,8 +1057,8 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
 
     // **a `private` static is reachable only from inside its own type**, which is the same rule and the
     // same question an instance property answers - AST::can_reach_private_member, off the enclosing
-    // declaration rather than off the file
-    if (found->second->is_private
+    // declaration rather than off the file. `internal` is the module axis, AST::refuse_invisible_property
+    if (found->second->is_private()
         && !AST::can_reach_private_member(
             payload.context.self_struct_ptr != nullptr
                 ? &payload.context.self_struct_ptr->complex_type()
@@ -1069,6 +1070,15 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
             owner.get_type_desciption()
         );
     }
+
+    AST::refuse_invisible_property(
+        payload.collector,
+        payload.context.code_ref(name_token),
+        found->second->visibility,
+        owner_type->declared_in,
+        AST::origin_at(payload.context),
+        fmt::format("{}::${}", owner_type->namespaced_name(), found->second->name()),
+        std::optional<TokenReference>(found->second->token_varname));
 
     auto &node = payload.context.emplace_node<AST::StaticPropertyExprNode>(
         name_token, owner, found->second, found->first);
@@ -1402,6 +1412,18 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     cursor.skip();
 
     const auto start = cursor.snapshot();
+
+    // `&Type::$name` is the address of a static property, not a function reference. tried first
+    // because `try_parse_static_owner(..., false)` only accepts an identifier after `::`, so
+    // `&Type::$empty` would otherwise fall through to "'&' expected a function name"
+    if (auto *prop = Parser::try_parse_static_property(payload)) {
+        const bool weak_wanted = expected_type != nullptr && expected_type->type.is_weak();
+
+        auto &addr = payload.context.emplace_node<AST::AddrOfExprNode>(prop, weak_wanted);
+        return AST::make_ref(addr);
+    }
+
+    cursor.restore(start);
     AST::TypeNode *owner = Parser::try_parse_static_owner(payload, /*want_property=*/false);
 
     const AST::Namespace *ns = payload.context.current_namespace;

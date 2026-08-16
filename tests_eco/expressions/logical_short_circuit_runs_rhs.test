@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: yes
+  at logical_short_circuit_runs_rhs.eco:5

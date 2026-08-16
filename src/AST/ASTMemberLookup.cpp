@@ -136,29 +136,71 @@ bool AST::bind_shorthand_to(AST::ExprNode *expr, const AST::ValueType &destinati
     return true;
 }
 
-AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from, const AST::ValueType &to)
+AST::FunctionDeclNode *AST::find_outbound_implicit_conversion(
+    const AST::ComplexType *owner,
+    const AST::ValueType &to
+)
 {
-    // only a declared type can offer one, and only ever to a *different* type - `t_exact` already
-    // answered the identity case, and admitting it here would let a type convert to itself
-    if (!from.has_complex_type() || !to.has_complex_type() || from == to) {
-        return nullptr;
-    }
-
-    const AST::ComplexType *owner = member_owner_of(from.get_complex_type());
+    owner = member_owner_of(owner);
 
     if (owner == nullptr) {
         return nullptr;
     }
 
-    // the published slot, not a walk of every method: this runs from the bottom of argument_fit, once
-    // per candidate per argument per fixpoint round. a type has one or two entries here, so a flat
-    // scan of them is
-    // the whole cost - and the list holds only declarations publish_implicit_conversion accepted, so
-    // there is nothing left to check but the target
     for (AST::FunctionDeclNode *candidate : owner->implicit_conversions()) {
-        if (candidate->get_return_type() == to) {
+        if (candidate->has_receiver() && candidate->get_return_type() == to) {
             return candidate;
         }
+    }
+
+    return nullptr;
+}
+
+AST::FunctionDeclNode *AST::find_inbound_implicit_conversion(
+    const AST::ComplexType *owner,
+    const AST::ValueType &from
+)
+{
+    owner = member_owner_of(owner);
+
+    if (owner == nullptr) {
+        return nullptr;
+    }
+
+    // a comparison: publish already refused a borrow parameter, so the source is the
+    // declared type and implicit_conversion_source is what peels a T& argument first
+    for (AST::FunctionDeclNode *candidate : owner->implicit_conversions()) {
+        if (!candidate->has_receiver()
+            && candidate->args.size() == 1
+            && candidate->parameter_type(0) == from) {
+            return candidate;
+        }
+    }
+
+    return nullptr;
+}
+
+AST::FunctionDeclNode *AST::find_implicit_conversion(const AST::ValueType &from, const AST::ValueType &to)
+{
+    // never to itself - `t_exact` already answered the identity case, and admitting it here would
+    // let a type convert to itself. inbound and outbound both refuse that at the declaration too
+    if (from == to) {
+        return nullptr;
+    }
+
+    // the published slot, not a walk of every method: this runs from the bottom of argument_fit, once
+    // per candidate per argument per fixpoint round. a type has one or two entries here, so a flat
+    // scan of them is the whole cost - and the list holds only declarations
+    // publish_implicit_conversion accepted, so there is nothing left to check but the target (outbound)
+    // or the source (inbound)
+    if (from.has_complex_type()) {
+        if (auto *found = find_outbound_implicit_conversion(from.get_complex_type(), to)) {
+            return found;
+        }
+    }
+
+    if (to.has_complex_type()) {
+        return find_inbound_implicit_conversion(to.get_complex_type(), from);
     }
 
     return nullptr;

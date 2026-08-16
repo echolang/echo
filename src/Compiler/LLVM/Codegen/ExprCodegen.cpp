@@ -188,6 +188,19 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
             rhs.get_type_desciption(), _ctx.function_context()));
     };
 
+    // **`&&` and `||` evaluate the right side only when the left has not already decided.** both
+    // sides always running was a CreateAnd / CreateOr, and `false && die("no")` died. the branch
+    // lives in its own helper so this function does not create blocks - dprint is the only builtin
+    // that does, and it has its own subsystem for that reason
+    if (node.op_node != nullptr && node.op_node->op != nullptr) {
+        const Token::Type op = node.op_node->op->type;
+
+        if (op == Token::Type::t_logical_and || op == Token::Type::t_logical_or) {
+            gen_logical_short_circuit(node);
+            return;
+        }
+    }
+
     node.lhs->accept(*_ctx.visitor);
     node.rhs->accept(*_ctx.visitor);
 
@@ -495,12 +508,6 @@ void ExprCodegen::gen_binary_expr(AST::BinaryExprNode &node)
     }
     else if (lhsret.is_boolean_type() && rhsret.is_boolean_type()) {
         switch (node.op_node->op->type) {
-            case Token::Type::t_logical_and:
-                _ctx.value_stack.push(_ctx.builder->CreateAnd(left, right));
-                break;
-            case Token::Type::t_logical_or:
-                _ctx.value_stack.push(_ctx.builder->CreateOr(left, right));
-                break;
             // **whether two answers agree**, over the i1 they already are. the four *ordering*
             // comparisons are deliberately absent: a bool is a yes/no rather than a small number, and
             // `$a < $b` on two of them is a precedence mistake far more often than it is a question -
@@ -1651,6 +1658,45 @@ void ExprCodegen::gen_temporary_bind(AST::TemporaryBindExprNode &node)
     if (value != nullptr) {
         _ctx.value_stack.push(value);
     }
+}
+
+void ExprCodegen::gen_logical_short_circuit(AST::BinaryExprNode &node)
+{
+    llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+
+    const bool is_and = node.op_node->op->type == Token::Type::t_logical_and;
+    const char *rhs_name = is_and ? "and.rhs" : "or.rhs";
+    const char *done_name = is_and ? "and.done" : "or.done";
+    const char *phi_name = is_and ? "and" : "or";
+
+    node.lhs->accept(*_ctx.visitor);
+    llvm::Value *left = _ctx.pop();
+
+    auto *rhs_block = llvm::BasicBlock::Create(*_ctx.llvm_context, rhs_name, function);
+    auto *done_block = llvm::BasicBlock::Create(*_ctx.llvm_context, done_name, function);
+
+    // `&&` takes the right side only when the left is true. `||` takes it only when the left is false.
+    // the skipped path carries the left value itself, which is the last operand that ran
+    if (is_and) {
+        _ctx.builder->CreateCondBr(left, rhs_block, done_block);
+    }
+    else {
+        _ctx.builder->CreateCondBr(left, done_block, rhs_block);
+    }
+
+    llvm::BasicBlock *lhs_end = _ctx.builder->GetInsertBlock();
+
+    _ctx.set_insert_point(rhs_block);
+    node.rhs->accept(*_ctx.visitor);
+    llvm::Value *right = _ctx.pop();
+    llvm::BasicBlock *rhs_end = _ctx.builder->GetInsertBlock();
+    _ctx.builder->CreateBr(done_block);
+
+    _ctx.set_insert_point(done_block);
+    llvm::PHINode *phi = _ctx.builder->CreatePHI(left->getType(), 2, phi_name);
+    phi->addIncoming(left, lhs_end);
+    phi->addIncoming(right, rhs_end);
+    _ctx.value_stack.push(phi);
 }
 
 void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)

@@ -1,0 +1,8 @@
+modules: visibility/lib_member_internal
+
+# a public type with internal members: the same module's other file reads the payload,
+# and a consumer reaches only the surface. errors/internal_member_across_modules is
+# the half that names $kind from outside
+--- OUT --->
+14
+ok

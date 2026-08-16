@@ -71,5 +71,5 @@ const std::string AST::TypeDeclNode::node_description()
 void AST::TypeDeclNode::add_property(VarDeclNode *property)
 {
     _properties.push_back(property);
-    _complex_type.add_property(property->name(), property->type_node()->type, property->is_private);
+    _complex_type.add_property(property->name(), property->type_node()->type, property->visibility);
 }

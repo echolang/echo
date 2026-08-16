@@ -1,94 +1,88 @@
 expect: fail
 
 # **every shape that takes no visibility modifier**, in one case, because they are one rule read from
-# nine sides: a modifier says who may name a declaration, and each of these is either not a declaration
+# eight sides: a modifier says who may name a declaration, and each of these is either not a declaration
 # or is already exactly as reachable as whatever owns it.
 #
 # what the case really pins is the recovery: each refusal lands on the modifier itself rather than on the
-# declaration behind it, the declaration behind it still parses, and nothing cascades - so nine misplaced
-# words cost nine diagnostics and not a truncated file. that only holds because
+# declaration behind it, the declaration behind it still parses, and nothing cascades - so eight misplaced
+# words cost eight diagnostics and not a truncated file. that only holds because
 # Parser::parse_visibility_prefix *consumes* the token before refusing it, which is also what keeps the
 # declaration pass and the body pass on the same token
+#
+# `internal` on a member used to live here. it is a real rung now - visibility/member_internal and
+# errors/internal_member_across_modules are that case
 --- OUT --->
 [error] visibility_misplaced.eco:13:5
 
-  'internal' cannot be written here. A member has no module of its own - it is reachable exactly where the type that owns it is. Write 'internal' on the type instead, or 'private' here to keep the member inside its own type.
-
-  12 |     // `internal` is the module axis, and a member has none: what a module may reach is the type
-  13 |     internal int32 $shared;
-     :     ^^^^^^^^
-  14 | 
-
-[error] visibility_misplaced.eco:16:5
-
   'private' cannot be written here. A type declared inside another is only ever named through its owner, so it is already as reachable as that owner is.
 
-  15 |     // a nested type is only ever named through its owner
-  16 |     private struct Inner
+  12 |     // a nested type is only ever named through its owner
+  13 |     private struct Inner
      :     ^^^^^^^
-  17 |     {
+  14 |     {
 
-[error] visibility_misplaced.eco:22:5
+[error] visibility_misplaced.eco:19:5
 
   'private' cannot be written here. A destructor is never called by name - the compiler runs it where the value it belongs to ends - so there is no call site for a modifier to narrow.
 
-  21 |     // a destructor is never called by name
-  22 |     private destructor()
+  18 |     // a destructor is never called by name
+  19 |     private destructor()
      :     ^^^^^^^
-  23 |     {
+  20 |     {
 
-[error] visibility_misplaced.eco:27:5
+[error] visibility_misplaced.eco:24:5
 
   'private' cannot be written here. A constant declared inside a type is reached through that type, so it is already as reachable as its owner is - and there is no narrower scope for one.
 
-  26 |     // a constant declared inside a type is reached through that type
-  27 |     private const int32 STEP = 2;
+  23 |     // a constant declared inside a type is reached through that type
+  24 |     private const int32 STEP = 2;
      :     ^^^^^^^
-  28 | }
+  25 | }
 
-[error] visibility_misplaced.eco:31:1
+[error] visibility_misplaced.eco:28:1
 
   'private' cannot be written here. An operator's symbol is global wherever it is declared - one entry in one table that every module reads - so there is no scope for it to be narrowed to.
 
-  30 | // an operator's symbol is global wherever it is written
-  31 | private operator (Holder $a) + (Holder $b) : int32
+  27 | // an operator's symbol is global wherever it is written
+  28 | private operator (Holder $a) + (Holder $b) : int32
      : ^^^^^^^
-  32 | {
+  29 | {
 
-[error] visibility_misplaced.eco:39:5
+[error] visibility_misplaced.eco:36:5
 
   'private' cannot be written here. A method declared in an interface is a requirement, so it is reachable exactly where the interface is - it is what an implementor promises to answer.
 
-  38 |     // a requirement *is* the interface's surface
-  39 |     private function area() : int32;
+  35 |     // a requirement *is* the interface's surface
+  36 |     private function area() : int32;
      :     ^^^^^^^
-  40 | }
+  37 | }
 
-[error] visibility_misplaced.eco:46:5
+[error] visibility_misplaced.eco:43:5
 
   'private' cannot be written here. A declaration inside a body is already reachable from that block and from nowhere else, so there is nothing for a modifier to narrow.
 
-  45 |     // nowhere else already
-  46 |     private struct Local
+  42 |     // nowhere else already
+  43 |     private struct Local
      :     ^^^^^^^
-  47 |     {
+  44 |     {
 
-[error] visibility_misplaced.eco:51:5
+[error] visibility_misplaced.eco:48:5
 
   'private' cannot be written here. A declaration inside a body is already reachable from that block and from nowhere else, so there is nothing for a modifier to narrow.
 
-  50 | 
-  51 |     private function nested() : int32
+  47 | 
+  48 |     private function nested() : int32
      :     ^^^^^^^
-  52 |     {
+  49 |     {
 
-[error] visibility_misplaced.eco:58:1
+[error] visibility_misplaced.eco:55:1
 
   'public' cannot be written here. A visibility modifier says who may name a declaration, and this is not one.
 
-  57 | // nor on something that is not a declaration
-  58 | public echo 1;
+  54 | // nor on something that is not a declaration
+  55 | public echo 1;
      : ^^^^^^
-  59 | 
+  56 | 
 
-9 errors, nothing was compiled.
+8 errors, nothing was compiled.

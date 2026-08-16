@@ -1,0 +1,8 @@
+// a type split across two files of one module can keep its payload off the public surface.
+// this program names only what the library marked public; write.eco, inside the library,
+// is the neighbour that reads $kind
+
+Node $n = Node(7, "ok");
+
+echo write($n);
+echo $n->text();

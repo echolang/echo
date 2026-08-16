@@ -96,6 +96,10 @@ namespace Compiler::LLVM
         // a select, because **B must not be evaluated on the present path** - it may be a call
         void gen_null_coalesce(AST::NullCoalesceExprNode &node);
 
+        // `A && B` / `A || B`: evaluate A, and evaluate B only when it can still change the answer.
+        // a branch and a phi, the same shape as `??`, because **B must not run when A already decided**
+        void gen_logical_short_circuit(AST::BinaryExprNode &node);
+
         // **`match ($u) { ... }` - one switch over `__tag`, one block per arm, one phi.**
         //
         // shaped on gen_null_coalesce beside it, which is the two-arm case of exactly this: each arm's

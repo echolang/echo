@@ -1,0 +1,16 @@
+// `&Type::$name` is a T& to the same storage Type::$name names
+
+struct Slot
+{
+    static int32 $empty = 7;
+}
+
+int32& $p = &Slot::$empty;
+
+echo $p;
+echo Slot::$empty;
+
+$p = 9;
+
+echo $p;
+echo Slot::$empty;

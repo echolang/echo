@@ -1,0 +1,10 @@
+// an inbound conversion takes the source by value, so the lookup stays a comparison
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32& $n) : Quantity { return Quantity(0); }
+}
+
+echo 1;

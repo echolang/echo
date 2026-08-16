@@ -187,7 +187,7 @@ namespace AST
         // function is `t_file`. holding both would be two fields that must agree about a declaration that
         // is only one thing
         //
-        // there is no carrier for this on the *layout*, the way ComplexType::Property::is_private is the
+        // there is no carrier for this on the *layout*, the way ComplexType::Property::visibility is the
         // layout-side copy of a property's. There does not have to be: AST::find_member_functions redirects
         // an instantiation through `template_ref`, so what a call site finds for `Box<int32>::hidden()` is
         // the declaration `Box<T>` wrote, flag and all

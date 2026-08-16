@@ -96,15 +96,23 @@ namespace AST
     // would have to grow - it substitutes an instantiation's properties and conformances and knows
     // nothing about member types
 
-    // the method that implicitly converts a `from` into a `to`, or null when the type declares none.
+    // the method that implicitly converts a `from` into a `to`, or null when neither type declares one.
     //
-    // **the one rule** for "does this type convert to that one": a method its owner marked
-    // `#[implicit]`, whose return type is exactly `to`. Exact rather than convertible on purpose, so a
-    // chain of conversions can never be searched for.
+    // **the one rule** for "does this type convert to that one", two arms, source first:
     //
-    // Everything else about a candidate - it takes no parameters, it is a method, its target is a
-    // declared type that owns nothing - was decided at the declaration by Parser's
-    // publish_implicit_conversion. That is what lets this be a comparison rather than a filter.
+    //   1. outbound - `from` is a declared type whose owner marked a parameterless method `#[implicit]`,
+    //      return type exactly `to`
+    //   2. inbound  - `to` is a declared type whose owner marked a static `#[implicit]`,
+    //      sole parameter exactly `from`
+    //
+    // Exact rather than convertible on purpose, so a chain of conversions can never be searched for.
+    // The source walk wins when both exist for the same pair, so a type that already knows how to
+    // become another is not overridden by that other's inbound.
+    //
+    // Everything else about a candidate - arity, method vs static, the return type being the owner or
+    // not, whether an outbound target may own something, that an inbound source is by value - was
+    // decided at the declaration by Parser's publish_implicit_conversion. That is what lets this be
+    // a comparison rather than a filter.
     //
     // an implicit conversion is inserted at an argument position where the user wrote nothing, so
     // it is not an `operator` - every form that grammar has is operand syntax. the spelling is
@@ -115,6 +123,15 @@ namespace AST
     // t_declared_conversion, below every built-in conversion, so an overload taking the owning type
     // always wins), TypeChecker accepts it, and AST::CallResolver is the one that inserts the call
     FunctionDeclNode *find_implicit_conversion(const ValueType &from, const ValueType &to);
+
+    // the outbound conversion `owner` already published to `to`, or null. the half of the lookup
+    // publish_implicit_conversion asks so a second method to the same target is the same question,
+    // not a second walk of the slot
+    FunctionDeclNode *find_outbound_implicit_conversion(const ComplexType *owner, const ValueType &to);
+
+    // the inbound conversion `owner` already published from `from`, or null. the inbound twin of
+    // the function above: two statics that both take `int32` collide even when their names differ
+    FunctionDeclNode *find_inbound_implicit_conversion(const ComplexType *owner, const ValueType &from);
 
     // `ct`'s destructor, or null when the type has none of its own. the same template_ref redirect
     // the overload lookup above does, and for the same reason: `Box<int32>` holds no destructor, the

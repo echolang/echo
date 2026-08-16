@@ -1,0 +1,14 @@
+// a type has one inbound conversion per source: nothing would decide which of two an
+// invisible call meant
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Quantity { return Quantity($n); }
+
+    #[implicit]
+    static function wrap(int32 $n) : Quantity { return Quantity($n); }
+}
+
+echo 1;

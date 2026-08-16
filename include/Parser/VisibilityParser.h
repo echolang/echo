@@ -26,9 +26,8 @@ namespace Parser
         // see AST::declaration_visibility
         t_declaration,
 
-        // a struct, class or interface body. `private` narrows to Visibility::t_owner, `public` is the
-        // level a member has anyway, and `internal` is refused: a member has no module axis, being
-        // reachable exactly where the type that owns it is
+        // a struct, class or interface body. `private` narrows to Visibility::t_owner, `internal` is
+        // the module that declared the type, and nothing / `public` is the level a member has anyway
         t_member,
 
         // inside a `{ }` block - a function body, or a lexical block at file scope. no modifier is legal:

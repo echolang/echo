@@ -56,8 +56,8 @@ namespace AST
         // the field alone is only half the answer
         AccessEffect access_effect = AccessEffect::t_none;
 
-        // written `private ptr<T> $data;` on a struct property: the name is reachable only from
-        // inside the type that declared it.
+        // written `private ptr<T> $data;` or `internal int32 $kind;` on a struct property. `t_owner`
+        // is the declaring type, `t_module` is this module and no further, `t_public` is the default.
         //
         // **it is not decoration and not a style rule - it is what makes an invariant an invariant.**
         // `mem::buffer<T>` claims that exactly one value names its allocation, and until this existed
@@ -65,8 +65,12 @@ namespace AST
         // "two live buffers are two allocations" was something the standard library kept rather than
         // something the compiler knew.
         //
-        // only ever true of a *property*. a local has no outside to be hidden from
-        bool is_private = false;
+        // only ever meaningful on a *property*. a local has no outside to be hidden from
+        Visibility visibility = Visibility::t_public;
+
+        bool is_private() const {
+            return visibility == Visibility::t_owner;
+        }
 
         // where the `static` was written, on the same "present *is* the modifier" terms as a function's.
         // the token rather than a bool, so a refusal points at the modifier rather than at the name

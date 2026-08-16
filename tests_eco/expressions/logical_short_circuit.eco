@@ -1,0 +1,21 @@
+// **`&&` and `||` evaluate the right side only when the left has not already decided.**
+// both sides always running was a CreateAnd / CreateOr, so `false && boom()` died
+
+function boom() : bool
+{
+    die("no");
+}
+
+echo 1;
+
+if (false && boom()) {
+    echo 0;
+}
+
+echo 2;
+
+if (true || boom()) {
+    echo 3;
+}
+
+echo 4;

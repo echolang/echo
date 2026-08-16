@@ -3,6 +3,7 @@
 #include <AST/ASTArgumentFit.h>
 #include <AST/ASTBundle.h>
 #include <AST/ASTMemberLookup.h>
+#include <AST/ASTValueType.h>
 #include <AST/FunctionDeclNode.h>
 #include <AST/TypeDeclNode.h>
 
@@ -121,4 +122,148 @@ TEST_CASE("a marked method that cannot be a conversion is refused", "[implicit_c
 
         REQUIRE(has_issue_containing(*bundle, "not supported yet"));
     }
+
+    SECTION("inbound with no parameter")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from() : Quantity { return Quantity(0); }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "takes one parameter"));
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().empty());
+    }
+
+    SECTION("inbound returning something other than the owner")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Window { usize $count; }\n"
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from(int32 $n) : Window { return Window(1); }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "must return 'Quantity'"));
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().empty());
+    }
+
+    SECTION("inbound twice from the same source")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from(int32 $n) : Quantity { return Quantity($n); }\n"
+            "    #[implicit]\n"
+            "    static function wrap(int32 $n) : Quantity { return Quantity($n); }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "already declares an implicit conversion from"));
+
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().size() == 1);
+    }
+
+    SECTION("inbound with a borrow parameter")
+    {
+        auto bundle = EchoTests::tests_make_parsed_bundle(
+            "struct Quantity {\n"
+            "    int64 $n;\n"
+            "    #[implicit]\n"
+            "    static function from(int32& $n) : Quantity { return Quantity(0); }\n"
+            "}\n");
+
+        REQUIRE(has_issue_containing(*bundle, "takes the source by value"));
+        auto &m = bundle->modules.find_module("test");
+        REQUIRE(type_named(m, "Quantity")->complex_type().implicit_conversions().empty());
+    }
+}
+
+TEST_CASE("an inbound #[implicit] static is published on the destination", "[implicit_conversion]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Quantity {\n"
+        "    int64 $n;\n"
+        "    #[implicit]\n"
+        "    static function from(int32 $n) : Quantity { return Quantity($n); }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *quantity = type_named(m, "Quantity");
+    REQUIRE(quantity != nullptr);
+
+    const auto &published = quantity->complex_type().implicit_conversions();
+    REQUIRE(published.size() == 1);
+    REQUIRE_FALSE(published[0]->has_receiver());
+    REQUIRE(published[0]->args.size() == 1);
+    REQUIRE(published[0]->get_return_type() == quantity->value_type());
+
+    const ValueType t_int32 = EchoTests::prim(ValueTypePrimitive::t_int32);
+
+    // the destination owns the conversion; int32 still declares nothing
+    REQUIRE(find_implicit_conversion(t_int32, quantity->value_type()) == published[0]);
+    REQUIRE(find_implicit_conversion(quantity->value_type(), t_int32) == nullptr);
+    REQUIRE(find_inbound_implicit_conversion(&quantity->complex_type(), t_int32) == published[0]);
+}
+
+TEST_CASE("a class may declare an inbound conversion that allocates", "[implicit_conversion]")
+{
+    // outbound still refuses a return that needs destruction. inbound constructs the destination,
+    // so a class Quantity is the shape W1 asked for
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Quantity {\n"
+        "    int64 $n;\n"
+        "    #[implicit]\n"
+        "    static function from(int32 $n) : Quantity { return Quantity($n); }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *quantity = type_named(m, "Quantity");
+    REQUIRE(quantity != nullptr);
+    REQUIRE(quantity->complex_type().implicit_conversions().size() == 1);
+    REQUIRE(find_implicit_conversion(
+        EchoTests::prim(ValueTypePrimitive::t_int32), quantity->value_type()) != nullptr);
+}
+
+TEST_CASE("outbound wins the scan when both directions exist for one pair", "[implicit_conversion]")
+{
+    // source walk first: Buffer already knows how to become Window, so Window's inbound from
+    // Buffer is not the one find_implicit_conversion answers. swapping the arms would pick
+    // Window::from and every existing outbound golden would still pass
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Buffer {\n"
+        "    usize $n;\n"
+        "    #[implicit]\n"
+        "    function window() : Window { return Window($this->n); }\n"
+        "}\n"
+        "struct Window {\n"
+        "    usize $n;\n"
+        "    #[implicit]\n"
+        "    static function from(Buffer $b) : Window { return Window($b->n); }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    auto *buffer = type_named(m, "Buffer");
+    auto *window = type_named(m, "Window");
+    REQUIRE(buffer != nullptr);
+    REQUIRE(window != nullptr);
+
+    FunctionDeclNode *found = find_implicit_conversion(buffer->value_type(), window->value_type());
+    REQUIRE(found != nullptr);
+    REQUIRE(found->has_receiver());
+    REQUIRE(found->name_token.has_value());
+    REQUIRE(found->name_token.value().value() == "window");
+
+    REQUIRE(find_inbound_implicit_conversion(&window->complex_type(), buffer->value_type()) != nullptr);
 }

@@ -31,17 +31,15 @@ namespace str;
  * it has to be: `string::owner` is a property of this type, so anyone holding a `string` can already name it.
  * Hiding the type while exposing a property of it would be incoherent.
  *
- * **The four mutators below cannot be narrowed either, and the reason is a hole rather than a choice.**
- * `private` on a member is the *owner type* axis, and what these want is the module one - string.eco,
- * format.eco and str.eco all call them - but `internal` is refused on a member, a member having no module
- * of its own. So the shape is what is enforced instead: every mutator is `private` on `string`'s side, so
- * no caller reaches one through the owner it holds.
+ * **The payload and the four mutators are `internal`.** `private` would refuse string.eco, format.eco
+ * and this file, which all name them; `internal` is the module rung, so a consumer holding a
+ * `str::buf` still cannot write `$b->bytes` or call `$b->append`. The type stays constructible.
  */
 public class buf
 {
-    usize $capacity;
-    usize $used;
-    ptr<uint8> $bytes;
+    internal usize $capacity;
+    internal usize $used;
+    internal ptr<uint8> $bytes;
 
     /**
      * Grows so that at least `$capacity` text bytes fit. Does nothing when they already do.
@@ -55,7 +53,7 @@ public class buf
      * out earlier is *not* covered - a view holds no reference count by design, and the language
      * has no borrow checker. This is the one place that shows.
      */
-    function reserve(usize $capacity) : void
+    internal function reserve(usize $capacity) : void
     {
         if ($this->capacity >= $capacity) {
             return;
@@ -76,7 +74,7 @@ public class buf
     /**
      * Copies `$count` bytes onto the end and re-terminates.
      */
-    function append(ptr<const uint8> $src, usize $count) : void
+    internal function append(ptr<const uint8> $src, usize $count) : void
     {
         $this->reserve($this->used + $count);
 
@@ -91,7 +89,7 @@ public class buf
     /**
      * Appends one byte and re-terminates.
      */
-    function push(uint8 $byte) : void
+    internal function push(uint8 $byte) : void
     {
         $this->reserve($this->used + 1);
 
@@ -103,7 +101,7 @@ public class buf
     /**
      * Drops the contents and keeps the allocation.
      */
-    function clear() : void
+    internal function clear() : void
     {
         $this->used = 0;
         $this->bytes:$[0] = 0;

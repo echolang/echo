@@ -45,10 +45,12 @@ namespace Parser
 
     // publishes `#[implicit]` on `owner_struct`, or reports why the declaration cannot carry it.
     //
-    // the one owner of the marker: what it means, which shapes are refused, and how each refusal
-    // reads. every declaration that can be written with one reaches it through
-    // publish_declaration_markers - a free function and a constructor or destructor only so that they
-    // can be told they cannot be one, which is a diagnostic no method-only helper could ever report
+    // two shapes, one slot: a parameterless method is outbound (this type becomes the return type);
+    // a static of one by-value parameter is inbound (the parameter becomes this type). the one owner of the
+    // marker: what it means, which shapes are refused, and how each refusal reads. every declaration
+    // that can be written with one reaches it through publish_declaration_markers - a free function
+    // and a constructor or destructor only so that they can be told they cannot be one, which is a
+    // diagnostic no method-only helper could ever report
     //
     // a second fact about an *already-registered* declaration, so it is called after registration and
     // deliberately not on FunctionRegistry: all three registrars return early on the body pass, and a

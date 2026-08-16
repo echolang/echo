@@ -9,9 +9,6 @@ struct Holder
 {
     int32 $n;
 
-    // `internal` is the module axis, and a member has none: what a module may reach is the type
-    internal int32 $shared;
-
     // a nested type is only ever named through its owner
     private struct Inner
     {

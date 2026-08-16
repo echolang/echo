@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidImplicitConversion  implicit_conversion_inbound_return.eco:8:7
+
+  An inbound conversion must return 'Quantity' - the type it is declared on.
+
+   7 | 
+   8 |     #[implicit]
+     :       ^^^^^^^^^
+   9 |     static function from(int32 $n) : Window { return Window(1); }
+     : ^^^^^^^^^^
+  10 | }
+
+1 error, nothing was compiled.

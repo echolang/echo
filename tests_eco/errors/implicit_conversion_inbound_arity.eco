@@ -1,0 +1,10 @@
+// an inbound conversion takes the source and nothing else
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from() : Quantity { return Quantity(0); }
+}
+
+echo 1;

@@ -1,0 +1,5 @@
+// the static half of an internal member: Type::$name is the same axis as $n->kind,
+// asked at the parse of the static property rather than in TypeChecker, so a miss
+// here would leave instance properties refused and statics wide open
+
+echo Node::$empty;

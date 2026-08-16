@@ -1,0 +1,20 @@
+// the conversion still composes with a later borrow: put takes const Quantity&, 7 becomes a
+// Quantity temporary, then that is borrowed
+
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Quantity
+    {
+        return Quantity($n);
+    }
+}
+
+function put(const Quantity& $q) : void
+{
+    echo $q->n;
+}
+
+put(7);

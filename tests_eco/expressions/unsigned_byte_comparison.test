@@ -1,0 +1,11 @@
+--- OUT --->
+1
+0
+1
+1
+1
+1
+--- IR --->
+CHECK: define i32 @main(
+CHECK: icmp ugt i8
+CHECK: icmp ult i8

@@ -1,0 +1,10 @@
+// the module boundary, from the only place it can be seen: a second module.
+// Node is public, so it constructs; $kind, hidden() and Node::$empty are internal
+// to 'doc', so naming them here is InaccessibleDeclaration, not "unknown property"
+
+Node $n = Node(7, "ok");
+
+echo $n->text();
+echo $n->kind;
+echo $n->hidden();
+echo Node::$empty;

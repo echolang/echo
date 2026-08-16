@@ -1,0 +1,26 @@
+// one operator []= that takes the library type is enough for `$a[$k] = 1` to compile
+
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Quantity
+    {
+        return Quantity($n);
+    }
+}
+
+struct Slot
+{
+    Quantity $held;
+}
+
+operator (Slot& $s)[int32 $k] = (Quantity $v) : void
+{
+    $s->held = $v;
+}
+
+Slot $s = Slot(Quantity(0));
+$s[0] = 1;
+echo $s->held->n;

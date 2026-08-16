@@ -1,0 +1,10 @@
+# one operator []= taking Quantity is enough for `$s[0] = 1` to compile
+stdlib: off
+
+--- OUT --->
+1
+--- IR --->
+CHECK: define i32 @main(
+CHECK: call %Quantity @_M8Quantity_fromZZMLPi(i32 1)
+CHECK: call void @_operatorx20x5bx5dx3d
+CHECK: ret i32 0

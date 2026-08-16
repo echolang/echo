@@ -2,6 +2,7 @@
 
 #include <AST/ASTBundle.h>
 #include <AST/ASTConstness.h>
+#include <AST/ASTValueType.h>
 #include <AST/ASTVisibility.h>
 #include <AST/ConstDeclNode.h>
 #include <AST/FunctionDeclNode.h>
@@ -101,8 +102,10 @@ TEST_CASE("a private member is the owner axis, not the file", "[visibility]")
     const ComplexType::Property *shown = box->complex_type().find_property("shown");
     REQUIRE(hidden != nullptr);
     REQUIRE(shown != nullptr);
-    REQUIRE(hidden->is_private);
-    REQUIRE_FALSE(shown->is_private);
+    REQUIRE(hidden->is_private());
+    REQUIRE_FALSE(shown->is_private());
+    REQUIRE(hidden->visibility == Visibility::t_owner);
+    REQUIRE(shown->visibility == Visibility::t_public);
 }
 
 TEST_CASE("a modifier does not reclassify the declaration behind it", "[visibility]")
@@ -131,7 +134,8 @@ TEST_CASE("a modifier does not reclassify the declaration behind it", "[visibili
     const ComplexType::Property *limit = reading->complex_type().find_property("limit");
     REQUIRE(limit != nullptr);
     REQUIRE(limit->type.is_const());
-    REQUIRE_FALSE(limit->is_private);
+    REQUIRE_FALSE(limit->is_private());
+    REQUIRE(limit->visibility == Visibility::t_public);
 
     // the constant, which is a member of the type and so has no level of its own to narrow
     const auto constants = m.nodes.of_type<ConstDeclNode>();
@@ -203,4 +207,122 @@ TEST_CASE("a refusal is worded only where there is something to refuse", "[visib
     const std::string file_refusal = visibility_refusal(Visibility::t_file, in_a, in_app, "thing()");
     REQUIRE_FALSE(file_refusal.empty());
     REQUIRE(file_refusal.find("private to 'a.eco'") != std::string::npos);
+}
+
+TEST_CASE("internal on a member is the module axis, not a refusal", "[visibility]")
+{
+    // the same word on a member and on a free declaration, in one program. `t_module` versus
+    // `t_module` is the whole of what the position decided this time: a member now sits on the
+    // module axis the top level already had, and nothing downstream re-asks "is this a member"
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "internal function free_one() : int32 { return 1; }\n"
+        "struct Box\n"
+        "{\n"
+        "    internal int32 $shared;\n"
+        "    int32 $shown;\n"
+        "    internal function hidden() : int32 { return $this->shared; }\n"
+        "    function open_one() : int32 { return $this->hidden(); }\n"
+        "    constructor() { $this->shared = 0; $this->shown = 0; }\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+
+    REQUIRE(decls_named(m, "free_one")[0]->visibility == Visibility::t_module);
+    REQUIRE(decls_named(m, "hidden")[0]->visibility == Visibility::t_module);
+    REQUIRE(decls_named(m, "open_one")[0]->visibility == Visibility::t_public);
+
+    auto *box = type_named(m, "Box");
+    REQUIRE(box != nullptr);
+
+    const ComplexType::Property *shared = box->complex_type().find_property("shared");
+    const ComplexType::Property *shown = box->complex_type().find_property("shown");
+    REQUIRE(shared != nullptr);
+    REQUIRE(shown != nullptr);
+    REQUIRE(shared->visibility == Visibility::t_module);
+    REQUIRE_FALSE(shared->is_private());
+    REQUIRE(shown->visibility == Visibility::t_public);
+}
+
+TEST_CASE("member_visibility maps internal to the module rung", "[visibility]")
+{
+    REQUIRE(member_visibility(Visibility::t_module) == Visibility::t_module);
+    REQUIRE(member_visibility(Visibility::t_file) == Visibility::t_owner);
+    REQUIRE(member_visibility(Visibility::t_public) == Visibility::t_public);
+    REQUIRE(member_visibility(std::nullopt) == Visibility::t_public);
+}
+
+TEST_CASE("an internal property does not suppress the field-wise constructor", "[visibility]")
+{
+    auto internal_fields = EchoTests::tests_make_parsed_bundle(
+        "struct Open\n"
+        "{\n"
+        "    internal int32 $n;\n"
+        "    int32 $m;\n"
+        "}\n");
+
+    REQUIRE_FALSE(internal_fields->collector.has_critical_issues());
+
+    auto *open = type_named(internal_fields->modules.find_module("test"), "Open");
+    REQUIRE(open != nullptr);
+    REQUIRE(open->field_wise_constructor() != nullptr);
+    REQUIRE(open->field_wise_constructor()->args.size() == 2);
+
+    auto private_field = EchoTests::tests_make_parsed_bundle(
+        "struct Shut\n"
+        "{\n"
+        "    private int32 $n;\n"
+        "    int32 $m;\n"
+        "}\n");
+
+    REQUIRE_FALSE(private_field->collector.has_critical_issues());
+
+    auto *shut = type_named(private_field->modules.find_module("test"), "Shut");
+    REQUIRE(shut != nullptr);
+    REQUIRE(shut->field_wise_constructor() == nullptr);
+}
+
+TEST_CASE("an instantiation copies a property's module visibility", "[visibility]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "struct Box<T>\n"
+        "{\n"
+        "    internal T $item;\n"
+        "}\n"
+        "function take(Box<int32> $b) : int32 { return 1; }\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto *box = type_named(bundle->modules.find_module("test"), "Box");
+    REQUIRE(box != nullptr);
+
+    const ValueType i32 = EchoTests::prim(ValueTypePrimitive::t_int32);
+    ComplexType *of_int = bundle->collector.type_registry.get_or_create_instantiation(
+        &box->complex_type(), { i32 });
+    REQUIRE(of_int != nullptr);
+
+    const ComplexType::Property *item = of_int->find_property("item");
+    REQUIRE(item != nullptr);
+    REQUIRE(item->visibility == Visibility::t_module);
+    REQUIRE_FALSE(item->is_private());
+}
+
+TEST_CASE("a neighbour in the same module can name an internal member", "[visibility]")
+{
+    const std::vector<std::string> files = {
+        "struct Node\n"
+        "{\n"
+        "    internal int32 $kind;\n"
+        "    internal const function hidden() : int32 { return $this->kind; }\n"
+        "}\n",
+        "function write(const Node& $n) : int32\n"
+        "{\n"
+        "    return $n->kind + $n->hidden();\n"
+        "}\n"
+        "function main() : int32 { return write(Node(1)); }\n",
+    };
+    auto bundle = EchoTests::tests_make_parsed_bundle(files);
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }

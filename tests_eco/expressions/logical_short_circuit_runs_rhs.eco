@@ -1,0 +1,10 @@
+// the taken path still runs: `true && boom()` dies, so short-circuit is not "never evaluate the right"
+
+function boom() : bool
+{
+    die("yes");
+}
+
+if (true && boom()) {
+    echo 0;
+}

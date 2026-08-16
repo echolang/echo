@@ -1,0 +1,45 @@
+modules: visibility/lib_member_internal
+expect: fail
+
+# a public type with internal members: the type constructs, the surface is callable, and naming
+# the payload or an internal method is InaccessibleDeclaration - not UnknownProperty, not
+# PrivateMember. the sentence names the member and the module
+--- OUT --->
+[error] InaccessibleDeclaration  internal_member_across_modules.eco:10:12
+
+  'Node::$empty' is internal to the module 'doc', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'doc' offers.
+
+   9 | echo $n->hidden();
+  10 | echo Node::$empty;
+     :            ^^^^^^
+  11 | 
+
+  19 | 
+  20 |     internal static int32 $empty = 0;
+     :                           ------ declared here
+  21 | }
+
+[error] InaccessibleDeclaration  internal_member_across_modules.eco:8:10
+
+  'Node::kind' is internal to the module 'doc', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'doc' offers.
+
+  7 | echo $n->text();
+  8 | echo $n->kind;
+    :          ^^^^
+  9 | echo $n->hidden();
+
+[error] InaccessibleDeclaration  internal_member_across_modules.eco:9:10
+
+  'const Node::hidden()' is internal to the module 'doc', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'doc' offers.
+
+   8 | echo $n->kind;
+   9 | echo $n->hidden();
+     :          ^^^^^^
+  10 | echo Node::$empty;
+
+  14 | 
+  15 |     internal const function hidden() : int32
+     :                             ------ declared here
+  16 |     {
+
+3 errors, nothing was compiled.

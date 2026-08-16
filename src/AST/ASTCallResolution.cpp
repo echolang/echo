@@ -127,12 +127,27 @@ namespace AST
             // the only way to tell them apart
             assert(conversion != nullptr && "the fit rank promised a declared conversion");
 
-            // the conversion's `$this` is a borrow, so the receiver is addressed - **unless the
-            // argument already is one**, which is the whole of what makes the conversion reachable
-            // through a `const T&` parameter. asked of AST::receiver_for_member_call, which owns that
-            // rule for every synthesized member call: addressing a borrow a second time builds a
-            // `ptr<ptr<T>>`, which unifies against nothing, and the call is then silently never
-            // instantiated rather than refused - a failure mode with no room for a second copy
+            // inbound is a static of the destination: no receiver, one by-value argument.
+            // implicit_conversion_for already peeled a T& source; the argument is a value
+            // edge and PointerAdjuster inserts the deref. no second fit
+            if (!conversion->has_receiver()) {
+                auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
+                    at, std::vector<ExprNode *>{ arg });
+
+                conversion_call.decl = conversion;
+                conversion_call.static_owner = implicit_conversion_target(expected);
+                conversion_call.settlement = CallSettlement::t_settled;
+
+                return &conversion_call;
+            }
+
+            // outbound: the conversion's `$this` is a borrow, so the receiver is addressed -
+            // **unless the argument already is one**, which is the whole of what makes the
+            // conversion reachable through a `const T&` parameter. asked of
+            // AST::receiver_for_member_call, which owns that rule for every synthesized member
+            // call: addressing a borrow a second time builds a `ptr<ptr<T>>`, which unifies
+            // against nothing, and the call is then silently never instantiated rather than
+            // refused - a failure mode with no room for a second copy
             auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
                 at, std::vector<ExprNode *>{ receiver_for_member_call(nodes, arg) });
 

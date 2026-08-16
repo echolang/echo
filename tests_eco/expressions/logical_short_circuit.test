@@ -1,0 +1,11 @@
+--- OUT --->
+1
+2
+3
+4
+--- IR --->
+CHECK: define i32 @main(
+CHECK: and.rhs
+CHECK: and.done
+CHECK: or.rhs
+CHECK: or.done

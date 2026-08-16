@@ -1,0 +1,13 @@
+// writing through a borrow of an owning static drops the previous value.
+// the drop hangs off the assignment the same way a field write's does
+
+struct Slot
+{
+    static string $held = 'old';
+}
+
+string& $p = &Slot::$held;
+$p = 'new';
+
+echo $p;
+echo Slot::$held;

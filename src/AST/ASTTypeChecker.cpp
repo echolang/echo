@@ -270,24 +270,42 @@ void TypeChecker::visitScope(ScopeNode &node)
 //
 // reported here rather than at the layout, because privacy is about the *site* and the layout has no
 // idea where it is being read from
-void TypeChecker::check_private_member(
+void TypeChecker::check_member_visibility(
     MemberAccessNode &node,
     const ComplexType &complex,
     const ComplexType::Property &property
 )
 {
-    if (!property.is_private) {
+    if (property.visibility == Visibility::t_public) {
         return;
     }
 
-    if (can_reach_private_member(enclosing_type(), &complex)) {
+    // the *owner* axis: a `private` property. asked of the type, not of the file - a neighbour in
+    // the same module still does not get in
+    if (property.visibility == Visibility::t_owner) {
+        if (can_reach_private_member(enclosing_type(), &complex)) {
+            return;
+        }
+
+        _collector.collect_issue<Issue::PrivateMember>(
+            code_ref_for(node.get_member_name()),
+            property.name,
+            complex.namespaced_name());
         return;
     }
 
-    _collector.collect_issue<Issue::PrivateMember>(
+    // the module axis: `internal` on a member. the type's origin is the member's - a property has
+    // no origin of its own, and the layout already carries what the type said
+    const ComplexType *declared = complex.template_or_self();
+
+    refuse_invisible_property(
+        _collector,
         code_ref_for(node.get_member_name()),
-        property.name,
-        complex.namespaced_name());
+        property.visibility,
+        declared->declared_in,
+        current_origin(),
+        fmt::format("{}::{}", declared->namespaced_name(), property.name),
+        std::nullopt);
 }
 
 // **asked of a settled call, on purpose.** an invisible declaration is not filtered out of the overload
@@ -653,7 +671,7 @@ void TypeChecker::visitMemberAccess(MemberAccessNode &node)
 
             if (property != nullptr) {
                 names_own_property = base_type.is_wrapped_optional();
-                check_private_member(node, *complex, *property);
+                check_member_visibility(node, *complex, *property);
             }
             // **an unknown member of a tagged optional is not an unknown member.** the two it has are the
             // compiler's own, so anything else the author named is a member of the *payload* - and what

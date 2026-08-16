@@ -1,0 +1,10 @@
+// a null pointer is not read when the left of `&&` is already false.
+// this is the make_unique shape: the second condition only runs once the handle is there
+
+ptr<int32> $owner = null;
+
+if ($owner:$ != null && $owner:$[0] == 0) {
+    echo 0;
+}
+
+echo 1;

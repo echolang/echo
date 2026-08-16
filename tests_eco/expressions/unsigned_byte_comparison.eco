@@ -1,0 +1,20 @@
+// **two unsigned values of one width compare unsigned.** the uint64 golden already pins the
+// wide case; this is the one libraries trip over: a `uint8` holding 200 against 57 used to
+// read as `(int8)200` = -56
+
+uint8 $b = 200;
+uint8 $lo = 48;
+uint8 $hi = 57;
+
+echo $b > $hi;
+echo $b < $lo;
+echo $hi < $b;
+echo $lo <= $b;
+
+uint16 $wide = 40000;
+uint16 $small = 100;
+echo $wide > $small;
+
+usize $big = 200;
+usize $mid = 57;
+echo $big > $mid;

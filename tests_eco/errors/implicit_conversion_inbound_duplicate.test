@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidImplicitConversion  implicit_conversion_inbound_duplicate.eco:10:7
+
+  'Quantity' already declares an implicit conversion from 'int32'.
+
+   9 | 
+  10 |     #[implicit]
+     :       ^^^^^^^^^
+  11 |     static function wrap(int32 $n) : Quantity { return Quantity($n); }
+     : ^^^^^^^^^^
+  12 | }
+
+1 error, nothing was compiled.

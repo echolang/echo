@@ -1,0 +1,73 @@
+// a comparison is a bool. returning one from a `: bool` function is ordinary - not a branch
+// and two returns. the house rule in string.eco was cargo-cult; this golden keeps it dead
+
+function empty(int32 $count) : bool
+{
+    return $count == 0;
+}
+
+function differs(int32 $a, int32 $b) : bool
+{
+    return $a != $b;
+}
+
+function ordered(uint8 $a, uint8 $b) : bool
+{
+    return $a < $b;
+}
+
+function above(int32 $a, int32 $b) : bool
+{
+    return $a > $b;
+}
+
+function at_most(int32 $a, int32 $b) : bool
+{
+    return $a <= $b;
+}
+
+function at_least(int32 $a, int32 $b) : bool
+{
+    return $a >= $b;
+}
+
+function both(bool $a, bool $b) : bool
+{
+    return $a && $b;
+}
+
+function either(bool $a, bool $b) : bool
+{
+    return $a || $b;
+}
+
+function no(bool $a) : bool
+{
+    return !$a;
+}
+
+function absent(int32? $x) : bool
+{
+    return $x == null;
+}
+
+class Box { int32 $n; }
+
+function is_box(Box $b) : bool
+{
+    return $b instanceof Box;
+}
+
+echo empty(0);
+echo empty(3);
+echo differs(1, 2);
+echo ordered(1, 2);
+echo above(3, 1);
+echo at_most(1, 1);
+echo at_least(2, 1);
+echo both(true, true);
+echo both(true, false);
+echo either(false, true);
+echo no(false);
+echo absent(null);
+echo is_box(Box(1));

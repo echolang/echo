@@ -176,6 +176,20 @@ TEST_CASE("a comparison folds, and reads the operand type's own signedness", "[c
     REQUIRE(fold_condition("-1 < 1").as_bool());
 }
 
+TEST_CASE("two uint8s compare unsigned", "[const_fold]")
+{
+    // variables do not fold; the constants expand to uint8 literals, which is the pair the folder
+    // and codegen share binary_operation_type's signedness for. 200 > 57 is true unsigned and
+    // false as signed i8
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "const uint8 B = 200;\n"
+        "const uint8 HI = 57;\n"
+        "if (B > HI) { echo 1; }\n");
+
+    REQUIRE(fold_last_condition(*bundle).is_bool());
+    REQUIRE(fold_last_condition(*bundle).as_bool());
+}
+
 TEST_CASE("mismatched operands are reconciled through common_numeric_type", "[const_fold]")
 {
     // **the shape a constant creates.** AST::ConstantExpander lands its clone *after* the parser has
@@ -200,13 +214,33 @@ TEST_CASE("mismatched operands are reconciled through common_numeric_type", "[co
     REQUIRE(fold_last_condition(*wide).as_bool());
 }
 
-TEST_CASE("`&&` and `||` fold without short-circuiting", "[const_fold]")
+TEST_CASE("`&&` and `||` fold, and short-circuit", "[const_fold]")
 {
     REQUIRE(fold_condition("true && true").as_bool());
     REQUIRE_FALSE(fold_condition("true && false").as_bool());
     REQUIRE(fold_condition("false || true").as_bool());
     REQUIRE_FALSE(fold_condition("false || false").as_bool());
     REQUIRE(fold_condition("3 < 4 && 5 > 4").as_bool());
+
+    // **the right side is not required to fold** once the left has decided. a call is refused as
+    // "only known when it runs", so `false && side()` must not become that refusal
+    auto short_and = EchoTests::tests_make_parsed_bundle(
+        "function side() : bool { return true; }\n"
+        "if (false && side()) { echo 1; }\n");
+    const ConstFoldResult and_folded = fold_last_condition(*short_and);
+    REQUIRE(and_folded.is_bool());
+    REQUIRE_FALSE(and_folded.as_bool());
+
+    auto short_or = EchoTests::tests_make_parsed_bundle(
+        "function side() : bool { return false; }\n"
+        "if (true || side()) { echo 1; }\n");
+    const ConstFoldResult or_folded = fold_last_condition(*short_or);
+    REQUIRE(or_folded.is_bool());
+    REQUIRE(or_folded.as_bool());
+
+    // the other way round still needs the right side
+    REQUIRE(fold_condition("true && (3 < 4)").as_bool());
+    REQUIRE_FALSE(fold_condition("false || (4 < 3)").as_bool());
 }
 
 TEST_CASE("the two ownership builtins fold from the taxonomy", "[const_fold]")

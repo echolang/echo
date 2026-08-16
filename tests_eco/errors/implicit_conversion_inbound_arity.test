@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidImplicitConversion  implicit_conversion_inbound_arity.eco:6:7
+
+  An inbound conversion takes one parameter - the source. 'Quantity::from' declares 0.
+
+  5 | 
+  6 |     #[implicit]
+    :       ^^^^^^^^^
+  7 |     static function from() : Quantity { return Quantity(0); }
+    : ^^^^^^^^^^
+  8 | }
+
+1 error, nothing was compiled.

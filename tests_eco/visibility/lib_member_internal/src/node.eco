@@ -1,0 +1,21 @@
+// a public type with an inside. the payload is this module's, the surface is everybody's.
+// write.eco, the other file of this module, names $kind and hidden() - that is the whole of
+// what `internal` on a member is for
+
+public class Node
+{
+    internal int32 $kind;
+    internal string $body;
+
+    public const function text() : string
+    {
+        return $this->body;
+    }
+
+    internal const function hidden() : int32
+    {
+        return $this->kind;
+    }
+
+    internal static int32 $empty = 0;
+}

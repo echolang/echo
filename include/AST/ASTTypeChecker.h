@@ -50,9 +50,10 @@ namespace AST
         // and the narrowing cast, which is a value conversion and so has no place to ask about
         void report_unsafe_promotion(const ValueType &to, const TokenReference &at);
 
-        // refuses a read of a `private` property from outside the type that declared it. takes the
-        // property the caller already resolved, so the name is looked up once per member access
-        void check_private_member(MemberAccessNode &node, const ComplexType &complex,
+        // refuses a read of a property this site is not allowed to name. takes the property the
+        // caller already resolved, so the name is looked up once per member access. `t_owner` is
+        // AST::can_reach_private_member; `t_module` is AST::visible_from against the type's origin
+        void check_member_visibility(MemberAccessNode &node, const ComplexType &complex,
             const ComplexType::Property &property);
 
         // **refuses a call to something this site is not allowed to name.** asked of a *settled* call, so
