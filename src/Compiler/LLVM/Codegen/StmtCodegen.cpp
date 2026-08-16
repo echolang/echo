@@ -748,6 +748,13 @@ void StmtCodegen::gen_assign(AST::AssignNode &node)
     llvm::Value *new_value = _ctx.value_stack.top();
     _ctx.value_stack.pop();
 
+    // the target's address, bound once - see AssignNode::target_bind. **after** the right-hand side and
+    // never before it: the right-hand side may mutate the container, and an address taken ahead of it
+    // would dangle. gen_lvalue below then addresses the local, not the element
+    if (node.target_bind != nullptr) {
+        node.target_bind->accept(*_ctx.visitor);
+    }
+
     // one path for every left hand side shape, addressing exactly what the target names - and
     // addressing it once, which is why a class's release is not a node with a place of its own
     // write-through is not decided here: `$p = 20` arrives as a deref of $p and lands on the

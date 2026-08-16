@@ -1,0 +1,6 @@
+// a raw pointer element is storage nothing is accounting for. taking `&$p:$[0]` to bind the
+// address would be an UnsafePromotion, and there is no old value here to destroy - the slot
+// came out of `mem::alloc` holding whatever bytes the allocator handed back
+ptr<string> $buf = mem::alloc<string>(1);
+
+$buf:$[0] = 'replaced';

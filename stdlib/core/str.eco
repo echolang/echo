@@ -156,6 +156,7 @@ internal const uint8 CH_LT = 60;
 internal const uint8 CH_GT = 62;
 internal const uint8 CH_UPPER_A = 65;
 internal const uint8 CH_UPPER_X = 88;
+private const uint8 CH_UPPER_Z = 90;
 internal const uint8 CH_CARET = 94;
 internal const uint8 CH_LOWER_A = 97;
 internal const uint8 CH_B = 98;
@@ -315,6 +316,56 @@ public function rtrim(const string& $text) : string
 public function trim(const string& $text) : string
 {
     return ltrim(rtrim($text));
+}
+
+/**
+ * The ASCII lower-case value of `$b`, as an `int32`. Letters A-Z move; everything else is itself.
+ *
+ * Widened first, which is this file's rule as much as `string`'s: integer comparison lowers signed,
+ * so a `uint8` of `0xff` reads as -1 and a range test over two bytes answers nonsense.
+ *
+ * Deliberately ASCII. `str::lower` is Unicode Default Case Conversion and allocates; a header name,
+ * an HTTP token, a hex digit is none of that, and the caller is usually inside a scan that cannot
+ * afford a buffer.
+ */
+private function fold_ascii(uint8 $b) : int32
+{
+    int32 $wide = $b;
+
+    if ($wide >= CH_UPPER_A) {
+        if ($wide <= CH_UPPER_Z) {
+            return $wide + 32;
+        }
+    }
+
+    return $wide;
+}
+
+/**
+ * Are these the same bytes, ignoring ASCII case?
+ *
+ * Allocates nothing. `str::lower($a) == str::lower($b)` is the Unicode answer and a pair of
+ * buffers; this is the one a protocol that said "case-insensitive" and meant A-Z writes.
+ *
+ * A `string` reaches it without a cast - `string::view()` is an `#[implicit]` conversion.
+ */
+public function iequals(string::view $a, string::view $b) : bool
+{
+    if ($a->size != $b->size) {
+        return false;
+    }
+
+    usize $i = 0;
+
+    while ($i < $a->size) {
+        if (fold_ascii($a->byte($i)) != fold_ascii($b->byte($i))) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
 }
 
 /**

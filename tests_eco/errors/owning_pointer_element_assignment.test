@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] owning_pointer_element_assignment.eco:6:11
+
+  Cannot assign a 'string' through a pointer element - it owns a resource, and what the slot holds is storage nothing is accounting for, so there is no old value here to destroy. Use `mem::take` to end what is there, then `mem::init` to seat the new value.
+
+  5 | 
+  6 | $buf:$[0] = 'replaced';
+    :           ^
+  7 | 
+
+1 error, nothing was compiled.

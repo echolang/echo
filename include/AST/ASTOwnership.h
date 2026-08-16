@@ -24,6 +24,7 @@ namespace AST
     class FunctionCallExprNode;
     class MemberAccessNode;
     class StaticPropertyExprNode;
+    class AssignNode;
     class NodeReference;
 
     // **the operand edge a pending temporary request means.** the owner holds its operand in one of two
@@ -330,7 +331,16 @@ namespace AST
         // below share: one is a statement's worth of storage owned by the frame, the other an
         // expression's worth owned by a TemporaryBindExprNode, and the declaration is the same
         // declaration either way
-        VarDeclNode &make_temporary(ExprNode *init, const TokenReference &site);
+        //
+        // `prefix` is the spelling between `$__` and the per-body counter, so a RAST golden can name
+        // `$__elemN` without a second counter. the default is what every other mint already prints
+        VarDeclNode &make_temporary(ExprNode *init, const TokenReference &site, const char *prefix = "temp");
+
+        // binds the target's address to a local when the place reaches through a container element, so the
+        // teardown below and the store in gen_assign address it once between them. a no-op for every other
+        // place shape - a member path is a route the teardown can simply rebuild. the target has already
+        // been walked; this must not walk the bind
+        void bind_indexed_target(AssignNode &assign);
 
         // **answers the expression to use in place of `expr`**, which is `expr` itself for everything
         // except a member access that had to be given storage. every arm reseats the edges it owns, so

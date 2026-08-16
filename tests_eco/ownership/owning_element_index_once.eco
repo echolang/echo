@@ -1,0 +1,22 @@
+// **the property the whole change is about.** `$a[bump($c)] = 'x'` used to be unwritable for an
+// owning element; now it is, and the index expression (and so `operator []`) must still run
+// exactly once. a second evaluation would increment `$c->n` again
+struct Counter
+{
+    int32 $n;
+}
+
+function bump(Counter& $c) : usize
+{
+    $c->n = $c->n + 1;
+    return 0;
+}
+
+Counter $c = Counter(0);
+array<string> $rows = array<string>();
+$rows->push('old');
+
+$rows[bump($c)] = 'x';
+
+echo $c->n;
+echo $rows[0];

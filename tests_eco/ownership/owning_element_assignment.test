@@ -1,0 +1,19 @@
+# the output says the *new* value arrived; the allocation counts say the *old* one left. neither
+# alone is the assertion - a store with no drop prints exactly the same lines and leaks one buffer
+# per write
+flags: --track-allocations
+
+--- OUT --->
+first
+replaced
+new
+new
+swapped
+balanced
+--- RAST --->
+# the address is bound once and the teardown goes through that local, so `operator []` is not
+# evaluated a second time to destroy what the slot held
+CHECK: binds target:
+CHECK: $__elem
+CHECK: destroys old:
+CHECK: $deinit

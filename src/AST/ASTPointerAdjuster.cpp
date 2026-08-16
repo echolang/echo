@@ -242,6 +242,11 @@ void PointerAdjuster::visitVarDecl(VarDeclNode &node)
 
 void PointerAdjuster::visit_assign(AssignNode &node)
 {
+    // the bind first: its initializer is `&$rows[$at]`, and adjust_place has to rewrite that index
+    // the way it already rewrites `T& $r = &$a[0]`. the reseated target below is a read of the bind,
+    // so its type is already on the declaration
+    statement_edge(node.target_bind);
+
     // the target goes through as_value like any other read: a plain pointer target gains the deref
     // that write-through means, while `$p:$` keeps the slot it names - that is the whole difference
     // between writing through a pointer and re-seating it

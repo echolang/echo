@@ -1,0 +1,93 @@
+// **writing an owning value into an element is a re-assignment like any other**: the address is
+// bound once so the teardown and the store share it, and `operator []` runs exactly once. that is
+// the same answer `$a[0]++` already has, and it is why this is a compiler change rather than a
+// write contract every container has to declare
+//
+// the arithmetic to read the numbers against:
+//
+//   - an empty array is **0**: a null buffer is a legitimate state
+//   - a non-empty array is **1**: the element buffer
+//   - a *written* string is **2**: its `str::buf` and that buf's bytes. a string **literal** is 0
+
+{
+    array<string> $rows = array<string>();
+
+    assert(mem::live_allocations() == 0, 'an empty array allocates nothing');
+
+    string $first = '';
+    $first->append('first');
+
+    assert(mem::live_allocations() == 2, 'one written string');
+
+    $rows->push($first);
+
+    assert(mem::live_allocations() == 3, 'the buffer, and the string retained rather than copied');
+    assert(mem::refs<str::buf>($first->owner) == 2, 'the local and the slot');
+
+    echo $rows[0];
+
+    string $next = '';
+    $next->append('replaced');
+
+    assert(mem::live_allocations() == 5, 'a second written string');
+
+    usize $at = 0;
+    $rows[$at] = $next;
+
+    assert(mem::live_allocations() == 5, 'nothing allocated and nothing leaked');
+    assert(mem::refs<str::buf>($first->owner) == 1, 'the slot gave its reference back');
+    assert(mem::refs<str::buf>($next->owner) == 2, 'and the new value has it');
+
+    echo $rows[0];
+}
+
+assert(mem::live_allocations() == 0, 'the buffer and both strings each destroyed exactly once');
+
+// a field through an element, and an element of an element: one bind of the whole target either way
+struct Cell
+{
+    string $label;
+}
+
+{
+    array<Cell> $cells = array<Cell>();
+    $cells->push(Cell('old'));
+
+    $cells[0]->label = 'new';
+    echo $cells[0]->label;
+
+    array<array<string>> $grid = array<array<string>>();
+    $grid->push(array<string>());
+    $grid[0]->push('old');
+
+    $grid[0][0] = 'new';
+    echo $grid[0][0];
+}
+
+assert(mem::live_allocations() == 0, 'nested places tear the old value down too');
+
+// a user container that declares only `operator []`. no `[]=`, which is why the compiler binds
+// rather than asking the library to write a second contract
+struct Box
+{
+    string $item;
+
+    constructor(string $s)
+    {
+        $this->item = $s;
+    }
+}
+
+operator (Box& $b)[usize $i] : string&
+{
+    return &$b->item;
+}
+
+{
+    Box $box = Box('kept');
+    $box[0] = 'swapped';
+    echo $box[0];
+}
+
+assert(mem::live_allocations() == 0, 'and so did a container the standard library does not know');
+echo 'balanced';

@@ -1,0 +1,18 @@
+# ASCII case fold only, and the last line is the leak check: one built string, nothing else
+
+--- OUT --->
+1
+1
+0
+1
+0
+1
+0
+1
+1
+0
+0
+1
+1
+1
+2

@@ -7,6 +7,7 @@
 #include <AST/ASTMemberLookup.h>
 #include <AST/AssignNode.h>
 #include <AST/MemberAccessNode.h>
+#include <AST/VarRefNode.h>
 #include <AST/ASTPlaceExpr.h>
 #include <AST/ExprNode.h>
 #include <AST/IfStatementNode.h>
@@ -725,6 +726,49 @@ TEST_CASE("the class path carries a flag rather than nodes", "[ownership]")
     REQUIRE(assign != nullptr);
     REQUIRE(assign->releases_old);
     REQUIRE(assign->teardown_old == nullptr);
+}
+
+TEST_CASE("an owning element assignment binds the address once", "[ownership]")
+{
+    // `$b[0] = Buffer(...)` used to be refused so the index would not run twice: gen_assign addresses
+    // the place once, a teardown in the tree addresses it again. the bind is the same answer
+    // `$b[0]++` already has - T& $__elemN = &$b[0] - and both the teardown and the store go through it
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        std::string(k_buffer) +
+        "struct Bag { Buffer $v; }\n"
+        "operator (Bag& $b)[usize $i] : Buffer& { return &$b->v; }\n"
+        "function f() : void {\n"
+        "    $b = Bag(Buffer(1, null));\n"
+        "    $b[0] = Buffer(2, null);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    AssignNode *assign = nullptr;
+
+    for (auto &child : body_of(m, "f").children) {
+        if (child.has_type<AssignNode>() && child.get<AssignNode>().target_bind != nullptr) {
+            assign = &child.get<AssignNode>();
+            break;
+        }
+    }
+
+    REQUIRE(assign != nullptr);
+    REQUIRE(assign->teardown_old != nullptr);
+    REQUIRE(assign->teardown_old->children.size() == 1);
+
+    ExprNode *place = assign->target;
+    if (place != nullptr && place->get_node_type() == NodeType::n_expr_deref) {
+        place = static_cast<DerefExprNode *>(place)->operand;
+    }
+
+    REQUIRE(place != nullptr);
+    REQUIRE(place->get_node_type() == NodeType::n_varref);
+
+    auto *ref = static_cast<VarRefNode *>(place);
+    REQUIRE(ref->is_var());
+    REQUIRE(&ref->get_var().decl() == assign->target_bind);
 }
 
 TEST_CASE("a static property assignment carries the old value's teardown", "[ownership]")

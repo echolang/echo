@@ -834,12 +834,12 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
             }
 
             // "the old value is destroyed, the new one is built in place" - a whole local, a
-            // member path, and a static property. an element stays refused: gen_assign
-            // addresses the place once, a teardown in the tree addresses it again, so
-            // `$items[$i] = $x` would evaluate `$i` twice. a static has no index; the drop is
-            // emit_drop_of_place over a fresh access, rebuilt so no node sits in the tree
-            // twice (make_place's rule)
+            // member path, a static property, and a container element whose address was bound
+            // once. a raw pointer element stays refused: taking `&$p[$i]` would be an
+            // UnsafePromotion, and the slot is storage nothing is accounting for
             if (!assign->is_initialization && needs_destruction(target_type)) {
+                bind_indexed_target(*assign);
+
                 std::vector<std::string> path;
 
                 // null-guards its own argument, so a targetless assignment answers null here too
@@ -890,14 +890,23 @@ NodeReference OwnershipPass::walk_statement(const NodeReference &child)
                     }
                 }
                 else {
+                    const bool pointer_element = assign->target != nullptr
+                        && assign->target->get_node_type() == NodeType::n_expr_index
+                        && static_cast<IndexExprNode *>(assign->target)->element_call == nullptr;
+
                     _collector.collect_issue<Issue::GenericError>(
-                        code_ref_for(assign->token_assign), fmt::format(
-                            "Cannot assign a '{}' into an element - it owns a resource, and the old "
-                            "value would have to be destroyed through an index this assignment has "
-                            "already evaluated. Assign a variable or a field, or clear the element "
-                            "first.",
-                            target_type.get_type_desciption()
-                        )
+                        code_ref_for(assign->token_assign),
+                        pointer_element
+                            ? fmt::format(
+                                "Cannot assign a '{}' through a pointer element - it owns a resource, "
+                                "and what the slot holds is storage nothing is accounting for, so there "
+                                "is no old value here to destroy. Use `mem::take` to end what is there, "
+                                "then `mem::init` to seat the new value.",
+                                target_type.get_type_desciption())
+                            : fmt::format(
+                                "Cannot assign a '{}' here - it owns a resource, and this place is not "
+                                "a variable, a field or a container element whose address can be bound.",
+                                target_type.get_type_desciption())
                     );
                 }
             }
@@ -1254,7 +1263,7 @@ void OwnershipPass::walk_loop(ExprNode *&condition, ScopeNode *body, ScopeNode *
     }
 }
 
-VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference &site)
+VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference &site, const char *prefix)
 {
     // **numbered, because one bind can hold several.** two temporaries in one statement are two
     // declarations either way - a place refers to the VarDeclNode and never to its spelling - but a
@@ -1262,7 +1271,7 @@ VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference 
     // rule in this pass is pinned. per body rather than global, so a case's golden does not move
     // when an unrelated function above it grows a temporary
     const TokenReference name_token =
-        virtual_token(fmt::format("$__temp{}", ++_temporary_count), Token::Type::t_varname, site);
+        virtual_token(fmt::format("$__{}{}", prefix, ++_temporary_count), Token::Type::t_varname, site);
 
     auto &type_node = _current_module->nodes.emplace_back<TypeNode>(init->result_type());
     auto &decl = _current_module->nodes.emplace_back<VarDeclNode>(name_token, &type_node);
@@ -1274,6 +1283,63 @@ VarDeclNode &OwnershipPass::make_temporary(ExprNode *init, const TokenReference 
     _changed = true;
 
     return decl;
+}
+
+void OwnershipPass::bind_indexed_target(AssignNode &assign)
+{
+    // the target has already been walked as a place. wrapping it and reseating assign.target is
+    // the whole of this function - walking the bind would walk `$rows[$at]` a second time
+    ExprNode *place = assign.target;
+
+    while (place != nullptr) {
+        switch (place->get_node_type()) {
+            case NodeType::n_member_access:
+            {
+                auto &base = static_cast<MemberAccessNode *>(place)->get_base_node();
+                place = base.has() && base.is_expression_node()
+                    ? base.unsafe_ptr<ExprNode>()
+                    : nullptr;
+                break;
+            }
+
+            case NodeType::n_expr_deref:
+                place = static_cast<DerefExprNode *>(place)->operand;
+                break;
+
+            case NodeType::n_expr_peel:
+                place = static_cast<PointerValueNode *>(place)->operand;
+                break;
+
+            case NodeType::n_type_cast:
+            {
+                auto *cast = static_cast<TypeCastNode *>(place);
+                if (!cast->is_implcit) {
+                    return;
+                }
+                place = cast->expr;
+                break;
+            }
+
+            case NodeType::n_expr_index:
+            {
+                auto *index = static_cast<IndexExprNode *>(place);
+                if (index->element_call == nullptr) {
+                    return;
+                }
+
+                auto &addr = _current_module->nodes.emplace_back<AddrOfExprNode>(assign.target);
+                VarDeclNode &decl = make_temporary(
+                    &addr, location_of_expression(assign.target), "elem");
+
+                assign.target_bind = &decl;
+                assign.target = &local_place(*_current_module, decl);
+                return;
+            }
+
+            default:
+                return;
+        }
+    }
 }
 
 VarDeclNode &OwnershipPass::bind_discarded_temporary(ExprNode *expr)

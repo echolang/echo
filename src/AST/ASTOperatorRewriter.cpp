@@ -587,6 +587,7 @@ void OperatorRewriter::visitVarDecl(VarDeclNode &node)
 
 void OperatorRewriter::visit_assign(AssignNode &node)
 {
+    statement_edge(node.target_bind);
     value_edge(node.target);
 
     // as for a declaration above: the scope owns an array literal on the right-hand side

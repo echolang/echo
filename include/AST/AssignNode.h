@@ -10,6 +10,7 @@
 namespace AST
 {
     class ScopeNode;
+    class VarDeclNode;
 
     // an assignment statement: `<place> = <value>`
     //
@@ -68,8 +69,7 @@ namespace AST
         //    node emit_drop appends at a scope end, so -ar shows it, the type checker validates it
         //    and a generic teardown instantiates from this call site like any other. it runs
         //    before the store that overwrites those bytes. set for a whole local, a member_path_of
-        //    field, and a static property; never for an indexed place, whose target would be
-        //    addressed twice
+        //    field, a static property, and an indexed place whose address was bound once below
         //  - a **class** owes one reference less, and that cannot be a node. the release needs the old
         //    handle out of the slot codegen already addressed, and a class target may be `$node->next`
         //    or an element whose index expression must not be evaluated twice. so the handle is read
@@ -80,6 +80,18 @@ namespace AST
         // else's now
         ScopeNode *teardown_old = nullptr;
         bool releases_old = false;
+
+        // **the target's address, bound once.** null unless the place goes through a container element.
+        //
+        // a member path is a fixed route and the teardown may simply rebuild it; an element is not - the
+        // index would run twice, and `operator []` with it. so the address is bound to a local and both the
+        // teardown and the store go through that local. the same answer Parser::bind_incdec_target gives
+        // `$a[0]++`, and the same tree.
+        //
+        // evaluated by gen_assign *after* the right-hand side and never as a statement ahead of the
+        // assignment: the right-hand side may mutate the container, and an address bound before it would
+        // dangle. that ordering is the reason this rides on the node instead of being hoisted
+        VarDeclNode *target_bind = nullptr;
 
         AssignNode(ExprNode *target, ExprNode *value_expr, TokenReference token_assign)
             : target(target), value_expr(value_expr), token_assign(token_assign)

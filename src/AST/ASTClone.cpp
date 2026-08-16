@@ -410,9 +410,10 @@ Node *AssignNode::clone(CloneContext &cc) const
     c->value_expr = cc.child(c->value_expr);
 
     // always null in practice: only a template body is cloned, and AST::OwnershipPass skips a generic
-    // body entirely, so no teardown exists yet when the clone happens. cloned anyway because `clone`
-    // has to be total - the monomorphizer relies on that - and because the shallow copy above would
-    // otherwise leave two assignments pointing at one scope
+    // body entirely, so no teardown or bind exists yet when the clone happens. cloned anyway because
+    // `clone` has to be total - the monomorphizer relies on that - and because the shallow copy above
+    // would otherwise leave two assignments pointing at one scope
+    c->target_bind = cc.child(c->target_bind);
     c->teardown_old = cc.child(c->teardown_old);
 
     return c;

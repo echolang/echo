@@ -173,6 +173,11 @@ void RecursiveVisitor::visit_const_decl(ConstDeclNode &node)
 
 void RecursiveVisitor::visit_assign(AssignNode &node)
 {
+    // the bind first: after OwnershipPass reseats the target onto `$__elemN`, the index and
+    // `operator []` live only on this declaration. AccessPass's read-escape and PointerAdjuster's
+    // place walk both have to reach it, and a rewriter that inserts a deref per visit would insert
+    // two if the bind were reached through the target as well
+    statement_edge(node.target_bind);
     value_edge(node.target);
     value_edge(node.value_expr);
 

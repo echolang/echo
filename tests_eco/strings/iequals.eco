@@ -1,0 +1,29 @@
+// ASCII case-insensitive equality. allocates nothing, and is not Unicode: ß is not SS
+
+echo str::iequals('Content-Type', 'content-type');
+echo str::iequals('Content-Type', 'CONTENT-TYPE');
+echo str::iequals('Content-Type', 'content-length');
+echo str::iequals('Accept', 'accept');
+
+// length mismatch is false without walking
+echo str::iequals('ab', 'abc');
+echo str::iequals('', '');
+echo str::iequals('', 'a');
+
+// non-letters survive unchanged, so a digit or a hyphen is compared as itself
+echo str::iequals('X-Request-Id', 'x-request-id');
+echo str::iequals('abc-1', 'ABC-1');
+echo str::iequals('abc-1', 'ABC-2');
+
+// Unicode case folding is a different function. ß encodes as two bytes, SS as two letters
+echo str::iequals('straße', 'STRASSE');
+echo str::iequals('straße', 'STRAßE');
+
+// a string and a view, and two views, all reach the same function
+string $built = '';
+$built->append('Content-Type');
+echo str::iequals($built, 'content-type');
+echo str::iequals($built->window, 'CONTENT-TYPE');
+
+assert(mem::live_allocations() == 2, "one built string is a buf and its bytes; iequals allocated nothing");
+echo mem::live_allocations();

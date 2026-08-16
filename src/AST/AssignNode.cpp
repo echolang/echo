@@ -1,6 +1,7 @@
 #include "AST/AssignNode.h"
 
 #include "AST/ScopeNode.h"
+#include "AST/VarDeclNode.h"
 #include "Debugging.h"
 
 const std::string AST::AssignNode::node_description()
@@ -12,6 +13,11 @@ const std::string AST::AssignNode::node_description()
     // answered, and a teardown that does not appear there cannot be checked at all
     if (releases_old) {
         desc += "\n" + DD::tabbify("releases old", 4);
+    }
+
+    if (target_bind != nullptr) {
+        desc += "\n"
+            + DD::tabbify("binds target: " + target_bind->node_description(), 4);
     }
 
     if (teardown_old != nullptr) {
