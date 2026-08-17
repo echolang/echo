@@ -16,9 +16,11 @@
     ptr<string> $buf = mem::alloc<string>(2);
 
     string $a = '';
+    $a->reserve(string::INLINE + 1);
     $a->append('hello');
 
     string $b = '';
+    $b->reserve(string::INLINE + 1);
     $b->append('world');
 
     assert(mem::live_allocations() == 5, "the buffer and two written strings");

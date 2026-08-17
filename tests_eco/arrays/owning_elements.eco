@@ -16,6 +16,7 @@
     array<string> $a = [];
 
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('hello');
 
     // the array's buffer, the buf, and the buf's bytes
@@ -40,8 +41,10 @@ assert(mem::live_allocations() == 0, "both arrays gave back their buffers and re
     array<string> $a = [];
 
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('one');
     $a[] = '';
+    $a[1]->reserve(string::INLINE + 1);
     $a[1]->append('two');
 
     assert(mem::live_allocations() == 5, "one array and two written strings");
@@ -54,6 +57,7 @@ assert(mem::live_allocations() == 0, "the elements went with it, not just the bu
     array<string> $a = [];
 
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('gone');
 
     assert(mem::live_allocations() == 3, "one array, one written string");
@@ -65,6 +69,7 @@ assert(mem::live_allocations() == 0, "the elements went with it, not just the bu
 
     // and the kept buffer is still usable, which is the reason to clear rather than reassign
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('again');
     echo $a[0];
 }
@@ -77,6 +82,7 @@ assert(mem::live_allocations() == 0, "balanced");
     array<string> $a = [];
 
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('popped');
 
     assert(mem::live_allocations() == 3, "one array, one written string");
@@ -102,6 +108,7 @@ assert(mem::live_allocations() == 0, "balanced");
     array<string> $a = [];
 
     $a[] = '';
+    $a[0]->reserve(string::INLINE + 1);
     $a[0]->append('cloned');
 
     array<string> $b = $a->clone();

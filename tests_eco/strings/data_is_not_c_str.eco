@@ -7,6 +7,7 @@ extern {
 
 $owned = 'hello';
 $owned = $owned->clone();
+$owned->reserve(string::INLINE + 1);
 $owned->append(' world');
 
 echo $owned->data() == $owned->cstr();

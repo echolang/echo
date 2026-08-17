@@ -15,6 +15,7 @@
     assert(mem::live_allocations() == 0, 'an empty array allocates nothing');
 
     string $first = '';
+    $first->reserve(string::INLINE + 1);
     $first->append('first');
 
     assert(mem::live_allocations() == 2, 'one written string');
@@ -27,6 +28,7 @@
     echo $rows[0];
 
     string $next = '';
+    $next->reserve(string::INLINE + 1);
     $next->append('replaced');
 
     assert(mem::live_allocations() == 5, 'a second written string');

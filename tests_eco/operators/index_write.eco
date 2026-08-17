@@ -93,6 +93,7 @@ operator (const slots& $s)[usize $i] : const string&
     slots $s = slots();
 
     string $a = '';
+    $a->reserve(string::INLINE + 1);
     $a->append('first');
 
     // an insert. the buffer, plus the written string's str::buf and its bytes
@@ -105,6 +106,7 @@ operator (const slots& $s)[usize $i] : const string&
     echo $s[0];
 
     string $b = '';
+    $b->reserve(string::INLINE + 1);
     $b->append('second');
 
     // **a replace.** `seat` destroyed what was there, so the first string loses the slot's reference and

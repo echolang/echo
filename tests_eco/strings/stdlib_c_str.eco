@@ -13,6 +13,7 @@ echo c_strlen($lit->cstr());
 
 // an owned buffer: terminated by str::buf, which is what makes `$bytes[$used]` an invariant
 $owned = $lit->clone();
+$owned->reserve(string::INLINE + 1);
 $owned->append(' world');
 echo $owned->terminated();
 echo c_strlen($owned->cstr());

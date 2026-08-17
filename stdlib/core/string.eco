@@ -5,8 +5,9 @@
  *
  *  - `string::view` **borrows**. Two words - an address and a byte count - owning nothing, copying
  *    for free, keeping nothing alive. Every operation that only *reads* text lives here.
- *  - `string` **owns**. A window plus a reference-counted buffer, so copying one is a retain rather
- *    than a memcpy, and a substring shares its parent's bytes instead of duplicating them.
+ *  - `string` **owns**. A unique value of at most `INLINE` bytes lives in the value itself. Longer
+ *    text is a window plus a reference-counted buffer, so copying one is a retain rather than a
+ *    memcpy, and a substring shares its parent's bytes instead of duplicating them.
  *  - `str::buf` is that buffer, and the only one of the three that touches raw memory. It lives in
  *    str.eco, because a namespace is a property of the file: the two types here are root vocabulary
  *    and the buffer behind them is not.
@@ -32,10 +33,12 @@
 /**
  * An owning, reference-counted, copy-on-write string.
  *
- * **This type declares no destructor, and must not.** A declared destructor disqualifies the
- * synthesized copy (`AST::copy_is_synthesizable`), and the synthesized copy - a struct whose only
- * owning property is a class - is exactly what makes `$b = $a;` one retain of the buffer rather
- * than a duplicated allocation. The `str::buf` handle is released at scope exit either way.
+ * A unique value of at most `INLINE` bytes lives in `$sso_*` and never touches the heap. The
+ * stored window's `$bytes` is **null** for that case - a self-pointer would dangle the
+ * moment the value moved, and a return in Echo is a move. `view()` rebuilds the address
+ * from this value. There is still **no destructor** - `$owner` is a class, so its release
+ * runs as the property's own teardown, and an inline or literal owner is null. The
+ * synthesized copy copies the private words and retains a heap owner.
  */
 #[core: string]
 public struct string
@@ -99,6 +102,7 @@ public struct string
         /**
          * Byte-for-byte equality. No normalization, no case folding, no encoding check.
          */
+        #[inline]
         const function equals(string::view $other) : bool
         {
             if ($this->size != $other->size) {
@@ -159,32 +163,49 @@ public struct string
          * An empty needle is found at 0. In an *empty* window that answer is also the sentinel, and
          * `contains` inherits the corner and says false.
          *
-         * A plain O(n*m) scan.
+         * Scan for the first byte, then compare the rest. A candidate view
+         * per offset was the same comparison with a temporary on every step.
          */
         const function find(string::view $needle) : usize
         {
-            if ($needle->size > $this->size) {
-                return $this->size;
+            usize $n = $needle->size;
+            usize $m = $this->size;
+
+            if ($n > $m) {
+                return $m;
             }
 
-            usize $last = $this->size - $needle->size;
+            if ($n == 0) {
+                return 0;
+            }
+
+            ptr<const uint8> $hay = $this->bytes;
+            ptr<const uint8> $nd = $needle->bytes;
+            uint8 $first = $nd:$[0];
+            usize $last = $m - $n;
             usize $at = 0;
-            usize $found = $this->size;
 
-            // `<=`, because a needle may begin at the last offset that still fits
             while ($at <= $last) {
-                string::view $candidate = $this->sub($at, $needle->size);
+                if ($hay:$[$at] == $first) {
+                    usize $k = 1;
 
-                if ($candidate->equals($needle)) {
-                    $found = $at;
-                    $at = $last + 1;
+                    while ($k < $n) {
+                        if ($hay:$[$at + $k] != $nd:$[$k]) {
+                            break;
+                        }
+
+                        $k = $k + 1;
+                    }
+
+                    if ($k == $n) {
+                        return $at;
+                    }
                 }
-                else {
-                    $at = $at + 1;
-                }
+
+                $at = $at + 1;
             }
 
-            return $found;
+            return $m;
         }
 
         /**
@@ -286,8 +307,160 @@ public struct string
         }
     }
 
+    // the live bytes when they live elsewhere - a literal, a buffer. null
+    // `$bytes` is the inline tag: the text is in `$sso_*` and `view()` names it
     string::view $window;
     str::buf $owner;
+
+    /**
+     * How many text bytes sit in the value before it becomes a `str::buf`.
+     * The store is this plus a NUL, so `cstr()` on a short unique string
+     * stays a pointer, not a clone. `self::INLINE + 1` is the first length
+     * that allocates.
+     */
+    public const usize INLINE = 15;
+
+    // `INLINE + 1` bytes, two words. private so the constructor stays
+    // `string(view, owner)` - a field-wise one would grow a third argument
+    // at every site
+    private uint64 $sso_lo;
+    private uint64 $sso_hi;
+
+    #[inline]
+    private function sso_bytes() : ptr<uint8>
+    {
+        return ptr<uint8>(&$this->sso_lo);
+    }
+
+    #[inline]
+    private const function sso_addr() : ptr<const uint8>
+    {
+        return ptr<const uint8>(&$this->sso_lo);
+    }
+
+    /**
+     * True when the text sits in `$sso_*`. A literal is the other null-owner
+     * case: its window names `.rodata`, so it is not inline.
+     */
+    #[inline]
+    private const function is_inline() : bool
+    {
+        return $this->owner == null && $this->window->bytes:$ == null;
+    }
+
+    /**
+     * The live text. A pointer, not a window: a window is an aggregate and
+     * would come back through `sret` on every `find` and `append`.
+     */
+    #[inline]
+    private const function live_bytes() : ptr<const uint8>
+    {
+        if ($this->is_inline()) {
+            return $this->sso_addr();
+        }
+
+        return $this->window->bytes;
+    }
+
+    /**
+     * A window over the live bytes. For an inline value that is `$sso_*` of
+     * *this* object, rebuilt every time, so a move leaves it correct.
+     */
+    #[inline]
+    private const function as_view() : string::view
+    {
+        return string::view($this->live_bytes(), $this->window->size);
+    }
+
+    /**
+     * Seats `$n` bytes at `$src` in the inline store. `$n` must be at most
+     * `self::INLINE`. The stored window's bytes are null: that is the tag
+     * `is_inline` reads, and it survives a bitwise move.
+     */
+    private function seat_inline(ptr<const uint8> $src, usize $n) : void
+    {
+        ptr<uint8> $dst = $this->sso_bytes();
+
+        if ($n > 0) {
+            mem::copy<uint8>($dst, ptr<uint8>($src:$), $n);
+        }
+
+        $dst:$[$n] = 0;
+        $this->window = string::view(null, $n);
+    }
+
+    // the writable store after `make_unique`. dest / cap / finish are the
+    // whole of a mutator; inline vs heap lives only here
+    #[inline]
+    private function dest() : ptr<uint8>
+    {
+        if ($this->is_inline()) {
+            return $this->sso_bytes();
+        }
+        return $this->owner->bytes;
+    }
+
+    #[inline]
+    private function cap() : usize
+    {
+        if ($this->is_inline()) {
+            return self::INLINE;
+        }
+        return $this->owner->capacity;
+    }
+
+    private function finish(usize $n) : void
+    {
+        ptr<uint8> $p = $this->dest();
+        $p:$[$n] = 0;
+
+        if ($this->is_inline()) {
+            $this->window = string::view(null, $n);
+            return;
+        }
+
+        $this->owner->used = $n;
+        $this->window = string::view($p, $n);
+    }
+
+    #[inline]
+    private function uniquely_owned() : bool
+    {
+        if ($this->is_inline()) {
+            return true;
+        }
+
+        if ($this->owner == null || mem::refs($this->owner) != 1) {
+            return false;
+        }
+
+        return $this->window->size == $this->owner->used;
+    }
+
+    constructor(string::view $window)
+    {
+        $this->window = $window;
+        $this->sso_lo = 0;
+        $this->sso_hi = 0;
+    }
+
+    constructor(string::view $window, str::buf $owner)
+    {
+        $this->window = $window;
+        $this->owner = $owner;
+        $this->sso_lo = 0;
+        $this->sso_hi = 0;
+    }
+
+    /**
+     * An independent string holding `$w`'s bytes. Short values stay inline.
+     */
+    public static function from(string::view $w) : string
+    {
+        string $tmp = string($w);
+
+        return $tmp->clone();
+    }
 
     /**
      * The whole string as a borrowed window.
@@ -302,28 +475,36 @@ public struct string
      * result. Neither has an address for `$this`, so the compiler binds one for the duration of the
      * statement - the same temporary any other borrow argument gets.
      */
+    #[inline]
     #[implicit]
     const function view() : string::view
     {
-        return $this->window;
+        return $this->as_view();
     }
 
     /**
      * The byte count. O(1) - it is a field, not a walk. See `chars`.
      */
+    #[inline]
     const function size() : usize
     {
         return $this->window->size;
     }
 
+    #[inline]
     const function empty() : bool
     {
         return $this->window->empty();
     }
 
+    #[inline]
     const function byte(usize $index) : uint8
     {
-        return $this->window->byte($index);
+        assert($index < $this->window->size, 'string index out of bounds');
+
+        ptr<const uint8> $p = $this->live_bytes();
+
+        return $p:$[$index];
     }
 
     /**
@@ -339,43 +520,55 @@ public struct string
      */
     const function sub(usize $from, usize $len) : string
     {
-        return string($this->window->sub($from, $len), $this->owner);
+        string::view $w = $this->as_view()->sub($from, $len);
+
+        // inline bytes live inside *this* value. a window into them with a
+        // null owner would dangle when this string is dropped, so the
+        // substring copies into its own store
+        if ($this->is_inline()) {
+            return string::from($w);
+        }
+
+        return string($w, $this->owner);
     }
 
     /**
      * Byte-for-byte equality, against anything that is a `string` - a literal included.
      *
-     * By value, which costs one retain and one release. A literal binds to a `string&` parameter now
-     * that the compiler gives a non-place argument storage, so this could be a borrow - the signature
-     * is simply not worth changing under everything that calls it. On a hot path write
-     * `$a->window->equals($b->window)`, which is the same comparison with neither count.
+     * Borrows: a literal already has a slot, and the comparison does not
+     * need a retain. On a hotter path still write `$a->data()` against
+     * `$b->data()` and skip the method.
      */
-    const function equals(string $other) : bool
+    #[inline]
+    const function equals(const string& $other) : bool
     {
-        return $this->window->equals($other->window);
+        return $this->as_view()->equals($other->as_view());
     }
 
-    const function starts(string $prefix) : bool
+    #[inline]
+    const function starts(const string& $prefix) : bool
     {
-        return $this->window->starts($prefix->window);
+        return $this->as_view()->starts($prefix->as_view());
     }
 
-    const function ends(string $suffix) : bool
+    const function ends(const string& $suffix) : bool
     {
-        return $this->window->ends($suffix->window);
+        return $this->as_view()->ends($suffix->as_view());
     }
 
     /**
      * The byte offset of the first occurrence of `$needle`, or `$this->size()` when there is none.
      */
-    const function find(string $needle) : usize
+    #[inline]
+    const function find(const string& $needle) : usize
     {
-        return $this->window->find($needle->window);
+        return $this->as_view()->find($needle->as_view());
     }
 
-    const function contains(string $needle) : bool
+    #[inline]
+    const function contains(const string& $needle) : bool
     {
-        return $this->window->contains($needle->window);
+        return $this->as_view()->contains($needle->as_view());
     }
 
     /**
@@ -383,7 +576,7 @@ public struct string
      */
     const function chars() : usize
     {
-        return $this->window->chars();
+        return $this->as_view()->chars();
     }
 
     /**
@@ -391,7 +584,7 @@ public struct string
      */
     const function terminated() : bool
     {
-        return $this->window->terminated();
+        return $this->as_view()->terminated();
     }
 
     /**
@@ -399,22 +592,27 @@ public struct string
      */
     const function cstr() : ptr<const uint8>
     {
-        return $this->window->cstr();
+        // a local, not `$this->as_view()->cstr()`: that returns a pointer
+        // the compiler reads as into the temporary view
+        string::view $v = $this->as_view();
+
+        return $v->cstr();
     }
 
     /**
      * The bytes, with no terminator required. See `string::view::data`.
      */
+    #[inline]
     const function data() : ptr<const uint8>
     {
-        return $this->window->data();
+        return $this->live_bytes();
     }
 
     /**
      * An independent copy that shares nothing.
      *
-     * The one operation that always allocates. Everything else in this file avoids a copy until a
-     * write makes one unavoidable; this is how you ask for one on purpose - to stop a substring
+     * Short values stay inline and do not allocate. Everything else in this file avoids a copy until
+     * a write makes one unavoidable; this is how you ask for one on purpose - to stop a substring
      * holding a large parent buffer alive, or to get a NUL-terminated copy of one.
      */
     const function clone() : string
@@ -439,11 +637,20 @@ public struct string
      */
     private const function clone_reserving(usize $extra) : string
     {
+        ptr<const uint8> $bytes = $this->live_bytes();
         usize $n = $this->window->size;
+
+        if ($n <= self::INLINE && $extra <= self::INLINE - $n) {
+            string $out = string(string::view($bytes, $n));
+
+            $out->seat_inline($bytes, $n);
+
+            return $out;
+        }
 
         // `+ 1` is the NUL slot, exactly as str::buf counts it
         str::buf $buf = str::buf($n + $extra, 0, mem::alloc<uint8>($n + $extra + 1));
-        $buf->append($this->window->bytes, $n);
+        $buf->append($bytes, $n);
 
         return string(string::view($buf->bytes, $n), $buf);
     }
@@ -454,7 +661,7 @@ public struct string
     const function concat(string $other) : string
     {
         // sized for both operands up front: one allocation and one copy of each side's bytes
-        string $out = $this->clone_reserving($other->window->size);
+        string $out = $this->clone_reserving($other->size());
         $out->append($other);
 
         return $out;
@@ -483,16 +690,16 @@ public struct string
      */
     private function make_unique() : void
     {
-        if (mem::refs($this->owner) == 1 && $this->window->size == $this->owner->used) {
+        if ($this->uniquely_owned()) {
             return;
         }
 
         string $fresh = $this->clone();
 
-        // the window first. assigning the owner releases the one this string held, and if that was
-        // its last reference the old bytes are gone by the time the next statement would read them
-        $this->window = $fresh->window;
+        $this->sso_lo = $fresh->sso_lo;
+        $this->sso_hi = $fresh->sso_hi;
         $this->owner = $fresh->owner;
+        $this->window = $fresh->window;
     }
 
     /**
@@ -506,11 +713,15 @@ public struct string
      * One method rather than the same statement at the end of four mutators, so the fifth cannot
      * forget it or spell it differently.
      *
-     * `private`, so only `string`'s own bodies reach it
-     *.
+     * `private`, so only `string`'s own bodies reach it.
      */
+    #[inline]
     private function reseat() : void
     {
+        if ($this->is_inline()) {
+            return;
+        }
+
         $this->window = string::view($this->owner->bytes, $this->owner->used);
     }
 
@@ -523,6 +734,17 @@ public struct string
     function reserve(usize $capacity) : void
     {
         $this->make_unique();
+
+        if ($capacity <= $this->cap()) {
+            return;
+        }
+
+        if ($this->is_inline()) {
+            $this->promote($capacity);
+
+            return;
+        }
+
         $this->owner->reserve($capacity);
         $this->reseat();
     }
@@ -536,10 +758,33 @@ public struct string
     function capacity() : usize
     {
         if ($this->owner == null) {
+            if ($this->is_inline()) {
+                return self::INLINE;
+            }
+
             return $this->window->size;
         }
 
         return $this->owner->capacity;
+    }
+
+    /**
+     * Moves the current bytes onto a heap buffer of at least `$cap` text bytes.
+     */
+    private function promote(usize $cap) : void
+    {
+        ptr<const uint8> $src = $this->live_bytes();
+        usize $n = $this->window->size;
+        usize $need = $cap;
+
+        if ($need < $n) {
+            $need = $n;
+        }
+
+        str::buf $buf = str::buf($need, 0, mem::alloc<uint8>($need + 1));
+        $buf->append($src, $n);
+        $this->owner = $buf;
+        $this->window = string::view($buf->bytes, $n);
     }
 
     /**
@@ -548,15 +793,56 @@ public struct string
      * The same work `append` does, for a pointer and a length C already has. Copy-on-write first,
      * then through `str::buf::append`, so the terminator stays this file's invariant.
      */
+    #[inline]
     function append(ptr<const uint8> $src, usize $count) : void
     {
         if ($count == 0) {
             return;
         }
 
+        // uniquely owned heap: a refs-load and a memcpy. the clone
+        // and the inline store live in `append_slow` so this body
+        // stays small enough to inline into a tight loop
+        if ($this->uniquely_owned()) {
+            if ($this->owner != null) {
+                $this->owner->append($src, $count);
+                $this->reseat();
+
+                return;
+            }
+        }
+
+        $this->append_slow($src, $count);
+    }
+
+    private function append_slow(ptr<const uint8> $src, usize $count) : void
+    {
         $this->make_unique();
-        $this->owner->append($src, $count);
-        $this->reseat();
+
+        usize $n = $this->window->size;
+
+        if ($n + $count > $this->cap()) {
+            $this->promote($n + $count);
+        }
+
+        ptr<uint8> $dst = $this->dest();
+        mem::copy<uint8>($dst:$ + $n, ptr<uint8>($src:$), $count);
+        $this->finish($n + $count);
+    }
+
+    // already unique and reserved. `join` is why this exists
+    #[inline]
+    internal function append_reserved(ptr<const uint8> $src, usize $count) : void
+    {
+        if ($count == 0) {
+            return;
+        }
+
+        usize $n = $this->window->size;
+        ptr<uint8> $dst = $this->dest();
+
+        mem::copy<uint8>($dst:$ + $n, ptr<uint8>($src:$), $count);
+        $this->finish($n + $count);
     }
 
     /**
@@ -570,9 +856,9 @@ public struct string
     function spare() : ptr<uint8>
     {
         $this->make_unique();
-        $this->reseat();
 
-        return $this->owner->bytes:$ + $this->owner->used;
+        ptr<uint8> $p = $this->dest();
+        return $p:$ + $this->window->size;
     }
 
     /**
@@ -584,9 +870,8 @@ public struct string
     function room() : usize
     {
         $this->make_unique();
-        $this->reseat();
 
-        return $this->owner->capacity - $this->owner->used;
+        return $this->cap() - $this->window->size;
     }
 
     /**
@@ -598,13 +883,10 @@ public struct string
     function commit(usize $n) : void
     {
         $this->make_unique();
-        $this->reseat();
 
-        assert($n <= $this->owner->capacity - $this->owner->used, 'commit past the end of the spare');
+        assert($n <= $this->cap() - $this->window->size, 'commit past the end of the spare');
 
-        $this->owner->used = $this->owner->used + $n;
-        $this->owner->bytes:$[$this->owner->used] = 0;
-        $this->reseat();
+        $this->finish($this->window->size + $n);
     }
 
     /**
@@ -615,17 +897,16 @@ public struct string
      * sees a count of two and clones - and `$other` still names the old, untouched bytes while the
      * new ones are written. a `const string&` would be a second access of `$this` and is refused.
      */
+    #[inline]
     function append(string $other) : void
     {
-        usize $extra = $other->window->size;
+        usize $extra = $other->size();
 
         if ($extra == 0) {
             return;
         }
 
-        $this->make_unique();
-        $this->owner->append($other->window->bytes, $extra);
-        $this->reseat();
+        $this->append($other->live_bytes(), $extra);
     }
 
     /**
@@ -634,11 +915,12 @@ public struct string
      * A byte, not a character: appending `0x80` on its own leaves the string holding invalid UTF-8,
      * and nothing here will say so - `chars` will simply count it as a character.
      */
+    #[inline]
     function push(uint8 $byte) : void
     {
-        $this->make_unique();
-        $this->owner->push($byte);
-        $this->reseat();
+        uint8 $one = $byte;
+
+        $this->append(ptr<const uint8>(&$one), 1);
     }
 
     /**
@@ -650,11 +932,7 @@ public struct string
     function clear() : void
     {
         $this->make_unique();
-        $this->owner->clear();
-
-        // the same re-seat as every other mutator: `empty()` has just set `$used` to 0, so the
-        // window this hands back is the empty one, spelled as the one rule rather than as a second
-        $this->reseat();
+        $this->finish(0);
     }
 }
 
@@ -671,8 +949,7 @@ public struct string
  *
  * **Both operands are borrows**, so comparing two strings costs no reference count at all. By value it
  * would be a retain and a release per comparison, and the place this exists for is the inside of a hash
- * map's probe loop. `string::equals` keeps its by-value parameter: everything already calls it, and this
- * is not that method's cost to fix.
+ * map's probe loop. `string::equals` takes `const string&` for the same reason.
  *
  * **Two pairs, and what keeps them apart is the rank ordering.** A `string` converts to a `string::view`
  * by the `#[implicit]` method above, so every operand of the first pair can also reach the second - and
@@ -694,12 +971,12 @@ public struct string
  */
 operator (const string& $a) == (const string& $b) : bool
 {
-    return $a->window->equals($b->window);
+    return $a->equals($b);
 }
 
 operator (const string& $a) != (const string& $b) : bool
 {
-    if ($a->window->equals($b->window)) {
+    if ($a->equals($b)) {
         return false;
     }
 

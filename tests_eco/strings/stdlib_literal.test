@@ -19,7 +19,7 @@
 # first, so the main unit's copy of the same Echo type is uniquified to `%string.N`. what matters is
 # the shape, and the shape is the tail of the line
 CHECK: define i32 @main(
-CHECK: { ptr @str, i64 5 }, ptr null }
+CHECK: { ptr @str, i64 5 }, ptr null, i64 0, i64 0 }
 
 # and getting all of that costs nothing. no allocation for the bytes, and no reference count moved -
 # the owner is null and both operations are null-guarded. scoped to main on purpose: the allocation seam

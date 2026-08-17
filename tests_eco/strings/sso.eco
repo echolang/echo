@@ -1,0 +1,95 @@
+// small-string optimisation: a unique value of at most `string::INLINE` bytes
+// lives in the string itself. nothing is allocated, a copy is a memcpy, and a
+// return still names the destination's store rather than the callee's frame
+
+function make_hi() : string
+{
+    string $s = '';
+    $s->append('hi');
+
+    return $s;
+}
+
+echo mem::live_allocations();
+
+string $short = '';
+$short->append('hello');
+
+echo $short;
+echo $short->size();
+echo $short->capacity() == string::INLINE;
+echo mem::live_allocations();
+echo $short->cstr() != null;
+echo $short->terminated();
+
+// a copy is independent: mutating one does not touch the other, and neither
+// pays for a buffer
+string $copy = $short;
+$copy->append('!');
+
+echo $short;
+echo $copy;
+echo $copy->capacity() == string::INLINE;
+echo mem::live_allocations();
+
+// a function return is a move. the window must name *this* value's store
+string $returned = make_hi();
+echo $returned;
+echo $returned->capacity() == string::INLINE;
+echo mem::live_allocations();
+
+// `string::INLINE` bytes still fit; one more does not
+echo string::INLINE;
+
+string $cap = '';
+$cap->append('0123456789abcde');
+echo $cap->size();
+echo $cap->capacity() == string::INLINE;
+echo mem::live_allocations();
+
+$cap->push(102);
+echo $cap;
+echo $cap->capacity() > string::INLINE;
+echo mem::live_allocations() == 2;
+
+// a literal is the other null-owner case, not an inline one
+string $lit = 'hello';
+echo $lit->capacity() == $lit->size();
+echo mem::refs($lit->owner);
+
+// a substring of an inline value copies, it does not share the store
+string $part = $short->sub(1, 3);
+echo $part;
+echo $part->capacity() == string::INLINE;
+$short->append('?');
+echo $part;
+echo $short;
+
+// spare and commit stay in the store
+string $s = '';
+$s->reserve(8);
+echo $s->capacity();
+echo $s->capacity() == string::INLINE;
+
+ptr<uint8> $p = $s->spare();
+$p:$[0] = 65;
+$p:$[1] = 66;
+$s->commit(2);
+echo $s;
+echo $s->capacity() == string::INLINE;
+
+// heap copy-on-write is unchanged once the value no longer fits
+string $long = '0123456789abcdef';
+$long = $long->clone();
+echo $long->capacity() > string::INLINE;
+echo mem::refs($long->owner);
+
+string $shared = $long;
+echo mem::refs($long->owner);
+$long->append('!');
+echo $shared;
+echo $long;
+echo mem::refs($long->owner);
+echo mem::refs($shared->owner);
+
+echo mem::live_allocations() > 0;

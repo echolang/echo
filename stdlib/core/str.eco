@@ -76,6 +76,7 @@ public class buf
     /**
      * Copies `$count` bytes onto the end and re-terminates.
      */
+    #[inline]
     internal function append(ptr<const uint8> $src, usize $count) : void
     {
         $this->reserve($this->used + $count);
@@ -247,6 +248,10 @@ public function from(ptr<const uint8> $s) : string
  */
 public function from(ptr<const uint8> $b, usize $count) : string
 {
+    if ($count <= string::INLINE) {
+        return string::from(string::view($b, $count));
+    }
+
     // `+ 1` is the NUL slot `$capacity` does not count
     buf $owner = buf($count, 0, mem::alloc<uint8>($count + 1));
     $owner->append($b, $count);
@@ -271,14 +276,28 @@ public function concat(const string& $a, const string& $b) : string
 }
 
 /**
+ * `$span` of `$text` as an owning string. A short result stays inline so
+ * it does not keep a large parent buffer alive. An inline source is
+ * always short, which is what keeps the span from dangling.
+ */
+private function owned_span(const string& $text, string::view $span) : string
+{
+    if ($span->size <= string::INLINE) {
+        return string::from($span);
+    }
+
+    return string($span, $text->owner);
+}
+
+/**
  * `$text` with leading ASCII whitespace removed.
  *
  * A window, not a copy: the result shares `$text`'s buffer, which is what makes trimming free. Call
  * `->clone()` on it if you want the parent's bytes released.
  */
-public function ltrim(const string& $text) : string
+public function ltrim(string::view $text) : string::view
 {
-    usize $n = $text->size();
+    usize $n = $text->size;
     usize $i = 0;
 
     while ($i < $n) {
@@ -292,12 +311,17 @@ public function ltrim(const string& $text) : string
     return $text->sub($i, $n - $i);
 }
 
+public function ltrim(const string& $text) : string
+{
+    return owned_span($text, ltrim($text->view()));
+}
+
 /**
  * `$text` with trailing ASCII whitespace removed. A window, for `ltrim`'s reason.
  */
-public function rtrim(const string& $text) : string
+public function rtrim(string::view $text) : string::view
 {
-    usize $n = $text->size();
+    usize $n = $text->size;
 
     while ($n > 0) {
         if (!space($text->byte($n - 1))) {
@@ -310,12 +334,22 @@ public function rtrim(const string& $text) : string
     return $text->sub(0, $n);
 }
 
+public function rtrim(const string& $text) : string
+{
+    return owned_span($text, rtrim($text->view()));
+}
+
 /**
  * `$text` with ASCII whitespace removed from both ends. A window, for `ltrim`'s reason.
  */
-public function trim(const string& $text) : string
+public function trim(string::view $text) : string::view
 {
     return ltrim(rtrim($text));
+}
+
+public function trim(const string& $text) : string
+{
+    return owned_span($text, trim($text->view()));
 }
 
 /**
@@ -369,6 +403,149 @@ public function iequals(string::view $a, string::view $b) : bool
 }
 
 /**
+ * Offset of the first `$b` in `$n` bytes at `$p`, or `$n` when it is not there.
+ *
+ * Its own function so the loop has no `push` inside it. Fields here are a
+ * handful of bytes; a `memchr` call per field is slower than this walk.
+ */
+private function find_byte(ptr<const uint8> $p, usize $n, uint8 $b) : usize
+{
+    usize $i = 0;
+
+    while ($i < $n) {
+        if ($p:$[$i] == $b) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $n;
+}
+
+/**
+ * One field of a `str::parts`: an offset and a length into `$source`.
+ *
+ * Offsets, not pointers, so an inline source can move and `at()` still
+ * names the live bytes.
+ */
+private struct part
+{
+    usize $off;
+    usize $len;
+}
+
+/**
+ * The cursor `str::parts` hands `foreach`. Rebuilds the current view
+ * from the source on each `advance`, so the bytes stay valid after a
+ * move of the parts value.
+ */
+public struct parts_iterator : contract::iterator<string::view>, contract::keyed<usize>
+{
+    private string $source;
+    private array<part> $spans;
+    private usize $pos;
+    private string::view $current;
+
+    constructor(string $source, array<part> $spans)
+    {
+        $this->source = $source;
+        $this->spans = $spans;
+        $this->pos = 0;
+    }
+
+    function advance() : bool
+    {
+        if ($this->pos >= $this->spans->count()) {
+            return false;
+        }
+
+        part $s = $this->spans[$this->pos];
+        ptr<const uint8> $bytes = $this->source->data();
+
+        $this->current = string::view($bytes:$ + $s->off, $s->len);
+        $this->pos = $this->pos + 1;
+
+        return true;
+    }
+
+    function current() : string::view&
+    {
+        return &$this->current;
+    }
+
+    function key() : usize
+    {
+        return $this->pos - 1;
+    }
+}
+
+/**
+ * The result of `str::split`: offsets into one live `string`.
+ *
+ * One retain of the source, then an `array<part>`. Minting an owning
+ * `string` per field is `$p->owned()`, and it is the slow path on
+ * purpose: each handle is an atomic retain of `$source`'s buffer.
+ *
+ * The source is stored so `str::split(make_text(), ',')` does not
+ * dangle. The views `at()` rebuilds are only valid while this value is.
+ */
+public struct parts : contract::iterable<string::view>, contract::const_iterable<string::view>
+{
+    private string $source;
+    private array<part> $spans;
+
+    constructor(string $source, array<part> $spans)
+    {
+        $this->source = $source;
+        $this->spans = $spans;
+    }
+
+    const function count() : usize
+    {
+        return $this->spans->count();
+    }
+
+    const function at(usize $index) : string::view
+    {
+        part $s = $this->spans[$index];
+        ptr<const uint8> $bytes = $this->source->data();
+
+        return string::view($bytes:$ + $s->off, $s->len);
+    }
+
+    /**
+     * Each span as an owning `string` that shares `$source`'s buffer. N retains.
+     */
+    function owned() : array<string>
+    {
+        array<string> $out = array<string>();
+        usize $n = $this->spans->count();
+
+        $out->reserve($n);
+
+        usize $i = 0;
+
+        while ($i < $n) {
+            $out->push(owned_span($this->source, $this->at($i)));
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+
+    function iterate() : parts_iterator
+    {
+        return parts_iterator($this->source, $this->spans);
+    }
+
+    const function iterate() : parts_iterator
+    {
+        return parts_iterator($this->source, $this->spans);
+    }
+}
+
+/**
  * `$text` cut at every occurrence of `$sep`.
  *
  * Always answers at least one part, and `n` separators give `n + 1` of them - so an empty text
@@ -377,49 +554,110 @@ public function iequals(string::view $a, string::view $b) : bool
  *
  * An empty separator would match everywhere and nowhere, so it answers the whole text unsplit
  * rather than one part per byte.
+ *
+ * The parts are offsets into `$text`. `$p->at($i)` rebuilds a window. `$p->owned()` is
+ * the list of owning strings this used to return.
  */
-public function split(const string& $text, const string& $sep) : array<string>
+public function split(const string& $text, const string& $sep) : parts
 {
-    array<string> $parts = array<string>();
-
-    // the scan is views. `$text->sub` is an owning string, and a retain of `str::buf` is an
-    // atomic RMW: doing that once per separator on a shared parent is what made
-    // `bench/string_split_join` 2x Rust. each part is still one owning `string` that shares
-    // the parent's bytes - that contract does not change
-    string::view $all = $text->window;
+    array<part> $spans = array<part>();
+    string::view $all = $text->view();
+    usize $n = $all->size;
 
     if ($sep->empty()) {
-        $parts->push(string($all, $text->owner));
-        return $parts;
+        $spans->push(part(0, $n));
+
+        return parts($text, $spans);
     }
 
-    string::view $needle = $sep->window;
-    usize $size = $all->size;
+    ptr<const uint8> $bytes = $all->bytes;
+
+    // a character separator is a byte scan with no store inside it, then one
+    // push. a loop that stores a view on every comma will not vectorise
+    if ($sep->size() == 1) {
+        uint8 $b = $sep->byte(0);
+        usize $start = 0;
+
+        while (true) {
+            usize $at = find_byte($bytes:$ + $start, $n - $start, $b);
+            usize $i = $start + $at;
+
+            $spans->push(part($start, $at));
+
+            if ($i == $n) {
+                return parts($text, $spans);
+            }
+
+            $start = $i + 1;
+        }
+    }
+
+    string::view $needle = $sep->view();
     usize $start = 0;
 
     while (true) {
-        string::view $rest = $all->sub($start, $size - $start);
+        string::view $rest = $all->sub($start, $n - $start);
         usize $at = $rest->find($needle);
 
         // `find` answers the haystack's own size when there is no match - there is no `Option`
         // to hand back, and the size is the one value always to hand and never a valid index
         if ($at >= $rest->size) {
-            $parts->push(string($rest, $text->owner));
-            break;
+            $spans->push(part($start, $n - $start));
+
+            return parts($text, $spans);
         }
 
-        $parts->push(string($rest->sub(0, $at), $text->owner));
+        $spans->push(part($start, $at));
         $start = $start + $at + $needle->size;
     }
-
-    return $parts;
 }
 
 /**
- * Every part of `$parts` in order, with `$sep` between them.
+ * Every span of `$p` in order, with `$sep` between them.
  *
  * The inverse of `split`, and sized in one pass so a long list is one allocation rather than one
  * per part.
+ */
+public function join(const parts& $p, const string& $sep) : string
+{
+    usize $count = $p->count();
+
+    if ($count == 0) {
+        return '';
+    }
+
+    usize $total = $sep->size() * ($count - 1);
+    usize $i = 0;
+
+    while ($i < $count) {
+        $total = $total + $p->at($i)->size;
+        $i = $i + 1;
+    }
+
+    string $out = '';
+    $out->reserve($total);
+
+    ptr<const uint8> $sep_bytes = $sep->data();
+    usize $sep_n = $sep->size();
+
+    $i = 0;
+
+    while ($i < $count) {
+        if ($i > 0) {
+            $out->append_reserved($sep_bytes, $sep_n);
+        }
+
+        string::view $span = $p->at($i);
+
+        $out->append_reserved($span->bytes, $span->size);
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+/**
+ * Every part of `$parts` in order, with `$sep` between them. The list a caller built by hand.
  */
 public function join(const array<string>& $parts, const string& $sep) : string
 {
@@ -440,16 +678,17 @@ public function join(const array<string>& $parts, const string& $sep) : string
     string $out = '';
     $out->reserve($total);
 
+    ptr<const uint8> $sep_bytes = $sep->data();
+    usize $sep_n = $sep->size();
+
     $i = 0;
 
     while ($i < $count) {
         if ($i > 0) {
-            $out->append($sep->window->bytes, $sep->size());
+            $out->append_reserved($sep_bytes, $sep_n);
         }
 
-        // the dest is a fresh unique buffer; the parts share a different one. the
-        // pointer form copies bytes and does not retain the parent
-        $out->append($parts[$i]->window->bytes, $parts[$i]->size());
+        $out->append_reserved($parts[$i]->data(), $parts[$i]->size());
         $i = $i + 1;
     }
 

@@ -99,6 +99,7 @@ function through_mut_string(string& $s) : usize
 
 {
     string $s = '';
+    $s->reserve(string::INLINE + 1);
     $s->append('x');
 
     echo through_const_string($s);

@@ -25,7 +25,7 @@ string $big = 'xxhelloxx';
 echo hash::of($big->sub(2, 5));
 
 // and a view agrees with the string that owns it
-echo hash::of($literal->window);
+echo hash::of($literal->view());
 
 // a different text, so a different hash
 echo hash::of('world');

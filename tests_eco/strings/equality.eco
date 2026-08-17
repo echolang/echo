@@ -49,18 +49,18 @@ echo 'hell' == $a;
 // this pair could not be declared at all until the temporary borrow was moved above the declared
 // conversion: before that the string pair won the place operand, the view pair won the literal one,
 // neither dominated, and `$a == 'hello'` was ambiguous
-echo $a->window == $b->window;
-echo $a->window != $b->window;
-echo $a->window == $c->window;
-echo $a->window != $c->window;
+echo $a->view() == $b->view();
+echo $a->view() != $b->view();
+echo $a->view() == $c->view();
+echo $a->view() != $c->view();
 
 // a view over a substring, so the two views point into different buffers at different offsets and only
 // the text is the same - the view pair compares bytes, exactly as the string pair does
-echo $big->sub(2, 5)->window == $a->window;
+echo $big->sub(2, 5)->view() == $a->view();
 
 // and `equals` still says the same thing, being the one byte loop both pairs are written through
-echo $a->window->equals($b->window);
-echo $a->window->equals($c->window);
+echo $a->view()->equals($b->view());
+echo $a->view()->equals($c->view());
 
-assert(mem::live_allocations() == 2, "only the one built string allocated; comparing costs nothing");
+assert(mem::live_allocations() == 0, "a short built string is inline; comparing costs nothing");
 echo mem::live_allocations();

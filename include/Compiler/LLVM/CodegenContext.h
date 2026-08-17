@@ -7,6 +7,7 @@
 #include "Compiler/CompilerException.h"
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CompilationUnit.h"
+#include "Compiler/LLVM/Codegen/ReturnAbi.h"
 #include "Compiler/LLVM/Codegen/TbaaTree.h"
 #include "AST/ASTCoreTypes.h"
 
@@ -25,6 +26,11 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace llvm
+{
+    class Function;
+};
 
 namespace AST
 {
@@ -95,12 +101,10 @@ namespace Compiler::LLVM
 
         // the two words a string is read as: the bytes and how many of them.
         //
-        // **the other half of what PrintfConversion.h was extracted for.** the same two printers ask -
-        // `echo`, one scalar per statement, and the `dprint` builtin, a whole value's structure - and
-        // getting the *window* out is as much a shared fact as which conversion specifier to use: a
-        // `string` wraps a `view` and is one level further out than it, a `view` is the window itself, and
-        // both are resolved by index off the layout the core binding published, never by position (see
-        // AST::resolve_core_string_layout)
+        // the value is a `string::view`. a `string` becomes one first, through
+        // `string_as_view`, so this never has to know how the live bytes are stored.
+        // resolved by index off the layout the core binding published, never by
+        // position (see AST::resolve_core_string_layout)
         //
         // takes a value rather than an address: both askers already hold one, and a substring shares its
         // owner's buffer, so there is nothing here to load through
@@ -110,7 +114,28 @@ namespace Compiler::LLVM
             llvm::Value *size;
         };
 
-        StringWindow gen_string_window(llvm::Value *value, const AST::ValueType &type, const char *prefix);
+        StringWindow gen_string_window(llvm::Value *view, const char *prefix);
+
+        // a `string` becomes a `view` through the conversion the type already
+        // declared. a view is handed back as-is. a hand-declared `#[core: string]`
+        // with no conversion still has a live window, and that is the fallback
+        llvm::Value *string_as_view(
+            llvm::Value *value,
+            const AST::ValueType &type,
+            const char *prefix);
+
+        // **the caller's half of the return ABI, and the only place a call to an Echo function is
+        // emitted.** echo, die and dprint convert a `string` through this, and every ordinary
+        // call does too - one dance, because a site that allocated the slot and forgot the
+        // attribute is a *miscompile*
+        void emit_call(
+            llvm::FunctionCallee callee,
+            std::vector<llvm::Value *> &args,
+            const ReturnAbi &abi);
+
+        // the llvm::Function a declaration was emitted as, declared into this unit
+        // on demand. null when nothing was emitted for it; the caller phrases the diagnostic
+        llvm::Function *llvm_function(const AST::FunctionDeclNode *decl);
 
         // the registry an interface **widening** needs, published here by compile_bundle for the reason
         // core_types_ptr above is - so codegen still never holds the whole collector.

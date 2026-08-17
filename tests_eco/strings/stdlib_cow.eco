@@ -1,20 +1,23 @@
 // copy-on-write: a mutation copies the buffer whenever this string is not its sole owner. three
 // ways that happens, and the gate is one rule for all of them
 
+// heap copy-on-write: a unique value of at most `string::INLINE` bytes stays inline and never
+// has an owner to share. these cases use a 16-byte text so the buffer is real
+
 // 1. the bytes are a literal. static, in the binary, owned by nobody - so `mem::refs` is 0 and the
 //    first write clones rather than scribbling on the program's own image
-$lit = 'ab';
-$lit->append('cd');
+$lit = '0123456789abcdef';
+$lit->append('!');
 echo $lit;
 echo mem::refs($lit->owner);
 
 // 2. a second string names the same buffer. the copy is untouched by the original's mutation
-$orig = 'one';
-$orig->append('two');
+$orig = '0123456789abcdef';
+$orig = $orig->clone();
 $copy = $orig;
 echo mem::refs($orig->owner);
 
-$orig->append('three');
+$orig->append('!');
 echo $copy;
 echo $orig;
 
@@ -24,7 +27,7 @@ echo mem::refs($copy->owner);
 
 // 3. a sub-window of a buffer this string *does* uniquely own. the bytes ahead of it are not its to
 //    move, so it clones too - and the parent is left alone
-$whole = 'abcdef';
+$whole = '0123456789abcdef';
 $whole = $whole->clone();
 $part = $whole->sub(0, 3);
 $part->append('!');

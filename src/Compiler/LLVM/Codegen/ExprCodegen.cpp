@@ -167,7 +167,16 @@ void ExprCodegen::gen_literal_string(AST::LiteralStringExprNode &node)
     view_fields[layout.size_index] =
         llvm::ConstantInt::get(view_struct->getElementType(layout.size_index), bytes.size());
 
-    std::vector<llvm::Constant *> string_fields(2);
+    // every field, then the two the layout names. SSO storage on `string` is extra
+    // properties the constant must still fill - getNullValue so a new one is
+    // zero rather than a missing operand LLVM rejects
+    const unsigned field_count = string_struct->getNumElements();
+    std::vector<llvm::Constant *> string_fields(field_count);
+
+    for (unsigned i = 0; i < field_count; i++) {
+        string_fields[i] = llvm::Constant::getNullValue(string_struct->getElementType(i));
+    }
+
     string_fields[layout.window_index] = llvm::ConstantStruct::get(view_struct, view_fields);
     string_fields[layout.owner_index] =
         llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(string_struct->getElementType(layout.owner_index)));
@@ -708,7 +717,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
     }
 
     else {
-        llvm::Function *func = find_llvm_function(node.decl);
+        llvm::Function *func = _ctx.llvm_function(node.decl);
 
         if (!func) {
             throw _ctx.error(fmt::format(
@@ -741,55 +750,7 @@ void ExprCodegen::gen_function_call(AST::FunctionCallExprNode &node)
             _ctx.value_stack.pop();
         }
 
-        emit_call(func, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
-    }
-}
-
-void ExprCodegen::emit_call(
-    llvm::FunctionCallee callee,
-    std::vector<llvm::Value *> &args,
-    const ReturnAbi &abi
-)
-{
-    // **an aggregate too big for registers comes back through storage this call site provides.**
-    // `abi` is the same answer the signature asked, so a caller and its callee cannot disagree about
-    // where the answer is. the slot is an ordinary entry alloca, which is what lets SROA promote it
-    // into scalars once the callee is inlined
-    //
-    // **the slot's type comes from this unit's lowering of the ABI, never from the `sret` attribute
-    // on the callee.** reading it off the attribute is the same answer right up until the modules are
-    // merged: the JIT and `--optimize whole` both link every unit into one and `llvm::Linker` brings
-    // each unit's own named struct types along, so the attribute can name the *other* unit's `%string`
-    // while this unit allocates and reads its own
-
-    if (abi.is_indirect()) {
-        llvm::Value *slot = _ctx.entry_alloca(abi.indirect_type, "call.sret");
-
-        args.insert(args.begin(), slot);
-
-        auto *call = _ctx.builder->CreateCall(callee, args);
-
-        // **the attribute goes on the call too, and forgetting it is a miscompile rather than a missed
-        // optimization** - see the note on Compiler::LLVM::indirect_return_attributes. it decides which
-        // register the hidden pointer travels in, and LLVM's fallback to the callee's own attributes stops
-        // working the moment a merge leaves this unit's `%string` and the callee's as two types
-        call->setAttributes(call->getAttributes().addParamAttributes(
-            *_ctx.llvm_context, 0,
-            indirect_return_attributes(*_ctx.llvm_context, abi, _ctx.layout())));
-
-        // the call answers `void`, so the value this expression produces is what the callee wrote
-        _ctx.value_stack.push(
-            _ctx.builder->CreateLoad(abi.indirect_type, slot, "call.result"));
-
-        return;
-    }
-
-    auto *call = _ctx.builder->CreateCall(callee, args);
-
-    // a void call produces no value. pushing one anyway left a void-typed entry that no
-    // parent ever pops, so a `foo();` statement quietly grew the stack
-    if (!call->getType()->isVoidTy()) {
-        _ctx.value_stack.push(call);
+        _ctx.emit_call(func, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
     }
 }
 
@@ -863,37 +824,7 @@ void ExprCodegen::gen_virtual_call(AST::FunctionCallExprNode &node)
             *_ctx.current_cmp_unit,
             TypeLowering::FunctionCallingShape::t_echo);
 
-    emit_call({ fn_type, callee }, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
-}
-
-// the callee symbol *in the current unit*, declared on demand if this unit has not named it yet.
-//
-// it used to fall back to searching the other units' tables, which is wrong in a way nothing catches:
-// an llvm::Function belongs to exactly one llvm::Module, and compile_bundle moves every non-main
-// module into main and then resets it. a call planted against a foreign unit's Function therefore
-// references an object that is about to be destroyed, and LLVM's verifier does not check the module
-// membership of a referenced global - so the whole thing is silent. the path was unreachable only
-// because build_function_maps' reference-scoped loop happens to declare every callee of every call
-// node a module owns, which stops being true as soon as a definition is emitted into a unit other
-// than the one that owns its declaration.
-//
-// declaring into the current unit is what that loop already does, so this is the same answer reached
-// on demand rather than up front, and a `declare` is all a cross-module callee ever needs.
-llvm::Function *ExprCodegen::find_llvm_function(const AST::FunctionDeclNode *decl)
-{
-    // a null decl is an unresolved call, which the caller reports by name - there is nothing to
-    // declare, and minting a symbol for it would turn a resolution failure into a link failure
-    if (decl == nullptr) {
-        return nullptr;
-    }
-
-    auto funcid = _ctx.current_cmp_unit->function_table.get_function_id(decl);
-
-    if (llvm::Function *func = _ctx.current_cmp_unit->function_table.get_llvm_function(funcid)) {
-        return func;
-    }
-
-    return _ctx.types->create_llvm_func_decl(decl, *_ctx.current_cmp_unit);
+    _ctx.emit_call({ fn_type, callee }, args, _ctx.types->return_abi_of(node.decl, *_ctx.current_cmp_unit));
 }
 
 void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)
@@ -904,7 +835,7 @@ void ExprCodegen::gen_closure_expr(AST::ClosureExprNode &node)
 
     // the body is an ordinary declaration, emitted from the file root like any other, so its
     // llvm::Function is already in the table by the time any expression is lowered
-    llvm::Function *func = find_llvm_function(node.decl);
+    llvm::Function *func = _ctx.llvm_function(node.decl);
 
     if (!func) {
         throw _ctx.error(fmt::format(
@@ -1025,7 +956,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
         : return_abi_for(
             _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit));
 
-    emit_call({ fn_type, fn }, args, abi);
+    _ctx.emit_call({ fn_type, fn }, args, abi);
 }
 
 void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
@@ -1163,7 +1094,7 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
 {
     // both string types arrive here as a *value*, so the window is reached by extraction rather than a
     // GEP - there is no address to walk
-    const auto [bytes, size] = _ctx.gen_string_window(value, type, "");
+    const auto [bytes, size] = _ctx.gen_string_window(_ctx.string_as_view(value, type, ""), "");
 
     llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -1247,7 +1178,8 @@ void ExprCodegen::gen_die_builtin(AST::FunctionCallExprNode &node)
     // reads
     message->accept(*_ctx.visitor);
     llvm::Value *value = _ctx.pop();
-    const auto [bytes, size] = _ctx.gen_string_window(value, message->result_type(), "");
+    const auto [bytes, size] = _ctx.gen_string_window(
+        _ctx.string_as_view(value, message->result_type(), ""), "");
 
     _ctx.abort->gen_abort_dynamic("fatal error", bytes, size, node.token_function_name);
 }
@@ -1573,7 +1505,7 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
             _ctx.function_context()));
     }
 
-    llvm::Function *fn = find_llvm_function(node.decl);
+    llvm::Function *fn = _ctx.llvm_function(node.decl);
 
     if (fn == nullptr) {
         throw _ctx.error(fmt::format(
@@ -1606,7 +1538,7 @@ llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
         return existing;
     }
 
-    llvm::Function *target = find_llvm_function(decl);
+    llvm::Function *target = _ctx.llvm_function(decl);
 
     if (target == nullptr) {
         throw _ctx.error(fmt::format(

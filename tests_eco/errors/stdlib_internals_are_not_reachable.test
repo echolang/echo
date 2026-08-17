@@ -16,10 +16,10 @@ expect: fail
      :           ^^^^^^
   14 | 
 
-  152 | internal const uint8 CH_SPACE = 32;
-  153 | internal const uint8 CH_DOT = 46;
+  153 | internal const uint8 CH_SPACE = 32;
+  154 | internal const uint8 CH_DOT = 46;
       :                      ------ declared here
-  154 | internal const uint8 CH_ZERO = 48;
+  155 | internal const uint8 CH_ZERO = 48;
 
 [error] InaccessibleDeclaration  stdlib_internals_are_not_reachable.eco:15:12
 

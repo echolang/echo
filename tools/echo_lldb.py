@@ -162,6 +162,23 @@ def _preview(value, limit, open_br, close_br, render):
 # string and string::view
 # ---------------------------------------------------------------------------------------------
 
+def _decode_bytes(raw):
+    return raw.decode("utf-8", "replace") if raw is not None else None
+
+
+def _read_memory(value, address, length):
+    if length > MAX_TEXT:
+        return None
+
+    error = lldb.SBError()
+    raw = value.GetProcess().ReadMemory(address, length, error)
+
+    if not error.Success() or raw is None:
+        return None
+
+    return _decode_bytes(raw)
+
+
 def _read_text(view):
     """The bytes a `string::view` names, as text.
 
@@ -182,16 +199,26 @@ def _read_text(view):
     if address == 0:
         return "" if length == 0 else None
 
-    if length > MAX_TEXT:
+    return _read_memory(view, address, length)
+
+
+def _read_inline(value, length):
+    """The 16-byte in-object store, sliced to `length`.
+
+    Read from the two `uint64` words rather than the object's address: a value
+    still in registers has no load address, and those words *are* the store."""
+    if length > 16:
         return None
 
-    error = lldb.SBError()
-    raw = view.GetProcess().ReadMemory(address, length, error)
+    lo = _member(value, "sso_lo")
+    hi = _member(value, "sso_hi")
 
-    if not error.Success() or raw is None:
+    if lo is None or hi is None:
         return None
 
-    return raw.decode("utf-8", "replace")
+    raw = _unsigned(lo).to_bytes(8, "little") + _unsigned(hi).to_bytes(8, "little")
+
+    return _decode_bytes(raw[:length])
 
 
 def _quote(text):
@@ -200,7 +227,35 @@ def _quote(text):
 
 @_summary
 def string_summary(value, _internal):
-    text = _read_text(_member(value, "window"))
+    # shape first, the way SequenceProvider refuses a stranger that matched the
+    # name: a user type called `string` is not ours
+    window = _member(value, "window")
+    owner = _member(value, "owner")
+
+    if window is None or owner is None:
+        return ""
+
+    bytes_ptr = _member(window, "bytes")
+    size = _member(window, "size")
+
+    if bytes_ptr is None or size is None:
+        return "<unreadable>"
+
+    address = _unsigned(bytes_ptr)
+    length = _unsigned(size)
+
+    if address == 0:
+        if length == 0:
+            return _quote("")
+
+        # inline: owner null and bytes null, text in `$sso_*`
+        if _unsigned(owner) != 0:
+            return "<unreadable>"
+
+        text = _read_inline(value, length)
+    else:
+        text = _read_memory(window, address, length)
+
     return _quote(text) if text is not None else "<unreadable>"
 
 

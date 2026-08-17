@@ -218,6 +218,7 @@ assert(mem::live_allocations() == 0, "two buffers each, both given back");
     pair_buffer<int32, string> $p = pair_buffer<int32, string>(4);
 
     string $s = '';
+    $s->reserve(string::INLINE + 1);
     $s->append('hello');
 
     $p->push(7, $s);
@@ -251,9 +252,11 @@ assert(mem::live_allocations() == 0, "both buffers' elements released and all fo
     pair_buffer<string, string> $p = pair_buffer<string, string>(2);
 
     string $k = '';
+    $k->reserve(string::INLINE + 1);
     $k->append('key');
 
     string $v = '';
+    $v->reserve(string::INLINE + 1);
     $v->append('value');
 
     $p->push($k, $v);
@@ -274,6 +277,7 @@ assert(mem::live_allocations() == 0, "an owning key is torn down as well as an o
     holder $h = holder();
 
     string $s = '';
+    $s->reserve(string::INLINE + 1);
     $s->append('nested');
 
     $h->inner->push(1, $s);

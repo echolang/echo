@@ -1,7 +1,7 @@
 // two library functions, each answering with an aggregate over the two-register line, and each declared
 // in a *different* module from the other. calling both is what puts two units' names for one type into
 // one merged module
-array<string> $parts = str::split('a::b::c', '::');
+str::parts $parts = str::split('a::b::c', '::');
 
 echo $parts->count();
 echo str::join($parts, '|');

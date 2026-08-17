@@ -61,7 +61,7 @@ namespace AST
 
     // a reference to this declaration from some unit needs that unit to name the symbol. True for
     // everything that has one - the lazy half of build_function_maps, and the on-demand path in
-    // ExprCodegen::find_llvm_function.
+    // CodegenContext::llvm_function.
     bool emission_needs_declaration(FunctionEmission kind);
 
     // this compiler emits the body. Both readers of that are the same question asked from the two ends:

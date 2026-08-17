@@ -15,14 +15,22 @@
     assert(mem::live_allocations() == 0, "a literal is a window, not an allocation");
 }
 
-// writing to one pays for a buffer, once
+// a short unique value stays in the string. no buffer
 {
     $s = '';
     $s->append('hello');
 
-    assert(mem::live_allocations() == 2, "the first write allocated a buf and its bytes");
+    assert(mem::live_allocations() == 0, "fifteen bytes or fewer sit in the string");
+}
 
-    $s->append(', world');
+// writing past `string::INLINE` bytes pays for a buffer, once
+{
+    $s = '';
+    $s->append('0123456789abcdef');
+
+    assert(mem::live_allocations() == 2, "sixteen bytes allocated a buf and its bytes");
+
+    $s->append('!');
     echo $s;
 
     // appending again grows the same block rather than taking a second one
@@ -31,10 +39,10 @@
 
 assert(mem::live_allocations() == 0, "both went back with the buf's last reference");
 
-// copy-on-write: two strings share one buffer until one of them is written to
+// copy-on-write: two long strings share one buffer until one of them is written to
 {
     $a = '';
-    $a->append('shared');
+    $a->append('0123456789abcdef');
     $b = $a;
 
     assert(mem::live_allocations() == 2, "one buf, two strings");

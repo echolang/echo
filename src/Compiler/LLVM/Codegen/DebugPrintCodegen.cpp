@@ -405,8 +405,9 @@ void DebugPrintCodegen::render_optional(
 
 void DebugPrintCodegen::render_string(const LValue &place, const AST::ValueType &type)
 {
+    llvm::Value *loaded = _ctx.lvalues->gen_load(place, "dprint.str");
     const auto [bytes, size] = _ctx.gen_string_window(
-        _ctx.lvalues->gen_load(place, "dprint.str"), type, "dprint.str.");
+        _ctx.string_as_view(loaded, type, "dprint.str."), "dprint.str.");
 
     // **`%.*s` is why this can share the surrounding printf.** C requires `%s` with a precision to read
     // at most that many bytes from an array that need not be NUL-terminated, which is exactly the shape

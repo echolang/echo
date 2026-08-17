@@ -1,7 +1,7 @@
 // spare is the first free byte, commit takes the write as part of the string and re-terminates
 
 $s = '';
-$s->reserve(8);
+$s->reserve(string::INLINE + 1);
 
 echo $s->capacity();
 echo $s->room();

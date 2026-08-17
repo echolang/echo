@@ -17,6 +17,7 @@
     assert(mem::live_allocations() == 0, 'an empty map allocates nothing');
 
     string $v = '';
+    $v->reserve(string::INLINE + 1);
     $v->append('hello');
 
     assert(mem::live_allocations() == 2, 'one written string');
@@ -30,6 +31,7 @@
     echo $m->get('greet');
 
     string $v2 = '';
+    $v2->reserve(string::INLINE + 1);
     $v2->append('bye');
 
     assert(mem::live_allocations() == 7, 'a second written string');
@@ -73,6 +75,7 @@ echo mem::live_allocations();
     map<string, int32> $m = map<string, int32>();
 
     string $k = '';
+    $k->reserve(string::INLINE + 1);
     $k->append('key');
 
     $m->set($k, 1);
@@ -98,6 +101,7 @@ echo mem::live_allocations();
     map<string, string> $m = map<string, string>();
 
     string $s = '';
+    $s->reserve(string::INLINE + 1);
     $s->append('gone');
 
     $m->set('k', $s);

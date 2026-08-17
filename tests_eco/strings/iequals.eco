@@ -23,7 +23,7 @@ echo str::iequals('straße', 'STRAßE');
 string $built = '';
 $built->append('Content-Type');
 echo str::iequals($built, 'content-type');
-echo str::iequals($built->window, 'CONTENT-TYPE');
+echo str::iequals($built->view(), 'CONTENT-TYPE');
 
-assert(mem::live_allocations() == 2, "one built string is a buf and its bytes; iequals allocated nothing");
+assert(mem::live_allocations() == 0, "a short built string is inline; iequals allocated nothing");
 echo mem::live_allocations();

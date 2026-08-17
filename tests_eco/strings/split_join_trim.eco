@@ -1,5 +1,5 @@
 // `n` separators give `n + 1` parts, which is the rule that makes join(split(t, s), s) == t
-array<string> $parts = str::split('a,b,c', ',');
+str::parts $parts = str::split('a,b,c', ',');
 echo $parts->count();
 echo str::join($parts, '-');
 
@@ -25,6 +25,10 @@ echo "|{$trimmed}|";
 echo "|{$start}|";
 echo "|{$end}|";
 echo "|{$blank}|";
+
+foreach (str::split('x,y', ',') as $p) {
+    echo $p->size;
+}
 
 echo str::repeat('ab', 3);
 echo str::repeat('ab', 0)->size();

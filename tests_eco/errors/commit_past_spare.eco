@@ -2,4 +2,4 @@
 
 $s = '';
 $s->reserve(2);
-$s->commit(3);
+$s->commit(string::INLINE + 1);

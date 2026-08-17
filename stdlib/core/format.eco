@@ -204,44 +204,44 @@ private function digits_of(uint64 $value, uint64 $base, bool $upper) : string
         return '0';
     }
 
-    // built backwards, because the last digit is the one arithmetic hands over first.
-    //
-    // sized once up front: 64 is the widest this can be - a `uint64` in base 2 - so no `push` below
-    // ever grows the buffer. Every `"{$n}"` in every program lands here, and a `int32` printed from
-    // an empty array reallocated five times on its way to ten digits
-    array<uint8> $reversed = array<uint8>();
-    $reversed->reserve(64);
+    // count, then write backwards into the spare. a scratch array was a
+    // heap block on every `"{$n}"`. the digit count of a uint64 in base
+    // 10 is at most 20, so the result stays inline
+    usize $n = 0;
+    uint64 $rest = $value;
 
-    while ($value > 0) {
-        uint64 $digit = $value % $base;
-        $value = $value / $base;
-
-        // narrowed by assignment, every value here being under 128 by construction
-        if ($digit < 10) {
-            uint8 $decimal = $digit + CH_ZERO;
-            $reversed->push($decimal);
-            continue;
-        }
-
-        if ($upper) {
-            uint8 $upper_letter = $digit - 10 + CH_UPPER_A;
-            $reversed->push($upper_letter);
-            continue;
-        }
-
-        uint8 $lower_letter = $digit - 10 + CH_LOWER_A;
-        $reversed->push($lower_letter);
+    while ($rest > 0) {
+        $n = $n + 1;
+        $rest = $rest / $base;
     }
 
     string $out = '';
-    $out->reserve($reversed->count());
+    $out->reserve($n);
+    ptr<uint8> $p = $out->spare();
 
-    usize $i = $reversed->count();
+    $rest = $value;
+    usize $i = $n;
 
     while ($i > 0) {
         $i = $i - 1;
-        $out->push($reversed[$i]);
+        uint64 $digit = $rest % $base;
+        $rest = $rest / $base;
+
+        if ($digit < 10) {
+            uint8 $decimal = $digit + CH_ZERO;
+            $p:$[$i] = $decimal;
+        }
+        else if ($upper) {
+            uint8 $upper_letter = $digit - 10 + CH_UPPER_A;
+            $p:$[$i] = $upper_letter;
+        }
+        else {
+            uint8 $lower_letter = $digit - 10 + CH_LOWER_A;
+            $p:$[$i] = $lower_letter;
+        }
     }
+
+    $out->commit($n);
 
     return $out;
 }

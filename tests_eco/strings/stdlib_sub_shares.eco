@@ -2,10 +2,10 @@
 // `mem::refs` is how it can be observed rather than asserted in a comment
 
 // a literal owns nothing at all - static bytes, a null owner, a count of zero
-$lit = 'hello world';
+$lit = 'hello world, 16+';
 echo mem::refs($lit->owner);
 
-// ->clone() is the one operation that always allocates, so this is the first real buffer
+// ->clone() of a long string is the first real buffer. a short clone stays inline
 $own = $lit->clone();
 echo mem::refs($own->owner);
 echo $own;
