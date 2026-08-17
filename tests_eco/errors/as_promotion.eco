@@ -1,0 +1,5 @@
+$n = 0;
+ptr<int32> $ints = &$n;
+ptr<uint8> $bytes = $ints:$ as ptr<uint8>;
+uint8& $r = $bytes:$ as uint8&;
+echo $r;

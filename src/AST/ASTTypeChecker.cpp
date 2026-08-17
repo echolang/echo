@@ -1585,6 +1585,15 @@ void TypeChecker::visitTypeCast(TypeCastNode &node)
         report_unsafe_promotion(node.cast_to, location_of_expression(node.expr));
     }
 
+    // CastResolution reports every written-cast refusal and sets plan_decided. a generic
+    // body this walk does not enter. !plan_decided here is a missed rewrite, not a second
+    // classification
+    if (!node.is_implcit && node.expr != nullptr && !node.plan_decided) {
+        _collector.collect_issue<Issue::GenericError>(
+            code_ref_for(location_of_expression(&node)),
+            "internal: a written cast was not classified");
+    }
+
     RecursiveVisitor::visitTypeCast(node);
 }
 

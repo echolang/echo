@@ -5,6 +5,21 @@
 
 #include <fmt/core.h>
 
+bool Parser::starts_foreach_as_binding(const Parser::Cursor &cursor)
+{
+    if (!cursor.is_type(Token::Type::t_as)) {
+        return false;
+    }
+
+    return cursor.peek_is_type(1, Token::Type::t_varname)
+        || cursor.peek_is_type(1, Token::Type::t_ref)
+        || cursor.peek_is_type(1, Token::Type::t_and)
+        || (cursor.peek_is_type(1, Token::Type::t_const)
+            && (cursor.peek_is_type(2, Token::Type::t_ref)
+                || cursor.peek_is_type(2, Token::Type::t_and)
+                || cursor.peek_is_type(2, Token::Type::t_varname)));
+}
+
 AST::ForeachNode *Parser::parse_foreach(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;

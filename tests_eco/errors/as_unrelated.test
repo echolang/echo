@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  as_unrelated.eco:5:14
+
+  Invalid type conversion: 'Alpha' cannot be read as a 'Beta'
+
+  4 | Alpha $a = Alpha(1);
+  5 | Beta $b = $a as Beta;
+    :              ^^
+  6 | echo $b->n;
+
+1 error, nothing was compiled.

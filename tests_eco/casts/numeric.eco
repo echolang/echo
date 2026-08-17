@@ -1,0 +1,6 @@
+// a written destination where assignment would have been the only spelling
+int32 $n = 7;
+echo $n as float64;
+
+int64 $big = 5000000000;
+echo $big as int32;

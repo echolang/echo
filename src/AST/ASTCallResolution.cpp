@@ -5,6 +5,7 @@
 #include "AST/ASTArgumentFit.h"
 #include "AST/ASTArrayLiteral.h"
 #include "AST/ASTCFunction.h"
+#include "AST/ASTCast.h"
 #include "AST/ASTCollector.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTFunctionMatcher.h"
@@ -127,38 +128,8 @@ namespace AST
             // the only way to tell them apart
             assert(conversion != nullptr && "the fit rank promised a declared conversion");
 
-            // inbound is a static of the destination: no receiver, one by-value argument.
-            // implicit_conversion_for already peeled a T& source; the argument is a value
-            // edge and PointerAdjuster inserts the deref. no second fit
-            if (!conversion->has_receiver()) {
-                auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
-                    at, std::vector<ExprNode *>{ arg });
-
-                conversion_call.decl = conversion;
-                conversion_call.static_owner = implicit_conversion_target(expected);
-                conversion_call.settlement = CallSettlement::t_settled;
-
-                return &conversion_call;
-            }
-
-            // outbound: the conversion's `$this` is a borrow, so the receiver is addressed -
-            // **unless the argument already is one**, which is the whole of what makes the
-            // conversion reachable through a `const T&` parameter. asked of
-            // AST::receiver_for_member_call, which owns that rule for every synthesized member
-            // call: addressing a borrow a second time builds a `ptr<ptr<T>>`, which unifies
-            // against nothing, and the call is then silently never instantiated rather than
-            // refused - a failure mode with no room for a second copy
-            auto &conversion_call = nodes.emplace_back<FunctionCallExprNode>(
-                at, std::vector<ExprNode *>{ receiver_for_member_call(nodes, arg) });
-
-            // settled outright, unlike the ownership pass's calls: the callee is known *and* its one
-            // argument is the address just built, which is exactly what its borrow parameter wants. so
-            // there is nothing left for a later round to decide, and nothing that would make the
-            // fixpoint revisit a call this deep inside an already-settled one
-            conversion_call.decl = conversion;
-            conversion_call.settlement = CallSettlement::t_settled;
-
-            return &conversion_call;
+            // the mint is AST::emit_declared_conversion's, shared with a written `$x as T`
+            return emit_declared_conversion(nodes, arg, conversion, expected, at);
         }
 
         // **a written `null` argument takes the parameter's type**, which is the one thing about an

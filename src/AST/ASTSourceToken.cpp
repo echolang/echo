@@ -194,7 +194,17 @@ const TokenReference *source_token_of(const Node &node)
             return through(static_cast<const DerefExprNode &>(node).operand);
 
         case NodeType::n_type_cast:
-            return through(static_cast<const TypeCastNode &>(node).expr);
+        {
+            // a written cast points at the `as` (or the `T` of `T(...)`). an implicit one has no
+            // token of its own and stands in for its operand, the way a deref does
+            const auto &cast = static_cast<const TypeCastNode &>(node);
+
+            if (!cast.is_implcit && cast.token.has_value() && cast.token->is_valid()) {
+                return &*cast.token;
+            }
+
+            return through(cast.expr);
+        }
 
         case NodeType::n_expr_retain:
             return through(static_cast<const RetainExprNode &>(node).operand);

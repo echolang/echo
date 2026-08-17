@@ -1,0 +1,10 @@
+stdlib: off
+
+--- OUT --->
+5
+--- IR --->
+CHECK: define i32 @main(
+CHECK: call %Window @_M6Buffer_windowZZMRBMLC6Buffer
+CHECK: call void @_spanZZMLC6Window
+CHECK-NOT: strong.inc
+CHECK: ret i32 0

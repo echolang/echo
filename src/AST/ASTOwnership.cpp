@@ -267,6 +267,19 @@ namespace
             RecursiveVisitor::visit_string_interpolation(node);
         }
 
+        // **an undecided written cast is never answerable.** a declared conversion is rewritten to a
+        // call that may return an owner, and this pass walks a body exactly once - so a walk now
+        // would decide the arrival of a coerce that is about to become a call. implicit casts never
+        // ask; a built-in kind that CastResolution has already classified is plan_decided
+        void visitTypeCast(TypeCastNode &node) override
+        {
+            if (!node.is_implcit && !node.plan_decided) {
+                answerable = false;
+            }
+
+            RecursiveVisitor::visitTypeCast(node);
+        }
+
         // a nested declaration is resolved as its own body, from the file root's children. whether
         // *it* is ready says nothing about whether this one is
         void visitFunctionDecl(FunctionDeclNode &) override

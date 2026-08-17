@@ -1,0 +1,13 @@
+// the site that had no destination: a return, and an operand of `<`
+function wide(uint8 $b) : int32
+{
+    return $b as int32;
+}
+
+uint8 $lo = 48;
+uint8 $hi = 57;
+uint8 $b = 200;
+
+echo wide($b);
+echo ($b as int32) > ($hi as int32);
+echo ($b as int32) < ($lo as int32);

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  as_optional.eco:2:19
+
+  Invalid type conversion: 'int32?' does not narrow through 'as' - unwrap it with guard, ?? or ?->
+
+  1 | int32? $maybe = 1;
+  2 | int32 $x = $maybe as int32;
+    :                   ^^
+  3 | echo $x;
+
+1 error, nothing was compiled.

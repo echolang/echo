@@ -9,6 +9,7 @@
 #include "AST/ASTForeachLowering.h"
 #include "AST/ASTGuardLowering.h"
 #include "AST/ASTMatchResolution.h"
+#include "AST/ASTCastResolution.h"
 #include "AST/ASTInterpolationLowering.h"
 #include "AST/ASTConstFolding.h"
 #include "AST/ASTOwnership.h"
@@ -75,6 +76,11 @@ namespace AST
         // see its header for the ordering the round depends on. a `T?` never reaches it
         GuardLowering _guards;
         MatchResolution _matches;
+
+        // a written `$x as T`, classified and - when it names an #[implicit] conversion - rewritten
+        // into the call AST::emit_declared_conversion mints. driven from inside here because that
+        // call is a generic site and because OwnershipPass walks a body exactly once: see its header
+        CastResolution _casts;
 
         // `foreach`, rewritten into the iterator declaration and the `while` it stands for. driven from
         // inside here because the element type is only knowable after resolution, and it must run before

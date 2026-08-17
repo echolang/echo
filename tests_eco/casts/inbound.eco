@@ -1,0 +1,17 @@
+struct Quantity
+{
+    int64 $n;
+
+    #[implicit]
+    static function from(int32 $n) : Quantity
+    {
+        return Quantity($n);
+    }
+}
+
+function put(Quantity $q) : void
+{
+    echo $q->n;
+}
+
+put(7 as Quantity);

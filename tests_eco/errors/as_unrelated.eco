@@ -1,0 +1,6 @@
+struct Alpha { int32 $n; }
+struct Beta { int32 $n; }
+
+Alpha $a = Alpha(1);
+Beta $b = $a as Beta;
+echo $b->n;

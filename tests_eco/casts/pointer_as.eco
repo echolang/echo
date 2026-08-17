@@ -1,0 +1,21 @@
+// the same operations as pointers/casts.eco, spelled `$x as T`
+
+$n = 0;
+ptr<int> $ints = &$n;
+
+ptr<uint8> $bytes = $ints:$ as ptr<uint8>;
+$bytes:$[0] = 255;
+
+echo $n;
+
+$a = 5;
+int& $r = &$a;
+ptr<int> $p = $r:$;
+$p = 8;
+echo $a;
+
+unsafe {
+    int& $back = $p:$ as int&;
+    $back = 12;
+}
+echo $a;

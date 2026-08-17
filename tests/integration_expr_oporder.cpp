@@ -8,7 +8,30 @@
 
 #include "helpers.h"
 
-TEST_CASE( "math operations", "[Integration][Expr][OpOrder]" )
+TEST_CASE("as is postfix like instanceof", "[Integration][Expr][OpOrder][cast]")
+{
+    // `$x as T + 1` is `($x as T) + 1`. the literal is retyped at the written destination,
+    // so the operand of the cast is already an int64
+    REQUIRE_NODE_DESC_EXPR(
+        "7 as int64 + 1;",
+        "binexp<int64>(cast<int64>(literal<int64>(7)) + literal<int64>(1))"
+    );
+
+    // the yard treats parentheses as operators, so postfix is applied after the
+    // sum is rebuilt - that is what attaches `as` to `(7 + 1)`
+    REQUIRE_NODE_DESC_EXPR(
+        "(7 + 1) as int64;",
+        "cast<int64>(binexp<int32>(literal<int32>(7) + literal<int32>(1)))"
+    );
+
+    // postfix binds to the last operand, not to the finished binary expression
+    REQUIRE_NODE_DESC_EXPR(
+        "1 + 2 as int64;",
+        "binexp<int64>(literal<int64>(1) + cast<int64>(literal<int64>(2)))"
+    );
+}
+
+TEST_CASE("math operations", "[Integration][Expr][OpOrder]")
 {
     // * > +
     REQUIRE_NODE_DESC_EXPR(
@@ -89,7 +112,7 @@ TEST_CASE( "math operations", "[Integration][Expr][OpOrder]" )
     );
 }
 
-TEST_CASE( "prefix unary negation", "[Integration][Expr][OpOrder]" )
+TEST_CASE("prefix unary negation", "[Integration][Expr][OpOrder]")
 {
     // prefix '-' on a parenthesized subexpression wraps the whole group
     REQUIRE_NODE_DESC_EXPR(

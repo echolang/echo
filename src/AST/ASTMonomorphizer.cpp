@@ -36,8 +36,8 @@ namespace AST
 
     Monomorphizer::Monomorphizer(Bundle &bundle)
         : _bundle(bundle), _collector(bundle.collector), _ownership(bundle),
-          _const_folding(bundle), _operators(bundle), _guards(bundle), _matches(bundle), _foreach(bundle),
-          _interpolation(bundle)
+          _const_folding(bundle), _operators(bundle), _guards(bundle), _matches(bundle), _casts(bundle),
+          _foreach(bundle), _interpolation(bundle)
     {
         _trace = std::getenv("ECO_TRACE_MONO") != nullptr;
     }
@@ -647,6 +647,13 @@ namespace AST
             // false, so the round a match resolves in is the round its body becomes eligible
             progressed |= _matches.run_round();
 
+            // **after the match, before interpolation and ownership.** after, because a match arm
+            // can yield the value being cast. before interpolation because a hole holding `$x as T`
+            // needs the conversion decided the way a match binding does. before ownership, which
+            // walks a body exactly once: a declared conversion is a call that returns an owner,
+            // and body_is_concrete answers false while an explicit TypeCastNode is still undecided
+            progressed |= _casts.run_round();
+
             // beside the loop lowering, and for two of its three reasons. **before settle_calls**,
             // because the `str::from` and `str::concat` calls it mints are exactly what that has to
             // finish - one of them may name a user's own overload, or a generic the next round still
@@ -698,6 +705,7 @@ namespace AST
         _operators.finalize();
         _guards.finalize();
         _matches.finalize();
+        _casts.finalize();
         _foreach.finalize();
 
         finalize_calls();

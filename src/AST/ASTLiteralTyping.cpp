@@ -677,6 +677,17 @@ namespace AST
             RecursiveVisitor::visit_match(node);
         }
 
+        // a written `$x as T` is a destination for its operand, the same rule a declaration is.
+        // implicit casts are not: the site that inserted them already typed the literal
+        void visitTypeCast(TypeCastNode &node) override
+        {
+            if (!node.is_implcit && node.expr != nullptr && node.token.has_value()) {
+                write_at(node.expr, node.cast_to, *node.token);
+            }
+
+            RecursiveVisitor::visitTypeCast(node);
+        }
+
     private:
         void write_at(ExprNode *&slot, const ValueType &destination, const TokenReference &at)
         {

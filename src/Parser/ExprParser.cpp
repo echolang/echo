@@ -29,6 +29,7 @@
 
 #include "External/infint.h"
 
+#include "Parser/ForeachParser.h"
 #include "Parser/FuncCallParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/NamespaceParser.h"
@@ -1099,6 +1100,17 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
     return &node;
 }
 
+// **postfix on a node that has not already been through the chain.** a parenthesised group
+// and a prefix unary do not call parse_postfix_chain themselves. wrapping twice is a no-op
+const AST::NodeReference with_postfix(Parser::Payload &payload, AST::NodeReference node)
+{
+    if (!node.has() || !node.is_expression_node()) {
+        return node;
+    }
+
+    return Parser::parse_postfix_chain(payload, node);
+}
+
 const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, AST::NodeReference base)
 {
     auto &cursor = payload.cursor;
@@ -1121,11 +1133,13 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
 
     // one loop for every suffix that binds tighter than any operator. `->`, `?->` and `:$` live here
     // rather than in the shunting yard, which has no notion of a postfix operator and pops two
-    // operands for everything it sees. `[...]` joins them later
+    // operands for everything it sees. `[...]` joins them later. `as` is instanceof's twin: its
+    // right operand is a type, so there is nothing for the yard to pop
     while (cursor.is_type(Token::Type::t_accessorlr)
         || cursor.is_type(Token::Type::t_optional_arrow)
         || cursor.is_type(Token::Type::t_ptr_of)
         || cursor.is_type(Token::Type::t_instanceof)
+        || cursor.is_type(Token::Type::t_as)
         || cursor.is_type(Token::Type::t_open_bracket)) {
 
         // `?->` opens a short circuit and then reads a member exactly as `->` does. so it is handled by
@@ -1178,6 +1192,30 @@ const AST::NodeReference Parser::parse_postfix_chain(Parser::Payload &payload, A
                 current_ref.unsafe_ptr<AST::ExprNode>(), queried->type, instanceof_token);
 
             current_ref = AST::make_ref(check);
+            continue;
+        }
+
+        // `$x as T`. foreach's binding `as` stays in the stream so parse_foreach still sees it
+        if (cursor.is_type(Token::Type::t_as)) {
+            if (Parser::starts_foreach_as_binding(cursor)) {
+                break;
+            }
+
+            auto as_token = cursor.current();
+            cursor.skip();
+
+            auto *cast_type = Parser::parse_type(payload);
+            if (cast_type == nullptr) {
+                return AST::make_void_ref();
+            }
+
+            auto &cast = payload.context.emplace_node<AST::TypeCastNode>(
+                cast_type->type,
+                current_ref.unsafe_ptr<AST::ExprNode>(),
+                false,
+                as_token);
+
+            current_ref = AST::make_ref(cast);
             continue;
         }
 
@@ -1947,7 +1985,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
             return AST::make_void_ref();
         }
 
-        auto &cast = payload.context.emplace_node<AST::TypeCastNode>(cast_type->type, inner, false);
+        auto &cast = payload.context.emplace_node<AST::TypeCastNode>(cast_type->type, inner, false, cast_token);
         return Parser::parse_postfix_chain(payload, AST::make_ref(cast));
     }
 
@@ -2088,6 +2126,16 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
     return AST::make_void_ref();
 }
 
+// **the two operand positions share this**: declared suffix operators (`1m`) first, then
+// postfix (`as`, `instanceof`, `->`). postfix after suffix is what makes `1m as T` and
+// `7 as T` the same wrap. a variable already went through the postfix chain; wrapping
+// again is a no-op
+const AST::NodeReference parse_operand(Parser::Payload &payload, AST::TypeNode *expected_type)
+{
+    return with_postfix(
+        payload, parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type)));
+}
+
 // parse an operand appearing in prefix position, consuming any leading unary
 // '-' / '+' operators and wrapping negations in a UnaryExprNode. unary '+' is
 // a no-op and returns the operand unchanged
@@ -2141,7 +2189,7 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
         }
 
         auto &unary = payload.context.emplace_node<AST::UnaryExprNode>(op_token, operand_expr);
-        return AST::make_ref(unary);
+        return with_postfix(payload, AST::make_ref(unary));
     }
 
     // a parenthesized subexpression, e.g. -(a + b)
@@ -2151,13 +2199,10 @@ const AST::NodeReference parse_prefix_unary(Parser::Payload &payload, AST::TypeN
         if (cursor.is_type(Token::Type::t_close_paren)) {
             cursor.skip();
         }
-        return inner;
+        return with_postfix(payload, inner);
     }
 
-    // an operand, and then whatever suffix operators follow it. this and the yard's own operand arm
-    // are the two operand positions in the grammar, so wrapping both is what makes `1m` and
-    // `$distance mm` the same rule rather than a literal special case
-    return parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type));
+    return parse_operand(payload, expected_type);
 }
 
 // an aggregate, so it is appended with `push_back({...})` rather than `emplace_back(a, b)`: the
@@ -2351,8 +2396,7 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
             return AST::make_void_ref();
         }
 
-        // parse the next expression node, plus any suffix operators applied to it
-        auto node = parse_suffix_operator_chain(payload, parse_expr_node(payload, expected_type));
+        auto node = parse_operand(payload, expected_type);
 
         // if the node is empty
         if (!node.has()) {
@@ -2434,7 +2478,11 @@ const AST::NodeReference parse_expr_parts(Parser::Payload &payload, AST::TypeNod
         return AST::make_void_ref();
     }
 
-    return node_stack.top();
+    // the yard treats `(` `)` as operators, so `(7 + 1) as T` is collected as those
+    // parts and `as` is still in the stream. postfix after the rebuilt expression is
+    // what attaches it. a wrap on a single part is not this: that operand already ran
+    // parse_operand
+    return with_postfix(payload, node_stack.top());
 }
 
 const AST::NodeReference Parser::parse_expr_ref(Parser::Payload &payload, AST::TypeNode *expected_type)

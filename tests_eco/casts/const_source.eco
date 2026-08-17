@@ -1,0 +1,22 @@
+// a const Buffer& still finds Buffer's const conversion. implicit_conversion_for
+// is the peel; a hand-rolled pointee() would keep the const and miss it
+struct Window
+{
+    ptr<const uint8> $at;
+    usize $count;
+}
+
+struct Buffer
+{
+    ptr<const uint8> $at;
+    usize $count;
+
+    #[implicit]
+    const function window() : Window { return Window($this->at, $this->count); }
+}
+
+function span(Window $w) : void { echo $w->count; }
+
+function take(const Buffer& $cb) : void { span($cb as Window); }
+
+take(Buffer('hello', 5));

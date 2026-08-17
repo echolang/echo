@@ -1,0 +1,8 @@
+// the binding `as` is still foreach's, even now that `$x as T` is a cast
+foreach (0 .. 3 as $i) {
+    echo $i;
+}
+
+foreach (0 .. 2 as const &$n) {
+    echo $n;
+}

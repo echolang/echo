@@ -1,0 +1,9 @@
+class Obj
+{
+    int32 $n;
+}
+
+Obj $o = Obj(1);
+weak<Obj> $w = &$o;
+Obj $x = $w as Obj;
+echo $x->n;

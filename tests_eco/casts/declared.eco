@@ -1,0 +1,20 @@
+// `$buf as Window` is the written form of the conversion span($buf) inserts
+struct Window
+{
+    ptr<const uint8> $at;
+    usize $count;
+}
+
+struct Buffer
+{
+    ptr<const uint8> $at;
+    usize $count;
+
+    #[implicit]
+    function window() : Window { return Window($this->at, $this->count); }
+}
+
+function span(Window $w) : void { echo $w->count; }
+
+$buf = Buffer('hello', 5);
+span($buf as Window);

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  as_weak.eco:8:13
+
+  Invalid type conversion: 'weak<Obj>' does not become a 'Obj' through 'as' - write 'strong(...)'
+
+  7 | weak<Obj> $w = &$o;
+  8 | Obj $x = $w as Obj;
+    :             ^^
+  9 | echo $x->n;
+
+1 error, nothing was compiled.

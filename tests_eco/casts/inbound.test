@@ -1,0 +1,9 @@
+stdlib: off
+
+--- OUT --->
+7
+--- IR --->
+CHECK: define i32 @main(
+CHECK: call %Quantity @_M8Quantity_fromZZMLPi(i32 7)
+CHECK: call void @_putZZMLC8Quantity
+CHECK: ret i32 0

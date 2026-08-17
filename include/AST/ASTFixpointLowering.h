@@ -20,10 +20,10 @@ namespace AST
 
     // **the chassis a pass running inside AST::Monomorphizer's fixpoint gets.**
     //
-    // four passes rewrite or resolve the tree from inside the fixpoint - AST::ForeachLowering,
-    // AST::GuardLowering, AST::InterpolationLowering and AST::MatchResolution - and only *which edge
-    // they hook* is genuinely theirs. everything around it is this class: the walk, the position it
-    // walks from, the exit obligation and the generic-body skip.
+    // five passes rewrite or resolve the tree from inside the fixpoint - AST::ForeachLowering,
+    // AST::GuardLowering, AST::InterpolationLowering, AST::MatchResolution and AST::CastResolution -
+    // and only *which edge they hook* is genuinely theirs. everything around it is this class: the
+    // walk, the position it walks from, the exit obligation and the generic-body skip.
     //
     // it exists because the three invariants below must live in one place, and **none of them
     // breaks loudly**: forgetting one is a golden diff or a round that stalls, never a compile error.

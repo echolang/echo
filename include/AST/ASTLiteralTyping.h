@@ -172,7 +172,8 @@ namespace AST
     //
     // three written destinations: a declaration's initializer, an assignment's right-hand side, a
     // return. plus the two wrappers that are themselves a destination: a `??` RHS at the unwrapped
-    // left type, and a `match` arm at the unified type. generic bodies are skipped - a template's
+    // left type, and a `match` arm at the unified type. and a written `$x as T`, whose operand is
+    // typed against the type the author named. generic bodies are skipped - a template's
     // `T $sum = 0` is only meaningful once cloned. of_type is deliberately not this: a detached
     // assign stays in the arena forever, and a walk that does not inherit visitFunctionDecl's skip
     // would stamp the template

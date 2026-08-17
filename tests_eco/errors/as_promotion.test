@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] UnsafePromotion  as_promotion.eco:4:13
+
+  cannot form 'uint8&' from a raw address outside an 'unsafe' block. A borrow is a trusted typed view: every access through it, here and in everything it is passed to, is optimized as 'uint8&' - so establishing one over raw storage is a promise only you can make.
+
+  3 | ptr<uint8> $bytes = $ints:$ as ptr<uint8>;
+  4 | uint8& $r = $bytes:$ as uint8&;
+    :             ^^^^^^
+  5 | echo $r;
+
+  help: inside 'unsafe { }' you assert the address is non-null, aligned, holds a complete and valid value of that type, stays valid for as long as the borrow is used, and that reading it at that type is compatible with every other typed access to the same storage. It does not assert that the borrow is the only one
+
+1 error, nothing was compiled.
