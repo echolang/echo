@@ -1,0 +1,46 @@
+namespace mem::atomic;
+
+/**
+ * Atomic operations on a word.
+ *
+ * These are the compiler seam a container talks to a slot through, the same way `mem::take` and
+ * `mem::init` are the seam a container talks to unaccounted storage through. The type you write
+ * on a field is `atomic<T>` in the root namespace; it forwards here. A `ptr<int32>` you already
+ * hold still writes `mem::atomic::add` - that is the rare spelling, and it should look like
+ * `mem::`.
+ *
+ * Sequentially consistent. An ordering is a claim about two accesses and nothing in the
+ * language can check it, so there is no ordering parameter. The compiler's own five sites
+ * (class counts, the allocation counter, the crash hook, static once, the Treiber teardown
+ * chain) pick a measured ordering because they are one protocol; this surface is not.
+ *
+ * `T` is a word: the 8/16/32/64-bit integers, `usize`/`isize`, `bool`, and `ptr<T>` at
+ * load / store / exchange / compare_exchange. A float, a class handle, a `string` and anything
+ * wider than a word are refused. `add`/`sub` on a pointer are refused too - that would move
+ * the address by bytes, not elements.
+ *
+ * Mixing a plain `$slot = 0` with `add` on the same word is a data race. Discipline is on
+ * the caller, which is why `atomic<T>` exists: its slot is private, so the only way in is a
+ * method that is an RMW.
+ */
+
+#[builtin: atomic_load]
+public function load<T>(const T& $slot) : T;
+
+#[builtin: atomic_store]
+public function store<T>(T& $slot, T $value) : void;
+
+#[builtin: atomic_add]
+public function add<T>(T& $slot, T $delta) : T;
+
+#[builtin: atomic_sub]
+public function sub<T>(T& $slot, T $delta) : T;
+
+#[builtin: atomic_exchange]
+public function exchange<T>(T& $slot, T $desired) : T;
+
+#[builtin: atomic_compare_exchange]
+public function compare_exchange<T>(T& $slot, T $expected, T $desired) : bool;
+
+#[builtin: atomic_fence]
+public function fence() : void;

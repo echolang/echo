@@ -1,0 +1,11 @@
+// the rare spelling: a slot the author already has, reached through mem::atomic::
+
+int32 $n = 0;
+echo mem::atomic::add<int32>($n, 2);
+echo mem::atomic::load<int32>($n);
+mem::atomic::store<int32>($n, 5);
+echo mem::atomic::exchange<int32>($n, 8);
+echo mem::atomic::load<int32>($n);
+echo mem::atomic::compare_exchange<int32>($n, 8, 1);
+echo mem::atomic::load<int32>($n);
+mem::atomic::fence();

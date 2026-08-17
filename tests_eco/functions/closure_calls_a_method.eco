@@ -1,0 +1,24 @@
+// `$c->bump()` as a statement inside a closure is a call on the captured place, not a
+// fresh `$c` waiting for `=`. the handle is copied into the environment; the object is shared
+
+class Counter
+{
+    int32 $hits;
+
+    constructor(int32 $hits)
+    {
+        $this->hits = $hits;
+    }
+
+    function bump() : void
+    {
+        $this->hits = $this->hits + 1;
+    }
+}
+
+Counter $c = Counter(0);
+function<void()> $f = function() : void {
+    $c->bump();
+};
+$f();
+echo $c->hits;

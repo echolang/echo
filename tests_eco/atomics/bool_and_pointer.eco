@@ -1,0 +1,14 @@
+// bool rides as i8; a pointer is a word at load/store/exchange, not at add
+
+bool $flag = false;
+mem::atomic::store<bool>($flag, true);
+echo mem::atomic::load<bool>($flag);
+echo mem::atomic::compare_exchange<bool>($flag, true, false);
+echo mem::atomic::load<bool>($flag);
+
+ptr<int32> $slot = ptr<int32>(null);
+echo mem::atomic::load<ptr<int32>>($slot) == null;
+int32 $v = 7;
+mem::atomic::store<ptr<int32>>($slot, &$v);
+ptr<int32> $got = mem::atomic::load<ptr<int32>>($slot);
+echo $got;

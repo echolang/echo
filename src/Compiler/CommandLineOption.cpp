@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <string>
 #include <utility>
 
 namespace
@@ -31,6 +32,33 @@ namespace
     {
         Compiler::TestFilter filter;
         return Compiler::parse_test_filter(value, filter, out_error);
+    }
+
+    bool check_timeout(const std::string &value, std::string &out_error)
+    {
+        if (value.empty()) {
+            out_error = "a timeout is a number of milliseconds.";
+            return false;
+        }
+
+        unsigned long parsed = 0;
+
+        for (char c : value) {
+            if (c < '0' || c > '9') {
+                out_error = "a timeout is a number of milliseconds, got '" + value + "'.";
+                return false;
+            }
+        }
+
+        try {
+            parsed = std::stoul(value);
+        } catch (...) {
+            out_error = "a timeout is a number of milliseconds, got '" + value + "'.";
+            return false;
+        }
+
+        (void)parsed;
+        return true;
     }
 
     unsigned int code_of(Compiler::PrintKind kind)
@@ -673,6 +701,22 @@ const std::vector<Compiler::CommandLineOption> &Compiler::command_line_options()
             "a pipe and a CI log record. A failure still gets its full block under the summary, where it "
             "is worth looking twice.",
             {}, nullptr
+        },
+        {
+            Opt::t_timeout, "timeout", nullptr, '\0',
+            OptionArity::t_value, OptionCategory::t_report,
+            accepts::test, 0, ExclusionGroup::t_none,
+            "<ms>", "",
+            "kill a hanging test after this many ms",
+            "Give each test a deadline, in milliseconds:\n"
+            "  echoc test --timeout 2000\n"
+            "A test that is still running when the clock fires is killed and reported as timed out, "
+            "rather than hanging the run until something outside echoc stops it. Zero waits forever, "
+            "which is the default and the behaviour a run without this flag has always had.\n"
+            "The parent watches the clock - poll, then SIGKILL - so the deadline is milliseconds "
+            "and a child that ignores signals still dies. A test that loops forever is then a "
+            "located failure, not a CI job that sits until its own limit.",
+            {}, check_timeout
         },
         {
             Opt::t_with_stdlib, "with-stdlib", nullptr, '\0',

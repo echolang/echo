@@ -1,0 +1,155 @@
+/**
+ * One OS thread, and the handle that joins it.
+ *
+ * `spawn` takes `function<void()>` and returns `result<handle, error>`. There is no type named
+ * `future` and no function named `async`. A value comes back through a `mutex` or a
+ * `task<T>`. The handle joins on drop: `detach()` is how you decline.
+ */
+
+namespace std::thread;
+
+private struct job
+{
+    function<void()> $work;
+}
+
+private function run_job(ptr<uint8> $raw) : ptr<uint8>
+{
+    ptr<job> $slot = ptr<job>($raw:$);
+    job $box = mem::take<job>($slot:$[0]);
+    mem::free<job>($slot);
+    $box->work();
+    return ptr<uint8>(null);
+}
+
+/**
+ * A running thread. Last drop joins; `detach()` is how you decline.
+ */
+#[atomic]
+public class handle
+{
+    private usize $tid;
+    private atomic<bool> $owed;
+
+    private constructor(usize $tid)
+    {
+        $this->tid = $tid;
+        $this->owed = atomic<bool>(true);
+    }
+
+    destructor()
+    {
+        $this->join();
+    }
+
+    /**
+     * Starts `$work` on a new OS thread. The closure travels as a heap `job`; the thread
+     * takes it and runs it. Failure takes the box back - the thread never started.
+     */
+    static function spawn(function<void()> $work) : result<handle, error>
+    {
+        ptr<job> $slot = mem::alloc<job>(1);
+
+        if ($slot:$ == null) {
+            return .error(error(ENOMEM));
+        }
+
+        mem::init<job>($slot:$[0], job($work));
+
+        usize $tid = 0;
+        int32 $rc = c_pthread_create(&$tid, ptr<uint8>(null), &run_job, ptr<uint8>($slot:$));
+
+        if ($rc != 0) {
+            job $back = mem::take<job>($slot:$[0]);
+            mem::free<job>($slot);
+            return .error(error($rc));
+        }
+
+        return .ok(handle($tid));
+    }
+
+    function join() : void
+    {
+        if (!$this->owed->exchange(false)) {
+            return;
+        }
+
+        int32 $rc = c_pthread_join($this->tid, ptr<ptr<uint8>>(null));
+        assert($rc == 0, "pthread_join failed after the first call");
+    }
+
+    function detach() : void
+    {
+        if (!$this->owed->exchange(false)) {
+            return;
+        }
+
+        int32 $rc = c_pthread_detach($this->tid);
+        assert($rc == 0, "pthread_detach failed after the first call");
+    }
+}
+
+/**
+ * Starts `$work` on a new OS thread. The written spelling of `handle::spawn`.
+ */
+public function spawn(function<void()> $work) : result<handle, error>
+{
+    return handle::spawn($work);
+}
+
+/**
+ * An identifier, not a handle: you cannot join yourself.
+ */
+public struct id
+{
+    usize $raw;
+}
+
+operator (id $a) == (id $b) : bool
+{
+    return c_pthread_equal($a->raw, $b->raw) != 0;
+}
+
+public function current() : id
+{
+    return id(c_pthread_self());
+}
+
+public function yield() : void
+{
+    c_sched_yield();
+}
+
+/**
+ * Sleeps `$ms` milliseconds, chopped into pieces of at most 500 so a long sleep
+ * is still interruptible by the platform's usleep limit.
+ */
+public function sleep(usize $ms) : void
+{
+    usize $left = $ms;
+
+    while ($left > 0) {
+        usize $chunk = $left;
+
+        if ($chunk > 500) {
+            $chunk = 500;
+        }
+
+        c_usleep(($chunk * 1000) as uint32);
+        $left = $left - $chunk;
+    }
+}
+
+/**
+ * How many processors the platform reports. 1 when it declines.
+ */
+public function concurrency() : usize
+{
+    int64 $n = c_sysconf(SC_NPROCESSORS_ONLN);
+
+    if ($n <= 0) {
+        return 1;
+    }
+
+    return $n as usize;
+}

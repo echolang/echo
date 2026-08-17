@@ -32,6 +32,13 @@ namespace
             { "process_argv", AST::BuiltinKind::t_process_argv },
             { "process_envp", AST::BuiltinKind::t_process_envp },
             { "exit", AST::BuiltinKind::t_exit },
+            { "atomic_load", AST::BuiltinKind::t_atomic_load },
+            { "atomic_store", AST::BuiltinKind::t_atomic_store },
+            { "atomic_add", AST::BuiltinKind::t_atomic_add },
+            { "atomic_sub", AST::BuiltinKind::t_atomic_sub },
+            { "atomic_exchange", AST::BuiltinKind::t_atomic_exchange },
+            { "atomic_compare_exchange", AST::BuiltinKind::t_atomic_compare_exchange },
+            { "atomic_fence", AST::BuiltinKind::t_atomic_fence },
         };
         return table;
     }
@@ -88,6 +95,13 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             return AST::BuiltinFoldability::t_not_a_query;
     }
 
@@ -124,6 +138,13 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             return false;
     }
 
@@ -163,6 +184,13 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             return false;
     }
 
@@ -210,6 +238,13 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_crash_take_hook:
         case AST::BuiltinKind::t_crash_default_hook:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             return std::nullopt;
     }
 
@@ -246,6 +281,13 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_process_argc:
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             return false;
     }
 

@@ -827,6 +827,19 @@ namespace AST
         // spelling of it, and a flag on the interning identity would fork `buffer<T>` in two
         bool is_unique = false;
 
+        // written `#[atomic]`: this class's reference count is an atomic RMW, so a handle may be
+        // retained and released on more than one thread. the contents are not covered - two writers
+        // of a property still race. AST::counts_are_atomic is the one reader
+        //
+        // here beside `kind` and `is_unique` and for their reason: an *instantiation* has a
+        // ComplexType and no declaration node, so this is the only thing that can answer for
+        // `mutex<int32>` what `mutex` was declared as. TypeRegistry::get_or_create_instantiation
+        // carries it across
+        //
+        // deliberately not on ValueType: it is a property of the declared type, identical for every
+        // spelling of it, and a flag on the interning identity would fork `mutex<T>` in two
+        bool is_atomic = false;
+
         // **this layout is a `T?` whose payload has no null value of its own** - two properties,
         // `__has` then `__value`, minted by AST::TypeRegistry::get_or_create_optional.
         //
@@ -949,8 +962,9 @@ namespace AST
         ) {
             // on a template, a `T`-typed property must reference one of this type's own declared
             // parameters. instantiations carry no type_parameters of their own, so the check only
-            // applies while a template is being built
-            if (type.is_type_param() && !is_instantiated()) {
+            // applies while a template is being built. a closure environment is not a template
+            // and may still capture an enclosing `T` — the clone substitutes it per instance
+            if (type.is_type_param() && !is_instantiated() && is_generic()) {
                 assert(declares_type_param(type));
             }
             _property_map[name] = _properties.size();

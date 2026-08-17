@@ -70,6 +70,14 @@ namespace Compiler::LLVM
     {
         static constexpr unsigned conformance_count_index = 0;
         static constexpr unsigned conformances_index = 1;
+
+        // appended so gen_conformance_scan's two GEPs stay on 0 and 1. bit 0 of flags is
+        // `#[atomic]`. deinit is the environment teardown `__eco_release_env` loads: null
+        // when the payload owns nothing
+        static constexpr unsigned flags_index = 2;
+        static constexpr unsigned deinit_index = 3;
+
+        static constexpr uint64_t atomic_flag = 1;
     };
 
     // what a class needs from codegen beyond the handle. resolved together because the box cannot be

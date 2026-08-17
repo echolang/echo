@@ -1,0 +1,8 @@
+--- OUT --->
+3
+--- IR --->
+# every sized aggregate is sret, including a packed 16-byte result. the direct
+# signature this used to pin (`define %"result<int64,int32>" @_pack_probe...`)
+# is the 4.7x path
+CHECK: define void @_pack_probeZZMLPl(ptr
+CHECK: sret(%"result<int64,int32>")

@@ -1,0 +1,135 @@
+/**
+ * A sleeping mutex, and the guard that unlocks on drop.
+ *
+ * The value lives inside the lock: there is no way to name it without going through
+ * `lock()`. `$held->value` is a place. Copying that address out and reading it after
+ * the guard dies is the same class of rule as a slice outliving its array.
+ */
+
+namespace std::thread;
+
+// Darwin's pthread_mutex_t is 64 bytes, glibc's is 40. 128 is twice the
+// larger one so a debug mutex still fits. mem::alloc is max-aligned
+internal const usize MUTEX_BYTES = 128;
+
+/**
+ * A sleeping lock around a `T`. The impl blob is an over-allocated
+ * `pthread_mutex_t` (`MUTEX_BYTES`, allocator-aligned).
+ */
+#[atomic]
+public class mutex<T>
+{
+    private ptr<uint8> $impl;
+    private T $value;
+
+    constructor(T $value)
+    {
+        $this->impl:$ = mem::alloc<uint8>(MUTEX_BYTES);
+
+        if ($this->impl:$ == null) {
+            die('could not allocate a mutex');
+        }
+
+        if (c_pthread_mutex_init($this->impl, ptr<uint8>(null)) != 0) {
+            mem::free<uint8>($this->impl);
+            die('could not initialize a mutex');
+        }
+
+        $this->value = $value;
+    }
+
+    destructor()
+    {
+        c_pthread_mutex_destroy($this->impl);
+        mem::free<uint8>($this->impl);
+    }
+
+    function lock() : locked<T>
+    {
+        if (c_pthread_mutex_lock($this->impl) != 0) {
+            die('could not lock a mutex');
+        }
+
+        return locked<T>(&$this->value, $this->impl);
+    }
+
+    function try_lock() : locked<T>?
+    {
+        int32 $rc = c_pthread_mutex_trylock($this->impl);
+
+        if ($rc == EBUSY) {
+            return null;
+        }
+
+        if ($rc != 0) {
+            die('could not lock a mutex');
+        }
+
+        return locked<T>(&$this->value, $this->impl);
+    }
+}
+
+/**
+ * The guard `lock()` hands back. Unique so it cannot be copied (that would unlock twice).
+ */
+#[unique]
+public struct locked<T>
+{
+    public ptr<T> $value;
+    private ptr<uint8> $impl;
+
+    internal constructor(ptr<T> $value, ptr<uint8> $impl)
+    {
+        $this->value:$ = $value;
+        $this->impl:$ = $impl;
+    }
+
+    destructor()
+    {
+        c_pthread_mutex_unlock($this->impl);
+    }
+}
+
+/**
+ * Run a function once. Every caller waits, losers included. `$work` runs
+ * with the gate dropped, so it may take other locks. It must not call
+ * `run` on this same `once` — that waits for itself.
+ */
+#[atomic]
+public class once
+{
+    private mutex<int32> $gate;
+
+    constructor()
+    {
+        $this->gate = mutex<int32>(0);
+    }
+
+    function run(function<void()> $work) : void
+    {
+        while (true) {
+            int32 $seen = 0;
+
+            {
+                locked<int32> $g = $this->gate->lock();
+                $seen = $g->value;
+
+                if ($seen == 2) {
+                    return;
+                }
+
+                if ($seen == 0) {
+                    $g->value = 1;
+                    break;
+                }
+            }
+
+            yield();
+        }
+
+        $work();
+
+        locked<int32> $g = $this->gate->lock();
+        $g->value = 2;
+    }
+}

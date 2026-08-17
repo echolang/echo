@@ -1,0 +1,11 @@
+// spawn(function<T()>) returns a task; wait joins and copies the slot
+
+use std::thread;
+
+thread::task<int32> $t = guard thread::spawn(function() : int32 {
+    return 40 + 2;
+}) else ($e) {
+    die($e->message());
+}
+
+echo $t->wait();

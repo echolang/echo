@@ -1,0 +1,9 @@
+mode: test
+flags: --timeout 200
+expect: fail
+
+--- OUT --->
+FAIL 1/1  main/a_hang_times_out.eco::hangs  (timed out)
+1 test, 1 failed
+
+x main/a_hang_times_out.eco::hangs  timed out

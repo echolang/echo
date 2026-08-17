@@ -613,7 +613,7 @@ public struct string
      * `$s->append($s)` is correct rather than a special case, and for a reason worth reading: the
      * parameter is by value, so `$other` holds a second reference to the buffer, the gate therefore
      * sees a count of two and clones - and `$other` still names the old, untouched bytes while the
-     * new ones are written.
+     * new ones are written. a `const string&` would be a second access of `$this` and is refused.
      */
     function append(string $other) : void
     {

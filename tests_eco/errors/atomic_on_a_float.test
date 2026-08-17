@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_on_a_float.eco:4:19
+
+  cannot atomically operate on 'float32' - a floating add would not mean what integer add means.
+
+  3 | float32 $x = 1.0;
+  4 | echo mem::atomic::load<float32>($x);
+    :                   ^^^^
+  5 | 
+
+1 error, nothing was compiled.

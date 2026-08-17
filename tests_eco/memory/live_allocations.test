@@ -20,7 +20,7 @@ CHECK: define linkonce_odr noalias ptr @__eco_alloc(i64 %size)
 
 # a failed allocation is not an allocation, so the count sits behind a null check on the *result*
 CHECK: alloc.count:
-CHECK: store i64 %live.next, ptr @__eco_alloc_live
+CHECK: atomicrmw add ptr @__eco_alloc_live, i64 1 monotonic
 
 # and the four-way split that keeps a refused realloc from reading as a free
 CHECK: define linkonce_odr noalias ptr @__eco_realloc(ptr %block, i64 %size)

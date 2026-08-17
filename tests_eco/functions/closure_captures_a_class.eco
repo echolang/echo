@@ -1,0 +1,32 @@
+// capture is by value: a class handle is one more reference. the environment tears it down
+// when the last callable dies, so the destructor runs exactly once
+
+class Box
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    destructor()
+    {
+        echo 1;
+    }
+
+    function get() : int32
+    {
+        return $this->n;
+    }
+}
+
+function outer() : int32
+{
+    Box $b = Box(5);
+    function<int32()> $f = function() : int32 { return $b->get(); };
+
+    return $f();
+}
+
+echo outer();

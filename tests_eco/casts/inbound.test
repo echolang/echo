@@ -4,6 +4,6 @@ stdlib: off
 7
 --- IR --->
 CHECK: define i32 @main(
-CHECK: call %Quantity @_M8Quantity_fromZZMLPi(i32 7)
+CHECK: call void @_M8Quantity_fromZZMLPi(ptr noalias sret(%Quantity)
 CHECK: call void @_putZZMLC8Quantity
 CHECK: ret i32 0

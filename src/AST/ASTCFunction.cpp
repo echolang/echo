@@ -281,20 +281,47 @@ bool AST::bind_function_ref_to(
 {
     FunctionRefExprNode *ref = function_ref_of(expr);
 
-    if (ref == nullptr || ref->resolved) {
+    if (ref == nullptr) {
         return false;
     }
 
     const ValueType wanted = ValueType::make_mutable(ValueType::make_non_nullable(destination));
 
-    if (!wanted.is_c_function()) {
+    const bool want_callable = wanted.is_callable();
+    const bool want_c = wanted.is_c_function();
+
+    if (!want_callable && !want_c) {
         return false;
+    }
+
+    // a C destination erases `const` on by-value parameters; an Echo callable does not.
+    // arity alone would seat `&returns_int` at `function<void()>`
+    auto callable_fits = [](const FunctionDeclNode &decl, const ValueType &dest) {
+        return decl.callable_type() == dest;
+    };
+
+    // a unique candidate is already resolved by the parser, before the destination speaks.
+    // a C destination leaves it as a C pointer; a callable destination is the same name
+    // seated as `{ thunk, env }`, which is what `spawn(&answer)` is
+    if (ref->resolved) {
+        if (!want_callable || ref->decl == nullptr) {
+            return false;
+        }
+
+        // flip even when the signature does not fit, so the type checker names two
+        // Echo callables rather than a leftover C pointer against a function<...>
+        ref->as_callable = true;
+        return callable_fits(*ref->decl, wanted);
     }
 
     std::vector<FunctionDeclNode *> matches;
 
     for (FunctionDeclNode *candidate : function_ref_candidates(*ref, functions)) {
-        if (c_function_signatures_match(candidate->c_function_type().signature(), wanted.signature())) {
+        const bool match = want_callable
+            ? callable_fits(*candidate, wanted)
+            : c_function_signatures_match(candidate->c_function_type().signature(), wanted.signature());
+
+        if (match) {
             matches.push_back(candidate);
         }
     }
@@ -307,5 +334,6 @@ bool AST::bind_function_ref_to(
     // against a chosen name rather than an ambiguity
     ref->decl = matches[0];
     ref->resolved = true;
+    ref->as_callable = want_callable;
     return true;
 }

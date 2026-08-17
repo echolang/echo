@@ -1,0 +1,28 @@
+// the default: an unmarked class keeps today's retain. the marked one beside it does not
+
+class Plain
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+#[atomic]
+class Marked
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+Plain $p = Plain(1);
+Plain $q = $p;
+Marked $m = Marked(2);
+Marked $n = $m;
+echo $q->n + $n->n;

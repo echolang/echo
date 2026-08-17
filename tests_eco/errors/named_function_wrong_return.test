@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InvalidTypeConversion  named_function_wrong_return.eco:8:18
+
+  Invalid type conversion: cannot implicitly convert 'function<int32()>' to 'function<void()>'
+
+  7 | 
+  8 | function<void()> $f = &answer;
+    :                  ^^
+  9 | echo 1;
+
+1 error, nothing was compiled.

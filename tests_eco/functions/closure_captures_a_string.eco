@@ -1,0 +1,12 @@
+// a string is a struct whose only owner is str::buf. capturing one is a retain of that
+// class, torn down with the environment
+
+function outer() : usize
+{
+    string $s = 'hello';
+    function<usize()> $f = function() : usize { return $s->size(); };
+
+    return $f();
+}
+
+echo outer();

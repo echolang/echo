@@ -1,4 +1,6 @@
 #include "Compiler/LLVM/Codegen/ClassCodegen.h"
+#include "Compiler/LLVM/Codegen/CountAccess.h"
+#include "Compiler/LLVM/Codegen/CountAtomics.h"
 #include "Compiler/LLVM/Codegen/IfaceValue.h"
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
@@ -6,6 +8,7 @@
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/CodegenContext.h"
 
+#include "AST/ASTAtomicity.h"
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/FunctionDeclNode.h"
@@ -13,6 +16,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 
 #include <fmt/core.h>
@@ -100,7 +104,7 @@ llvm::Value *ClassCodegen::gen_callable_retain(llvm::Value *callable)
     // is the shared one, and that is all a count needs. the layout is exactly what a callable does not know
     gen_count_inc(
         _ctx.builder->CreateExtractValue(callable, 1, "retain.env"),
-        nullptr, ClassBox::strong_index, "env.retain");
+        nullptr, ClassBox::strong_index, "env.retain", CountAccess::t_atomic);
 
     // the value flows through: a retain is a side effect on the environment, not a new callable
     return callable;
@@ -120,8 +124,8 @@ llvm::Function *ClassCodegen::get_or_create_env_release_thunk()
         return existing;
     }
 
-    // no layout and no deinit: the header is the shared one, and an environment holds no owning capture,
-    // so the block is all there is to give back
+    // no layout: the header is the shared one. teardown is loaded from the typeinfo deinit
+    // slot. the count is always atomic - every environment type is minted with is_atomic
     return build_release_thunk(name, nullptr, nullptr);
 }
 
@@ -147,7 +151,8 @@ llvm::Function *ClassCodegen::get_or_create_weak_release_thunk()
             // it for the free thunk from inside this one's body is safe: it guards and restores its own
             // insert point, exactly as the abort thunk already does when a body stops
             _ctx.memory->gen_free(handle);
-        });
+        },
+        CountAccess::t_from_typeinfo);
 }
 
 llvm::Value *ClassCodegen::gen_weak_of(llvm::Value *handle, const AST::ValueType &class_type)
@@ -155,7 +160,9 @@ llvm::Value *ClassCodegen::gen_weak_of(llvm::Value *handle, const AST::ValueType
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
 
-    gen_count_inc(handle, &layout, ClassBox::weak_index, "weak.retain");
+    gen_count_inc(
+        handle, &layout, ClassBox::weak_index, "weak.retain",
+        count_access_for(class_type.get_complex_type()));
 
     // the same address, differently typed. a weak handle *is* the block pointer - what makes it weak is
     // which word it moved and that reading it needs an upgrade, not a second representation
@@ -170,6 +177,8 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
+    llvm::Constant *null_handle =
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr));
 
     auto *read_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "upgrade.read", function);
     auto *live_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "upgrade.live", function);
@@ -182,10 +191,17 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
     // it, and the strong count in it says whether the payload is still there. a program with no weak count
     // could not ask - it would have to read the payload to find out, which is the dangle
     _ctx.set_insert_point(read_block);
-    llvm::Value *strong = _ctx.builder->CreateLoad(
-        i64,
-        gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"),
-        "strong");
+    llvm::Value *strong_ptr =
+        gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr");
+    llvm::LoadInst *strong = _ctx.builder->CreateLoad(i64, strong_ptr, "strong");
+
+    // the probe is the same word retain and last-release RMW. a plain load racing those is a
+    // data race, and a failed CAS that loops back here would otherwise reload a hoisted SSA
+    if (AST::counts_are_atomic(*class_type.get_complex_type())) {
+        strong->setAtomic(CountAtomics::observe());
+        strong->setAlignment(CountAtomics::word());
+    }
+
     _ctx.builder->CreateCondBr(
         _ctx.builder->CreateICmpEQ(strong, llvm::ConstantInt::get(i64, 0), "upgrade.dead"),
         done_block,
@@ -194,20 +210,40 @@ llvm::Value *ClassCodegen::gen_strong_upgrade(llvm::Value *weak_handle, const AS
     // one more owner, and it is this one that makes the handed-back handle safe to read through: the
     // count cannot reach zero while the caller holds it
     _ctx.set_insert_point(live_block);
-    _ctx.builder->CreateStore(
-        _ctx.builder->CreateAdd(strong, llvm::ConstantInt::get(i64, 1), "strong.inc"),
-        gen_header_ptr(weak_handle, layout.box, ClassBox::strong_index, "strong_ptr"));
-    _ctx.builder->CreateBr(done_block);
+
+    llvm::BasicBlock *success_block = live_block;
+
+    if (AST::counts_are_atomic(*class_type.get_complex_type())) {
+        // a cmpxchg loop, not an RMW: incrementing a count already at zero resurrects an object
+        // whose deinit ran. the CAS makes "not zero" and "I took one" the same instant. a failed
+        // CAS reloads rather than trusting the old value, so a concurrent last-release is seen
+        llvm::Value *next = _ctx.builder->CreateAdd(
+            strong, llvm::ConstantInt::get(i64, 1), "strong.inc");
+        llvm::AtomicCmpXchgInst *cas = _ctx.builder->CreateAtomicCmpXchg(
+            strong_ptr,
+            strong,
+            next,
+            CountAtomics::word(),
+            CountAtomics::upgrade_success(),
+            CountAtomics::upgrade_failure());
+        llvm::Value *ok = _ctx.builder->CreateExtractValue(cas, 1, "upgrade.ok");
+        _ctx.builder->CreateCondBr(ok, done_block, read_block);
+        success_block = live_block;
+    } else {
+        _ctx.builder->CreateStore(
+            _ctx.builder->CreateAdd(strong, llvm::ConstantInt::get(i64, 1), "strong.inc"),
+            strong_ptr);
+        _ctx.builder->CreateBr(done_block);
+    }
 
     _ctx.set_insert_point(done_block);
 
     // two ways to be absent and one to be there, so the result is `T?` - null for a weak that held nothing
     // and for one whose object is gone, which are the same answer to the only question a caller can ask
     llvm::PHINode *result = _ctx.builder->CreatePHI(opaque_ptr, 3, "upgraded");
-    llvm::Constant *null_handle = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr));
     result->addIncoming(null_handle, null_block);
     result->addIncoming(null_handle, read_block);
-    result->addIncoming(weak_handle, live_block);
+    result->addIncoming(weak_handle, success_block);
 
     return result;
 }
@@ -282,7 +318,7 @@ llvm::Value *ClassCodegen::gen_iface_retain(llvm::Value *erased)
     // object's own block, exactly where a class handle's does, so this needs no layout: gen_count_inc
     // over a null layout reaches it through the header every box shares
     llvm::Value *object = _ctx.builder->CreateExtractValue(erased, { IfaceValue::object_index }, "iface.obj");
-    gen_count_inc(object, nullptr, ClassBox::strong_index, "iface");
+    gen_count_inc(object, nullptr, ClassBox::strong_index, "iface", CountAccess::t_from_typeinfo);
 
     // handed back unchanged so a retain can sit inline in an expression, as the other two do
     return erased;
@@ -471,7 +507,9 @@ llvm::Value *ClassCodegen::gen_retain(llvm::Value *handle, const AST::ValueType 
     const ClassLayout layout =
         _ctx.types->get_or_create_class_layout(class_type.get_complex_type(), *_ctx.current_cmp_unit);
 
-    gen_count_inc(handle, &layout, ClassBox::strong_index, "retain");
+    gen_count_inc(
+        handle, &layout, ClassBox::strong_index, "retain",
+        count_access_for(class_type.get_complex_type()));
 
     // the handle itself, unchanged. a retain is a side effect on the block, not a new value
     return handle;
@@ -481,7 +519,8 @@ void ClassCodegen::gen_count_inc(
     llvm::Value *block,
     const ClassLayout *layout,
     unsigned index,
-    const char *label
+    const char *label,
+    CountAccess access
 )
 {
     llvm::Function *function = _ctx.builder->GetInsertBlock()->getParent();
@@ -501,11 +540,28 @@ void ClassCodegen::gen_count_inc(
 
     // the count's address is only well defined once the block is known non-null, so it is taken here
     const std::string name = count_name(index);
-    llvm::Value *count_ptr = gen_header_ptr(block, header_box_type(layout), index, name + "_ptr");
+    llvm::Type *box_type = header_box_type(layout);
+    llvm::Value *count_ptr = gen_header_ptr(block, box_type, index, name + "_ptr");
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-    llvm::Value *count = _ctx.builder->CreateLoad(i64, count_ptr, name);
-    _ctx.builder->CreateStore(
-        _ctx.builder->CreateAdd(count, llvm::ConstantInt::get(i64, 1), name + ".inc"), count_ptr);
+
+    apply_count_access(_ctx, access, block, box_type, label, [&](bool atomic) -> llvm::Value * {
+        if (atomic) {
+            llvm::Value *inc = _ctx.builder->CreateAtomicRMW(
+                llvm::AtomicRMWInst::Add,
+                count_ptr,
+                llvm::ConstantInt::get(i64, 1),
+                CountAtomics::word(),
+                CountAtomics::increment());
+            inc->setName(name + ".inc");
+        } else {
+            llvm::Value *count = _ctx.builder->CreateLoad(i64, count_ptr, name);
+            _ctx.builder->CreateStore(
+                _ctx.builder->CreateAdd(count, llvm::ConstantInt::get(i64, 1), name + ".inc"),
+                count_ptr);
+        }
+
+        return nullptr;
+    });
     _ctx.builder->CreateBr(done_block);
 
     _ctx.set_insert_point(done_block);
@@ -541,8 +597,12 @@ llvm::Value *ClassCodegen::gen_count(
 
     // the count's address is only well defined once the handle is known non-null, as above
     const std::string name = count_name(index);
-    llvm::Value *count = _ctx.builder->CreateLoad(
+    llvm::LoadInst *count = _ctx.builder->CreateLoad(
         i64, gen_header_ptr(handle, layout.box, index, name + "_ptr"), name);
+    if (AST::counts_are_atomic(*class_type.get_complex_type())) {
+        count->setAtomic(CountAtomics::observe());
+        count->setAlignment(CountAtomics::word());
+    }
     _ctx.builder->CreateBr(done_block);
 
     _ctx.set_insert_point(done_block);
@@ -593,6 +653,8 @@ llvm::Function *ClassCodegen::build_release_thunk(
 
     // an environment passes no layout, so the word is reached through the header every box shares. it used
     // to treat the handle *as* the count's address, which was true only while __strong was the first word
+    const CountAccess access = count_access_for(complex);
+
     return build_count_release_thunk(
         thunk, header_box_type(layout), ClassBox::strong_index, "dead",
         [this, complex, weak_release](llvm::Value *handle) {
@@ -600,9 +662,16 @@ llvm::Function *ClassCodegen::build_release_thunk(
             // weak reference the strong ones collectively held is given back - which frees the block only
             // if no `weak<T>` is still holding it. so a weak handle outlives the object it names and can
             // say so, rather than pointing at memory that has been handed back to malloc
-            gen_deinit_call(complex, handle);
+            if (complex == nullptr) {
+                gen_typeinfo_deinit_call(handle);
+            }
+            else {
+                gen_deinit_call(complex, handle);
+            }
+
             _ctx.builder->CreateCall(weak_release, { handle });
-        });
+        },
+        access);
 }
 
 // the payload's teardown, when there is any. the deinit takes `Foo&` - a pointer to a *slot* holding a
@@ -638,6 +707,46 @@ void ClassCodegen::gen_deinit_call(const AST::ComplexType *complex, llvm::Value 
         _ctx.current_cmp_unit->function_table.get_llvm_function(deinit_id), { slot });
 }
 
+void ClassCodegen::gen_typeinfo_deinit_call(llvm::Value *handle)
+{
+    llvm::Function *fn = _ctx.builder->GetInsertBlock()->getParent();
+    llvm::Type *header = _ctx.types->class_header_llvm_type();
+    llvm::Type *info_type = _ctx.types->typeinfo_llvm_type();
+    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
+
+    llvm::Value *typeinfo = _ctx.builder->CreateLoad(
+        opaque_ptr,
+        gen_header_ptr(handle, header, ClassBox::typeinfo_index, "typeinfo_ptr"),
+        "typeinfo");
+    llvm::Value *deinit = _ctx.builder->CreateLoad(
+        opaque_ptr,
+        _ctx.builder->CreateStructGEP(
+            info_type, typeinfo, ClassTypeInfo::deinit_index, "deinit.ptr"),
+        "deinit");
+
+    auto *call = llvm::BasicBlock::Create(*_ctx.llvm_context, "env.deinit", fn);
+    auto *skip = llvm::BasicBlock::Create(*_ctx.llvm_context, "env.no_deinit", fn);
+
+    _ctx.builder->CreateCondBr(
+        _ctx.builder->CreateICmpNE(
+            deinit,
+            llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)),
+            "has.deinit"),
+        call,
+        skip);
+
+    _ctx.set_insert_point(call);
+    llvm::Value *slot = _ctx.entry_alloca(opaque_ptr, "self_slot");
+    _ctx.builder->CreateStore(handle, slot);
+    _ctx.builder->CreateCall(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), { opaque_ptr }, false),
+        deinit,
+        { slot });
+    _ctx.builder->CreateBr(skip);
+
+    _ctx.set_insert_point(skip);
+}
+
 llvm::Function *ClassCodegen::declare_release_thunk(const std::string &name, const char *handle_name)
 {
     llvm::Type *void_type = llvm::Type::getVoidTy(*_ctx.llvm_context);
@@ -661,7 +770,8 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
     llvm::Type *box_type,
     unsigned count_index,
     const char *zero_block_name,
-    llvm::function_ref<void(llvm::Value *handle)> on_zero
+    llvm::function_ref<void(llvm::Value *handle)> on_zero,
+    CountAccess access
 )
 {
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
@@ -686,15 +796,46 @@ llvm::Function *ClassCodegen::build_count_release_thunk(
     const std::string count = count_name(count_index);
 
     llvm::Value *count_ptr = gen_header_ptr(handle, box_type, count_index, count + "_ptr");
-    llvm::Value *current = _ctx.builder->CreateLoad(i64, count_ptr, count);
-    llvm::Value *next = _ctx.builder->CreateSub(current, llvm::ConstantInt::get(i64, 1), count + ".dec");
-    _ctx.builder->CreateStore(next, count_ptr);
+
+    auto emit_plain_dec = [&]() -> llvm::Value * {
+        llvm::Value *current = _ctx.builder->CreateLoad(i64, count_ptr, count);
+        llvm::Value *next =
+            _ctx.builder->CreateSub(current, llvm::ConstantInt::get(i64, 1), count + ".dec");
+        _ctx.builder->CreateStore(next, count_ptr);
+        return next;
+    };
+
+    auto emit_atomic_dec = [&]() -> llvm::Value * {
+        // atomicrmw sub yields the old value
+        llvm::Value *old = _ctx.builder->CreateAtomicRMW(
+            llvm::AtomicRMWInst::Sub,
+            count_ptr,
+            llvm::ConstantInt::get(i64, 1),
+            CountAtomics::word(),
+            CountAtomics::decrement());
+        old->setName(count);
+        return _ctx.builder->CreateSub(old, llvm::ConstantInt::get(i64, 1), count + ".dec");
+    };
+
+    const bool needs_zero_fence = access != CountAccess::t_plain;
+
+    llvm::Value *next = apply_count_access(
+        _ctx, access, handle, box_type, "dec",
+        [&](bool atomic) -> llvm::Value * {
+            return atomic ? emit_atomic_dec() : emit_plain_dec();
+        });
+
     _ctx.builder->CreateCondBr(
         _ctx.builder->CreateICmpEQ(next, llvm::ConstantInt::get(i64, 0), "is_last_" + count),
         zero_block,
         return_block);
 
     _ctx.set_insert_point(zero_block);
+    if (needs_zero_fence) {
+        // acquire is needed only where the payload is read, one call in N. release + a fence
+        // beats acq_rel. for the weak thunk this is conservative when the class was unmarked
+        _ctx.builder->CreateFence(CountAtomics::last_reference());
+    }
     on_zero(handle);
     _ctx.builder->CreateBr(return_block);
 

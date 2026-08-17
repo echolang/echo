@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_on_an_interface.eco:3:3
+
+  '#[atomic]' cannot be written on an interface. An interface declares requirements and has no layout, so there is no count to make atomic.
+
+  2 | 
+  3 | #[atomic]
+    :   ^^^^^^^
+  4 | interface Drawable { function draw() : void; }
+    : ^^^^^^^^^
+  5 | 
+
+1 error, nothing was compiled.

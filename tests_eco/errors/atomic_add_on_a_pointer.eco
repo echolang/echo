@@ -1,0 +1,4 @@
+// adding to a pointer would move the address by bytes, not elements
+
+ptr<int32> $slot = ptr<int32>(null);
+mem::atomic::add<ptr<int32>>($slot, $slot);

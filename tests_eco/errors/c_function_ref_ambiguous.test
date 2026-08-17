@@ -3,7 +3,7 @@ expect: fail
 --- OUT --->
 [error] c_function_ref_ambiguous.eco:11:6
 
-  '&add' is ambiguous without a destination - could be add(int32), add(float64). Give it a type, or pass it where an 'extern function<...>' is expected.
+  '&add' is ambiguous without a destination - could be add(int32), add(float64). Give it a type, or pass it where a 'function<...>' or 'extern function<...>' is expected.
 
   10 | 
   11 | $f = &add;

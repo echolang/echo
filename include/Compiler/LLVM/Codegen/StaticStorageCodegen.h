@@ -75,9 +75,15 @@ namespace Compiler::LLVM
         // struct field's is: a rename is a different symbol and a reorder is not
         llvm::GlobalVariable *storage_for(AST::StaticPropertyExprNode &node, const std::string &symbol);
 
-        // the `i8` guard beside it. i8 rather than i1 so it reads as the byte the store actually is,
-        // which is what an IR golden shows
+        // the word beside it: 0, a tid token, or ~0. a word rather than an i8 so the in-progress
+        // state can name its owner, which is what keeps the documented recursion answer from
+        // becoming a pthread_once deadlock. a tid that is 0 or ~0 is stored as 1 so it cannot
+        // look uninitialized or finished
         llvm::GlobalVariable *guard_for(const std::string &symbol);
+
+        // the slow path: CAS 0 → self, run the body, store ~0. one function for the program,
+        // linkonce_odr. the fast path stays an acquire load in `<sym>.init`
+        llvm::Function *once_helper();
 
         // the self-guarding init function, emitted on first reference in this unit. **the guard is
         // stored before the body runs**, which is also the recursion answer: a static whose initializer

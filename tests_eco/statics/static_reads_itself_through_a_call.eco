@@ -1,0 +1,15 @@
+// the recursion answer: Type::$x = f() where f reads Type::$x sees the zero the
+// global was created with, and does not deadlock. written before the once-guard
+// grew an owner token, so a three-state spin would have hung this case
+
+function seed() : int32
+{
+    return Type::$x;
+}
+
+struct Type
+{
+    static int32 $x = seed();
+}
+
+echo Type::$x;

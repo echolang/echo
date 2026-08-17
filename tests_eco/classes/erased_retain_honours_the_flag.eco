@@ -1,0 +1,30 @@
+// an erased retain loads the typeinfo flag and branches. it does not assume atomic
+
+interface Drawable
+{
+    function id() : int32;
+}
+
+class Plain : Drawable
+{
+    function id() : int32
+    {
+        return 1;
+    }
+}
+
+#[atomic]
+class Marked : Drawable
+{
+    function id() : int32
+    {
+        return 2;
+    }
+}
+
+function take(Drawable $d) : int32
+{
+    return $d->id();
+}
+
+echo take(Plain()) + take(Marked());

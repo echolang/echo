@@ -5,6 +5,7 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 
 #include <cassert>
@@ -91,12 +92,15 @@ void MemoryCodegen::gen_counter_delta(int64_t delta)
     llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     llvm::GlobalVariable *counter = get_or_create_live_counter();
 
-    // non-atomic, the shape ClassCodegen::gen_count_inc uses on a reference count and for the same
-    // reason: the language has no threading model, so a count that could be raced is a count for a
-    // language this is not
-    llvm::Value *live = _ctx.builder->CreateLoad(i64, counter, "live");
-    _ctx.builder->CreateStore(
-        _ctx.builder->CreateAdd(live, llvm::ConstantInt::get(i64, delta), "live.next"), counter);
+    // one global counter, existing only under --track-allocations. monotonic: it answers how
+    // many, at some moment, and licenses nothing. reachable from every thread the moment a
+    // program can spawn one
+    _ctx.builder->CreateAtomicRMW(
+        llvm::AtomicRMWInst::Add,
+        counter,
+        llvm::ConstantInt::get(i64, delta),
+        llvm::Align(8),
+        llvm::AtomicOrdering::Monotonic)->setName("live");
 }
 
 llvm::Function *MemoryCodegen::get_or_create_alloc_thunk()

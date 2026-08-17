@@ -1,5 +1,6 @@
 #include "AST/ASTInstantiation.h"
 
+#include "AST/ASTCFunction.h"
 #include "AST/ASTLiteralTyping.h"
 
 #include "AST/ASTTypeParam.h"
@@ -176,6 +177,16 @@ namespace AST
                 return i < argument_defers.size() && argument_defers[i];
             };
 
+            const auto argument_type_for = [&](size_t i) {
+                ValueType argument_type = argument_types[i];
+
+                if (tmpl->args[i]->has_type()) {
+                    argument_type = function_ref_as(argument_type, tmpl->args[i]->type());
+                }
+
+                return argument_type;
+            };
+
             const auto unify_argument = [&](size_t i, bool write_back_only_new) {
                 // an argument with no type yet cannot contradict the template, and must not bind
                 // anything either: binding `T` to unknown would name the instance after
@@ -191,13 +202,15 @@ namespace AST
                     return;
                 }
 
+                const ValueType argument_type = argument_type_for(i);
+
                 // a literal unifies into a *copy*, and only the parameters nothing else reached are
                 // written back. asked through `covers` rather than by enumerating what the parameter
                 // mentions, because a nested application binds several in one descent
                 if (write_back_only_new) {
                     TypeSubstitution attempt = result.bindings;
 
-                    if (!unify_type(tmpl->args[i]->type(), argument_types[i], attempt)
+                    if (!unify_type(tmpl->args[i]->type(), argument_type, attempt)
                         && !mismatched_argument.has_value()) {
                         mismatched_argument = i;
                     }
@@ -217,7 +230,7 @@ namespace AST
                 const TypeSubstitution decided =
                     i >= authoritative ? result.bindings : TypeSubstitution();
 
-                if (!unify_type(tmpl->args[i]->type(), argument_types[i], result.bindings)
+                if (!unify_type(tmpl->args[i]->type(), argument_type, result.bindings)
                     && !mismatched_argument.has_value()) {
                     mismatched_argument = i;
                 }

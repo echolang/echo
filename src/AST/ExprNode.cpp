@@ -327,7 +327,12 @@ AST::ValueType AST::FunctionRefExprNode::result_type() const
         return ValueType::make_unknown();
     }
 
-    return decl->c_function_type();
+    return as_callable ? decl->callable_type() : decl->c_function_type();
+}
+
+AST::ValueType AST::FunctionRefExprNode::callable_result_type() const
+{
+    return decl != nullptr ? decl->callable_type() : ValueType::make_unknown();
 }
 
 const std::string AST::FunctionRefExprNode::node_description()

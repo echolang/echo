@@ -1,0 +1,4 @@
+// a string is three words and owns a count. an exchange would not retain
+
+string $name = 'idle';
+echo mem::atomic::load<string>($name);

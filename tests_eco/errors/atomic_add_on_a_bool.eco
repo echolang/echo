@@ -1,0 +1,4 @@
+// there is no integer RMW on a flag
+
+bool $flag = false;
+echo mem::atomic::add<bool>($flag, true);

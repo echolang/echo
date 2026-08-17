@@ -82,8 +82,8 @@ namespace Compiler::LLVM
         // `declare` here that only `main`'s unit defines is exactly that dependency
         llvm::GlobalVariable *get_or_create_live_counter();
 
-        // non-atomic load / add / store on the counter, the shape ClassCodegen::gen_count_inc uses on a
-        // reference count and for the same single-threaded reason. `delta` is signed: a free is -1
+        // a monotonic RMW on a process-wide counter. a different protocol from the class
+        // count - CountAtomics.h refuses to share one. `delta` is signed: a free is -1
         void gen_counter_delta(int64_t delta);
 
         // the shared skeleton of the three thunks: declare it, name its arguments, and hand back a

@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -13,6 +14,7 @@
 #endif
 
 #if ECO_TEST_ISOLATION_POSIX
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -20,18 +22,56 @@
 namespace
 {
 #if ECO_TEST_ISOLATION_POSIX
-    // everything the child wrote, read to end of file.
+    // everything the child wrote, read to end of file or until the deadline.
     //
     // **read to EOF before the wait, never after.** A pipe holds a page or so; a test that prints more than
     // that blocks in `write` while the parent blocks in `waitpid`, and neither ever moves again. Draining
     // first cannot deadlock: the write end is closed in the parent, so EOF arrives when the last child
     // holding it exits
-    std::string drain(int fd)
+    //
+    // **poll + SIGKILL**, never `alarm()`. the flag is milliseconds and the parent already owns the
+    // pipe; a deadline in the child is whole seconds and catchable. `timed_out` is a parent-side fact
+    std::string drain(int fd, unsigned timeout_ms, bool &timed_out)
     {
+        timed_out = false;
         std::string collected;
         char buffer[4096];
+        const auto started = std::chrono::steady_clock::now();
 
         while (true) {
+            int wait_ms = -1;
+
+            if (timeout_ms > 0) {
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started).count();
+
+                if (elapsed >= static_cast<long long>(timeout_ms)) {
+                    timed_out = true;
+                    return collected;
+                }
+
+                wait_ms = static_cast<int>(static_cast<long long>(timeout_ms) - elapsed);
+            }
+
+            pollfd pfd{};
+            pfd.fd = fd;
+            pfd.events = POLLIN;
+
+            const int ready = poll(&pfd, 1, wait_ms);
+
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+
+                return collected;
+            }
+
+            if (ready == 0) {
+                timed_out = true;
+                return collected;
+            }
+
             const ssize_t read_bytes = read(fd, buffer, sizeof(buffer));
 
             if (read_bytes > 0) {
@@ -39,7 +79,6 @@ namespace
                 continue;
             }
 
-            // a signal interrupted the read rather than ending it - the child is still going
             if (read_bytes < 0 && errno == EINTR) {
                 continue;
             }
@@ -71,7 +110,8 @@ bool Compiler::test_isolation_available()
 
 Compiler::TestResult Compiler::run_test_isolated(
     const TestCase &test,
-    const std::function<void()> &call
+    const std::function<void()> &call,
+    unsigned timeout_ms
 )
 {
     TestResult result;
@@ -140,8 +180,13 @@ Compiler::TestResult Compiler::run_test_isolated(
 
     close(pipe_ends[1]);
 
-    result.output = drain(pipe_ends[0]);
+    bool timed_out = false;
+    result.output = drain(pipe_ends[0], timeout_ms, timed_out);
     close(pipe_ends[0]);
+
+    if (timed_out) {
+        kill(child, SIGKILL);
+    }
 
     int status = 0;
 
@@ -153,10 +198,15 @@ Compiler::TestResult Compiler::run_test_isolated(
 
     result.milliseconds = elapsed();
 
-    if (WIFSIGNALED(status)) {
-        result.outcome = TestOutcome::t_signalled;
-        result.signal = WTERMSIG(status);
+    if (timed_out) {
+        result.outcome = TestOutcome::t_timed_out;
+        result.signal = SIGKILL;
+        return result;
+    }
 
+    if (WIFSIGNALED(status)) {
+        result.signal = WTERMSIG(status);
+        result.outcome = TestOutcome::t_signalled;
         return result;
     }
 
@@ -174,10 +224,12 @@ Compiler::TestResult Compiler::run_test_isolated(
 
 Compiler::TestResult Compiler::run_test_isolated(
     const TestCase &test,
-    const std::function<void()> &call
+    const std::function<void()> &call,
+    unsigned timeout_ms
 )
 {
     (void)call;
+    (void)timeout_ms;
 
     // unreachable: the subcommand refuses before the first test when test_isolation_available() is false,
     // which is where the refusal belongs - a platform that cannot isolate is told so once

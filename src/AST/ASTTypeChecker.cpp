@@ -1,6 +1,7 @@
 #include "AST/ASTTypeChecker.h"
 
 #include "AST/ASTArrayLiteral.h"
+#include "AST/ASTAtomics.h"
 #include "AST/ASTCFunction.h"
 #include "AST/ASTVariadic.h"
 
@@ -1099,6 +1100,41 @@ void TypeChecker::check_raw_storage_argument(FunctionCallExprNode &node)
         "'=', which ends the old value before storing the new one.");
 }
 
+// `mem::atomic::` is a word RMW and nothing else. reported here for check_ref_count_argument's
+// reason: ExprCodegen would throw a location-less ICE the moment LLVM refused an atomic on a
+// struct. AST::atomic_operand_refusal owns the sentence; this is the one ask
+void TypeChecker::check_atomic_operand(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()) {
+        return;
+    }
+
+    const BuiltinKind kind = builtin_kind_for(node.decl->builtin.value());
+
+    if (!is_atomic_builtin(kind) || kind == BuiltinKind::t_atomic_fence) {
+        return;
+    }
+
+    if (node.decl->instantiation_args.size() != 1) {
+        return;
+    }
+
+    const ValueType &subject = node.decl->instantiation_args[0];
+
+    if (is_undetermined_type(subject) || subject.is_type_param()) {
+        return;
+    }
+
+    const auto refusal = atomic_operand_refusal(subject, kind);
+
+    if (!refusal.has_value()) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::GenericError>(
+        code_ref_for(node.token_function_name), *refusal);
+}
+
 // **the only builtin that can be unavailable**, and the only reason this pass reads the compiler options
 // at all. `mem::live_allocations()` reads a counter the allocation seam maintains, and the seam only
 // maintains one when --track-allocations asked it to - so without the flag the load would answer 0.
@@ -1378,6 +1414,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
         check_abort_message(node);
         check_ref_count_argument(node);
         check_raw_storage_argument(node);
+        check_atomic_operand(node);
         check_variadic_argument(node);
     }
 
@@ -1489,40 +1526,6 @@ void TypeChecker::visit_indirect_call_expr(IndirectCallExprNode &node)
     }
 
     RecursiveVisitor::visit_indirect_call_expr(node);
-}
-
-void TypeChecker::visit_closure_expr(ClosureExprNode &node)
-{
-    // capture is by value, and a copy of an owning value is a whole taxonomy - a retain, a copy
-    // constructor, or nothing that exists at all. the environment's teardown is uniform precisely
-    // because it holds no owner: one `__eco_release_env` thunk and no deinit, so an owner admitted here
-    // is a leak rather than a wrong destructor
-    //
-    // here rather than at the capture site in the parser, where the read is written: the captured
-    // variable's type is not final until the monomorphizer has settled the call it was inferred from,
-    // so `$b = Box<int32>(5)` was still a `Box<T>` when the parser saw it - and a bare type parameter
-    // owns nothing, which is how an owning capture would pass unnoticed
-    if (node.environment_type != nullptr) {
-        for (size_t i = 0; i < node.environment_type->property_count(); i++) {
-            const ComplexType::Property &property = node.environment_type->get_property(i);
-
-            if (!needs_destruction(property.type)) {
-                continue;
-            }
-
-            // the property name *is* the variable's name - it is what the body's `$__env->name` read
-            // resolves through - so the diagnostic can name the capture without a second list to keep
-            // in step. located at the literal, which is where the copy would be made
-            _collector.collect_issue<Issue::GenericError>(
-                code_ref_for(node.token),
-                fmt::format(
-                    "'{}' is a '{}', which owns a resource. Capturing an owning value is not supported "
-                    "yet - pass it as a parameter instead.",
-                    property.name, property.type.get_type_desciption()));
-        }
-    }
-
-    RecursiveVisitor::visit_closure_expr(node);
 }
 
 void TypeChecker::visitTypeCast(TypeCastNode &node)
@@ -1967,7 +1970,7 @@ void TypeChecker::visit_function_ref_expr(FunctionRefExprNode &node)
                     node.token_name.value())
                 : fmt::format(
                     "'&{}' is ambiguous without a destination - could be {}. Give it a type, or "
-                    "pass it where an 'extern function<...>' is expected.",
+                    "pass it where a 'function<...>' or 'extern function<...>' is expected.",
                     node.token_name.value(), named));
     }
     else if (node.decl != nullptr) {

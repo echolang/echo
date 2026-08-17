@@ -1,0 +1,6 @@
+// refused at the declaration, so the flag only ever holds a claim that means something
+
+#[atomic]
+struct Point { int32 $x; int32 $y; }
+
+echo 1;

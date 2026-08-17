@@ -1,0 +1,9 @@
+// `&name` at a callable destination must match the signature, not just the arity
+
+function answer() : int32
+{
+    return 1;
+}
+
+function<void()> $f = &answer;
+echo 1;

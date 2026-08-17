@@ -174,6 +174,7 @@ namespace AST
         File *file = home->files().first();
         if (file && file->root) {
             file->root->children.push_back(make_ref(*instance));
+            publish_cloned_closures(*instance, file, tmpl, args);
         }
 
         return instance;
@@ -333,10 +334,9 @@ namespace AST
     // round. And before step C, so the body's `$__env->b->get()` resolves against `Box<int32>` rather
     // than finding only the template's method and reaching codegen unresolved.
     //
-    // One environment per closure *expression*, which a clone shares (ClosureExprNode::clone). That is
-    // fine only while a closure cannot be written in a generic body - two instances' captures would
-    // otherwise want two layouts and retype each other every round. The restriction lifts together with
-    // the per-instantiation environment a generic closure would need
+    // One environment per instance: ClosureExprNode::clone mints a fresh layout and
+    // publish_cloned_closures stamps the enclosing instance's identity so two same-shape
+    // captures do not share a symbol
     bool Monomorphizer::rederive_stale_capture_types()
     {
         bool progressed = false;

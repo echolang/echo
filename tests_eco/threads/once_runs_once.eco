@@ -1,0 +1,26 @@
+// every caller waits; the work runs once. the cell is a class so the closure's copy of
+// the handle names the same object
+
+use std::thread;
+
+#[atomic]
+class Cell
+{
+    int32 $n;
+
+    constructor()
+    {
+        $this->n = 0;
+    }
+
+    function bump() : void
+    {
+        $this->n = $this->n + 1;
+    }
+}
+
+Cell $cell = Cell();
+thread::once $o = thread::once();
+$o->run(function() : void { $cell->bump(); });
+$o->run(function() : void { $cell->bump(); });
+echo $cell->n;

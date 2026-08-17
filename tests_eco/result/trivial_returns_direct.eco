@@ -1,8 +1,0 @@
-// a 16-byte result comes back in registers. yesterday this was 24 bytes and sret.
-function pack_probe(int64 $v) : result<int64, int32>
-{
-    return .ok($v);
-}
-
-result<int64, int32> $r = pack_probe(3);
-echo $r->unwrap();

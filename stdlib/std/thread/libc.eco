@@ -1,0 +1,56 @@
+/**
+ * Every C symbol this namespace binds, in one file.
+ *
+ * A C symbol may only be declared once per module, so they are gathered here rather than
+ * sitting beside the code that calls them. `internal`: thread.eco and lock.eco name them,
+ * a consumer does not.
+ *
+ * `EAGAIN` and `EDEADLK` are swapped between Darwin and Linux. 11 is "no more threads" on
+ * one and "you would deadlock" on the other. Named here so the rest of the namespace never
+ * writes a literal.
+ */
+
+namespace std::thread;
+
+internal extern {
+    function pthread_create as c_pthread_create(
+        ptr<usize> $thread,
+        ptr<uint8> $attr,
+        extern function<ptr<uint8>(ptr<uint8>)> $start,
+        ptr<uint8> $arg
+    ) : int32;
+
+    function pthread_join as c_pthread_join(usize $thread, ptr<ptr<uint8>> $retval) : int32;
+    function pthread_detach as c_pthread_detach(usize $thread) : int32;
+    function pthread_self as c_pthread_self() : usize;
+    function pthread_equal as c_pthread_equal(usize $a, usize $b) : int32;
+
+    function pthread_mutex_init as c_pthread_mutex_init(ptr<uint8> $mutex, ptr<uint8> $attr) : int32;
+    function pthread_mutex_destroy as c_pthread_mutex_destroy(ptr<uint8> $mutex) : int32;
+    function pthread_mutex_lock as c_pthread_mutex_lock(ptr<uint8> $mutex) : int32;
+    function pthread_mutex_trylock as c_pthread_mutex_trylock(ptr<uint8> $mutex) : int32;
+    function pthread_mutex_unlock as c_pthread_mutex_unlock(ptr<uint8> $mutex) : int32;
+
+    function sched_yield as c_sched_yield() : int32;
+    function usleep as c_usleep(uint32 $usec) : int32;
+    function sysconf as c_sysconf(int32 $name) : int64;
+}
+
+internal const int32 ENOMEM = 12;
+internal const int32 EBUSY = 16;
+
+#[if: os == darwin]
+internal const int32 EAGAIN = 35;
+internal const int32 EDEADLK = 11;
+internal const int32 SC_NPROCESSORS_ONLN = 58;
+#[elif: os == linux]
+internal const int32 EAGAIN = 11;
+internal const int32 EDEADLK = 35;
+internal const int32 SC_NPROCESSORS_ONLN = 84;
+#[else]
+internal const int32 EAGAIN = 11;
+internal const int32 EDEADLK = 35;
+internal const int32 SC_NPROCESSORS_ONLN = 84;
+#[end]
+
+

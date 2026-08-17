@@ -14,7 +14,9 @@ flags: --optimize whole
 // what it pins about this type is the whole performance claim behind it being an enum: a `result<T, E>` over
 // payloads that own nothing costs a tag test, and there is no call left to either contract
 CHECK: define noundef i32 @main
+CHECK-NOT: define
 CHECK: vector.body:
 CHECK-NOT: call
 CHECK-NOT: alloca
+CHECK-NOT: phi %"result
 CHECK: br i1

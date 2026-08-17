@@ -627,6 +627,11 @@ namespace AST
         // GuardNode::plan_decided is
         bool resolved = false;
 
+        // the destination asked for an Echo callable, not a C function pointer. `&name` is
+        // still the same node; result_type() and codegen are what change. a null env and a
+        // thunk that ignores it, so the indirect call's convention is untouched
+        bool as_callable = false;
+
         FunctionRefExprNode(TokenReference token_amp, TokenReference token_name) :
             token_amp(token_amp), token_name(std::move(token_name)) {};
 
@@ -637,6 +642,10 @@ namespace AST
         }
 
         ValueType result_type() const override;
+
+        // the Echo callable this name is, for scoring a `function<...>` parameter before
+        // bind_function_ref_to has flipped as_callable. unknown when no declaration is bound
+        ValueType callable_result_type() const;
 
         const std::string node_description() override;
 

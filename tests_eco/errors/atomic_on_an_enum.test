@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_on_an_enum.eco:3:3
+
+  '#[atomic]' cannot be written on an enum. An enum has no reference count - it is copied, and each copy is one thread's own.
+
+  2 | 
+  3 | #[atomic]
+    :   ^^^^^^^
+  4 | enum Color { case red; }
+    : ^^^^
+  5 | 
+
+1 error, nothing was compiled.

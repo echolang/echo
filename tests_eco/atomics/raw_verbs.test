@@ -1,0 +1,9 @@
+--- OUT --->
+0
+2
+5
+8
+1
+1
+--- IR --->
+CHECK: fence seq_cst

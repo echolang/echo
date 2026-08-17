@@ -1,0 +1,11 @@
+// dropping a task<string> without wait() must join before the slot dies.
+// the worker sleeps so it is still writing when the handle is dropped
+
+use std::thread;
+
+thread::task<string> $t = guard thread::spawn(function() : string {
+    thread::sleep(20);
+    return 'owned';
+}) else ($e) {
+    die($e->message());
+}

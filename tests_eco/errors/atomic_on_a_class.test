@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_on_a_class.eco:9:14
+
+  cannot atomically operate on 'Node' - an exchange would move the bits without moving the count. Put it in a mutex, or mark the class '#[atomic]' and copy the handle.
+
+   8 | Node $n = Node(0);
+   9 | mem::atomic::load<Node>($n);
+     :              ^^^^
+  10 | 
+
+1 error, nothing was compiled.

@@ -1,0 +1,13 @@
+// the value lives inside the lock; `$g->value` is a place. drop of the guard unlocks
+
+use std::thread;
+
+thread::mutex<int32> $m = thread::mutex<int32>(0);
+
+{
+    thread::locked<int32> $g = $m->lock();
+    $g->value = 7;
+}
+
+thread::locked<int32> $g = $m->lock();
+echo $g->value;

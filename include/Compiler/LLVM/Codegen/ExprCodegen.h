@@ -154,6 +154,11 @@ namespace Compiler::LLVM
         // null when nothing was emitted for it; the caller phrases the diagnostic
         llvm::Function *find_llvm_function(const AST::FunctionDeclNode *decl);
 
+        // `&name` seated as `function<R(P...)>`: an Echo-shaped thunk that ignores its
+        // environment and calls the named function, so the indirect call's convention
+        // does not fork
+        llvm::Function *ensure_callable_adapt(AST::FunctionDeclNode *decl);
+
         // a call whose declaration is an interface **requirement**: the callee is loaded out of the
         // receiver's own vtable rather than looked up in the function table, because a requirement has no
         // symbol - the implementors have the bodies, under their own names

@@ -1,0 +1,22 @@
+// a struct with a destructor and no copy constructor is still uncopyable. capture is a
+// copy, so this is CannotCopy rather than a special "owning capture" refusal
+
+struct Buffer
+{
+    usize $len;
+
+    destructor()
+    {
+        echo 1;
+    }
+}
+
+function outer() : usize
+{
+    Buffer $b = Buffer(3);
+    function<usize()> $f = function() : usize { return $b->len; };
+
+    return $f();
+}
+
+echo outer();

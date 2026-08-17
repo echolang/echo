@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Compiler/LLVM/Codegen/ClassLayout.h"
+#include "Compiler/LLVM/Codegen/CountAtomics.h"
 
 #include <llvm/ADT/STLFunctionalExtras.h>
 #include <llvm/ADT/Twine.h>
@@ -118,8 +119,8 @@ namespace Compiler::LLVM
         //
         // the callable arm is uniform rather than per type, and that is forced: a callable's static type
         // is its signature and says nothing about which environment it holds, so the teardown cannot be
-        // keyed on a class the way the class arm is. it stays correct because an environment holds no
-        // owning capture - one that would is rejected at the capture site
+        // keyed on a class the way the class arm is. the env is a minted atomic class; last release
+        // loads the typeinfo deinit, which is why an owning capture needs no arm here
         llvm::Value *gen_retain(llvm::Value *handle, const AST::ValueType &class_type);
         void gen_release(llvm::Value *handle, const AST::ValueType &class_type);
 
@@ -142,7 +143,11 @@ namespace Compiler::LLVM
         // a null `layout` reaches the word through the shared header instead, which is how an environment
         // and an erased operand are counted: the one thing neither knows is a class layout
         void gen_count_inc(
-            llvm::Value *block, const ClassLayout *layout, unsigned index, const char *label);
+            llvm::Value *block,
+            const ClassLayout *layout,
+            unsigned index,
+            const char *label,
+            CountAccess access);
 
         // the interface half of gen_instanceof: walk the block's conformance table looking for the
         // interface's identity global. a loop rather than a comparison because conformance is a *set* -
@@ -166,7 +171,8 @@ namespace Compiler::LLVM
         //
         //   void __eco_release_env(ptr handle)
         //
-        // no deinit, because an environment holds no owning capture - see gen_callable_release
+        // teardown is dynamic: the typeinfo deinit slot is loaded and called when the count
+        // hits zero. null when the environment owns nothing
         llvm::Function *get_or_create_env_release_thunk();
 
         // and the weak one, also one per compilation unit and for a stronger reason: a weak release runs
@@ -195,6 +201,11 @@ namespace Compiler::LLVM
         // other receiver is. does nothing when the type declares none, which is the common case
         void gen_deinit_call(const AST::ComplexType *complex, llvm::Value *handle);
 
+        // the environment half: load the typeinfo deinit slot, skip if null, otherwise the same
+        // spill-and-call. one path for every environment, because a callable's type says nothing
+        // about which environment it holds
+        void gen_typeinfo_deinit_call(llvm::Value *handle);
+
         // **one decrement, two things that can end at zero.** the strong count reaching zero runs the
         // payload's teardown and gives back the collective weak reference; the weak count reaching zero
         // frees the block. everything around that is identical - the linkonce_odr `void(ptr)` thunk, the
@@ -215,7 +226,8 @@ namespace Compiler::LLVM
             llvm::Type *box_type,
             unsigned count_index,
             const char *zero_block_name,
-            llvm::function_ref<void(llvm::Value *handle)> on_zero
+            llvm::function_ref<void(llvm::Value *handle)> on_zero,
+            CountAccess access
         );
 
         // the address of one header word inside `handle`'s block. takes the box type rather than a layout,

@@ -276,7 +276,7 @@ namespace
     // name. a key added to the dispatch and forgotten here would leave the error telling an author
     // that a valid key is invalid
     constexpr std::string_view k_setting_keys[] = {
-        "flags", "modules", "stdlib", "expect", "mode", "env", "args", "stdin" };
+        "flags", "modules", "stdlib", "expect", "mode", "env", "args", "stdin", "timeout" };
 
     // whitespace separated into `out_list`. the shape `modules`, `env` and `args` share - three settings
     // that each mean a list because the header forbids a repeated key
@@ -448,6 +448,22 @@ namespace
                 { { "run", RunMode::t_run }, { "build", RunMode::t_build },
                   { "test", RunMode::t_test } },
                 out_file.mode, out_error);
+        }
+
+        if (key == "timeout") {
+            unsigned parsed = 0;
+            const auto *first = value.data();
+            const auto *last = first + value.size();
+            const auto [ptr, ec] = std::from_chars(first, last, parsed);
+
+            if (ec != std::errc() || ptr != last) {
+                out_error = locate(origin, record.number,
+                    "setting 'timeout' takes a millisecond count, got: " + value);
+                return false;
+            }
+
+            out_file.timeout_ms = parsed;
+            return true;
         }
 
         std::string known;

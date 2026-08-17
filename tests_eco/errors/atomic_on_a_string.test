@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_on_a_string.eco:4:19
+
+  cannot atomically operate on 'string' - it is wider than a word, and an exchange would not retain. Put it in a mutex.
+
+  3 | string $name = 'idle';
+  4 | echo mem::atomic::load<string>($name);
+    :                   ^^^^
+  5 | 
+
+1 error, nothing was compiled.

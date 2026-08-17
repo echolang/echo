@@ -1,0 +1,15 @@
+// the surface: atomic<int32> is a unique word, and every method is an RMW
+
+atomic<int32> $hits = atomic<int32>(0);
+echo $hits->add(1);
+echo $hits->load();
+$hits->store(10);
+echo $hits->load();
+echo $hits->sub(3);
+echo $hits->load();
+echo $hits->exchange(4);
+echo $hits->load();
+echo $hits->compare_exchange(4, 9);
+echo $hits->load();
+echo $hits->compare_exchange(4, 1);
+echo $hits->load();

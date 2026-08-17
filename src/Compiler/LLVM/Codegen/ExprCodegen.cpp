@@ -22,6 +22,7 @@
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
 #include "eco.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
@@ -38,6 +39,7 @@
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
 #include "AST/ASTCoreTypes.h"
+#include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/ReturnNode.h"
@@ -1021,8 +1023,7 @@ void ExprCodegen::gen_indirect_call(AST::IndirectCallExprNode &node)
     const ReturnAbi abi = c_function
         ? ReturnAbi{}
         : return_abi_for(
-            _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit),
-            _ctx.layout());
+            _ctx.types->get_llvm_type(signature.return_type, *_ctx.current_cmp_unit));
 
     emit_call({ fn_type, fn }, args, abi);
 }
@@ -1119,6 +1120,16 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
 
         case AST::BuiltinKind::t_exit:
             gen_exit_builtin(node);
+            return;
+
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
+            _ctx.atomics->gen_atomic_builtin(node, kind);
             return;
     }
 }
@@ -1344,6 +1355,13 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
         case AST::BuiltinKind::t_process_argv:
         case AST::BuiltinKind::t_process_envp:
         case AST::BuiltinKind::t_exit:
+        case AST::BuiltinKind::t_atomic_load:
+        case AST::BuiltinKind::t_atomic_store:
+        case AST::BuiltinKind::t_atomic_add:
+        case AST::BuiltinKind::t_atomic_sub:
+        case AST::BuiltinKind::t_atomic_exchange:
+        case AST::BuiltinKind::t_atomic_compare_exchange:
+        case AST::BuiltinKind::t_atomic_fence:
             throw _ctx.error(fmt::format(
                 "Builtin '{}' is not a type query {}", decl->builtin.value(), _ctx.function_context()));
     }
@@ -1563,7 +1581,84 @@ void ExprCodegen::gen_function_ref(AST::FunctionRefExprNode &node)
             node.token_name.value(), _ctx.function_context()));
     }
 
-    _ctx.value_stack.push(fn);
+    if (!node.as_callable) {
+        _ctx.value_stack.push(fn);
+        return;
+    }
+
+    llvm::Function *adapt = ensure_callable_adapt(node.decl);
+    llvm::StructType *callable_type = _ctx.types->callable_llvm_type();
+    llvm::Value *value = llvm::UndefValue::get(callable_type);
+    value = _ctx.builder->CreateInsertValue(value, adapt, 0, "ref.fn");
+    value = _ctx.builder->CreateInsertValue(
+        value,
+        llvm::ConstantPointerNull::get(llvm::PointerType::get(*_ctx.llvm_context, 0)),
+        1,
+        "ref.env");
+    _ctx.value_stack.push(value);
+}
+
+llvm::Function *ExprCodegen::ensure_callable_adapt(AST::FunctionDeclNode *decl)
+{
+    const std::string name = "__eco_adapt." + AST::mangle_function_name(decl);
+
+    if (llvm::Function *existing = _ctx.current_module()->getFunction(name)) {
+        return existing;
+    }
+
+    llvm::Function *target = find_llvm_function(decl);
+
+    if (target == nullptr) {
+        throw _ctx.error(fmt::format(
+            "function reference has no symbol to adapt {}",
+            _ctx.function_context()));
+    }
+
+    llvm::FunctionType *adapt_ty = _ctx.types->get_llvm_function_type(
+        decl->callable_type().signature(),
+        *_ctx.current_cmp_unit,
+        TypeLowering::FunctionCallingShape::t_echo);
+
+    llvm::Function *adapt = llvm::Function::Create(
+        adapt_ty,
+        llvm::GlobalValue::LinkOnceODRLinkage,
+        name,
+        _ctx.current_module());
+
+    llvm::IRBuilderBase::InsertPointGuard restore(*_ctx.builder);
+    _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    _ctx.builder->SetInsertPoint(llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", adapt));
+
+    llvm::Type *lowered_return = _ctx.types->get_llvm_type(
+        decl->get_return_type(), *_ctx.current_cmp_unit);
+    const ReturnAbi abi = return_abi_for(lowered_return);
+
+    std::vector<llvm::Value *> forwarded;
+    unsigned i = 0;
+
+    if (abi.is_indirect()) {
+        forwarded.push_back(adapt->getArg(i++));
+    }
+
+    // skip the environment the indirect call always passes
+    if (i < adapt->arg_size()) {
+        i++;
+    }
+
+    for (; i < adapt->arg_size(); i++) {
+        forwarded.push_back(adapt->getArg(i));
+    }
+
+    llvm::CallInst *call = _ctx.builder->CreateCall(target, forwarded);
+
+    if (abi.is_indirect() || decl->get_return_type().is_void()) {
+        _ctx.builder->CreateRetVoid();
+    }
+    else {
+        _ctx.builder->CreateRet(call);
+    }
+
+    return adapt;
 }
 
 void ExprCodegen::gen_strong_expr(AST::StrongExprNode &node)

@@ -1,0 +1,14 @@
+// two instantiations of a generic whose closure captures nothing must not
+// share one `closure$N` symbol
+
+function tick<T>() : int32
+{
+    function<int32()> $f = function() : int32 {
+        return 1;
+    };
+
+    return $f();
+}
+
+echo tick<int32>();
+echo tick<bool>();

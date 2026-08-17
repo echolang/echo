@@ -459,6 +459,13 @@ AST::ComplexType *AST::TypeRegistry::create_anonymous_type(
     type->kind = kind;
     type->ast_namespace = ns;
 
+    // a closure environment is a class the compiler minted, and a spawned one is shared by
+    // construction. there is no written `#[atomic]` on an anonymous type, so the flag is the
+    // mint's. a struct minted here (a tagged optional) has no count
+    if (kind == ComplexTypeKind::t_class) {
+        type->is_atomic = true;
+    }
+
     // deliberately *not* entered into `_instantiations`: it instantiates no template, so there is no key
     // it could be interned under, and nothing will ever ask for it by (template, args) again. the caller
     // holds the only handle, which is exactly the ownership a closure's environment wants
@@ -525,15 +532,23 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     auto key = std::make_tuple(tmpl, args);
     if (auto it = _instantiations.find(key); it != _instantiations.end()) {
         ComplexType *inst = it->second;
-        // refresh if the template gained properties or conformances after this instance was interned -
-        // this happens when an application (e.g. a return type) is parsed during the symbol pass,
-        // before the struct body populates the template
-        const bool stale = inst->property_count() < tmpl->property_count()
-            || inst->conformances().size() < tmpl->conformances().size();
 
-        if (inst != tmpl && stale) {
-            derive_instantiation(inst, tmpl, args);
+        // flags first, and even when the layout is not stale: a `Box<int32>` in a signature is
+        // interned during the declaration pass, before bind_atomic_attribute / bind_unique_attribute
+        // run. a property-less class never looks stale, so a later lookup that only refreshed the
+        // body would leave the instance unmarked and two threads racing a plain retain
+        if (inst != tmpl) {
+            inst->is_unique = tmpl->is_unique;
+            inst->is_atomic = tmpl->is_atomic;
+
+            const bool stale = inst->property_count() < tmpl->property_count()
+                || inst->conformances().size() < tmpl->conformances().size();
+
+            if (stale) {
+                derive_instantiation(inst, tmpl, args);
+            }
         }
+
         return inst;
     }
 
@@ -553,6 +568,11 @@ AST::ComplexType *AST::TypeRegistry::get_or_create_instantiation(ComplexType *tm
     // without this every instantiation of a unique template would be copyable, which is silent - the
     // copy is a byte copy, so two values end up naming one allocation and both free it
     instantiated->is_unique = tmpl->is_unique;
+
+    // and so is the count protocol: `mutex<int32>` is atomic exactly when `mutex` says it is.
+    // without this every instantiation of an atomic template would keep today's plain retain,
+    // which is silent - two threads sharing `mutex<string>` would race the count
+    instantiated->is_atomic = tmpl->is_atomic;
 
     // and so is visibility: `Hidden<int32>` is as reachable as `Hidden` is, and where it was written is
     // the template's file. without this a private generic type would be private as a template and public
@@ -597,6 +617,12 @@ void AST::TypeRegistry::derive_instantiation(
     // one substitution for everything derived below: the arguments arrive positionally, matching the
     // template's declared parameter order, and positional() is where that arity is checked
     TypeSubstitution subst = TypeSubstitution::positional(tmpl->type_parameters, args);
+
+    // the same flags get_or_create_instantiation copies on first intern and on a cache hit.
+    // here so a stale refresh cannot leave an instance with the template's new properties
+    // and the old "not unique / not atomic" defaults
+    inst->is_unique = tmpl->is_unique;
+    inst->is_atomic = tmpl->is_atomic;
 
     inst->_properties.clear();
     inst->_property_map.clear();

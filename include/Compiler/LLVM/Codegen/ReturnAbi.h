@@ -30,10 +30,9 @@ namespace Compiler::LLVM
     // that. so `extern` declarations keep the shape they have always had, and the one place that is still
     // wrong is still wrong. see the note in TypeLowering::get_function_type
     // there are two answers and the aggregate is the whole of what tells them apart, so it is the
-    // whole of what is stored. **direct** is the value as written - every scalar, every pointer, and
-    // every aggregate small enough that LLVM's own lowering puts it in registers. **indirect** is the
-    // caller passing storage as a hidden *first* argument for a function that then returns `void`, the
-    // classic `sret`, and what takes the aggregate out of the signature.
+    // whole of what is stored. **direct** is the value as written - every scalar and every pointer.
+    // **indirect** is the caller passing storage as a hidden *first* argument for a function that then
+    // returns `void`, the classic `sret`, and what takes the aggregate out of the signature.
     //
     // a kind beside the type would be two fields owing each other an invariant no reader states, and
     // every reader already asks is_indirect() and then reads the type it points at
@@ -47,29 +46,29 @@ namespace Compiler::LLVM
         }
     };
 
-    // **two registers' worth is the line**, which is the same one AArch64 and x86-64 both draw and is why
-    // it is a size and not a field count: what decides is whether the backend can hand the thing back in
-    // registers at all, and below the line it already does. a packed `result<int64, int32>` is 16 bytes
-    // and comes back directly; a value over the line still goes through `sret`. a `string` view pair
-    // does not.
+    // **every sized aggregate is indirect**, and the size is not part of the question. a one-field
+    // struct with two `return`s already becomes a phi of that struct; LLVM will not if-convert it, and
+    // LoopVectorize will not widen the loop that called it. the four-way table in notes/codegen.md is
+    // the proof: a scalar with two returns vectorises, a one-field struct with two does not, a
+    // three-field struct with one does. the packed `result<int64, E>` is 16 bytes - two registers -
+    // and that is why a two-register line was a trap rather than a feature. overlapping the enum
+    // dropped it from 24 onto that line and `bench/result_trivial` went from 1.00x Rust back to the
+    // 4.7x this file already recorded.
     //
-    // asked of the **lowered** type rather than the ValueType, because the answer is about machine
-    // registers and only the DataLayout knows the size. a `void` return and an opaque pointer both answer
-    // direct without a special case, neither being an aggregate
-    inline ReturnAbi return_abi_for(llvm::Type *lowered_return, const llvm::DataLayout &layout)
+    // asked of the **lowered** type rather than the ValueType, because `isAggregateType` is an LLVM
+    // fact. a `void` return and an opaque pointer both answer direct with no special case, neither
+    // being an aggregate. the size is not the question — `indirect_return_attributes` is what
+    // still needs the DataLayout
+    inline ReturnAbi return_abi_for(llvm::Type *lowered_return)
     {
         if (lowered_return == nullptr || !lowered_return->isAggregateType()) {
             return ReturnAbi{};
         }
 
-        // **sized, and asked before the size is.** an unsized aggregate has no answer to give and reaching
-        // for one asserts inside LLVM, so it keeps the shape it had rather than becoming a pointer to
-        // something whose size nothing knows
+        // **sized, and asked before the slot is.** an unsized aggregate has no storage to hand the
+        // caller and reaching for a size asserts inside LLVM, so it keeps the shape it had rather
+        // than becoming a pointer to something whose size nothing knows
         if (!lowered_return->isSized()) {
-            return ReturnAbi{};
-        }
-
-        if (layout.getTypeAllocSize(lowered_return) <= 16) {
             return ReturnAbi{};
         }
 

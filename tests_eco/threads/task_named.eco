@@ -1,0 +1,14 @@
+// `&answer` dest-types as function<int32()>, so spawn does not need a wrapper
+
+use std::thread;
+
+function answer() : int32
+{
+    return 40 + 2;
+}
+
+thread::task<int32> $t = guard thread::spawn(&answer) else ($e) {
+    die($e->message());
+}
+
+echo $t->wait();

@@ -17,8 +17,9 @@ CHECK: define i32 @main(
 CHECK: store %string { %view { ptr @str, i64 3 }, ptr null }
 
 # show(string::view) - the conversion is a call to the `#[implicit]` method the type declared, taking
-# the address of the place, and then the view travels as a plain two-word value
-CHECK: call %view.0 @_M6string_view
+# the address of the place. the view is a two-word aggregate so it comes back through sret, then
+# travels into `show` as a first-class argument
+CHECK: call void @_M6string_viewZZMRBMLC6string(ptr noalias sret(%view.0)
 CHECK: call void @_showZZMLCN6string4viewE
 
 # ...and no reference count moved to get there. this is the claim that would silently regress if the
@@ -32,9 +33,9 @@ CHECK-NOT: strong.inc
 # `const Foo&` wherever its properties allow one (AST::copy_source_may_be_const), and a string's are a
 # view and a class handle, neither of which needs to write through the source
 #
-# a `string` is three words, so the copy answers through storage the caller provides rather than in
-# registers - Compiler::LLVM::return_abi_for's line. the `view` above is two and stays direct, which is
-# why the two calls one screen apart are spelled differently
+# a `string` is three words and a `view` is two; both are aggregates, so both answers go through
+# sret. that is return_abi_for's line - size is not the question. the contrast worth pinning is
+# still the retain, not the signature
 #
 # **the `sret` is checked on the *call* and not only on the definition**, which is the bug this spelling
 # exists to catch: LLVM will fall back to the callee's attributes when a call site omits it, right up

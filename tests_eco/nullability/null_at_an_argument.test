@@ -23,4 +23,5 @@ CHECK: call i32 @_node_tagZZMQLC4Node(ptr null)
 // a member call's written null is argument 1, behind the receiver, and takes the same route
 CHECK: call i32 @_M5Store_readingZZMRBMLC5StoreZMQMLPi(ptr %s, %eco.optional.MLPi zeroinitializer)
 // and a constructor's, which is where this was first seen to crash
-CHECK: call %Row @_RowZZMQMLPi(%eco.optional.MLPi zeroinitializer)
+CHECK: call void @_RowZZMQMLPi(ptr noalias sret(%Row)
+CHECK: %eco.optional.MLPi zeroinitializer)

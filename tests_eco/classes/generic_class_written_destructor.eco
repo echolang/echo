@@ -1,0 +1,26 @@
+// a generic class with a written destructor must not synthesize a `$deinit` for the
+// self-application `Box<T>`. that body would look concrete (no type parameters) while
+// `$this` still names T, and TypeChecker would refuse the template as unresolved
+
+class Box<T>
+{
+    T $value;
+
+    constructor(T $v)
+    {
+        $this->value = $v;
+    }
+
+    destructor()
+    {
+        echo 1;
+    }
+
+    function get() : T
+    {
+        return $this->value;
+    }
+}
+
+Box<int32> $b = Box<int32>(5);
+echo $b->get();

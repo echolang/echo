@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AST/ASTCFunction.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTConstness.h"
 #include "AST/ASTMemberLookup.h"
@@ -362,6 +363,17 @@ namespace AST
 
         if (from == to) {
             return ArgumentFit::t_exact;
+        }
+
+        // `&name` is a C pointer until bind_function_ref_to flips it. a function<...>
+        // parameter scores the Echo callable of that signature - AST::function_ref_as
+        // is the one rewrite, and Instantiation asks it too
+        {
+            const ValueType as_callable = function_ref_as(from, to);
+
+            if (as_callable != from) {
+                return argument_fit(as_callable, nullptr, to);
+            }
         }
 
         // **a tagged optional accepts whatever its payload accepts.** `f($circle)` against a `Drawable?`

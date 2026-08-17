@@ -1,0 +1,18 @@
+// pins the once-guard shape: one acquire load on the fast path, the slow path
+// is a shared helper, and a teardown is a Treiber push
+
+struct Owns
+{
+    int32 $n;
+
+    destructor()
+    {
+    }
+}
+
+struct Holder
+{
+    static Owns $x = Owns(3);
+}
+
+echo Holder::$x->n;

@@ -167,6 +167,11 @@ namespace
     bool check_status(
         const EchoTests::EcoTestFile &test, const ProcessResult &result, const char *actor)
     {
+        if (result.timed_out) {
+            FAIL_CHECK(actor << " timed out after the case's deadline");
+            return false;
+        }
+
         if (EchoTests::status_matches(test.expect, result.exit_code)) {
             return true;
         }
@@ -308,7 +313,9 @@ namespace
         CaseOutcome outcome;
         ScopedScratch scratch(entry.scratch);
 
-        outcome.primary = run_capturing(command);
+        const unsigned deadline = entry.test.timeout_ms;
+
+        outcome.primary = run_capturing(command, deadline);
 
         if (!entry.binary.empty()) {
             std::error_code ec;
@@ -319,12 +326,13 @@ namespace
                 // is the program, so its argv *is* the program's, with no `--` needed to say so
                 outcome.program = run_capturing(
                     entry.test.stdin_prefix() + entry.test.environment_prefix() + quoted(entry.binary)
-                    + entry.test.argument_suffix() + " 2>&1");
+                    + entry.test.argument_suffix() + " 2>&1",
+                    deadline);
             }
         }
 
         for (const auto &dump : dump_commands) {
-            outcome.dumps.push_back(run_capturing(dump));
+            outcome.dumps.push_back(run_capturing(dump, deadline));
         }
 
         return outcome;

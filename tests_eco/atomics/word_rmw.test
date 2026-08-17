@@ -1,0 +1,26 @@
+--- OUT --->
+0
+1
+10
+10
+7
+7
+4
+1
+9
+0
+9
+--- IR --->
+# program order, inlined: add, load, store, sub, exchange, cas
+CHECK: atomicrmw add
+CHECK: seq_cst
+CHECK: load atomic
+CHECK: seq_cst
+CHECK: store atomic
+CHECK: seq_cst
+CHECK: atomicrmw sub
+CHECK: seq_cst
+CHECK: atomicrmw xchg
+CHECK: seq_cst
+CHECK: cmpxchg
+CHECK: seq_cst

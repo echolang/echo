@@ -6,7 +6,7 @@ mode: build
 # merged module. `echoc run` merges too, so the plain-mode cases cover the JIT - but a JIT fault and a
 # linked-binary fault are the same bug and only one of them is reproducible under a debugger.
 #
-# what broke here: an aggregate over Compiler::LLVM::return_abi_for's two-register line comes back through
+# what broke here: an aggregate return_abi_for sends through sret comes back through
 # an `sret` pointer, and which *register* that pointer travels in is decided by the attribute on the
 # **call**, not by the one on the function. LLVM hides a missing call-site attribute by reading the
 # callee's - and `CallBase::getCalledFunction()` answers null when the call's FunctionType is not the

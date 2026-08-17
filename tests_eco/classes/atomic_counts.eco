@@ -1,0 +1,16 @@
+// the four orderings of an atomic count, pinned in the IR section
+
+#[atomic]
+class Counter
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+}
+
+Counter $a = Counter(7);
+Counter $b = $a;
+echo $b->n;

@@ -1,0 +1,9 @@
+// an exchange would move the bits without moving the count
+
+class Node
+{
+    int32 $n;
+}
+
+Node $n = Node(0);
+mem::atomic::load<Node>($n);

@@ -209,7 +209,7 @@ TEST_CASE("two closure literals get different symbols", "[callable]")
     REQUIRE(closures[0]->decorated_func_name() != closures[1]->decorated_func_name());
 }
 
-TEST_CASE("a closure cannot be written where a type parameter is visible", "[callable]")
+TEST_CASE("a closure can be written where a type parameter is visible", "[callable]")
 {
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer<T>(T $v) : int32 {\n"
@@ -218,8 +218,7 @@ TEST_CASE("a closure cannot be written where a type parameter is visible", "[cal
         "}\n"
         "echo outer<int32>(1);\n");
 
-    REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "cannot be written inside a generic function's body"));
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
 // -- the indirect call -------------------------------------------------------
@@ -353,22 +352,19 @@ TEST_CASE("a closure that captures nothing has no environment", "[callable]")
     REQUIRE(closure->captured_values.empty());
 }
 
-TEST_CASE("capturing an owning value is refused", "[callable]")
+TEST_CASE("capturing a class is a retain", "[callable]")
 {
-    // by value means a copy, and copying an owner is a whole taxonomy - a retain, a copy constructor,
-    // or nothing that exists. the environment's teardown is uniform precisely because it holds no
-    // owner, so admitting one would leak it
+    // capture is a copy: a class handle is one more reference, torn down with the environment
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "struct Buffer { usize $len; destructor() { echo 1; } }\n"
-        "function outer() : usize {\n"
-        "    Buffer $b = Buffer(3);\n"
-        "    function<usize()> $f = function() : usize { return $b->len; };\n"
+        "class Box { int32 $n; constructor(int32 $n) { $this->n = $n; } }\n"
+        "function outer() : int32 {\n"
+        "    Box $b = Box(5);\n"
+        "    function<int32()> $f = function() : int32 { return $b->n; };\n"
         "    return $f();\n"
         "}\n"
         "echo outer();\n");
 
-    REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "which owns a resource. Capturing an owning value is not supported yet"));
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
 TEST_CASE("capturing through an enclosing closure is refused", "[callable]")
@@ -649,17 +645,14 @@ TEST_CASE("a malformed closure literal reports rather than crashing", "[callable
     }
 }
 
-TEST_CASE("a refused closure inside a return recovers", "[callable]")
+TEST_CASE("a closure inside a generic return compiles", "[callable]")
 {
-    // the refusal's recovery has to skip the literal brace-aware. skipping to the next `;` landed inside
-    // the body and ran the cursor off the end of the file, which asserted in Cursor::current
     auto bundle = EchoTests::tests_make_parsed_bundle(
-        "function mk<T>(T $seed) : int32 { return function() : int32 { return 1; }; }\n"
-        "echo 1;\n");
+        "function mk<T>(T $seed) : function<int32()> { return function() : int32 { return 1; }; }\n"
+        "function<int32()> $f = mk<int32>(0);\n"
+        "echo $f();\n");
 
-    REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(count_issues_containing(*bundle, "cannot be written inside a generic function's body") == 1);
-    REQUIRE(bundle->collector.issues.size() == 1);
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
 TEST_CASE("a cloned body gets its own indirect call and closure nodes", "[callable]")

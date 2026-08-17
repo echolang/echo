@@ -1,0 +1,4 @@
+// #[unique] so a struct copy cannot memcpy the word
+
+atomic<int32> $a = atomic<int32>(1);
+atomic<int32> $b = $a;

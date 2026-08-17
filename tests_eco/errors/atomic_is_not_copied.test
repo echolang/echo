@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  atomic_is_not_copied.eco:4:20
+
+  'atomic<int32>' is unique: exactly one value may name its storage, so it is moved and never copied.
+
+  3 | atomic<int32> $a = atomic<int32>(1);
+  4 | atomic<int32> $b = $a;
+    :                    ^^
+  5 | 
+
+  help: Write 'mv $a' to transfer it. Or take a borrow ('atomic<int32>&') if it is only being read.
+
+1 error, nothing was compiled.

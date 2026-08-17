@@ -97,7 +97,6 @@ namespace AST
 
         void visitFunctionCallExpr(FunctionCallExprNode &node) override;
         void visit_indirect_call_expr(IndirectCallExprNode &node) override;
-        void visit_closure_expr(ClosureExprNode &node) override;
         void visitVarDecl(VarDeclNode &node) override;
         void visit_assign(AssignNode &node) override;
         void visitTypeCast(TypeCastNode &node) override;
@@ -242,6 +241,10 @@ namespace AST
         // nothing else accounts for - AST::is_unaccounted_storage, asked once for the two of them.
         // refused here, where the call has a token to point at
         void check_raw_storage_argument(FunctionCallExprNode &node);
+
+        // `mem::atomic::` admits a word and nothing else. AST::atomic_operand_refusal is the
+        // sentence; this is the one site that asks it, of the bound `T`, located at the call
+        void check_atomic_operand(FunctionCallExprNode &node);
 
         // the one builtin whose *availability* is a question rather than its arguments: without
         // --track-allocations there is no counter for `mem::live_allocations()` to read

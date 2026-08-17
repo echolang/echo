@@ -284,10 +284,9 @@ AST::ExprNode *Parser::capture_variable(
         return nullptr;
     }
 
-    // whether the captured value owns a resource is *not* asked here, though this is where the capture
-    // is made: a variable's type is only final once the monomorphizer has settled the call it was
-    // inferred from, so the answer for `$b = Box<int32>(5)` would be taken from `Box<T>` and come back
-    // "owns nothing". AST::TypeChecker::visit_closure_expr asks it, once the types are honest
+    // whether the captured value owns a resource is *not* asked here: a variable's type is only
+    // final once the monomorphizer has settled the call it was inferred from. AST::OwnershipPass
+    // walks the captured places at the closure expression and classify_copy decides there
     //
     // a declaration whose inference failed has no type node at all, and `type()` would read through the
     // null. unknown rather than a refusal: the failure has already been reported at the declaration, and
@@ -361,15 +360,13 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // closure, so there is nothing to hide it from
     closure_decl->declared_in = AST::origin_at(payload.context);
 
-    // the same reason a nested declaration is rejected where a type parameter is visible: a closure
-    // cannot receive a substitution for one. lifted once closures can be generic
-    if (payload.context.has_visible_type_params()) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(function_token),
-            "A closure cannot be written inside a generic function's body yet - it has no access to the "
-            "enclosing type parameters.");
-        Parser::skip_refused_function(payload);
-        return nullptr;
+    // inherit the enclosing function's type parameters, the way a method inherits its
+    // owner's: so TypeChecker skips the template closure (it still names T) and the
+    // monomorphizer clones a concrete body per instance. a nested `function` stays
+    // refused - it is not cloned with its parent
+    if (AST::FunctionDeclNode *enclosing = payload.context.current_function_ptr) {
+        closure_decl->type_parameters = enclosing->type_parameters;
+        closure_decl->inherited_type_param_count = closure_decl->type_parameters.size();
     }
 
     auto &closure_scope = payload.context.emplace_node<AST::ScopeNode>();

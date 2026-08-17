@@ -2007,6 +2007,36 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
         case NodeType::n_expr_class_alloc:
             break;
 
+        // capture is by value, evaluated in this frame. RecursiveVisitor already walks
+        // captured_values; this pass has its own switch whose default walks nothing - the
+        // n_expr_match trap one node over. each capture arrives as an initialization of the
+        // environment property, so classify_copy and a copy constructor apply with no arm
+        // here. then ensure_deinit for the environment: an anonymous layout is in neither
+        // `_instantiations` nor `_type_module`, so the sweep never asks and this is the only
+        // place that can
+        case NodeType::n_expr_closure:
+        {
+            auto *node = static_cast<ClosureExprNode *>(expr);
+
+            if (node->environment_type != nullptr) {
+                for (size_t i = 0; i < node->captured_values.size(); i++) {
+                    // a copy, not a move: capture-by-value leaves the original in the enclosing
+                    // frame. t_initialization would take the local, which is A27 §2's `mv` capture
+                    node->captured_values[i] = resolve_value_arrival(
+                        node->captured_values[i],
+                        node->environment_type->get_property_type(i),
+                        nullptr,
+                        ValueDestination::t_declaration);
+                }
+
+                ensure_deinit(
+                    ValueType::make_complex(node->environment_type),
+                    node->token);
+            }
+
+            break;
+        }
+
         case NodeType::n_member_access:
         {
             auto *access = static_cast<MemberAccessNode *>(expr);
@@ -2886,6 +2916,13 @@ FunctionDeclNode *OwnershipPass::ensure_deinit(const ValueType &type, std::optio
         return nullptr;
     }
 
+    // the self-application `Foo<T>` is interned as an instantiation so a template body's `$this` has a
+    // type, but its arguments are still the parameters. a `$deinit` synthesized for it would look
+    // concrete to TypeChecker - empty type_parameters, a real body - while `$this` still names T
+    if (contains_type_param(type)) {
+        return nullptr;
+    }
+
     // **an instantiation whose properties are not filled in yet is not answerable either**, and the same
     // permanence applies: an application of a generic can be interned during the declaration pass, before
     // the template's own body has been walked, and is refilled later. answering in that window would
@@ -2993,6 +3030,11 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
         return;
     }
 
+    // the self-application, for ensure_deinit's reason: `Foo<T>::$count` is not storage
+    if (contains_type_param(node.owner)) {
+        return;
+    }
+
     // written at the type rather than at the access that asked - see TypeHomeScope for why that is a
     // soundness rule and not a tidiness one. the property's own `$name` positions the body either way,
     // so unlike a deinit there is nothing here that a missing home would leave unanswered
@@ -3042,6 +3084,8 @@ void OwnershipPass::ensure_static_init(StaticPropertyExprNode &node)
 
             CloneContext cc(_current_module->nodes, subst, _collector.type_registry);
             initializer = static_cast<ExprNode *>(node.decl->init_expr->clone(cc));
+            publish_cloned_closures(
+                *initializer, _current_file, &decl, ct->instantiation_args);
         }
 
         auto &assign = _current_module->nodes.emplace_back<AssignNode>(

@@ -35,6 +35,9 @@ namespace
 
         case Compiler::TestOutcome::t_failed:
             return fmt::format("exited {}", result.status);
+
+        case Compiler::TestOutcome::t_timed_out:
+            return "timed out";
         }
 
         return "ended";

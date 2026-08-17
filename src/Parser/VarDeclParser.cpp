@@ -13,6 +13,7 @@
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/FuncDeclParser.h"
 #include "Parser/GuardParser.h"
 #include "Parser/ScopeParser.h"
 
@@ -36,19 +37,24 @@ bool should_skip_vardecl_end_token(const Parser::Cursor &cursor)
     return cursor.is_type(Token::Type::t_semicolon) || cursor.is_type(Token::Type::t_comma);
 }
 
-// the left hand side of an assignment statement: the variable itself, or any `->member`,
-// `[n]` or `:$` suffix hanging off it. the cursor has to sit right after the varname
-static AST::ExprNode *parse_assign_target(Parser::Payload &payload, AST::VarDeclNode *vardecl)
+// the left hand side of an assignment statement: `base`, or any `->member`, `[n]` or `:$`
+// suffix hanging off it. the cursor has to sit right after the name that produced `base`
+static AST::ExprNode *parse_assign_target(Parser::Payload &payload, AST::ExprNode *base)
 {
-    auto var_node = &payload.context.emplace_node<AST::VarNode>(vardecl);
-    auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
-    auto target_ref = Parser::parse_postfix_chain(payload, AST::make_ref(*var_ref));
+    auto target_ref = Parser::parse_postfix_chain(payload, AST::make_ref(base));
 
     if (!target_ref.has()) {
         return nullptr;
     }
 
     return target_ref.unsafe_ptr<AST::ExprNode>();
+}
+
+static AST::ExprNode *parse_assign_target(Parser::Payload &payload, AST::VarDeclNode *vardecl)
+{
+    auto var_node = &payload.context.emplace_node<AST::VarNode>(vardecl);
+    auto var_ref = &payload.context.emplace_node<AST::VarRefNode>(var_node);
+    return parse_assign_target(payload, var_ref);
 }
 
 // `$i++` is a statement, not an expression - it desugars to `$i = $i + 1` here so that every
@@ -289,16 +295,36 @@ AST::VarDeclNode *Parser::parse_varexpr(
     // not count: `int32 $x = 2;` written inside a nested function body over an enclosing `$x` declares a
     // fresh variable that shadows it, and treating it as an assignment would have the nested body write
     // into a frame it cannot even address
+    AST::ScopeNode::VariableLookup found;
     AST::VarDeclNode *prev_vardecl = nullptr;
     if (scope != nullptr) {
-        const auto found = scope->lookup_variable(nametoken.value());
+        found = scope->lookup_variable(nametoken.value());
         prev_vardecl = found.found_in_frame() ? found.decl : nullptr;
+    }
+
+    // a closure is the one nested body that *can* reach an enclosing local: `$c->bump()` and
+    // `$n = $n + 1` are statements over the captured place, not a fresh declaration shadowing it.
+    // a plain nested `function` still shadows - it has no environment, so the name cannot mean the
+    // outer storage
+    AST::ExprNode *captured_base = nullptr;
+    if (prev_vardecl == nullptr
+        && found.decl != nullptr
+        && found.crossed_function_boundary()
+        && payload.context.current_closure_ptr != nullptr)
+    {
+        captured_base = Parser::capture_variable(
+            payload, found.decl, nametoken, found.boundaries_crossed);
+
+        if (captured_base == nullptr) {
+            cursor.try_skip_to_next_statement();
+            return nullptr;
+        }
     }
 
     // if the next token is a accessor this is a member reference
 
     // we have a previous declaration, this might be a mutable variable
-    if (prev_vardecl != nullptr) {
+    if (prev_vardecl != nullptr || captured_base != nullptr) {
         // const is *not* checked here. checking the declared type's top level is the wrong level
         // twice over: `const int& $r` is a mutable borrow of a const pointee, so the guard would
         // never fire on the write it should reject, while `const ptr<int> $p` is a const pointer
@@ -308,7 +334,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
 
         // we do not allow to redefine the type of a variable, the type
         // has to be either explictly set in the firt declaration or inferred
-        if (!prev_vardecl->has_type() && type != nullptr) {
+        if (prev_vardecl != nullptr && !prev_vardecl->has_type() && type != nullptr) {
             payload.collector.collect_issue<AST::Issue::VariableRedeclaration>(payload.context.code_ref(nametoken), prev_vardecl);
             cursor.try_skip_to_next_statement();
             return nullptr;
@@ -319,7 +345,9 @@ AST::VarDeclNode *Parser::parse_varexpr(
         // same AssignNode, so codegen resolves them through one lvalue path
         const auto target_start = cursor.snapshot();
 
-        auto *target = parse_assign_target(payload, prev_vardecl);
+        auto *target = captured_base != nullptr
+            ? parse_assign_target(payload, captured_base)
+            : parse_assign_target(payload, prev_vardecl);
         if (target == nullptr) {
             cursor.try_skip_to_next_statement();
             return nullptr;
@@ -367,7 +395,14 @@ AST::VarDeclNode *Parser::parse_varexpr(
                 // the same node under two parents: AST::PointerAdjuster rewrites edges in place,
                 // and a shared subtree would be adjusted twice
                 cursor.restore(target_start);
-                operand = parse_assign_target(payload, prev_vardecl);
+                if (captured_base != nullptr) {
+                    AST::ExprNode *again = Parser::capture_variable(
+                        payload, found.decl, nametoken, found.boundaries_crossed);
+                    operand = again != nullptr ? parse_assign_target(payload, again) : nullptr;
+                }
+                else {
+                    operand = parse_assign_target(payload, prev_vardecl);
+                }
                 cursor.skip(); // the ++/-- token, re-reached by the second parse
             }
 

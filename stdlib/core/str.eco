@@ -35,6 +35,8 @@ namespace str;
  * and this file, which all name them; `internal` is the module rung, so a consumer holding a
  * `str::buf` still cannot write `$b->bytes` or call `$b->append`. The type stays constructible.
  */
+// a string copy is a retain of this, and a copy out of a mutex happens on two threads
+#[atomic]
 public class buf
 {
     internal usize $capacity;
@@ -380,27 +382,34 @@ public function split(const string& $text, const string& $sep) : array<string>
 {
     array<string> $parts = array<string>();
 
+    // the scan is views. `$text->sub` is an owning string, and a retain of `str::buf` is an
+    // atomic RMW: doing that once per separator on a shared parent is what made
+    // `bench/string_split_join` 2x Rust. each part is still one owning `string` that shares
+    // the parent's bytes - that contract does not change
+    string::view $all = $text->window;
+
     if ($sep->empty()) {
-        $parts->push($text->sub(0, $text->size()));
+        $parts->push(string($all, $text->owner));
         return $parts;
     }
 
-    usize $size = $text->size();
+    string::view $needle = $sep->window;
+    usize $size = $all->size;
     usize $start = 0;
 
     while (true) {
-        string $rest = $text->sub($start, $size - $start);
-        usize $at = $rest->find($sep);
+        string::view $rest = $all->sub($start, $size - $start);
+        usize $at = $rest->find($needle);
 
         // `find` answers the haystack's own size when there is no match - there is no `Option`
         // to hand back, and the size is the one value always to hand and never a valid index
-        if ($at >= $rest->size()) {
-            $parts->push($rest);
+        if ($at >= $rest->size) {
+            $parts->push(string($rest, $text->owner));
             break;
         }
 
-        $parts->push($rest->sub(0, $at));
-        $start = $start + $at + $sep->size();
+        $parts->push(string($rest->sub(0, $at), $text->owner));
+        $start = $start + $at + $needle->size;
     }
 
     return $parts;
@@ -435,10 +444,12 @@ public function join(const array<string>& $parts, const string& $sep) : string
 
     while ($i < $count) {
         if ($i > 0) {
-            $out->append($sep);
+            $out->append($sep->window->bytes, $sep->size());
         }
 
-        $out->append($parts[$i]);
+        // the dest is a fresh unique buffer; the parts share a different one. the
+        // pointer form copies bytes and does not retain the parent
+        $out->append($parts[$i]->window->bytes, $parts[$i]->size());
         $i = $i + 1;
     }
 

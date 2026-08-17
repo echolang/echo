@@ -40,6 +40,7 @@ namespace Compiler::LLVM
     class LValueCodegen;
     class ClassCodegen;
     class AbortCodegen;
+    class AtomicCodegen;
     class MemoryCodegen;
     class StaticStorageCodegen;
     class ProcessCodegen;
@@ -264,6 +265,9 @@ namespace Compiler::LLVM
         // one message shape and one release-mode gate
         AbortCodegen *abort = nullptr;
 
+        // the seven `mem::atomic::` verbs. one protocol, one file - see AtomicCodegen.h
+        AtomicCodegen *atomics = nullptr;
+
         // the memory subsystem: the one owner of where heap memory comes from. the class subsystem's
         // boxes and environments and the stdlib's raw buffers both go through it, which is what makes
         // "how much is still outstanding" a question with an answer at all
@@ -290,6 +294,11 @@ namespace Compiler::LLVM
         // own subsystem for AbortCodegen's reason, being state carried across a whole function body
         // rather than a fact about the node in hand
         DebugInfoCodegen *debug_info = nullptr;
+
+        // `__eco_static_once` names pthread_self / sched_yield. set when that helper is
+        // emitted, read by the driver so the compiler-introduced symbols carry their own
+        // link requirement rather than borrowing the stdlib's
+        bool needs_pthread = false;
 
         llvm::Module *current_module() {
             return current_cmp_unit->llvm_module.get();
@@ -328,13 +337,18 @@ namespace Compiler::LLVM
                 return existing;
             }
 
-            return new llvm::GlobalVariable(
+            auto *global = new llvm::GlobalVariable(
                 *current_module(),
                 type,
                 /*isConstant=*/false,
                 llvm::GlobalValue::LinkOnceODRLinkage,
                 llvm::Constant::getNullValue(type),
                 symbol);
+
+            // an atomic access to a global with unstated alignment is a verifier error at best
+            // and two units disagreeing about one linkonce_odr symbol at worst
+            global->setAlignment(layout().getABITypeAlign(type));
+            return global;
         }
 
         // **where the builder goes, and the one place it goes there.**

@@ -1,0 +1,10 @@
+// a closure written in a generic body is cloned per instance; T in a capture substitutes
+
+function twice<T>(T $v, function<T(T)> $f) : T
+{
+    function<T()> $once = function() : T { return $f($v); };
+    return $once();
+}
+
+echo twice(21, function(int32 $a) : int32 { return $a + $a; });
+echo twice(1.5, function(float64 $a) : float64 { return $a + $a; });

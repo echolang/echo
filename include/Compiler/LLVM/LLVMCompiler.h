@@ -11,6 +11,7 @@
 #include "Compiler/CompilerOptions.h"
 #include "Compiler/LLVM/CodegenContext.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
+#include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/TypeLowering.h"
 #include "Compiler/LLVM/Codegen/LValueCodegen.h"
 #include "Compiler/LLVM/Codegen/ExprCodegen.h"
@@ -162,6 +163,12 @@ public:
     // prepare_execution, which is when the prune happens
     void set_jit_roots(std::vector<std::string> roots);
 
+    // `__eco_static_once` names pthread_self / sched_yield. the compiler emitted the
+    // symbols, so it owes the link requirement - a `--no-stdlib` static must still link
+    bool needs_pthread() const {
+        return _ctx.needs_pthread;
+    }
+
     // what that prune dropped, for `--explain-prune`. Empty on any path that has not run one
     const std::string &prune_report() const;
 
@@ -188,6 +195,7 @@ private:
     Compiler::LLVM::TypeDeclCodegen _struct;
     Compiler::LLVM::ClassCodegen _classes;
     Compiler::LLVM::AbortCodegen _abort;
+    Compiler::LLVM::AtomicCodegen _atomics;
     Compiler::LLVM::MemoryCodegen _memory;
     Compiler::LLVM::StaticStorageCodegen _statics;
     Compiler::LLVM::ProcessCodegen _process;

@@ -73,6 +73,7 @@ namespace Compiler
         t_color,
         t_silent,
         t_verbose,
+        t_timeout,
         t_with_stdlib,
         t_dry_run,
         t_help,

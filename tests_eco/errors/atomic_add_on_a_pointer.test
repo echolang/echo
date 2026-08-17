@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_add_on_a_pointer.eco:4:14
+
+  cannot atomically add to a pointer - that would move the address by bytes, not by elements. Write load, store, exchange or compare_exchange.
+
+  3 | ptr<int32> $slot = ptr<int32>(null);
+  4 | mem::atomic::add<ptr<int32>>($slot, $slot);
+    :              ^^^
+  5 | 
+
+1 error, nothing was compiled.

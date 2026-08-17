@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotCopy  closure_captures_uncopyable.eco:17:56
+
+  'Buffer' owns a resource and cannot be copied implicitly at this declaration.
+
+  16 |     Buffer $b = Buffer(3);
+  17 |     function<usize()> $f = function() : usize { return $b->len; };
+     :                                                        ^^
+  18 | 
+
+  help: Write 'mv $b' to transfer ownership, take a borrow ('Buffer&') if the value is only being read, or give 'Buffer' a copy constructor ('constructor(Buffer& $other)').
+
+1 error, nothing was compiled.

@@ -556,3 +556,68 @@ TEST_CASE("a difference names where it is", "[odr]")
     REQUIRE(difference->left != nullptr);
     REQUIRE(difference->right != nullptr);
 }
+
+TEST_CASE("a different atomic ordering is a divergence", "[odr]")
+{
+    auto pair = parse_pair(
+        R"(
+            define linkonce_odr i64 @bump(ptr %p) {
+            entry:
+              %r = atomicrmw add ptr %p, i64 1 monotonic, align 8
+              ret i64 %r
+            }
+        )",
+        R"(
+            define linkonce_odr i64 @bump(ptr %p) {
+            entry:
+              %r = atomicrmw add ptr %p, i64 1 seq_cst, align 8
+              ret i64 %r
+            }
+        )");
+
+    REQUIRE_FALSE(agree(*pair, "bump"));
+}
+
+TEST_CASE("a fence of a different ordering is a divergence", "[odr]")
+{
+    auto pair = parse_pair(
+        R"(
+            define linkonce_odr void @bar() {
+            entry:
+              fence acquire
+              ret void
+            }
+        )",
+        R"(
+            define linkonce_odr void @bar() {
+            entry:
+              fence release
+              ret void
+            }
+        )");
+
+    REQUIRE_FALSE(agree(*pair, "bar"));
+}
+
+TEST_CASE("a cmpxchg of a different success ordering is a divergence", "[odr]")
+{
+    auto pair = parse_pair(
+        R"(
+            define linkonce_odr i1 @try(ptr %p) {
+            entry:
+              %c = cmpxchg ptr %p, i64 0, i64 1 acquire monotonic, align 8
+              %ok = extractvalue { i64, i1 } %c, 1
+              ret i1 %ok
+            }
+        )",
+        R"(
+            define linkonce_odr i1 @try(ptr %p) {
+            entry:
+              %c = cmpxchg ptr %p, i64 0, i64 1 seq_cst monotonic, align 8
+              %ok = extractvalue { i64, i1 } %c, 1
+              ret i1 %ok
+            }
+        )");
+
+    REQUIRE_FALSE(agree(*pair, "try"));
+}

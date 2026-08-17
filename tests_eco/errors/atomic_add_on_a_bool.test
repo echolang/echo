@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] atomic_add_on_a_bool.eco:4:19
+
+  cannot atomically add or subtract a bool - there is no integer RMW on a flag. Write load, store, exchange or compare_exchange.
+
+  3 | bool $flag = false;
+  4 | echo mem::atomic::add<bool>($flag, true);
+    :                   ^^^
+  5 | 
+
+1 error, nothing was compiled.

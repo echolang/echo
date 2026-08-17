@@ -198,6 +198,22 @@ namespace AST
         // as the rest of the compiler knows, so `function f() : int32 { env::exit(1); }` would be a
         // missing return; AST::scope_exit_kind gives it the arm `t_die` has instead
         t_exit,
+
+        // the seven `mem::atomic::` verbs. a builtin over a borrow, same argument as `take`/`init`:
+        // the compiler is the only thing that can emit an `atomicrmw`, and an ordering is a claim
+        // about two accesses nothing in the language can check - so there is no ordering parameter
+        // and the surface is sequentially consistent
+        //
+        // they do **not** own raw storage. `builtin_owns_raw_storage` answering true would exempt
+        // the `T&` from `check_unsafe_promotion` and launder a raw address into a trusted borrow.
+        // AST::atomic_operand_refusal is the type gate; TypeChecker asks it once
+        t_atomic_load,
+        t_atomic_store,
+        t_atomic_add,
+        t_atomic_sub,
+        t_atomic_exchange,
+        t_atomic_compare_exchange,
+        t_atomic_fence,
     };
 
     // **can this builtin be answered before codegen, and if not, why not?**

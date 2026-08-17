@@ -4,6 +4,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <vector>
 
 #include "AST/ASTNode.h"
 #include "AST/ASTNodeReference.h"
@@ -11,6 +12,8 @@
 
 namespace AST
 {
+    class File;
+    class FunctionDeclNode;
     // toolkit threaded through a deep clone of an AST subtree. It is the single place that
     // knows how to (a) emit new nodes into the right NodeCollection, (b) substitute types,
     // and (c) rebind references so that clones point at clones (not at the originals)
@@ -92,6 +95,15 @@ namespace AST
             return substitute_type(type, subst, registry);
         }
     };
+
+    // cloned closures hang off the file root, not off the expression. walk `root` for
+    // ClosureExprNode, stamp the enclosing instance's identity, and publish each decl
+    // so codegen emits the body. one owner so CloneContext is not an out-parameter
+    void publish_cloned_closures(
+        Node &root,
+        File *file,
+        FunctionDeclNode *enclosing_template,
+        const std::vector<ValueType> &instantiation_args);
 };
 
 #endif

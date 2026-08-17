@@ -17,7 +17,12 @@ namespace Compiler
     {
         t_passed,
         t_failed,
-        t_signalled
+        t_signalled,
+
+        // the deadline `--timeout` asked for fired. a fourth answer rather than folding it into
+        // t_signalled: a test killed by SIGALRM because it ran too long and a test killed by
+        // SIGSEGV are not the same news
+        t_timed_out
     };
 
     // one finished test.
@@ -67,7 +72,13 @@ namespace Compiler
     //
     // the parent flushes its streams before forking, or whatever it had buffered is duplicated into every
     // child and written again by each
-    TestResult run_test_isolated(const TestCase &test, const std::function<void()> &call);
+    // `timeout_ms` is `--timeout`. zero waits forever. the parent watches the clock with
+    // poll and SIGKILL, so the flag's unit is honest and a child that ignores SIGALRM
+    // still dies. a fired deadline is `t_timed_out`, not `t_signalled`
+    TestResult run_test_isolated(
+        const TestCase &test,
+        const std::function<void()> &call,
+        unsigned timeout_ms = 0);
 };
 
 #endif

@@ -74,6 +74,10 @@ namespace Compiler
         // reacted to one would go cold for a flag the objects never saw
         std::vector<std::string> filters;
 
+        // `test` only. zero means no deadline, which is the default and the behaviour `--timeout`
+        // was added to keep. milliseconds, because that is what the flag takes
+        unsigned timeout_ms = 0;
+
         // the request, exactly as written. Compiler::TargetFacts::resolve is still the owner of what they
         // mean, asked in run_front_end and in main_clean as it is today
         std::string target_os;

@@ -1,0 +1,8 @@
+--- OUT --->
+3
+--- IR --->
+CHECK: @"5Plain.typeinfo" = linkonce_odr constant { i64, ptr, i64, ptr }
+CHECK: @"6Marked.typeinfo" = linkonce_odr constant { i64, ptr, i64, ptr }
+CHECK: %counts_are_atomic = icmp ne i64 %atomic.bit, 0
+CHECK: atomicrmw add
+CHECK: %strong.inc = add i64 %strong, 1

@@ -946,6 +946,47 @@ static void bind_unique_attribute(Parser::Payload &payload, AST::TypeDeclNode *s
     complex.is_unique = true;
 }
 
+// `#[atomic]` - this class's reference count is an atomic RMW, so a handle may be retained and
+// released on more than one thread. the contents are not covered
+//
+// shaped like bind_unique_attribute above, and refusing at the *declaration* for the same
+// reason: the flag only ever holds a claim that means something
+static void bind_atomic_attribute(Parser::Payload &payload, AST::TypeDeclNode *struct_node)
+{
+    auto *atomic_attr = struct_node->attributes.get_first("atomic");
+    if (atomic_attr == nullptr) {
+        return;
+    }
+
+    auto &complex = struct_node->complex_type();
+
+    // an interface declares requirements and has no layout, so there is no count to make atomic
+    if (complex.is_interface_kind()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(atomic_attr->attribute_tokens),
+            "'#[atomic]' cannot be written on an interface. An interface declares requirements "
+            "and has no layout, so there is no count to make atomic.");
+        return;
+    }
+
+    // a struct (or an enum) has no reference count - it is copied, and each copy is one thread's own
+    if (!complex.is_class_kind()) {
+        const char *keyword = AST::type_kind_keyword(complex.kind);
+        const char *article = complex.is_enum_kind() ? "an" : "a";
+        const char *Article = complex.is_enum_kind() ? "An" : "A";
+
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(atomic_attr->attribute_tokens),
+            fmt::format(
+                "'#[atomic]' cannot be written on {} {}. {} {} has no reference count - it is "
+                "copied, and each copy is one thread's own.",
+                article, keyword, Article, keyword));
+        return;
+    }
+
+    complex.is_atomic = true;
+}
+
 AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -1118,6 +1159,7 @@ AST::TypeDeclNode *Parser::parse_typedecl(Payload &payload)
 
     bind_core_type_attribute(payload, struct_node);
     bind_unique_attribute(payload, struct_node);
+    bind_atomic_attribute(payload, struct_node);
 
     if (owner_node != nullptr) {
         // part of the nested type's identity - see ComplexType::owner_type. set here rather than at

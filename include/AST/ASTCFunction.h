@@ -64,15 +64,32 @@ namespace AST
         FunctionRegistry &functions
     );
 
-    // **gives an undecided `&name` the destination's signature.** the exact shape of
-    // AST::bind_null_to beside it. a no-op on anything that is not an undecided function
-    // ref, and on a destination that is not a C function pointer. the only writer of
-    // `decl` that consults a destination - the parser's unique-candidate bind is the
-    // other writer, and it does not look at types
+    // **gives `&name` the destination's signature.** a C function pointer or an Echo
+    // callable. a unique name is already resolved by the parser; a callable destination
+    // still has to flip `as_callable` on that node, or `spawn(&answer)` stays a C pointer.
+    // the only writer of `decl` that consults a destination - the parser's unique-candidate
+    // bind is the other writer, and it does not look at types
     //
     // CallResolver is the only asker that can type a direct call's argument. the parser
     // asks where the destination is already known
     bool bind_function_ref_to(ExprNode *expr, const ValueType &destination, FunctionRegistry &functions);
+
+    // **what `&name` is at this destination.** a C function pointer sitting at a
+    // callable destination is the Echo callable of the same signature; otherwise
+    // `from`. scoring and inference both ask this, so neither has to know about
+    // FunctionRefExprNode
+    inline ValueType function_ref_as(const ValueType &from, const ValueType &destination)
+    {
+        const ValueType wanted = ValueType::make_mutable(ValueType::make_non_nullable(destination));
+
+        if (!wanted.is_callable() || !from.is_c_function()) {
+            return from;
+        }
+
+        return ValueType::make_callable(
+            from.signature().return_type,
+            from.signature().parameter_types);
+    }
 
     // the function ref this expression is, under implicit casts, or null
     FunctionRefExprNode *function_ref_of(ExprNode *expr);

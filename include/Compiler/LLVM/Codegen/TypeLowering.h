@@ -71,7 +71,7 @@ namespace Compiler::LLVM
             const AST::FunctionDeclNode *node, llvm::Function *func, Compiler::LLVM::CmpUnit &cmp_unit,
             const ReturnAbi &abi);
 
-        // **how *this declaration* hands its answer back**, which is the size rule
+        // **how *this declaration* hands its answer back**, which is the aggregate rule
         // Compiler::LLVM::return_abi_for owns plus the one thing it cannot see: whether the declaration
         // uses Echo's convention at all.
         //

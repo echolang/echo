@@ -1609,6 +1609,25 @@ static bool collect_link_requirements(
     return true;
 }
 
+// `__eco_static_once` names pthread_self / sched_yield. the compiler emitted those
+// symbols, so it owes the requirement - a `--no-stdlib` static must still link.
+// merge after codegen, which is when the helper is first asked for
+static void merge_emitted_runtime_link(
+    LLVMCompiler &compiler,
+    std::vector<Compiler::LinkRequirement> &link
+)
+{
+    if (!compiler.needs_pthread()) {
+        return;
+    }
+
+    Compiler::LinkRequirement pthread;
+    pthread.scheme = Compiler::LinkScheme::t_library;
+    pthread.value = "pthread";
+    pthread.declared_by = "echoc";
+    Compiler::merge_link_requirements({ pthread }, link);
+}
+
 // what a failed link owes a person beyond whatever the linker already printed.
 //
 // a linker names a symbol or a library and has no idea which of a build's manifests asked for it, which in
@@ -1903,10 +1922,6 @@ static std::optional<int> prepare_jit(
         }
     }
 
-    if (!load_native_libraries(diagnostics, link, c_builds.libraries)) {
-        return 1;
-    }
-
     compiler.set_entry(front.entry_module(), front.entry_file());
 
     // **no file root becomes the program.** Whatever application this module is does not run: a test asked
@@ -1929,6 +1944,12 @@ static std::optional<int> prepare_jit(
         step.finish(true);
     } catch (Compiler::ASTCompilerException &e) {
         return report_compiler_exception(diagnostics, e);
+    }
+
+    merge_emitted_runtime_link(compiler, link);
+
+    if (!load_native_libraries(diagnostics, link, c_builds.libraries)) {
+        return 1;
     }
 
     optimize_if_asked(driver, compiler);
@@ -2228,7 +2249,7 @@ int main_test(
 
         reporter.result(Compiler::run_test_isolated(test, [address]() {
             reinterpret_cast<void (*)()>(address)();
-        }));
+        }, driver.timeout_ms));
     }
 
     const bool passed = reporter.finish();
@@ -2333,6 +2354,8 @@ static int build_one_program(
     } catch (Compiler::ASTCompilerException &e) {
         return report_compiler_exception(diagnostics, e);
     }
+
+    merge_emitted_runtime_link(compiler, link);
 
     optimize_if_asked(driver, compiler);
 

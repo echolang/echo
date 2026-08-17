@@ -25,3 +25,7 @@
 #[sources: "std/math/*.eco"]
 #[sources: "std/env/*.eco"]
 #[sources: "std/io/*.eco"]
+#[sources: "std/thread/*.eco"]
+
+// glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
+#[link: lib "pthread"]

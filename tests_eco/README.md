@@ -55,6 +55,7 @@ test that quietly asserts less than its author wrote.
 | `env` | space-separated `KEY=VALUE` pairs | set in the environment of everything the case spawns |
 | `args` | space-separated words | the program's own arguments — `argv[1]` onwards |
 | `stdin` | space-separated words | fed to the program on standard input, **one line per word** |
+| `timeout` | milliseconds | deadline for every spawn this case starts. default 20000; `0` waits forever |
 
 `expect` takes an **exact status** as well as `ok`/`fail`, and that exists because `std::env::exit($code)`
 made the status something a program *chooses*: pinned as `fail`, a case asserting `exit(3)` would pass just

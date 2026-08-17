@@ -24,8 +24,8 @@
 
 LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     : _types(_ctx), _lvalues(_ctx), _expr(_ctx), _stmt(_ctx), _struct(_ctx), _classes(_ctx),
-      _abort(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx), _debug_info(_ctx),
-      _backend(_ctx)
+      _abort(_ctx), _atomics(_ctx), _memory(_ctx), _statics(_ctx), _process(_ctx), _debug_print(_ctx),
+      _debug_info(_ctx), _backend(_ctx)
 {
     // what the invocation asked for, before any subsystem can read it
     _ctx.options = options;
@@ -37,6 +37,7 @@ LLVMCompiler::LLVMCompiler(Compiler::CompilerOptions options)
     _ctx.lvalues = &_lvalues;
     _ctx.classes = &_classes;
     _ctx.abort = &_abort;
+    _ctx.atomics = &_atomics;
     _ctx.memory = &_memory;
     _ctx.statics = &_statics;
     _ctx.process = &_process;

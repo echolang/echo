@@ -1,6 +1,0 @@
---- OUT --->
-3
---- IR --->
-# the packed value is two registers, so the answer is the value itself. an sret
-# signature would be `define void @_pack_probe...(ptr sret(...`
-CHECK: define %"result<int64,int32>" @_pack_probeZZMLPl(i64 %v)

@@ -158,6 +158,10 @@ public function take<T>(T& $place) : T;
  *
  * `$value` arrives **by value**, so the caller's copy has already happened: this hands that owner
  * over rather than duplicating it, exactly as `take`'s result is handed to its caller.
+ *
+ * `mem::take` on a slot two threads share duplicates ownership. `mem::atomic::exchange` is
+ * "take, atomically" - and only for a word. A `string` or a class handle is not one; see
+ * `mem::atomic` and `atomic<T>`.
  */
 #[builtin: init]
 public function init<T>(T& $place, T $value) : void;

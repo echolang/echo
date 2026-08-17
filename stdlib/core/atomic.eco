@@ -1,0 +1,59 @@
+/**
+ * A word two threads RMW.
+ *
+ * `atomic<int32> $hits` is the spelling you write on a field. The raw verbs live in
+ * `mem::atomic::` and this type is the discipline over them: the slot is private, so the
+ * only way in is a method that is an RMW. `$hits = $hits + 1` cannot be written, which is
+ * the whole point - that would be a load, an add and a store, Java's `volatile++`.
+ *
+ * `#[unique]` so a struct copy cannot memcpy the word. That copy would be a non-atomic
+ * access. Moving transfers the slot; two live `atomic<T>` values are two words.
+ *
+ * There is no `atomic<string>`. A string is three words and owns a count, and an exchange
+ * would move the bits without retaining. Put a string in a `mutex`, or copy it - a copy is
+ * a retain of `str::buf`. The same refusal covers a class handle, a float, an enum and
+ * anything wider than a word.
+ *
+ * Nothing in the compiler knows what an `atomic` is. There is no `#[core:]` binding and
+ * there is deliberately none. The compiler supplies the verbs; this file supplies the type.
+ */
+#[unique]
+public struct atomic<T>
+{
+    private T $slot;
+
+    constructor(T $value)
+    {
+        $this->slot = $value;
+    }
+
+    const function load() : T
+    {
+        return mem::atomic::load<T>($this->slot);
+    }
+
+    function store(T $value) : void
+    {
+        mem::atomic::store<T>($this->slot, $value);
+    }
+
+    function add(T $delta) : T
+    {
+        return mem::atomic::add<T>($this->slot, $delta);
+    }
+
+    function sub(T $delta) : T
+    {
+        return mem::atomic::sub<T>($this->slot, $delta);
+    }
+
+    function exchange(T $desired) : T
+    {
+        return mem::atomic::exchange<T>($this->slot, $desired);
+    }
+
+    function compare_exchange(T $expected, T $desired) : bool
+    {
+        return mem::atomic::compare_exchange<T>($this->slot, $expected, $desired);
+    }
+}

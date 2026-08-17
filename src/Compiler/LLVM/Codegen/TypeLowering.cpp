@@ -12,6 +12,7 @@
 #include "eco.h"
 
 #include "AST/ASTAccess.h"
+#include "AST/ASTAtomicity.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTConformance.h"
 #include "AST/ASTFunctionEmission.h"
@@ -198,7 +199,7 @@ ReturnAbi TypeLowering::return_abi_of(
         return ReturnAbi{};
     }
 
-    return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit), _ctx.layout());
+    return return_abi_for(get_llvm_type(node->get_return_type(), cmp_unit));
 }
 
 void TypeLowering::apply_function_attributes(
@@ -569,12 +570,29 @@ void TypeLowering::build_class_box(
             llvm::Constant *conformances = build_conformance_table(type, cmp_unit);
             auto *info_type = typeinfo_llvm_type();
 
-            std::vector<llvm::Constant *> info_values(2);
+            std::vector<llvm::Constant *> info_values(4);
             info_values[ClassTypeInfo::conformance_count_index] =
                 llvm::ConstantInt::get(i64, type.conformances().size());
             info_values[ClassTypeInfo::conformances_index] = conformances != nullptr
                 ? conformances
                 : llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr));
+            info_values[ClassTypeInfo::flags_index] = llvm::ConstantInt::get(
+                i64, AST::counts_are_atomic(type) ? ClassTypeInfo::atomic_flag : 0);
+
+            // `__eco_release_env` loads this and calls it when the count hits zero. a class's
+            // own thunk still calls ComplexType::deinit directly - this slot is for the
+            // environment, whose type is gone at the release site
+            llvm::Constant *deinit = llvm::ConstantPointerNull::get(
+                llvm::cast<llvm::PointerType>(opaque_ptr));
+
+            if (AST::FunctionDeclNode *fn = type.deinit()) {
+                // create_llvm_func_decl is the one owner of this symbol. getOrInsertFunction
+                // under the mangled name would claim it first and the real body would be
+                // emitted as `.1`, leaving this slot pointing at an empty declaration
+                deinit = create_llvm_func_decl(fn, const_cast<CmpUnit &>(cmp_unit));
+            }
+
+            info_values[ClassTypeInfo::deinit_index] = deinit;
 
             return llvm::ConstantStruct::get(info_type, info_values);
         },
@@ -907,9 +925,11 @@ llvm::StructType *TypeLowering::class_header_llvm_type()
 
 llvm::StructType *TypeLowering::typeinfo_llvm_type()
 {
-    std::vector<llvm::Type *> members(2);
+    std::vector<llvm::Type *> members(4);
     members[ClassTypeInfo::conformance_count_index] = llvm::Type::getInt64Ty(*_ctx.llvm_context);
     members[ClassTypeInfo::conformances_index] = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    members[ClassTypeInfo::flags_index] = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+    members[ClassTypeInfo::deinit_index] = llvm::PointerType::get(*_ctx.llvm_context, 0);
 
     // by slot index rather than in written order, so the names in Codegen/ClassLayout.h are what decides
     // the layout - the one place the descriptor's shape is spelled, for the writer and the scan both
@@ -1026,7 +1046,7 @@ llvm::FunctionType *TypeLowering::get_llvm_function_type(
     // exemption; this is the callable / indirect-call half
     const ReturnAbi abi = shape == FunctionCallingShape::t_c
         ? ReturnAbi{}
-        : return_abi_for(lowered_return, _ctx.layout());
+        : return_abi_for(lowered_return);
 
     if (abi.is_indirect()) {
         lowered_return = llvm::Type::getVoidTy(*_ctx.llvm_context);

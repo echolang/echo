@@ -11,6 +11,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 
 #include <algorithm>
@@ -437,17 +438,27 @@ void AbortCodegen::gen_abort_if(
 
 llvm::Value *AbortCodegen::swap_hook(llvm::Value *fn)
 {
-    llvm::Value *old = _ctx.builder->CreateLoad(_ctx.opaque_ptr_type(), hook_global(), "crash.prev");
-    _ctx.builder->CreateStore(fn, hook_global());
+    // the slot is reachable from every thread the moment a program can spawn one
+    llvm::Value *old = _ctx.builder->CreateAtomicRMW(
+        llvm::AtomicRMWInst::Xchg,
+        hook_global(),
+        fn,
+        llvm::Align(8),
+        llvm::AtomicOrdering::SequentiallyConsistent);
+    old->setName("crash.prev");
     return old;
 }
 
 llvm::Value *AbortCodegen::take_hook()
 {
     llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
-    llvm::Value *old = _ctx.builder->CreateLoad(opaque_ptr, hook_global(), "crash.prev");
-    _ctx.builder->CreateStore(
-        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)), hook_global());
+    llvm::Value *old = _ctx.builder->CreateAtomicRMW(
+        llvm::AtomicRMWInst::Xchg,
+        hook_global(),
+        llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(opaque_ptr)),
+        llvm::Align(8),
+        llvm::AtomicOrdering::SequentiallyConsistent);
+    old->setName("crash.prev");
     return old;
 }
 

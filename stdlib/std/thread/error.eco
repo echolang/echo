@@ -1,0 +1,22 @@
+/**
+ * Why a thread could not be started.
+ *
+ * An errno and the sentence you print. Not an enum of every code the kernel can invent.
+ */
+
+namespace std::thread;
+
+public struct error
+{
+    int32 $code;
+
+    const function message() : string
+    {
+        return "could not start a thread ({$this->code})";
+    }
+
+    const function exhausted() : bool
+    {
+        return $this->code == EAGAIN;
+    }
+}

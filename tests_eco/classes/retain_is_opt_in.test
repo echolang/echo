@@ -1,0 +1,10 @@
+--- OUT --->
+3
+--- IR --->
+CHECK: atomicrmw add
+CHECK: monotonic
+CHECK: %strong.inc = add i64 %strong, 1
+CHECK: define linkonce_odr void @__eco_release_6Marked(
+CHECK: atomicrmw sub
+CHECK: release
+CHECK: define linkonce_odr void @__eco_release_5Plain(

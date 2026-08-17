@@ -1,0 +1,6 @@
+// refused at the declaration, so the flag only ever holds a claim that means something
+
+#[atomic]
+enum Color { case red; }
+
+echo 1;

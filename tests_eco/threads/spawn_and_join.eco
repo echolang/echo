@@ -1,0 +1,36 @@
+// a second thread, an atomic count, a join. the worker captures the handle
+
+use std::thread;
+
+#[atomic]
+class Counter
+{
+    atomic<int32> $hits;
+
+    constructor()
+    {
+        $this->hits = atomic<int32>(0);
+    }
+
+    function bump() : void
+    {
+        $this->hits->add(1);
+    }
+
+    function get() : int32
+    {
+        return $this->hits->load();
+    }
+}
+
+Counter $c = Counter();
+
+thread::handle $w = guard thread::spawn(function() : void {
+    $c->bump();
+}) else ($e) {
+    die($e->message());
+}
+
+$c->bump();
+$w->join();
+echo $c->get();

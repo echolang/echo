@@ -1,0 +1,13 @@
+// `&name` at a function<...> destination is a callable, not a C pointer
+
+function add1(int32 $a) : int32
+{
+    return $a + 1;
+}
+
+function apply(function<int32(int32)> $f, int32 $v) : int32
+{
+    return $f($v);
+}
+
+echo apply(&add1, 41);

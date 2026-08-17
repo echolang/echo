@@ -1,0 +1,4 @@
+// a floating add would not mean what integer add means
+
+float32 $x = 1.0;
+echo mem::atomic::load<float32>($x);

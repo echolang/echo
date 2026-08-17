@@ -485,6 +485,14 @@ TEST_CASE("a refusal says which mistake was made", "[cli]")
 
     REQUIRE(refusal({ "clean", "--explain", "cache" }) == "'clean' does not take '--explain'.");
 
+    REQUIRE(refusal({ "build", "--timeout", "200", "-o", "out", "a.eco" })
+        == "'build' does not take '--timeout'.");
+
+    REQUIRE(refusal({ "test", "--timeout", "200", "a.eco" }) == "<accepted>");
+
+    REQUIRE(contains(refusal({ "test", "--timeout", "soon", "a.eco" }),
+        "a timeout is a number of milliseconds"));
+
     REQUIRE(contains(
         refusal({ "run", "--debug", "--release", "a.eco" }), "two answers to one question"));
 

@@ -1,0 +1,6 @@
+// refused at the declaration, so the flag only ever holds a claim that means something
+
+#[atomic]
+interface Drawable { function draw() : void; }
+
+echo 1;

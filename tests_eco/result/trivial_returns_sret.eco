@@ -1,0 +1,10 @@
+// a 16-byte result still goes through sret. fitting in two registers is not the question:
+// a first-class aggregate return is a phi of that aggregate, and that is the 4.7x
+// `bench/result_trivial` already measured
+function pack_probe(int64 $v) : result<int64, int32>
+{
+    return .ok($v);
+}
+
+result<int64, int32> $r = pack_probe(3);
+echo $r->unwrap();

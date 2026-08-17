@@ -9,6 +9,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 
 #include <fmt/core.h>
 
@@ -20,6 +21,7 @@ namespace Compiler::LLVM
         // `linkonce_odr` like everything else this subsystem emits
         constexpr const char *k_chain_head_symbol = "__eco_static_chain";
         constexpr const char *k_teardown_symbol = "__eco_static_teardown";
+        constexpr const char *k_once_symbol = "__eco_static_once";
 
         // `{ ptr next, ptr fn }` - one node per static that owes a teardown, pushed by its init function
         // after the value is seated. **an intrusive node rather than a list the runtime allocates**,
@@ -75,7 +77,104 @@ namespace Compiler::LLVM
         const std::string guard_symbol = symbol + ".guard";
 
         return _ctx.get_or_create_odr_global(
-            guard_symbol.c_str(), llvm::Type::getInt8Ty(*_ctx.llvm_context));
+            guard_symbol.c_str(), llvm::Type::getInt64Ty(*_ctx.llvm_context));
+    }
+
+    llvm::Function *StaticStorageCodegen::once_helper()
+    {
+        if (auto *existing = _ctx.current_module()->getFunction(k_once_symbol)) {
+            return existing;
+        }
+
+        llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
+        llvm::Type *ptr = _ctx.opaque_ptr_type();
+        llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
+
+        auto *fn = llvm::Function::Create(
+            llvm::FunctionType::get(void_ty, { ptr, ptr }, false),
+            llvm::GlobalValue::LinkOnceODRLinkage,
+            k_once_symbol,
+            _ctx.current_module());
+        fn->getArg(0)->setName("guard");
+        fn->getArg(1)->setName("body");
+
+        llvm::IRBuilderBase::InsertPointGuard restore_point(*_ctx.builder);
+        _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
+
+        auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
+        auto *loop = llvm::BasicBlock::Create(*_ctx.llvm_context, "loop", fn);
+        auto *try_cas = llvm::BasicBlock::Create(*_ctx.llvm_context, "try", fn);
+        auto *run = llvm::BasicBlock::Create(*_ctx.llvm_context, "run", fn);
+        auto *wait = llvm::BasicBlock::Create(*_ctx.llvm_context, "wait", fn);
+        auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
+
+        llvm::Value *guard = fn->getArg(0);
+        llvm::Value *body = fn->getArg(1);
+        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, static_cast<uint64_t>(-1));
+
+        _ctx.builder->SetInsertPoint(entry);
+        // i64, not ptr: stdlib declares `pthread_self` as returning usize, and two units that
+        // disagree about that symbol's type emit two __eco_static_once bodies the ODR check
+        // refuses. the bits in the return register are the thread id either way
+        llvm::Value *self = _ctx.builder->CreateCall(
+            _ctx.libc_callee("pthread_self", i64, {}), {}, "self");
+        _ctx.needs_pthread = true;
+        // 0 is uninitialized and ~0 is done. a tid that collides with either would skip
+        // the initializer or look finished. 1 is neither sentinel
+        llvm::Value *one = llvm::ConstantInt::get(i64, 1);
+        llvm::Value *tid_is_sentinel = _ctx.builder->CreateOr(
+            _ctx.builder->CreateICmpEQ(self, llvm::ConstantInt::get(i64, 0), "tid.zero"),
+            _ctx.builder->CreateICmpEQ(self, done_tok, "tid.done"),
+            "tid.sentinel");
+        llvm::Value *token = _ctx.builder->CreateSelect(tid_is_sentinel, one, self, "token");
+        _ctx.builder->CreateBr(loop);
+
+        _ctx.builder->SetInsertPoint(loop);
+        llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "seen");
+        seen->setAtomic(llvm::AtomicOrdering::Acquire);
+        seen->setAlignment(llvm::Align(8));
+        llvm::Value *is_done = _ctx.builder->CreateICmpEQ(seen, done_tok, "is.done");
+        llvm::Value *is_self = _ctx.builder->CreateICmpEQ(seen, token, "is.self");
+        llvm::Value *mine_or_done = _ctx.builder->CreateOr(is_done, is_self, "mine.or.done");
+        llvm::Value *in_flight = _ctx.builder->CreateICmpNE(
+            seen, llvm::ConstantInt::get(i64, 0), "in.flight");
+        _ctx.builder->CreateCondBr(mine_or_done, done, try_cas);
+
+        _ctx.builder->SetInsertPoint(try_cas);
+        _ctx.builder->CreateCondBr(in_flight, wait, run);
+
+        // CAS 0 → token. the run block is only reached when seen was 0, so a failed CAS
+        // is another thread winning the race - loop and look again
+        _ctx.builder->SetInsertPoint(run);
+        llvm::AtomicCmpXchgInst *cas = _ctx.builder->CreateAtomicCmpXchg(
+            guard,
+            llvm::ConstantInt::get(i64, 0),
+            token,
+            llvm::Align(8),
+            llvm::AtomicOrdering::Acquire,
+            llvm::AtomicOrdering::Monotonic);
+        llvm::Value *ok = _ctx.builder->CreateExtractValue(cas, 1, "won");
+        auto *call_body = llvm::BasicBlock::Create(*_ctx.llvm_context, "call.body", fn);
+        _ctx.builder->CreateCondBr(ok, call_body, loop);
+
+        _ctx.builder->SetInsertPoint(call_body);
+        auto *body_ty = llvm::FunctionType::get(void_ty, false);
+        _ctx.builder->CreateCall(body_ty, body);
+        llvm::StoreInst *finish = _ctx.builder->CreateStore(done_tok, guard);
+        finish->setAtomic(llvm::AtomicOrdering::Release);
+        finish->setAlignment(llvm::Align(8));
+        _ctx.builder->CreateBr(done);
+
+        _ctx.builder->SetInsertPoint(wait);
+        _ctx.builder->CreateCall(
+            _ctx.libc_callee(
+                "sched_yield", llvm::Type::getInt32Ty(*_ctx.llvm_context), {}));
+        _ctx.builder->CreateBr(loop);
+
+        _ctx.builder->SetInsertPoint(done);
+        _ctx.builder->CreateRetVoid();
+
+        return fn;
     }
 
     llvm::Function *StaticStorageCodegen::init_for(
@@ -89,56 +188,61 @@ namespace Compiler::LLVM
             return existing;
         }
 
-        llvm::Type *i8 = llvm::Type::getInt8Ty(*_ctx.llvm_context);
+        llvm::Type *void_ty = llvm::Type::getVoidTy(*_ctx.llvm_context);
+        llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
         llvm::Type *ptr = _ctx.opaque_ptr_type();
 
         auto *fn = llvm::Function::Create(
-            llvm::FunctionType::get(llvm::Type::getVoidTy(*_ctx.llvm_context), false),
+            llvm::FunctionType::get(void_ty, false),
             llvm::GlobalValue::LinkOnceODRLinkage,
             init_symbol,
             _ctx.current_module());
 
-        auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
-        auto *init_block = llvm::BasicBlock::Create(*_ctx.llvm_context, "init", fn);
-        auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
+        const std::string body_symbol = symbol + ".init.body";
+        auto *body = llvm::Function::Create(
+            llvm::FunctionType::get(void_ty, false),
+            llvm::GlobalValue::LinkOnceODRLinkage,
+            body_symbol,
+            _ctx.current_module());
 
-        // the builder is mid-statement in whatever body asked for this address, so everything below has
-        // to be put back exactly as it was found - this function is emitted *beside* that one. the guard
-        // restores the block, the insert point and the debug location together, and on every exit
         llvm::IRBuilderBase::InsertPointGuard restore_point(*_ctx.builder);
-
-        // no debug location on any of this: it is compiler-emitted runtime with no line of its own, and
-        // a location inherited from the statement that happened to reference it first is exactly the
-        // ambient state a linkonce_odr body may not depend on
         _ctx.builder->SetCurrentDebugLocation(llvm::DebugLoc());
 
         llvm::GlobalVariable *guard = guard_for(symbol);
+        llvm::Constant *done_tok = llvm::ConstantInt::get(i64, static_cast<uint64_t>(-1));
+
+        // **the fast path stays one acquire load.** inlining the owner-token dance everywhere is
+        // fifteen blocks per static; routing every access through the helper puts a call in front
+        // of every static read. this keeps a static read at one acquire load - the same
+        // instruction a plain load lowers to on both architectures
+        auto *entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", fn);
+        auto *slow = llvm::BasicBlock::Create(*_ctx.llvm_context, "slow", fn);
+        auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
 
         _ctx.builder->SetInsertPoint(entry);
-        llvm::Value *seen = _ctx.builder->CreateLoad(i8, guard, "guard");
+        llvm::LoadInst *seen = _ctx.builder->CreateLoad(i64, guard, "guard");
+        seen->setAtomic(llvm::AtomicOrdering::Acquire);
+        seen->setAlignment(llvm::Align(8));
         _ctx.builder->CreateCondBr(
-            _ctx.builder->CreateICmpNE(seen, llvm::ConstantInt::get(i8, 0), "initialized"),
+            _ctx.builder->CreateICmpEQ(seen, done_tok, "initialized"),
             done,
-            init_block);
+            slow);
 
-        _ctx.builder->SetInsertPoint(init_block);
+        _ctx.builder->SetInsertPoint(slow);
+        _ctx.builder->CreateCall(once_helper(), { guard, body });
+        _ctx.builder->CreateBr(done);
 
-        // **the guard is set before the body runs, and that is the recursion answer.** a static whose
-        // initializer reads itself re-enters here, finds the guard set and returns, so the read sees the
-        // zero the global was created with - a defined value rather than undefined behaviour or a
-        // deadlock. it is the specified answer, not an accident of ordering
-        _ctx.builder->CreateStore(llvm::ConstantInt::get(i8, 1), guard);
+        _ctx.builder->SetInsertPoint(done);
+        _ctx.builder->CreateRetVoid();
 
-        // the initializer, which AST::OwnershipPass synthesized as an ordinary function: its body is
-        // `Type::$x = <what was written>;` in a real scope, so every ownership rule, every copy and
-        // every temporary was decided by the passes that already know how, with nothing here to repeat
+        // `<sym>.init.body` holds what init_block held: the seat, then the Treiber push
+        auto *body_entry = llvm::BasicBlock::Create(*_ctx.llvm_context, "entry", body);
+        _ctx.builder->SetInsertPoint(body_entry);
+
         if (llvm::Function *seat = declare_on_demand(node.init)) {
             _ctx.builder->CreateCall(seat);
         }
 
-        // and the teardown, only for a static that owes one. the node is pushed *after* the value is
-        // seated, so the chain's LIFO order is reverse-of-initialization for free - including across
-        // statics whose initializers named each other
         if (llvm::Function *end = declare_on_demand(node.deinit)) {
             llvm::StructType *node_type = chain_node_type(_ctx);
             const std::string link_symbol = symbol + ".link";
@@ -149,14 +253,31 @@ namespace Compiler::LLVM
             llvm::Value *next_slot = _ctx.builder->CreateStructGEP(node_type, link, 0, "link.next");
             llvm::Value *fn_slot = _ctx.builder->CreateStructGEP(node_type, link, 1, "link.fn");
 
-            _ctx.builder->CreateStore(_ctx.builder->CreateLoad(ptr, head, "chain"), next_slot);
+            // store the fn slot plainly, then a release/monotonic CAS loop publishing the head
             _ctx.builder->CreateStore(end, fn_slot);
-            _ctx.builder->CreateStore(link, head);
+
+            auto *push = llvm::BasicBlock::Create(*_ctx.llvm_context, "push", body);
+            auto *pushed = llvm::BasicBlock::Create(*_ctx.llvm_context, "pushed", body);
+            _ctx.builder->CreateBr(push);
+
+            _ctx.builder->SetInsertPoint(push);
+            llvm::LoadInst *cur = _ctx.builder->CreateLoad(ptr, head, "chain");
+            cur->setAtomic(llvm::AtomicOrdering::Monotonic);
+            cur->setAlignment(llvm::Align(8));
+            _ctx.builder->CreateStore(cur, next_slot);
+            llvm::AtomicCmpXchgInst *cas = _ctx.builder->CreateAtomicCmpXchg(
+                head,
+                cur,
+                link,
+                llvm::Align(8),
+                llvm::AtomicOrdering::Release,
+                llvm::AtomicOrdering::Monotonic);
+            llvm::Value *ok = _ctx.builder->CreateExtractValue(cas, 1, "published");
+            _ctx.builder->CreateCondBr(ok, pushed, push);
+
+            _ctx.builder->SetInsertPoint(pushed);
         }
 
-        _ctx.builder->CreateBr(done);
-
-        _ctx.builder->SetInsertPoint(done);
         _ctx.builder->CreateRetVoid();
 
         return fn;
@@ -210,7 +331,9 @@ namespace Compiler::LLVM
             auto *done = llvm::BasicBlock::Create(*_ctx.llvm_context, "done", fn);
 
             _ctx.builder->SetInsertPoint(entry);
-            llvm::Value *first = _ctx.builder->CreateLoad(ptr, head, "first");
+            llvm::LoadInst *first = _ctx.builder->CreateLoad(ptr, head, "first");
+            first->setAtomic(llvm::AtomicOrdering::Acquire);
+            first->setAlignment(llvm::Align(8));
             _ctx.builder->CreateBr(loop);
 
             _ctx.builder->SetInsertPoint(loop);

@@ -1,0 +1,79 @@
+/**
+ * One value that is not there yet. `wait()` joins the worker and copies the slot.
+ *
+ * There is no `task<void>` — that is a `handle`. A failing computation is a `T` that is
+ * itself a `result`, not a second error channel here.
+ */
+
+namespace std::thread;
+
+#[atomic]
+public class task<T>
+{
+    private handle? $worker;
+    private T? $slot;
+
+    // join before the slot dies. a class deinit runs this, then drops
+    // fields in reverse declaration order — `$slot` first. an owning T
+    // written from the worker would race that drop
+    destructor()
+    {
+        handle $h = guard $this->worker else {
+            return;
+        }
+
+        $h->join();
+    }
+
+    private constructor()
+    {
+    }
+
+    /**
+     * Starts `$work` on a new OS thread and seats the result. Failure is "the thread
+     * never started"; what `$work` itself returns is `T`.
+     */
+    static function spawn(function<T()> $work) : result<task<T>, error>
+    {
+        task<T> $t = task<T>();
+
+        handle $h = guard handle::spawn(function() : void {
+            $t->seat($work);
+        }) else ($e) {
+            return .error($e);
+        }
+
+        $t->worker = $h;
+        return .ok($t);
+    }
+
+    function wait() : T
+    {
+        handle $h = guard $this->worker else {
+            die('task was not started');
+        }
+
+        $h->join();
+
+        T $v = guard $this->slot else {
+            die('task produced no value');
+        }
+
+        return $v;
+    }
+
+    internal function seat(function<T()> $work) : void
+    {
+        $this->slot = $work();
+    }
+}
+
+/**
+ * Starts `$work` on a new OS thread. The written spelling of `task<T>::spawn`.
+ *
+ * `function<void()>` stays `spawn` → `handle`. This overload is the other type.
+ */
+public function spawn<T>(function<T()> $work) : result<task<T>, error>
+{
+    return task<T>::spawn($work);
+}

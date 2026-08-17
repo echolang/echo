@@ -16,6 +16,6 @@ modules: modules/lib_core
 # source, and it stops being one the moment a consumer can cause a definition to appear in the *library's*
 # unit - which is what happened before instances were placed this way.
 CHECK: define linkonce_odr i32 @_modcore_tripledZZMLPi
-CHECK: define linkonce_odr %"Box<int32>" @_modcore_BoxZZMLPiGMLPi
+CHECK: define linkonce_odr void @_modcore_BoxZZMLPiGMLPi(ptr noalias sret(%"Box<int32>"
 CHECK: define linkonce_odr i32 @_modcore_MN7modcore3BoxE_get
 CHECK: define i32 @_modcore_doubledZZMLPi

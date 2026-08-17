@@ -1,0 +1,9 @@
+--- OUT --->
+7
+--- IR --->
+CHECK: atomicrmw add
+CHECK: monotonic
+CHECK: define linkonce_odr void @__eco_release_7Counter(ptr %obj)
+CHECK: atomicrmw sub
+CHECK: release
+CHECK: fence acquire

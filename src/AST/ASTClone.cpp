@@ -17,6 +17,8 @@
 
 #include "AST/ASTClone.h"
 
+#include "AST/ASTFile.h"
+#include "AST/ASTRecursiveVisitor.h"
 #include "AST/ScopeNode.h"
 #include "AST/OperatorNode.h"
 #include "AST/LiteralValueNode.h"
@@ -51,6 +53,8 @@
 #include "AST/ReleaseNode.h"
 #include "AST/MatchExprNode.h"
 #include "AST/TemporaryBindExprNode.h"
+
+#include <fmt/core.h>
 
 namespace AST
 {
@@ -240,12 +244,44 @@ Node *InstanceOfExprNode::clone(CloneContext &cc) const
 Node *ClosureExprNode::clone(CloneContext &cc) const
 {
     ClosureExprNode *c = cc.shallow(this);
-    // the declaration is not a child - it hangs off the file root, not off this expression - so it is
-    // rebound the way a call's decl is. an instantiated body therefore shares the template's closure
-    // body, which is correct: a closure cannot name the enclosing type parameters
-    c->decl = cc.rebind(c->decl);
+
+    // a fresh environment per instance: the template's layout still names T, and two instances
+    // of `spawn<int32>` must not share one ComplexType whose properties were substituted in
+    // place. the function's identity is the enclosing instance's `instantiation_args`, not
+    // this name — same-shape captures still need that stamp to mangle apart
+    ComplexType *new_env = nullptr;
+
+    if (environment_type != nullptr) {
+        std::string env_name = environment_type->name.value_or("env");
+
+        for (size_t i = 0; i < environment_type->property_count(); i++) {
+            env_name += "." + cc.substitute(environment_type->get_property(i).type).get_mangled_name();
+        }
+
+        new_env = cc.registry.create_anonymous_type(
+            env_name, ComplexTypeKind::t_class, environment_type->ast_namespace);
+
+        for (size_t i = 0; i < environment_type->property_count(); i++) {
+            const ComplexType::Property &prop = environment_type->get_property(i);
+            new_env->add_property(prop.name, cc.substitute(prop.type), prop.visibility);
+        }
+
+        c->environment_type = new_env;
+    }
+
+    // the declaration is not a child of the expression - it hangs off the file root - so the
+    // clone has to be asked for here. sharing it would leave every instance calling the
+    // template's body, whose `$__env` is still typed with T
+    if (decl != nullptr) {
+        c->decl = cc.child(decl);
+        if (new_env != nullptr && !c->decl->args.empty() && c->decl->args[0] != nullptr) {
+            auto &env_type = cc.nodes.emplace_back<TypeNode>(ValueType::make_class(new_env));
+            c->decl->args[0]->set_type_node(&env_type);
+        }
+    }
+
     // the captured places are read in the *enclosing* frame, so they are ordinary owned children of this
-    // expression. the environment type is not cloned: it is a layout, shared like a ComplexType always is
+    // expression
     for (auto &value : c->captured_values) value = cc.child(value);
     return c;
 }
@@ -687,6 +723,46 @@ Node *AttributeNode::clone(CloneContext &cc) const
     AttributeNode *c = cc.shallow(this);
     c->scope_owner = cc.rebind(scope_owner);
     return c;
+}
+
+void publish_cloned_closures(
+    Node &root,
+    File *file,
+    FunctionDeclNode *enclosing_template,
+    const std::vector<ValueType> &instantiation_args
+)
+{
+    struct Publisher : RecursiveVisitor
+    {
+        File *file = nullptr;
+        FunctionDeclNode *tmpl = nullptr;
+        std::vector<ValueType> args;
+
+        void visit_closure_expr(ClosureExprNode &node) override {
+            if (FunctionDeclNode *decl = node.decl) {
+                decl->template_ref = tmpl;
+                decl->instantiation_args = args;
+
+                if (file != nullptr && file->root != nullptr) {
+                    file->root->children.push_back(make_ref(*decl));
+                }
+
+                // the declaration hangs off the file root, so RecursiveVisitor will not
+                // descend into it from the expression. nested closures live in that body
+                if (decl->body != nullptr) {
+                    decl->body->accept(*this);
+                }
+            }
+
+            RecursiveVisitor::visit_closure_expr(node);
+        }
+    };
+
+    Publisher publisher;
+    publisher.file = file;
+    publisher.tmpl = enclosing_template;
+    publisher.args = instantiation_args;
+    root.accept(publisher);
 }
 
 };  // namespace AST

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "eco_check_directives.h"
+#include "subprocess.h"
 
 #include <filesystem>
 #include <string>
@@ -98,6 +99,10 @@ namespace EchoTests
         bool stdlib = true;
         Expectation expect;
         RunMode mode = RunMode::t_run;
+
+        // deadline for every spawn this case starts, in milliseconds. defaulted so an existing
+        // case is untouched; `timeout: 0` waits forever. EchoTests::run_capturing is the owner
+        unsigned timeout_ms = k_default_timeout_ms;
 
         // `KEY=VALUE` pairs to set in the environment of everything this case spawns, and the arguments
         // to hand the program. Both exist for `std::env`, which can otherwise only be tested against

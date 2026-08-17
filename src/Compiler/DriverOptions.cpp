@@ -1,6 +1,7 @@
 #include "Compiler/DriverOptions.h"
 
 #include <cstddef>
+#include <string>
 
 namespace
 {
@@ -34,6 +35,10 @@ bool Compiler::resolve_driver_options(
     out.defines = cli.list(Opt::t_define);
     out.targets = cli.list(Opt::t_target);
     out.filters = cli.list(Opt::t_filter);
+
+    if (cli.stated(Opt::t_timeout)) {
+        out.timeout_ms = static_cast<unsigned>(std::stoul(cli.value(Opt::t_timeout)));
+    }
     out.program_arguments = cli.program_arguments;
 
     out.target_os = cli.value(Opt::t_target_os);

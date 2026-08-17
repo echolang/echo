@@ -1,0 +1,7 @@
+// a test that never returns is a located failure, not a hang of the run
+
+test hangs
+{
+    while (true) {
+    }
+}
