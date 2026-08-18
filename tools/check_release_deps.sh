@@ -44,7 +44,7 @@ case "$(uname -s)" in
         # sonames rather than paths here: the loader resolves them through ldconfig, so what matters is
         # that each one belongs to a package every target machine already has. libzstd is deliberately
         # absent - ECO_STATIC_ZSTD puts it inside the binary, and its return is a regression
-        allowed='^(libc|libm|libdl|libpthread|librt|libz|libstdc\+\+|libgcc_s|ld-linux-x86-64)\.so'
+        allowed='^(libc|libm|libdl|libpthread|librt|libz|libstdc\+\+|libgcc_s|ld-linux-[a-z0-9-]+)\.so'
         for name in "$@"; do
             allowed="${allowed}|lib${name}\\.so"
         done

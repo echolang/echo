@@ -18,6 +18,22 @@
 #[depends: "../../echolibs/libjson"]
 #[depends: "../../echolibs/libcurl"]
 
+// release builds pass --define static_curl and --link search:<prefix>/lib.
+// the archive still needs zlib and a TLS stack; those names are not on
+// libcurl's dynamic manifest, so they do not collide.
+#[if: static_curl]
+#[link: lib "z"]
+#[if: os == linux]
+#[link: lib "dl"]
+#[end]
+#[if: os == darwin]
+#[link: framework "Security"]
+#[link: framework "CoreFoundation"]
+#[link: framework "CoreServices"]
+#[link: framework "SystemConfiguration"]
+#[end]
+#[end]
+
 #[target: exe { name: "epm", entry: "src/main.eco" }]
 
 #[target: test] {

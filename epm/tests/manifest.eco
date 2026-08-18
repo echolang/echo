@@ -116,6 +116,29 @@ test load_of_garbage_fails
     scratch::gone($dir);
 }
 
+test echoc_from_uses_env
+{
+    string $dir = scratch::dir('echoc-env');
+    scratch::file($dir, 'echoc', '');
+    assert(manifest::echoc_from($dir, '/other/echoc') == '/other/echoc');
+    scratch::gone($dir);
+}
+
+test echoc_from_uses_sibling
+{
+    string $dir = scratch::dir('echoc-sib');
+    string $sib = scratch::file($dir, 'echoc', '');
+    assert(manifest::echoc_from($dir, '') == $sib);
+    scratch::gone($dir);
+}
+
+test echoc_from_falls_back_to_path
+{
+    string $dir = scratch::dir('echoc-path');
+    assert(manifest::echoc_from($dir, '') == 'echoc');
+    scratch::gone($dir);
+}
+
 test echoc_bin_is_not_empty
 {
     assert(!manifest::echoc_bin()->empty());

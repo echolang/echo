@@ -16,6 +16,29 @@ _deps
 # one. `echoc clean` is the tidy way to remove them
 ecobuild/
 
+# epm's fetch tree. committed lockfiles stay; the sources do not
+epm/vendor/
+
 # what older versions of echoc used for the same thing. Kept so a checkout made before the rename does not
 # start showing one; nothing writes here any more, and `echoc clean` says so when it finds one
 .echo/
+
+# local performance comparisons against equivalent Rust programs, and the binaries they build. A number
+# measured here is a fact about one machine rather than about the compiler, so it is not something a checkout
+# should carry - `tools/` holds what everybody runs, this holds what somebody measured
+bench/
+notes/
+todo/
+
+# local scratch only. notes/ and todo/ are the project's design record (DESIGN_NOTES.md)
+.scratch/
+
+# Unicode Character Database text, fetched by tools/gen_unicode_case.py. the generated
+# stdlib/core/case_data.eco is what is committed
+tools/ucd/
+
+# cmake output. `build` is the tree CLAUDE.md's commands configure, `build-release` the two-stage one,
+# `build-linux` the Ubuntu tree `tools/linux-ci.sh` writes
+build/
+build-release/
+build-linux/

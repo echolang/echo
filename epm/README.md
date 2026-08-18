@@ -13,7 +13,9 @@ is the bootstrap: path-depends on `../../echolibs/libjson` and
 ../build/echoc test
 ../build/echoc build
 
-# epm shells out to echoc. Prefer ECHOC if PATH still has an older one:
+# epm shells out to echoc. A released epm looks next to itself first
+# (install.sh puts both in the same directory). ECHOC wins when set,
+# which is how this tree points at ../build/echoc:
 export ECHOC=$PWD/../build/echoc
 ```
 

@@ -161,8 +161,7 @@ jobs:
             libc++-dev \
             libc++abi-dev \
             zlib1g-dev \
-            libzstd-dev \
-            libcurl4-openssl-dev
+            libzstd-dev
 
       # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
       # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
@@ -240,8 +239,12 @@ jobs:
 
       # epm is Echo, not a CMake target. The compiler that just shipped is the one that compiles it.
       # libjson and libcurl are path-depends next to this checkout; the script clones them there.
+      # static curl is built in this job so the released epm does not NEED libcurl.so.
+      - name: Build a static libcurl
+        run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
+
       - name: Build epm with the release compiler
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm"
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl"
 
       - name: Smoke test epm
         run: |
@@ -253,7 +256,7 @@ jobs:
           fi
 
       - name: Check epm carries only allowed dependencies
-        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm" curl
+        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm"
 
       - name: Package release archive
         env:
@@ -350,10 +353,13 @@ jobs:
       - name: Check the binary carries its dependencies
         run: ./tools/check_release_deps.sh build-release/echoc
 
-      # epm is Echo, not a CMake target. Do not point -lcurl at Homebrew: system libcurl is
-      # /usr/lib/libcurl.4.dylib, and check_release_deps refuses anything else.
+      # epm is Echo, not a CMake target. Static curl sits on an OpenSSL we build here
+      # plus Apple SecTrust; Homebrew must not appear on the link line.
+      - name: Build a static libcurl
+        run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
+
       - name: Build epm with the release compiler
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm"
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl"
 
       - name: Smoke test epm
         run: |
@@ -365,7 +371,7 @@ jobs:
           fi
 
       - name: Check epm carries only allowed dependencies
-        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm" curl
+        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm"
 
       - name: Package release archive
         run: |

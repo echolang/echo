@@ -96,19 +96,31 @@ public function find_module(const string& $start) : string?
     }
 }
 
-public function echoc_bin() : string
+/**
+ * Which echoc this process should shell out to.
+ *
+ * A non-empty $from_env is ECHOC and wins. Otherwise the echoc sitting
+ * next to this binary, which is where install.sh puts it. A bare
+ * `echoc` is PATH.
+ */
+public function echoc_from(const string& $exe_dir, const string& $from_env) : string
 {
-    string::view $from_env = guard env::var('ECHOC') else {
-        string $guess = sys::join(env::cwd(), '../build/echoc');
-
-        if (sys::is_file($guess)) {
-            return $guess;
-        }
-
-        return 'echoc';
+    if (!$from_env->empty()) {
+        return $from_env;
     }
 
-    return str::from($from_env);
+    string $sibling = sys::join($exe_dir, 'echoc');
+
+    if (sys::is_file($sibling)) {
+        return $sibling;
+    }
+
+    return 'echoc';
+}
+
+public function echoc_bin() : string
+{
+    return echoc_from(sys::dirname(env::exe()), str::from(env::var('ECHOC', '')));
 }
 
 public function load(const string& $path) : result<Manifest, string>
