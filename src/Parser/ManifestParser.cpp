@@ -1134,7 +1134,8 @@ bool read_manifest_with(
 
 Parser::ModuleContribution Parser::module_contribution_for(
     const Parser::ModuleManifest &manifest,
-    const Parser::ActiveTargets &active
+    const Parser::ActiveTargets &active,
+    std::string *out_link_error
 )
 {
     Parser::ModuleContribution out;
@@ -1180,7 +1181,13 @@ Parser::ModuleContribution Parser::module_contribution_for(
         // **through the one merger**, which is what `--link` and every manifest below this one already go
         // through: a requirement a scope repeats after the module stated it is one library, and a raw
         // append would send the duplicate to the link line and to `runtime_library_of` twice
-        Compiler::merge_link_requirements(target.link, out.link);
+        std::string link_error;
+
+        if (!Compiler::merge_link_requirements(target.link, out.link, link_error)) {
+            if (out_link_error != nullptr && out_link_error->empty()) {
+                *out_link_error = link_error;
+            }
+        }
 
         out.cc.sources.insert(
             out.cc.sources.end(), target.cc.sources.begin(), target.cc.sources.end());

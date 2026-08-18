@@ -28,4 +28,6 @@
 #[sources: "std/thread/*.eco"]
 
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
-#[link: lib "pthread"]
+// `runtime: process` is the JIT half: there is no loadable `libpthread.so` on
+// modern Linux, and the symbols are already mapped. Native `build` still gets `-lpthread`.
+#[link: lib { name: "pthread", runtime: process }]

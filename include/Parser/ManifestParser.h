@@ -230,7 +230,8 @@ namespace Parser
     // or whose targets carry no scope, comes back stating exactly what its manifest states
     ModuleContribution module_contribution_for(
         const ModuleManifest &manifest,
-        const ActiveTargets &active
+        const ActiveTargets &active,
+        std::string *out_link_error = nullptr
     );
 
     // just the dependencies of the above, appended to `into` without duplicating what it holds.

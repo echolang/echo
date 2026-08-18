@@ -5,6 +5,11 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -23,6 +28,26 @@ const std::vector<std::pair<std::string, Compiler::LinkScheme>> &scheme_table()
     return table;
 }
 
+const std::vector<std::pair<std::string, Compiler::LinkLinkage>> &linkage_table()
+{
+    static const std::vector<std::pair<std::string, Compiler::LinkLinkage>> table = {
+        { "dynamic", Compiler::LinkLinkage::t_dynamic },
+        { "static", Compiler::LinkLinkage::t_static },
+    };
+
+    return table;
+}
+
+const std::vector<std::pair<std::string, Compiler::LinkRuntime>> &runtime_table()
+{
+    static const std::vector<std::pair<std::string, Compiler::LinkRuntime>> table = {
+        { "load", Compiler::LinkRuntime::t_load },
+        { "process", Compiler::LinkRuntime::t_process },
+    };
+
+    return table;
+}
+
 // the name a scheme is written under, in either medium
 std::string scheme_name_of(Compiler::LinkScheme scheme)
 {
@@ -33,6 +58,23 @@ std::string scheme_name_of(Compiler::LinkScheme scheme)
     }
 
     return "";
+}
+
+template <class Scheme>
+bool name_in_table(
+    const std::string &spelled,
+    const std::vector<std::pair<std::string, Scheme>> &table,
+    Scheme &out
+)
+{
+    for (const auto &[candidate, scheme] : table) {
+        if (candidate == spelled) {
+            out = scheme;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // what a scheme and a value *mean*, once the two have been read - which is the whole of what the two
@@ -108,6 +150,213 @@ bool settle_link_requirement(
     return false;
 }
 
+// directories the host loader already searches. `search:` is consulted first and is not in this
+// list - that is a declared path, not a platform default. Windows resolves against PATH via the
+// bare name, so it contributes nothing here
+std::vector<std::filesystem::path> host_library_directories()
+{
+    const std::string &os = Compiler::TargetFacts::host().operating_system;
+
+    std::vector<std::filesystem::path> directories;
+
+    if (os == "linux") {
+        directories = {
+            "/lib",
+            "/usr/lib",
+            "/lib64",
+            "/usr/lib64",
+            "/lib/x86_64-linux-gnu",
+            "/usr/lib/x86_64-linux-gnu",
+            "/lib/aarch64-linux-gnu",
+            "/usr/lib/aarch64-linux-gnu",
+        };
+    }
+    else if (os == "darwin") {
+        directories = { "/usr/lib", "/usr/local/lib", "/opt/homebrew/lib" };
+    }
+
+    std::vector<std::filesystem::path> existing;
+    existing.reserve(directories.size());
+
+    for (const std::filesystem::path &directory : directories) {
+        std::error_code ec;
+        if (std::filesystem::is_directory(directory, ec)) {
+            existing.push_back(directory);
+        }
+    }
+
+    return existing;
+}
+
+// loadable files in `directory` for this name. Zero, one, or several: several is the caller's
+// refusal, not a ranking. An unversioned DSO, when it is a real one, is the only answer - the
+// versioned neighbours sit beside a linker script, not beside a second winner
+std::vector<std::filesystem::path> loadables_in_directory(
+    const std::filesystem::path &directory,
+    const std::string &name,
+    const std::optional<std::string> &file
+)
+{
+    std::vector<std::filesystem::path> found;
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(directory, ec)) {
+        return found;
+    }
+
+    if (file.has_value()) {
+        const std::filesystem::path candidate = directory / file.value();
+
+        if (Compiler::is_loadable_shared_object(candidate)) {
+            found.push_back(candidate);
+        }
+
+        return found;
+    }
+
+    const std::string extension = Compiler::TargetFacts::host().shared_library_extension();
+    const std::string unversioned = "lib" + name + extension;
+    const std::filesystem::path exact = directory / unversioned;
+
+    if (Compiler::is_loadable_shared_object(exact)) {
+        found.push_back(exact);
+        return found;
+    }
+
+    const std::string prefix = unversioned + ".";
+
+    for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(
+             directory, std::filesystem::directory_options::skip_permission_denied, ec)) {
+        if (ec) {
+            break;
+        }
+
+        const std::string filename = entry.path().filename().string();
+
+        if (filename.compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+
+        if (!Compiler::is_loadable_shared_object(entry.path())) {
+            continue;
+        }
+
+        found.push_back(entry.path());
+    }
+
+    return found;
+}
+
+// a `lib<name>.a` sitting in a declared search directory, or nullopt. The one lookup the static
+// arm of the renderer is allowed - it does not walk the host and it does not invent flags
+std::optional<std::filesystem::path> archive_in_search(
+    const std::string &name,
+    const std::vector<Compiler::LinkRequirement> &requirements
+)
+{
+    for (const Compiler::LinkRequirement &other : requirements) {
+        if (other.scheme != Compiler::LinkScheme::t_search) {
+            continue;
+        }
+
+        const std::filesystem::path archive =
+            std::filesystem::path(other.value) / ("lib" + name + ".a");
+
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(archive, ec)) {
+            return archive;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::string asker_of_requirement(const std::string &declared_by)
+{
+    return declared_by.empty()
+        ? std::string("the command line")
+        : fmt::format("module '{}'", declared_by);
+}
+
+bool parse_lib_record(
+    const AST::AttributeValue &record,
+    Compiler::LinkScheme scheme,
+    const std::filesystem::path &base,
+    const Compiler::TargetFacts &facts,
+    const std::string &declared_by,
+    AST::AttributeReader &reader,
+    Compiler::LinkRequirement &out
+)
+{
+    reader.reject_unknown_fields(record, { "name", "linkage", "runtime", "file" });
+
+    const AST::AttributeValue *name_value = reader.require_field(record, "name");
+
+    if (name_value == nullptr) {
+        return false;
+    }
+
+    std::optional<std::string> name = reader.string(*name_value);
+
+    if (!name.has_value()) {
+        return false;
+    }
+
+    Compiler::LinkLinkage linkage = Compiler::LinkLinkage::t_dynamic;
+    Compiler::LinkRuntime runtime = Compiler::LinkRuntime::t_load;
+    std::optional<std::string> file;
+
+    if (const AST::AttributeValue *written = reader.field(record, "linkage")) {
+        std::optional<std::string> spelled = reader.name(*written);
+
+        if (!spelled.has_value()) {
+            return false;
+        }
+
+        if (!name_in_table(spelled.value(), linkage_table(), linkage)) {
+            reader.refuse(written->span, fmt::format(
+                "'{}' is not a linkage, expected one of: {}.",
+                spelled.value(), Compiler::scheme_list_of(linkage_table())));
+            return false;
+        }
+    }
+
+    if (const AST::AttributeValue *written = reader.field(record, "runtime")) {
+        std::optional<std::string> spelled = reader.name(*written);
+
+        if (!spelled.has_value()) {
+            return false;
+        }
+
+        if (!name_in_table(spelled.value(), runtime_table(), runtime)) {
+            reader.refuse(written->span, fmt::format(
+                "'{}' is not a runtime, expected one of: {}.",
+                spelled.value(), Compiler::scheme_list_of(runtime_table())));
+            return false;
+        }
+    }
+
+    if (const AST::AttributeValue *written = reader.field(record, "file")) {
+        file = reader.string(*written);
+
+        if (!file.has_value()) {
+            return false;
+        }
+    }
+
+    std::string reason;
+
+    if (!settle_link_requirement(scheme, name.value(), base, facts, declared_by, out, reason)) {
+        reader.refuse(record.span, reason);
+        return false;
+    }
+
+    out.linkage = linkage;
+    out.runtime = runtime;
+    out.file = file;
+    return true;
+}
+
 };
 
 std::string Compiler::link_scheme_list()
@@ -121,6 +370,29 @@ std::string Compiler::link_requirement_spelling(const LinkRequirement &requireme
 
     if (name.empty()) {
         return requirement.value;
+    }
+
+    const bool as_record = requirement.scheme == LinkScheme::t_library
+        && (requirement.linkage != LinkLinkage::t_dynamic
+            || requirement.runtime != LinkRuntime::t_load
+            || requirement.file.has_value());
+
+    if (as_record) {
+        std::string body = fmt::format("name: \"{}\"", requirement.value);
+
+        if (requirement.linkage == LinkLinkage::t_static) {
+            body += ", linkage: static";
+        }
+
+        if (requirement.runtime == LinkRuntime::t_process) {
+            body += ", runtime: process";
+        }
+
+        if (requirement.file.has_value()) {
+            body += fmt::format(", file: \"{}\"", requirement.file.value());
+        }
+
+        return name + " { " + body + " }";
     }
 
     // `declared_by` is already the record of which medium wrote it: a manifest credits its module, a
@@ -172,6 +444,26 @@ bool Compiler::parse_link_attribute(
             continue;
         }
 
+        if (entry->is(AST::AttributeValueKind::t_record)) {
+            if (scheme != LinkScheme::t_library) {
+                reader.refuse(entry->span, fmt::format(
+                    "a record payload is a '{}' shape - write '{} \"...\"' for this scheme.",
+                    scheme_name_of(LinkScheme::t_library), scheme_name_of(scheme)));
+                settled_all = false;
+                continue;
+            }
+
+            LinkRequirement requirement;
+
+            if (!parse_lib_record(*entry, scheme, base, facts, declared_by, reader, requirement)) {
+                settled_all = false;
+                continue;
+            }
+
+            out.push_back(requirement);
+            continue;
+        }
+
         for (const AST::AttributeValue *word : AST::AttributeReader::payload(*entry)) {
             std::optional<std::string> spelled = reader.string(*word);
 
@@ -217,6 +509,13 @@ void Compiler::partition_link_requirements(
     for (const LinkRequirement &requirement : requirements) {
         switch (requirement.scheme) {
         case LinkScheme::t_library:
+            if (requirement.linkage == LinkLinkage::t_static) {
+                if (const auto archive = archive_in_search(requirement.value, requirements)) {
+                    out_objects.push_back(archive.value());
+                    break;
+                }
+            }
+
             out_words.push_back("-l" + requirement.value);
             break;
 
@@ -231,6 +530,103 @@ void Compiler::partition_link_requirements(
             break;
         }
     }
+}
+
+bool Compiler::is_loadable_shared_object(const std::filesystem::path &file)
+{
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) {
+        return false;
+    }
+
+    std::ifstream in(file, std::ios::binary);
+    unsigned char magic[4] = {};
+    in.read(reinterpret_cast<char *>(magic), 4);
+
+    if (!in || in.gcount() < 4) {
+        return false;
+    }
+
+    if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
+        return true;
+    }
+
+    if (magic[0] == 'M' && magic[1] == 'Z') {
+        return true;
+    }
+
+    static const unsigned char mach_o[][4] = {
+        { 0xfe, 0xed, 0xfa, 0xce },
+        { 0xce, 0xfa, 0xed, 0xfe },
+        { 0xfe, 0xed, 0xfa, 0xcf },
+        { 0xcf, 0xfa, 0xed, 0xfe },
+        { 0xca, 0xfe, 0xba, 0xbe },
+        { 0xbe, 0xba, 0xfe, 0xca },
+        { 0xca, 0xfe, 0xba, 0xbf },
+        { 0xbf, 0xba, 0xfe, 0xca },
+    };
+
+    for (const unsigned char (&signature)[4] : mach_o) {
+        if (std::memcmp(magic, signature, 4) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::optional<std::filesystem::path> Compiler::find_loadable_library(
+    const std::string &name,
+    const std::vector<std::filesystem::path> &search_dirs,
+    const std::optional<std::string> &file,
+    std::string &out_refusal
+)
+{
+    const auto consider = [&](const std::filesystem::path &directory) -> std::optional<std::filesystem::path> {
+        const std::vector<std::filesystem::path> found = loadables_in_directory(directory, name, file);
+
+        if (found.size() == 1) {
+            return found.front();
+        }
+
+        if (found.size() > 1) {
+            std::string names;
+
+            for (const std::filesystem::path &path : found) {
+                names += names.empty() ? path.filename().string() : ", " + path.filename().string();
+            }
+
+            out_refusal = fmt::format(
+                "several loadable files match '{}' in '{}': {}. Write 'file:' to name one.",
+                file.value_or("lib" + name + TargetFacts::host().shared_library_extension()),
+                directory.string(),
+                names);
+        }
+
+        return std::nullopt;
+    };
+
+    for (const std::filesystem::path &directory : search_dirs) {
+        if (const auto found = consider(directory)) {
+            return found;
+        }
+
+        if (!out_refusal.empty()) {
+            return std::nullopt;
+        }
+    }
+
+    for (const std::filesystem::path &directory : host_library_directories()) {
+        if (const auto found = consider(directory)) {
+            return found;
+        }
+
+        if (!out_refusal.empty()) {
+            return std::nullopt;
+        }
+    }
+
+    return std::nullopt;
 }
 
 std::optional<std::filesystem::path> Compiler::runtime_library_of(
@@ -261,28 +657,41 @@ std::optional<std::filesystem::path> Compiler::runtime_library_of(
     }
 
     case LinkScheme::t_library: {
-        // **the host's extension, deliberately.** `run` executes on this machine, so what `--target-os`
-        // says a condition sees has nothing to do with what dlopen can open
-        const std::string file_name =
-            "lib" + requirement.value + TargetFacts::host().shared_library_extension();
+        if (requirement.runtime == LinkRuntime::t_process) {
+            return std::nullopt;
+        }
 
-        // **the declared search paths first, and only then the bare name.** dlopen knows nothing about the
-        // `-L`s the link line carries, so a library that only exists under a `search:` directory would
-        // link and then fail to load, which is the one failure that looks like the feature not working
+        if (requirement.linkage == LinkLinkage::t_static) {
+            out_refusal = fmt::format(
+                "'{}' cannot be loaded by 'echoc run': a static library is an archive, and the JIT "
+                "resolves symbols out of the running process. Use 'echoc build' for this program, "
+                "or ship the library as a shared object.",
+                link_requirement_spelling(requirement));
+            return std::nullopt;
+        }
+
+        std::vector<std::filesystem::path> search_dirs;
+
         for (const LinkRequirement &other : all) {
-            if (other.scheme != LinkScheme::t_search) {
-                continue;
-            }
-
-            const std::filesystem::path candidate = std::filesystem::path(other.value) / file_name;
-
-            std::error_code ec;
-            if (std::filesystem::is_regular_file(candidate, ec)) {
-                return candidate;
+            if (other.scheme == LinkScheme::t_search) {
+                search_dirs.emplace_back(other.value);
             }
         }
 
-        // bare, for the loader to resolve the way it resolves everything else
+        if (const auto found =
+                find_loadable_library(requirement.value, search_dirs, requirement.file, out_refusal)) {
+            return found;
+        }
+
+        if (!out_refusal.empty()) {
+            return std::nullopt;
+        }
+
+        // bare, for the loader to resolve the way it resolves everything else - Darwin's dyld cache
+        // still answers `libpthread.dylib` with no file on disk
+        const std::string file_name = requirement.file.value_or(
+            "lib" + requirement.value + TargetFacts::host().shared_library_extension());
+
         return std::filesystem::path(file_name);
     }
     }
@@ -290,13 +699,35 @@ std::optional<std::filesystem::path> Compiler::runtime_library_of(
     return std::nullopt;
 }
 
-void Compiler::merge_link_requirements(const std::vector<LinkRequirement> &incoming, std::vector<LinkRequirement> &into)
+bool Compiler::merge_link_requirements(
+    const std::vector<LinkRequirement> &incoming,
+    std::vector<LinkRequirement> &into,
+    std::string &out_error
+)
 {
     for (const LinkRequirement &requirement : incoming) {
-        if (std::find(into.begin(), into.end(), requirement) != into.end()) {
+        const auto existing = std::find(into.begin(), into.end(), requirement);
+
+        if (existing == into.end()) {
+            into.push_back(requirement);
             continue;
         }
 
-        into.push_back(requirement);
+        if (existing->linkage == requirement.linkage
+            && existing->runtime == requirement.runtime
+            && existing->file == requirement.file) {
+            continue;
+        }
+
+        out_error = fmt::format(
+            "'{}' asked for by {} disagrees with '{}' asked for by {} - the same library cannot "
+            "be linked two ways.",
+            link_requirement_spelling(requirement),
+            asker_of_requirement(requirement.declared_by),
+            link_requirement_spelling(*existing),
+            asker_of_requirement(existing->declared_by));
+        return false;
     }
+
+    return true;
 }

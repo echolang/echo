@@ -1008,8 +1008,11 @@ struct FrontEnd
     // what one module contributes to *this* program - its sources, dependencies, link line and C build,
     // with whatever scopes this program opened folded in. The one owner of that question, asked here
     // rather than each reader picking a field off the manifest
-    Parser::ModuleContribution contribution(const Parser::ModuleManifest &manifest) const {
-        return Parser::module_contribution_for(manifest, program->active_targets);
+    Parser::ModuleContribution contribution(
+        const Parser::ModuleManifest &manifest,
+        std::string *out_link_error = nullptr
+    ) const {
+        return Parser::module_contribution_for(manifest, program->active_targets, out_link_error);
     }
 };
 
@@ -1576,7 +1579,18 @@ static bool collect_link_requirements(
 )
 {
     for (auto manifest = front.manifests().rbegin(); manifest != front.manifests().rend(); ++manifest) {
-        Compiler::merge_link_requirements(front.contribution(**manifest).link, out);
+        std::string error;
+        const Parser::ModuleContribution contribution = front.contribution(**manifest, &error);
+
+        if (!error.empty()) {
+            diagnostics.render_untyped("Invalid Link Requirement", error);
+            return false;
+        }
+
+        if (!Compiler::merge_link_requirements(contribution.link, out, error)) {
+            diagnostics.render_untyped("Invalid Link Requirement", error);
+            return false;
+        }
     }
 
     const std::vector<std::string> &spelled_on_command_line = driver.link;
@@ -1604,7 +1618,12 @@ static bool collect_link_requirements(
         from_command_line.push_back(requirement);
     }
 
-    Compiler::merge_link_requirements(from_command_line, out);
+    std::string error;
+
+    if (!Compiler::merge_link_requirements(from_command_line, out, error)) {
+        diagnostics.render_untyped("Invalid Link Requirement", error);
+        return false;
+    }
 
     return true;
 }
@@ -1612,20 +1631,30 @@ static bool collect_link_requirements(
 // `__eco_static_once` names pthread_self / sched_yield. the compiler emitted those
 // symbols, so it owes the requirement - a `--no-stdlib` static must still link.
 // merge after codegen, which is when the helper is first asked for
-static void merge_emitted_runtime_link(
+static bool merge_emitted_runtime_link(
+    const AST::DiagnosticRenderer &diagnostics,
     LLVMCompiler &compiler,
     std::vector<Compiler::LinkRequirement> &link
 )
 {
     if (!compiler.needs_pthread()) {
-        return;
+        return true;
     }
 
     Compiler::LinkRequirement pthread;
     pthread.scheme = Compiler::LinkScheme::t_library;
     pthread.value = "pthread";
     pthread.declared_by = "echoc";
-    Compiler::merge_link_requirements({ pthread }, link);
+    pthread.runtime = Compiler::LinkRuntime::t_process;
+
+    std::string error;
+
+    if (!Compiler::merge_link_requirements({ pthread }, link, error)) {
+        diagnostics.render_untyped("Invalid Link Requirement", error);
+        return false;
+    }
+
+    return true;
 }
 
 // what a failed link owes a person beyond whatever the linker already printed.
@@ -1722,8 +1751,11 @@ static bool build_c_modules(
 
         if (!for_jit) {
             for (const std::filesystem::path &object : result.objects) {
-                out.objects.push_back(Compiler::LinkRequirement{
-                    Compiler::LinkScheme::t_object, object.string(), manifest.name });
+                Compiler::LinkRequirement requirement;
+                requirement.scheme = Compiler::LinkScheme::t_object;
+                requirement.value = object.string();
+                requirement.declared_by = manifest.name;
+                out.objects.push_back(requirement);
             }
 
             step.finish(true);
@@ -1946,7 +1978,9 @@ static std::optional<int> prepare_jit(
         return report_compiler_exception(diagnostics, e);
     }
 
-    merge_emitted_runtime_link(compiler, link);
+    if (!merge_emitted_runtime_link(diagnostics, compiler, link)) {
+        return 1;
+    }
 
     if (!load_native_libraries(diagnostics, link, c_builds.libraries)) {
         return 1;
@@ -2331,7 +2365,12 @@ static int build_one_program(
         }
 
         // ahead of every library, which partition_link_requirements is what guarantees
-        Compiler::merge_link_requirements(c_builds.objects, link);
+        std::string link_error;
+
+        if (!Compiler::merge_link_requirements(c_builds.objects, link, link_error)) {
+            diagnostics.render_untyped("Invalid Link Requirement", link_error);
+            return 1;
+        }
     }
 
     LLVMCompiler compiler(options);
@@ -2355,7 +2394,9 @@ static int build_one_program(
         return report_compiler_exception(diagnostics, e);
     }
 
-    merge_emitted_runtime_link(compiler, link);
+    if (!merge_emitted_runtime_link(diagnostics, compiler, link)) {
+        return 1;
+    }
 
     optimize_if_asked(driver, compiler);
 
