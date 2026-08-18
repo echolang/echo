@@ -1,0 +1,122 @@
+use epm::manifest;
+use epm::scratch;
+use epm::sys;
+
+test find_module_walks_up
+{
+    string $root = scratch::dir('find');
+    scratch::file($root, 'module.eco', "#[module: \"app\"]\n");
+    string $deep = sys::join($root, 'src/nested');
+    assert(sys::mkdir_p($deep));
+    string $found = guard manifest::find_module($deep);
+    assert($found == sys::join($root, 'module.eco'));
+    scratch::gone($root);
+}
+
+test find_module_at_the_manifest_dir
+{
+    string $root = scratch::dir('find-here');
+    string $mod = scratch::file($root, 'module.eco', "#[module: \"app\"]\n");
+    string $found = guard manifest::find_module($root);
+    assert($found == $mod);
+    scratch::gone($root);
+}
+
+test find_module_misses_when_there_is_none
+{
+    string $root = scratch::dir('find-none');
+    assert(manifest::find_module($root) == null);
+    scratch::gone($root);
+}
+
+test load_reads_epm_itself
+{
+    manifest::Manifest $m = guard manifest::load('module.eco');
+    assert($m->name == 'epm');
+    assert($m->version == '0.1.0');
+    assert($m->depends->count() >= 2);
+    bool $json = false;
+    bool $curl = false;
+    usize $i = 0;
+
+    while ($i < $m->depends->count()) {
+        if ($m->depends[$i]->contains('libjson')) {
+            $json = true;
+        }
+
+        if ($m->depends[$i]->contains('libcurl')) {
+            $curl = true;
+        }
+
+        $i = $i + 1;
+    }
+
+    assert($json);
+    assert($curl);
+}
+
+test load_reads_libjson_by_path
+{
+    manifest::Manifest $m = guard manifest::load('../../echolibs/libjson/module.eco');
+    assert($m->name == 'libjson');
+}
+
+test load_reads_libcurl_by_path
+{
+    manifest::Manifest $m = guard manifest::load('../../echolibs/libcurl/module.eco');
+    assert($m->name == 'libcurl');
+}
+
+test load_reads_requires
+{
+    string $dir = scratch::dir('load-req');
+    scratch::file($dir, 'src/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.3.1\"]\n#[requires: \"libcurl\" { version: \"^0.1\", source: git \"https://x\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    assert($m->name == 'app');
+    assert($m->version == '0.3.1');
+    assert($m->requires->count() == 1);
+    assert($m->requires[0]->name == 'libcurl');
+    assert($m->requires[0]->version == '^0.1');
+    assert($m->requires[0]->origin->kind == 'git');
+    assert($m->requires[0]->origin->locator == 'https://x');
+    scratch::gone($dir);
+}
+
+test load_keeps_target_requires_apart
+{
+    string $dir = scratch::dir('load-scoped');
+    scratch::file($dir, 'src/dummy.eco', "echo 1;\n");
+    scratch::file($dir, 'tests/dummy.eco', "echo 1;\n");
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1\", source: git \"https://x\" }]\n#[sources: \"src/*.eco\"]\n#[target: test] {\n    #[sources: \"tests/*.eco\"]\n    #[requires: \"mock\" { version: \"*\", source: git \"https://y\" }]\n}\n"
+    );
+    manifest::Manifest $m = guard manifest::load($mod);
+    assert($m->requires->count() == 1);
+    assert($m->requires[0]->name == 'lib');
+    assert($m->scoped->count() == 1);
+    assert($m->scoped[0]->req->name == 'mock');
+    assert($m->scoped[0]->target == 'tests');
+    array<manifest::Requirement> $all = manifest::all_requires($m);
+    assert($all->count() == 2);
+    scratch::gone($dir);
+}
+
+test load_of_garbage_fails
+{
+    string $dir = scratch::dir('load-bad');
+    string $mod = scratch::file($dir, 'module.eco', "this is not a manifest\n");
+    assert(manifest::load($mod)->failed());
+    scratch::gone($dir);
+}
+
+test echoc_bin_is_not_empty
+{
+    assert(!manifest::echoc_bin()->empty());
+}

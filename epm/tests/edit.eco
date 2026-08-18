@@ -1,0 +1,148 @@
+use epm::manifest;
+use epm::scratch;
+use epm::sys;
+
+test add_depend_writes_the_path_as_written
+{
+    string $dir = scratch::dir('depend');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n#[version: \"0.1.0\"]\n");
+    bool $ok = guard manifest::add_depend_line($mod, '../../echolibs/libcurl');
+    string $got = scratch::read($mod);
+    assert($got->contains('#[depends: "../../echolibs/libcurl"]'));
+    assert($got->contains('#[module: "app"]'));
+    scratch::gone($dir);
+}
+
+test add_depend_refuses_a_duplicate
+{
+    string $dir = scratch::dir('depend-dup');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n#[version: \"0.1.0\"]\n");
+    bool $first = guard manifest::add_depend_line($mod, '../../echolibs/libcurl');
+    assert(manifest::add_depend_line($mod, '../../echolibs/libcurl')->failed());
+    scratch::gone($dir);
+}
+
+test add_depend_lands_after_an_existing_depend
+{
+    string $dir = scratch::dir('depend-second');
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[depends: \"../../echolibs/libjson\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    bool $ok = guard manifest::add_depend_line($mod, '../../echolibs/libcurl');
+    string $got = scratch::read($mod);
+    usize $json = $got->find('libjson');
+    usize $curl = $got->find('libcurl');
+    assert($json < $curl);
+    assert($got->contains('#[sources: "src/*.eco"]'));
+    scratch::gone($dir);
+}
+
+test add_line_writes_a_requires
+{
+    string $dir = scratch::dir('req');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n#[version: \"0.1.0\"]\n");
+    manifest::Requirement $req = manifest::Requirement(
+        'libcurl', '^0.1', manifest::Origin::git('https://example.com/libcurl'), ''
+    );
+    bool $ok = guard manifest::add_line($mod, $req);
+    string $got = scratch::read($mod);
+    assert($got->contains('#[requires: "libcurl" { version: "^0.1", source: git "https://example.com/libcurl" }]'));
+    scratch::gone($dir);
+}
+
+test add_line_includes_a_rev_when_set
+{
+    string $dir = scratch::dir('req-rev');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n");
+    manifest::Requirement $req = manifest::Requirement('lib', '1.0.0', manifest::Origin::git('https://x'), 'deadbeef');
+    bool $ok = guard manifest::add_line($mod, $req);
+    string $got = scratch::read($mod);
+    assert($got->contains('rev: "deadbeef"'));
+    scratch::gone($dir);
+}
+
+test add_line_refuses_a_duplicate_name
+{
+    string $dir = scratch::dir('req-dup');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n");
+    manifest::Requirement $req = manifest::Requirement('libcurl', '^0.1', manifest::Origin::git('https://x'), '');
+    bool $first = guard manifest::add_line($mod, $req);
+    assert(manifest::add_line($mod, $req)->failed());
+    scratch::gone($dir);
+}
+
+test add_line_does_not_touch_the_rest
+{
+    string $dir = scratch::dir('req-rest');
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    manifest::Requirement $req = manifest::Requirement('lib', '*', manifest::Origin::git('https://x'), '');
+    bool $ok = guard manifest::add_line($mod, $req);
+    string $got = scratch::read($mod);
+    assert($got->contains('#[module: "app"]'));
+    assert($got->contains('#[version: "0.1.0"]'));
+    assert($got->contains('#[sources: "src/*.eco"]'));
+    scratch::gone($dir);
+}
+
+test remove_line_deletes_only_that_require
+{
+    string $dir = scratch::dir('req-rm');
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[requires: \"a\" { version: \"*\", source: git \"https://a\" }]\n#[requires: \"b\" { version: \"*\", source: git \"https://b\" }]\n"
+    );
+    bool $ok = guard manifest::remove_line($mod, 'a');
+    string $got = scratch::read($mod);
+    assert(!$got->contains('#[requires: "a"'));
+    assert($got->contains('#[requires: "b"'));
+    scratch::gone($dir);
+}
+
+test remove_line_refuses_a_missing_name
+{
+    string $dir = scratch::dir('req-rm-miss');
+    string $mod = scratch::file($dir, 'module.eco', "#[module: \"app\"]\n");
+    assert(manifest::remove_line($mod, 'libcurl')->failed());
+    scratch::gone($dir);
+}
+
+test add_line_on_a_missing_file_fails
+{
+    assert(manifest::add_depend_line('/tmp/epm-t-no-module/module.eco', '../x')->failed());
+}
+
+test remove_line_refuses_a_multiline_require
+{
+    string $dir = scratch::dir('req-ml');
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[requires: \"lib\" {\n    version: \"*\",\n    source: git \"https://x\"\n}]\n"
+    );
+    result<bool, string> $out = manifest::remove_line($mod, 'lib');
+    assert($out->failed());
+    assert($out->failure()->contains('single-line'));
+    scratch::gone($dir);
+}
+
+test remove_depend_deletes_only_that_path
+{
+    string $dir = scratch::dir('dep-rm');
+    string $mod = scratch::file(
+        $dir,
+        'module.eco',
+        "#[module: \"app\"]\n#[depends: \"../a\"]\n#[depends: \"../b\"]\n"
+    );
+    bool $ok = guard manifest::remove_depend_line($mod, '../a');
+    string $got = scratch::read($mod);
+    assert(!$got->contains('../a'));
+    assert($got->contains('../b'));
+    scratch::gone($dir);
+}

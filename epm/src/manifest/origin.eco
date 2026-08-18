@@ -1,0 +1,38 @@
+/**
+ * Where a package comes from. The kind is a closed tag (`git` in v1) so a
+ * later host is another tag, not a field named after today's transport.
+ */
+
+namespace epm::manifest;
+
+public struct Origin
+{
+    string $kind;
+    string $locator;
+
+    constructor(string $kind, string $locator)
+    {
+        $this->kind = $kind;
+        $this->locator = $locator;
+    }
+
+    static function git(const string& $url) : Origin
+    {
+        return Origin('git', $url);
+    }
+
+    const function empty() : bool
+    {
+        return $this->locator->empty();
+    }
+
+    const function same(const Origin& $other) : bool
+    {
+        return $this->kind == $other->kind && $this->locator == $other->locator;
+    }
+
+    const function spelling() : string
+    {
+        return "{$this->kind} {$this->locator}";
+    }
+}

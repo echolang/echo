@@ -1,0 +1,263 @@
+/**
+ * The one place epm writes Echo: insert or delete a single #[requires:] or
+ * #[depends:] line. No reformatting, no other byte touched. Only a single
+ * line in epm's own spelling is editable.
+ */
+
+namespace epm::manifest;
+
+use std::io;
+
+public function add_line(const string& $path, const Requirement& $req) : result<bool, string>
+{
+    string $text = guard io::readfile($path) else ($e) {
+        return .error("cannot read {$path}: {$e}");
+    }
+
+    if (!require_span($text, $req->name)->failed()) {
+        return .error("'{$req->name}' is already required");
+    }
+
+    string $line = require_line($req);
+    string $out = insert_after($text, $line, '#[requires:');
+
+    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+
+    if ($wrote->failed()) {
+        return .error("cannot write {$path}");
+    }
+
+    return .ok(true);
+}
+
+public function remove_line(const string& $path, const string& $name) : result<bool, string>
+{
+    string $text = guard io::readfile($path) else ($e) {
+        return .error("cannot read {$path}: {$e}");
+    }
+
+    LineSpan $span = guard require_span($text, $name) else ($e) {
+        return .error($e);
+    }
+
+    string $out = $text->sub(0, $span->start);
+    $out->append($text->sub($span->end, $text->size() - $span->end));
+
+    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+
+    if ($wrote->failed()) {
+        return .error("cannot write {$path}");
+    }
+
+    return .ok(true);
+}
+
+private function require_line(const Requirement& $req) : string
+{
+    string $line = "#[requires: \"{$req->name}\" { version: \"{$req->version}\", source: {$req->origin->kind} \"{$req->origin->locator}\"";
+
+    if (!$req->rev->empty()) {
+        $line->append(", rev: \"{$req->rev}\"");
+    }
+
+    $line->append(" }]\n");
+    return $line;
+}
+
+struct LineSpan
+{
+    usize $start;
+    usize $end;
+
+    constructor(usize $start, usize $end)
+    {
+        $this->start = $start;
+        $this->end = $end;
+    }
+}
+
+private function require_span(const string& $text, const string& $name) : result<LineSpan, string>
+{
+    string $needle = "#[requires: \"{$name}\"";
+    usize $from = 0;
+
+    while ($from <= $text->size()) {
+        string $rest = $text->sub($from, $text->size() - $from);
+        usize $rel = $rest->find($needle);
+
+        if ($rel == $rest->size()) {
+            return .error("'{$name}' is not required");
+        }
+
+        usize $at = $from + $rel;
+
+        if ($at > 0 && $text->byte($at - 1) != 10) {
+            $from = $at + $needle->size();
+            continue;
+        }
+
+        usize $end = $at;
+
+        while ($end < $text->size() && $text->byte($end) != 10) {
+            $end = $end + 1;
+        }
+
+        string $line = $text->sub($at, $end - $at);
+
+        if (!$line->contains(']')) {
+            return .error(
+                "'{$name}' is not a single-line #[requires:] epm can edit - rewrite it as one line, or edit the file by hand"
+            );
+        }
+
+        if ($end < $text->size()) {
+            $end = $end + 1;
+        }
+
+        return .ok(LineSpan($at, $end));
+    }
+
+    return .error("'{$name}' is not required");
+}
+
+public function remove_depend_line(const string& $path, const string& $depend) : result<bool, string>
+{
+    string $text = guard io::readfile($path) else ($e) {
+        return .error("cannot read {$path}: {$e}");
+    }
+
+    string $needle = "#[depends: \"{$depend}\"";
+    usize $from = 0;
+
+    while ($from <= $text->size()) {
+        string $rest = $text->sub($from, $text->size() - $from);
+        usize $rel = $rest->find($needle);
+
+        if ($rel == $rest->size()) {
+            return .error("'{$depend}' is not a path depend");
+        }
+
+        usize $at = $from + $rel;
+
+        if ($at > 0 && $text->byte($at - 1) != 10) {
+            $from = $at + $needle->size();
+            continue;
+        }
+
+        usize $end = $at;
+
+        while ($end < $text->size() && $text->byte($end) != 10) {
+            $end = $end + 1;
+        }
+
+        string $line = $text->sub($at, $end - $at);
+
+        if (!$line->contains(']')) {
+            return .error(
+                "'{$depend}' is not a single-line #[depends:] epm can edit - rewrite it as one line, or edit the file by hand"
+            );
+        }
+
+        if ($end < $text->size()) {
+            $end = $end + 1;
+        }
+
+        string $out = $text->sub(0, $at);
+        $out->append($text->sub($end, $text->size() - $end));
+
+        result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+
+        if ($wrote->failed()) {
+            return .error("cannot write {$path}");
+        }
+
+        return .ok(true);
+    }
+
+    return .error("'{$depend}' is not a path depend");
+}
+
+public function add_depend_line(const string& $path, const string& $depend) : result<bool, string>
+{
+    string $text = guard io::readfile($path) else ($e) {
+        return .error("cannot read {$path}: {$e}");
+    }
+
+    string $line = "#[depends: \"{$depend}\"]\n";
+
+    if ($text->contains($line) || $text->contains("#[depends: \"{$depend}\"]")) {
+        return .error("'{$depend}' is already a path depend");
+    }
+
+    string $out = insert_after($text, $line, '#[depends:');
+
+    result<usize, io::ioerror> $wrote = io::writefile($path, $out);
+
+    if ($wrote->failed()) {
+        return .error("cannot write {$path}");
+    }
+
+    return .ok(true);
+}
+
+private function insert_after(
+    const string& $text,
+    const string& $line,
+    const string& $prefer
+) : string
+{
+    usize $after = last_prefix($text, $prefer);
+
+    if ($after == $text->size()) {
+        $after = last_prefix($text, '#[requires:');
+    }
+
+    if ($after == $text->size()) {
+        $after = last_prefix($text, '#[version:');
+    }
+
+    if ($after == $text->size()) {
+        $after = last_prefix($text, '#[module:');
+    }
+
+    if ($after == $text->size()) {
+        string $out = $text;
+        $out->append($line);
+        return $out;
+    }
+
+    string $out = $text->sub(0, $after);
+    $out->append($line);
+    $out->append($text->sub($after, $text->size() - $after));
+    return $out;
+}
+
+private function last_prefix(const string& $text, const string& $prefix) : usize
+{
+    usize $best = $text->size();
+    usize $i = 0;
+
+    while ($i < $text->size()) {
+        string $rest = $text->sub($i, $text->size() - $i);
+        usize $at = $rest->find($prefix);
+
+        if ($at == $rest->size()) {
+            return $best;
+        }
+
+        usize $abs = $i + $at;
+
+        while ($abs < $text->size() && $text->byte($abs) != 10) {
+            $abs = $abs + 1;
+        }
+
+        if ($abs < $text->size()) {
+            $abs = $abs + 1;
+        }
+
+        $best = $abs;
+        $i = $abs;
+    }
+
+    return $best;
+}

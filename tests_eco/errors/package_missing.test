@@ -7,8 +7,8 @@ expect: fail
   the package "libhello" is not in 'vendor/'.
 
   3 | 
-  4 | #[requires: "libhello" { git: "https://x", version: "^1" }]
-    :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  4 | #[requires: "libhello" { version: "^1", source: git "https://x" }]
+    :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   5 | 
 
   note: run `epm install`

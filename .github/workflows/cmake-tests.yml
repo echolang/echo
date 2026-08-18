@@ -161,7 +161,8 @@ jobs:
             libc++-dev \
             libc++abi-dev \
             zlib1g-dev \
-            libzstd-dev
+            libzstd-dev \
+            libcurl4-openssl-dev
 
       # stage one: an ordinary compiler, reading the standard library from this checkout. It exists to
       # regenerate the embeddable header below - a release binary carries the stdlib, and the bytes it
@@ -237,6 +238,23 @@ jobs:
       - name: Check the binary carries its dependencies
         run: ./tools/check_release_deps.sh build-release/echoc
 
+      # epm is Echo, not a CMake target. The compiler that just shipped is the one that compiles it.
+      # libjson and libcurl are path-depends next to this checkout; the script clones them there.
+      - name: Build epm with the release compiler
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm"
+
+      - name: Smoke test epm
+        run: |
+          set -euo pipefail
+          reported=$("$RUNNER_TEMP/epm" --version)
+          if [ "$reported" != "0.1.0" ]; then
+            echo "epm reports '$reported', expected '0.1.0'." >&2
+            exit 1
+          fi
+
+      - name: Check epm carries only allowed dependencies
+        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm" curl
+
       - name: Package release archive
         env:
           VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
@@ -244,6 +262,7 @@ jobs:
           set -euo pipefail
           mkdir -p stage
           cp build-release/echoc stage/
+          cp "$RUNNER_TEMP/epm" stage/
           cp README.md LICENSE stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
 
@@ -331,11 +350,29 @@ jobs:
       - name: Check the binary carries its dependencies
         run: ./tools/check_release_deps.sh build-release/echoc
 
+      # epm is Echo, not a CMake target. Do not point -lcurl at Homebrew: system libcurl is
+      # /usr/lib/libcurl.4.dylib, and check_release_deps refuses anything else.
+      - name: Build epm with the release compiler
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm"
+
+      - name: Smoke test epm
+        run: |
+          set -euo pipefail
+          reported=$("$RUNNER_TEMP/epm" --version)
+          if [ "$reported" != "0.1.0" ]; then
+            echo "epm reports '$reported', expected '0.1.0'." >&2
+            exit 1
+          fi
+
+      - name: Check epm carries only allowed dependencies
+        run: ./tools/check_release_deps.sh "$RUNNER_TEMP/epm" curl
+
       - name: Package release archive
         run: |
           set -euo pipefail
           mkdir -p stage
           cp build-release/echoc stage/
+          cp "$RUNNER_TEMP/epm" stage/
           cp README.md LICENSE stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
 

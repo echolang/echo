@@ -1,0 +1,73 @@
+use epm::scratch;
+use epm::sys;
+
+test sha256_of_abc
+{
+    string $hex = sys::sha256_hex('abc');
+    assert($hex == 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+}
+
+test sha256_of_empty
+{
+    string $hex = sys::sha256_hex('');
+    assert($hex == 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+}
+
+test sha256_of_the_quick_brown_fox
+{
+    string $hex = sys::sha256_hex('The quick brown fox jumps over the lazy dog');
+    assert($hex == 'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592');
+}
+
+test an_empty_tree_hashes_like_empty_input
+{
+    string $root = scratch::dir('tree-empty');
+    string $hex = sys::tree_sha256($root);
+    assert($hex == 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    scratch::gone($root);
+}
+
+test tree_hash_is_stable
+{
+    string $root = scratch::dir('tree-stable');
+    scratch::file($root, 'b.txt', 'B');
+    scratch::file($root, 'a.txt', 'A');
+    string $first = sys::tree_sha256($root);
+    string $second = sys::tree_sha256($root);
+    assert($first == $second);
+    assert($first->size() == 64);
+    scratch::gone($root);
+}
+
+test tree_hash_changes_when_a_file_does
+{
+    string $root = scratch::dir('tree-change');
+    scratch::file($root, 'a.txt', 'A');
+    string $before = sys::tree_sha256($root);
+    scratch::write(sys::join($root, 'a.txt'), 'B');
+    string $after = sys::tree_sha256($root);
+    assert($before != $after);
+    scratch::gone($root);
+}
+
+test tree_hash_ignores_dot_git
+{
+    string $root = scratch::dir('tree-git');
+    scratch::file($root, 'a.txt', 'A');
+    string $before = sys::tree_sha256($root);
+    scratch::file($root, '.git/HEAD', 'ref: refs/heads/main');
+    string $after = sys::tree_sha256($root);
+    assert($before == $after);
+    scratch::gone($root);
+}
+
+test tree_hash_includes_the_relative_path
+{
+    string $left = scratch::dir('tree-path-l');
+    string $right = scratch::dir('tree-path-r');
+    scratch::file($left, 'a.txt', 'same');
+    scratch::file($right, 'b.txt', 'same');
+    assert(sys::tree_sha256($left) != sys::tree_sha256($right));
+    scratch::gone($left);
+    scratch::gone($right);
+}

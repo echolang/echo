@@ -4,7 +4,7 @@
 #[epm::description: "a thing that does a thing"]
 
 #[depends: "../scratch-lib"]
-#[requires: "libcurl" { git: "https://x", version: "^0.1" }]
+#[requires: "libcurl" { version: "^0.1", source: git "https://x" }]
 
 #[sources: "src/*.eco"]
 

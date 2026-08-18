@@ -1,0 +1,264 @@
+use epm::cli;
+
+function parse_ok(const array<string>& $words) : cli::CommandLine
+{
+    array<string> $argv = array<string>();
+    $argv[] = 'epm';
+    usize $i = 0;
+
+    while ($i < $words->count()) {
+        $argv[] = $words[$i];
+        $i = $i + 1;
+    }
+
+    cli::CommandLine $cli = cli::CommandLine();
+    bool $ok = guard cli::parse_command_line($argv, $cli);
+    return $cli;
+}
+
+function parse_err(const array<string>& $words) : string
+{
+    array<string> $argv = array<string>();
+    $argv[] = 'epm';
+    usize $i = 0;
+
+    while ($i < $words->count()) {
+        $argv[] = $words[$i];
+        $i = $i + 1;
+    }
+
+    cli::CommandLine $cli = cli::CommandLine();
+    result<bool, string> $got = cli::parse_command_line($argv, $cli);
+
+    if ($got->failed()) {
+        return $got->failure();
+    }
+
+    return '';
+}
+
+function words() : array<string>
+{
+    return array<string>();
+}
+
+function words1(const string& $a) : array<string>
+{
+    array<string> $w = array<string>();
+    $w[] = $a;
+    return $w;
+}
+
+function words2(const string& $a, const string& $b) : array<string>
+{
+    array<string> $w = words1($a);
+    $w[] = $b;
+    return $w;
+}
+
+function words3(const string& $a, const string& $b, const string& $c) : array<string>
+{
+    array<string> $w = words2($a, $b);
+    $w[] = $c;
+    return $w;
+}
+
+function words4(const string& $a, const string& $b, const string& $c, const string& $d) : array<string>
+{
+    array<string> $w = words3($a, $b, $c);
+    $w[] = $d;
+    return $w;
+}
+
+test no_command_is_a_refusal
+{
+    string $err = parse_err(words());
+    assert($err == 'No command given.');
+}
+
+test unknown_command_names_the_list
+{
+    string $err = parse_err(words1('compile'));
+    assert($err->contains("'compile' is not an epm command."));
+    assert($err->contains("'install'"));
+    assert($err->contains("'add'"));
+}
+
+test unknown_option
+{
+    string $err = parse_err(words2('install', '--foo'));
+    assert($err == "Unknown option '--foo'.");
+}
+
+test install_does_not_take_git
+{
+    string $err = parse_err(words3('install', '--git', 'https://example.com/x'));
+    assert($err == "'install' does not take '--git'.");
+}
+
+test help_short_circuits_a_missing_name
+{
+    cli::CommandLine $cli = parse_ok(words2('remove', '--help'));
+    assert($cli->wants_help);
+    assert($cli->subcommand == cli::Subcommand::remove);
+}
+
+test version_short_circuits
+{
+    cli::CommandLine $cli = parse_ok(words1('--version'));
+    assert($cli->wants_version);
+}
+
+test help_then_command_is_that_page
+{
+    cli::CommandLine $cli = parse_ok(words2('--help', 'add'));
+    assert($cli->wants_help);
+    assert($cli->subcommand == cli::Subcommand::add);
+}
+
+test add_help_git_names_the_option
+{
+    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'git'));
+    assert($cli->wants_help);
+    assert($cli->help_topic_is_option);
+    assert($cli->help_topic == 'git');
+}
+
+test add_help_unknown_word_is_still_help
+{
+    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'libjson'));
+    assert($cli->wants_help);
+    assert(!$cli->help_topic_is_option);
+}
+
+test install_help_git_is_refused
+{
+    string $err = parse_err(words3('install', '--help', 'git'));
+    assert($err == "'install' does not take '--git'.");
+}
+
+test range_equals_form
+{
+    cli::CommandLine $cli = parse_ok(words4('add', 'lib', '--git', 'https://example.com/lib.git'));
+    assert($cli->git == 'https://example.com/lib.git');
+    assert($cli->range == '*');
+
+    array<string> $w = words3('add', 'lib', '--git');
+    $w[] = 'https://example.com/lib.git';
+    $w[] = '--range=^0.2';
+    $cli = parse_ok($w);
+    assert($cli->range == '^0.2');
+    assert($cli->positionals[0] == 'lib');
+}
+
+test flag_after_the_name
+{
+    array<string> $w = words2('add', 'lib');
+    $w[] = '--git';
+    $w[] = 'https://example.com/lib.git';
+    cli::CommandLine $cli = parse_ok($w);
+    assert($cli->git == 'https://example.com/lib.git');
+    assert($cli->positionals[0] == 'lib');
+}
+
+test git_and_path_are_one_question
+{
+    array<string> $w = words3('add', '--git', 'https://example.com/x');
+    $w[] = '--path';
+    $w[] = '../lib';
+    string $err = parse_err($w);
+    assert($err->contains('--git'));
+    assert($err->contains('--path'));
+    assert($err->contains('origin'));
+}
+
+test git_needs_a_value_not_another_flag
+{
+    string $err = parse_err(words3('add', '--git', '--path'));
+    assert($err == "'--git' needs a value, and '--path' is an option.");
+}
+
+test install_refuses_a_leftover_word
+{
+    string $err = parse_err(words2('install', 'libjson'));
+    assert($err == "'install' takes no package name.");
+}
+
+test separator_is_refused
+{
+    array<string> $w = words1('install');
+    $w[] = '--';
+    $w[] = 'x';
+    string $err = parse_err($w);
+    assert($err == "'install' does not take '--'.");
+}
+
+test clustered_short_is_refused
+{
+    string $err = parse_err(words2('install', '-hv'));
+    assert($err->contains('A short option is one character'));
+}
+
+test colour_alias
+{
+    cli::CommandLine $cli = parse_ok(words3('install', '--colour', 'never'));
+    assert($cli->color == 'never');
+}
+
+test unknown_color_value
+{
+    string $err = parse_err(words3('install', '--color', 'purple'));
+    assert($err->contains("Unknown '--color' value 'purple'"));
+    assert($err->contains('auto, always, never'));
+}
+
+test overview_page_lists_commands
+{
+    cli::CommandLine $cli = parse_ok(words1('--help'));
+    string $page = cli::render_help($cli, cli::plain_terminal());
+    assert($page->contains('Usage'));
+    assert($page->contains('install'));
+    assert($page->contains('add'));
+    assert($page->contains('remove'));
+    assert($page->contains('update'));
+    assert($page->contains('verify'));
+    assert($page->contains('tree'));
+    assert($page->contains('--help'));
+    assert($page->contains('--version'));
+}
+
+test add_help_git_is_that_option
+{
+    cli::CommandLine $cli = parse_ok(words3('add', '--help', 'git'));
+    string $page = cli::render_help($cli, cli::plain_terminal());
+    assert($page->contains('--git'));
+    assert($page->contains('GitHub'));
+    assert(!$page->contains('--path writes'));
+}
+
+test refusal_shape
+{
+    string $text = cli::render_error(
+        'No command given.',
+        cli::Subcommand::none,
+        cli::plain_terminal()
+    );
+    assert($text->starts('error: No command given.'));
+    assert($text->contains('Usage'));
+    assert($text->contains("Run 'epm --help'"));
+}
+
+test coloured_page_minus_escapes_is_the_plain_page
+{
+    cli::CommandLine $cli = parse_ok(words1('--help'));
+    string $plain = cli::render_help($cli, cli::plain_terminal());
+    cli::TerminalCapabilities $color = cli::TerminalCapabilities(true, false, 80, true);
+    string $drawn = cli::render_help($cli, $color);
+    assert($drawn->contains("\x1b["));
+    assert(cli::strip_sgr($drawn) == $plain);
+}
+
+test version_text
+{
+    assert(cli::render_version() == "0.1.0\n");
+}

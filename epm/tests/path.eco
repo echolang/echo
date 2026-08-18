@@ -1,0 +1,77 @@
+use epm::manifest;
+use epm::scratch;
+use epm::sys;
+
+test join_skips_a_double_slash
+{
+    assert(sys::join('/tmp', 'a') == '/tmp/a');
+    assert(sys::join('/tmp/', 'a') == '/tmp/a');
+    assert(sys::join('/tmp', '/abs') == '/abs');
+}
+
+test join_empty_is_the_other_side
+{
+    assert(sys::join('', 'a') == 'a');
+    assert(sys::join('a', '') == 'a');
+}
+
+test a_joined_path_can_be_created
+{
+    string $dir = scratch::dir('join-real');
+    string $child = sys::join($dir, 'nested/leaf');
+    assert(sys::mkdir_p($child));
+    assert(sys::is_dir($child));
+    scratch::gone($dir);
+}
+
+test dirname_and_basename
+{
+    assert(sys::basename('/tmp/foo/bar.eco') == 'bar.eco');
+    assert(sys::dirname('/tmp/foo/bar.eco') == '/tmp/foo');
+    assert(sys::dirname('bar.eco') == '.');
+}
+
+test dirname_of_root_is_root
+{
+    assert(sys::dirname('/') == '/');
+}
+
+test dirname_of_a_top_level_file
+{
+    assert(sys::dirname('/foo') == '/');
+    assert(sys::basename('/foo') == 'foo');
+}
+
+test basename_without_a_slash_is_the_path
+{
+    assert(sys::basename('bar.eco') == 'bar.eco');
+}
+
+test is_absolute_is_a_leading_slash
+{
+    assert(sys::is_absolute('/tmp'));
+    assert(!sys::is_absolute('tmp'));
+    assert(!sys::is_absolute(''));
+}
+
+test a_package_name_may_have_a_vendor_prefix
+{
+    assert(manifest::usable_name('libcurl'));
+    assert(manifest::usable_name('lib-json'));
+    assert(manifest::usable_name('a_b'));
+    assert(manifest::usable_name('echolang/libcurl'));
+    assert(manifest::usable_name('github.com/echolang/libcurl'));
+}
+
+test a_package_name_cannot_leave_vendor
+{
+    assert(!manifest::usable_name('../escape'));
+    assert(!manifest::usable_name('foo/../bar'));
+    assert(!manifest::usable_name('foo//bar'));
+    assert(!manifest::usable_name('/abs'));
+    assert(!manifest::usable_name('foo/'));
+    assert(!manifest::usable_name('foo\\bar'));
+    assert(!manifest::usable_name(''));
+    assert(!manifest::usable_name('.'));
+    assert(!manifest::usable_name('..'));
+}

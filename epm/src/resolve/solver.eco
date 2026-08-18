@@ -1,0 +1,397 @@
+/**
+ * Pick one version per package name. Two versions of one package cannot
+ * coexist, so "no version satisfies everyone" is a routine outcome and the
+ * conflict message is the feature.
+ *
+ * Pending ranges for the same name are intersected before a version is
+ * chosen. A failed subtree restores `$picked` to the count it had before
+ * the attempt, not by a single pop. An already-picked version is checked
+ * against a new range; the pick is not rewritten.
+ *
+ * Manifests are fetched when a release is tried, not before.
+ */
+
+namespace epm::resolve;
+
+use epm::fetch;
+use epm::manifest::{Requirement, Origin};
+use epm::util::{Version, Range, intersect, satisfies, parse_range};
+
+public struct Release
+{
+    Version $version;
+    string $tag;
+    string $rev;
+    array<Requirement> $requires;
+    bool $hydrated;
+
+    constructor(Version $version, string $tag, string $rev)
+    {
+        $this->version = $version;
+        $this->tag = $tag;
+        $this->rev = $rev;
+        $this->requires = array<Requirement>();
+        $this->hydrated = false;
+    }
+}
+
+public struct Package
+{
+    string $name;
+    Origin $origin;
+    array<Release> $releases;
+
+    constructor(string $name, Origin $origin)
+    {
+        $this->name = $name;
+        $this->origin = $origin;
+        $this->releases = array<Release>();
+    }
+}
+
+public struct Choice
+{
+    string $name;
+    Version $version;
+    Origin $origin;
+    string $tag;
+    string $rev;
+    array<string> $requires;
+    string $why;
+
+    constructor(
+        string $name,
+        Version $version,
+        Origin $origin,
+        string $tag,
+        string $rev,
+        string $why
+    )
+    {
+        $this->name = $name;
+        $this->version = $version;
+        $this->origin = $origin;
+        $this->tag = $tag;
+        $this->rev = $rev;
+        $this->requires = array<string>();
+        $this->why = $why;
+    }
+}
+
+public struct World
+{
+    array<Package> $catalog;
+
+    constructor()
+    {
+        $this->catalog = array<Package>();
+    }
+
+    const function package_of(const string& $name) : Package?
+    {
+        usize $i = 0;
+
+        while ($i < $this->catalog->count()) {
+            if ($this->catalog[$i]->name == $name) {
+                return $this->catalog[$i];
+            }
+
+            $i = $i + 1;
+        }
+
+        return null;
+    }
+
+    const function index_of(const string& $name) : usize
+    {
+        usize $i = 0;
+
+        while ($i < $this->catalog->count()) {
+            if ($this->catalog[$i]->name == $name) {
+                return $i;
+            }
+
+            $i = $i + 1;
+        }
+
+        return $this->catalog->count();
+    }
+}
+
+struct Need
+{
+    Requirement $req;
+    string $who;
+
+    constructor(Requirement $req, string $who)
+    {
+        $this->req = $req;
+        $this->who = $who;
+    }
+}
+
+public function solve(
+    const array<Requirement>& $roots,
+    World& $world
+) : result<array<Choice>, string>
+{
+    array<Need> $pending = array<Need>();
+    usize $i = 0;
+
+    while ($i < $roots->count()) {
+        $pending[] = Need($roots[$i], 'the project');
+        $i = $i + 1;
+    }
+
+    array<Choice> $picked = array<Choice>();
+    string $err = '';
+
+    if (!assign($pending, $world, $picked, $err)) {
+        return .error($err);
+    }
+
+    return .ok($picked);
+}
+
+private function assign(
+    const array<Need>& $pending,
+    World& $world,
+    array<Choice>& $picked,
+    string& $err
+) : bool
+{
+    if ($pending->count() == 0) {
+        return true;
+    }
+
+    usize $i = 0;
+
+    while ($i < $pending->count()) {
+        if (picked_index($picked, $pending[$i]->req->name) != $picked->count()) {
+            if (!accept_more($pending[$i], $picked, $err)) {
+                return false;
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    usize $head = $pending->count();
+    bool $found = false;
+
+    while ($head > 0) {
+        $head = $head - 1;
+
+        if (picked_index($picked, $pending[$head]->req->name) == $picked->count()) {
+            $found = true;
+            break;
+        }
+    }
+
+    if (!$found) {
+        return true;
+    }
+
+    string $name = $pending[$head]->req->name;
+    Range $range = guard parse_need($pending[$head], $err) else {
+        return false;
+    }
+
+    string $why = "{$pending[$head]->who} asked for {$pending[$head]->req->version}";
+    $i = 0;
+
+    while ($i < $pending->count()) {
+        if ($pending[$i]->req->name == $name) {
+            Range $extra = guard parse_need($pending[$i], $err) else {
+                return false;
+            }
+
+            Range $both = guard intersect($range, $extra) else {
+                $err = "cannot satisfy '{$name}': {$why}, {$pending[$i]->who} wants {$pending[$i]->req->version}";
+                return false;
+            }
+
+            $range = $both;
+        }
+
+        $i = $i + 1;
+    }
+
+    array<Need> $rest = array<Need>();
+    $i = 0;
+
+    while ($i < $pending->count()) {
+        if ($pending[$i]->req->name != $name) {
+            $rest[] = $pending[$i];
+        }
+
+        $i = $i + 1;
+    }
+
+    usize $pkg = $world->index_of($name);
+
+    if ($pkg == $world->catalog->count()) {
+        $err = "{$pending[$head]->who} requires '{$name}', and no versions of it are known";
+        return false;
+    }
+
+    usize $v = 0;
+    bool $in_range = false;
+    bool $readable = false;
+
+    while ($v < $world->catalog[$pkg]->releases->count()) {
+        if (!satisfies($world->catalog[$pkg]->releases[$v]->version, $range)) {
+            $v = $v + 1;
+            continue;
+        }
+
+        $in_range = true;
+
+        if (!hydrate($world, $pkg, $v, $err)) {
+            $v = $v + 1;
+            continue;
+        }
+
+        $readable = true;
+        Release $rel = $world->catalog[$pkg]->releases[$v];
+        usize $at = $picked->count();
+        Choice $choice = Choice(
+            $name,
+            $rel->version,
+            $world->catalog[$pkg]->origin,
+            $rel->tag,
+            $rel->rev,
+            $why
+        );
+
+        usize $k = 0;
+
+        while ($k < $rel->requires->count()) {
+            $choice->requires[] = $rel->requires[$k]->name;
+            $k = $k + 1;
+        }
+
+        $picked[] = $choice;
+
+        array<Need> $next = array<Need>();
+        usize $r = 0;
+
+        while ($r < $rest->count()) {
+            $next[] = $rest[$r];
+            $r = $r + 1;
+        }
+
+        $k = 0;
+
+        while ($k < $rel->requires->count()) {
+            $next[] = Need($rel->requires[$k], $name);
+            $k = $k + 1;
+        }
+
+        if (assign($next, $world, $picked, $err)) {
+            return true;
+        }
+
+        restore($picked, $at);
+        $v = $v + 1;
+    }
+
+    if (!$in_range) {
+        $err = "no version of '{$name}' satisfies {$pending[$head]->who}'s range {$pending[$head]->req->version}";
+    }
+    else if (!$readable) {
+        $err = "no version of '{$name}' has a readable module.eco in range {$pending[$head]->req->version}";
+    }
+
+    return false;
+}
+
+private function hydrate(
+    World& $world,
+    usize $pkg,
+    usize $rel_i,
+    string& $err
+) : bool
+{
+    if ($world->catalog[$pkg]->releases[$rel_i]->hydrated) {
+        return true;
+    }
+
+    Origin $origin = $world->catalog[$pkg]->origin;
+    fetch::Source $src = fetch::source_for($origin);
+    string $tag = $world->catalog[$pkg]->releases[$rel_i]->tag;
+    string $rev = $world->catalog[$pkg]->releases[$rel_i]->rev;
+    epm::manifest::Manifest $man = guard $src->fetch_manifest($tag, $rev) else {
+        return false;
+    }
+
+    array<Requirement> $reqs = array<Requirement>();
+    usize $r = 0;
+
+    while ($r < $man->requires->count()) {
+        $reqs[] = $man->requires[$r];
+        bool $listed = guard ensure_listed($man->requires[$r], $world) else ($e) {
+            $err = $e;
+            return false;
+        }
+
+        $r = $r + 1;
+    }
+
+    $world->catalog[$pkg]->releases[$rel_i]->requires = $reqs;
+    $world->catalog[$pkg]->releases[$rel_i]->hydrated = true;
+    return true;
+}
+
+private function accept_more(
+    const Need& $need,
+    array<Choice>& $picked,
+    string& $err
+) : bool
+{
+    usize $at = picked_index($picked, $need->req->name);
+    Range $extra = guard parse_need($need, $err) else {
+        return false;
+    }
+
+    if (!satisfies($picked[$at]->version, $extra)) {
+        string $have = $picked[$at]->version->spelling();
+        string $reason = $picked[$at]->why;
+        $err = "cannot satisfy '{$need->req->name}': {$need->who} wants {$need->req->version}, already picked {$have} ({$reason})";
+        return false;
+    }
+
+    return true;
+}
+
+private function parse_need(const Need& $need, string& $err) : Range?
+{
+    Range $range = guard parse_range($need->req->version) else {
+        $err = "{$need->who} asked for {$need->req->name} @{$need->req->version}, which is not a range";
+        return null;
+    }
+
+    return $range;
+}
+
+private function picked_index(const array<Choice>& $picked, const string& $name) : usize
+{
+    usize $i = 0;
+
+    while ($i < $picked->count()) {
+        if ($picked[$i]->name == $name) {
+            return $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $picked->count();
+}
+
+private function restore(array<Choice>& $picked, usize $at) : void
+{
+    while ($picked->count() > $at) {
+        $picked->pop();
+    }
+}

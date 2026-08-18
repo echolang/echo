@@ -1,0 +1,269 @@
+/**
+ * The fallback Source: git ls-remote for versions, a clone for a module.eco
+ * and for vendor/. Every other host holds one of these.
+ */
+
+namespace epm::fetch;
+
+use epm::manifest;
+use epm::resolve;
+use epm::sys;
+
+public class Git : Source
+{
+    string $url;
+
+    constructor(string $url)
+    {
+        $this->url = $url;
+    }
+
+    const function list_versions() : result<resolve::Package, string>
+    {
+        array<string> $argv = array<string>();
+        $argv[] = 'git';
+        $argv[] = 'ls-remote';
+        $argv[] = '--tags';
+        $argv[] = $this->url;
+        sys::Run $ran = sys::run($argv);
+
+        if (!$ran->ok()) {
+            return .error("git ls-remote failed for {$this->url}:\n{$ran->err}");
+        }
+
+        array<RemoteTag> $tags = array<RemoteTag>();
+        str::parts $lines = str::split($ran->out, "\n");
+        usize $i = 0;
+
+        while ($i < $lines->count()) {
+            string::view $line = str::trim($lines->at($i));
+            $i = $i + 1;
+
+            if ($line->empty()) {
+                continue;
+            }
+
+            usize $tab = $line->find("\t");
+
+            if ($tab == $line->size) {
+                continue;
+            }
+
+            string::view $sha_v = $line->sub(0, $tab);
+            string::view $ref = $line->sub($tab + 1, $line->size - $tab - 1);
+            bool $peeled = $ref->ends('^{}');
+
+            if ($peeled) {
+                $ref = $ref->sub(0, $ref->size - 3);
+            }
+
+            if (!$ref->starts('refs/tags/')) {
+                continue;
+            }
+
+            string $name = str::from($ref->sub(10, $ref->size - 10));
+            string $sha = str::from($sha_v);
+            take_remote_tag($tags, $name, $sha, $peeled);
+        }
+
+        return .ok(package_from_tags(manifest::Origin::git($this->url), $tags));
+    }
+
+    const function fetch_manifest(
+        const string& $tag,
+        const string& $rev
+    ) : result<manifest::Manifest, string>
+    {
+        string $key = manifest_key($tag, $rev);
+
+        if ($key->empty()) {
+            return .error("cannot fetch a manifest from {$this->url} without a rev");
+        }
+
+        string $cache = cache_dir($this->url, $key);
+        string $mod = sys::join($cache, 'module.eco');
+
+        if (!sys::is_file($mod)) {
+            if (!$this->clone_manifest($key, $cache)) {
+                return .error("no module.eco at {$this->url}@{$key}");
+            }
+        }
+
+        return manifest::load($mod);
+    }
+
+    const function checkout(
+        const string& $rev,
+        const string& $dest
+    ) : result<string, string>
+    {
+        if ($rev->empty()) {
+            return .error("cannot check out {$this->url}: no rev");
+        }
+
+        string $parent = sys::dirname($dest);
+
+        if (!sys::mkdir_p($parent)) {
+            return .error("cannot create {$parent}");
+        }
+
+        string $base = sys::basename($dest);
+        string $tmp = sys::join($parent, ".epm-{$base}.tmp");
+
+        if (sys::exists($tmp)) {
+            sys::remove_all($tmp);
+        }
+
+        if (!sys::mkdir_p($tmp)) {
+            return .error("cannot create {$tmp}");
+        }
+
+        string $failed = fetch_into($this->url, $rev, $tmp);
+
+        if (!$failed->empty()) {
+            sys::remove_all($tmp);
+            return .error($failed);
+        }
+
+        if (sys::exists($dest)) {
+            sys::remove_all($dest);
+        }
+
+        if (!sys::rename($tmp, $dest)) {
+            sys::remove_all($tmp);
+            return .error("cannot move {$tmp} to {$dest}");
+        }
+
+        return .ok(rev_at($dest));
+    }
+
+    private const function clone_manifest(
+        const string& $rev,
+        const string& $cache
+    ) : bool
+    {
+        string $ignored = guard $this->checkout($rev, $cache) else {
+            return false;
+        }
+
+        return sys::is_file(sys::join($cache, 'module.eco'));
+    }
+}
+
+public function rev_at(const string& $dir) : string
+{
+    if (!sys::is_dir(sys::join($dir, '.git'))) {
+        return '';
+    }
+
+    array<string> $argv = array<string>();
+    $argv[] = 'git';
+    $argv[] = '-C';
+    $argv[] = $dir;
+    $argv[] = 'rev-parse';
+    $argv[] = 'HEAD';
+    sys::Run $ran = sys::run($argv);
+
+    if (!$ran->ok()) {
+        return '';
+    }
+
+    return str::trim($ran->out);
+}
+
+private function take_remote_tag(
+    array<RemoteTag>& $tags,
+    const string& $name,
+    const string& $sha,
+    bool $peeled
+) : void
+{
+    usize $i = 0;
+
+    while ($i < $tags->count()) {
+        if ($tags[$i]->name == $name) {
+            if ($peeled || $tags[$i]->sha->empty()) {
+                $tags[$i]->sha = $sha;
+            }
+
+            return;
+        }
+
+        $i = $i + 1;
+    }
+
+    $tags[] = RemoteTag($name, $sha);
+}
+
+private function fetch_into(
+    const string& $url,
+    const string& $rev,
+    const string& $tmp
+) : string
+{
+    array<string> $init = array<string>();
+    $init[] = 'git';
+    $init[] = '-C';
+    $init[] = $tmp;
+    $init[] = 'init';
+    sys::Run $ran = sys::run($init);
+
+    if (!$ran->ok()) {
+        return "git init failed in {$tmp}:\n{$ran->err}";
+    }
+
+    array<string> $remote = array<string>();
+    $remote[] = 'git';
+    $remote[] = '-C';
+    $remote[] = $tmp;
+    $remote[] = 'remote';
+    $remote[] = 'add';
+    $remote[] = 'origin';
+    $remote[] = $url;
+    $ran = sys::run($remote);
+
+    if (!$ran->ok()) {
+        return "git remote add failed in {$tmp}:\n{$ran->err}";
+    }
+
+    array<string> $fetch = array<string>();
+    $fetch[] = 'git';
+    $fetch[] = '-C';
+    $fetch[] = $tmp;
+    $fetch[] = 'fetch';
+    $fetch[] = '--depth';
+    $fetch[] = '1';
+    $fetch[] = 'origin';
+    $fetch[] = $rev;
+    $ran = sys::run($fetch);
+
+    if (!$ran->ok()) {
+        array<string> $full = array<string>();
+        $full[] = 'git';
+        $full[] = '-C';
+        $full[] = $tmp;
+        $full[] = 'fetch';
+        $full[] = 'origin';
+        $full[] = $rev;
+        $ran = sys::run($full);
+    }
+
+    if (!$ran->ok()) {
+        return "git fetch {$url}@{$rev} failed:\n{$ran->err}";
+    }
+
+    array<string> $co = array<string>();
+    $co[] = 'git';
+    $co[] = '-C';
+    $co[] = $tmp;
+    $co[] = 'checkout';
+    $co[] = '--force';
+    $co[] = 'FETCH_HEAD';
+    $ran = sys::run($co);
+
+    if (!$ran->ok()) {
+        return "git checkout failed in {$tmp}:\n{$ran->err}";
+    }
+
+    return '';
+}

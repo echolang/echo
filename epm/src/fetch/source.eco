@@ -1,0 +1,107 @@
+/**
+ * How a remote produces versions, a module.eco, and a tree on disk.
+ *
+ * The concrete type is picked from the URL (`source_for`), so this is a stored
+ * interface: GitHub and Git are classes. A later host is another class and
+ * does not touch fill or install.
+ */
+
+namespace epm::fetch;
+
+use epm::manifest;
+use epm::resolve;
+use epm::sys;
+use epm::util;
+use std::env;
+
+public interface Source
+{
+    const function list_versions() : result<resolve::Package, string>;
+    const function fetch_manifest(
+        const string& $tag,
+        const string& $rev
+    ) : result<manifest::Manifest, string>;
+    const function checkout(
+        const string& $rev,
+        const string& $dest
+    ) : result<string, string>;
+}
+
+public function source_for(const manifest::Origin& $origin) : Source
+{
+    if ($origin->kind != 'git') {
+        return Git($origin->locator);
+    }
+
+    GitHub $github = guard GitHub::from_url($origin->locator) else {
+        return Git($origin->locator);
+    }
+
+    return $github;
+}
+
+function package_from_tags(
+    const manifest::Origin& $origin,
+    const array<RemoteTag>& $tags
+) : resolve::Package
+{
+    resolve::Package $out = resolve::Package('', $origin);
+    usize $i = 0;
+
+    while ($i < $tags->count()) {
+        util::Version $ver = guard util::parse_version($tags[$i]->name) else {
+            $i = $i + 1;
+            continue;
+        }
+
+        $out->releases[] = resolve::Release($ver, $tags[$i]->name, $tags[$i]->sha);
+        $i = $i + 1;
+    }
+
+    sort_releases($out);
+    return $out;
+}
+
+function sort_releases(resolve::Package& $src) : void
+{
+    usize $n = $src->releases->count();
+
+    if ($n < 2) {
+        return;
+    }
+
+    usize $i = 1;
+
+    while ($i < $n) {
+        resolve::Release $held = $src->releases[$i];
+        usize $j = $i;
+
+        while ($j > 0) {
+            if (util::cmp_version($held->version, $src->releases[$j - 1]->version) <= 0) {
+                break;
+            }
+
+            $src->releases[$j] = $src->releases[$j - 1];
+            $j = $j - 1;
+        }
+
+        $src->releases[$j] = $held;
+        $i = $i + 1;
+    }
+}
+
+function manifest_key(const string& $tag, const string& $rev) : string
+{
+    if (!$rev->empty()) {
+        return $rev;
+    }
+
+    return $tag;
+}
+
+function cache_dir(const string& $url, const string& $rev) : string
+{
+    string $hash = sys::sha256_hex($url)->sub(0, 16);
+    string $tmp = str::from(env::tmp());
+    return sys::join(sys::join($tmp, "epm-cache/{$hash}"), $rev);
+}

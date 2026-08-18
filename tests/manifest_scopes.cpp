@@ -347,7 +347,7 @@ TEST_CASE("a scoped #[requires:] is present for test and absent for build", "[ma
         "#[sources: \"src/*.eco\"]\n"
         "#[target: test] {\n"
         "    #[sources: \"tests/*.eco\"]\n"
-        "    #[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "    #[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
         "}\n");
 
     write_file(project.root() / "app/src/api.eco",

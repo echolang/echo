@@ -59,13 +59,20 @@ namespace Parser
         t_test
     };
 
-    // one `#[requires: "name" { version:, git:, rev: }]`. the compiler reads the name and
-    // resolves it against the package directory; version / git / rev are recorded only
+    // one `#[requires: "name" { version:, source: git "...", rev: }]`. the compiler reads
+    // the name and resolves it against the package directory; version / source / rev are
+    // recorded only. the source *kind* is a closed tag so a later host is another tag
+    enum class RequirementSourceKind
+    {
+        t_git
+    };
+
     struct ModuleRequirement
     {
         std::string name;
         std::string version;
-        std::string git;
+        RequirementSourceKind source_kind = RequirementSourceKind::t_git;
+        std::string source;
         std::string rev;
         TokenSpan span;
     };

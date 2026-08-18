@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# installs the latest released echoc into /usr/local/bin:
+# installs the latest released echoc and epm into /usr/local/bin:
 #
 #   curl -fsSL https://raw.githubusercontent.com/echolang/echo/master/install.sh | bash
 #
-# a released binary carries the standard library inside it, so this is one file and nothing else.
+# a released echoc carries the standard library inside it. epm is the package
+# manager and sits next to it in the same archive.
 # set ECHO_INSTALL_DIR to install somewhere other than /usr/local/bin.
 
 set -euo pipefail
@@ -18,7 +19,7 @@ case "$(uname -s)-$(uname -m)" in
     Darwin-arm64)  asset="echo-macos-arm64" ;;
     Linux-x86_64)  asset="echo-linux-x86_64" ;;
     *)
-        echo "echo: no prebuilt echoc for $(uname -s) $(uname -m)." >&2
+        echo "echo: no prebuilt Echo for $(uname -s) $(uname -m)." >&2
         echo "build it from source instead: https://github.com/${REPO}" >&2
         exit 1
         ;;
@@ -42,14 +43,22 @@ if [ ! -f "${tmp}/echoc" ]; then
     exit 1
 fi
 
+if [ ! -f "${tmp}/epm" ]; then
+    echo "echo: the downloaded archive does not contain epm." >&2
+    exit 1
+fi
+
 # sudo only when it is needed, and it reads its password from the tty - so this still works under
 # `curl | bash`, where stdin is the script
 if [ -w "${INSTALL_DIR}" ]; then
     install -m 755 "${tmp}/echoc" "${INSTALL_DIR}/echoc"
+    install -m 755 "${tmp}/epm" "${INSTALL_DIR}/epm"
 else
     echo "${INSTALL_DIR} is not writable, installing with sudo ..."
     sudo mkdir -p "${INSTALL_DIR}"
     sudo install -m 755 "${tmp}/echoc" "${INSTALL_DIR}/echoc"
+    sudo install -m 755 "${tmp}/epm" "${INSTALL_DIR}/epm"
 fi
 
 echo "installed echoc $("${INSTALL_DIR}/echoc" --version) to ${INSTALL_DIR}/echoc"
+echo "installed epm $("${INSTALL_DIR}/epm" --version) to ${INSTALL_DIR}/epm"

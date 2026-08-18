@@ -6,6 +6,6 @@
 #[module: "flatapp"]
 #[version: "0.1.0"]
 
-#[requires: "libcurl" { git: "https://example.com/libcurl", version: "^0.1" }]
+#[requires: "libcurl" { version: "^0.1", source: git "https://example.com/libcurl" }]
 
 #[sources: "src/*.eco"]

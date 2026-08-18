@@ -1,0 +1,178 @@
+/**
+ * epm.lock.json. JSON, so libjson is the only serializer epm links.
+ * No absolute paths. lockVersion is refused if it is not 1.
+ */
+
+namespace epm::lock;
+
+use epm::manifest::Origin;
+use epm::sys;
+use std::io;
+
+public const LOCK_VERSION = 1;
+
+public struct Entry
+{
+    string $name;
+    string $version;
+    Origin $origin;
+    string $rev;
+    string $sha256;
+    array<string> $requires;
+
+    constructor(string $name, string $version, Origin $origin, string $rev, string $sha256)
+    {
+        $this->name = $name;
+        $this->version = $version;
+        $this->origin = $origin;
+        $this->rev = $rev;
+        $this->sha256 = $sha256;
+        $this->requires = array<string>();
+    }
+}
+
+public struct Lock
+{
+    array<Entry> $packages;
+
+    constructor()
+    {
+        $this->packages = array<Entry>();
+    }
+
+    const function find(const string& $name) : Entry?
+    {
+        usize $i = 0;
+
+        while ($i < $this->packages->count()) {
+            if ($this->packages[$i]->name == $name) {
+                return $this->packages[$i];
+            }
+
+            $i = $i + 1;
+        }
+
+        return null;
+    }
+}
+
+public function path_beside(const string& $manifest) : string
+{
+    return sys::join(sys::dirname($manifest), 'epm.lock.json');
+}
+
+public function load(const string& $path) : result<Lock, string>
+{
+    if (!sys::is_file($path)) {
+        return .ok(Lock());
+    }
+
+    string $text = guard io::readfile($path) else ($e) {
+        return .error("cannot read {$path}: {$e}");
+    }
+
+    json::Value $root = guard json::parse($text) else ($e) {
+        return .error("{$path} is not JSON: {$e}");
+    }
+
+    int64 $ver = $root['lockVersion']->asInt() ?? 0;
+
+    if ($ver != 1) {
+        return .error("{$path} has lockVersion {$ver}, expected 1");
+    }
+
+    Lock $lock = Lock();
+    array<json::Value> $pkgs = guard $root['packages']->asArray() else {
+        return .ok($lock);
+    }
+
+    usize $i = 0;
+
+    while ($i < $pkgs->count()) {
+        json::Value $one = $pkgs[$i];
+        string $name = $one['name']->asStr() ?? '';
+        string $kind = $one['source']['kind']->asStr() ?? '';
+        string $url = $one['source']['url']->asStr() ?? '';
+
+        if ($name->empty()) {
+            $i = $i + 1;
+            continue;
+        }
+
+        if ($kind != 'git') {
+            return .error("{$path}: package '{$name}' has source kind '{$kind}', expected git");
+        }
+
+        Entry $e = Entry(
+            $name,
+            $one['version']->asStr() ?? '',
+            Origin::git($url),
+            $one['rev']->asStr() ?? '',
+            $one['sha256']->asStr() ?? ''
+        );
+
+        array<json::Value> $reqs = $one['requires']->asArray() ?? array<json::Value>();
+
+        usize $j = 0;
+
+        while ($j < $reqs->count()) {
+            string $n = $reqs[$j]->asStr() ?? '';
+
+            if (!$n->empty()) {
+                $e->requires[] = $n;
+            }
+
+            $j = $j + 1;
+        }
+
+        $lock->packages[] = $e;
+        $i = $i + 1;
+    }
+
+    return .ok($lock);
+}
+
+public function save(const string& $path, const Lock& $lock) : result<bool, string>
+{
+    json::Value $root = json::object();
+    $root['lockVersion'] = json::int(LOCK_VERSION);
+
+    json::Value $pkgs = json::arr();
+    usize $i = 0;
+
+    while ($i < $lock->packages->count()) {
+        Entry $e = $lock->packages[$i];
+        json::Value $one = json::object();
+        $one['name'] = json::str($e->name);
+        $one['version'] = json::str($e->version);
+
+        json::Value $src = json::object();
+        $src['kind'] = json::str($e->origin->kind);
+        $src['url'] = json::str($e->origin->locator);
+        $one['source'] = $src;
+        $one['rev'] = json::str($e->rev);
+        $one['sha256'] = json::str($e->sha256);
+
+        json::Value $reqs = json::arr();
+        usize $j = 0;
+
+        while ($j < $e->requires->count()) {
+            $reqs[] = json::str($e->requires[$j]);
+            $j = $j + 1;
+        }
+
+        $one['requires'] = $reqs;
+        $pkgs[] = $one;
+        $i = $i + 1;
+    }
+
+    $root['packages'] = $pkgs;
+
+    result<usize, io::ioerror> $wrote = io::writefile($path, json::pretty($root));
+
+    if ($wrote->failed()) {
+        return .error("cannot write {$path}");
+    }
+
+    return .ok(true);
+}

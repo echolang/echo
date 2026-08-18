@@ -230,8 +230,8 @@ void read_manifest_depends(
             }
 
             reader.refuse(entry->span,
-                "git dependencies are not resolved yet - write '#[requires: \"name\" { git: \"...\", "
-                "version: \"...\" }]' and run `epm install`, or vendor the module and name it with a path.");
+                "git dependencies are not resolved yet - write '#[requires: \"name\" { version: \"...\", "
+                "source: git \"...\" }]' and run `epm install`, or vendor the module and name it with a path.");
             continue;
         }
 

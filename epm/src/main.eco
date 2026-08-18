@@ -1,0 +1,40 @@
+/*
+ * epm <command> [args]
+ *
+ * The entry file. Parse first: --help and --version are answers, not exits
+ * inside the parser, and a refusal is drawn here so it can take the colour
+ * the invocation asked for.
+ */
+
+use epm::cli;
+use epm::cmd::dispatch;
+use std::env;
+use std::io;
+
+array<string> $argv = env::argv();
+cli::CommandLine $parsed = cli::CommandLine();
+bool $ok = guard cli::parse_command_line($argv, $parsed) else ($e) {
+    cli::TerminalCapabilities $err_caps = cli::capabilities_for(
+        $parsed,
+        cli::TerminalStream::stderr
+    );
+    io::eprint(cli::render_error($e, $parsed->subcommand, $err_caps));
+    env::exit(1);
+}
+
+if ($parsed->wants_version) {
+    io::print(cli::render_version());
+    env::exit(0);
+}
+
+if ($parsed->wants_help) {
+    cli::TerminalCapabilities $out_caps = cli::capabilities_for(
+        $parsed,
+        cli::TerminalStream::stdout
+    );
+    io::print(cli::render_help($parsed, $out_caps));
+    env::exit(0);
+}
+
+int32 $code = dispatch($parsed);
+env::exit($code);

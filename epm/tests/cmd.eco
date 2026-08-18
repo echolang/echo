@@ -1,0 +1,80 @@
+use epm::cmd;
+use epm::lock;
+use epm::scratch;
+use epm::sys;
+
+test install_applies_the_lock_and_update_re_resolves
+{
+    string $pkg = scratch::dir('cmd-pkg');
+    scratch::git_module($pkg, 'lib', '1.0.0', '');
+    scratch::write(
+        sys::join($pkg, 'module.eco'),
+        "#[module: \"lib\"]\n#[version: \"2.0.0\"]\n#[sources: \"src/*.eco\"]\n"
+    );
+    array<string> $add = array<string>();
+    $add[] = 'add';
+    $add[] = '-A';
+    assert(scratch::git($pkg, $add)->ok());
+    array<string> $commit = array<string>();
+    $commit[] = 'commit';
+    $commit[] = '--no-gpg-sign';
+    $commit[] = '-m';
+    $commit[] = 'v2';
+    assert(scratch::git($pkg, $commit)->ok());
+    assert(scratch::git_tag($pkg, 'v2.0.0')->ok());
+
+    string $rev1 = scratch::rev_parse($pkg, 'v1.0.0');
+    string $app = scratch::dir('cmd-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \">=1.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+
+    lock::Lock $lock = lock::Lock();
+    $lock->packages[] = lock::Entry('lib', '1.0.0', epm::manifest::Origin::git($pkg), $rev1, '');
+    bool $saved = guard lock::save(lock::path_beside(sys::join($app, 'module.eco')), $lock);
+    assert($saved);
+
+    assert(cmd::install_at($app) == 0);
+    string $vendored = scratch::read(sys::join($app, 'vendor/lib/module.eco'));
+    assert($vendored->contains('#[version: "1.0.0"]'));
+
+    assert(cmd::verify_at($app) == 0);
+
+    assert(cmd::update_at($app, '') == 0);
+    $vendored = scratch::read(sys::join($app, 'vendor/lib/module.eco'));
+    assert($vendored->contains('#[version: "2.0.0"]'));
+
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^3.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    assert(cmd::verify_at($app) == 1);
+
+    scratch::gone($pkg);
+    scratch::gone($app);
+}
+
+test install_without_a_lock_resolves
+{
+    string $pkg = scratch::dir('cmd-fresh-pkg');
+    scratch::git_module($pkg, 'lib', '1.0.0', '');
+    string $app = scratch::dir('cmd-fresh-app');
+    scratch::file(
+        $app,
+        'module.eco',
+        "#[module: \"app\"]\n#[version: \"0.1.0\"]\n#[requires: \"lib\" { version: \"^1.0\", source: git \"{$pkg}\" }]\n#[sources: \"src/*.eco\"]\n"
+    );
+    scratch::file($app, 'src/main.eco', "echo 1;\n");
+
+    assert(cmd::install_at($app) == 0);
+    assert(sys::is_file(sys::join($app, 'epm.lock.json')));
+    assert(sys::is_file(sys::join($app, 'vendor/lib/module.eco')));
+    assert(cmd::verify_at($app) == 0);
+
+    scratch::gone($pkg);
+    scratch::gone($app);
+}

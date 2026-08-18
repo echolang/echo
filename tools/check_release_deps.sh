@@ -3,6 +3,7 @@
 # what a released binary is allowed to depend on.
 #
 #   tools/check_release_deps.sh build-release/echoc
+#   tools/check_release_deps.sh /tmp/epm curl
 #
 # a shared library the machine that downloaded the binary does not have is not a missing feature: the
 # loader refuses to start the process, so the release is not a slower compiler there, it is no
@@ -10,16 +11,21 @@
 # fatal anywhere else, while a plain soname is resolved by ldconfig on every machine that has the
 # distro package - so this is one allowlist per loader rather than one list of library names.
 #
+# extra names after the binary are linker names (`curl` for `#[link: lib "curl"]`). They extend the
+# Linux SONAME allowlist only. Darwin still admits `/usr/lib` and `/System/Library` and nothing else,
+# so a Homebrew curl is refused whether you named it or not.
+#
 # runnable by hand against an unpacked release, which is what makes it a check rather than a CI step.
 
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-    echo "usage: $0 <binary>" >&2
+if [ $# -lt 1 ]; then
+    echo "usage: $0 <binary> [extra-lib...]" >&2
     exit 2
 fi
 
 binary="$1"
+shift
 
 if [ ! -f "${binary}" ]; then
     echo "check_release_deps: no such file: ${binary}" >&2
@@ -39,6 +45,9 @@ case "$(uname -s)" in
         # that each one belongs to a package every target machine already has. libzstd is deliberately
         # absent - ECO_STATIC_ZSTD puts it inside the binary, and its return is a regression
         allowed='^(libc|libm|libdl|libpthread|librt|libz|libstdc\+\+|libgcc_s|ld-linux-x86-64)\.so'
+        for name in "$@"; do
+            allowed="${allowed}|lib${name}\\.so"
+        done
         deps="$(readelf -d "${binary}" | sed -n 's/.*NEEDED.*\[\(.*\)\].*/\1/p')"
         escaped="$(printf '%s\n' "${deps}" | grep -v -E "${allowed}" || true)"
 

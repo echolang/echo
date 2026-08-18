@@ -7,7 +7,7 @@ expect: fail
   '../escape' is not a usable package name - it becomes a directory under 'vendor/', so each component must be a real segment (not '.', '..', empty, or a backslash).
 
   1 | #[module: "badname"]
-  2 | #[requires: "../escape" { git: "https://x", version: "^1" }]
+  2 | #[requires: "../escape" { version: "^1", source: git "https://x" }]
     :             ^^^^^^^^^^^
   3 | #[sources: "src/*.eco"]
 

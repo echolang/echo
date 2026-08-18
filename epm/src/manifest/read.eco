@@ -1,0 +1,250 @@
+/**
+ * Read a module.eco through `echoc -p manifest`. One grammar, one implementation.
+ */
+
+namespace epm::manifest;
+
+use epm::sys;
+use std::env;
+
+public struct Requirement
+{
+    string $name;
+    string $version;
+    Origin $origin;
+    string $rev;
+
+    constructor(string $name, string $version, Origin $origin, string $rev)
+    {
+        $this->name = $name;
+        $this->version = $version;
+        $this->origin = $origin;
+        $this->rev = $rev;
+    }
+}
+
+public struct ScopedRequirement
+{
+    string $target;
+    Requirement $req;
+
+    constructor(string $target, Requirement $req)
+    {
+        $this->target = $target;
+        $this->req = $req;
+    }
+}
+
+public struct Manifest
+{
+    string $name;
+    string $version;
+    string $path;
+    array<Requirement> $requires;
+    array<ScopedRequirement> $scoped;
+    array<string> $depends;
+
+    constructor(string $name, string $version, string $path)
+    {
+        $this->name = $name;
+        $this->version = $version;
+        $this->path = $path;
+        $this->requires = array<Requirement>();
+        $this->scoped = array<ScopedRequirement>();
+        $this->depends = array<string>();
+    }
+}
+
+public function all_requires(const Manifest& $m) : array<Requirement>
+{
+    array<Requirement> $out = array<Requirement>();
+    usize $i = 0;
+
+    while ($i < $m->requires->count()) {
+        $out[] = $m->requires[$i];
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < $m->scoped->count()) {
+        $out[] = $m->scoped[$i]->req;
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+public function find_module(const string& $start) : string?
+{
+    string $dir = $start;
+
+    while (true) {
+        string $here = sys::join($dir, 'module.eco');
+
+        if (sys::is_file($here)) {
+            return $here;
+        }
+
+        string $parent = sys::dirname($dir);
+
+        if ($parent == $dir) {
+            return null;
+        }
+
+        $dir = $parent;
+    }
+}
+
+public function echoc_bin() : string
+{
+    string::view $from_env = guard env::var('ECHOC') else {
+        string $guess = sys::join(env::cwd(), '../build/echoc');
+
+        if (sys::is_file($guess)) {
+            return $guess;
+        }
+
+        return 'echoc';
+    }
+
+    return str::from($from_env);
+}
+
+public function load(const string& $path) : result<Manifest, string>
+{
+    string $bin = echoc_bin();
+    array<string> $argv = array<string>();
+    $argv[] = $bin;
+    $argv[] = 'build';
+    $argv[] = '-p';
+    $argv[] = 'manifest';
+    $argv[] = '-m';
+    $argv[] = $path;
+    sys::Run $ran = sys::run($argv);
+
+    if (!$ran->ok()) {
+        return .error("echoc -p manifest failed:\n{$ran->err}{$ran->out}");
+    }
+
+    json::Value $root = guard json::parse($ran->out) else ($e) {
+        return .error("echoc -p manifest was not JSON: {$e}");
+    }
+
+    Manifest $m = Manifest(
+        $root['name']->asStr() ?? '',
+        $root['version']->asStr() ?? '',
+        $path
+    );
+
+    array<json::Value> $deps = $root['depends']->asArray() ?? array<json::Value>();
+    usize $di = 0;
+
+    while ($di < $deps->count()) {
+        string $d = $deps[$di]->asStr() ?? '';
+
+        if (!$d->empty()) {
+            $m->depends[] = $d;
+        }
+
+        $di = $di + 1;
+    }
+
+    take_requires($root['requires'], $m->requires);
+
+    array<json::Value> $targets = $root['targets']->asArray() ?? array<json::Value>();
+    usize $ti = 0;
+
+    while ($ti < $targets->count()) {
+        string $tname = $targets[$ti]['name']->asStr() ?? '';
+        array<Requirement> $scoped = array<Requirement>();
+        take_requires($targets[$ti]['requires'], $scoped);
+        usize $si = 0;
+
+        while ($si < $scoped->count()) {
+            $m->scoped[] = ScopedRequirement($tname, $scoped[$si]);
+            $si = $si + 1;
+        }
+
+        $ti = $ti + 1;
+    }
+
+    return .ok($m);
+}
+
+private function take_requires(json::Value $node, array<Requirement>& $into) : void
+{
+    array<json::Value> $items = $node->asArray() ?? array<json::Value>();
+
+    usize $i = 0;
+
+    while ($i < $items->count()) {
+        json::Value $one = $items[$i];
+        string $name = $one['name']->asStr() ?? '';
+        string $version = $one['version']->asStr() ?? '';
+        string $rev = $one['rev']->asStr() ?? '';
+        Origin $origin = origin_from_json($one['source']);
+
+        if (!$name->empty()) {
+            $into[] = Requirement($name, $version, $origin, $rev);
+        }
+
+        $i = $i + 1;
+    }
+}
+
+function origin_from_json(json::Value $node) : Origin
+{
+    string $kind = $node['kind']->asStr() ?? 'git';
+    string $url = $node['url']->asStr() ?? '';
+    return Origin($kind, $url);
+}
+
+public function usable_name(const string& $name) : bool
+{
+    if ($name->empty() || $name->contains('\\')) {
+        return false;
+    }
+
+    int32 $components = 0;
+    usize $start = 0;
+    usize $i = 0;
+
+    while ($i <= $name->size()) {
+        bool $cut = $i == $name->size();
+
+        if (!$cut && $name->byte($i) == 47) {
+            $cut = true;
+        }
+
+        if ($cut) {
+            usize $len = $i - $start;
+
+            if ($len == 0) {
+                return false;
+            }
+
+            string $part = $name->sub($start, $len);
+
+            if ($part == '.' || $part == '..') {
+                return false;
+            }
+
+            $components = $components + 1;
+
+            if ($components > 8) {
+                return false;
+            }
+
+            $start = $i + 1;
+        }
+
+        if ($i == $name->size()) {
+            break;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $components >= 1;
+}

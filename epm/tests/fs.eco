@@ -1,0 +1,79 @@
+use epm::scratch;
+use epm::sys;
+
+test mkdir_p_makes_nested_directories
+{
+    string $root = scratch::dir('mkdir');
+    string $leaf = sys::join($root, 'a/b/c');
+    assert(sys::mkdir_p($leaf));
+    assert(sys::is_dir($leaf));
+    assert(sys::mkdir_p($leaf));
+    scratch::gone($root);
+}
+
+test exists_is_file_is_dir
+{
+    string $root = scratch::dir('kind');
+    string $file = scratch::file($root, 'x.txt', 'hi');
+    assert(sys::exists($file));
+    assert(sys::is_file($file));
+    assert(!sys::is_dir($file));
+    assert(sys::is_dir($root));
+    assert(!sys::is_file($root));
+    assert(!sys::exists(sys::join($root, 'nope')));
+    scratch::gone($root);
+}
+
+test remove_all_deletes_a_tree
+{
+    string $root = scratch::dir('rm');
+    scratch::file($root, 'a/b.txt', 'x');
+    assert(sys::remove_all($root));
+    assert(!sys::exists($root));
+    assert(sys::remove_all($root));
+}
+
+test rename_moves_a_file
+{
+    string $root = scratch::dir('rename');
+    string $from = scratch::file($root, 'a.txt', 'payload');
+    string $to = sys::join($root, 'b.txt');
+    assert(sys::rename($from, $to));
+    assert(!sys::exists($from));
+    assert(scratch::read($to) == 'payload');
+    scratch::gone($root);
+}
+
+test readdir_lists_children
+{
+    string $root = scratch::dir('readdir');
+    scratch::file($root, 'a.txt', 'a');
+    scratch::file($root, 'b.txt', 'b');
+    array<string> $names = sys::readdir($root);
+    assert($names->count() == 2);
+    bool $saw_a = false;
+    bool $saw_b = false;
+    usize $i = 0;
+
+    while ($i < $names->count()) {
+        if ($names[$i] == 'a.txt') {
+            $saw_a = true;
+        }
+
+        if ($names[$i] == 'b.txt') {
+            $saw_b = true;
+        }
+
+        $i = $i + 1;
+    }
+
+    assert($saw_a);
+    assert($saw_b);
+    scratch::gone($root);
+}
+
+test readdir_of_a_missing_dir_is_empty
+{
+    array<string> $names = sys::readdir('/tmp/epm-t-does-not-exist');
+    assert($names->count() == 0);
+}

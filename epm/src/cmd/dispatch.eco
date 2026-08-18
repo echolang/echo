@@ -1,0 +1,53 @@
+/**
+ * The command, already parsed. Help and version never reach here.
+ */
+
+namespace epm::cmd;
+
+use epm::cli::{CommandLine, report, Subcommand};
+use epm::manifest;
+use std::env;
+
+public function dispatch(const CommandLine& $cli) : int32
+{
+    if ($cli->subcommand == Subcommand::install) {
+        return install($cli);
+    }
+
+    if ($cli->subcommand == Subcommand::add) {
+        return add($cli);
+    }
+
+    if ($cli->subcommand == Subcommand::remove) {
+        return remove($cli);
+    }
+
+    if ($cli->subcommand == Subcommand::update) {
+        return update($cli);
+    }
+
+    if ($cli->subcommand == Subcommand::verify) {
+        return verify($cli);
+    }
+
+    if ($cli->subcommand == Subcommand::tree) {
+        return tree($cli);
+    }
+
+    report('No command given.');
+    return 1;
+}
+
+function project() : result<manifest::Manifest, string>
+{
+    return project_at(env::cwd());
+}
+
+function project_at(const string& $start) : result<manifest::Manifest, string>
+{
+    string $mod = guard manifest::find_module($start) else {
+        return .error("no module.eco here or above");
+    }
+
+    return manifest::load($mod);
+}

@@ -119,6 +119,15 @@ void json_attribute_value(std::ostream &out, const AST::AttributeValue &value)
     out << " }";
 }
 
+const char *requirement_source_kind_name(Parser::RequirementSourceKind kind)
+{
+    switch (kind) {
+    case Parser::RequirementSourceKind::t_git: return "git";
+    }
+
+    return "git";
+}
+
 void json_requirements(std::ostream &out, const std::vector<Parser::ModuleRequirement> &requirements)
 {
     out << '[';
@@ -133,9 +142,11 @@ void json_requirements(std::ostream &out, const std::vector<Parser::ModuleRequir
         json_escape(out, requirement.name);
         out << ", \"version\": ";
         json_escape(out, requirement.version);
-        out << ", \"git\": ";
-        json_escape(out, requirement.git);
-        out << ", \"rev\": ";
+        out << ", \"source\": { \"kind\": ";
+        json_escape(out, requirement_source_kind_name(requirement.source_kind));
+        out << ", \"url\": ";
+        json_escape(out, requirement.source);
+        out << " }, \"rev\": ";
         json_optional_string(out, requirement.rev);
         out << " }";
     }

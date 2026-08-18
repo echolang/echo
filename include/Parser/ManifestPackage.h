@@ -23,10 +23,12 @@ namespace Parser
     // and a backslash are what would leave that directory
     bool package_name_is_usable(const std::string &name);
 
-    // `#[requires: "libcurl" { git: "...", version: "^0.1" }]`, in every shape a list of them takes.
+    // `#[requires: "libcurl" { version: "^0.1", source: git "..." }]`, in every shape a list of them
+    // takes.
     //
-    // **shape only** - no semver parse, matching `#[version:]`. `version` and `git` are required in v1;
-    // `rev` is optional. the name is the tag, a string so a hyphenated package is spellable
+    // **shape only** - no semver parse, matching `#[version:]`. `version` and `source` are required
+    // in v1; `rev` is optional. `source` is a tagged locator (`git "..."`); a later host is another
+    // tag. the name is the tag, a string so a hyphenated package is spellable
     void read_manifest_requires(
         const AST::AttributeValue &written,
         AST::AttributeReader &reader,

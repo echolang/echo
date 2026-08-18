@@ -1,0 +1,92 @@
+/**
+ * HTTP through Echo's libcurl, and the GitHub tags JSON shape. Host
+ * policy lives on GitHub; this file is the transport and the parse.
+ */
+
+namespace epm::fetch;
+
+public struct RemoteTag
+{
+    string $name;
+    string $sha;
+
+    constructor(string $name, string $sha)
+    {
+        $this->name = $name;
+        $this->sha = $sha;
+    }
+}
+
+public function http_get(const string& $url) : result<string, string>
+{
+    return fetch_body($url, '');
+}
+
+/**
+ * Tag names from a GitHub `/repos/{owner}/{repo}/tags` body. Public so a
+ * fixture can pin the walk without touching the network.
+ */
+public function tag_names_from(const string& $body) : result<array<string>, string>
+{
+    array<RemoteTag> $tags = guard remote_tags_from($body) else ($e) {
+        return .error($e);
+    }
+
+    array<string> $names = array<string>();
+    usize $i = 0;
+
+    while ($i < $tags->count()) {
+        $names[] = $tags[$i]->name;
+        $i = $i + 1;
+    }
+
+    return .ok($names);
+}
+
+public function remote_tags_from(const string& $body) : result<array<RemoteTag>, string>
+{
+    json::Value $root = guard json::parse($body) else ($e) {
+        return .error("github tags were not JSON: {$e}");
+    }
+
+    array<json::Value> $items = guard $root->asArray() else {
+        return .error('github tags were not an array');
+    }
+
+    array<RemoteTag> $tags = array<RemoteTag>();
+    usize $i = 0;
+
+    while ($i < $items->count()) {
+        string $name = $items[$i]['name']->asStr() ?? '';
+
+        if (!$name->empty()) {
+            string $sha = $items[$i]['commit']['sha']->asStr() ?? '';
+            $tags[] = RemoteTag($name, $sha);
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok($tags);
+}
+
+function fetch_body(const string& $url, const string& $accept) : result<string, string>
+{
+    curl::Request $req = .get($url);
+    $req->userAgent('epm/0.1');
+    $req->timeout(30000);
+
+    if (!$accept->empty()) {
+        $req->header('Accept', $accept);
+    }
+
+    curl::Response $res = guard curl::send($req) else ($e) {
+        return .error("GET {$url}: {$e}");
+    }
+
+    if (!$res->success()) {
+        return .error("GET {$url}: HTTP {$res->status}");
+    }
+
+    return .ok($res->body);
+}

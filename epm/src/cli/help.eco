@@ -1,0 +1,407 @@
+/**
+ * How an option is spelled back to a human. The page, one option, a usage
+ * line, a refusal. Help is an answer and goes to stdout; a refusal is the
+ * mirror and goes to stderr.
+ */
+
+namespace epm::cli;
+
+use std::io;
+
+public function render_version() : string
+{
+    string $v = VERSION;
+    return "{$v}\n";
+}
+
+public function render_usage(Subcommand $subject) : string
+{
+    string $out = '';
+    write_heading($out, 'Usage', plain_terminal());
+    write_usage_lines($out, $subject);
+    return $out;
+}
+
+public function render_error(
+    const string& $message,
+    Subcommand $subject,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+    string $badge = styled('error', SGR_ERROR, $caps->color);
+    $out->append("{$badge}: {$message}\n\n");
+    write_heading($out, 'Usage', $caps);
+    write_usage_lines($out, $subject);
+    $out->append("\n");
+
+    if ($subject == Subcommand::none) {
+        write_wrapped($out, "Run 'epm --help' to see what epm can do.", 0, $caps);
+    }
+    else {
+        string $name = subject_name($subject);
+        write_wrapped($out, "Run 'epm {$name} --help' for what this command accepts.", 0, $caps);
+    }
+
+    return $out;
+}
+
+public function render_help(
+    const CommandLine& $cli,
+    const TerminalCapabilities& $caps
+) : string
+{
+    if ($cli->help_topic_is_option) {
+        Option $option = guard option_for_long($cli->help_topic) else {
+            return render_help_page($cli->subcommand, $caps);
+        }
+
+        return render_option_help($cli->subcommand, $option, $caps);
+    }
+
+    return render_help_page($cli->subcommand, $caps);
+}
+
+public function report(const string& $message) : void
+{
+    io::eprintln("error: {$message}");
+}
+
+private function render_help_page(
+    Subcommand $subject,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+
+    if ($subject == Subcommand::none) {
+        string $ver = VERSION;
+        write_wrapped($out, "epm {$ver} - a package manager for Echo.", 0, $caps);
+        $out->append("\n");
+        write_heading($out, 'Usage', $caps);
+        write_usage_lines($out, Subcommand::none);
+        $out->append("\n");
+        write_heading($out, 'Commands', $caps);
+
+        int32 $column = summary_column($subject, $caps);
+        array<SubcommandInfo> $cmds = subcommand_table();
+        usize $i = 0;
+
+        while ($i < $cmds->count()) {
+            string $cmd_name = styled($cmds[$i]->name, SGR_INFO, $caps->color);
+            write_row(
+                $out,
+                "  {$cmd_name}",
+                2 + text_width($cmds[$i]->name),
+                $cmds[$i]->summary,
+                '',
+                $column,
+                $caps
+            );
+            $i = $i + 1;
+        }
+
+        write_category($out, $subject, OptionCategory::general, $column, $caps);
+        $out->append("\n");
+        write_wrapped($out, "Run 'epm <command> --help' for what a command accepts.", 0, $caps);
+        return $out;
+    }
+
+    SubcommandInfo $info = subcommand_info($subject);
+    write_wrapped($out, "epm {$info->name} - {$info->summary}.", 0, $caps);
+    $out->append("\n");
+    write_heading($out, 'Usage', $caps);
+    write_usage_lines($out, $subject);
+    $out->append("\n");
+    write_wrapped($out, $info->description, 0, $caps);
+
+    if (!$info->positional->empty()) {
+        $out->append("\n  ");
+        $out->append(styled($info->positional, SGR_INFO, $caps->color));
+        $out->append("\n");
+        write_wrapped($out, $info->positional_description, 4, $caps);
+    }
+
+    int32 $column = summary_column($subject, $caps);
+    write_category($out, $subject, OptionCategory::inputs, $column, $caps);
+    write_category($out, $subject, OptionCategory::general, $column, $caps);
+    $out->append("\n");
+    write_wrapped(
+        $out,
+        "Run 'epm {$info->name} --help <option>' for the full description of one option, for example 'epm {$info->name} --help color'.",
+        0,
+        $caps
+    );
+    return $out;
+}
+
+private function render_option_help(
+    Subcommand $subject,
+    const Option& $option,
+    const TerminalCapabilities& $caps
+) : string
+{
+    string $out = '';
+    write_heading($out, option_spelling($option), $caps);
+    $out->append("\n");
+    write_wrapped($out, $option->description, 4, $caps);
+
+    usize $i = 0;
+
+    while ($i < $option->values->count()) {
+        $out->append("\n    ");
+        $out->append(styled($option->values[$i]->name, SGR_SECONDARY, $caps->color));
+        $out->append("\n");
+        write_wrapped($out, $option->values[$i]->description, 4, $caps);
+        $i = $i + 1;
+    }
+
+    $out->append("\n");
+
+    if ($option->subcommands == ACCEPTS_ALL) {
+        write_wrapped($out, 'Accepted by: every command.', 0, $caps);
+    }
+    else {
+        string $who = accepted_commands($option);
+        write_wrapped($out, "Accepted by: {$who}.", 0, $caps);
+    }
+
+    if (!$option->fallback->empty()) {
+        write_wrapped($out, "Defaults to '{$option->fallback}'.", 0, $caps);
+    }
+
+    return $out;
+}
+
+private function write_usage_lines(string& $out, Subcommand $subject) : void
+{
+    if ($subject != Subcommand::none) {
+        string $one = usage_of($subject);
+        $out->append("  {$one}\n");
+        return;
+    }
+
+    $out->append("  epm <command> [options] [name]\n\n");
+    array<SubcommandInfo> $cmds = subcommand_table();
+    usize $i = 0;
+
+    while ($i < $cmds->count()) {
+        string $one = usage_of($cmds[$i]->id);
+        $out->append("  {$one}\n");
+        $i = $i + 1;
+    }
+}
+
+private function write_category(
+    string& $out,
+    Subcommand $subject,
+    OptionCategory $category,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    int32 $wanted = ACCEPTS_ALL;
+
+    if ($subject != Subcommand::none) {
+        $wanted = bit_of($subject);
+    }
+
+    bool $has_positional = $category == OptionCategory::inputs
+        && $subject != Subcommand::none
+        && !subcommand_info($subject)->positional->empty();
+
+    bool $drawn = false;
+
+    if ($has_positional) {
+        $out->append("\n");
+        write_heading($out, category_heading($category), $caps);
+        SubcommandInfo $info = subcommand_info($subject);
+        string $pos = styled($info->positional, SGR_INFO, $caps->color);
+        write_row(
+            $out,
+            "  {$pos}",
+            2 + text_width($info->positional),
+            $info->positional_summary,
+            '',
+            $column,
+            $caps
+        );
+        $drawn = true;
+    }
+
+    array<Option> $rows = command_line_options();
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        Option $option = $rows[$i];
+        $i = $i + 1;
+
+        if ($option->category != $category || ($option->subcommands & $wanted) == 0) {
+            continue;
+        }
+
+        if (!$drawn) {
+            $out->append("\n");
+            write_heading($out, category_heading($category), $caps);
+            $drawn = true;
+        }
+
+        write_option($out, $option, $column, $caps);
+    }
+}
+
+private function write_option(
+    string& $out,
+    const Option& $option,
+    int32 $column,
+    const TerminalCapabilities& $caps
+) : void
+{
+    string $spelling = page_spelling($option);
+    string $drawn = styled($spelling, SGR_INFO, $caps->color);
+    write_row(
+        $out,
+        "  {$drawn}",
+        2 + text_width($spelling),
+        $option->summary,
+        '',
+        $column,
+        $caps
+    );
+
+    usize $i = 0;
+    usize $n = $option->values->count();
+
+    while ($i < $n) {
+        bool $last = $i + 1 == $n;
+        string $branch = '|- ';
+
+        if ($caps->unicode) {
+            if ($last) {
+                $branch = '└─ ';
+            }
+            else {
+                $branch = '├─ ';
+            }
+        }
+        else if ($last) {
+            $branch = '`- ';
+        }
+
+        string $marker = '';
+
+        if ($option->values[$i]->name == $option->fallback) {
+            $marker = 'default';
+        }
+
+        string $left = styled($branch, SGR_DIM, $caps->color);
+        string $name = styled($option->values[$i]->name, SGR_SECONDARY, $caps->color);
+        write_row(
+            $out,
+            "    {$left}{$name}",
+            4 + 3 + text_width($option->values[$i]->name),
+            $option->values[$i]->summary,
+            $marker,
+            $column,
+            $caps
+        );
+        $i = $i + 1;
+    }
+}
+
+private function summary_column(Subcommand $subject, const TerminalCapabilities& $caps) : int32
+{
+    int32 $wanted = ACCEPTS_ALL;
+
+    if ($subject != Subcommand::none) {
+        $wanted = bit_of($subject);
+    }
+
+    int32 $widest = 0;
+
+    if ($subject == Subcommand::none) {
+        array<SubcommandInfo> $cmds = subcommand_table();
+        usize $i = 0;
+
+        while ($i < $cmds->count()) {
+            int32 $w = 2 + text_width($cmds[$i]->name);
+
+            if ($w > $widest) {
+                $widest = $w;
+            }
+
+            $i = $i + 1;
+        }
+    }
+    else if (!subcommand_info($subject)->positional->empty()) {
+        $widest = 2 + text_width(subcommand_info($subject)->positional);
+    }
+
+    array<Option> $rows = command_line_options();
+    usize $i = 0;
+
+    while ($i < $rows->count()) {
+        if (($rows[$i]->subcommands & $wanted) == 0) {
+            $i = $i + 1;
+            continue;
+        }
+
+        int32 $w = 2 + text_width(page_spelling($rows[$i]));
+
+        if ($w > $widest) {
+            $widest = $w;
+        }
+
+        usize $v = 0;
+
+        while ($v < $rows[$i]->values->count()) {
+            int32 $vw = 4 + 3 + text_width($rows[$i]->values[$v]->name);
+
+            if ($vw > $widest) {
+                $widest = $vw;
+            }
+
+            $v = $v + 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    int32 $column = $widest + 2;
+
+    if ($column > 30) {
+        $column = 30;
+    }
+
+    int32 $half = page_width($caps) / 2;
+
+    if ($column > $half) {
+        return $half;
+    }
+
+    return $column;
+}
+
+private function accepted_commands(const Option& $option) : string
+{
+    string $joined = '';
+    array<SubcommandInfo> $cmds = subcommand_table();
+    usize $i = 0;
+
+    while ($i < $cmds->count()) {
+        if (($option->subcommands & $cmds[$i]->bit) == 0) {
+            $i = $i + 1;
+            continue;
+        }
+
+        if (!$joined->empty()) {
+            $joined->append(', ');
+        }
+
+        $joined->append($cmds[$i]->name);
+        $i = $i + 1;
+    }
+
+    return $joined;
+}
+

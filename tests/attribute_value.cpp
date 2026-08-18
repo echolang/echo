@@ -80,9 +80,9 @@ TEST_CASE("a name followed by a value is a tag", "[attributes]")
 
 TEST_CASE("a string may be a tag, so a package name stays free text", "[attributes]")
 {
-    // `#[requires: "libcurl" { version:, git: }]` - a hyphenated name is not an identifier
+    // `#[requires: "libcurl" { version:, source: }]` - a hyphenated name is not an identifier
     ParsedAttribute parsed = attribute_of(
-        "core: \"lib-curl\" { version: \"^0.1\", git: \"https://x\" }");
+        "core: \"lib-curl\" { version: \"^0.1\", source: git \"https://x\" }");
 
     REQUIRE(parsed.value().has_tag());
     REQUIRE(parsed.value().tag() == "lib-curl");

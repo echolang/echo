@@ -6,6 +6,6 @@
 #[module: "prefixapp"]
 #[version: "0.1.0"]
 
-#[requires: "echolang/libhello" { git: "https://example.com/libhello", version: "^1.0" }]
+#[requires: "echolang/libhello" { version: "^1.0", source: git "https://example.com/libhello" }]
 
 #[sources: "src/*.eco"]

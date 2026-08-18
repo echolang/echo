@@ -1,0 +1,118 @@
+use epm::fetch;
+use epm::manifest;
+use epm::resolve;
+use epm::scratch;
+use epm::sys;
+use epm::util;
+
+test ls_tags_on_a_local_repo
+{
+    string $dir = scratch::dir('git-tags');
+    scratch::git_module($dir, 'lib', '0.1.0', '');
+    sys::Run $t2 = scratch::git_tag($dir, 'v0.2.0');
+    assert($t2->ok());
+    sys::Run $nightly = scratch::git_tag($dir, 'nightly');
+    assert($nightly->ok());
+
+    fetch::Source $src = fetch::source_for(manifest::Origin::git($dir));
+    resolve::Package $cat = guard $src->list_versions();
+    assert($cat->releases->count() == 2);
+    assert($cat->releases[0]->version->minor == 2);
+    assert($cat->releases[0]->tag == 'v0.2.0');
+    assert($cat->releases[1]->version->minor == 1);
+    scratch::gone($dir);
+}
+
+test ls_tags_on_a_repo_with_no_semver_tags_is_empty
+{
+    string $dir = scratch::dir('git-none');
+    scratch::git_module($dir, 'lib', '0.1.0', '');
+    array<string> $drop = array<string>();
+    $drop[] = 'tag';
+    $drop[] = '-d';
+    $drop[] = 'v0.1.0';
+    sys::Run $gone = scratch::git($dir, $drop);
+    assert($gone->ok());
+
+    fetch::Source $src = fetch::source_for(manifest::Origin::git($dir));
+    resolve::Package $cat = guard $src->list_versions();
+    assert($cat->releases->count() == 0);
+    scratch::gone($dir);
+}
+
+test checkout_checks_out_the_tag
+{
+    string $src = scratch::dir('git-src');
+    scratch::git_module($src, 'lib', '1.0.0', '');
+    string $dest = sys::join(scratch::dir('git-dest'), 'lib');
+
+    fetch::Source $remote = fetch::source_for(manifest::Origin::git($src));
+    string $rev = guard $remote->checkout('v1.0.0', $dest);
+    assert(!$rev->empty());
+    assert(sys::is_file(sys::join($dest, 'module.eco')));
+    string $body = scratch::read(sys::join($dest, 'module.eco'));
+    assert($body->contains('#[module: "lib"]'));
+    scratch::gone($src);
+    scratch::gone(sys::dirname($dest));
+}
+
+test fill_world_walks_a_local_requires
+{
+    string $b = scratch::dir('git-b');
+    scratch::git_module($b, 'b', '1.0.0', '');
+
+    string $a = scratch::dir('git-a');
+    scratch::git_module(
+        $a,
+        'a',
+        '1.1.0',
+        "#[requires: \"b\" { version: \"^1.0\", source: git \"{$b}\" }]\n"
+    );
+
+    fetch::Source $listed_src = fetch::source_for(manifest::Origin::git($a));
+    resolve::Package $listed = guard $listed_src->list_versions();
+    assert($listed->releases->count() == 1);
+    util::Version $listed_v = $listed->releases[0]->version;
+    assert($listed_v->major == 1);
+    assert($listed_v->minor == 1);
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('a', '^1.0', manifest::Origin::git($a), '');
+
+    resolve::World $world = resolve::World();
+    bool $ok = guard resolve::fill_world($roots, $world);
+    resolve::Package $have_a = guard $world->package_of('a');
+    assert($have_a->releases->count() > 0);
+    assert($world->package_of('b') == null);
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 2);
+    assert($world->package_of('b') != null);
+
+    scratch::gone($a);
+    scratch::gone($b);
+}
+
+test fill_world_refuses_a_requirement_without_git
+{
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('ghost', '*', manifest::Origin::git(''), '');
+    resolve::World $world = resolve::World();
+    assert(resolve::fill_world($roots, $world)->failed());
+}
+
+test fill_world_refuses_two_remotes_for_one_name
+{
+    string $one = scratch::dir('git-two-a');
+    scratch::git_module($one, 'lib', '1.0.0', '');
+    string $two = scratch::dir('git-two-b');
+    scratch::git_module($two, 'lib', '1.0.0', '');
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '*', manifest::Origin::git($one), '');
+    $roots[] = manifest::Requirement('lib', '*', manifest::Origin::git($two), '');
+    resolve::World $world = resolve::World();
+    assert(resolve::fill_world($roots, $world)->failed());
+    scratch::gone($one);
+    scratch::gone($two);
+}

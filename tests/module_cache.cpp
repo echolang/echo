@@ -602,7 +602,7 @@ TEST_CASE("a vendor path change alone does not change a module's key", "[cache][
         write_file(root / "module.eco",
             "#[module: \"pkgapp\"]\n"
             "#[version: \"0.1.0\"]\n"
-            "#[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+            "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
             "#[sources: \"src/*.eco\"]\n");
         write_file(root / "src" / "app.eco", "echo libhello::answer();\n");
         write_file(root / "vendor" / "libhello" / "module.eco",
@@ -708,7 +708,7 @@ TEST_CASE("a prefixed #[requires:] resolves under vendor/<prefix>/", "[cache][pa
 
     write_file(project.root() / "module.eco",
         "#[module: \"prefapp\"]\n"
-        "#[requires: \"echolang/libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "#[requires: \"echolang/libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
         "#[sources: \"src/*.eco\"]\n");
     write_file(project.root() / "src" / "app.eco", "echo libhello::answer();\n");
     write_file(project.root() / "vendor" / "echolang" / "libhello" / "module.eco",
@@ -730,7 +730,7 @@ TEST_CASE("--package-dir overrides the vendor search", "[cache][packages]")
 
     write_file(project.root() / "module.eco",
         "#[module: \"overapp\"]\n"
-        "#[requires: \"libhello\" { git: \"https://example.com/libhello\", version: \"^1.0\" }]\n"
+        "#[requires: \"libhello\" { version: \"^1.0\", source: git \"https://example.com/libhello\" }]\n"
         "#[sources: \"src/*.eco\"]\n");
     write_file(project.root() / "src" / "app.eco", "echo libhello::answer();\n");
     write_file(project.root() / "pkgs" / "libhello" / "module.eco",

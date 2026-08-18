@@ -1,0 +1,439 @@
+/**
+ * argv → stated values. Nothing here is settled: --color auto is still the
+ * word "auto", and --help is an answer the driver draws, not an exit.
+ */
+
+namespace epm::cli;
+
+use epm::sys;
+use std::env;
+
+public struct CommandLine
+{
+    Subcommand $subcommand;
+    array<string> $positionals;
+    bool $saw_separator;
+    bool $wants_help;
+    bool $wants_version;
+    string $help_topic;
+    bool $help_topic_is_option;
+
+    bool $stated_help;
+    bool $stated_version;
+    bool $stated_color;
+    string $color;
+    bool $stated_module;
+    string $module;
+    bool $stated_git;
+    string $git;
+    bool $stated_path;
+    string $path;
+    bool $stated_range;
+    string $range;
+
+    constructor()
+    {
+        $this->subcommand = Subcommand::none;
+        $this->positionals = array<string>();
+        $this->saw_separator = false;
+        $this->wants_help = false;
+        $this->wants_version = false;
+        $this->help_topic = '';
+        $this->help_topic_is_option = false;
+        $this->stated_help = false;
+        $this->stated_version = false;
+        $this->stated_color = false;
+        $this->color = 'auto';
+        $this->stated_module = false;
+        $this->module = '';
+        $this->stated_git = false;
+        $this->git = '';
+        $this->stated_path = false;
+        $this->path = '';
+        $this->stated_range = false;
+        $this->range = '*';
+    }
+}
+
+public function stated(const CommandLine& $cli, Opt $id) : bool
+{
+    return match ($id) {
+        Opt::help => $cli->stated_help,
+        Opt::version => $cli->stated_version,
+        Opt::color => $cli->stated_color,
+        Opt::module => $cli->stated_module,
+        Opt::git => $cli->stated_git,
+        Opt::path => $cli->stated_path,
+        Opt::range => $cli->stated_range,
+    };
+}
+
+public function value_of(const CommandLine& $cli, Opt $id) : string
+{
+    return match ($id) {
+        Opt::color => $cli->color,
+        Opt::module => $cli->module,
+        Opt::git => $cli->git,
+        Opt::path => $cli->path,
+        Opt::range => $cli->range,
+        Opt::help => '',
+        Opt::version => '',
+    };
+}
+
+public function parse_command_line(
+    const array<string>& $argv,
+    CommandLine& $out
+) : result<bool, string>
+{
+    $out = CommandLine();
+
+    array<string> $words = array<string>();
+    bool $in_tail = false;
+    usize $i = 1;
+
+    while ($i < $argv->count()) {
+        string $word = $argv[$i];
+        $i = $i + 1;
+
+        if ($in_tail) {
+            continue;
+        }
+
+        if ($word == '--') {
+            $out->saw_separator = true;
+            $in_tail = true;
+            continue;
+        }
+
+        $words[] = $word;
+    }
+
+    $i = 0;
+
+    while ($i < $words->count()) {
+        string $word = $words[$i];
+        Option? $found = null;
+        string $spelled = $word;
+        string $attached = '';
+        bool $has_attached = false;
+
+        if ($word->size() > 2 && $word->starts('--')) {
+            string $rest = $word->sub(2, $word->size() - 2);
+            usize $eq = $rest->find('=');
+
+            if ($eq < $rest->size()) {
+                $has_attached = true;
+                $attached = $rest->sub($eq + 1, $rest->size() - $eq - 1);
+                $rest = $rest->sub(0, $eq);
+            }
+
+            $found = option_for_long($rest);
+            $spelled = "--{$rest}";
+        }
+        else if ($word->size() > 1 && $word->starts('-') && !$word->starts('--')) {
+            $spelled = $word;
+
+            if ($word->size() == 2) {
+                $found = option_for_short($word->sub(1, 1));
+            }
+        }
+        else {
+            if ($out->subcommand == Subcommand::none) {
+                SubcommandInfo $cmd = guard subcommand_for_word($word) else {
+                    string $list = command_word_list();
+                    return .error("'{$word}' is not an epm command. Write {$list}.");
+                }
+
+                $out->subcommand = $cmd->id;
+                $i = $i + 1;
+                continue;
+            }
+
+            $out->positionals[] = $word;
+            $i = $i + 1;
+            continue;
+        }
+
+        Option $option = guard $found else {
+            if (!$word->starts('--') && $word->size() > 2) {
+                string $rest = $word->sub(1, $word->size() - 1);
+                return .error(
+                    "'{$word}' is not an option. A short option is one character - write '-{$rest}' - and a long one takes two dashes."
+                );
+            }
+
+            return .error("Unknown option '{$spelled}'.");
+        }
+
+        if ($out->subcommand != Subcommand::none) {
+            if (($option->subcommands & bit_of($out->subcommand)) == 0) {
+                string $names = option_flag_names($option);
+                string $who = subject_name($out->subcommand);
+                return .error("'{$who}' does not take '{$names}'.");
+            }
+        }
+
+        if (!option_takes_a_value($option)) {
+            if ($has_attached) {
+                return .error("'--{$option->name}' takes no value.");
+            }
+
+            take_flag($out, $option->id);
+            $i = $i + 1;
+            continue;
+        }
+
+        string $value = $attached;
+
+        if (!$has_attached) {
+            if ($i + 1 >= $words->count()) {
+                string $need = option_spelling($option);
+                return .error("'{$need}' needs a value.");
+            }
+
+            string $next = $words[$i + 1];
+
+            if (looks_like_a_flag($next)) {
+                string $names = option_flag_names($option);
+                return .error("'{$names}' needs a value, and '{$next}' is an option.");
+            }
+
+            $value = $next;
+            $i = $i + 1;
+        }
+
+        string $accepted = guard accept_value($option, $value) else ($e) {
+            return .error($e);
+        }
+
+        take_value($out, $option->id, $value);
+        $i = $i + 1;
+    }
+
+    $out->wants_help = $out->stated_help;
+    $out->wants_version = $out->stated_version;
+
+    if ($out->wants_help || $out->wants_version) {
+        if ($out->wants_help && $out->positionals->count() == 1) {
+            string $topic = $out->positionals[0];
+            Option? $named = null;
+
+            if ($topic->size() == 1) {
+                $named = option_for_short($topic);
+            }
+            else {
+                $named = option_for_long($topic);
+            }
+
+            Option $opt = guard $named else {
+                return .ok(true);
+            }
+
+            if ($out->subcommand != Subcommand::none) {
+                if (($opt->subcommands & bit_of($out->subcommand)) == 0) {
+                    string $names = option_flag_names($opt);
+                    string $who = subject_name($out->subcommand);
+                    return .error("'{$who}' does not take '{$names}'.");
+                }
+            }
+
+            $out->help_topic = $opt->name;
+            $out->help_topic_is_option = true;
+        }
+
+        return .ok(true);
+    }
+
+    if ($out->subcommand == Subcommand::none) {
+        return .error('No command given.');
+    }
+
+    if ($out->saw_separator) {
+        string $who = subject_name($out->subcommand);
+        return .error("'{$who}' does not take '--'.");
+    }
+
+    SubcommandInfo $info = subcommand_info($out->subcommand);
+    int32 $n = 0;
+    usize $pi = 0;
+
+    while ($pi < $out->positionals->count()) {
+        $n = $n + 1;
+        $pi = $pi + 1;
+    }
+
+    if ($n < $info->min_positionals) {
+        return .error("'{$info->name}' needs '{$info->positional}'.");
+    }
+
+    if ($n > $info->max_positionals) {
+        if ($info->max_positionals == 0) {
+            return .error("'{$info->name}' takes no package name.");
+        }
+
+        return .error("'{$info->name}' takes at most one package name.");
+    }
+
+    array<Option> $rows = command_line_options();
+    usize $r = 0;
+
+    while ($r < $rows->count()) {
+        Option $option = $rows[$r];
+        $r = $r + 1;
+
+        if ($option->exclusion == ExclusionGroup::none || !stated($out, $option->id)) {
+            continue;
+        }
+
+        usize $o = 0;
+
+        while ($o < $rows->count()) {
+            Option $other = $rows[$o];
+            $o = $o + 1;
+
+            if ($other->id == $option->id || $other->exclusion != $option->exclusion) {
+                continue;
+            }
+
+            if (stated($out, $other->id)) {
+                string $group = exclusion_group_name($option->exclusion);
+                return .error(
+                    "'--{$option->name}' and '--{$other->name}' are two answers to one question - the {$group}. Write one."
+                );
+            }
+        }
+    }
+
+    return .ok(true);
+}
+
+public function capabilities_for(
+    const CommandLine& $cli,
+    TerminalStream $stream
+) : TerminalCapabilities
+{
+    ColorChoice $choice = color_choice_named($cli->color) ?? ColorChoice::auto;
+    return resolve_terminal($choice, $stream);
+}
+
+public function start_from_cli(const CommandLine& $cli) : result<string, string>
+{
+    if (!$cli->stated_module) {
+        return .ok(env::cwd());
+    }
+
+    string $probe = $cli->module;
+
+    if (!sys::is_absolute($probe)) {
+        $probe = sys::join(env::cwd(), $cli->module);
+    }
+
+    if (sys::is_file($probe) && sys::basename($probe) == 'module.eco') {
+        return .ok(sys::dirname($probe));
+    }
+
+    if (sys::is_dir($probe) && sys::is_file(sys::join($probe, 'module.eco'))) {
+        return .ok($probe);
+    }
+
+    return .error("no module.eco at {$cli->module}");
+}
+
+private function looks_like_a_flag(const string& $word) : bool
+{
+    return $word->size() > 1 && $word->starts('--');
+}
+
+private function accept_value(const Option& $option, const string& $word) : result<string, string>
+{
+    if ($option->values->count() == 0) {
+        return .ok($word);
+    }
+
+    usize $i = 0;
+
+    while ($i < $option->values->count()) {
+        if ($option->values[$i]->name == $word) {
+            return .ok($word);
+        }
+
+        $i = $i + 1;
+    }
+
+    string $expected = option_value_csv($option);
+    return .error("Unknown '--{$option->name}' value '{$word}'. Expected one of: {$expected}.");
+}
+
+private function take_flag(CommandLine& $out, Opt $id) : void
+{
+    int32 $ignored = match ($id) {
+        Opt::help => take_help($out),
+        Opt::version => take_version($out),
+        Opt::color => 0,
+        Opt::module => 0,
+        Opt::git => 0,
+        Opt::path => 0,
+        Opt::range => 0,
+    };
+}
+
+private function take_help(CommandLine& $out) : int32
+{
+    $out->stated_help = true;
+    return 0;
+}
+
+private function take_version(CommandLine& $out) : int32
+{
+    $out->stated_version = true;
+    return 0;
+}
+
+private function take_value(CommandLine& $out, Opt $id, const string& $word) : void
+{
+    int32 $ignored = match ($id) {
+        Opt::color => take_color($out, $word),
+        Opt::module => take_module($out, $word),
+        Opt::git => take_git($out, $word),
+        Opt::path => take_path($out, $word),
+        Opt::range => take_range($out, $word),
+        Opt::help => 0,
+        Opt::version => 0,
+    };
+}
+
+private function take_color(CommandLine& $out, const string& $word) : int32
+{
+    $out->stated_color = true;
+    $out->color = $word;
+    return 0;
+}
+
+private function take_module(CommandLine& $out, const string& $word) : int32
+{
+    $out->stated_module = true;
+    $out->module = $word;
+    return 0;
+}
+
+private function take_git(CommandLine& $out, const string& $word) : int32
+{
+    $out->stated_git = true;
+    $out->git = $word;
+    return 0;
+}
+
+private function take_path(CommandLine& $out, const string& $word) : int32
+{
+    $out->stated_path = true;
+    $out->path = $word;
+    return 0;
+}
+
+private function take_range(CommandLine& $out, const string& $word) : int32
+{
+    $out->stated_range = true;
+    $out->range = $word;
+    return 0;
+}

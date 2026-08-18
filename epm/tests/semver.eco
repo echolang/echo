@@ -1,0 +1,286 @@
+use epm::util;
+
+test parses_a_plain_version
+{
+    util::Version $v = guard util::parse_version('1.2.3');
+    assert($v->major == 1);
+    assert($v->minor == 2);
+    assert($v->patch == 3);
+    assert($v->pre->empty());
+}
+
+test strips_a_leading_v
+{
+    util::Version $v = guard util::parse_version('v0.1.0');
+    assert($v->major == 0);
+    assert($v->minor == 1);
+    assert($v->patch == 0);
+}
+
+test strips_a_leading_capital_v
+{
+    util::Version $v = guard util::parse_version('V2.0.1');
+    assert($v->major == 2);
+    assert($v->patch == 1);
+}
+
+test a_two_part_version_is_patch_zero
+{
+    util::Version $v = guard util::parse_version('1.2');
+    assert($v->major == 1);
+    assert($v->minor == 2);
+    assert($v->patch == 0);
+}
+
+test a_prerelease_is_kept
+{
+    util::Version $v = guard util::parse_version('1.2.3-alpha.1');
+    assert($v->major == 1);
+    assert($v->pre == 'alpha.1');
+    assert($v->spelling() == '1.2.3-alpha.1');
+}
+
+test a_release_spells_without_a_hyphen
+{
+    util::Version $v = guard util::parse_version('0.1.0');
+    assert($v->spelling() == '0.1.0');
+}
+
+test a_lone_major_is_not_a_version
+{
+    assert(util::parse_version('1') == null);
+}
+
+test an_empty_string_is_not_a_version
+{
+    assert(util::parse_version('') == null);
+    assert(util::parse_version('v') == null);
+}
+
+test four_parts_are_not_a_version
+{
+    assert(util::parse_version('1.2.3.4') == null);
+}
+
+test letters_are_not_a_version
+{
+    assert(util::parse_version('foo') == null);
+    assert(util::parse_version('1.2.x') == null);
+}
+
+test a_prerelease_on_two_parts_is_refused
+{
+    assert(util::parse_version('1.2-alpha') == null);
+}
+
+test a_trailing_dot_is_refused
+{
+    assert(util::parse_version('1.2.') == null);
+}
+
+test a_release_is_newer_than_its_prerelease
+{
+    util::Version $rel = guard util::parse_version('1.0.0');
+    util::Version $pre = guard util::parse_version('1.0.0-rc.1');
+    assert(util::cmp_version($rel, $pre) > 0);
+    assert(util::cmp_version($pre, $rel) < 0);
+}
+
+test equal_versions_compare_zero
+{
+    util::Version $a = guard util::parse_version('1.2.3');
+    util::Version $b = guard util::parse_version('v1.2.3');
+    assert(util::cmp_version($a, $b) == 0);
+}
+
+test patch_beats_an_older_patch
+{
+    util::Version $a = guard util::parse_version('1.2.3');
+    util::Version $b = guard util::parse_version('1.2.4');
+    assert(util::cmp_version($b, $a) > 0);
+}
+
+test caret_on_zero_is_the_next_minor
+{
+    util::Range $r = guard util::parse_range('^0.1.3');
+    util::Version $ok = guard util::parse_version('0.1.9');
+    util::Version $no = guard util::parse_version('0.2.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test caret_on_one_is_the_next_major
+{
+    util::Range $r = guard util::parse_range('^1.2.3');
+    util::Version $ok = guard util::parse_version('1.9.0');
+    util::Version $no = guard util::parse_version('2.0.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test caret_on_two_parts_uses_patch_zero
+{
+    util::Range $r = guard util::parse_range('^0.1');
+    util::Version $ok = guard util::parse_version('0.1.9');
+    util::Version $no = guard util::parse_version('0.2.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test caret_on_zero_zero_is_the_next_minor
+{
+    util::Range $r = guard util::parse_range('^0.0.1');
+    util::Version $ok = guard util::parse_version('0.0.9');
+    util::Version $no = guard util::parse_version('0.1.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test tilde_is_the_next_minor
+{
+    util::Range $r = guard util::parse_range('~1.2.3');
+    util::Version $ok = guard util::parse_version('1.2.9');
+    util::Version $no = guard util::parse_version('1.3.0');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test tilde_includes_the_bound
+{
+    util::Range $r = guard util::parse_range('~1.2.3');
+    util::Version $v = guard util::parse_version('1.2.3');
+    assert(util::satisfies($v, $r));
+}
+
+test greater_or_equal_has_no_ceiling
+{
+    util::Range $r = guard util::parse_range('>=1.2.3');
+    util::Version $low = guard util::parse_version('1.2.3');
+    util::Version $high = guard util::parse_version('9.0.0');
+    util::Version $below = guard util::parse_version('1.2.2');
+    assert(util::satisfies($low, $r));
+    assert(util::satisfies($high, $r));
+    assert(!util::satisfies($below, $r));
+}
+
+test a_star_matches_everything
+{
+    util::Range $r = guard util::parse_range('*');
+    util::Version $zero = guard util::parse_version('0.0.1');
+    util::Version $big = guard util::parse_version('99.0.0');
+    assert(util::satisfies($zero, $r));
+    assert(util::satisfies($big, $r));
+    assert($r->spelling() == '*');
+}
+
+test an_empty_range_is_a_star
+{
+    util::Range $r = guard util::parse_range('');
+    util::Version $v = guard util::parse_version('1.0.0');
+    assert(util::satisfies($v, $r));
+}
+
+test an_exact_version_is_that_patch_only
+{
+    util::Range $r = guard util::parse_range('1.2.3');
+    util::Version $ok = guard util::parse_version('1.2.3');
+    util::Version $no = guard util::parse_version('1.2.4');
+    assert(util::satisfies($ok, $r));
+    assert(!util::satisfies($no, $r));
+}
+
+test range_parse_trims_whitespace
+{
+    util::Range $r = guard util::parse_range('  ^1.2.3  ');
+    util::Version $ok = guard util::parse_version('1.9.0');
+    assert(util::satisfies($ok, $r));
+}
+
+test a_broken_range_is_nothing
+{
+    assert(util::parse_range('^') == null);
+    assert(util::parse_range('~') == null);
+    assert(util::parse_range('>=') == null);
+    assert(util::parse_range('foo') == null);
+    assert(util::parse_range('^^1.0.0') == null);
+}
+
+test intersecting_ranges_narrows
+{
+    util::Range $a = guard util::parse_range('^1.0.0');
+    util::Range $b = guard util::parse_range('~1.2.0');
+    util::Range $both = guard util::intersect($a, $b);
+    util::Version $ok = guard util::parse_version('1.2.5');
+    util::Version $no = guard util::parse_version('1.3.0');
+    assert(util::satisfies($ok, $both));
+    assert(!util::satisfies($no, $both));
+}
+
+test intersecting_open_ranges_keeps_the_higher_floor
+{
+    util::Range $a = guard util::parse_range('>=1.0.0');
+    util::Range $b = guard util::parse_range('>=2.0.0');
+    util::Range $both = guard util::intersect($a, $b);
+    util::Version $ok = guard util::parse_version('2.0.0');
+    util::Version $no = guard util::parse_version('1.9.0');
+    assert(util::satisfies($ok, $both));
+    assert(!util::satisfies($no, $both));
+}
+
+test a_star_intersect_a_caret_is_the_caret
+{
+    util::Range $any = guard util::parse_range('*');
+    util::Range $caret = guard util::parse_range('^1.2.3');
+    util::Range $both = guard util::intersect($any, $caret);
+    util::Version $ok = guard util::parse_version('1.9.0');
+    util::Version $no = guard util::parse_version('2.0.0');
+    assert(util::satisfies($ok, $both));
+    assert(!util::satisfies($no, $both));
+}
+
+test disjoint_ranges_do_not_intersect
+{
+    util::Range $a = guard util::parse_range('^1.0.0');
+    util::Range $b = guard util::parse_range('^2.0.0');
+    assert(util::intersect($a, $b) == null);
+}
+
+test a_range_does_not_include_its_exclusive_max
+{
+    util::Range $r = guard util::parse_range('^1.0.0');
+    util::Version $max = guard util::parse_version('2.0.0');
+    assert(!util::satisfies($max, $r));
+}
+
+test newer_sorts_first
+{
+    array<util::Version> $vs = array<util::Version>();
+    util::Version $a = guard util::parse_version('1.0.0');
+    util::Version $b = guard util::parse_version('1.2.0');
+    util::Version $c = guard util::parse_version('1.1.0');
+    $vs[] = $a;
+    $vs[] = $b;
+    $vs[] = $c;
+    util::sort_versions($vs);
+    assert($vs[0]->minor == 2);
+    assert($vs[1]->minor == 1);
+    assert($vs[2]->minor == 0);
+}
+
+test a_release_sorts_ahead_of_its_prerelease
+{
+    array<util::Version> $vs = array<util::Version>();
+    $vs[] = epm::scratch::version('1.0.0-alpha');
+    $vs[] = epm::scratch::version('1.0.0');
+    util::sort_versions($vs);
+    assert($vs[0]->pre->empty());
+    assert($vs[1]->pre == 'alpha');
+}
+
+test sorting_one_version_is_a_no_op
+{
+    array<util::Version> $vs = array<util::Version>();
+    $vs[] = epm::scratch::version('1.0.0');
+    util::sort_versions($vs);
+    assert($vs->count() == 1);
+}

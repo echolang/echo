@@ -1,0 +1,175 @@
+/**
+ * GitHub remotes list tags and fetch a module.eco over HTTP. git is the
+ * fallback when HTTP fails, and the only way to fill vendor/.
+ */
+
+namespace epm::fetch;
+
+use epm::manifest;
+use epm::resolve;
+use epm::sys;
+use std::io;
+
+public class GitHub : Source
+{
+    string $url;
+    string $repo;
+    private Git $git;
+
+    constructor(string $url, string $repo)
+    {
+        $this->url = $url;
+        $this->repo = $repo;
+        $this->git = Git($url);
+    }
+
+    static function from_url(const string& $url) : GitHub?
+    {
+        string $repo = guard owner_repo($url) else {
+            return null;
+        }
+
+        return GitHub($url, $repo);
+    }
+
+    const function list_versions() : result<resolve::Package, string>
+    {
+        array<RemoteTag> $tags = guard ls_tags($this->repo) else {
+            return $this->git->list_versions();
+        }
+
+        return .ok(package_from_tags(manifest::Origin::git($this->url), $tags));
+    }
+
+    const function fetch_manifest(
+        const string& $tag,
+        const string& $rev
+    ) : result<manifest::Manifest, string>
+    {
+        string $key = manifest_key($tag, $rev);
+
+        if ($key->empty()) {
+            return .error("cannot fetch a manifest from {$this->url} without a rev");
+        }
+
+        string $cache = cache_dir($this->url, $key);
+        string $mod = sys::join($cache, 'module.eco');
+
+        if (sys::is_file($mod)) {
+            return manifest::load($mod);
+        }
+
+        string $body = guard raw_file($this->repo, $key, 'module.eco') else {
+            return $this->git->fetch_manifest($tag, $rev);
+        }
+
+        if (!sys::mkdir_p($cache)) {
+            return .error("no module.eco at {$this->url}@{$key}");
+        }
+
+        result<usize, io::ioerror> $wrote = io::writefile($mod, $body);
+
+        if ($wrote->failed()) {
+            return .error("no module.eco at {$this->url}@{$key}");
+        }
+
+        return manifest::load($mod);
+    }
+
+    const function checkout(
+        const string& $rev,
+        const string& $dest
+    ) : result<string, string>
+    {
+        return $this->git->checkout($rev, $dest);
+    }
+}
+
+private function ls_tags(const string& $repo) : result<array<RemoteTag>, string>
+{
+    array<RemoteTag> $tags = array<RemoteTag>();
+    int32 $page = 1;
+
+    while (true) {
+        string $url = "https://api.github.com/repos/{$repo}/tags?per_page=100&page={$page}";
+        string $body = guard fetch_body($url, 'application/vnd.github+json') else ($e) {
+            return .error($e);
+        }
+
+        array<RemoteTag> $page_tags = guard remote_tags_from($body) else ($e) {
+            return .error("{$repo}: {$e}");
+        }
+
+        usize $i = 0;
+
+        while ($i < $page_tags->count()) {
+            $tags[] = $page_tags[$i];
+            $i = $i + 1;
+        }
+
+        if ($page_tags->count() < 100) {
+            break;
+        }
+
+        $page = $page + 1;
+    }
+
+    return .ok($tags);
+}
+
+private function raw_file(
+    const string& $repo,
+    const string& $rev,
+    const string& $path
+) : result<string, string>
+{
+    return http_get("https://raw.githubusercontent.com/{$repo}/{$rev}/{$path}");
+}
+
+/** `owner/repo` when `$url` is a GitHub remote, otherwise nothing. */
+private function owner_repo(const string& $url) : string?
+{
+    string $s = $url;
+
+    if ($s->ends('.git')) {
+        $s = $s->sub(0, $s->size() - 4);
+    }
+
+    string $https = 'https://github.com/';
+
+    if ($s->starts($https)) {
+        return two_parts($s->sub($https->size(), $s->size() - $https->size()));
+    }
+
+    string $ssh = 'git@github.com:';
+
+    if ($s->starts($ssh)) {
+        return two_parts($s->sub($ssh->size(), $s->size() - $ssh->size()));
+    }
+
+    return null;
+}
+
+private function two_parts(const string& $rest) : string?
+{
+    usize $slash = $rest->find('/');
+
+    if ($slash == $rest->size() || $slash == 0) {
+        return null;
+    }
+
+    string $owner = $rest->sub(0, $slash);
+    string $after = $rest->sub($slash + 1, $rest->size() - $slash - 1);
+    usize $next = $after->find('/');
+    string $repo = $after;
+
+    if ($next < $after->size()) {
+        $repo = $after->sub(0, $next);
+    }
+
+    if ($owner->empty() || $repo->empty()) {
+        return null;
+    }
+
+    return "{$owner}/{$repo}";
+}

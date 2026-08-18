@@ -1,0 +1,321 @@
+use epm::manifest;
+use epm::resolve;
+use epm::scratch;
+
+test a_single_requirement_picks_the_newest_match
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://example.com/lib'));
+    $cat->releases[] = scratch::release('0.2.0');
+    $cat->releases[] = scratch::release('0.1.3');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '>=0.1', manifest::Origin::git('https://example.com/lib'), '');
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 1);
+    assert($plan[0]->version->minor == 2);
+    assert($plan[0]->tag == 'v0.2.0');
+}
+
+test a_star_picks_the_newest
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('2.0.0');
+    $cat->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '*', manifest::Origin::git('https://x'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan[0]->version->major == 2);
+}
+
+test an_exact_pin_picks_that_patch
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('1.2.4');
+    $cat->releases[] = scratch::release('1.2.3');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '1.2.3', manifest::Origin::git('https://x'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan[0]->version->patch == 3);
+}
+
+test a_conflict_names_both_askers
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $json = resolve::Package('libjson', manifest::Origin::git('https://example.com/libjson'));
+    $json->releases[] = scratch::release('0.2.0');
+    $json->releases[] = scratch::release('0.1.0');
+    $world->catalog[] = $json;
+
+    resolve::Package $curl = resolve::Package('libcurl', manifest::Origin::git('https://example.com/libcurl'));
+    resolve::Release $c10 = scratch::release('0.1.0');
+    $c10->requires[] = manifest::Requirement('libjson', '^0.1', manifest::Origin::git('https://example.com/libjson'), '');
+    $curl->releases[] = $c10;
+    $world->catalog[] = $curl;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('libcurl', '^0.1', manifest::Origin::git('https://example.com/libcurl'), '');
+    $roots[] = manifest::Requirement('libjson', '^0.2', manifest::Origin::git('https://example.com/libjson'), '');
+
+    result<array<resolve::Choice>, string> $out = resolve::solve($roots, $world);
+    assert($out->failed());
+    assert($out->failure()->contains('libjson'));
+}
+
+test a_transitive_requirement_is_picked
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $curl = resolve::Package('libcurl', manifest::Origin::git('https://example.com/libcurl'));
+    resolve::Release $c10 = scratch::release('0.1.0');
+    $c10->requires[] = manifest::Requirement('libjson', '^0.2', manifest::Origin::git('https://example.com/libjson'), '');
+    $curl->releases[] = $c10;
+    $world->catalog[] = $curl;
+
+    resolve::Package $json = resolve::Package('libjson', manifest::Origin::git('https://example.com/libjson'));
+    $json->releases[] = scratch::release('0.2.1');
+    $world->catalog[] = $json;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('libcurl', '^0.1', manifest::Origin::git('https://example.com/libcurl'), '');
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 2);
+}
+
+test a_diamond_picks_one_shared_version
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $a = resolve::Package('a', manifest::Origin::git('https://a'));
+    resolve::Release $ar = scratch::release('1.0.0');
+    $ar->requires[] = manifest::Requirement('c', '^1.0', manifest::Origin::git('https://c'), '');
+    $a->releases[] = $ar;
+    $world->catalog[] = $a;
+
+    resolve::Package $b = resolve::Package('b', manifest::Origin::git('https://b'));
+    resolve::Release $br = scratch::release('1.0.0');
+    $br->requires[] = manifest::Requirement('c', '^1.0', manifest::Origin::git('https://c'), '');
+    $b->releases[] = $br;
+    $world->catalog[] = $b;
+
+    resolve::Package $c = resolve::Package('c', manifest::Origin::git('https://c'));
+    $c->releases[] = scratch::release('1.5.0');
+    $world->catalog[] = $c;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('a', '*', manifest::Origin::git('https://a'), '');
+    $roots[] = manifest::Requirement('b', '*', manifest::Origin::git('https://b'), '');
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 3);
+}
+
+test compatible_ranges_for_the_same_name_share_a_pick
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('1.5.0');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '^1.0', manifest::Origin::git('https://x'), '');
+    $roots[] = manifest::Requirement('lib', '>=1.2', manifest::Origin::git('https://x'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 1);
+}
+
+test intersecting_root_ranges_picks_the_older_match
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('1.5.0');
+    $cat->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '^1.0', manifest::Origin::git('https://x'), '');
+    $roots[] = manifest::Requirement('lib', '~1.0.0', manifest::Origin::git('https://x'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 1);
+    assert($plan[0]->version->minor == 0);
+}
+
+test an_unknown_package_fails
+{
+    resolve::World $world = resolve::World();
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('ghost', '*', manifest::Origin::git('https://x'), '');
+    result<array<resolve::Choice>, string> $out = resolve::solve($roots, $world);
+    assert($out->failed());
+    assert($out->failure()->contains('ghost'));
+}
+
+test a_bad_range_fails
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', 'nope', manifest::Origin::git('https://x'), '');
+    assert(resolve::solve($roots, $world)->failed());
+}
+
+test no_version_in_range_fails
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $cat = resolve::Package('lib', manifest::Origin::git('https://x'));
+    $cat->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $cat;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('lib', '^2.0', manifest::Origin::git('https://x'), '');
+    assert(resolve::solve($roots, $world)->failed());
+}
+
+test backtracking_picks_an_older_version_when_the_new_one_cannot
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $a = resolve::Package('a', manifest::Origin::git('https://a'));
+    resolve::Release $a2 = scratch::release('2.0.0');
+    $a2->requires[] = manifest::Requirement('b', '^2.0', manifest::Origin::git('https://b'), '');
+    $a->releases[] = $a2;
+    resolve::Release $a1 = scratch::release('1.0.0');
+    $a1->requires[] = manifest::Requirement('b', '^1.0', manifest::Origin::git('https://b'), '');
+    $a->releases[] = $a1;
+    $world->catalog[] = $a;
+
+    resolve::Package $b = resolve::Package('b', manifest::Origin::git('https://b'));
+    $b->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $b;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('a', '*', manifest::Origin::git('https://a'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 2);
+    assert($plan[0]->name == 'a' || $plan[1]->name == 'a');
+    usize $i = 0;
+    int32 $major = 0;
+
+    while ($i < $plan->count()) {
+        if ($plan[$i]->name == 'a') {
+            $major = $plan[$i]->version->major;
+        }
+
+        $i = $i + 1;
+    }
+
+    assert($major == 1);
+}
+
+test backtracking_undoes_a_sibling_when_the_second_child_fails
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $a = resolve::Package('a', manifest::Origin::git('https://a'));
+    resolve::Release $a2 = scratch::release('2.0.0');
+    $a2->requires[] = manifest::Requirement('b', '^1.0', manifest::Origin::git('https://b'), '');
+    $a2->requires[] = manifest::Requirement('c', '^2.0', manifest::Origin::git('https://c'), '');
+    $a->releases[] = $a2;
+    resolve::Release $a1 = scratch::release('1.0.0');
+    $a1->requires[] = manifest::Requirement('b', '^1.0', manifest::Origin::git('https://b'), '');
+    $a1->requires[] = manifest::Requirement('c', '^1.0', manifest::Origin::git('https://c'), '');
+    $a->releases[] = $a1;
+    $world->catalog[] = $a;
+
+    resolve::Package $b = resolve::Package('b', manifest::Origin::git('https://b'));
+    $b->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $b;
+
+    resolve::Package $c = resolve::Package('c', manifest::Origin::git('https://c'));
+    $c->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $c;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('a', '*', manifest::Origin::git('https://a'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 3);
+    usize $i = 0;
+    int32 $major = 0;
+
+    while ($i < $plan->count()) {
+        if ($plan[$i]->name == 'a') {
+            $major = $plan[$i]->version->major;
+        }
+
+        $i = $i + 1;
+    }
+
+    assert($major == 1);
+}
+
+test a_child_range_error_is_not_swallowed
+{
+    resolve::World $world = resolve::World();
+    resolve::Package $a = resolve::Package('a', manifest::Origin::git('https://a'));
+    resolve::Release $ar = scratch::release('1.0.0');
+    $ar->requires[] = manifest::Requirement('b', 'nope', manifest::Origin::git('https://b'), '');
+    $a->releases[] = $ar;
+    $world->catalog[] = $a;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('a', '*', manifest::Origin::git('https://a'), '');
+    result<array<resolve::Choice>, string> $out = resolve::solve($roots, $world);
+    assert($out->failed());
+    assert($out->failure()->contains('not a range'));
+}
+
+test versions_of_misses_an_unknown_name
+{
+    resolve::World $world = resolve::World();
+    assert($world->package_of('lib') == null);
+}
+
+test empty_roots_solve_to_nothing
+{
+    resolve::World $world = resolve::World();
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 0);
+}
+
+test a_failed_sibling_does_not_stick_a_range_on_an_earlier_pick
+{
+    resolve::World $world = resolve::World();
+
+    resolve::Package $a = resolve::Package('a', manifest::Origin::git('https://a'));
+    $a->releases[] = scratch::release('1.5.0');
+    $world->catalog[] = $a;
+
+    resolve::Package $p = resolve::Package('p', manifest::Origin::git('https://p'));
+    resolve::Release $p2 = scratch::release('2.0.0');
+    $p2->requires[] = manifest::Requirement('a', '>=1.2', manifest::Origin::git('https://a'), '');
+    $p2->requires[] = manifest::Requirement('q', '^2.0', manifest::Origin::git('https://q'), '');
+    $p->releases[] = $p2;
+    resolve::Release $p1 = scratch::release('1.0.0');
+    $p1->requires[] = manifest::Requirement('a', '>=1.0', manifest::Origin::git('https://a'), '');
+    $p1->requires[] = manifest::Requirement('q', '^1.0', manifest::Origin::git('https://q'), '');
+    $p->releases[] = $p1;
+    $world->catalog[] = $p;
+
+    resolve::Package $q = resolve::Package('q', manifest::Origin::git('https://q'));
+    $q->releases[] = scratch::release('1.0.0');
+    $world->catalog[] = $q;
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    $roots[] = manifest::Requirement('p', '*', manifest::Origin::git('https://p'), '');
+    $roots[] = manifest::Requirement('a', '*', manifest::Origin::git('https://a'), '');
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world);
+    assert($plan->count() == 3);
+}

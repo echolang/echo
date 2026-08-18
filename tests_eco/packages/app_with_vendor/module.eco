@@ -6,6 +6,6 @@
 #[module: "pkgapp"]
 #[version: "0.1.0"]
 
-#[requires: "libhello" { git: "https://example.com/libhello", version: "^1.0" }]
+#[requires: "libhello" { version: "^1.0", source: git "https://example.com/libhello" }]
 
 #[sources: "src/*.eco"]

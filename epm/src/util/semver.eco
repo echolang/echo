@@ -1,0 +1,358 @@
+/**
+ * Semver parse, compare, ranges, and intersection.
+ *
+ * v1 understands: `1.2.3`, `v1.2.3`, `^1.2.3`, `~1.2.3`, `>=1.2.3`, `*`.
+ * A leading `v` on a version is ignored. Pre-release is kept but a version
+ * with one is less than the same numbers without.
+ */
+
+namespace epm::util;
+
+public struct Version
+{
+    int32 $major;
+    int32 $minor;
+    int32 $patch;
+    string $pre;
+
+    constructor(int32 $major, int32 $minor, int32 $patch)
+    {
+        $this->major = $major;
+        $this->minor = $minor;
+        $this->patch = $patch;
+        $this->pre = '';
+    }
+
+    constructor(int32 $major, int32 $minor, int32 $patch, string $pre)
+    {
+        $this->major = $major;
+        $this->minor = $minor;
+        $this->patch = $patch;
+        $this->pre = $pre;
+    }
+
+    const function spelling() : string
+    {
+        if ($this->pre->empty()) {
+            return "{$this->major}.{$this->minor}.{$this->patch}";
+        }
+
+        return "{$this->major}.{$this->minor}.{$this->patch}-{$this->pre}";
+    }
+}
+
+public struct Range
+{
+    Version $min;
+    Version $max;
+    bool $open_max;
+
+    constructor(Version $min, Version $max, bool $open_max)
+    {
+        $this->min = $min;
+        $this->max = $max;
+        $this->open_max = $open_max;
+    }
+
+    const function spelling() : string
+    {
+        if ($this->open_max) {
+            if ($this->min->major == 0 && $this->min->minor == 0 && $this->min->patch == 0) {
+                return '*';
+            }
+
+            return ">={$this->min->spelling()}";
+        }
+
+        return "{$this->min->spelling()} .. {$this->max->spelling()}";
+    }
+}
+
+public function parse_version(const string& $text) : Version?
+{
+    string $s = $text;
+
+    if ($s->starts('v') || $s->starts('V')) {
+        $s = $s->sub(1, $s->size() - 1);
+    }
+
+    if ($s->empty()) {
+        return null;
+    }
+
+    int32 $major = 0;
+    int32 $minor = 0;
+    int32 $patch = 0;
+    string $pre = '';
+    int32 $part = 0;
+    int32 $acc = 0;
+    bool $seen = false;
+    usize $i = 0;
+
+    while ($i < $s->size()) {
+        uint8 $b = $s->byte($i);
+        int32 $wide = $b;
+
+        if ($wide >= 48 && $wide <= 57) {
+            $acc = $acc * 10 + ($wide - 48);
+            $seen = true;
+            $i = $i + 1;
+            continue;
+        }
+
+        if ($wide == 46) {
+            if (!$seen || $part > 1) {
+                return null;
+            }
+
+            if ($part == 0) {
+                $major = $acc;
+            }
+            else {
+                $minor = $acc;
+            }
+
+            $part = $part + 1;
+            $acc = 0;
+            $seen = false;
+            $i = $i + 1;
+            continue;
+        }
+
+        if ($wide == 45) {
+            if (!$seen || $part != 2) {
+                return null;
+            }
+
+            $patch = $acc;
+            $pre = $s->sub($i + 1, $s->size() - $i - 1);
+            $seen = true;
+            $part = 3;
+            break;
+        }
+
+        return null;
+    }
+
+    if (!$seen) {
+        return null;
+    }
+
+    if ($part == 0) {
+        $major = $acc;
+    }
+    else if ($part == 1) {
+        $minor = $acc;
+    }
+    else if ($part == 2) {
+        $patch = $acc;
+    }
+
+    if ($part < 1) {
+        return null;
+    }
+
+    return Version($major, $minor, $patch, $pre);
+}
+
+public function cmp_version(const Version& $a, const Version& $b) : int32
+{
+    if ($a->major < $b->major) {
+        return -1;
+    }
+
+    if ($a->major > $b->major) {
+        return 1;
+    }
+
+    if ($a->minor < $b->minor) {
+        return -1;
+    }
+
+    if ($a->minor > $b->minor) {
+        return 1;
+    }
+
+    if ($a->patch < $b->patch) {
+        return -1;
+    }
+
+    if ($a->patch > $b->patch) {
+        return 1;
+    }
+
+    if ($a->pre->empty() && $b->pre->empty()) {
+        return 0;
+    }
+
+    if ($a->pre->empty()) {
+        return 1;
+    }
+
+    if ($b->pre->empty()) {
+        return -1;
+    }
+
+    return cmp_text($a->pre, $b->pre);
+}
+
+private function cmp_text(const string& $a, const string& $b) : int32
+{
+    usize $n = $a->size();
+
+    if ($b->size() < $n) {
+        $n = $b->size();
+    }
+
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint8 $ca = $a->byte($i);
+        uint8 $cb = $b->byte($i);
+
+        if ($ca < $cb) {
+            return -1;
+        }
+
+        if ($ca > $cb) {
+            return 1;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($a->size() < $b->size()) {
+        return -1;
+    }
+
+    if ($a->size() > $b->size()) {
+        return 1;
+    }
+
+    return 0;
+}
+
+public function parse_range(const string& $text) : Range?
+{
+    string $s = str::trim($text);
+
+    if ($s == '*' || $s->empty()) {
+        return Range(Version(0, 0, 0), Version(0, 0, 0), true);
+    }
+
+    if ($s->starts('^')) {
+        Version $v = guard parse_version($s->sub(1, $s->size() - 1)) else {
+            return null;
+        }
+
+        Version $max = Version($v->major + 1, 0, 0);
+
+        if ($v->major == 0) {
+            $max = Version(0, $v->minor + 1, 0);
+        }
+
+        return Range($v, $max, false);
+    }
+
+    if ($s->starts('~')) {
+        Version $v = guard parse_version($s->sub(1, $s->size() - 1)) else {
+            return null;
+        }
+
+        return Range($v, Version($v->major, $v->minor + 1, 0), false);
+    }
+
+    if ($s->starts('>=')) {
+        Version $v = guard parse_version($s->sub(2, $s->size() - 2)) else {
+            return null;
+        }
+
+        return Range($v, Version(0, 0, 0), true);
+    }
+
+    Version $exact = guard parse_version($s) else {
+        return null;
+    }
+
+    return Range($exact, Version($exact->major, $exact->minor, $exact->patch + 1), false);
+}
+
+public function satisfies(const Version& $v, const Range& $r) : bool
+{
+    if (cmp_version($v, $r->min) < 0) {
+        return false;
+    }
+
+    if ($r->open_max) {
+        return true;
+    }
+
+    if (cmp_version($v, $r->max) < 0) {
+        return true;
+    }
+
+    return false;
+}
+
+public function intersect(const Range& $a, const Range& $b) : Range?
+{
+    Version $lo = $a->min;
+
+    if (cmp_version($b->min, $lo) > 0) {
+        $lo = $b->min;
+    }
+
+    bool $open = $a->open_max && $b->open_max;
+
+    if ($open) {
+        return Range($lo, Version(0, 0, 0), true);
+    }
+
+    Version $hi = $a->max;
+    bool $have_hi = !$a->open_max;
+
+    if (!$b->open_max) {
+        if (!$have_hi || cmp_version($b->max, $hi) < 0) {
+            $hi = $b->max;
+            $have_hi = true;
+        }
+    }
+
+    if (!$have_hi) {
+        return Range($lo, Version(0, 0, 0), true);
+    }
+
+    if (cmp_version($lo, $hi) >= 0) {
+        return null;
+    }
+
+    return Range($lo, $hi, false);
+}
+
+public function sort_versions(array<Version>& $items) : void
+{
+    usize $n = $items->count();
+
+    if ($n < 2) {
+        return;
+    }
+
+    usize $i = 1;
+
+    while ($i < $n) {
+        Version $held = $items[$i];
+        usize $j = $i;
+
+        while ($j > 0) {
+            if (cmp_version($held, $items[$j - 1]) <= 0) {
+                break;
+            }
+
+            $items[$j] = $items[$j - 1];
+            $j = $j - 1;
+        }
+
+        $items[$j] = $held;
+        $i = $i + 1;
+    }
+}

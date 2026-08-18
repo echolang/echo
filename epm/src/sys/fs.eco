@@ -1,0 +1,288 @@
+/**
+ * Files and directories the stdlib does not cover: listing, mkdir -p, rm -r,
+ * and "is this a directory".
+ */
+
+namespace epm::sys;
+
+public function exists(const string& $path) : bool
+{
+    int32 $k = epm_kind($path->cstr());
+
+    if ($k > 0) {
+        return true;
+    }
+
+    return false;
+}
+
+public function is_dir(const string& $path) : bool
+{
+    return epm_kind($path->cstr()) == 2;
+}
+
+public function is_file(const string& $path) : bool
+{
+    return epm_kind($path->cstr()) == 1;
+}
+
+public function mkdir(const string& $path) : bool
+{
+    return epm_mkdir($path->cstr()) == 0;
+}
+
+public function mkdir_p(const string& $path) : bool
+{
+    if ($path->empty() || $path == '.') {
+        return true;
+    }
+
+    if (is_dir($path)) {
+        return true;
+    }
+
+    string $parent = dirname($path);
+
+    if ($parent != $path) {
+        if (!mkdir_p($parent)) {
+            return false;
+        }
+    }
+
+    return mkdir($path);
+}
+
+public function rmdir(const string& $path) : bool
+{
+    return epm_rmdir($path->cstr()) == 0;
+}
+
+public function rename(const string& $from, const string& $to) : bool
+{
+    return epm_rename($from->cstr(), $to->cstr()) == 0;
+}
+
+public function readdir(const string& $path) : array<string>
+{
+    array<string> $names = array<string>();
+    ptr<uint8> $dir = epm_opendir($path->cstr());
+
+    if ($dir:$ == null) {
+        return $names;
+    }
+
+    string $buf = '';
+    $buf->reserve(512);
+    ptr<uint8> $slot = $buf->spare();
+
+    int32 $got = epm_readdir($dir, $slot, 512);
+
+    while ($got == 1) {
+        $names[] = str::from($slot);
+        $got = epm_readdir($dir, $slot, 512);
+    }
+
+    epm_closedir($dir);
+    return $names;
+}
+
+public function remove_all(const string& $path) : bool
+{
+    int32 $k = epm_kind($path->cstr());
+
+    if ($k == 0) {
+        return true;
+    }
+
+    if ($k == 1) {
+        result<bool, std::io::ioerror> $gone = std::io::remove($path);
+
+        if ($gone->failed()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    array<string> $kids = readdir($path);
+    usize $i = 0;
+
+    while ($i < $kids->count()) {
+        if (!remove_all(join($path, $kids[$i]))) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return rmdir($path);
+}
+
+public function sha256_hex(const string& $data) : string
+{
+    ptr<uint8> $h = epm_sha256_new();
+
+    if ($h:$ == null) {
+        return '';
+    }
+
+    epm_sha256_update($h, $data->cstr(), $data->size());
+
+    string $raw = '';
+    $raw->reserve(32);
+    ptr<uint8> $out = $raw->spare();
+    epm_sha256_final($h, $out);
+    $raw->commit(32);
+
+    return hex_of($raw);
+}
+
+public function tree_sha256(const string& $root) : string
+{
+    array<string> $files = array<string>();
+    collect_files($root, '', $files);
+    sort_strings($files);
+
+    ptr<uint8> $h = epm_sha256_new();
+
+    if ($h:$ == null) {
+        return '';
+    }
+
+    usize $i = 0;
+
+    while ($i < $files->count()) {
+        string $rel = $files[$i];
+        epm_sha256_update($h, $rel->cstr(), $rel->size());
+        epm_sha256_update($h, str::from('\n')->cstr(), 1);
+
+        string $body = std::io::readfile(join($root, $rel))->or('');
+
+        epm_sha256_update($h, $body->cstr(), $body->size());
+        $i = $i + 1;
+    }
+
+    string $raw = '';
+    $raw->reserve(32);
+    ptr<uint8> $out = $raw->spare();
+    epm_sha256_final($h, $out);
+    $raw->commit(32);
+
+    return hex_of($raw);
+}
+
+private function collect_files(const string& $root, const string& $rel, array<string>& $into) : void
+{
+    string $here = $root;
+
+    if (!$rel->empty()) {
+        $here = join($root, $rel);
+    }
+
+    if (is_file($here)) {
+        $into[] = $rel;
+        return;
+    }
+
+    if (!is_dir($here)) {
+        return;
+    }
+
+    array<string> $kids = readdir($here);
+    usize $i = 0;
+
+    while ($i < $kids->count()) {
+        string $name = $kids[$i];
+
+        if ($name == '.git') {
+            $i = $i + 1;
+            continue;
+        }
+
+        string $child = $name;
+
+        if (!$rel->empty()) {
+            $child = join($rel, $name);
+        }
+
+        collect_files($root, $child, $into);
+        $i = $i + 1;
+    }
+}
+
+private function hex_of(const string& $raw) : string
+{
+    string $digits = '0123456789abcdef';
+    string $out = '';
+    $out->reserve($raw->size() * 2);
+
+    usize $i = 0;
+
+    while ($i < $raw->size()) {
+        uint8 $b = $raw->byte($i);
+        int32 $wide = $b;
+        usize $hi = ($wide >> 4) & 15;
+        usize $lo = $wide & 15;
+        $out->append($digits->sub($hi, 1));
+        $out->append($digits->sub($lo, 1));
+        $i = $i + 1;
+    }
+
+    return $out;
+}
+
+private function sort_strings(array<string>& $items) : void
+{
+    usize $n = $items->count();
+
+    if ($n < 2) {
+        return;
+    }
+
+    usize $i = 1;
+
+    while ($i < $n) {
+        string $held = $items[$i];
+        usize $j = $i;
+
+        while ($j > 0) {
+            if (!before($held, $items[$j - 1])) {
+                break;
+            }
+
+            $items[$j] = $items[$j - 1];
+            $j = $j - 1;
+        }
+
+        $items[$j] = $held;
+        $i = $i + 1;
+    }
+}
+
+private function before(const string& $a, const string& $b) : bool
+{
+    usize $n = $a->size();
+
+    if ($b->size() < $n) {
+        $n = $b->size();
+    }
+
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint8 $ca = $a->byte($i);
+        uint8 $cb = $b->byte($i);
+
+        if ($ca < $cb) {
+            return true;
+        }
+
+        if ($ca > $cb) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return $a->size() < $b->size();
+}

@@ -1,0 +1,360 @@
+namespace epm::cmd;
+
+use epm::cli::{CommandLine, report, start_from_cli};
+use epm::fetch;
+use epm::lock;
+use epm::manifest;
+use epm::resolve;
+use epm::sys;
+use epm::util;
+use std::io;
+
+public function install(const CommandLine& $cli) : int32
+{
+    string $start = guard start_from_cli($cli) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    return install_at($start);
+}
+
+public function install_at(const string& $start) : int32
+{
+    manifest::Manifest $man = guard project_at($start) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    array<manifest::Requirement> $need = manifest::all_requires($man);
+
+    if ($need->count() == 0) {
+        io::println('nothing to install');
+        return 0;
+    }
+
+    string $lock_path = lock::path_beside($man->path);
+
+    if (!sys::is_file($lock_path)) {
+        return update_at($start, '');
+    }
+
+    lock::Lock $lock = guard lock::load($lock_path) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    if (!lock_covers($need, $lock)) {
+        return 1;
+    }
+
+    return apply_lock($man, $lock, $lock_path);
+}
+
+public function update(const CommandLine& $cli) : int32
+{
+    string $only = '';
+
+    if ($cli->positionals->count() > 0) {
+        $only = $cli->positionals[0];
+    }
+
+    string $start = guard start_from_cli($cli) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    return update_at($start, $only);
+}
+
+public function update_at(const string& $start, const string& $only) : int32
+{
+    manifest::Manifest $man = guard project_at($start) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    string $lock_path = lock::path_beside($man->path);
+    lock::Lock $old = guard lock::load($lock_path) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    array<manifest::Requirement> $need = manifest::all_requires($man);
+
+    if ($need->count() == 0) {
+        lock::Lock $empty = lock::Lock();
+        return finish_lock($man, $old, $empty);
+    }
+
+    resolve::World $world = resolve::World();
+    bool $filled = guard resolve::fill_world($need, $world) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    array<manifest::Requirement> $roots = array<manifest::Requirement>();
+    usize $i = 0;
+
+    while ($i < $need->count()) {
+        $roots[] = $need[$i];
+        $i = $i + 1;
+    }
+
+    if (!$only->empty()) {
+        $i = 0;
+
+        while ($i < $old->packages->count()) {
+            lock::Entry $e = $old->packages[$i];
+
+            if ($e->name != $only && $world->package_of($e->name) != null) {
+                $roots[] = manifest::Requirement($e->name, $e->version, $e->origin, $e->rev);
+            }
+
+            $i = $i + 1;
+        }
+    }
+
+    array<resolve::Choice> $plan = guard resolve::solve($roots, $world) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    return apply_plan($man, $old, $plan);
+}
+
+private function lock_covers(
+    const array<manifest::Requirement>& $need,
+    const lock::Lock& $lock
+) : bool
+{
+    usize $i = 0;
+
+    while ($i < $need->count()) {
+        manifest::Requirement $req = $need[$i];
+        lock::Entry $have = guard $lock->find($req->name) else {
+            report("'{$req->name}' is required but not locked - run `epm update`");
+            return false;
+        }
+
+        util::Range $range = guard util::parse_range($req->version) else {
+            report("'{$req->version}' is not a version range");
+            return false;
+        }
+
+        util::Version $ver = guard util::parse_version($have->version) else {
+            report("lock has a broken version for {$req->name}");
+            return false;
+        }
+
+        if (!util::satisfies($ver, $range)) {
+            report("'{$req->name}' @{$have->version} does not satisfy {$req->version} - run `epm update`");
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
+}
+
+private function apply_lock(
+    const manifest::Manifest& $man,
+    lock::Lock $lock,
+    const string& $lock_path
+) : int32
+{
+    string $vendor = sys::join(sys::dirname($man->path), 'vendor');
+
+    if (!sys::mkdir_p($vendor)) {
+        report("cannot create {$vendor}");
+        return 1;
+    }
+
+    bool $dirty = false;
+    usize $i = 0;
+
+    while ($i < $lock->packages->count()) {
+        lock::Entry $e = $lock->packages[$i];
+        string $dest = sys::join($vendor, $e->name);
+        Placed $got = guard materialize($dest, $e->origin, $e->rev, $e->sha256) else ($err) {
+            report($err);
+            return 1;
+        }
+
+        if ($got->kept) {
+            io::println("keep {$e->name}@{$e->version}");
+        }
+        else {
+            io::println("vendor {$e->name}@{$e->version}");
+        }
+
+        if ($got->sha256 != $e->sha256 || $got->rev != $e->rev) {
+            $lock->packages[$i]->sha256 = $got->sha256;
+            $lock->packages[$i]->rev = $got->rev;
+            $dirty = true;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($dirty) {
+        bool $saved = guard lock::save($lock_path, $lock) else ($e) {
+            report($e);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+private function apply_plan(
+    const manifest::Manifest& $man,
+    const lock::Lock& $old,
+    const array<resolve::Choice>& $plan
+) : int32
+{
+    string $vendor = sys::join(sys::dirname($man->path), 'vendor');
+
+    if (!sys::mkdir_p($vendor)) {
+        report("cannot create {$vendor}");
+        return 1;
+    }
+
+    lock::Lock $lock = lock::Lock();
+    usize $i = 0;
+
+    while ($i < $plan->count()) {
+        resolve::Choice $c = $plan[$i];
+        string $dest = sys::join($vendor, $c->name);
+        string $want = $c->rev;
+
+        if ($want->empty()) {
+            $want = $c->tag;
+        }
+
+        string $expect = expected_sha($old, $c->name, $want);
+
+        Placed $got = guard materialize($dest, $c->origin, $want, $expect) else ($e) {
+            report($e);
+            return 1;
+        }
+
+        if ($got->kept) {
+            io::println("keep {$c->name}@{$c->version->spelling()}");
+        }
+        else {
+            io::println("vendor {$c->name}@{$c->version->spelling()}");
+        }
+
+        lock::Entry $entry = lock::Entry(
+            $c->name,
+            $c->version->spelling(),
+            $c->origin,
+            $got->rev,
+            $got->sha256
+        );
+
+        usize $r = 0;
+
+        while ($r < $c->requires->count()) {
+            $entry->requires[] = $c->requires[$r];
+            $r = $r + 1;
+        }
+
+        $lock->packages[] = $entry;
+        $i = $i + 1;
+    }
+
+    return finish_lock($man, $old, $lock);
+}
+
+private function expected_sha(
+    const lock::Lock& $old,
+    const string& $name,
+    const string& $rev
+) : string
+{
+    lock::Entry $prev = guard $old->find($name) else {
+        return '';
+    }
+
+    if ($prev->rev == $rev) {
+        return $prev->sha256;
+    }
+
+    return '';
+}
+
+struct Placed
+{
+    string $rev;
+    string $sha256;
+    bool $kept;
+
+    constructor(string $rev, string $sha256, bool $kept)
+    {
+        $this->rev = $rev;
+        $this->sha256 = $sha256;
+        $this->kept = $kept;
+    }
+}
+
+function materialize(
+    const string& $dest,
+    const manifest::Origin& $origin,
+    const string& $rev,
+    const string& $expected_sha
+) : result<Placed, string>
+{
+    if (!$rev->empty() && sys::is_dir($dest) && !$expected_sha->empty()) {
+        if (sys::tree_sha256($dest) == $expected_sha) {
+            return .ok(Placed($rev, $expected_sha, true));
+        }
+    }
+
+    if ($rev->empty()) {
+        return .error("lock entry has no rev - run `epm update`");
+    }
+
+    fetch::Source $src = fetch::source_for($origin);
+    string $got = guard $src->checkout($rev, $dest) else ($e) {
+        return .error($e);
+    }
+
+    return .ok(Placed($got, sys::tree_sha256($dest), false));
+}
+
+private function finish_lock(
+    const manifest::Manifest& $man,
+    const lock::Lock& $old,
+    const lock::Lock& $lock
+) : int32
+{
+    string $vendor = sys::join(sys::dirname($man->path), 'vendor');
+    string $lock_path = lock::path_beside($man->path);
+
+    usize $i = 0;
+
+    while ($i < $old->packages->count()) {
+        string $name = $old->packages[$i]->name;
+
+        if ($lock->find($name) == null) {
+            string $dest = sys::join($vendor, $name);
+
+            if (sys::exists($dest)) {
+                sys::remove_all($dest);
+            }
+        }
+
+        $i = $i + 1;
+    }
+
+    bool $saved = guard lock::save($lock_path, $lock) else ($e) {
+        report($e);
+        return 1;
+    }
+
+    io::println("wrote {$lock_path}");
+    return 0;
+}

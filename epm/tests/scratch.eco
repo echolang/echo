@@ -1,0 +1,136 @@
+/**
+ * Scratch directories for tests that touch the filesystem.
+ */
+
+namespace epm::scratch;
+
+use epm::resolve;
+use epm::sys;
+use epm::util;
+
+public function dir(const string& $name) : string
+{
+    string $path = sys::join('/tmp', "epm-t-{$name}");
+    sys::remove_all($path);
+    assert(sys::mkdir_p($path));
+    return $path;
+}
+
+public function gone(const string& $path) : void
+{
+    sys::remove_all($path);
+}
+
+public function write(const string& $path, const string& $text) : void
+{
+    result<usize, std::io::ioerror> $wrote = std::io::writefile($path, $text);
+    assert(!$wrote->failed());
+}
+
+public function read(const string& $path) : string
+{
+    string $text = guard std::io::readfile($path);
+    return $text;
+}
+
+public function file(const string& $dir, const string& $rel, const string& $text) : string
+{
+    string $path = sys::join($dir, $rel);
+    assert(sys::mkdir_p(sys::dirname($path)));
+    write($path, $text);
+    return $path;
+}
+
+public function version(const string& $text) : util::Version
+{
+    util::Version $v = guard util::parse_version($text) else {
+        die("not a version: {$text}");
+    }
+
+    return $v;
+}
+
+public function release(const string& $text) : resolve::Release
+{
+    resolve::Release $rel = resolve::Release(version($text), "v{$text}", '');
+    $rel->hydrated = true;
+    return $rel;
+}
+
+public function git(const string& $dir, const array<string>& $args) : sys::Run
+{
+    array<string> $argv = array<string>();
+    $argv[] = 'git';
+    $argv[] = '-C';
+    $argv[] = $dir;
+    $argv[] = '-c';
+    $argv[] = 'user.email=t@t';
+    $argv[] = '-c';
+    $argv[] = 'user.name=t';
+    usize $i = 0;
+
+    while ($i < $args->count()) {
+        $argv[] = $args[$i];
+        $i = $i + 1;
+    }
+
+    return sys::run($argv);
+}
+
+/** A tiny tagged Echo module, so Source::list_versions / checkout can run against a local path. */
+public function git_module(
+    const string& $dir,
+    const string& $name,
+    const string& $version,
+    const string& $extra
+) : void
+{
+    assert(sys::mkdir_p(sys::join($dir, 'src')));
+    write(
+        sys::join($dir, 'module.eco'),
+        "#[module: \"{$name}\"]\n#[version: \"{$version}\"]\n{$extra}#[sources: \"src/*.eco\"]\n"
+    );
+    write(
+        sys::join($dir, 'src/lib.eco'),
+        "namespace {$name};\npublic function ping() : int32\n{\n    return 1;\n}\n"
+    );
+
+    array<string> $init = array<string>();
+    $init[] = 'init';
+    assert(git($dir, $init)->ok());
+
+    array<string> $add = array<string>();
+    $add[] = 'add';
+    $add[] = '-A';
+    assert(git($dir, $add)->ok());
+
+    array<string> $commit = array<string>();
+    $commit[] = 'commit';
+    $commit[] = '--no-gpg-sign';
+    $commit[] = '-m';
+    $commit[] = 't';
+    assert(git($dir, $commit)->ok());
+
+    array<string> $tag = array<string>();
+    $tag[] = 'tag';
+    $tag[] = "v{$version}";
+    assert(git($dir, $tag)->ok());
+}
+
+public function git_tag(const string& $dir, const string& $tag) : sys::Run
+{
+    array<string> $args = array<string>();
+    $args[] = 'tag';
+    $args[] = $tag;
+    return git($dir, $args);
+}
+
+public function rev_parse(const string& $dir, const string& $name) : string
+{
+    array<string> $args = array<string>();
+    $args[] = 'rev-parse';
+    $args[] = $name;
+    sys::Run $ran = git($dir, $args);
+    assert($ran->ok());
+    return str::trim($ran->out);
+}

@@ -1,0 +1,87 @@
+/**
+ * Run a command as argv, capture stdout, stderr and the exit code.
+ * There is no shell.
+ */
+
+namespace epm::sys;
+
+public struct Run
+{
+    int32 $code;
+    string $out;
+    string $err;
+
+    constructor(int32 $code, string $out, string $err)
+    {
+        $this->code = $code;
+        $this->out = $out;
+        $this->err = $err;
+    }
+
+    const function ok() : bool
+    {
+        return $this->code == 0;
+    }
+}
+
+public function run(const array<string>& $args) : Run
+{
+    if ($args->count() == 0) {
+        return Run(1, '', 'failed to spawn');
+    }
+
+    ptr<uint8> $h = epm_argv_new();
+
+    if ($h:$ == null) {
+        return Run(1, '', 'failed to spawn');
+    }
+
+    usize $i = 0;
+
+    while ($i < $args->count()) {
+        string $arg = $args[$i]->clone();
+
+        if (epm_argv_push($h, $arg->cstr()) != 0) {
+            epm_argv_free($h);
+            return Run(1, '', 'failed to spawn');
+        }
+
+        $i = $i + 1;
+    }
+
+    ptr<uint8> $out_s = null;
+    int32 $out_n = 0;
+    ptr<uint8> $err_s = null;
+    int32 $err_n = 0;
+    int32 $code = 1;
+
+    int32 $rc = epm_run($h, &$out_s, &$out_n, &$err_s, &$err_n, &$code);
+    epm_argv_free($h);
+
+    if ($rc != 0) {
+        return Run(1, '', 'failed to spawn');
+    }
+
+    string $out = '';
+    string $err = '';
+
+    if ($out_s:$ != null && $out_n > 0) {
+        usize $n = $out_n;
+        $out = str::from($out_s, $n);
+    }
+
+    if ($err_s:$ != null && $err_n > 0) {
+        usize $n = $err_n;
+        $err = str::from($err_s, $n);
+    }
+
+    if ($out_s:$ != null) {
+        epm_free($out_s);
+    }
+
+    if ($err_s:$ != null) {
+        epm_free($err_s);
+    }
+
+    return Run($code, $out, $err);
+}

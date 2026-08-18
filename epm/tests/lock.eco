@@ -1,0 +1,93 @@
+use epm::lock;
+use epm::scratch;
+use epm::sys;
+
+test lock_path_sits_beside_the_manifest
+{
+    assert(lock::path_beside('/tmp/app/module.eco') == '/tmp/app/epm.lock.json');
+}
+
+test a_missing_lock_is_empty
+{
+    lock::Lock $lock = guard lock::load('/tmp/epm-t-no-such-lock.json');
+    assert($lock->packages->count() == 0);
+    assert($lock->find('libcurl') == null);
+}
+
+test lock_round_trips
+{
+    string $dir = scratch::dir('lock-round');
+    string $path = sys::join($dir, 'epm.lock.json');
+
+    lock::Lock $lock = lock::Lock();
+    lock::Entry $e = lock::Entry(
+        'libcurl',
+        '0.1.0',
+        epm::manifest::Origin::git('https://example.com/libcurl'),
+        'abc123',
+        'deadbeef'
+    );
+    $e->requires[] = 'libjson';
+    $lock->packages[] = $e;
+
+    bool $saved = guard lock::save($path, $lock);
+    assert(sys::is_file($path));
+
+    lock::Lock $back = guard lock::load($path);
+    assert($back->packages->count() == 1);
+    lock::Entry $got = guard $back->find('libcurl');
+    assert($got->version == '0.1.0');
+    assert($got->origin->kind == 'git');
+    assert($got->origin->locator == 'https://example.com/libcurl');
+    assert($got->rev == 'abc123');
+    assert($got->sha256 == 'deadbeef');
+    assert($got->requires->count() == 1);
+    assert($got->requires[0] == 'libjson');
+    scratch::gone($dir);
+}
+
+test lock_find_misses_an_unknown_name
+{
+    lock::Lock $lock = lock::Lock();
+    $lock->packages[] = lock::Entry('libjson', '0.2.0', epm::manifest::Origin::git(''), '', '');
+    assert($lock->find('libcurl') == null);
+}
+
+test a_broken_lock_is_refused
+{
+    string $dir = scratch::dir('lock-bad');
+    string $path = scratch::file($dir, 'epm.lock.json', '{');
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}
+
+test lock_skips_an_entry_without_a_name
+{
+    string $dir = scratch::dir('lock-blank');
+    string $path = scratch::file(
+        $dir,
+        'epm.lock.json',
+        '{"lockVersion":1,"packages":[{"name":"","version":"1.0.0"},{"name":"lib","version":"1.0.0","source":{"kind":"git","url":""},"rev":"","sha256":"","requires":[]}]}'
+    );
+    lock::Lock $lock = guard lock::load($path);
+    assert($lock->packages->count() == 1);
+    assert($lock->packages[0]->name == 'lib');
+    scratch::gone($dir);
+}
+
+test lock_without_packages_is_empty
+{
+    string $dir = scratch::dir('lock-none');
+    string $path = scratch::file($dir, 'epm.lock.json', '{"lockVersion":1}');
+    lock::Lock $lock = guard lock::load($path);
+    assert($lock->packages->count() == 0);
+    scratch::gone($dir);
+}
+
+test an_unknown_lock_version_is_refused
+{
+    string $dir = scratch::dir('lock-ver');
+    string $path = scratch::file($dir, 'epm.lock.json', '{"lockVersion":2,"packages":[]}');
+    assert(lock::load($path)->failed());
+    scratch::gone($dir);
+}

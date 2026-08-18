@@ -1,0 +1,83 @@
+/**
+ * Path joining and splitting. `/` only - epm is POSIX.
+ */
+
+namespace epm::sys;
+
+public function join(const string& $a, const string& $b) : string
+{
+    if ($a->empty()) {
+        return $b;
+    }
+
+    if ($b->empty()) {
+        return $a;
+    }
+
+    if ($b->starts('/')) {
+        return $b;
+    }
+
+    if ($a->ends('/')) {
+        string $glued = "{$a}{$b}";
+        return $glued->clone();
+    }
+
+    string $joined = "{$a}/{$b}";
+    return $joined->clone();
+}
+
+public function basename(const string& $path) : string
+{
+    usize $last = $path->size();
+    usize $i = 0;
+
+    while ($i < $path->size()) {
+        if ($path->byte($i) == 47) {
+            $last = $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($last == $path->size()) {
+        return $path;
+    }
+
+    string $name = $path->sub($last + 1, $path->size() - $last - 1);
+    return $name->clone();
+}
+
+public function dirname(const string& $path) : string
+{
+    usize $last = $path->size();
+    usize $i = 0;
+
+    while ($i < $path->size()) {
+        if ($path->byte($i) == 47) {
+            $last = $i;
+        }
+
+        $i = $i + 1;
+    }
+
+    if ($last == $path->size()) {
+        return '.';
+    }
+
+    if ($last == 0) {
+        return '/';
+    }
+
+    string $dir = $path->sub(0, $last);
+    return $dir->clone();
+}
+
+public function is_absolute(const string& $path) : bool
+{
+    if ($path->empty()) {
+        return false;
+    }
+
+    return $path->starts('/');
+}

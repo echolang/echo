@@ -1,0 +1,76 @@
+/**
+ * Seed a World with version lists. Manifests are fetched when the solver
+ * tries a release, not here.
+ */
+
+namespace epm::resolve;
+
+use epm::fetch;
+use epm::manifest;
+
+public function fill_world(
+    const array<manifest::Requirement>& $roots,
+    World& $world
+) : result<bool, string>
+{
+    usize $i = 0;
+
+    while ($i < $roots->count()) {
+        bool $ok = guard ensure_listed($roots[$i], $world) else ($e) {
+            return .error($e);
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok(true);
+}
+
+public function ensure_listed(
+    const manifest::Requirement& $req,
+    World& $world
+) : result<bool, string>
+{
+    Package $have = guard $world->package_of($req->name) else {
+        return list_into($req, $world);
+    }
+
+    if (!$req->origin->empty() && !$have->origin->empty() && !$have->origin->same($req->origin)) {
+        return .error(
+            "'{$req->name}' is required from {$req->origin->spelling()} and {$have->origin->spelling()} - two remotes of one name cannot coexist"
+        );
+    }
+
+    return .ok(true);
+}
+
+private function list_into(
+    const manifest::Requirement& $req,
+    World& $world
+) : result<bool, string>
+{
+    if ($req->origin->empty()) {
+        return .error("'{$req->name}' has no source (v1 needs source: git \"...\")");
+    }
+
+    if ($req->origin->kind != 'git') {
+        return .error("'{$req->name}' has source kind '{$req->origin->kind}', which v1 does not fetch");
+    }
+
+    fetch::Source $src = fetch::source_for($req->origin);
+    epm::resolve::Package $listed = guard $src->list_versions() else ($e) {
+        return .error($e);
+    }
+
+    Package $out = Package($req->name, $req->origin);
+    usize $v = 0;
+
+    while ($v < $listed->releases->count()) {
+        Release $rel = $listed->releases[$v];
+        $out->releases[] = Release($rel->version, $rel->tag, $rel->rev);
+        $v = $v + 1;
+    }
+
+    $world->catalog[] = $out;
+    return .ok(true);
+}

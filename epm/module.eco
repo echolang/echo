@@ -1,0 +1,25 @@
+/*
+ * epm - Echo's package manager.
+ *
+ * Resolves, fetches and vendors. It never compiles anything. The only byte it
+ * writes into a module.eco is the one #[requires:] line `epm add` was asked for.
+ *
+ * Bootstrap is a path, so epm never needs itself.
+ */
+
+#[module: "epm"]
+#[version: "0.1.0"]
+#[epm::license: "MIT"]
+#[epm::description: "a package manager for Echo"]
+
+#[sources: "src/**/*.eco"]
+#[cc: sources "c/shim.c"]
+
+#[depends: "../../echolibs/libjson"]
+#[depends: "../../echolibs/libcurl"]
+
+#[target: exe { name: "epm", entry: "src/main.eco" }]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

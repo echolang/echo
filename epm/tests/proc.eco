@@ -1,0 +1,42 @@
+use epm::sys;
+
+test run_captures_stdout
+{
+    array<string> $a = array<string>();
+    $a[] = 'printf';
+    $a[] = 'hello';
+    sys::Run $ran = sys::run($a);
+    assert($ran->ok());
+    assert($ran->out == 'hello');
+}
+
+test run_captures_a_nonzero_exit
+{
+    array<string> $a = array<string>();
+    $a[] = 'false';
+    sys::Run $ran = sys::run($a);
+    assert(!$ran->ok());
+    assert($ran->code != 0);
+}
+
+test run_captures_stderr
+{
+    array<string> $a = array<string>();
+    $a[] = 'sh';
+    $a[] = '-c';
+    $a[] = 'printf nope 1>&2';
+    sys::Run $ran = sys::run($a);
+    assert($ran->ok());
+    assert($ran->err == 'nope');
+}
+
+test run_passes_an_argument_that_would_break_a_shell
+{
+    array<string> $a = array<string>();
+    $a[] = 'printf';
+    $a[] = '%s';
+    $a[] = "it's";
+    sys::Run $ran = sys::run($a);
+    assert($ran->ok());
+    assert($ran->out == "it's");
+}

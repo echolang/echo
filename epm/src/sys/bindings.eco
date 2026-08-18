@@ -1,0 +1,39 @@
+/*
+ * The C symbols in c/shim.c. One block, declared once - a C symbol may only
+ * appear once per module. Everything else in epm::sys calls these.
+ */
+
+namespace epm::sys;
+
+internal extern {
+    function epm_opendir(ptr<const uint8> $path) : ptr<uint8>;
+    function epm_readdir(ptr<uint8> $dir, ptr<uint8> $name, usize $cap) : int32;
+    function epm_closedir(ptr<uint8> $dir) : void;
+
+    function epm_kind(ptr<const uint8> $path) : int32;
+    function epm_mkdir(ptr<const uint8> $path) : int32;
+    function epm_rmdir(ptr<const uint8> $path) : int32;
+    function epm_rename(ptr<const uint8> $from, ptr<const uint8> $to) : int32;
+
+    function epm_argv_new() : ptr<uint8>;
+    function epm_argv_push(ptr<uint8> $h, ptr<const uint8> $s) : int32;
+    function epm_argv_free(ptr<uint8> $h) : void;
+
+    function epm_run(
+        ptr<uint8> $h,
+        ptr<ptr<uint8>> $out_s,
+        ptr<int32> $out_n,
+        ptr<ptr<uint8>> $err_s,
+        ptr<int32> $err_n,
+        ptr<int32> $code
+    ) : int32;
+
+    function epm_free(ptr<uint8> $p) : void;
+
+    function epm_sha256_new() : ptr<uint8>;
+    function epm_sha256_update(ptr<uint8> $h, ptr<const uint8> $data, usize $n) : void;
+    function epm_sha256_final(ptr<uint8> $h, ptr<uint8> $out) : void;
+
+    function epm_isatty(int32 $fd) : int32;
+    function epm_columns(int32 $fd) : int32;
+}

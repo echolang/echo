@@ -1,0 +1,116 @@
+use epm::fetch;
+
+test github_https_remote_is_owner_slash_repo
+{
+    fetch::GitHub $got = guard fetch::GitHub::from_url('https://github.com/echolang/libcurl.git');
+    assert($got->repo == 'echolang/libcurl');
+}
+
+test github_https_without_git_suffix
+{
+    fetch::GitHub $got = guard fetch::GitHub::from_url('https://github.com/echolang/libcurl');
+    assert($got->repo == 'echolang/libcurl');
+}
+
+test github_https_strips_a_trailing_path
+{
+    fetch::GitHub $got = guard fetch::GitHub::from_url('https://github.com/echolang/libcurl/tree/main');
+    assert($got->repo == 'echolang/libcurl');
+}
+
+test github_ssh_remote_is_owner_slash_repo
+{
+    fetch::GitHub $got = guard fetch::GitHub::from_url('git@github.com:echolang/libjson');
+    assert($got->repo == 'echolang/libjson');
+}
+
+test github_ssh_with_git_suffix
+{
+    fetch::GitHub $got = guard fetch::GitHub::from_url('git@github.com:echolang/libjson.git');
+    assert($got->repo == 'echolang/libjson');
+}
+
+test a_non_github_remote_is_not_a_repo
+{
+    assert(fetch::GitHub::from_url('https://gitlab.com/foo/bar') == null);
+    assert(fetch::GitHub::from_url('https://github.com/echolang') == null);
+    assert(fetch::GitHub::from_url('https://github.com/') == null);
+    assert(fetch::GitHub::from_url('https://github.com/owner/') == null);
+    assert(fetch::GitHub::from_url('git://github.com/echolang/libcurl') == null);
+    assert(fetch::GitHub::from_url('') == null);
+}
+
+test source_for_a_github_https_url_is_github
+{
+    fetch::Source $src = fetch::source_for(epm::manifest::Origin::git('https://github.com/echolang/libcurl.git'));
+    assert($src instanceof fetch::GitHub);
+}
+
+test source_for_a_github_ssh_url_is_github
+{
+    fetch::Source $src = fetch::source_for(epm::manifest::Origin::git('git@github.com:echolang/libjson'));
+    assert($src instanceof fetch::GitHub);
+}
+
+test source_for_a_gitlab_url_is_git
+{
+    fetch::Source $src = fetch::source_for(epm::manifest::Origin::git('https://gitlab.com/foo/bar'));
+    assert($src instanceof fetch::Git);
+    assert(!($src instanceof fetch::GitHub));
+}
+
+test source_for_a_local_path_is_git
+{
+    fetch::Source $src = fetch::source_for(epm::manifest::Origin::git('/tmp/some-repo'));
+    assert($src instanceof fetch::Git);
+}
+
+test github_tags_json_reads_names
+{
+    string $body = '[{"name":"v0.1.0"},{"name":"nightly"},{"name":"0.2.0"}]';
+    array<string> $tags = guard fetch::tag_names_from($body);
+    assert($tags->count() == 3);
+    assert($tags[0] == 'v0.1.0');
+    assert($tags[1] == 'nightly');
+    assert($tags[2] == '0.2.0');
+}
+
+test github_tags_json_reads_the_real_shape
+{
+    string $body = '[{"name":"v0.1.0","zipball_url":"x","commit":{"sha":"abc"}}]';
+    array<string> $tags = guard fetch::tag_names_from($body);
+    assert($tags->count() == 1);
+    assert($tags[0] == 'v0.1.0');
+}
+
+test github_tags_json_reads_the_commit_sha
+{
+    string $body = '[{"name":"v0.1.0","commit":{"sha":"abc123"}}]';
+    array<fetch::RemoteTag> $tags = guard fetch::remote_tags_from($body);
+    assert($tags->count() == 1);
+    assert($tags[0]->name == 'v0.1.0');
+    assert($tags[0]->sha == 'abc123');
+}
+
+test github_tags_json_skips_a_blank_name
+{
+    array<string> $tags = guard fetch::tag_names_from('[{"name":""},{"name":"v1.0.0"}]');
+    assert($tags->count() == 1);
+    assert($tags[0] == 'v1.0.0');
+}
+
+test github_tags_json_of_an_empty_array_is_empty
+{
+    array<string> $tags = guard fetch::tag_names_from('[]');
+    assert($tags->count() == 0);
+}
+
+test github_tags_json_rejects_an_object
+{
+    assert(fetch::tag_names_from('{"message":"Not Found"}')->failed());
+}
+
+test github_tags_json_rejects_garbage
+{
+    assert(fetch::tag_names_from('not json')->failed());
+}

@@ -51,7 +51,7 @@ void Parser::read_manifest_requires(
     for (const AST::AttributeValue *entry : AST::AttributeReader::each(written)) {
         if (!entry->has_tag() || !entry->is(AST::AttributeValueKind::t_record)) {
             reader.refuse(entry->span,
-                "a requirement is '\"name\" { version:, git:, rev: }'.");
+                "a requirement is '\"name\" { version:, source: git \"...\", rev: }'.");
             continue;
         }
 
@@ -87,10 +87,10 @@ void Parser::read_manifest_requires(
         }
 
         const AST::AttributeValue *version = reader.require_field(*entry, "version");
-        const AST::AttributeValue *git = reader.require_field(*entry, "git");
-        reader.reject_unknown_fields(*entry, { "version", "git", "rev" });
+        const AST::AttributeValue *source = reader.require_field(*entry, "source");
+        reader.reject_unknown_fields(*entry, { "version", "source", "rev" });
 
-        if (reader.has_refusals() || version == nullptr || git == nullptr) {
+        if (reader.has_refusals() || version == nullptr || source == nullptr) {
             continue;
         }
 
@@ -102,8 +102,17 @@ void Parser::read_manifest_requires(
             requirement.version = value.value();
         }
 
-        if (std::optional<std::string> value = reader.string(*git)) {
-            requirement.git = value.value();
+        Parser::RequirementSourceKind kind = Parser::RequirementSourceKind::t_git;
+        static const std::vector<std::pair<std::string, Parser::RequirementSourceKind>> kinds = {
+            { "git", Parser::RequirementSourceKind::t_git }
+        };
+
+        if (reader.tag(*source, kinds, "source", "git", kind)) {
+            requirement.source_kind = kind;
+
+            if (std::optional<std::string> value = reader.string(*source)) {
+                requirement.source = value.value();
+            }
         }
 
         if (const AST::AttributeValue *rev = reader.field(*entry, "rev")) {
