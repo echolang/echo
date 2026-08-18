@@ -101,10 +101,19 @@ mkdir -p "${src}/openssl"
 tar -xzf "${src}/openssl.tar.gz" -C "${src}/openssl" --strip-components=1
 (
     cd "${src}/openssl"
-    ./Configure --prefix="${prefix}" no-shared no-tests "${openssl_target}"
+    # --libdir=lib is load-bearing on x86_64 Linux: Configure defaults to lib64 there,
+    # and --link search:<prefix>/lib would miss the archives and pick up the distro
+    # OpenSSL 3.0 instead. SSL_get0_group_name is 3.2+; that mismatch is a link error.
+    ./Configure --prefix="${prefix}" --libdir=lib no-shared no-tests "${openssl_target}"
     make -j"${jobs}"
     make install_sw
 )
+
+if [ ! -f "${prefix}/lib/libssl.a" ] || [ ! -f "${prefix}/lib/libcrypto.a" ]; then
+    echo "build_static_curl: OpenSSL did not install libssl.a / libcrypto.a into ${prefix}/lib" >&2
+    ls -la "${prefix}/lib" "${prefix}/lib64" 2>/dev/null || true
+    exit 1
+fi
 
 fetch "${CURL_URL}" "${src}/curl.tar.xz" "${CURL_SHA}"
 mkdir -p "${src}/curl"

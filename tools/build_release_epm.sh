@@ -40,6 +40,12 @@ if [ ! -f "${curl_prefix}/lib/libcurl.a" ]; then
     exit 2
 fi
 
+if [ ! -f "${curl_prefix}/lib/libssl.a" ] || [ ! -f "${curl_prefix}/lib/libcrypto.a" ]; then
+    echo "build_release_epm: no libssl.a / libcrypto.a under ${curl_prefix}/lib" >&2
+    echo "  a lib64 install is the usual cause - OpenSSL must be configured --libdir=lib" >&2
+    exit 2
+fi
+
 out="$2"
 if [ "${out#/}" = "${out}" ]; then
     out="$(pwd)/${out}"
