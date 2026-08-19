@@ -5,11 +5,10 @@
 
 namespace epm::cli;
 
-public const VERSION = '0.1.0';
-
 public enum Subcommand
 {
     case none;
+    case init;
     case install;
     case add;
     case remove;
@@ -23,6 +22,7 @@ public enum Opt
     case help;
     case version;
     case color;
+    case yes;
     case module;
     case git;
     case path;
@@ -154,10 +154,17 @@ public const ACCEPTS_REMOVE = 4;
 public const ACCEPTS_UPDATE = 8;
 public const ACCEPTS_VERIFY = 16;
 public const ACCEPTS_TREE = 32;
-public const ACCEPTS_ALL = 63;
+public const ACCEPTS_INIT = 64;
+public const ACCEPTS_EXISTING = ACCEPTS_INSTALL | ACCEPTS_ADD | ACCEPTS_REMOVE
+    | ACCEPTS_UPDATE | ACCEPTS_VERIFY | ACCEPTS_TREE;
+public const ACCEPTS_ALL = ACCEPTS_EXISTING | ACCEPTS_INIT;
 
 public function bit_of(Subcommand $id) : int32
 {
+    if ($id == Subcommand::init) {
+        return ACCEPTS_INIT;
+    }
+
     if ($id == Subcommand::install) {
         return ACCEPTS_INSTALL;
     }
@@ -188,6 +195,18 @@ public function bit_of(Subcommand $id) : int32
 public function subcommand_table() : array<SubcommandInfo>
 {
     array<SubcommandInfo> $rows = array<SubcommandInfo>();
+    $rows[] = SubcommandInfo(
+        Subcommand::init,
+        'init',
+        ACCEPTS_INIT,
+        'create a new Echo module',
+        'Walk a short wizard and write a new module into a new directory.\nEnter takes a default. --yes skips the questions and writes those defaults.\nThe directory is named after the module and is created next to the working directory. A module.eco already there is a refusal: init creates, it does not occupy.',
+        '[<name>]',
+        'the module name, and the directory',
+        'Omitted, the wizard asks. Stated, it is the default. --yes needs it: a script has to say the name.',
+        0,
+        1
+    );
     $rows[] = SubcommandInfo(
         Subcommand::install,
         'install',
@@ -312,7 +331,7 @@ public function command_line_options() : array<Option>
         'm',
         OptionArity::value,
         OptionCategory::inputs,
-        ACCEPTS_ALL,
+        ACCEPTS_EXISTING,
         ExclusionGroup::none,
         '<manifest>',
         '',
@@ -409,6 +428,21 @@ public function command_line_options() : array<Option>
         'colourise the page and refusals',
         'Colourise the help page and the argv refusals:\n  epm --color always --help\n\'always\' puts escape sequences into a file or a pipe, which is what a renderer downstream wants. \'never\' is the other direction, and \'auto\' colours a terminal and nothing else.\nNO_COLOR, CLICOLOR_FORCE and TERM=dumb are honoured, so a machine that has already said how it feels about colour does not need this flag at all.',
         $colors
+    );
+    $rows[] = Option(
+        Opt::yes,
+        'yes',
+        '',
+        'y',
+        OptionArity::flag,
+        OptionCategory::general,
+        ACCEPTS_INIT,
+        ExclusionGroup::none,
+        '',
+        '',
+        'take the defaults, write, do not ask',
+        'Skip the wizard. Needs a module name:\n  epm init greet --yes\nWithout --yes, init asks. Without a terminal, --yes is the only way through.',
+        $none
     );
     return $rows;
 }

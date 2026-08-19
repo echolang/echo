@@ -10,6 +10,10 @@ use std::env;
 
 public function dispatch(const CommandLine& $cli) : int32
 {
+    if ($cli->subcommand == Subcommand::init) {
+        return init($cli);
+    }
+
     if ($cli->subcommand == Subcommand::install) {
         return install($cli);
     }

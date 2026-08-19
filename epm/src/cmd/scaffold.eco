@@ -1,0 +1,267 @@
+/**
+ * What `epm init` writes. One list of files; apply writes it, the listing
+ * reads it, the preview is the module.eco entry.
+ */
+
+namespace epm::scaffold;
+
+use epm::manifest;
+use epm::sys;
+use std::io;
+
+public enum Kind
+{
+    case exe;
+    case lib;
+}
+
+public struct Recipe
+{
+    string $name;
+    string $description;
+    string $license;
+    Kind $kind;
+    bool $tests;
+    bool $readme;
+
+    constructor(
+        string $name,
+        string $description,
+        string $license,
+        Kind $kind,
+        bool $tests,
+        bool $readme
+    )
+    {
+        $this->name = $name;
+        $this->description = $description;
+        $this->license = $license;
+        $this->kind = $kind;
+        $this->tests = $tests;
+        $this->readme = $readme;
+    }
+}
+
+public struct File
+{
+    string $rel;
+    string $text;
+
+    constructor(string $rel, string $text)
+    {
+        $this->rel = $rel;
+        $this->text = $text;
+    }
+}
+
+public function default_recipe(const string& $name) : Recipe
+{
+    return Recipe($name, '', 'MIT', Kind::exe, true, true);
+}
+
+public function kind_named(const string& $word) : Kind?
+{
+    string $low = str::lower($word);
+
+    if ($low == 'exe' || $low == 'e') {
+        return Kind::exe;
+    }
+
+    if ($low == 'lib' || $low == 'l' || $low == 'library') {
+        return Kind::lib;
+    }
+
+    return null;
+}
+
+public function usable_project_name(const string& $name) : bool
+{
+    if ($name->contains('/') || $name->contains('"') || $name->contains("'")) {
+        return false;
+    }
+
+    if ($name->contains("\n") || $name->contains("\r")) {
+        return false;
+    }
+
+    return manifest::usable_name($name);
+}
+
+public function attribute_text_ok(const string& $text) : bool
+{
+    if ($text->contains('"') || $text->contains("\n") || $text->contains("\r")) {
+        return false;
+    }
+
+    return true;
+}
+
+public function manifest_text(const Recipe& $recipe) : string
+{
+    string $out = "#[module: \"{$recipe->name}\"]\n";
+    $out->append("#[version: \"0.1.0\"]\n");
+
+    if (!$recipe->license->empty()) {
+        $out->append("#[epm::license: \"{$recipe->license}\"]\n");
+    }
+
+    if (!$recipe->description->empty()) {
+        $out->append("#[epm::description: \"{$recipe->description}\"]\n");
+    }
+
+    $out->append("\n#[sources: \"src/*.eco\"]\n");
+
+    if ($recipe->kind == Kind::exe) {
+        $out->append(
+            "\n#[target: exe { name: \"{$recipe->name}\", entry: \"src/main.eco\" }]\n"
+        );
+    }
+
+    if ($recipe->tests) {
+        $out->append("\n#[target: test] {\n");
+        $out->append("    #[sources: \"tests/*.eco\"]\n");
+        $out->append("}\n");
+    }
+
+    return $out;
+}
+
+public function files(const Recipe& $recipe) : array<File>
+{
+    array<File> $out = array<File>();
+    $out[] = File('module.eco', manifest_text($recipe));
+    $out[] = File(source_rel($recipe), source_text($recipe));
+
+    if ($recipe->tests) {
+        $out[] = File('tests/hello.eco', test_text($recipe));
+    }
+
+    if ($recipe->readme) {
+        $out[] = File('README.md', readme_text($recipe));
+    }
+
+    $out[] = File('.gitignore', "ecobuild/\nvendor/\n");
+    return $out;
+}
+
+public function apply(const Recipe& $recipe, const string& $parent) : result<string, string>
+{
+    if (!usable_project_name($recipe->name)) {
+        return .error("'{$recipe->name}' is not a usable module name");
+    }
+
+    if (!attribute_text_ok($recipe->description)) {
+        return .error("a description cannot contain a quote or a newline");
+    }
+
+    if (!attribute_text_ok($recipe->license)) {
+        return .error("a license cannot contain a quote or a newline");
+    }
+
+    string $dir = sys::join($parent, $recipe->name);
+
+    if (sys::exists($dir)) {
+        if (sys::is_dir($dir) && sys::is_file(sys::join($dir, 'module.eco'))) {
+            return .error("'{$recipe->name}' already has a module.eco");
+        }
+
+        return .error("'{$recipe->name}' already exists");
+    }
+
+    if (!sys::mkdir_p($dir)) {
+        return .error("cannot create {$dir}");
+    }
+
+    if (!write_files(files($recipe), $dir)) {
+        sys::remove_all($dir);
+        return .error("cannot write {$dir}");
+    }
+
+    return .ok($dir);
+}
+
+function source_rel(const Recipe& $recipe) : string
+{
+    if ($recipe->kind == Kind::exe) {
+        return 'src/main.eco';
+    }
+
+    return 'src/lib.eco';
+}
+
+function source_text(const Recipe& $recipe) : string
+{
+    if ($recipe->kind == Kind::exe) {
+        return "echo \"Hello, {$recipe->name}!\";\n";
+    }
+
+    string $out = "public function hello() : string\n";
+    $out->append("{\n");
+    $out->append("    return \"Hello, {$recipe->name}!\";\n");
+    $out->append("}\n");
+    return $out;
+}
+
+function test_text(const Recipe& $recipe) : string
+{
+    if ($recipe->kind == Kind::exe) {
+        return "test hello\n{\n    assert(1 + 1 == 2);\n}\n";
+    }
+
+    string $out = "test hello_says_hello\n";
+    $out->append("{\n");
+    $out->append("    assert(hello() == \"Hello, {$recipe->name}!\");\n");
+    $out->append("}\n");
+    return $out;
+}
+
+function readme_text(const Recipe& $recipe) : string
+{
+    string $out = "# {$recipe->name}\n";
+
+    if (!$recipe->description->empty()) {
+        $out->append("\n{$recipe->description}\n");
+    }
+
+    $out->append("\n```bash\n");
+
+    if ($recipe->kind == Kind::exe) {
+        $out->append("echoc run\n");
+    }
+
+    $out->append("echoc build\n");
+
+    if ($recipe->tests) {
+        $out->append("echoc test\n");
+    }
+
+    $out->append("```\n");
+    return $out;
+}
+
+function write_files(const array<File>& $tree, const string& $dir) : bool
+{
+    usize $i = 0;
+
+    while ($i < $tree->count()) {
+        string $path = sys::join($dir, $tree[$i]->rel);
+
+        if (!sys::mkdir_p(sys::dirname($path))) {
+            return false;
+        }
+
+        if (!write_text($path, $tree[$i]->text)) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
+}
+
+function write_text(const string& $path, const string& $text) : bool
+{
+    result<usize, io::ioerror> $wrote = io::writefile($path, $text);
+    return !$wrote->failed();
+}

@@ -1,8 +1,9 @@
 /*
  * epm - Echo's package manager.
  *
- * Resolves, fetches and vendors. It never compiles anything. The only byte it
- * writes into a module.eco is the one #[requires:] line `epm add` was asked for.
+ * Resolves, fetches and vendors. It never compiles anything. It writes a
+ * module.eco only as a whole new file (`epm init`) or as the one
+ * #[requires:] / #[depends:] line `epm add` was asked for.
  *
  * Bootstrap is a path, so epm never needs itself.
  */

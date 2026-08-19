@@ -1,0 +1,199 @@
+use epm::cli;
+use epm::cmd;
+use epm::manifest;
+use epm::scaffold;
+use epm::scratch;
+use epm::sys;
+
+function parse_init(const array<string>& $words) : cli::CommandLine
+{
+    array<string> $argv = array<string>();
+    $argv[] = 'epm';
+    usize $i = 0;
+
+    while ($i < $words->count()) {
+        $argv[] = $words[$i];
+        $i = $i + 1;
+    }
+
+    cli::CommandLine $cli = cli::CommandLine();
+    bool $ok = guard cli::parse_command_line($argv, $cli);
+    return $cli;
+}
+
+function assert_wrote(const string& $dir, const scaffold::Recipe& $recipe) : void
+{
+    array<scaffold::File> $tree = scaffold::files($recipe);
+    usize $i = 0;
+
+    while ($i < $tree->count()) {
+        assert(scratch::read(sys::join($dir, $tree[$i]->rel)) == $tree[$i]->text);
+        $i = $i + 1;
+    }
+}
+
+test usable_project_name_is_a_single_component
+{
+    assert(scaffold::usable_project_name('greet'));
+    assert(scaffold::usable_project_name('lib-json'));
+    assert(!scaffold::usable_project_name(''));
+    assert(!scaffold::usable_project_name('.'));
+    assert(!scaffold::usable_project_name('..'));
+    assert(!scaffold::usable_project_name('foo/bar'));
+    assert(!scaffold::usable_project_name('../x'));
+    assert(!scaffold::usable_project_name('has"quote'));
+}
+
+test kind_named_reads_exe_and_lib
+{
+    scaffold::Kind $exe = guard scaffold::kind_named('exe');
+    assert($exe == scaffold::Kind::exe);
+    scaffold::Kind $e = guard scaffold::kind_named('e');
+    assert($e == scaffold::Kind::exe);
+    scaffold::Kind $lib = guard scaffold::kind_named('LIB');
+    assert($lib == scaffold::Kind::lib);
+    scaffold::Kind $library = guard scaffold::kind_named('library');
+    assert($library == scaffold::Kind::lib);
+    assert(scaffold::kind_named('nope') == null);
+}
+
+test apply_writes_an_exe_with_tests_and_readme
+{
+    string $root = scratch::dir('init-exe');
+    scaffold::Recipe $recipe = scaffold::default_recipe('greet');
+    string $dir = guard scaffold::apply($recipe, $root);
+    assert($dir == sys::join($root, 'greet'));
+    assert_wrote($dir, $recipe);
+
+    string $manifest = scratch::read(sys::join($dir, 'module.eco'));
+    assert($manifest == scaffold::manifest_text($recipe));
+    assert($manifest->contains('#[module: "greet"]'));
+    assert($manifest->contains('#[version: "0.1.0"]'));
+    assert($manifest->contains('#[epm::license: "MIT"]'));
+    assert(!$manifest->contains('#[epm::description:'));
+    assert($manifest->contains('#[target: exe { name: "greet", entry: "src/main.eco" }]'));
+    assert($manifest->contains('#[target: test]'));
+
+    manifest::Manifest $loaded = guard manifest::load(sys::join($dir, 'module.eco'));
+    assert($loaded->name == 'greet');
+    assert($loaded->version == '0.1.0');
+
+    scratch::gone($root);
+}
+
+test apply_writes_a_library
+{
+    string $root = scratch::dir('init-lib');
+    scaffold::Recipe $recipe = scaffold::Recipe(
+        'libgreet',
+        '',
+        'MIT',
+        scaffold::Kind::lib,
+        true,
+        false
+    );
+    string $dir = guard scaffold::apply($recipe, $root);
+    assert_wrote($dir, $recipe);
+
+    string $manifest = scratch::read(sys::join($dir, 'module.eco'));
+    assert(!$manifest->contains('#[target: exe'));
+    assert($manifest->contains('#[target: test]'));
+    assert(sys::is_file(sys::join($dir, 'src/lib.eco')));
+    assert(!sys::is_file(sys::join($dir, 'src/main.eco')));
+    assert(!sys::is_file(sys::join($dir, 'README.md')));
+    assert(scratch::read(sys::join($dir, 'src/lib.eco'))->contains('public function hello()'));
+    assert(scratch::read(sys::join($dir, 'tests/hello.eco'))->contains('hello_says_hello'));
+
+    scratch::gone($root);
+}
+
+test apply_omits_empty_description_and_license
+{
+    string $root = scratch::dir('init-omit');
+    scaffold::Recipe $recipe = scaffold::Recipe(
+        'plain',
+        '',
+        '',
+        scaffold::Kind::exe,
+        false,
+        false
+    );
+    string $dir = guard scaffold::apply($recipe, $root);
+    assert_wrote($dir, $recipe);
+
+    string $manifest = scratch::read(sys::join($dir, 'module.eco'));
+    assert(!$manifest->contains('#[epm::license:'));
+    assert(!$manifest->contains('#[epm::description:'));
+    assert(!$manifest->contains('#[target: test]'));
+    assert(!sys::is_file(sys::join($dir, 'tests/hello.eco')));
+
+    scratch::gone($root);
+}
+
+test apply_refuses_an_existing_module
+{
+    string $root = scratch::dir('init-exists-mod');
+    scratch::file($root, 'greet/module.eco', "#[module: \"greet\"]\n");
+    string $before = scratch::read(sys::join($root, 'greet/module.eco'));
+
+    result<string, string> $got = scaffold::apply(scaffold::default_recipe('greet'), $root);
+    assert($got->failed());
+    assert($got->failure() == "'greet' already has a module.eco");
+    assert(scratch::read(sys::join($root, 'greet/module.eco')) == $before);
+
+    scratch::gone($root);
+}
+
+test apply_refuses_an_existing_directory
+{
+    string $root = scratch::dir('init-exists-dir');
+    assert(sys::mkdir_p(sys::join($root, 'greet')));
+
+    result<string, string> $got = scaffold::apply(scaffold::default_recipe('greet'), $root);
+    assert($got->failed());
+    assert($got->failure() == "'greet' already exists");
+
+    scratch::gone($root);
+}
+
+test apply_refuses_a_bad_name
+{
+    string $root = scratch::dir('init-bad-name');
+
+    result<string, string> $slash = scaffold::apply(scaffold::default_recipe('foo/bar'), $root);
+    assert($slash->failed());
+    assert($slash->failure()->contains('not a usable module name'));
+
+    result<string, string> $up = scaffold::apply(scaffold::default_recipe('../x'), $root);
+    assert($up->failed());
+    assert(!sys::exists(sys::join($root, 'foo')));
+
+    scratch::gone($root);
+}
+
+test init_yes_writes_the_defaults
+{
+    string $root = scratch::dir('init-yes');
+    array<string> $words = array<string>();
+    $words[] = 'init';
+    $words[] = 'greet';
+    $words[] = '--yes';
+    cli::CommandLine $cli = parse_init($words);
+    assert(cmd::init_at($cli, $root) == 0);
+    assert_wrote(sys::join($root, 'greet'), scaffold::default_recipe('greet'));
+
+    scratch::gone($root);
+}
+
+test init_yes_needs_a_name
+{
+    string $root = scratch::dir('init-yes-noname');
+    array<string> $words = array<string>();
+    $words[] = 'init';
+    $words[] = '--yes';
+    cli::CommandLine $cli = parse_init($words);
+    assert(cmd::init_at($cli, $root) == 1);
+    assert(!sys::exists(sys::join($root, 'greet')));
+
+    scratch::gone($root);
+}

@@ -5,6 +5,8 @@
 
 namespace epm::fetch;
 
+use epm::cli;
+
 public struct RemoteTag
 {
     string $name;
@@ -73,7 +75,7 @@ public function remote_tags_from(const string& $body) : result<array<RemoteTag>,
 function fetch_body(const string& $url, const string& $accept) : result<string, string>
 {
     curl::Request $req = .get($url);
-    $req->userAgent('epm/0.1');
+    $req->userAgent("epm/{cli::VERSION}");
     $req->timeout(30000);
 
     if (!$accept->empty()) {

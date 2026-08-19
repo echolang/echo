@@ -141,6 +141,7 @@ jobs:
       BUILD_TYPE: Release
       USE_CLANG: 1
       BIN_NAME: echo-linux-x86_64
+      EPM_BIN_NAME: epm-linux-x86_64
 
     steps:
       - name: Checkout repository
@@ -244,14 +245,18 @@ jobs:
         run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
 
       - name: Build epm with the release compiler
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl"
+        env:
+          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl" "${VERSION}"
 
       - name: Smoke test epm
+        env:
+          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
         run: |
           set -euo pipefail
           reported=$("$RUNNER_TEMP/epm" --version)
-          if [ "$reported" != "0.1.0" ]; then
-            echo "epm reports '$reported', expected '0.1.0'." >&2
+          if [ "$reported" != "$EXPECTED" ]; then
+            echo "epm reports '$reported', expected '$EXPECTED'." >&2
             exit 1
           fi
 
@@ -263,17 +268,26 @@ jobs:
           VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
         run: |
           set -euo pipefail
-          mkdir -p stage
+          mkdir -p stage epm-stage
           cp build-release/echoc stage/
           cp "$RUNNER_TEMP/epm" stage/
+          cp "$RUNNER_TEMP/epm" epm-stage/
           cp README.md LICENSE stage/
+          cp LICENSE epm-stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
+          tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
+
+      - name: Upload epm archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{env.EPM_BIN_NAME}}
+          path: ${{github.workspace}}/${{env.EPM_BIN_NAME}}.tar.gz
 
   build_release_macos_arm64:
     runs-on: macos-15
@@ -282,6 +296,7 @@ jobs:
       BUILD_TYPE: Release
       USE_CLANG: 1
       BIN_NAME: echo-macos-arm64
+      EPM_BIN_NAME: epm-macos-arm64
 
     steps:
       - name: Checkout repository
@@ -359,14 +374,18 @@ jobs:
         run: ./tools/build_static_curl.sh "$RUNNER_TEMP/static-curl"
 
       - name: Build epm with the release compiler
-        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl"
+        env:
+          VERSION: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
+        run: ./tools/build_release_epm.sh build-release/echoc "$RUNNER_TEMP/epm" "$RUNNER_TEMP/static-curl" "${VERSION}"
 
       - name: Smoke test epm
+        env:
+          EXPECTED: ${{needs.resolve_version.outputs.version}}${{needs.resolve_version.outputs.suffix}}
         run: |
           set -euo pipefail
           reported=$("$RUNNER_TEMP/epm" --version)
-          if [ "$reported" != "0.1.0" ]; then
-            echo "epm reports '$reported', expected '0.1.0'." >&2
+          if [ "$reported" != "$EXPECTED" ]; then
+            echo "epm reports '$reported', expected '$EXPECTED'." >&2
             exit 1
           fi
 
@@ -376,17 +395,26 @@ jobs:
       - name: Package release archive
         run: |
           set -euo pipefail
-          mkdir -p stage
+          mkdir -p stage epm-stage
           cp build-release/echoc stage/
           cp "$RUNNER_TEMP/epm" stage/
+          cp "$RUNNER_TEMP/epm" epm-stage/
           cp README.md LICENSE stage/
+          cp LICENSE epm-stage/
           tar -czf "${{env.BIN_NAME}}.tar.gz" -C stage .
+          tar -czf "${{env.EPM_BIN_NAME}}.tar.gz" -C epm-stage .
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: ${{env.BIN_NAME}}
           path: ${{github.workspace}}/${{env.BIN_NAME}}.tar.gz
+
+      - name: Upload epm archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{env.EPM_BIN_NAME}}
+          path: ${{github.workspace}}/${{env.EPM_BIN_NAME}}.tar.gz
 
   # every push to master is a patch release. `gh release create` creates the tag itself, so nothing
   # here pushes a ref by hand and nothing commits back onto the branch
@@ -426,4 +454,6 @@ jobs:
             --title "echo ${TAG}" \
             --generate-notes \
             artifacts/echo-linux-x86_64/echo-linux-x86_64.tar.gz \
-            artifacts/echo-macos-arm64/echo-macos-arm64.tar.gz
+            artifacts/echo-macos-arm64/echo-macos-arm64.tar.gz \
+            artifacts/epm-linux-x86_64/epm-linux-x86_64.tar.gz \
+            artifacts/epm-macos-arm64/epm-macos-arm64.tar.gz

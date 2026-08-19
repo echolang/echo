@@ -22,6 +22,7 @@ public struct CommandLine
     bool $stated_version;
     bool $stated_color;
     string $color;
+    bool $stated_yes;
     bool $stated_module;
     string $module;
     bool $stated_git;
@@ -44,6 +45,7 @@ public struct CommandLine
         $this->stated_version = false;
         $this->stated_color = false;
         $this->color = 'auto';
+        $this->stated_yes = false;
         $this->stated_module = false;
         $this->module = '';
         $this->stated_git = false;
@@ -61,6 +63,7 @@ public function stated(const CommandLine& $cli, Opt $id) : bool
         Opt::help => $cli->stated_help,
         Opt::version => $cli->stated_version,
         Opt::color => $cli->stated_color,
+        Opt::yes => $cli->stated_yes,
         Opt::module => $cli->stated_module,
         Opt::git => $cli->stated_git,
         Opt::path => $cli->stated_path,
@@ -78,6 +81,7 @@ public function value_of(const CommandLine& $cli, Opt $id) : string
         Opt::range => $cli->range,
         Opt::help => '',
         Opt::version => '',
+        Opt::yes => '',
     };
 }
 
@@ -371,6 +375,7 @@ private function take_flag(CommandLine& $out, Opt $id) : void
         Opt::help => take_help($out),
         Opt::version => take_version($out),
         Opt::color => 0,
+        Opt::yes => take_yes($out),
         Opt::module => 0,
         Opt::git => 0,
         Opt::path => 0,
@@ -390,6 +395,12 @@ private function take_version(CommandLine& $out) : int32
     return 0;
 }
 
+private function take_yes(CommandLine& $out) : int32
+{
+    $out->stated_yes = true;
+    return 0;
+}
+
 private function take_value(CommandLine& $out, Opt $id, const string& $word) : void
 {
     int32 $ignored = match ($id) {
@@ -400,6 +411,7 @@ private function take_value(CommandLine& $out, Opt $id, const string& $word) : v
         Opt::range => take_range($out, $word),
         Opt::help => 0,
         Opt::version => 0,
+        Opt::yes => 0,
     };
 }
 

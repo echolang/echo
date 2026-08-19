@@ -1,8 +1,8 @@
 # epm
 
 A package manager for Echo. It resolves, fetches and vendors. It never compiles
-anything, and the only byte it writes into a `module.eco` is the one
-`#[requires:]` line `epm add` was asked for.
+anything. It writes a `module.eco` only as a whole new file (`epm init`) or as
+the one `#[requires:]` line `epm add` was asked for.
 
 A released `epm` arrives next to `echoc` from the install one-liner. This tree
 is the bootstrap: path-depends on `../../echolibs/libjson` and
@@ -22,6 +22,8 @@ export ECHOC=$PWD/../build/echoc
 ```
 epm --help
 epm --version
+epm init greet
+epm init greet --yes
 epm install
 epm add --path ../../echolibs/libjson
 epm add --path ../../echolibs/libcurl
@@ -36,8 +38,14 @@ epm tree
 `epm --help` and `epm <command> --help` are the page; `epm add --help git`
 is one option in full. Refusals go to stderr with the same `error:` shape
 echoc uses. `-m, --module` names the project; omitted, epm walks up from
-the working directory. `--version` is epm's own version. The package range
+the working directory. `init` does not take `-m`: it creates a project,
+it does not operate on one. `--version` is epm's own version. The package range
 is `--range`.
+
+`init` walks a short wizard and writes a new module into a new directory
+named after it. Enter takes a default. `epm init greet --yes` skips the
+questions and writes those defaults. A `module.eco` already there is a
+refusal.
 
 `install` applies `epm.lock.json` to `vendor/`. `update` is what re-resolves
 within the declared ranges and rewrites the lock. A first `install` with no

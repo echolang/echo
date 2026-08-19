@@ -1,0 +1,9 @@
+/**
+ * The version a released epm prints. tools/build_release_epm.sh overwrites
+ * this file with the same number echoc was stamped with. The committed
+ * default is what a local echoc test / echoc build reports.
+ */
+
+namespace epm::cli;
+
+public const VERSION = '0.1.0';

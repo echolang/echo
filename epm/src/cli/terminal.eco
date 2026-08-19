@@ -19,6 +19,7 @@ public enum TerminalStream
 {
     case stdout;
     case stderr;
+    case stdin;
 }
 
 public struct TerminalCapabilities
@@ -51,6 +52,9 @@ public function resolve_terminal(
 
     if ($stream == TerminalStream::stdout) {
         $fd = 1;
+    }
+    else if ($stream == TerminalStream::stdin) {
+        $fd = 0;
     }
 
     bool $tty = sys::epm_isatty($fd) == 1;
@@ -113,6 +117,7 @@ public const SGR_BOLD = "\x1b[1m";
 public const SGR_ERROR = "\x1b[1;31m";
 public const SGR_INFO = "\x1b[1;34m";
 public const SGR_SECONDARY = "\x1b[1;36m";
+public const SGR_SUCCESS = "\x1b[1;32m";
 
 private function environment_allows_color(bool $tty) : bool
 {

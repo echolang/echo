@@ -217,6 +217,7 @@ test overview_page_lists_commands
     cli::CommandLine $cli = parse_ok(words1('--help'));
     string $page = cli::render_help($cli, cli::plain_terminal());
     assert($page->contains('Usage'));
+    assert($page->contains('init'));
     assert($page->contains('install'));
     assert($page->contains('add'));
     assert($page->contains('remove'));
@@ -248,6 +249,61 @@ test refusal_shape
     assert($text->contains("Run 'epm --help'"));
 }
 
+test init_parses
+{
+    cli::CommandLine $cli = parse_ok(words1('init'));
+    assert($cli->subcommand == cli::Subcommand::init);
+    assert(!$cli->stated_yes);
+}
+
+test init_yes_sets_the_flag
+{
+    cli::CommandLine $cli = parse_ok(words3('init', 'greet', '--yes'));
+    assert($cli->stated_yes);
+    assert($cli->positionals[0] == 'greet');
+
+    $cli = parse_ok(words3('init', '-y', 'greet'));
+    assert($cli->stated_yes);
+    assert($cli->positionals[0] == 'greet');
+}
+
+test init_takes_at_most_one_name
+{
+    string $err = parse_err(words3('init', 'a', 'b'));
+    assert($err == "'init' takes at most one package name.");
+}
+
+test init_does_not_take_module
+{
+    string $err = parse_err(words3('init', '-m', 'app'));
+    assert($err == "'init' does not take '-m, --module'.");
+}
+
+test install_does_not_take_yes
+{
+    string $err = parse_err(words2('install', '--yes'));
+    assert($err == "'install' does not take '-y, --yes'.");
+}
+
+test init_help_describes_the_wizard
+{
+    cli::CommandLine $cli = parse_ok(words2('init', '--help'));
+    string $page = cli::render_help($cli, cli::plain_terminal());
+    assert($page->contains('init'));
+    assert($page->contains('wizard'));
+    assert($page->contains('--yes'));
+    assert($page->contains('[<name>]'));
+}
+
+test init_help_yes_is_that_option
+{
+    cli::CommandLine $cli = parse_ok(words3('init', '--help', 'yes'));
+    string $page = cli::render_help($cli, cli::plain_terminal());
+    assert($page->contains('--yes'));
+    assert($page->contains('epm init greet --yes'));
+    assert($page->contains('Accepted by: init.'));
+}
+
 test coloured_page_minus_escapes_is_the_plain_page
 {
     cli::CommandLine $cli = parse_ok(words1('--help'));
@@ -261,4 +317,14 @@ test coloured_page_minus_escapes_is_the_plain_page
 test version_text
 {
     assert(cli::render_version() == "0.1.0\n");
+}
+
+test accepts_masks_are_the_bits
+{
+    assert(cli::ACCEPTS_EXISTING == (
+        cli::ACCEPTS_INSTALL | cli::ACCEPTS_ADD | cli::ACCEPTS_REMOVE
+        | cli::ACCEPTS_UPDATE | cli::ACCEPTS_VERIFY | cli::ACCEPTS_TREE
+    ));
+    assert(cli::ACCEPTS_ALL == (cli::ACCEPTS_EXISTING | cli::ACCEPTS_INIT));
+    assert((cli::ACCEPTS_EXISTING & cli::ACCEPTS_INIT) == 0);
 }

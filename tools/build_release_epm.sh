@@ -3,7 +3,7 @@
 # compile epm with a just-built echoc, after cloning the two path-depends it
 # bootstraps on.
 #
-#   tools/build_release_epm.sh build-release/echoc /tmp/epm /tmp/static-curl
+#   tools/build_release_epm.sh build-release/echoc /tmp/epm /tmp/static-curl 0.2.2
 #
 # epm/module.eco writes ../../echolibs/{libjson,libcurl} from epm/, so the
 # clones land next to the echo checkout, not inside it. The depends stay
@@ -12,11 +12,13 @@
 # the third argument is the prefix tools/build_static_curl.sh wrote. The
 # compile passes --define static_curl and --link search:<prefix>/lib so
 # the released binary seats libcurl.a rather than the system dylib.
+# the fourth is the version echoc was stamped with; it is written into
+# epm/src/cli/version.eco before the compile.
 
 set -euo pipefail
 
-if [ $# -ne 3 ]; then
-    echo "usage: $0 <echoc> <out-binary> <static-curl-prefix>" >&2
+if [ $# -ne 4 ]; then
+    echo "usage: $0 <echoc> <out-binary> <static-curl-prefix> <version>" >&2
     exit 2
 fi
 
@@ -43,6 +45,12 @@ fi
 if [ ! -f "${curl_prefix}/lib/libssl.a" ] || [ ! -f "${curl_prefix}/lib/libcrypto.a" ]; then
     echo "build_release_epm: no libssl.a / libcrypto.a under ${curl_prefix}/lib" >&2
     echo "  a lib64 install is the usual cause - OpenSSL must be configured --libdir=lib" >&2
+    exit 2
+fi
+
+version="$4"
+if [ -z "${version}" ]; then
+    echo "build_release_epm: version is empty" >&2
     exit 2
 fi
 
@@ -106,6 +114,20 @@ PY
 fi
 
 mkdir -p "$(dirname "${out}")"
+
+# refuse quotes so a bad version cannot escape the Echo string
+case "${version}" in
+    *\'*|*\")
+        echo "build_release_epm: version '${version}' contains a quote" >&2
+        exit 2
+        ;;
+esac
+
+cat > "${epm}/src/cli/version.eco" <<EOF
+namespace epm::cli;
+
+public const VERSION = '${version}';
+EOF
 
 # ECHOC so anything the compile shells out to sees this compiler, not PATH
 ECHOC="${echoc}" "${echoc}" build -m "${epm}" --target epm -o "${out}" \
