@@ -276,7 +276,8 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     std::string imported_name;
     const bool may_import = requested_namespace == nullptr
         && !lookup.shorthand_dot.has_value()
-        && !lookup.static_owner.has_complex_type();
+        && lookup.static_owner.is_unknown()
+        && lookup.constructed_type.is_unknown();
     const bool imported = may_import && AST::apply_item_import(
         AST::file_of(payload.context),
         payload.collector,
@@ -349,7 +350,10 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
     if (lookup.shorthand_dot.has_value()) {
         funcall.token_shorthand_dot.emplace(lookup.shorthand_dot.value());
     }
-    else if (lookup.static_owner.has_complex_type()) {
+    else if (!lookup.constructed_type.is_unknown()) {
+        funcall.constructed_type = lookup.constructed_type;
+    }
+    else if (!lookup.static_owner.is_unknown()) {
         funcall.static_owner = lookup.static_owner;
     }
     else if (imported) {
@@ -366,6 +370,16 @@ AST::FunctionCallExprNode *Parser::parse_funccall(
         // the call is kept, pending, for the destination to name an owner for - and if none ever
         // does, the monomorphizer's finalizing sweep is what says so, having run out of rounds
         if (lookup.shorthand_dot.has_value()) {
+            return &funcall;
+        }
+
+        // a type-parameter owner is a not-yet: `T::from(...)` and `T(...)` sit in a template body
+        // whose clones carry the concrete type. reporting here is one round too early, the same
+        // standing an undetermined receiver already has. `is_unknown()` is the "this is not that
+        // kind of call" test - unknown is undetermined, and would swallow every ordinary miss
+        if ((!lookup.static_owner.is_unknown() && AST::is_undetermined_type(lookup.static_owner))
+            || (!lookup.constructed_type.is_unknown()
+                && AST::is_undetermined_type(lookup.constructed_type))) {
             return &funcall;
         }
 

@@ -1,0 +1,16 @@
+// type_id is a map key: hash::of hashes the identity address, == compares it
+
+map<type_id, int32> $m = map<type_id, int32>();
+
+$m[type_id<int32>()] = 1;
+$m[type_id<int64>()] = 2;
+
+echo $m->count();
+echo $m->get(type_id<int32>());
+echo $m->get(type_id<int64>());
+echo $m->has(type_id<int32>());
+echo $m->has(type_id<float64>());
+
+$m[type_id<int32>()] = 9;
+echo $m->get(type_id<int32>());
+echo $m->count();

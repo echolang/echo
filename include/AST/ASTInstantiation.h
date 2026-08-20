@@ -46,9 +46,9 @@ namespace AST
         // the call passes a different number of arguments than the template takes
         t_argument_count,
 
-        // `foo<int32>(...)` named a different number of type arguments than the template has *own*
-        // type parameters. a method's inherited prefix cannot be spelled at a call site, so it is
-        // not counted here
+        // `foo<int32, float64>(...)` named *more* type arguments than the template has *own*
+        // type parameters. fewer is a prefix: `make<Handle>(7)` binds T and infers A. a method's
+        // inherited prefix cannot be spelled at a call site, so it is not counted here
         t_type_argument_count,
 
         // `unify_type` could not reconcile argument `argument` with its parameter, so no
@@ -127,15 +127,21 @@ namespace AST
     // FuncDeclParser shares the owner's declarations rather than copying them, so this binds the same
     // TypeParamDecl pointers the receiver path would have
     //
-    // empty for anything that is not a static, and empty while `owner` still mentions a type parameter:
-    // a static call written inside an un-instantiated template has to stay a not-yet, not a decision
+    // empty while `owner` still mentions a type parameter: a static call written inside an
+    // un-instantiated template has to stay a not-yet, not a decision
+    //
+    // constructors use the same seed. they share the struct's type parameters and have no receiver,
+    // so `T(...)` after substitution binds those from the constructed type - `box<YetAnotherOne>`
+    // names T, the argument does not. empty for anything that is neither a static nor a constructor
     TypeSubstitution static_owner_bindings(const FunctionDeclNode *tmpl, const ValueType &owner);
 
     // the question asked with argument types alone, plus whatever type arguments the call site
     // spelled out. `explicit_type_args` empty means "infer everything"
     //
-    // `static_owner` is the type a static call named - `unknown` for every other shape of call, which
-    // is what makes the seed above a no-op for them
+    // `static_owner` is the type a static call named, or the type a `T(...)` constructs - `unknown`
+    // for every other shape of call, which is what makes the seed above a no-op for them.
+    // constructors read `<...>` as the *type's* arguments (the inherited prefix), not as their own:
+    // `Box<int32>(5)` names Box
     //
     // **`argument_defers` says which arguments have no opinion about the instance's name.** an untyped
     // number literal is one: its type is a default nobody chose, and letting it bind a parameter that

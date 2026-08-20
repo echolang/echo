@@ -107,6 +107,15 @@ namespace AST
         // by property name, the way the string layout is resolved. the hook itself is a compiler
         // global, not a field
         t_crash_info,
+
+        // `struct type_id` - a copyable identity, the address of a type's `linkonce_odr` global.
+        // bound so the builtin that mints one can find `$desc` by name rather than assuming
+        // property 0, the way crash_info finds its fields
+        t_type_id,
+
+        // `struct erased` - owning erasure of a class handle. bound so from/assume/retain/release
+        // find `$object` and `$release` by name
+        t_erased,
     };
 
     // resolves a core-type name to its kind, or nullopt when the name is not one. the single place that
@@ -149,6 +158,11 @@ namespace AST
         // a `--no-stdlib` program genuinely has no spelling to quote, and the tag is the only thing
         // true about it in that case
         std::string spelling(CoreTypeKind kind) const;
+
+        // the named property of a bound core type, or null when the kind is unbound or the
+        // declaration has no such property. codegen throws rather than assuming slot 0;
+        // resolve_core_string_layout refuses
+        const ComplexType::Property *property(CoreTypeKind kind, const char *name) const;
 
         ValueType string_type() const {
             return type(CoreTypeKind::t_string);

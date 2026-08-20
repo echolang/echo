@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] CannotConstructType  construct_primitive_through_type_param.eco:6:12
+
+  The type 'int32' cannot be constructed
+
+  5 | {
+  6 |     return T();
+    :            ^
+  7 | }
+
+  help: only a struct or a class has constructors. T(...) names those after T is bound - a primitive, an interface, or a type parameter that never became one of those has none
+
+1 error, nothing was compiled.

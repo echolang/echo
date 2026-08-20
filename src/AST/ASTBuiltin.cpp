@@ -13,6 +13,11 @@ namespace
             { "align_of", AST::BuiltinKind::t_align_of },
             { "is_trivially_copyable", AST::BuiltinKind::t_is_trivially_copyable },
             { "needs_destruction", AST::BuiltinKind::t_needs_destruction },
+            { "type_id", AST::BuiltinKind::t_type_id },
+            { "erased_from", AST::BuiltinKind::t_erased_from },
+            { "erased_retain", AST::BuiltinKind::t_erased_retain },
+            { "erased_release", AST::BuiltinKind::t_erased_release },
+            { "assume", AST::BuiltinKind::t_assume },
             { "take", AST::BuiltinKind::t_take },
             { "init", AST::BuiltinKind::t_init },
             { "die", AST::BuiltinKind::t_die },
@@ -71,6 +76,13 @@ AST::BuiltinFoldability AST::builtin_foldability(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
             return AST::BuiltinFoldability::t_needs_layout;
 
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
+            return AST::BuiltinFoldability::t_not_a_query;
+
         // everything else does something rather than answering something. `take` moves a value out of
         // a place and `init` moves one in, `ref_count` and `weak_count` read a word of a live heap block,
         // `dprint` prints, the raw-memory trio allocates, `live_allocations` reads a counter the program
@@ -126,6 +138,11 @@ bool AST::builtin_never_returns(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
         case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:
@@ -177,6 +194,11 @@ bool AST::builtin_owns_raw_storage(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
         case AST::BuiltinKind::t_alloc_bytes:
         case AST::BuiltinKind::t_realloc_bytes:
         case AST::BuiltinKind::t_free_bytes:
@@ -221,6 +243,11 @@ std::optional<size_t> AST::builtin_message_index(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
         case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:
@@ -269,6 +296,11 @@ bool AST::builtin_message_must_be_literal(AST::BuiltinKind kind)
         case AST::BuiltinKind::t_align_of:
         case AST::BuiltinKind::t_is_trivially_copyable:
         case AST::BuiltinKind::t_needs_destruction:
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
         case AST::BuiltinKind::t_take:
         case AST::BuiltinKind::t_init:
         case AST::BuiltinKind::t_ref_count:

@@ -15,6 +15,7 @@
 #include "AST/ASTAtomicity.h"
 #include "AST/ASTBundle.h"
 #include "AST/ASTConformance.h"
+#include "AST/ASTCoreTypes.h"
 #include "AST/ASTFunctionEmission.h"
 #include "AST/ASTMangler.h"
 #include "AST/ASTNullability.h"
@@ -611,6 +612,67 @@ llvm::GlobalVariable *TypeLowering::get_or_create_interface_identity(
         interface.mangled_token() + ".itype",
         [&] { return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0); },
         cmp_unit);
+}
+
+llvm::GlobalVariable *TypeLowering::get_or_create_type_identity(
+    const AST::ValueType &type,
+    const Compiler::LLVM::CmpUnit &cmp_unit
+)
+{
+    // identity of the value type after stripping `const` and the nullability *flag*. neither is a
+    // different type at runtime: `type_id<const Foo>()` is `type_id<Foo>()`, and a class's
+    // `Handle?` shares the class typeinfo with `Handle`. a pointer *level* is a different type
+    // (`int32&` is not `int32`). a tagged `T?` is a different interned layout and is left alone -
+    // unwrapping it here would make `type_id<int32?>()` collide with `type_id<int32>()`
+    AST::ValueType subject = AST::ValueType::make_mutable(type);
+
+    if (subject.is_nullable() && !subject.is_wrapped_optional()) {
+        subject = AST::ValueType::make_non_nullable(subject);
+    }
+
+    if (subject.is_class() && subject.get_complex_type() != nullptr) {
+        return get_or_create_class_layout(subject.get_complex_type(), cmp_unit).typeinfo;
+    }
+
+    if (subject.is_interface() && subject.get_complex_type() != nullptr) {
+        return get_or_create_interface_identity(*subject.get_complex_type(), cmp_unit);
+    }
+
+    return get_or_create_odr_constant(
+        subject.get_mangled_name() + ".typeid",
+        [&] { return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*_ctx.llvm_context), 0); },
+        cmp_unit);
+}
+
+void TypeLowering::gen_type_id(AST::FunctionCallExprNode &node)
+{
+    const AST::FunctionDeclNode *decl = node.decl;
+
+    if (decl->instantiation_args.size() != 1) {
+        throw _ctx.error(fmt::format(
+            "Builtin 'type_id' expects exactly one type argument, got {} {}",
+            decl->instantiation_args.size(), _ctx.function_context()));
+    }
+
+    llvm::GlobalVariable *identity = get_or_create_type_identity(
+        decl->instantiation_args[0], *_ctx.current_cmp_unit);
+
+    llvm::Type *agg_type = get_llvm_type(decl->get_return_type(), *_ctx.current_cmp_unit);
+
+    const AST::ComplexType::Property *desc = _ctx.core_types().property(
+        AST::CoreTypeKind::t_type_id, "desc");
+
+    if (desc == nullptr) {
+        throw _ctx.error(fmt::format(
+            "'{}' has no property '$desc' {}",
+            _ctx.core_types().spelling(AST::CoreTypeKind::t_type_id),
+            _ctx.function_context()));
+    }
+
+    llvm::Value *agg = llvm::UndefValue::get(agg_type);
+    agg = _ctx.builder->CreateInsertValue(
+        agg, identity, { static_cast<unsigned>(desc->index) }, "type_id");
+    _ctx.push(agg);
 }
 
 llvm::Constant *TypeLowering::build_conformance_table(

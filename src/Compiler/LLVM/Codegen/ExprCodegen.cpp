@@ -21,6 +21,7 @@
 #include "Compiler/LLVM/Codegen/MemoryCodegen.h"
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
+#include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/AbortCodegen.h"
 #include "Compiler/LLVM/Codegen/AtomicCodegen.h"
 #include "Compiler/LLVM/Codegen/IntrinsicResolution.h"
@@ -38,7 +39,6 @@
 #include "AST/VarNode.h"
 #include "AST/AssignNode.h"
 #include "AST/LiteralValueNode.h"
-#include "AST/ASTCoreTypes.h"
 #include "AST/ASTMangler.h"
 #include "AST/ExprNode.h"
 #include "AST/TypeCastNode.h"
@@ -976,6 +976,26 @@ void ExprCodegen::gen_builtin_call(AST::FunctionCallExprNode &node)
             gen_type_query_builtin(node, kind);
             return;
 
+        case AST::BuiltinKind::t_type_id:
+            _ctx.types->gen_type_id(node);
+            return;
+
+        case AST::BuiltinKind::t_erased_from:
+            _ctx.erasure->gen_from(node);
+            return;
+
+        case AST::BuiltinKind::t_erased_retain:
+            _ctx.erasure->gen_retain(node);
+            return;
+
+        case AST::BuiltinKind::t_erased_release:
+            _ctx.erasure->gen_release(node);
+            return;
+
+        case AST::BuiltinKind::t_assume:
+            _ctx.erasure->gen_assume(node);
+            return;
+
         case AST::BuiltinKind::t_take:
             gen_take_builtin(node);
             return;
@@ -1268,6 +1288,11 @@ void ExprCodegen::gen_type_query_builtin(AST::FunctionCallExprNode &node, AST::B
             break;
         }
 
+        case AST::BuiltinKind::t_type_id:
+        case AST::BuiltinKind::t_erased_from:
+        case AST::BuiltinKind::t_erased_retain:
+        case AST::BuiltinKind::t_erased_release:
+        case AST::BuiltinKind::t_assume:
         case AST::BuiltinKind::t_die:
         case AST::BuiltinKind::t_unwrap_abort:
         case AST::BuiltinKind::t_crash_set_hook:

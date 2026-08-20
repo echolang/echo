@@ -1,0 +1,23 @@
+// `type_id<T>()` is a value. same T is the same id; a different T is not. a generic class
+// instantiation is its own type, so Box<int32> and Box<int64> differ
+
+class Handle
+{
+    int32 $n;
+}
+
+class Box<T>
+{
+    T $v;
+}
+
+echo type_id<int32>() == type_id<int32>();
+echo type_id<int32>() == type_id<int64>();
+echo type_id<Handle>() == type_id<Handle>();
+echo type_id<Handle>() == type_id<int32>();
+echo type_id<Box<int32>>() == type_id<Box<int32>>();
+echo type_id<Box<int32>>() == type_id<Box<int64>>();
+echo type_id<int32>() != type_id<int64>();
+echo type_id<Handle>() == type_id<Handle?>();
+echo type_id<const int32>() == type_id<int32>();
+echo type_id<int32&>() == type_id<int32>();

@@ -1,0 +1,7 @@
+struct Point
+{
+    int32 $x;
+}
+
+Point $p = Point(1);
+erased $held = erased::from($p);

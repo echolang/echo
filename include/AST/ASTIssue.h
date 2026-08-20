@@ -217,6 +217,12 @@ namespace AST
         // two messages to look alike enough to see which they got
         MAKE_ISSUE_DEF2(UnknownStaticFunction, IssueSeverity::Error, const std::string, function_name, const std::string, type_name,
             std::vector<IssueNote> notes() const override;);
+        // `T(...)` after substitution named a type that has no constructors - a primitive, an
+        // interface, or a type whose field-wise constructor was suppressed and that wrote none of
+        // its own. its own kind because UnknownFunction would name the type-parameter token (`T`)
+        // rather than the type it became, and the remedy is not "declare a function of that name"
+        MAKE_ISSUE_DEF1(CannotConstructType, IssueSeverity::Error, const std::string, type_name,
+            std::vector<IssueNote> notes() const override;);
         MAKE_ISSUE_DEF1(ArgumentTypeMismatch, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnresolvedTypeParameter, IssueSeverity::Error, const std::string, _message);
         MAKE_ISSUE_DEF1(UnsatisfiedTypeConstraint, IssueSeverity::Error, const std::string, _message);
@@ -270,6 +276,13 @@ namespace AST
         // optimized against, and this is the one place a program can assert that contract over storage
         // the compiler cannot check
         MAKE_ISSUE_DEF1(UnsafePromotion, IssueSeverity::Error, const std::string, borrow_type,
+            std::vector<IssueNote> notes() const override;);
+
+        // `assume<T>` outside `unsafe`. its own kind because the recovery is a promise the type
+        // system cannot check, which is a different question from UnsafePromotion's raw-storage
+        // borrow. the sentence is the diagnostic; the remedy lives in notes() so the collector's
+        // dedup key is the message alone
+        MAKE_ISSUE_DEF1(AssumeRequiresUnsafe, IssueSeverity::Error, const std::string, _message,
             std::vector<IssueNote> notes() const override;);
 
         // top-level code in a file that is no target's entry. its own kind because it is the diagnostic

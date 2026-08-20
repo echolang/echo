@@ -1003,6 +1003,23 @@ void TypeChecker::check_ref_count_argument(FunctionCallExprNode &node)
 // nothing else is refused. a still-generic T returns early exactly as its neighbour above does, because
 // the monomorphizer already reports an uninstantiated call and a second diagnostic on top of it is noise;
 // and every other type has a rendering, which is the whole point of the builtin
+void TypeChecker::check_assume_is_unsafe(FunctionCallExprNode &node)
+{
+    if (!node.decl->is_builtin()
+        || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_assume) {
+        return;
+    }
+
+    if (_unsafe_depth > 0) {
+        return;
+    }
+
+    _collector.collect_issue<Issue::AssumeRequiresUnsafe>(
+        code_ref_for(node.token_function_name),
+        "'assume' recovers a class handle from erasure, which is a promise the type system cannot "
+        "check");
+}
+
 void TypeChecker::check_dprint_argument(FunctionCallExprNode &node)
 {
     if (!node.decl->is_builtin() || builtin_kind_for(node.decl->builtin.value()) != BuiltinKind::t_dprint) {
@@ -1359,6 +1376,7 @@ void TypeChecker::visitFunctionCallExpr(FunctionCallExprNode &node)
     // runs. inside the gate it would never fire and the failure would stay a location-less codegen throw
     if (node.decl != nullptr) {
         check_dprint_argument(node);
+        check_assume_is_unsafe(node);
 
         // outside the gate too, and for a plainer reason than its neighbour's: the question is whether
         // the *builtin* may be called at all, which does not depend on a single argument being resolved

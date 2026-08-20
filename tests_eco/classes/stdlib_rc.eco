@@ -1,0 +1,34 @@
+// stdlib `rc<T>`: a class wrapping any T, so a struct can live behind a class handle and
+// satisfy `T : class`. seat an already-built T
+
+struct Point
+{
+    int32 $x;
+    int32 $y;
+}
+
+struct Meter
+{
+    float64 $n;
+}
+
+rc<int32> $n = rc<int32>(7);
+echo $n->value;
+
+rc<Point> $p = rc<Point>(Point(1, 2));
+echo $p->value->x;
+echo $p->value->y;
+
+rc<Meter> $m = rc<Meter>(Meter(3.14));
+echo $m->value->n;
+
+rc<Point> $q = rc<Point>(Point(9, 8));
+echo $q->value->x;
+
+function take<T : class>(T $v) : int32
+{
+    return 1;
+}
+
+echo take($n);
+echo take($p);

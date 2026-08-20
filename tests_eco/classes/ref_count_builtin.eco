@@ -1,5 +1,5 @@
 // `mem::refs` is the one builtin that is both generic and takes an argument. it is declared in
-// `stdlib/core/rc.eco` rather than here - a second declaration of it would not be a duplicate
+// `stdlib/core/mem.eco` rather than here - a second declaration of it would not be a duplicate
 // signature (two templates' `T`s are distinct declarations) but an ambiguous call at every site
 
 class Handle { int32 $x; }

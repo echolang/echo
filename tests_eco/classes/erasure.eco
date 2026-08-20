@@ -1,0 +1,29 @@
+// erased owns a class handle without an interface. assume is the reverse, and is a promise
+
+class Handle
+{
+    int32 $n;
+}
+
+class Box<T>
+{
+    T $v;
+}
+
+Handle $h = Handle(7);
+erased $held = erased::from($h);
+
+unsafe {
+    Handle $back = assume<Handle>($held);
+    echo $back->n;
+}
+
+Box<int32> $b = Box<int32>(3);
+erased $boxed = erased::from($b);
+
+unsafe {
+    Box<int32> $out = assume<Box<int32>>($boxed);
+    echo $out->v;
+}
+
+echo mem::refs($h);

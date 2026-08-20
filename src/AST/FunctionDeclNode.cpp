@@ -53,7 +53,15 @@ const std::string AST::FunctionDeclNode::signature_description() const
         buffer += namespaced_func_name();
     }
 
-    if (own_type_param_count() > 0) {
+    // a method's `<...>` is its own parameters (`$b->map<U>()`). a constructor's is the *type's*:
+    // `Box<int32>(5)` names Box, so the inherited prefix is what belongs on the name
+    if (is_constructor() && inherited_type_param_count > 0) {
+        buffer += "<";
+        for (size_t i = 0; i < inherited_type_param_count; i++) {
+            buffer += (i > 0 ? ", " : "") + type_parameters[i]->name;
+        }
+        buffer += ">";
+    } else if (own_type_param_count() > 0) {
         buffer += "<";
         for (size_t i = inherited_type_param_count; i < type_parameters.size(); i++) {
             buffer += (i > inherited_type_param_count ? ", " : "") + type_parameters[i]->name;

@@ -25,6 +25,8 @@ namespace
             { "failable", AST::CoreTypeKind::t_failable },
             { "variadic_args", AST::CoreTypeKind::t_variadic_args },
             { "crash_info", AST::CoreTypeKind::t_crash_info },
+            { "type_id", AST::CoreTypeKind::t_type_id },
+            { "erased", AST::CoreTypeKind::t_erased },
         };
 
         return table;
@@ -79,6 +81,20 @@ std::string AST::CoreTypes::spelling(AST::CoreTypeKind kind) const
     }
 
     return "<core>";
+}
+
+const AST::ComplexType::Property *AST::CoreTypes::property(
+    AST::CoreTypeKind kind,
+    const char *name
+) const
+{
+    AST::TypeDeclNode *decl = declaration(kind);
+
+    if (decl == nullptr) {
+        return nullptr;
+    }
+
+    return decl->complex_type().find_property(name);
 }
 
 std::optional<AST::CoreStringLayout> AST::resolve_core_string_layout(const AST::CoreTypes &types, std::string &out_error)

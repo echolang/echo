@@ -3,6 +3,7 @@
 #include <AST/ASTInstantiation.h>
 #include <AST/ASTTypeParam.h>
 #include <AST/FunctionDeclNode.h>
+#include <AST/TypeDeclNode.h>
 #include <AST/VarDeclNode.h>
 
 #include <string>
@@ -180,6 +181,29 @@ TEST_CASE("Explicit type arguments win over what the arguments would have inferr
     REQUIRE(too_many.blame == InstantiationBlame::t_type_argument_count);
 }
 
+TEST_CASE("A prefix of explicit type arguments binds and the rest is inferred", "[instantiation][generics]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function make<T, A>(A $arg) : T { return T($arg); }\n"
+        "class Handle { int32 $n; constructor(int32 $n) { $this->n = $n; } }\n");
+
+    auto *tmpl = template_named(*bundle, "make");
+    REQUIRE(tmpl != nullptr);
+
+    auto &m = bundle->modules.find_module("test");
+    auto *handle = EchoTests::type_named(m, "Handle");
+    REQUIRE(handle != nullptr);
+
+    const ValueType handle_ty = handle->value_type();
+    const auto inst = can_instantiate(tmpl, {int32}, {handle_ty});
+
+    REQUIRE(inst.fit == InstantiationFit::t_yes);
+    REQUIRE(inst.decided);
+    REQUIRE(inst.type_arguments.size() == 2);
+    REQUIRE(inst.type_arguments[0] == handle_ty);
+    REQUIRE(inst.type_arguments[1] == int32);
+}
+
 TEST_CASE("A borrow parameter binds through the borrow", "[instantiation][generics][pointer]")
 {
     // the address-of a `T&` parameter needs is inserted after inference, so the argument still reads
@@ -262,4 +286,37 @@ TEST_CASE("The constraint rule judges everything except a bare type parameter", 
 
     // an unconstrained parameter allows anything, and a missing argument is not judged at all
     REQUIRE(first_constraint_violation(params, {int32}) == std::nullopt);
+}
+
+TEST_CASE("A class-kind constraint admits classes and refuses everything else", "[instantiation][generics]")
+{
+    // `T : class` is an open kind predicate, not a closed alias. a generic class instantiation
+    // carries the template's kind, so Box<int32> answers yes the same way a plain Handle does
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Handle { int32 $n; }\n"
+        "struct Point { int32 $x; }\n"
+        "class Box<U> { U $v; }\n"
+        "function only<T: class>(T $v) : T { return $v; }\n"
+        "Handle $h = Handle(1);\n"
+        "Point $p = Point(1);\n"
+        "Box<int32> $b = Box<int32>(1);\n");
+
+    auto *tmpl = template_named(*bundle, "only");
+    REQUIRE(tmpl != nullptr);
+    REQUIRE(tmpl->type_parameters[0]->constraint_spelling == "class");
+    REQUIRE(tmpl->type_parameters[0]->constraint.size() == 1);
+    REQUIRE(tmpl->type_parameters[0]->constraint[0].is_class_kind_constraint());
+
+    const ValueType handle = decl_type(*bundle, "$h");
+    const ValueType point = decl_type(*bundle, "$p");
+    const ValueType boxed = decl_type(*bundle, "$b");
+
+    REQUIRE(handle.is_class());
+    REQUIRE(point.is_struct());
+    REQUIRE(boxed.is_class());
+
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {handle}) == std::nullopt);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {boxed}) == std::nullopt);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {point}) == 0);
+    REQUIRE(first_constraint_violation(tmpl->type_parameters, {int32}) == 0);
 }

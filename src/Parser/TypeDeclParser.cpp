@@ -505,6 +505,16 @@ static void parse_constructor(
 
     cursor.skip(); // skip "constructor"
 
+    // a constructor has no type parameters of its own. `Box<int32>(5)` names the type; a value
+    // is built from the arguments. consume a written `<...>` so the rest of the signature parses
+    if (cursor.is_type(Token::Type::t_open_angle)) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(cursor.current()),
+            "a constructor has no type parameters of its own. the type's are named at the call "
+            "('Box<int32>(...)') and a value is built from the arguments");
+        (void)Parser::parse_type_param_list(payload);
+    }
+
     if (!payload.expect_token(Token::Type::t_open_paren)) {
         return;
     }
@@ -535,10 +545,11 @@ static void parse_constructor(
     ctor_decl->visibility = visibility.value;
     ctor_decl->declared_in = AST::origin_at(payload.context);
 
-    // share the struct's parameter declarations rather than declaring its own: the ctor's return
-    // type is the struct's self-application Foo<T>, so a substitution built from this list has to
-    // bind the very same T that type mentions
-    ctor_decl->type_parameters = struct_node->type_parameters();
+    // the struct's parameters inherited. declare_type_parameters shares the struct's T rather than
+    // copying it, so one substitution binds the T the return type Foo<T> mentions
+    Parser::declare_type_parameters(payload, *ctor_decl, {}, struct_node->type_parameters());
+
+    AST::TypeParamScope type_param_scope(payload.context, ctor_decl->type_parameters);
 
     // the return type is the one thing *not* rebuilt per pass: it is the struct's interned self type,
     // so the second pass would only emplace a node equal to the one already here
@@ -814,8 +825,9 @@ static void synthesize_field_wise_constructor(
 
     default_ctor.ast_namespace = payload.context.current_namespace;
 
-    // shares the struct's parameter declarations, same reason as the explicit constructor above
-    default_ctor.type_parameters = struct_node->type_parameters();
+    // inherited, not merely held: inherited_type_param_count is what lets Box<int32>(1, 2) name
+    // the type. empty own list - a constructor has no type parameters of its own
+    Parser::declare_type_parameters(payload, default_ctor, {}, struct_node->type_parameters());
 
     // create a type node for the return type
     auto &type_node = payload.context.emplace_node<AST::TypeNode>(self_value_type);

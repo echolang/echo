@@ -22,6 +22,7 @@
 #include "Compiler/LLVM/Codegen/StaticStorageCodegen.h"
 #include "Compiler/LLVM/Codegen/ProcessCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugPrintCodegen.h"
+#include "Compiler/LLVM/Codegen/ErasureCodegen.h"
 #include "Compiler/LLVM/Codegen/DebugInfoCodegen.h"
 #include "Compiler/LLVM/Codegen/Backend.h"
 
@@ -200,6 +201,7 @@ private:
     Compiler::LLVM::StaticStorageCodegen _statics;
     Compiler::LLVM::ProcessCodegen _process;
     Compiler::LLVM::DebugPrintCodegen _debug_print;
+    Compiler::LLVM::ErasureCodegen _erasure;
     Compiler::LLVM::DebugInfoCodegen _debug_info;
     Compiler::LLVM::Backend _backend;
 };

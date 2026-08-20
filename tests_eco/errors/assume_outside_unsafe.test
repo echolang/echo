@@ -1,0 +1,15 @@
+expect: fail
+
+--- OUT --->
+[error] AssumeRequiresUnsafe  assume_outside_unsafe.eco:8:16
+
+  'assume' recovers a class handle from erasure, which is a promise the type system cannot check
+
+  7 | erased $held = erased::from($h);
+  8 | Handle $back = assume<Handle>($held);
+    :                ^^^^^^
+  9 | echo $back->n;
+
+  help: write it inside an 'unsafe' block
+
+1 error, nothing was compiled.

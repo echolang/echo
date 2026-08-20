@@ -157,6 +157,18 @@ ISSUE_MESSAGE_FNC(UnknownStaticFunction)
     return fmt::format("The type '{}' has no static function named '{}'", type_name, function_name);
 }
 
+ISSUE_MESSAGE_FNC(CannotConstructType)
+{
+    return fmt::format("The type '{}' cannot be constructed", type_name);
+}
+
+std::vector<AST::IssueNote> AST::Issue::CannotConstructType::notes() const
+{
+    return { IssueNote { NoteKind::t_help,
+        "only a struct or a class has constructors. T(...) names those after T is bound - "
+        "a primitive, an interface, or a type parameter that never became one of those has none" } };
+}
+
 std::vector<AST::IssueNote> AST::Issue::UnknownStaticFunction::notes() const
 {
     return { IssueNote { NoteKind::t_help,
@@ -289,6 +301,16 @@ std::vector<AST::IssueNote> AST::Issue::UnsafePromotion::notes() const
         "value of that type, stays valid for as long as the borrow is used, and that reading it at "
         "that type is compatible with every other typed access to the same storage. It does not "
         "assert that the borrow is the only one" } };
+}
+
+ISSUE_MESSAGE_FNC(AssumeRequiresUnsafe)
+{
+    return _message;
+}
+
+std::vector<AST::IssueNote> AST::Issue::AssumeRequiresUnsafe::notes() const
+{
+    return { IssueNote { NoteKind::t_help, "write it inside an 'unsafe' block" } };
 }
 
 ISSUE_MESSAGE_FNC(DuplicateTestName)

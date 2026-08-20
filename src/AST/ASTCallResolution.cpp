@@ -273,10 +273,36 @@ namespace AST
 
     std::vector<FunctionDeclNode *> CallResolver::candidates_for(const FunctionCallExprNode &call) const
     {
+        // **constructing a type**: `T(...)` after the callee is a type rather than a function name.
+        // asked first so a constructor's arguments cannot be read as a receiver or a free call - a
+        // type parameter is a not-yet (empty → t_unknown_name, retryable), a primitive or interface
+        // is a real empty set. a struct or class looks up the same overload set a written `Foo(...)`
+        // already uses: constructors are namespace functions named after the type
+        if (!call.constructed_type.is_unknown()) {
+            if (is_undetermined_type(call.constructed_type) || !call.constructed_type.has_complex_type()) {
+                return {};
+            }
+
+            const ComplexType *owner = call.constructed_type.get_complex_type()->template_or_self();
+
+            if (!owner->name.has_value() || owner->ast_namespace == nullptr) {
+                return {};
+            }
+
+            return _collector.functions.overloads(*owner->name, *owner->ast_namespace);
+        }
+
         // a **static** call: the type names the overload set. asked ahead of the namespace arm because
         // `Type::f()` carries both a written owner and the namespace the parser was standing in, and
         // the owner is the one that decides - falling through would let the registry's outward walk
         // answer with a free `f` from an enclosing scope
+        //
+        // a type-parameter owner is a not-yet, the same empty set a shorthand has: `T::from(...)`
+        // inside a template body has nothing to search until substitution names the type
+        if (call.static_owner.is_type_param()) {
+            return {};
+        }
+
         if (call.static_owner.has_complex_type()) {
             return find_static_functions(call.static_owner.get_complex_type(), call.lookup_name());
         }
@@ -320,20 +346,12 @@ namespace AST
 
         const std::vector<ValueType> argument_types = argument_types_of(call);
 
-        // which of them have no opinion about the instance's name, read once for every candidate below
-        const std::vector<bool> argument_defers = argument_defers_of(call);
-
         // with a single candidate there is nothing to choose between, so it is taken as written and
         // every judgement about it is left to the passes that specialise in one: the monomorphizer
         // reports an unsatisfied constraint by name, the type checker reports which argument is
         // wrong. pre-filtering here would replace both with "no overload accepts these arguments" -
         // the same reasoning as the arity short-circuit inside match_function
         const bool choosing = candidates.size() > 1;
-
-        // what the call spelled out, if anything: `foo<int32>(...)` names the instance rather than
-        // leaving it to inference, so a candidate has to be scored with those in hand - otherwise a
-        // template is judged on parameters the call already decided
-        const std::vector<ValueType> explicit_type_args = explicit_type_args_of(call);
 
         std::vector<FunctionCandidate> match_candidates;
         match_candidates.reserve(candidates.size());
@@ -357,8 +375,7 @@ namespace AST
                 // overload set over a generic owner is scored against these substituted parameters,
                 // and without the seed every candidate is still holding a bare `T` - so they all
                 // rank undetermined and tie, and the call never resolves
-                const Instantiation inst = can_instantiate(
-                    candidate, argument_types, explicit_type_args, call.static_owner, argument_defers);
+                const Instantiation inst = can_instantiate(candidate, call);
 
                 // the template cannot be instantiated for these arguments at all, so it is not a
                 // candidate. this is also how a type constraint filters an overload set

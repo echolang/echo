@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  class_constraint_on_a_struct.eco:14:6
+
+  Type parameter 'T' of 'id' is constrained to 'class' but was given 'Point'
+
+  13 | 
+  14 | echo id(Point(1))->x;
+     :      ^^
+  15 | 
+
+1 error, nothing was compiled.

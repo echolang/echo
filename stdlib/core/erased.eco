@@ -1,0 +1,45 @@
+/**
+ * Owning erasure of a class handle. No interface required of the class.
+ *
+ * `erased::from($obj)` retains. Dropping the `erased` releases through the thunk stored at the
+ * widening, where `T` is still known. `assume<T>($held)` promises the slot is a `T` and
+ * is refused outside `unsafe`.
+ */
+
+#[core: erased]
+public struct erased
+{
+    private ptr<uint8> $object;
+    private ptr<uint8> $release;
+
+    destructor()
+    {
+        erased_release($this);
+    }
+
+    constructor(const erased& $other)
+    {
+        $this->object:$ = $other->object:$;
+        $this->release:$ = $other->release:$;
+        erased_retain($this);
+    }
+
+    /**
+     * A new owner of `$v`. `T` must be a class.
+     */
+    #[builtin: erased_from]
+    public static function from<T : class>(const T& $v) : erased;
+}
+
+#[builtin: erased_retain]
+private function erased_retain(erased& $v) : void;
+
+#[builtin: erased_release]
+private function erased_release(erased& $v) : void;
+
+/**
+ * Promise that `$v` holds a `T`. Extra retain for the handle that comes back.
+ * Refused outside `unsafe`.
+ */
+#[builtin: assume]
+public function assume<T : class>(const erased& $v) : T;

@@ -1,0 +1,14 @@
+// a struct is not a class. the refusal is at the call, naming the constraint as written and
+// the type that was given — the same sentence `numeric` uses
+
+function id<T : class>(T $v) : T
+{
+    return $v;
+}
+
+struct Point
+{
+    int32 $x;
+}
+
+echo id(Point(1))->x;

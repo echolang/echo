@@ -38,6 +38,21 @@ namespace AST
         t_is_trivially_copyable,
         t_needs_destruction,
 
+        // **the runtime identity of a type**, as a value a program can hold. `type_id<T>()` is the
+        // address of a `linkonce_odr` global: a class's existing typeinfo, an interface's itype, or
+        // a one-byte `.typeid` minted for everything else. the same identity `instanceof` compares,
+        // wrapped so it can be a map key. not a foldable integer - the answer is an address
+        t_type_id,
+
+        // **owning erasure of a class handle**, no interface required. `erased::from<T>` stores the
+        // handle and T's release thunk; `assume<T>` promises the slot is a T. retain/release are
+        // the copy and destructor of the `erased` struct, answered here because the thunk is a
+        // compiler symbol
+        t_erased_from,
+        t_erased_retain,
+        t_erased_release,
+        t_assume,
+
         // **move the value out of a place**, leaving the storage behind it dead
         //
         // The verb the two predicates above are useless without. Knowing `T` owns something buys

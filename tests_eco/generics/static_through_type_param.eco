@@ -1,0 +1,63 @@
+// `T::f(...)` through a type parameter: candidates come from the bound type's
+// statics, and the owner is the substitution seed the same way a written
+// `Handle::from` already is
+
+class Handle
+{
+    int32 $n;
+
+    constructor(int32 $n)
+    {
+        $this->n = $n;
+    }
+
+    static function from(int32 $n) : Handle
+    {
+        return Handle($n);
+    }
+}
+
+class Ctx
+{
+    int32 $id;
+
+    constructor(int32 $id)
+    {
+        $this->id = $id;
+    }
+
+    function create<T : class>(int32 $n) : T
+    {
+        return T::make($this, $n);
+    }
+}
+
+class Element
+{
+    int32 $from;
+    int32 $n;
+
+    constructor(int32 $from, int32 $n)
+    {
+        $this->from = $from;
+        $this->n = $n;
+    }
+
+    static function make(Ctx $ctx, int32 $n) : Element
+    {
+        return Element($ctx->id, $n);
+    }
+}
+
+function spawn<T : class>(int32 $n) : T
+{
+    return T::from($n);
+}
+
+$h = spawn<Handle>(7);
+echo $h->n;
+
+$ctx = Ctx(9);
+$e = $ctx->create<Element>(3);
+echo $e->from;
+echo $e->n;

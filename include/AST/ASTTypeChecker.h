@@ -235,6 +235,7 @@ namespace AST
         void check_abort_message(FunctionCallExprNode &node);
         void check_ref_count_argument(FunctionCallExprNode &node);
         void check_dprint_argument(FunctionCallExprNode &node);
+        void check_assume_is_unsafe(FunctionCallExprNode &node);
 
         // `mem::take<T>` ends its source's claim on a value without writing anything back and
         // `mem::init<T>` starts one without ending what was there, so both are only sound over storage

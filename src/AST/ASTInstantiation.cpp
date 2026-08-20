@@ -55,7 +55,19 @@ namespace AST
     {
         TypeSubstitution bindings;
 
-        if (tmpl == nullptr || !tmpl->is_static_method() || !owner.has_complex_type()) {
+        if (tmpl == nullptr || !owner.has_complex_type()) {
+            return bindings;
+        }
+
+        // the owner's *instantiation* is what says what its parameters are. an owner that is still a
+        // template - `result<T, E>` inside its own body, or inside a generic that has not been
+        // instantiated - carries none, and binding nothing is what keeps that a not-yet
+        const std::vector<ValueType> &args = owner.get_complex_type()->instantiation_args;
+
+        // a static and a constructor both have no receiver. the inherited prefix is the owner's
+        // own parameter list, and `T(...)` after substitution is `box<YetAnotherOne>(...)`, so T
+        // comes from the constructed type rather than from the argument
+        if (!tmpl->is_static_method() && !tmpl->is_constructor()) {
             return bindings;
         }
 
@@ -64,11 +76,6 @@ namespace AST
         if (inherited == 0) {
             return bindings;
         }
-
-        // the owner's *instantiation* is what says what its parameters are. an owner that is still a
-        // template - `result<T, E>` inside its own body, or inside a generic that has not been
-        // instantiated - carries none, and binding nothing is what keeps that a not-yet
-        const std::vector<ValueType> &args = owner.get_complex_type()->instantiation_args;
 
         for (size_t i = 0; i < inherited && i < args.size() && i < tmpl->type_parameters.size(); i++) {
             if (is_undetermined_type(args[i])) {
@@ -105,17 +112,41 @@ namespace AST
         // that an untyped argument would have bound is a not-yet, and the fixpoint answers it
         bool saw_untyped_argument = false;
 
-        if (!explicit_type_args.empty()) {
+        // constructors invert what `<...>` means: `Box<int32>(5)` names the *type*, so the
+        // arguments bind the inherited prefix. a method's `$b->map<float64>()` names the method's
+        // own parameters, and the owner's T comes from the receiver
+        bool infer_from_arguments = false;
+
+        if (!explicit_type_args.empty() && tmpl->is_constructor()) {
+            if (explicit_type_args.size() != tmpl->inherited_type_param_count) {
+                return rejected(InstantiationBlame::t_type_argument_count);
+            }
+
+            for (size_t i = 0; i < explicit_type_args.size() && i < tmpl->type_parameters.size(); i++) {
+                result.bindings.bind(tmpl->type_parameters[i], explicit_type_args[i]);
+            }
+
+            if (tmpl->args.size() != argument_types.size()) {
+                return rejected(InstantiationBlame::t_argument_count);
+            }
+
+            infer_from_arguments = true;
+        } else if (!explicit_type_args.empty()) {
             // explicit type arguments win: foo<int>(...)
             //
             // a method carries its owner's parameters ahead of its own, and only the *own* ones can
             // be spelled at the call site: `$b->map<float64>()` says nothing about Box's T, which
             // the receiver already fixes
-            if (explicit_type_args.size() != tmpl->own_type_param_count()) {
+            //
+            // **a prefix is allowed.** `make<Handle>(7)` names T and leaves A to the argument.
+            // more than the own count is still a refusal - there is nothing a third name could bind.
+            // fewer than the own count infers the tail, which is why the argument walk runs
+            const size_t inherited = tmpl->inherited_type_param_count;
+            const size_t own = tmpl->own_type_param_count();
+
+            if (explicit_type_args.size() > own) {
                 return rejected(InstantiationBlame::t_type_argument_count);
             }
-
-            const size_t inherited = tmpl->inherited_type_param_count;
 
             // the owner's parameters come from the receiver, which is argument 0. inferred rather
             // than read off the receiver's instantiation_args so there is one binding rule: the
@@ -128,13 +159,26 @@ namespace AST
                 result.bindings.bind(tmpl->type_parameters[inherited + i], explicit_type_args[i]);
             }
 
-            // deliberately no argument-count check on this branch: the type arguments are what the
-            // instance is named after, and a call passing the wrong number of *arguments* to a
-            // template it named correctly is an ordinary bad call, reported against the instance
+            if (explicit_type_args.size() < own) {
+                if (tmpl->args.size() != argument_types.size()) {
+                    return rejected(InstantiationBlame::t_argument_count);
+                }
+
+                infer_from_arguments = true;
+            }
+
+            // exact own count: no argument-count check, the type arguments named the instance and a
+            // wrong *value* arity is an ordinary bad call against it. no inference either: the list
+            // is the instance, and an argument must not rename what the author wrote
         } else {
             if (tmpl->args.size() != argument_types.size()) {
                 return rejected(InstantiationBlame::t_argument_count);
             }
+
+            infer_from_arguments = true;
+        }
+
+        if (infer_from_arguments) {
 
             // **what argument 0 bound is authoritative.** `TypeSubstitution::bind` lets a later
             // inference replace an earlier one, which is right between two arguments of equal standing
@@ -379,11 +423,15 @@ namespace AST
 
     Instantiation can_instantiate(const FunctionDeclNode *tmpl, const FunctionCallExprNode &call)
     {
+        // a static names its owner; a constructor names the type it builds. they are mutually
+        // exclusive on the node, and either is the seed static_owner_bindings reads
+        const ValueType &owner = call.static_owner.is_unknown() ? call.constructed_type : call.static_owner;
+
         return can_instantiate(
             tmpl,
             argument_types_of(call),
             explicit_type_args_of(call),
-            call.static_owner,
+            owner,
             argument_defers_of(call));
     }
 };

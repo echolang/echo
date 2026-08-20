@@ -21,6 +21,7 @@ namespace AST
 {
     class Bundle;
     class FunctionDeclNode;
+    class FunctionCallExprNode;
     class TypeDeclNode;
     class ComplexType;
 };
@@ -107,6 +108,18 @@ namespace Compiler::LLVM
             const AST::ComplexType &interface,
             const Compiler::LLVM::CmpUnit &cmp_unit
         );
+
+        // the `linkonce_odr` global whose *address* is `T`'s identity, which `type_id<T>()` wraps.
+        // a class reuses its typeinfo, an interface its itype, everything else a one-byte `.typeid`.
+        // `const` and the nullability flag are stripped; a pointer level and a tagged `T?` are not
+        llvm::GlobalVariable *get_or_create_type_identity(
+            const AST::ValueType &type,
+            const Compiler::LLVM::CmpUnit &cmp_unit
+        );
+
+        // `type_id<T>()`: seat the identity global into the stdlib struct. the global is
+        // get_or_create_type_identity; `$desc` is found by name. pushes the value
+        void gen_type_id(AST::FunctionCallExprNode &node);
 
         llvm::Type *get_llvm_type(const AST::ValueType &type, const Compiler::LLVM::CmpUnit &cmp_unit);
         llvm::Type *get_llvm_type(const AST::ValueTypePrimitive type);

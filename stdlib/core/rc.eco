@@ -1,0 +1,38 @@
+/**
+ * A class that holds a `T`. Copying the handle is a retain.
+ *
+ * A class is already a struct on the heap. This is that, with the payload as a type parameter, so
+ * `rc<Point>` is a class even though `Point` is a struct. It is what `T : class` factories and
+ * `erased::from` accept when the thing you have is not a class of its own.
+ *
+ * Not unique, and not `mem::`. The wrapped value is copied into the object at construction.
+ * There is no `#[core:]` binding: the compiler never mints one, it only has to be a name you can
+ * write, the same way `result` is.
+ *
+ * ```echo
+ * struct Point
+ * {
+ *     int32 $x;
+ *     int32 $y;
+ * }
+ *
+ * rc<Point> $p = rc<Point>(Point(1, 2));
+ * echo $p->value->x;           // 1
+ *
+ * rc<int32> $n = rc<int32>(7);
+ * echo $n->value;              // 7
+ * ```
+ *
+ * Seat an already-built `T`. `rc<Point>(1, 2)` is not a constructor of `rc`: build the payload
+ * first, `rc<Point>(Point(1, 2))`.
+ */
+
+public class rc<T>
+{
+    public T $value;
+
+    public constructor(T $value)
+    {
+        $this->value = $value;
+    }
+}

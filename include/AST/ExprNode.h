@@ -155,6 +155,18 @@ namespace AST
         // template's `result<T, E>` is undecidable in every instance, silently
         ValueType static_owner = ValueType::make_unknown();
 
+        // **the type `T(...)` constructs**, when the callee is a type rather than a function name.
+        // `unknown` for every other call. constructors are not static methods - they live in
+        // FunctionRegistry under the type's name, and `$this` is a body-local - so this is a fourth
+        // candidate source beside namespace / receiver / static_owner, not a reuse of static_owner
+        //
+        // a type parameter is a not-yet: CallResolver answers t_pending until substitution, then
+        // looks up the bound type's name in its namespace, the same set a written `Foo(...)` uses.
+        // the owner seed can_instantiate already takes for a static is what binds a generic type's
+        // own parameters - `box<YetAnotherOne>(...)` names T from the constructed type, not from
+        // the argument. **CloneContext::shallow copy-constructs, so this substitutes too**
+        ValueType constructed_type = ValueType::make_unknown();
+
         // the `.` a shorthand was written with, which is where its diagnostics point. the name token is
         // the wrong place for them: "nothing here says what type this is" is about the leading dot, not
         // about the name, and a reader looking at the name would go looking for a typo

@@ -84,7 +84,13 @@ namespace AST
         // would extractvalue a second word past the end of a one-word value. as a kind each site has
         // to be visited on purpose. one opaque ptr, C's convention, no environment
         t_c_function,
-        t_unknown
+        t_unknown,
+        // **a constraint atom, never a value a program holds.** `T : class` is an open kind
+        // predicate — every class, including an instantiation such as `Box<int32>` — not a closed
+        // set the way `numeric` is. stored as a ValueType so it sits in TypeParamDecl::constraint
+        // with every other atom and `constraint_admits` stays the one owner of "is this argument
+        // allowed". `is_class()` is false: that question is "is this a class", and this atom is not
+        t_kind_class
     };
 
     // **the two properties of a tagged optional, by index.** `ComplexType::is_optional` says a layout is
@@ -251,6 +257,11 @@ namespace AST
 
         static ValueType make_unknown() {
             return ValueType(ValueTypeKind::t_unknown, ValueTypePrimitive::t_void);
+        }
+
+        // the `class` atom of `T : class`. only legal in a constraint list
+        static ValueType make_class_kind_constraint() {
+            return ValueType(ValueTypeKind::t_kind_class, ValueTypePrimitive::t_void);
         }
 
         static ValueType void_type() {
@@ -501,6 +512,10 @@ namespace AST
             return kind == ValueTypeKind::t_class;
         }
 
+        bool is_class_kind_constraint() const {
+            return kind == ValueTypeKind::t_kind_class;
+        }
+
         bool is_interface() const {
             return kind == ValueTypeKind::t_interface;
         }
@@ -685,6 +700,10 @@ namespace AST
                     return _type_param == other._type_param;
 
                 case ValueTypeKind::t_unknown:
+                    return true;
+
+                // no extra state: every `class` atom is the same predicate
+                case ValueTypeKind::t_kind_class:
                     return true;
             }
 

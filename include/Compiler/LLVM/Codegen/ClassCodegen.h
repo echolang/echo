@@ -98,6 +98,13 @@ namespace Compiler::LLVM
         // is why it takes this rather than gen_release_value below
         llvm::Function *get_or_create_release_thunk(const AST::ValueType &class_type);
 
+        // retain of a class handle whose concrete type is not statically known - the object
+        // inside an `erased`. reaches the count through the shared header, same as an interface
+        llvm::Value *gen_erased_retain(llvm::Value *object);
+
+        // call a stored `__eco_release_*` thunk. field 1 of `erased` is the thunk itself, not a vtable
+        void gen_call_release_thunk(llvm::Value *object, llvm::Value *thunk);
+
         // one of `handle`'s counts as an i64, or **0 when it is null**. here rather than at its callers so
         // `ClassBox::strong_index` and `weak_index` keep one owner.
         //

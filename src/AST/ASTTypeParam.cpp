@@ -34,6 +34,14 @@ bool AST::constraint_admits(const std::vector<ValueType> &constraint, const Valu
         if (allowed.is_interface() && AST::conforms_to(bare, allowed)) {
             return true;
         }
+
+        // **the kind predicate**, open the way an interface is: there is no finite set of
+        // classes to expand `numeric`-style, and `Box<int32>` is a class the author of the
+        // constraint has never named. `is_class()` on the argument is the whole of it —
+        // an instantiation carries the template's kind, so a generic class answers yes
+        if (allowed.is_class_kind_constraint() && bare.is_class()) {
+            return true;
+        }
     }
     return false;
 }

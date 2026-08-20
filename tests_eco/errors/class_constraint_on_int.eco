@@ -1,0 +1,8 @@
+// a primitive is not a class either. same diagnostic, different given type
+
+function id<T : class>(T $v) : T
+{
+    return $v;
+}
+
+echo id(1);

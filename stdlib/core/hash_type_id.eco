@@ -1,0 +1,17 @@
+/**
+ * `hash::of` for `type_id`, so `map<type_id, V>` is a thing.
+ *
+ * The hash is the identity word, via `type_id::hash`. Byte-hashing the struct from outside
+ * would be the trap `bits` documents: a type that holds an address, hashed as bytes.
+ *
+ * Its own file, because a namespace is a file-level statement and `hash.eco` cannot also
+ * declare `type_id`.
+ */
+
+namespace hash;
+
+#[inline]
+public function of(const type_id& $id) : uint64
+{
+    return $id->hash();
+}

@@ -425,6 +425,31 @@ namespace AST
             return;
         }
 
+        // `T(...)` through a type parameter. silent while the owner still mentions a type parameter
+        // - that call sits in the template's own copy, whose clones carry the concrete type
+        if (!call.constructed_type.is_unknown()) {
+            if (is_undetermined_type(call.constructed_type)) {
+                return;
+            }
+
+            _collector.collect_issue<Issue::CannotConstructType>(
+                at, call.constructed_type.get_type_desciption());
+            return;
+        }
+
+        // `T::f(...)` through a type parameter. asked ahead of the member arm: a static call has
+        // no lookup_namespace, and its first argument is not a receiver - reading it as one would
+        // report that `int32` has no member `from` for `T::from(1)`
+        if (!call.static_owner.is_unknown()) {
+            if (is_undetermined_type(call.static_owner)) {
+                return;
+            }
+
+            _collector.collect_issue<Issue::UnknownStaticFunction>(
+                at, call.token_function_name.value(), call.static_owner.get_type_desciption());
+            return;
+        }
+
         // which of the two remaining errors it is, is which kind of call it is - and that is
         // `lookup_namespace`, the one field that distinguishes them: a member call has none, because
         // its candidates come from the receiver sitting in argument 0

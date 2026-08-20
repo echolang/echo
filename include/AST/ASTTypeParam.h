@@ -63,7 +63,9 @@ namespace AST
 
         // the set of concrete types this parameter may be substituted with. empty means
         // unconstrained. aliases (e.g. `numeric`) are expanded into this set at parse time,
-        // so checking is exact set membership
+        // so checking is exact set membership. `class` is not expanded: it is one
+        // ValueTypeKind::t_kind_class atom, and constraint_admits asks is_class() of the
+        // argument rather than enumerating types
         std::vector<ValueType> constraint;
 
         // the original constraint source (e.g. "numeric|bool"), kept for diagnostics so an

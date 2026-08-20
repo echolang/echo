@@ -1,0 +1,53 @@
+/**
+ * A type's runtime identity, as a value a program can hold.
+ *
+ * `type_id<T>()` is the address of a `linkonce_odr` global: a class's typeinfo (the same word
+ * `instanceof` compares), an interface's itype, or a one-byte marker minted for everything else.
+ * Two calls with the same `T` are the same id, including across modules, because the linker
+ * keeps one global. `Box<int32>` and `Box<string>` are two ids.
+ *
+ * It is a map key: `hash::of` and `operator ==` are declared for it. It is not reflection. It
+ * does not name constructors, fields or modules.
+ */
+
+#[core: type_id]
+public struct type_id
+{
+    private ptr<uint8> $desc;
+
+    /**
+     * True when `$other` is the same type. The operator below is this, as `==`.
+     */
+    public const function same(const type_id& $other) : bool
+    {
+        return $this->desc:$ == $other->desc:$;
+    }
+
+    /**
+     * The identity word, stirred. `hash::of` calls this rather than byte-hashing the struct.
+     */
+    public const function hash() : uint64
+    {
+        return hash::mix(mem::bit_cast<usize, ptr<uint8>>($this->desc:$));
+    }
+}
+
+/**
+ * The identity of `T`. Generic, no value arguments: the type is the whole of the question.
+ */
+#[builtin: type_id]
+public function type_id<T>() : type_id;
+
+operator (const type_id& $a) == (const type_id& $b) : bool
+{
+    return $a->same($b);
+}
+
+operator (const type_id& $a) != (const type_id& $b) : bool
+{
+    if ($a == $b) {
+        return false;
+    }
+
+    return true;
+}

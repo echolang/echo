@@ -1,0 +1,9 @@
+// T(...) after T is bound to a primitive: there is no constructor list to search.
+// refused at the instantiated call, not at the template — an unused generic is silent
+
+function build<T>() : T
+{
+    return T();
+}
+
+echo build<int32>();

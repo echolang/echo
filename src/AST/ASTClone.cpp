@@ -139,6 +139,10 @@ Node *FunctionCallExprNode::clone(CloneContext &cc) const
     // the monomorphizer's still-generic skip and determine_type_args' undecided arm report nothing,
     // so the call is emitted nowhere and nothing says why
     c->static_owner = cc.substitute(c->static_owner);
+
+    // the same trap for `T(...)`: without this, every instance keeps the template's type parameter
+    // and the registry has nothing concrete to look up. silent, for the same two skips
+    c->constructed_type = cc.substitute(c->constructed_type);
     return c;
 }
 

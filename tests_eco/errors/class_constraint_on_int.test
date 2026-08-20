@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  class_constraint_on_int.eco:8:6
+
+  Type parameter 'T' of 'id' is constrained to 'class' but was given 'int32'
+
+  7 | 
+  8 | echo id(1);
+    :      ^^
+  9 | 
+
+1 error, nothing was compiled.

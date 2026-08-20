@@ -1,0 +1,28 @@
+// a struct has no class handle, so it enters a `T : class` factory wrapped in a
+// class. `box<YetAnotherOne>` is a class; seat an already-built T
+
+struct YetAnotherOne
+{
+    float64 $n;
+}
+
+class box<T>
+{
+    T $value;
+
+    constructor(T $value)
+    {
+        $this->value = $value;
+    }
+}
+
+function make<T : class, A>(A $arg) : T
+{
+    return T($arg);
+}
+
+$c = make<box<YetAnotherOne>>(YetAnotherOne(3.14));
+echo $c->value->n;
+
+$d = box<YetAnotherOne>(YetAnotherOne(2.5));
+echo $d->value->n;

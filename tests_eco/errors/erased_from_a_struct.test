@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] UnsatisfiedTypeConstraint  erased_from_a_struct.eco:7:24
+
+  Type parameter 'T' of 'from' is constrained to 'class' but was given 'Point'
+
+  6 | Point $p = Point(1);
+  7 | erased $held = erased::from($p);
+    :                        ^^^^
+  8 | 
+
+1 error, nothing was compiled.

@@ -1,0 +1,24 @@
+// `T : class` admits any class, including a generic instantiation — Box<int32> is a class, not
+// a struct, because the instance carries the template's kind. a struct or a primitive is refused
+// at the call (see errors/class_constraint_*)
+
+class Handle
+{
+    int32 $n;
+}
+
+class Box<U>
+{
+    U $v;
+}
+
+function id<T : class>(T $v) : T
+{
+    return $v;
+}
+
+Handle $h = Handle(7);
+echo id($h)->n;
+
+Box<int32> $b = Box<int32>(3);
+echo id($b)->v;

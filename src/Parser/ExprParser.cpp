@@ -875,10 +875,19 @@ namespace
             AST::Symbol *symbol = nullptr;
 
             if (parts.empty()) {
-                // a bare `Point::origin` after `use geometry::Point` - the same lookup a
-                // type in type position uses, so the two spellings cannot drift
-                symbol = Parser::find_unqualified_type(
-                    payload, owner_name, *payload.context.current_namespace);
+                // a type parameter is an owner too: `T::from(...)` inside `make<T>`. a type
+                // parameter is not a Symbol, so skip the type-symbol lookup and let parse_type
+                // below build the node, the same way a type in type position does
+                if (payload.context.find_type_param(owner_name) == nullptr) {
+                    // a bare `Point::origin` after `use geometry::Point` - the same lookup a
+                    // type in type position uses, so the two spellings cannot drift
+                    symbol = Parser::find_unqualified_type(
+                        payload, owner_name, *payload.context.current_namespace);
+
+                    if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+                        return nullptr;
+                    }
+                }
             }
             else {
                 // `geometry::Point::origin` after `use geometry` - the same path walk
@@ -894,10 +903,10 @@ namespace
                 }
 
                 symbol = payload.collector.namespaces.find_symbol(owner_name, *in);
-            }
 
-            if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
-                return nullptr;
+                if (symbol == nullptr || symbol->type() != AST::SymbolType::t_type) {
+                    return nullptr;
+                }
             }
         }
 
@@ -928,7 +937,10 @@ namespace
         // is reported: this is speculation, and a name that is not a type is not yet a mistake
         const bool consumed_owner = cursor.is_done();
 
-        if (owner_node == nullptr || !consumed_owner || !owner_node->type.has_complex_type()) {
+        // a type parameter is a legitimate owner - `T::from(...)` - and has no ComplexType until
+        // substitution. anything else that is not a named type goes back for the namespace walk
+        if (owner_node == nullptr || !consumed_owner
+            || !(owner_node->type.has_complex_type() || owner_node->type.is_type_param())) {
             cursor.restore(start);
             return nullptr;
         }
@@ -974,7 +986,8 @@ AST::FunctionCallExprNode *Parser::try_parse_static_call(Parser::Payload &payloa
     // tell them apart is what the owner declares - and a nested type is the older meaning
     //
     // asked of the template, a nested type inside a generic owner being refused where it is declared
-    if (cursor.is_type(Token::Type::t_identifier)
+    if (owner.has_complex_type()
+        && cursor.is_type(Token::Type::t_identifier)
         && owner.get_complex_type()->template_or_self()->find_member_type_decl(cursor.current().value()) != nullptr) {
         cursor.restore(start);
         return nullptr;
@@ -993,6 +1006,11 @@ AST::FunctionCallExprNode *Parser::try_parse_static_call(Parser::Payload &payloa
     // what keeps the constant path reading exactly what it read before
     if (!cursor.peek_is_type(1, Token::Type::t_open_paren)
         && !cursor.peek_is_type(1, Token::Type::t_open_angle)) {
+        if (!owner.has_complex_type()) {
+            cursor.restore(start);
+            return nullptr;
+        }
+
         const AST::ComplexType *ct = owner.get_complex_type()->template_or_self();
 
         if (!cursor.is_type(Token::Type::t_identifier)
@@ -1045,6 +1063,17 @@ AST::StaticPropertyExprNode *Parser::try_parse_static_property(Parser::Payload &
     const auto name_token = cursor.current();
 
     cursor.skip(); // the `$name`
+
+    // a type-parameter owner has no static-property table to search. `T::$x` is not a not-yet the
+    // way `T::f(...)` is: a static property has no call-settlement chassis, so a pending one would
+    // sit unresolved until codegen. refused here, at the `$`
+    if (!owner.has_complex_type()) {
+        payload.collector.collect_issue<AST::Issue::GenericError>(
+            payload.context.code_ref(name_token),
+            "a static property cannot be read through a type parameter");
+        return &payload.context.emplace_node<AST::StaticPropertyExprNode>(
+            name_token, owner, nullptr, 0);
+    }
 
     // **committed from here**, exactly as the call form is, and for the same reason: `Type::$x` where
     // `Type` is a type has no second reading to fall back to. a namespace has no `$` names in it
@@ -1481,7 +1510,7 @@ const AST::NodeReference parse_function_ref(Parser::Payload &payload, AST::TypeN
     bool qualified = false;
     AST::ValueType static_owner;
 
-    if (owner != nullptr && cursor.is_type(Token::Type::t_identifier)) {
+    if (owner != nullptr && owner->type.has_complex_type() && cursor.is_type(Token::Type::t_identifier)) {
         static_owner = owner->type;
     }
     else {
@@ -2056,7 +2085,19 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_angle })
     ) {
         bool is_call = false;
-        auto fcall = parse_funccall(payload, ast_namespace, &is_call);
+        Parser::CallLookup lookup;
+
+        // `T(...)` where T is a type parameter: constructing that type, not looking up a function
+        // named T. only the bare `T(` spelling - `T<...>(` is a generic application, which a type
+        // parameter is not. a qualified name is never a type parameter
+        if (ast_namespace == nullptr
+            && cursor.is_type_sequence(0, { Token::Type::t_identifier, Token::Type::t_open_paren })) {
+            if (const AST::TypeParamDecl *param = payload.context.find_type_param(cursor.current().value())) {
+                lookup.constructed_type = AST::ValueType::make_type_param(param);
+            }
+        }
+
+        auto fcall = parse_funccall(payload, ast_namespace, &is_call, lookup);
 
         if (fcall != nullptr) {
             // **and then the suffixes**, which every other operand producer in this function already does.

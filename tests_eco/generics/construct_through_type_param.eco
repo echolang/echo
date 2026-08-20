@@ -1,0 +1,54 @@
+// `T(...)` after monomorphization names the bound type's constructors. no Echo
+// variadics: arity is an overload, so make<T, A> and make<T, A, B> are two functions
+
+class SomeService
+{
+    string $name;
+
+    constructor(string $something)
+    {
+        $this->name = $something;
+    }
+}
+
+class AnotherService
+{
+    int32 $n;
+
+    constructor(int32 $else)
+    {
+        $this->n = $else;
+    }
+}
+
+class Pair
+{
+    int32 $a;
+    int32 $b;
+
+    constructor(int32 $a, int32 $b)
+    {
+        $this->a = $a;
+        $this->b = $b;
+    }
+}
+
+function make<T : class, A>(A $arg) : T
+{
+    return T($arg);
+}
+
+function make<T : class, A, B>(A $a, B $b) : T
+{
+    return T($a, $b);
+}
+
+$a = make<SomeService>('hey');
+echo $a->name;
+
+$b = make<AnotherService>(42);
+echo $b->n;
+
+$c = make<Pair>(2, 3);
+echo $c->a;
+echo $c->b;

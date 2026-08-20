@@ -93,8 +93,8 @@ namespace Parser
 
     // parses an optional generic type-parameter list `<T, U, ...>` (the declaration side,
     // e.g. on a function or struct). Each parameter may carry a constraint
-    // `T: atom (| atom)*` where an atom is a primitive, an alias (e.g. `numeric`) or a
-    // user type. Returns the parsed parameters, or an empty vector if the cursor is not
+    // `T: atom (| atom)*` where an atom is a primitive, an alias (e.g. `numeric`), the
+    // kind predicate `class`, or a user type. Returns the parsed parameters, or an empty vector if the cursor is not
     // positioned at a `<`. Consumes through the closing `>`
     // the constraint half of that grammar, `: atom (| atom)*`, on its own - so an interface's
     // associated type (`type Iter : contract::iterator<V>`) is constrained by the same rule a type parameter
@@ -108,10 +108,6 @@ namespace Parser
     // one's ordinal and owner. idempotent across the symbol and full parser passes: an unchanged
     // list reuses the declarations already installed, so a parameter has exactly one declaration
     // no matter how often its owner is re-parsed
-    //
-    // a constructor of a generic struct must NOT call this: it shares the struct's declarations by
-    // copying the pointer vector, which is what lets one substitution bind the parameters mentioned
-    // in both the owner's and the constructor's types
     void declare_type_parameters(Payload &payload, AST::ComplexType &owner, const std::vector<ParsedTypeParam> &parsed);
 
     // the function overload owns the whole `[inherited..., own...]` shape of

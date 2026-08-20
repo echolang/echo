@@ -1,0 +1,9 @@
+class Handle
+{
+    int32 $n;
+}
+
+Handle $h = Handle(1);
+erased $held = erased::from($h);
+Handle $back = assume<Handle>($held);
+echo $back->n;

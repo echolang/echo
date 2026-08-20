@@ -359,6 +359,9 @@ std::string AST::ValueType::get_mangled_name() const
         }
         mangled_name += "E";
     } else {
+        assert(
+            kind != ValueTypeKind::t_kind_class
+            && "a class-kind constraint is not a type that mangles");
         assert(kind == ValueTypeKind::t_unknown && "a ValueType kind with no mangling would share the unknown token");
         mangled_name += "U"; // unknown type
         mangled_name += "A";
@@ -439,6 +442,10 @@ std::string AST::ValueType::get_type_desciption() const
         // from the TypeRegistry's args_description method. the namespace is prepended here so
         // two same-named types from different namespaces are distinguishable in diagnostics
         return prefix + ct->namespaced_name() + suffix;
+    }
+
+    if (is_class_kind_constraint()) {
+        return prefix + "class" + suffix;
     }
 
     // handle unknown or other types

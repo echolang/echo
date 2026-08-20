@@ -21,6 +21,11 @@ namespace AST
             case BuiltinKind::t_align_of:
             case BuiltinKind::t_is_trivially_copyable:
             case BuiltinKind::t_needs_destruction:
+            case BuiltinKind::t_type_id:
+            case BuiltinKind::t_erased_from:
+            case BuiltinKind::t_erased_retain:
+            case BuiltinKind::t_erased_release:
+            case BuiltinKind::t_assume:
             case BuiltinKind::t_take:
             case BuiltinKind::t_init:
             case BuiltinKind::t_die:

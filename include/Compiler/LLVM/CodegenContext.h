@@ -51,6 +51,7 @@ namespace Compiler::LLVM
     class StaticStorageCodegen;
     class ProcessCodegen;
     class DebugPrintCodegen;
+    class ErasureCodegen;
     class DebugInfoCodegen;
 
     // shared mutable state threaded through every codegen subsystem. owns the llvm context and
@@ -313,6 +314,10 @@ namespace Compiler::LLVM
         // because it carries state across a recursion and creates basic blocks, neither of which an
         // expression arm may do
         DebugPrintCodegen *debug_print = nullptr;
+
+        // owning class-handle erasure: `erased::from`, retain/release, and `assume`. reachable from
+        // the expression subsystem, which is where those builtins are called
+        ErasureCodegen *erasure = nullptr;
 
         // the debug-info subsystem: the whole of what a debugger is told. every entry point on it is a
         // no-op with `-g` off, which is what keeps the call sites free of a flag check - and it is its

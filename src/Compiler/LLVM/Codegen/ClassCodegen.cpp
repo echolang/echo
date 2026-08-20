@@ -324,6 +324,21 @@ llvm::Value *ClassCodegen::gen_iface_retain(llvm::Value *erased)
     return erased;
 }
 
+llvm::Value *ClassCodegen::gen_erased_retain(llvm::Value *object)
+{
+    gen_count_inc(object, nullptr, ClassBox::strong_index, "erased", CountAccess::t_from_typeinfo);
+    return object;
+}
+
+void ClassCodegen::gen_call_release_thunk(llvm::Value *object, llvm::Value *thunk)
+{
+    llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
+    auto *thunk_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*_ctx.llvm_context), { opaque_ptr }, false);
+
+    _ctx.builder->CreateCall(thunk_type, thunk, { object });
+}
+
 void ClassCodegen::gen_iface_release(llvm::Value *erased)
 {
     llvm::Type *opaque_ptr = llvm::PointerType::get(*_ctx.llvm_context, 0);
