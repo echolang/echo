@@ -1402,7 +1402,8 @@ static bool resolve_programs(
             /*name=*/{},
             entry == nullptr ? ECO_MAIN_MODULE_NAME : entry->name,
             /*entry_file=*/{},
-            driver.output
+            driver.output,
+            /*active_targets=*/{}
         });
 
         return true;
@@ -1437,7 +1438,8 @@ static bool resolve_programs(
             target.name,
             entry->name,
             target.entry,
-            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output
+            driver.output.empty() ? out.layout.target_binary(*entry, target.name) : driver.output,
+            /*active_targets=*/{}
         };
 
         // **only the target being built, and only in the module that declared it.** Two targets of one

@@ -135,12 +135,14 @@ void OperatorRewriter::widen_binary_operands(BinaryExprNode &bin)
     // **an address is never a width to reconcile.** pointer arithmetic and pointer comparison each have
     // their own arm in BinaryExprNode::result_type(), and a cast inserted here would convert the address
     // itself to an integer - which is what `string::view($this->bytes:$ + $from, $len)` turns into if this
-    // exits any later. Asked of the *raw* operand types, because this pass runs ahead of
-    // AST::PointerAdjuster and a borrow still reads as a pointer here
+    // exits any later. asked of the *nullable* half, because this pass runs ahead of AST::PointerAdjuster
+    // and a borrow still reads as a pointer here - and a `const usize&` foreach element compared to a
+    // literal is that borrow, not an address. `ptr<T>` is the skip; `T&` is a number once it is read
     const ValueType raw_left = bin.lhs->result_type();
     const ValueType raw_right = bin.rhs->result_type();
 
-    if (raw_left.is_pointer() || raw_right.is_pointer()) {
+    if ((raw_left.is_pointer() && raw_left.is_nullable())
+        || (raw_right.is_pointer() && raw_right.is_nullable())) {
         return;
     }
 

@@ -473,8 +473,22 @@ namespace AST
             return out;
         }
 
-        const ValueType left = lhs->result_type();
-        const ValueType right = rhs->result_type();
+        // a borrow of a number is a number once it is read. PointerAdjuster peels it later; asked
+        // here so `$i == 0` over a range element (`const usize&`) retypes the literal instead of
+        // reaching codegen as i64 vs i32. a `ptr<T>` is nullable and is an address, not a width -
+        // leave it, so `$p + n` and `$p:$ + n` stay pointer arithmetic
+        const auto operand_type = [](const ExprNode &expr) {
+            const ValueType raw = expr.result_type();
+
+            if (raw.is_pointer() && !raw.is_nullable()) {
+                return value_type_of(raw);
+            }
+
+            return raw;
+        };
+
+        const ValueType left = operand_type(*lhs);
+        const ValueType right = operand_type(*rhs);
 
         const bool left_defers = is_untyped_literal(lhs);
         const bool right_defers = is_untyped_literal(rhs);
@@ -547,6 +561,13 @@ namespace AST
             out.warning = typing.warning;
             out.warned_operand = typing.node;
 
+            return out;
+        }
+
+        // converting an address to an integer is pointer arithmetic's opposite, and a cast of
+        // `const usize&` to `int32` would do that. a literal beside a borrow is retyped above;
+        // two typed integers where one is still a borrow wait for PointerAdjuster
+        if (loser->result_type().is_pointer()) {
             return out;
         }
 

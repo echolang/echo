@@ -1,8 +1,75 @@
 #include "AST/ASTModuleEmbedder.h"
-
-#include <fstream>
-#include <fmt/format.h>
 #include "AST/ASTModule.h"
+
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <stdexcept>
+#include <string>
+
+#include <fmt/format.h>
+
+namespace
+{
+
+// `path.generic_string()` is not enough: on POSIX a string built with backslashes
+// is one filename, and the Windows release path is native `\` against a CMake
+// STDLIB_SOURCE_DIR that uses `/`. one spelling, so the prefix match cannot miss
+std::string with_forward_slashes(std::string path)
+{
+    for (char &c : path) {
+        if (c == '\\') {
+            c = '/';
+        }
+    }
+    return path;
+}
+
+std::string as_c_string_literal(const std::string &value)
+{
+    std::string out = "\"";
+    for (unsigned char c : value) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            default:
+                out += static_cast<char>(c);
+                break;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+};
+
+std::string AST::embedded_source_path(const std::filesystem::path &path)
+{
+    std::string file_path = with_forward_slashes(path.generic_string());
+    std::string stdlib_root = with_forward_slashes(
+        std::filesystem::path(STDLIB_SOURCE_DIR).generic_string());
+
+    // drop a trailing slash so the remainder keeps its leading one, matching the
+    // existing `stdlib:/core/...` spelling
+    while (!stdlib_root.empty() && stdlib_root.back() == '/') {
+        stdlib_root.pop_back();
+    }
+
+    if (file_path.size() >= stdlib_root.size()
+        && file_path.compare(0, stdlib_root.size(), stdlib_root) == 0
+        && (file_path.size() == stdlib_root.size() || file_path[stdlib_root.size()] == '/')) {
+        file_path = "stdlib:" + file_path.substr(stdlib_root.size());
+    }
+
+    return file_path;
+}
 
 void AST::write_embedded_module(AST::Module &module, const std::string &output_path)
 {
@@ -23,16 +90,9 @@ void AST::write_embedded_module(AST::Module &module, const std::string &output_p
     for (auto &file : module.files()) {
         file_index++;
         std::string filevar = fmt::format("file_{}", file_index);
+        std::string file_path = embedded_source_path(file.get_path());
 
-        // this is not really clean, but it works for now
-        // we can take the "STDLIB_SOURCE_DIR" define to determine the relative path
-        // of the full file path if it begins with it
-        std::string file_path = file.get_path().string();
-        if (file_path.find(STDLIB_SOURCE_DIR) == 0) {
-            file_path = "stdlib:" + file_path.substr(strlen(STDLIB_SOURCE_DIR));
-        }
-
-        output << fmt::format("    auto &{} = module.add_file(\"{}\");\n", filevar, file_path);
+        output << fmt::format("    auto &{} = module.add_file({});\n", filevar, as_c_string_literal(file_path));
 
         output << fmt::format("    static const unsigned char {}_data[] = {{\n", filevar);
         output << "        ";
