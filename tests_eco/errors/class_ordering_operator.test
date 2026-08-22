@@ -5,13 +5,13 @@
 expect: fail
 
 --- OUT --->
-[error] class_ordering_operator.eco:7:17
+[error] NoMatchingOverload  class_ordering_operator.eco:7:17
 
   operator '<' is not supported on operands of type 'Res' and 'Res'
 
   6 | $b = Res(2);
   7 | bool $less = $a < $b;
-    :                 ^
+    :                 ^^^^^
   8 | 
 
 1 error, nothing was compiled.

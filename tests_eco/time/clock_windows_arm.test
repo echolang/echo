@@ -1,0 +1,7 @@
+flags: --target-os windows
+
+--- OUT --->
+--- IR --->
+CHECK: declare void @Sleep(
+CHECK: declare i32 @QueryPerformanceCounter(
+CHECK: declare void @GetSystemTimePreciseAsFileTime(

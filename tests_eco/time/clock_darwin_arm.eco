@@ -1,0 +1,10 @@
+// the Darwin twin of clock_linux_arm. CLOCK_MONOTONIC is 6 in the macOS SDK; the call
+// with `i32 6` is instant::now(). pin_clocks is not reached: a Linux host never has to
+// resolve Darwin's clock_gettime.
+use std::time;
+
+function pin_clocks() : void
+{
+    time::instant $i = time::instant::now();
+    time::timestamp $t = time::timestamp::now();
+}

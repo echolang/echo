@@ -37,10 +37,11 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ChangesEnvironment=yes
 UninstallDisplayName={#AppName} {#AppVersion}
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 SetupLogging=yes
+UsePreviousAppDir=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

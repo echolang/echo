@@ -1,0 +1,7 @@
+flags: --target-os darwin
+
+--- OUT --->
+--- IR --->
+CHECK: declare i32 @nanosleep(
+CHECK: call i32 @clock_gettime(i32 6,
+CHECK: declare i32 @clock_gettime(

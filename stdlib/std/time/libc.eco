@@ -1,0 +1,127 @@
+/**
+ * Platform clock and sleep bindings.
+ *
+ * POSIX is `clock_gettime` / `nanosleep` with a `timespec` that is also this module's duration
+ * split, so a clock read and a sleep take the same two words with no conversion. Windows has
+ * neither call; the shims below keep those two names so instant.eco, timestamp.eco and sleep.eco
+ * never write a platform conditional.
+ *
+ * `CLOCK_MONOTONIC` rather than `_RAW` on both Unixes: NTP may slew it, it never steps, and that
+ * is the clock Go and Rust hand you for measuring. Darwin's value is 6; everyone else uses 1,
+ * which is the linux uapi and the id the Windows QPC shim keys on.
+ *
+ * A C symbol may only be declared once per module, so they live here. `internal`: the rest of
+ * `std::time` names them, a consumer does not.
+ */
+
+namespace std::time;
+
+/**
+ * C's `struct timespec` on every Unix we build for: two 64-bit fields, `time_t` then `long`.
+ * Windows has no such type; the shims still write one, as a plain Echo struct of the same shape.
+ *
+ * libc *writes* into it, so both fields are declared exactly. A binding that only read could
+ * leave the tail off; this one cannot.
+ */
+internal struct timespec
+{
+    int64 $sec;
+    int64 $nsec;
+}
+
+#[if: os != windows]
+internal extern {
+    function clock_gettime as c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32;
+    function nanosleep as c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32;
+}
+#[end]
+
+internal const int32 CLOCK_REALTIME = 0;
+
+#[if: os == darwin]
+internal const int32 CLOCK_MONOTONIC = 6;
+#[else]
+internal const int32 CLOCK_MONOTONIC = 1;
+#[end]
+
+#[if: os == windows]
+internal extern {
+    function QueryPerformanceCounter as c_QueryPerformanceCounter(ptr<int64> $count) : int32;
+    function QueryPerformanceFrequency as c_QueryPerformanceFrequency(ptr<int64> $freq) : int32;
+    function GetSystemTimePreciseAsFileTime as c_GetSystemTimePreciseAsFileTime(ptr<uint64> $time) : void;
+    function Sleep as c_Sleep(uint32 $ms) : void;
+}
+
+internal const int64 FILETIME_EPOCH_DELTA_SECS = 11644473600;
+internal const int64 FILETIME_TICKS_PER_SEC = 10000000;
+internal const int64 FILETIME_NANOS_PER_TICK = 100;
+internal const int64 SLEEP_CHUNK_MS = 4000000000;
+
+private function read_qpf() : int64
+{
+    int64 $f = 0;
+    c_QueryPerformanceFrequency(&$f);
+
+    if ($f == 0) {
+        die('QueryPerformanceFrequency returned 0');
+    }
+
+    return $f;
+}
+
+// QPF is boot-constant. The static is lazy, once, and thread-safe: the language rule, not
+// a comment. A dummy field so the type has a constructor; nothing constructs one.
+private struct qpc
+{
+    int32 $pad;
+
+    static int64 $freq = read_qpf();
+}
+
+internal function c_clock_gettime(int32 $clock, ptr<timespec> $ts) : int32
+{
+    if ($clock == CLOCK_MONOTONIC) {
+        int64 $count = 0;
+        c_QueryPerformanceCounter(&$count);
+
+        int64 $f = qpc::$freq;
+        $ts->sec = $count / $f;
+        $ts->nsec = (($count % $f) * NANOS_PER_SEC) / $f;
+        return 0;
+    }
+
+    uint64 $ticks = 0;
+    c_GetSystemTimePreciseAsFileTime(&$ticks);
+
+    uint64 $per_sec = FILETIME_TICKS_PER_SEC as uint64;
+    int64 $secs_1601 = ($ticks / $per_sec) as int64;
+    int64 $subsec = ($ticks % $per_sec) as int64;
+    $ts->sec = $secs_1601 - FILETIME_EPOCH_DELTA_SECS;
+    $ts->nsec = $subsec * FILETIME_NANOS_PER_TICK;
+    return 0;
+}
+
+internal function c_nanosleep(ptr<timespec> $req, ptr<timespec> $rem) : int32
+{
+    int64 $ms = $req->sec * MILLIS_PER_SEC + ($req->nsec + NANOS_PER_MILLI - 1) / NANOS_PER_MILLI;
+
+    if ($ms < 0) {
+        $ms = 0;
+    }
+
+    while ($ms > 0) {
+        int64 $chunk = $ms;
+
+        if ($chunk > SLEEP_CHUNK_MS) {
+            $chunk = SLEEP_CHUNK_MS;
+        }
+
+        c_Sleep($chunk as uint32);
+        $ms = $ms - $chunk;
+    }
+
+    $rem->sec = 0;
+    $rem->nsec = 0;
+    return 0;
+}
+#[end]

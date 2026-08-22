@@ -221,11 +221,47 @@ if (-not (Test-Path -LiteralPath $setup)) {
 
 Write-Host "smoke test the setup wizard"
 $setupDir = Join-Path $env:RUNNER_TEMP "echo-setup-smoke"
-Invoke-Checked -What "silent setup" -Block {
-    & $setup /VERYSILENT /NORESTART "/DIR=$setupDir"
+$setupLog = Join-Path $env:RUNNER_TEMP "echo-setup-smoke.log"
+$installed = Join-Path $setupDir "bin\echoc.exe"
+
+# Inno's Setup.exe is a GUI subsystem binary. `&` in PowerShell does not wait
+# for those, so LASTEXITCODE was still ISCC's 0 and the next line looked for
+# echoc 136ms later. Start-Process -Wait is the wait; the poll is in case the
+# stub returns before the inner installer has finished copying the sysroot
+$proc = Start-Process -FilePath $setup -ArgumentList @(
+    "/VERYSILENT",
+    "/NORESTART",
+    "/SUPPRESSMSGBOXES",
+    "/CURRENTUSER",
+    "/DIR=$setupDir",
+    "/LOG=$setupLog"
+) -Wait -PassThru
+if ($null -eq $proc.ExitCode -or $proc.ExitCode -ne 0) {
+    if (Test-Path -LiteralPath $setupLog) { Get-Content -LiteralPath $setupLog }
+    Write-Error "silent setup exited $($proc.ExitCode)"
+    exit 1
 }
+
+$deadline = (Get-Date).AddMinutes(15)
+while (-not (Test-Path -LiteralPath $installed)) {
+    if ((Get-Date) -gt $deadline) {
+        if (Test-Path -LiteralPath $setupLog) { Get-Content -LiteralPath $setupLog }
+        if (Test-Path -LiteralPath $setupDir) {
+            Get-ChildItem -LiteralPath $setupDir -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 80 -ExpandProperty FullName
+        }
+        $fallback = Join-Path $env:LOCALAPPDATA "echo\bin\echoc.exe"
+        if (Test-Path -LiteralPath $fallback) {
+            Write-Error "silent setup wrote $fallback instead of $installed (/DIR was ignored)"
+        } else {
+            Write-Error "silent setup did not write $installed"
+        }
+        exit 1
+    }
+    Start-Sleep -Seconds 2
+}
+
 Invoke-WithCleanPath -BinDir (Join-Path $setupDir "bin") -Block {
-    $installed = Join-Path $setupDir "bin\echoc.exe"
     $reported = ((& $installed --version) | Out-String).Trim()
     if ($reported -ne $env:VERSION) {
         Write-Error "setup-installed echoc reports '$reported', expected '$env:VERSION'."

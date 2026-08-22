@@ -26,6 +26,7 @@
 #[sources: "std/env/*.eco"]
 #[sources: "std/io/*.eco"]
 #[sources: "std/thread/*.eco"]
+#[sources: "std/time/*.eco"]
 
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
 // `runtime: process` is the JIT half: there is no loadable `libpthread.so` on

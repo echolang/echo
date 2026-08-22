@@ -1,0 +1,120 @@
+/**
+ * A moment on the wall clock: a signed duration since 1970-01-01T00:00:00Z.
+ *
+ * No calendar, no timezone, no `str::from`. Human rendering is a later layer; a bare-number
+ * format of this type would be kept forever, so there is none. `timestamp::now()` is
+ * `clock_gettime(CLOCK_REALTIME)` (GetSystemTimePreciseAsFileTime on Windows).
+ */
+
+namespace std::time;
+
+public struct timestamp
+{
+    internal const duration $raw;
+
+    public static function now() : timestamp
+    {
+        timespec $ts = timespec(0, 0);
+        c_clock_gettime(CLOCK_REALTIME, &$ts);
+        return timestamp(duration($ts->sec, $ts->nsec));
+    }
+
+    #[inline]
+    public static function from_unix_secs(int64 $secs) : timestamp
+    {
+        return timestamp(duration::secs($secs));
+    }
+
+    #[inline]
+    public static function from_unix_millis(int64 $millis) : timestamp
+    {
+        return timestamp(duration::millis($millis));
+    }
+
+    #[inline]
+    const function since_epoch() : duration
+    {
+        return $this->raw;
+    }
+
+    /**
+     * Whole Unix seconds, rounding toward negative infinity. Pre-1970 rounds down.
+     */
+    #[inline]
+    const function unix_secs() : int64
+    {
+        return $this->raw->as_secs();
+    }
+
+    #[inline]
+    const function unix_millis() : int64
+    {
+        return $this->raw->as_millis();
+    }
+
+    /**
+     * Whole Unix nanoseconds. Wraps in 2262.
+     */
+    #[inline]
+    const function unix_nanos() : int64
+    {
+        return $this->raw->as_nanos();
+    }
+}
+
+operator (timestamp $a) - (timestamp $b) : duration
+{
+    return $a->raw - $b->raw;
+}
+
+operator (timestamp $a) + (duration $d) : timestamp
+{
+    return timestamp($a->raw + $d);
+}
+
+operator (timestamp $a) - (duration $d) : timestamp
+{
+    return timestamp($a->raw - $d);
+}
+
+operator (timestamp $a) == (timestamp $b) : bool
+{
+    return $a->raw == $b->raw;
+}
+
+operator (timestamp $a) != (timestamp $b) : bool
+{
+    if ($a == $b) {
+        return false;
+    }
+
+    return true;
+}
+
+operator (timestamp $a) < (timestamp $b) : bool
+{
+    return $a->raw < $b->raw;
+}
+
+operator (timestamp $a) > (timestamp $b) : bool
+{
+    return $b < $a;
+}
+
+operator (timestamp $a) <= (timestamp $b) : bool
+{
+    if ($a < $b) {
+        return true;
+    }
+
+    return $a == $b;
+}
+
+operator (timestamp $a) >= (timestamp $b) : bool
+{
+    if ($b < $a) {
+        return true;
+    }
+
+    return $a == $b;
+}

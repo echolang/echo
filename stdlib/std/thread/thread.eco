@@ -121,23 +121,20 @@ public function yield() : void
 }
 
 /**
- * Sleeps `$ms` milliseconds, chopped into pieces of at most 500 so a long sleep
- * is still interruptible by the platform's usleep limit.
+ * Sleeps `$ms` milliseconds. The same call as `std::time::sleep`, in milliseconds.
+ *
+ * `$ms as int64` wraps if `$ms` is above int64's maximum. That is a sleep of 292 million
+ * years; saturate rather than becoming a negative duration and a no-op.
  */
 public function sleep(usize $ms) : void
 {
-    usize $left = $ms;
+    int64 $n = std::math::MAX_INT64;
 
-    while ($left > 0) {
-        usize $chunk = $left;
-
-        if ($chunk > 500) {
-            $chunk = 500;
-        }
-
-        c_usleep(($chunk * 1000) as uint32);
-        $left = $left - $chunk;
+    if ($ms <= std::math::MAX_INT64 as usize) {
+        $n = $ms as int64;
     }
+
+    std::time::sleep(std::time::duration::millis($n));
 }
 
 /**

@@ -4,6 +4,9 @@ expect: fail
 [error] NoMatchingOverload  operator_no_match.eco:11:9
 
   No overload of 'operator +' accepts these arguments. Candidates are:
+    operator +(std::time::duration, std::time::duration)
+    operator +(std::time::instant, std::time::duration)
+    operator +(std::time::timestamp, std::time::duration)
     operator +(A, A)
     operator +(A, int32)
 

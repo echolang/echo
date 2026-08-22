@@ -1,0 +1,10 @@
+// the Linux arm of `std::time`, lowered on whatever machine runs the suite. CLOCK_MONOTONIC
+// is 1 in the linux uapi; the call with `i32 1` is instant::now(). pin_clocks is not reached:
+// a Darwin host never has to resolve Linux's clock_gettime.
+use std::time;
+
+function pin_clocks() : void
+{
+    time::instant $i = time::instant::now();
+    time::timestamp $t = time::timestamp::now();
+}

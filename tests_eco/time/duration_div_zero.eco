@@ -1,0 +1,4 @@
+// integer division of a duration by zero is a located stop, not a poison sdiv
+use std::time;
+
+echo (time::duration::secs(1) / 0)->as_millis();

@@ -1,0 +1,6 @@
+// `$secs` and `$nanos` are internal const: a consumer cannot name them, so they cannot
+// break the timespec invariant by writing a wild `$nanos`
+use std::time;
+
+time::duration $d = time::duration::secs(1);
+echo $d->nanos;

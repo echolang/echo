@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] InaccessibleDeclaration  duration_fields_hidden.eco:6:10
+
+  'std::time::duration::nanos' is internal to the module 'stdlib', so the module 'main' cannot name it. Write 'public' on the declaration to make it part of what 'stdlib' offers.
+
+  5 | time::duration $d = time::duration::secs(1);
+  6 | echo $d->nanos;
+    :          ^^^^^
+  7 | 
+
+1 error, nothing was compiled.

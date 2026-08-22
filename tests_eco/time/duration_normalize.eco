@@ -1,0 +1,10 @@
+// the constructor carries and borrows so `$nanos` lands in [0, 999999999]
+use std::time;
+
+time::duration $up = time::duration(0, 1500000000);
+echo $up->as_secs();
+echo $up->subsec_nanos();
+
+time::duration $down = time::duration(1, -1500000000);
+echo $down->as_secs();
+echo $down->subsec_nanos();

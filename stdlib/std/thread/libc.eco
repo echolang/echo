@@ -39,7 +39,6 @@ internal extern {
     function pthread_cond_broadcast as c_pthread_cond_broadcast(ptr<uint8> $cond) : int32;
 
     function sched_yield as c_sched_yield() : int32;
-    function usleep as c_usleep(uint32 $usec) : int32;
     function sysconf as c_sysconf(int32 $name) : int64;
 }
 #[end]
@@ -59,7 +58,6 @@ internal extern {
     function CloseHandle as c_CloseHandle(ptr<uint8> $handle) : int32;
     function GetCurrentThreadId as c_GetCurrentThreadId() : uint32;
     function SwitchToThread as c_SwitchToThread() : int32;
-    function Sleep as c_Sleep(uint32 $ms) : void;
     function GetActiveProcessorCount as c_GetActiveProcessorCount(uint16 $group) : uint32;
 
     function InitializeSRWLock as c_InitializeSRWLock(ptr<uint8> $lock) : void;
@@ -197,18 +195,6 @@ internal function c_pthread_cond_broadcast(ptr<uint8> $cond) : int32
 internal function c_sched_yield() : int32
 {
     c_SwitchToThread();
-    return 0;
-}
-
-internal function c_usleep(uint32 $usec) : int32
-{
-    uint32 $ms = ($usec + 999) / 1000;
-
-    if ($ms == 0 && $usec > 0) {
-        $ms = 1;
-    }
-
-    c_Sleep($ms);
     return 0;
 }
 
