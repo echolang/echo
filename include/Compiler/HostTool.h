@@ -52,13 +52,16 @@ namespace Compiler
     // not been bundled
     std::filesystem::path windows_sysroot();
 
-    // `-isystem` for every directory under sysroot/include. no-op when
-    // there is no sysroot, so a developer build still uses the VS that
-    // clang finds on its own
+    // `-fms-runtime-lib=static` so a `#[cc:]` object matches the libcmt
+    // Backend always links, then `-isystem` for every directory under
+    // sysroot/include. the CRT flag is independent of the bundle; the
+    // includes no-op when there is no sysroot, so a developer build still
+    // uses the VS that clang finds on its own
     void append_windows_sysroot_cc_args(std::vector<std::string> &argv);
 
-    // `-fuse-ld=lld` and `-Lsysroot/lib` so the clang fallback and a
-    // `#[cc:]` shared library hit the bundled linker and CRT, not PATH
+    // `-fuse-ld=lld`, static CRT, and `-Lsysroot/lib` so the clang fallback
+    // and a `#[cc:]` shared library hit the bundled linker and libcmt, not
+    // PATH's DLL CRT
     void append_windows_sysroot_link_args(std::vector<std::string> &argv);
 
     // the same spawn, capturing merged stdout+stderr instead of inheriting them.

@@ -365,6 +365,13 @@ void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
 #if !defined(_WIN32)
     (void)argv;
 #else
+    // Backend::host_linker_command always `/defaultlib:libcmt`. clang's
+    // default on Windows is the DLL CRT, which is how a `#[cc:]` object
+    // (or a static libcurl built /MD) pulled ucrt.lib in next to libucrt
+    // and duplicate-symbol'd malloc. asked even when there is no sysroot,
+    // because the CRT choice is the linker's, not the bundle's
+    argv.push_back("-fms-runtime-lib=static");
+
     const std::filesystem::path sysroot = windows_sysroot();
     if (sysroot.empty()) {
         return;
@@ -397,6 +404,7 @@ void Compiler::append_windows_sysroot_link_args(std::vector<std::string> &argv)
     (void)argv;
 #else
     argv.push_back("-fuse-ld=lld");
+    argv.push_back("-fms-runtime-lib=static");
     const std::filesystem::path sysroot = windows_sysroot();
     if (sysroot.empty()) {
         return;

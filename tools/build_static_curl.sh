@@ -103,9 +103,14 @@ case "${os}" in
         fetch "${CURL_URL}" "${src}/curl.tar.xz" "${CURL_SHA}"
         mkdir -p "${src}/curl"
         tar -xJf "${src}/curl.tar.xz" -C "${src}/curl" --strip-components=1
+        # MultiThreaded is libcmt, the CRT echoc's Windows link line always
+        # names. CMake defaults to /MD; that archive then pulls ucrt.lib in
+        # next to libucrt and lld-link duplicate-symbols malloc
         cmake -S "${src}/curl" -B "${src}/curl-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${prefix}" \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_CURL_EXE=OFF \
             -DCURL_USE_SCHANNEL=ON \
