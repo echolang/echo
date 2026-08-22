@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -98,3 +99,10 @@ TEST_CASE("quote_windows_arg follows CommandLineToArgvW", "[subprocess]")
     REQUIRE(Compiler::quote_windows_arg("say \"hi\"") == "\"say \\\"hi\\\"\"");
 }
 #endif
+
+TEST_CASE("process_directory is the running executable's folder", "[subprocess]")
+{
+    const std::filesystem::path dir = Compiler::process_directory();
+    REQUIRE_FALSE(dir.empty());
+    REQUIRE(std::filesystem::is_directory(dir));
+}

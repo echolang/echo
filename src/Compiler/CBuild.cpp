@@ -124,6 +124,8 @@ bool c_spec_digest(
     digest = Compiler::fnv1a64(
         options.emitting_debug_info() ? std::string("g") : std::string("nog"), digest);
 
+    digest = Compiler::fnv1a64(Compiler::windows_sysroot().string(), digest);
+
     for (const std::filesystem::path &include : spec.includes) {
         digest = Compiler::fnv1a64(include.string(), digest);
     }
@@ -524,6 +526,8 @@ bool Compiler::build_c_sources(
             argv.push_back("-fPIC");
         }
 
+        Compiler::append_windows_sysroot_cc_args(argv);
+
         argv.push_back("-o");
         argv.push_back(object.string());
         argv.push_back(source.string());
@@ -604,6 +608,7 @@ bool Compiler::build_c_shared_library(
     // considerably fussier than an executable's, and this path is not the one Backend::link_executable's
     // fast path exists to speed up - it runs once per module per change, not once per build
     std::vector<std::string> argv = { "clang", "-shared", "-o", out_library.string() };
+    Compiler::append_windows_sysroot_link_args(argv);
 
     for (const std::filesystem::path &object : objects) {
         argv.push_back(object.string());

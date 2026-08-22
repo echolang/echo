@@ -1,6 +1,7 @@
 /*
- * The C symbols in c/shim.c. One block, declared once - a C symbol may only
- * appear once per module. Everything else in epm::sys calls these.
+ * The C symbols in c/{common,posix,win32}.c. One block, declared once - a C
+ * symbol may only appear once per module. Everything else in epm::sys calls
+ * these.
  */
 
 namespace epm::sys;

@@ -54,6 +54,28 @@ test is_absolute_is_a_leading_slash
     assert(!sys::is_absolute(''));
 }
 
+#[if: os == windows]
+test windows_paths_accept_a_drive_and_a_backslash
+{
+    assert(sys::is_absolute('C:/echo'));
+    assert(sys::is_absolute('C:\\echo'));
+    assert(!sys::is_absolute('echo'));
+    assert(sys::basename('C:\\echo\\bin\\echoc.exe') == 'echoc.exe');
+    assert(sys::dirname('C:\\echo\\bin\\echoc.exe') == 'C:\\echo\\bin');
+    assert(sys::dirname('C:\\echo') == 'C:\\');
+    assert(sys::join('C:\\echo', 'bin') == 'C:\\echo\\bin');
+}
+
+test host_exe_is_the_platform_binary_name
+{
+#[if: os == windows]
+    assert(sys::host_exe('echoc') == 'echoc.exe');
+#[else]
+    assert(sys::host_exe('echoc') == 'echoc');
+#[end]
+}
+#[end]
+
 test a_package_name_may_have_a_vendor_prefix
 {
     assert(manifest::usable_name('libcurl'));

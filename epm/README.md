@@ -4,7 +4,7 @@ A package manager for Echo. It resolves, fetches and vendors. It never compiles
 anything. It writes a `module.eco` only as a whole new file (`epm init`) or as
 the one `#[requires:]` line `epm add` was asked for.
 
-A released `epm` arrives next to `echoc` from the install one-liner. This tree
+A released `epm` arrives next to `echoc` from the installer. This tree
 is the bootstrap: path-depends on `../../echolibs/libjson` and
 `../../echolibs/libcurl`, compiled by this tree's `echoc`.
 

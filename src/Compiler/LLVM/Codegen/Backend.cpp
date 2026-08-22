@@ -429,6 +429,75 @@ std::optional<std::vector<std::string>> host_linker_command(
     command.insert(command.end(), link_words.begin(), link_words.end());
 
     return command;
+#elif defined(_WIN32)
+    // lld-link is the Windows spelling of the Apple `ld` path: a linker we
+    // can invoke without the clang driver. It cannot find the CRT on its
+    // own, so we only take this path when a bundled sysroot is sitting
+    // next to echoc or the environment already has LIB (vcvars / CI).
+    // Otherwise the clang driver is the one that knows how to find VS.
+    const std::filesystem::path sysroot = Compiler::windows_sysroot();
+    const char *libenv = std::getenv("LIB");
+    if (sysroot.empty() && (libenv == nullptr || *libenv == '\0')) {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> command = {
+        "lld-link",
+        "/nologo",
+        "/subsystem:console",
+        "/out:" + executable_name,
+    };
+
+    if (!sysroot.empty()) {
+        command.push_back("/libpath:" + (sysroot / "lib").string());
+    }
+
+    // Echo objects have no /DEFAULTLIB comments. These are the CRT and
+    // Win32 libs a console program needs; lld-link finds them on LIB or
+    // the sysroot libpath above.
+    command.push_back("/defaultlib:libcmt");
+    command.push_back("/defaultlib:libucrt");
+    command.push_back("/defaultlib:libvcruntime");
+    command.push_back("/defaultlib:oldnames");
+    command.push_back("/defaultlib:kernel32");
+    command.push_back("/defaultlib:user32");
+    command.push_back("/defaultlib:advapi32");
+    command.push_back("/defaultlib:shell32");
+    command.push_back("/defaultlib:ws2_32");
+
+    append_objects(command, objects);
+    append_objects(command, link_objects);
+
+    for (size_t i = 0; i < link_words.size(); i++) {
+        const std::string &word = link_words[i];
+
+        if (word == "-framework") {
+            if (i + 1 < link_words.size()) {
+                i++;
+            }
+            continue;
+        }
+
+        if (word.rfind("-L", 0) == 0) {
+            command.push_back("/libpath:" + word.substr(2));
+            continue;
+        }
+
+        if (word.rfind("-l", 0) == 0) {
+            const std::string name = word.substr(2);
+            // libm is a Unix split. UCRT already has the math symbols, and
+            // lld-link looking for m.lib is a missing-library error
+            if (name == "m") {
+                continue;
+            }
+            command.push_back(name + ".lib");
+            continue;
+        }
+
+        command.push_back(word);
+    }
+
+    return command;
 #else
     (void)executable_name;
     (void)objects;
@@ -539,6 +608,7 @@ bool Backend::link_executable(
     }
 
     std::vector<std::string> fallback = { "clang", "-o", output };
+    Compiler::append_windows_sysroot_link_args(fallback);
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     fallback.insert(fallback.end(), link_words.begin(), link_words.end());

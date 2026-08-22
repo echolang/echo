@@ -41,6 +41,26 @@ namespace Compiler
     // on PATH (llvm-mingw) cannot link the MSVC objects we emit. empty if none
     std::string host_clang();
 
+    // directory containing this process's executable. A released Windows
+    // echoc looks here (and one level up) for the bundled clang, lld-link
+    // and sysroot; a local `build/echoc` has none of those and falls through
+    std::filesystem::path process_directory();
+
+    // `{prefix}/sysroot` next to a released Windows echoc: `lib/` is the
+    // MSVC/UCRT import libraries, `include/` is the headers clang needs
+    // for `#[cc:]`. empty on Unix and on a local Windows build that has
+    // not been bundled
+    std::filesystem::path windows_sysroot();
+
+    // `-isystem` for every directory under sysroot/include. no-op when
+    // there is no sysroot, so a developer build still uses the VS that
+    // clang finds on its own
+    void append_windows_sysroot_cc_args(std::vector<std::string> &argv);
+
+    // `-fuse-ld=lld` and `-Lsysroot/lib` so the clang fallback and a
+    // `#[cc:]` shared library hit the bundled linker and CRT, not PATH
+    void append_windows_sysroot_link_args(std::vector<std::string> &argv);
+
     // the same spawn, capturing merged stdout+stderr instead of inheriting them.
     //
     // a test's output belongs under its own row, and a corpus case's golden is a byte comparison, so

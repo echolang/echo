@@ -2,6 +2,7 @@
 
 #include "Compiler/ProgressReporter.h"
 
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -47,6 +49,14 @@ namespace
 
     std::string resolve_program(const std::string &name)
     {
+        // a released Windows echoc ships clang and lld-link next to itself.
+        // look there before the baked build-machine path, which does not
+        // exist on a machine that only ran the installer
+        const std::string bundled = sibling_tool(Compiler::process_directory(), name);
+        if (!bundled.empty()) {
+            return bundled;
+        }
+
         // prefer the LLVM that built echoc. findProgramByName walks PATH, and
         // llvm-mingw's GNU-ABI clang is a common first hit on Windows
 #ifdef ECO_HOST_CLANG
@@ -299,6 +309,101 @@ namespace
 std::string Compiler::host_clang()
 {
     return resolve_program("clang");
+}
+
+std::filesystem::path Compiler::process_directory()
+{
+    static const std::filesystem::path dir = [] {
+#if defined(_WIN32)
+        std::wstring buf(32768, L'\0');
+        const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (n == 0 || n >= buf.size()) {
+            return std::filesystem::current_path();
+        }
+        buf.resize(n);
+        return std::filesystem::path(buf).parent_path();
+#else
+        const std::string exe = llvm::sys::fs::getMainExecutable(
+            "echoc", reinterpret_cast<void *>(&Compiler::process_directory));
+        if (exe.empty()) {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path(exe).parent_path();
+#endif
+    }();
+
+    return dir;
+}
+
+std::filesystem::path Compiler::windows_sysroot()
+{
+#if !defined(_WIN32)
+    return {};
+#else
+    static const std::filesystem::path root = [] {
+        std::error_code ec;
+        const std::filesystem::path dir = Compiler::process_directory();
+        const std::filesystem::path candidates[] = {
+            dir / "sysroot",
+            dir.parent_path() / "sysroot",
+        };
+
+        for (const std::filesystem::path &candidate : candidates) {
+            if (std::filesystem::is_directory(candidate / "lib", ec)) {
+                return candidate;
+            }
+        }
+
+        return std::filesystem::path();
+    }();
+
+    return root;
+#endif
+}
+
+void Compiler::append_windows_sysroot_cc_args(std::vector<std::string> &argv)
+{
+#if !defined(_WIN32)
+    (void)argv;
+#else
+    const std::filesystem::path sysroot = windows_sysroot();
+    if (sysroot.empty()) {
+        return;
+    }
+
+    const std::filesystem::path include = sysroot / "include";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(include, ec)) {
+        return;
+    }
+
+    std::vector<std::filesystem::path> dirs = { include };
+    for (const auto &entry : std::filesystem::directory_iterator(include, ec)) {
+        if (entry.is_directory(ec)) {
+            dirs.push_back(entry.path());
+        }
+    }
+
+    std::sort(dirs.begin(), dirs.end());
+    for (const std::filesystem::path &dir : dirs) {
+        argv.push_back("-isystem");
+        argv.push_back(dir.string());
+    }
+#endif
+}
+
+void Compiler::append_windows_sysroot_link_args(std::vector<std::string> &argv)
+{
+#if !defined(_WIN32)
+    (void)argv;
+#else
+    argv.push_back("-fuse-ld=lld");
+    const std::filesystem::path sysroot = windows_sysroot();
+    if (sysroot.empty()) {
+        return;
+    }
+    argv.push_back("-L" + (sysroot / "lib").string());
+#endif
 }
 
 int Compiler::run_wait(const std::string &program, const std::vector<std::string> &argv)

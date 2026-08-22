@@ -10,10 +10,18 @@ Echo won't run PHP right now, nor in the future. Echo is fundamentally different
 
 ## Installation
 
+macOS / Linux:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/echolang/echo/master/install.sh | bash
 ```
 
-`echoc run hello.eco` to jit stuff.
+Windows (PowerShell):
 
-Compiling to a native `echoc build` needs `clang` on your `PATH`; on macOS that means the Xcode command line tools (`xcode-select --install`).
+```powershell
+irm https://raw.githubusercontent.com/echolang/echo/master/install.ps1 | iex
+```
+
+Or download `echo-windows-x86_64-setup.exe` from the [latest release](https://github.com/echolang/echo/releases/latest) and run the wizard. The zip is there if you want to unpack it yourself.
+
+`echoc run hello.eco` to jit. `echoc build hello.eco` emits a native binary. On macOS that needs the Xcode command line tools (`xcode-select --install`). On Windows the installer already ships clang, lld-link and a sysroot; no separate LLVM install.

@@ -59,6 +59,68 @@ case "$(uname -s)" in
         fi
         ;;
 
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+        # imports, not paths: the loader looks next to the exe, then System32. A DLL we ship
+        # beside the binary is the Windows spelling of "the binary carries it". VCRUNTIME /
+        # MSVCP live in System32 on this runner and on almost no clean machine, so they are
+        # refused even when present - that is the static CRT not taking.
+        if command -v llvm-readobj >/dev/null 2>&1; then
+            deps="$(llvm-readobj --coff-imports "${binary}" | sed -n 's/^  Name: //p')"
+        else
+            echo "check_release_deps: llvm-readobj is required on Windows" >&2
+            exit 2
+        fi
+
+        bindir="$(cd "$(dirname "${binary}")" && pwd)"
+        sys32=""
+        if [ -n "${WINDIR:-}" ]; then
+            sys32="${WINDIR}/System32"
+        elif [ -d /c/Windows/System32 ]; then
+            sys32="/c/Windows/System32"
+        fi
+
+        extra=""
+        for name in "$@"; do
+            extra="${extra} ${name}.dll ${name}.DLL"
+        done
+
+        escaped=""
+        while IFS= read -r dll; do
+            [ -z "${dll}" ] && continue
+            lower="$(printf '%s' "${dll}" | tr '[:upper:]' '[:lower:]')"
+            case "${lower}" in
+                vcruntime*.dll|msvcp*.dll|msvcr*.dll|concrt*.dll)
+                    escaped="${escaped}"$'\n'"${dll}"
+                    continue
+                    ;;
+            esac
+
+            listed=0
+            for name in ${extra}; do
+                extra_lower="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
+                if [ "${lower}" = "${extra_lower}" ]; then
+                    listed=1
+                    break
+                fi
+            done
+            if [ "${listed}" -eq 1 ]; then
+                continue
+            fi
+
+            if [ -f "${bindir}/${dll}" ]; then
+                continue
+            fi
+
+            if [ -n "${sys32}" ] && [ -f "${sys32}/${dll}" ]; then
+                continue
+            fi
+
+            escaped="${escaped}"$'\n'"${dll}"
+        done <<EOF
+${deps}
+EOF
+        ;;
+
     *)
         echo "check_release_deps: no rule for $(uname -s), not checking anything" >&2
         exit 2
