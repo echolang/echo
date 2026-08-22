@@ -13,6 +13,7 @@
 #include "AST/TypeNode.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
+#include "Parser/CaptureParser.h"
 #include "Parser/FuncDeclParser.h"
 #include "Parser/GuardParser.h"
 #include "Parser/ScopeParser.h"
@@ -310,7 +311,7 @@ AST::VarDeclNode *Parser::parse_varexpr(
     if (prev_vardecl == nullptr
         && found.decl != nullptr
         && found.crossed_function_boundary()
-        && payload.context.current_closure_ptr != nullptr)
+        && payload.context.current_closure() != nullptr)
     {
         captured_base = Parser::capture_variable(
             payload, found.decl, nametoken, found.boundaries_crossed);

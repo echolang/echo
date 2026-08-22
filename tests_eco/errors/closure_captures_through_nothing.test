@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] closure_captures_through_nothing.eco:8:60
+
+  '$n' cannot be captured through a closure that captures nothing (`function[]()`). Capture it in that closure, or pass it as an argument.
+
+  7 |     function<int32()> $f = function[]() : int32 {
+  8 |         function<int32()> $g = function() : int32 { return $n; };
+    :                                                            ^^
+  9 |         return $g();
+
+1 error, nothing was compiled.

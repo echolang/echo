@@ -1,0 +1,11 @@
+// `function[]()` captures nothing, said explicitly. a read of an enclosing local is refused
+
+function outer() : int32
+{
+    int32 $n = 5;
+    function<int32()> $f = function[]() : int32 { return $n; };
+
+    return $f();
+}
+
+echo outer();

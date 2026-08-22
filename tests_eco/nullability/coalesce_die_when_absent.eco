@@ -1,0 +1,5 @@
+// the other half of the diverging arm: when the optional is actually null, the program
+// stops with die's usual message. `coalesce_die_present` covers the arm being admitted
+int32? $n = null;
+echo $n ?? die('gone');
+echo 999;

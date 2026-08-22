@@ -543,6 +543,19 @@ namespace AST
         // reads them back off the environment parameter
         std::vector<ExprNode *> captured_values;
 
+        // one name in a written capture list. `mv` is the keyword when this entry is a move, so
+        // MoveExprNode can point at it; absent, the name is captured by copy
+        struct Capture
+        {
+            TokenReference name;
+            std::optional<TokenReference> mv;
+        };
+
+        // written between `function` and `(`. absent means implicit capture-by-copy of whatever
+        // the body reads. present means the set is closed: only these names, each copy or move as
+        // written. an empty list is `function[]()`
+        std::optional<std::vector<Capture>> capture_list;
+
         TokenReference token;
 
         ClosureExprNode(FunctionDeclNode *decl, TokenReference token) : decl(decl), token(token) {};
@@ -805,6 +818,9 @@ namespace AST
         //
         // unless the right side is *itself* nullable, in which case the answer still may be absent and the
         // type says so - `$a ?? $b` over two `int32?`s is an `int32?`, which chains
+        //
+        // a right side that never comes back (`die`, `exit`) is the other exception: it contributes no
+        // type, so the result is still the left's payload - `$n ?? die('gone')` is an `int32`
         ValueType result_type() const override;
 
         const std::string node_description() override;

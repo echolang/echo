@@ -54,11 +54,13 @@ namespace AST
     // shapes that would reach - `f(die())` - are ones AST::TypeChecker refuses on the argument's `void`
     // type first, so widening this would be answering for programs that do not exist
     //
-    // two readers, and they are the two halves of one rule: statement_exit_kind, so a bare `die('...')`
-    // ends its scope, and AST::MatchResolution, so an arm that dies contributes no type to the arms'
-    // unification. without the second, the only thing a `match` arm could do with a case whose payload is
-    // the wrong type was produce a value it has not got - which is what stopped an enum from answering
-    // `contract::unwrappable<V>::unwrap() : V&`
+    // three readers, and they are one rule: statement_exit_kind, so a bare `die('...')` ends its scope;
+    // AST::MatchResolution, so an arm that dies contributes no type to the arms' unification; and `??`,
+    // so a fallback that dies contributes no type and no incoming value to the join. without the second,
+    // the only thing a `match` arm could do with a case whose payload is the wrong type was produce a
+    // value it has not got - which is what stopped an enum from answering
+    // `contract::unwrappable<V>::unwrap() : V&`. without the third, `$n ?? die('gone')` popped an empty
+    // stack
     bool expression_never_returns(const ExprNode &expr);
 
     // **can control fall out of the bottom of this scope?** the scope-boundary question, and the one two of

@@ -1,0 +1,11 @@
+// a listed name without `mv` is a copy. the source is still live in the enclosing body
+
+function outer() : int32
+{
+    int32 $n = 5;
+    function<int32()> $f = function[$n]() : int32 { return $n; };
+
+    return $f() + $n;
+}
+
+echo outer();

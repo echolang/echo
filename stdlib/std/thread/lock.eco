@@ -35,7 +35,7 @@ public class mutex<T>
             die('could not initialize a mutex');
         }
 
-        $this->value = $value;
+        $this->value = mv $value;
     }
 
     destructor()
@@ -87,6 +87,75 @@ public struct locked<T>
     destructor()
     {
         c_pthread_mutex_unlock($this->impl);
+    }
+
+    // the mutex blob `condition::wait` hands to pthread. internal so a condition in this
+    // module can wait without making the pointer a public field
+    internal function mutex_impl() : ptr<uint8>
+    {
+        return $this->impl;
+    }
+}
+
+// Darwin's pthread_cond_t is 48 bytes, glibc's is 48. 128 matches MUTEX_BYTES so a
+// debug cond still fits, allocator-aligned
+internal const usize COND_BYTES = 128;
+
+/**
+ * A condition variable. Waiters sleep until `notify` or `notify_all`.
+ *
+ * `wait` takes the guard, not a bare mutex: the mutex pointer already lives on
+ * `locked<T>`. It releases and reacquires around the sleep. Calling it without
+ * holding is the same class of rule as reading `$held->value` after the guard
+ * dies - the type will not stop you.
+ *
+ * A wakeup is not a promise that the predicate is true. Loop on the condition,
+ * the way `channel` does.
+ */
+#[atomic]
+public class condition
+{
+    private ptr<uint8> $impl;
+
+    constructor()
+    {
+        $this->impl:$ = mem::alloc<uint8>(COND_BYTES);
+
+        if ($this->impl:$ == null) {
+            die('could not allocate a condition');
+        }
+
+        if (c_pthread_cond_init($this->impl, ptr<uint8>(null)) != 0) {
+            mem::free<uint8>($this->impl);
+            die('could not initialize a condition');
+        }
+    }
+
+    destructor()
+    {
+        c_pthread_cond_destroy($this->impl);
+        mem::free<uint8>($this->impl);
+    }
+
+    function wait<T>(locked<T>& $held) : void
+    {
+        if (c_pthread_cond_wait($this->impl, $held->mutex_impl()) != 0) {
+            die('could not wait on a condition');
+        }
+    }
+
+    function notify() : void
+    {
+        if (c_pthread_cond_signal($this->impl) != 0) {
+            die('could not notify a condition');
+        }
+    }
+
+    function notify_all() : void
+    {
+        if (c_pthread_cond_broadcast($this->impl) != 0) {
+            die('could not notify a condition');
+        }
     }
 }
 

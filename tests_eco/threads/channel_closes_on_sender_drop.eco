@@ -1,0 +1,14 @@
+// close() is the named form of last-sender-drop. recv drains what was sent, then null
+
+use std::thread;
+
+thread::channel<int32> $ch = thread::channel<int32>();
+$ch->tx->send(5);
+$ch->tx->close();
+
+int32 $v = guard $ch->rx->recv() else {
+    die('drained too soon');
+}
+
+echo $v;
+echo $ch->rx->recv() == null;

@@ -2021,7 +2021,9 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             if (node->environment_type != nullptr) {
                 for (size_t i = 0; i < node->captured_values.size(); i++) {
                     // a copy, not a move: capture-by-value leaves the original in the enclosing
-                    // frame. t_initialization would take the local, which is A27 §2's `mv` capture
+                    // frame. `mv $name` in a closed capture list wraps the place in a MoveExprNode,
+                    // which arrive_value consumes above and marks the source moved-from - so this
+                    // destination stays t_declaration and does not have to know about the list
                     node->captured_values[i] = resolve_value_arrival(
                         node->captured_values[i],
                         node->environment_type->get_property_type(i),

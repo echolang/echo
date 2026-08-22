@@ -1,0 +1,6 @@
+// capacity 0 is refused rather than becoming a surprise rendezvous
+
+use std::thread;
+
+thread::channel<int32> $ch = thread::channel<int32>(0);
+echo $ch->tx->send(1);

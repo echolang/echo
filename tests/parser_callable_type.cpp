@@ -11,6 +11,7 @@
 #include <AST/VarDeclNode.h>
 
 #include <algorithm>
+#include <vector>
 
 #include "helpers.h"
 
@@ -367,10 +368,10 @@ TEST_CASE("capturing a class is a retain", "[callable]")
     REQUIRE_FALSE(bundle->collector.has_critical_issues());
 }
 
-TEST_CASE("capturing through an enclosing closure is refused", "[callable]")
+TEST_CASE("capturing through an enclosing closure captures the outer environment", "[callable]")
 {
-    // the value has to be read where it lives, and that place is not reachable from the inner
-    // closure's creation site - so it is refused rather than read out of the wrong frame
+    // the inner creation site sits in the outer body, so the inner capture is a member access of
+    // the outer environment rather than a read of the original local
     auto bundle = EchoTests::tests_make_parsed_bundle(
         "function outer() : int32 {\n"
         "    int32 $n = 5;\n"
@@ -382,8 +383,127 @@ TEST_CASE("capturing through an enclosing closure is refused", "[callable]")
         "}\n"
         "echo outer();\n");
 
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    std::vector<ClosureExprNode *> closures;
+    for (auto *node : m.nodes.of_type<ClosureExprNode>()) {
+        closures.push_back(node);
+    }
+
+    REQUIRE(closures.size() >= 2);
+    ClosureExprNode *outer = closures.front();
+    ClosureExprNode *inner = closures.back();
+    REQUIRE(outer != inner);
+    REQUIRE(inner->captured_values.size() == 1);
+    REQUIRE(inner->environment_type != nullptr);
+    REQUIRE(inner->environment_type->has_property("$n"));
+    REQUIRE(outer->environment_type != nullptr);
+    REQUIRE(outer->environment_type->has_property("$n"));
+}
+
+TEST_CASE("an empty capture list refuses a read of an enclosing local", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    function<int32()> $f = function[]() : int32 { return $n; };\n"
+        "    return $f();\n"
+        "}\n"
+        "echo outer();\n");
+
     REQUIRE(bundle->collector.has_critical_issues());
-    REQUIRE(has_issue_containing(*bundle, "Capturing through a closure is not supported yet"));
+    REQUIRE(has_issue_containing(*bundle, "function[]()"));
+}
+
+TEST_CASE("capturing through a function[]() enclosing closure is refused", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    function<int32()> $f = function[]() : int32 {\n"
+        "        function<int32()> $g = function() : int32 { return $n; };\n"
+        "        return $g();\n"
+        "    };\n"
+        "    return $f();\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "through a closure that captures nothing"));
+}
+
+TEST_CASE("mv in the capture list records a moved capture", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    function<int32()> $f = function[mv $n]() : int32 { return $n; };\n"
+        "    return $f();\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    ClosureExprNode *closure = first_closure(m);
+    REQUIRE(closure != nullptr);
+    REQUIRE(closure->capture_list.has_value());
+    REQUIRE(closure->capture_list->size() == 1);
+    REQUIRE(closure->capture_list->at(0).name.value() == "$n");
+    REQUIRE(closure->capture_list->at(0).mv.has_value());
+    REQUIRE(closure->captured_values.size() == 1);
+}
+
+TEST_CASE("a closed capture list refuses an unlisted read", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    int32 $m = 9;\n"
+        "    function<int32()> $f = function[mv $n]() : int32 { return $n + $m; };\n"
+        "    return $f();\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "is not in this closure's capture list"));
+}
+
+TEST_CASE("a listed name without mv is a copy capture", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    function<int32()> $f = function[$n]() : int32 { return $n; };\n"
+        "    return $f() + $n;\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    ClosureExprNode *closure = first_closure(m);
+    REQUIRE(closure != nullptr);
+    REQUIRE(closure->capture_list.has_value());
+    REQUIRE(closure->capture_list->size() == 1);
+    REQUIRE(closure->capture_list->at(0).name.value() == "$n");
+    REQUIRE_FALSE(closure->capture_list->at(0).mv.has_value());
+    REQUIRE(closure->captured_values.size() == 1);
+}
+
+TEST_CASE("mv capture kills the source in the enclosing body", "[callable]")
+{
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function outer() : int32 {\n"
+        "    int32 $n = 5;\n"
+        "    function<int32()> $f = function[mv $n]() : int32 { return $n; };\n"
+        "    return $n;\n"
+        "}\n"
+        "echo outer();\n");
+
+    REQUIRE(bundle->collector.has_critical_issues());
+    REQUIRE(has_issue_containing(*bundle, "'$n' has been moved out of"));
 }
 
 // -- ownership ---------------------------------------------------------------

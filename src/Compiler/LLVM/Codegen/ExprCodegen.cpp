@@ -1803,15 +1803,39 @@ void ExprCodegen::gen_null_coalesce(AST::NullCoalesceExprNode &node)
     // side effect the program did not ask for
     _ctx.set_insert_point(absent_block);
     node.rhs->accept(*_ctx.visitor);
-    llvm::Value *right = _ctx.types->coerce_value(
-        _ctx.pop(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
-    llvm::BasicBlock *absent_end = _ctx.builder->GetInsertBlock();
-    _ctx.builder->CreateBr(done_block);
+
+    // **a right arm that never comes back is emitted and then not read.** `die('...')` leaves no value
+    // on the stack and terminates its own block with `unreachable`, so popping one would read a stack
+    // that is empty and coerce whatever was under it - or feed a `void` into a phi of the left's type.
+    // AST::expression_never_returns is the same owner gen_match asked, so a `die` as a `??` fallback
+    // and a `die` as a match arm cannot disagree
+    //
+    // the join then has only the present arm, which is the C3 answer asked of an expression: a
+    // terminated right arm does not join. `block_is_terminated` is the same insurance gen_guard takes
+    // on its else - an unterminated block is an llvm verifier failure with no source location
+    llvm::Value *right = nullptr;
+    llvm::BasicBlock *absent_end = nullptr;
+
+    if (!AST::expression_never_returns(*node.rhs) && !_ctx.block_is_terminated()) {
+        right = _ctx.types->coerce_value(
+            _ctx.pop(), node.rhs->result_type(), result, *_ctx.current_cmp_unit);
+        absent_end = _ctx.builder->GetInsertBlock();
+        _ctx.builder->CreateBr(done_block);
+    }
+    else if (!_ctx.block_is_terminated()) {
+        _ctx.builder->CreateUnreachable();
+    }
 
     // the blocks the phi takes its incoming values from are the ones the builder *ended* in, not the ones
     // it started in: either arm may have branched internally - a call with its own control flow, a nested
     // `??` - and a phi naming the wrong predecessor is an llvm verifier failure with no source location
     _ctx.set_insert_point(done_block);
+
+    if (right == nullptr) {
+        _ctx.value_stack.push(present);
+        return;
+    }
+
     llvm::PHINode *phi = _ctx.builder->CreatePHI(
         _ctx.types->get_llvm_type(result, *_ctx.current_cmp_unit), 2, "coalesce");
     phi->addIncoming(present, present_end);

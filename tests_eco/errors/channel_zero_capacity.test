@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: channel capacity must be at least 1
+  at channel.eco:194

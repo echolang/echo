@@ -1,0 +1,10 @@
+--- OUT --->
+1
+1
+7
+3
+--- IR --->
+# the absent arm of `$n ?? die(...)` / `$f ?? die(...)` stops rather than joining.
+# a phi fed from it was the LLVM assert on the class shape
+CHECK: coalesce.absent:
+CHECK: unreachable

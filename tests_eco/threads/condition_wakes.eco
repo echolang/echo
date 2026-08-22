@@ -1,0 +1,29 @@
+// a waiter sleeps on a condition; the notifier sets the predicate and wakes it
+
+use std::thread;
+
+thread::mutex<int32> $m = thread::mutex<int32>(0);
+thread::condition $cv = thread::condition();
+
+thread::handle $w = guard thread::spawn(function() : void {
+    thread::locked<int32> $g = $m->lock();
+
+    while ($g->value == 0) {
+        $cv->wait($g);
+    }
+
+    $g->value = $g->value + 1;
+}) else ($e) {
+    die($e->message());
+}
+
+{
+    thread::locked<int32> $g = $m->lock();
+    $g->value = 1;
+}
+
+$cv->notify();
+$w->join();
+
+thread::locked<int32> $done = $m->lock();
+echo $done->value;

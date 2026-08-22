@@ -7,15 +7,29 @@
 
 namespace std::thread;
 
+// a heap cell the worker retains independently of the task handle. capturing the task
+// itself would keep it alive, so drop would not join. capturing `&$t->slot` is a
+// pointer into the object, and the write would be unaccounted storage. this cell is
+// an ordinary class: the worker assigns a field, the task reads it after join
+#[atomic]
+private class box<T>
+{
+    T? $value;
+
+    constructor()
+    {
+    }
+}
+
 #[atomic]
 public class task<T>
 {
     private handle? $worker;
-    private T? $slot;
+    private box<T> $slot;
 
-    // join before the slot dies. a class deinit runs this, then drops
-    // fields in reverse declaration order — `$slot` first. an owning T
-    // written from the worker would race that drop
+    // join before the box dies. a class deinit runs this, then drops fields in
+    // reverse declaration order — `$slot` first. after join the worker has already
+    // dropped its retain, so this drop is the last
     destructor()
     {
         handle $h = guard $this->worker else {
@@ -36,9 +50,12 @@ public class task<T>
     static function spawn(function<T()> $work) : result<task<T>, error>
     {
         task<T> $t = task<T>();
+        box<T> $out = box<T>();
+        $t->slot = $out;
 
-        handle $h = guard handle::spawn(function() : void {
-            $t->seat($work);
+        handle $h = guard handle::spawn(function[mv $work, mv $out]() : void {
+            T $v = $work();
+            $out->value = mv $v;
         }) else ($e) {
             return .error($e);
         }
@@ -55,16 +72,11 @@ public class task<T>
 
         $h->join();
 
-        T $v = guard $this->slot else {
+        T $v = guard $this->slot->value else {
             die('task produced no value');
         }
 
         return $v;
-    }
-
-    internal function seat(function<T()> $work) : void
-    {
-        $this->slot = $work();
     }
 }
 

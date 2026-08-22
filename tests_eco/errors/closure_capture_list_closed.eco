@@ -1,0 +1,12 @@
+// a written list is closed: `$m` is not named, so it is not captured
+
+function outer() : int32
+{
+    int32 $n = 5;
+    int32 $m = 9;
+    function<int32()> $f = function[mv $n]() : int32 { return $n + $m; };
+
+    return $f();
+}
+
+echo outer();

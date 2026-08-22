@@ -1,0 +1,6 @@
+// dropping the pair drops the only receiver. the surviving sender handle cannot land a value
+
+use std::thread;
+
+thread::sender<int32> $tx = thread::channel<int32>()->tx;
+echo $tx->send(1);

@@ -64,7 +64,19 @@ namespace AST
 // ---------------------------------------------------------------------------
 
 Node *OperatorNode::clone(CloneContext &cc) const { return cc.shallow(this); }
-Node *NullNode::clone(CloneContext &cc) const { return cc.shallow(this); }
+Node *NullNode::clone(CloneContext &cc) const
+{
+    NullNode *c = cc.shallow(this);
+
+    // `return null` of a `T?` binds the template's T? at parse time. without substituting,
+    // the instance still holds that type parameter and codegen sees an untyped null at an
+    // `int32?` destination
+    if (c->bound_type.has_value()) {
+        c->bound_type = cc.substitute(*c->bound_type);
+    }
+
+    return c;
+}
 Node *VoidExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralFloatExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
 Node *LiteralIntExprNode::clone(CloneContext &cc) const { return cc.shallow(this); }
@@ -285,7 +297,7 @@ Node *ClosureExprNode::clone(CloneContext &cc) const
     }
 
     // the captured places are read in the *enclosing* frame, so they are ordinary owned children of this
-    // expression
+    // expression. capture_list is tokens, copied by shallow
     for (auto &value : c->captured_values) value = cc.child(value);
     return c;
 }

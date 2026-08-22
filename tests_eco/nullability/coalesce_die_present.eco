@@ -1,0 +1,23 @@
+// a `??` fallback that never comes back is the expression form of `else { die(...); }`.
+// the join has only the present arm: die pushes nothing, so popping one was an empty
+// value_stack (exit 139) and feeding it to a phi of the left's type was the LLVM assert
+// (exit 134). both shapes, because they failed differently
+//
+// `$n ?? -1` and `$f ?? Foo(0)` sit beside them so those paths stay the ones they were
+
+class Foo { int32 $n; }
+
+function take(Foo? $f) : int32
+{
+    Foo $x = $f ?? die('gone');
+    return $x->n;
+}
+
+int32? $n = 1;
+echo $n ?? die('gone');
+echo $n ?? -1;
+
+echo take(Foo(7));
+
+Foo? $missing = null;
+echo ($missing ?? Foo(3))->n;

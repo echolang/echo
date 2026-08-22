@@ -1,0 +1,24 @@
+// produce hands the sender to the worker as a parameter. when the worker
+// returns the sender drops, recv sees closed, the loop stops
+
+use std::thread;
+
+thread::receiver<int32> $rx = guard thread::produce(function(thread::sender<int32> $tx) : void {
+    $tx->send(1);
+    $tx->send(2);
+    $tx->send(3);
+}) else ($e) {
+    die($e->message());
+}
+
+int32 $sum = 0;
+
+while (true) {
+    int32 $v = guard $rx->recv() else {
+        break;
+    }
+
+    $sum = $sum + $v;
+}
+
+echo $sum;

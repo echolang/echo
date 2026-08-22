@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <vector>
 
 #include "AST/ASTModule.h"
 #include "AST/ASTFile.h"
@@ -41,13 +42,23 @@ namespace AST
         // function it was written in
         FunctionDeclNode *current_function_ptr = nullptr;
 
-        // the closure literal whose body is being parsed, null everywhere else - including inside a plain
-        // nested `function`, which captures nothing and reports an outer read instead
+        // innermost-last nest of function-like bodies. a nullptr slot is a named `function` wall:
+        // capture through it is refused, because a named function has no environment. ClosureScope
+        // pushes; capture_variable walks toward the front. parse-only - after the body both
+        // environments already hold the properties, so nothing is stored on the node
         //
-        // this is what turns a read across a function boundary from an error into a capture. carried on
-        // the context for the reason self_struct_ptr is: the read site is deep inside the expression
-        // parser, and nothing between it and parse_closure_literal cares
-        ClosureExprNode *current_closure_ptr = nullptr;
+        // `current_closure()` is `back()`, which is null inside a named function - including one
+        // nested in a closure. that is what turns a read across a function boundary from an error
+        // into a capture, and what stops a nested `function` from capturing. carried on the context
+        // for the reason self_struct_ptr is: the read site is deep inside the expression parser
+        std::vector<ClosureExprNode *> closure_nest {};
+
+        // the closure literal whose body is being parsed, or null inside a named `function`.
+        // derived from the nest rather than stored beside it: a named function pushes nullptr, so
+        // back() *is* the current closure, including the "there is none" answer
+        ClosureExprNode *current_closure() const {
+            return closure_nest.empty() ? nullptr : closure_nest.back();
+        }
 
         // the return type of the function body being parsed, null at file scope. this is the
         // destination a `return` fits its expression to, the same way a variable declaration's
@@ -410,23 +421,23 @@ namespace AST
     struct ClosureScope
     {
         Context &context;
-        ClosureExprNode *previous_closure;
 
         // the closure alone, because the environment parameter is not a second fact: it is `args[0]` of
         // the closure's declaration by construction - push_environment_param puts it there before the
         // parameter list is read, and `is_closure` is what makes implicit_arg_count count it. carrying
-        // it separately would be two fields that must agree
+        // it separately would be two fields that must agree. a named function pushes nullptr, which
+        // is the wall `current_closure()` and through-capture both read
         ClosureScope(Context &context, ClosureExprNode *closure) :
-            context(context), previous_closure(context.current_closure_ptr)
+            context(context)
         {
-            context.current_closure_ptr = closure;
+            context.closure_nest.push_back(closure);
         }
 
         ClosureScope(const ClosureScope &) = delete;
         ClosureScope &operator=(const ClosureScope &) = delete;
 
         ~ClosureScope() {
-            context.current_closure_ptr = previous_closure;
+            context.closure_nest.pop_back();
         }
     };
 

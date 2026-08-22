@@ -29,6 +29,7 @@
 
 #include "External/infint.h"
 
+#include "Parser/CaptureParser.h"
 #include "Parser/ForeachParser.h"
 #include "Parser/FuncCallParser.h"
 #include "Parser/FuncDeclParser.h"
@@ -1832,7 +1833,7 @@ const AST::NodeReference parse_expr_node(Parser::Payload &payload, AST::TypeNode
         AST::ExprNode *captured_read = nullptr;
 
         if (found.crossed_function_boundary()) {
-            if (payload.context.current_closure_ptr == nullptr) {
+            if (payload.context.current_closure() == nullptr) {
                 // a file-scope declaration is one frame out like any other - its storage is a local of
                 // the implicit entry point - but saying "an enclosing function" about it names a
                 // function the source does not contain, so it gets its own phrasing

@@ -1,0 +1,227 @@
+/**
+ * A queue between threads. `send` puts a value in; `recv` takes one out. Last
+ * drop of the sender closes the stream, and `recv` then returns `null` once
+ * the queue is drained.
+ *
+ * Ends are class handles: copying a sender is another retain of the same
+ * object, which is how several producers share one stream. `produce` is the
+ * spelling that never leaves a sender on the parent, so the worker finishing
+ * is what closes.
+ */
+
+namespace std::thread;
+
+// stored as `buffer::$cap`. `channel<T>()` opens at this; `channel<T>(0)` is refused
+// rather than becoming a rendezvous
+internal const usize UNBOUNDED = 0;
+
+/**
+ * What `try_recv` saw. Empty and closed are different, and `T?` cannot say so.
+ */
+public enum poll<T>
+{
+    case item(T $value);
+    case empty;
+    case closed;
+}
+
+private struct buffer<T>
+{
+    array<T> $items;
+    bool $closed;
+    bool $has_receiver;
+    usize $cap;
+
+    constructor(usize $cap)
+    {
+        $this->items = array<T>();
+        $this->closed = false;
+        $this->has_receiver = true;
+        $this->cap = $cap;
+    }
+}
+
+#[atomic]
+private class shared<T>
+{
+    mutex<buffer<T>> $lock;
+    condition $cv;
+
+    constructor(usize $cap)
+    {
+        $this->lock = mutex<buffer<T>>(buffer<T>($cap));
+        $this->cv = condition();
+    }
+}
+
+/**
+ * The producing end. Last drop closes; `close()` is the named form of the same
+ * thing, for a parent that still holds the handle.
+ */
+#[atomic]
+public class sender<T>
+{
+    private shared<T> $core;
+
+    internal constructor(shared<T> $core)
+    {
+        $this->core = $core;
+    }
+
+    destructor()
+    {
+        $this->close();
+    }
+
+    function close() : void
+    {
+        {
+            locked<buffer<T>> $g = $this->core->lock->lock();
+            $g->value->closed = true;
+        }
+
+        $this->core->cv->notify_all();
+    }
+
+    /**
+     * Hands `$v` to a waiting receiver. `false` means nobody is listening; `$v`
+     * is then destroyed with this call. Blocks while the channel is bounded
+     * and full.
+     */
+    function send(T $v) : bool
+    {
+        locked<buffer<T>> $g = $this->core->lock->lock();
+
+        while ($g->value->cap != UNBOUNDED && $g->value->items->count() >= $g->value->cap) {
+            if ($g->value->closed || !$g->value->has_receiver) {
+                return false;
+            }
+
+            $this->core->cv->wait($g);
+        }
+
+        if ($g->value->closed || !$g->value->has_receiver) {
+            return false;
+        }
+
+        $g->value->items[] = mv $v;
+        $this->core->cv->notify();
+        return true;
+    }
+}
+
+/**
+ * The consuming end. `recv` sleeps until a value arrives or the sender side
+ * has closed and the queue is empty.
+ */
+#[atomic]
+public class receiver<T>
+{
+    private shared<T> $core;
+
+    internal constructor(shared<T> $core)
+    {
+        $this->core = $core;
+    }
+
+    destructor()
+    {
+        {
+            locked<buffer<T>> $g = $this->core->lock->lock();
+            $g->value->has_receiver = false;
+        }
+
+        $this->core->cv->notify_all();
+    }
+
+    function recv() : T?
+    {
+        locked<buffer<T>> $g = $this->core->lock->lock();
+
+        while (true) {
+            if ($g->value->items->count() > 0) {
+                T $v = $g->value->items->remove(0);
+                $this->core->cv->notify();
+                return $v;
+            }
+
+            if ($g->value->closed) {
+                return null;
+            }
+
+            $this->core->cv->wait($g);
+        }
+    }
+
+    function try_recv() : poll<T>
+    {
+        locked<buffer<T>> $g = $this->core->lock->lock();
+
+        if ($g->value->items->count() > 0) {
+            T $v = $g->value->items->remove(0);
+            $this->core->cv->notify();
+            return .item(mv $v);
+        }
+
+        if ($g->value->closed) {
+            return .closed;
+        }
+
+        return .empty;
+    }
+}
+
+/**
+ * Both ends of one stream. Bind `$tx` and `$rx` to locals before spawning:
+ * capturing the pair would give the worker a receiver it does not need.
+ *
+ * `channel<T>()` is unbounded. `channel<T>($cap)` blocks `send` while full.
+ * Capacity `0` is refused rather than becoming a rendezvous.
+ */
+public struct channel<T>
+{
+    public sender<T> $tx;
+    public receiver<T> $rx;
+
+    constructor()
+    {
+        $this->open(UNBOUNDED);
+    }
+
+    constructor(usize $cap)
+    {
+        if ($cap == 0) {
+            die('channel capacity must be at least 1');
+        }
+
+        $this->open($cap);
+    }
+
+    private function open(usize $cap) : void
+    {
+        shared<T> $core = shared<T>($cap);
+        $this->tx = sender<T>($core);
+        $this->rx = receiver<T>($core);
+    }
+}
+
+/**
+ * Starts `$work` on a new OS thread with the sender as a parameter. When
+ * `$work` returns the sender drops and the stream closes, so a `recv` loop
+ * on the returned receiver terminates. Failure is "the thread never started".
+ */
+public function produce<T>(function<void(sender<T>)> $work) : result<receiver<T>, error>
+{
+    channel<T> $ch = channel<T>();
+    sender<T> $tx = $ch->tx;
+    receiver<T> $rx = $ch->rx;
+
+    handle $h = guard handle::spawn(function[mv $tx, mv $work]() : void {
+        $work($tx);
+    }) else ($e) {
+        return .error($e);
+    }
+
+    $h->detach();
+    return .ok($rx);
+}

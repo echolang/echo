@@ -92,7 +92,8 @@ namespace Compiler::LLVM
         void gen_strong_expr(AST::StrongExprNode &node);
 
         // `A ?? B`: evaluate A, test it, and take B only when it is absent. a branch and a phi rather than
-        // a select, because **B must not be evaluated on the present path** - it may be a call
+        // a select, because **B must not be evaluated on the present path** - it may be a call.
+        // a B that never comes back (`die`, `exit`) is emitted and then not read: it feeds no phi
         void gen_null_coalesce(AST::NullCoalesceExprNode &node);
 
         // `A && B` / `A || B`: evaluate A, and evaluate B only when it can still change the answer.

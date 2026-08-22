@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: gone
+  at coalesce_die_when_absent.eco:4

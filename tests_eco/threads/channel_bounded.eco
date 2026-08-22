@@ -1,0 +1,24 @@
+// capacity 1: the second send waits until recv makes space
+
+use std::thread;
+
+thread::channel<int32> $ch = thread::channel<int32>(1);
+
+thread::handle $w = guard thread::spawn(function() : void {
+    $ch->tx->send(1);
+    $ch->tx->send(2);
+    $ch->tx->close();
+}) else ($e) {
+    die($e->message());
+}
+
+int32 $a = guard $ch->rx->recv() else {
+    die('first');
+}
+
+int32 $b = guard $ch->rx->recv() else {
+    die('second');
+}
+
+$w->join();
+echo $a + $b;

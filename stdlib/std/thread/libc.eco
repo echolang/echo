@@ -31,6 +31,12 @@ internal extern {
     function pthread_mutex_trylock as c_pthread_mutex_trylock(ptr<uint8> $mutex) : int32;
     function pthread_mutex_unlock as c_pthread_mutex_unlock(ptr<uint8> $mutex) : int32;
 
+    function pthread_cond_init as c_pthread_cond_init(ptr<uint8> $cond, ptr<uint8> $attr) : int32;
+    function pthread_cond_destroy as c_pthread_cond_destroy(ptr<uint8> $cond) : int32;
+    function pthread_cond_wait as c_pthread_cond_wait(ptr<uint8> $cond, ptr<uint8> $mutex) : int32;
+    function pthread_cond_signal as c_pthread_cond_signal(ptr<uint8> $cond) : int32;
+    function pthread_cond_broadcast as c_pthread_cond_broadcast(ptr<uint8> $cond) : int32;
+
     function sched_yield as c_sched_yield() : int32;
     function usleep as c_usleep(uint32 $usec) : int32;
     function sysconf as c_sysconf(int32 $name) : int64;

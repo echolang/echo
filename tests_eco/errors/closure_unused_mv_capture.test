@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] closure_unused_mv_capture.eco:6:40
+
+  '$n' is named in the capture list but never read in this closure
+
+  5 |     int32 $n = 5;
+  6 |     function<int32()> $f = function[mv $n]() : int32 { return 1; };
+    :                                        ^^
+  7 | 
+
+1 error, nothing was compiled.

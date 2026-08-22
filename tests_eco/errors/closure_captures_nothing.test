@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] closure_captures_nothing.eco:6:58
+
+  '$n' cannot be captured: this closure was written `function[]()` and captures nothing.
+
+  5 |     int32 $n = 5;
+  6 |     function<int32()> $f = function[]() : int32 { return $n; };
+    :                                                          ^^
+  7 | 
+
+1 error, nothing was compiled.

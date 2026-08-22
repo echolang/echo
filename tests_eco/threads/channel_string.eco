@@ -1,0 +1,15 @@
+// an owning T through the queue: the string is moved in and copied out of recv as a retain
+
+use std::thread;
+
+thread::receiver<string> $rx = guard thread::produce(function(thread::sender<string> $tx) : void {
+    $tx->send('owned');
+}) else ($e) {
+    die($e->message());
+}
+
+string $s = guard $rx->recv() else {
+    die('closed');
+}
+
+echo $s;

@@ -1,0 +1,13 @@
+expect: fail
+
+--- OUT --->
+[error] closure_capture_list_closed.eco:7:68
+
+  '$m' is not in this closure's capture list
+
+  6 |     int32 $m = 9;
+  7 |     function<int32()> $f = function[mv $n]() : int32 { return $n + $m; };
+    :                                                                    ^^
+  8 | 
+
+1 error, nothing was compiled.

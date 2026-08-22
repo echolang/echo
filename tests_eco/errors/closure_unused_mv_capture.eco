@@ -1,0 +1,11 @@
+// a name in the capture list that the body never reads is a located error
+
+function outer() : int32
+{
+    int32 $n = 5;
+    function<int32()> $f = function[mv $n]() : int32 { return 1; };
+
+    return $f();
+}
+
+echo outer();

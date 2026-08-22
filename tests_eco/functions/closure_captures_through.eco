@@ -1,6 +1,5 @@
-// a capture is read where it lives, in the frame the closure is created in. two frames out is not
-// reachable from *this* closure's creation site - the enclosing closure would have to capture it and
-// hand it on
+// a capture two frames out is handed through the enclosing closure: the outer captures the local,
+// the inner captures the outer environment's property
 
 function outer() : int32
 {

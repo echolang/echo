@@ -113,31 +113,21 @@ namespace Parser
     // struct member walk cannot come to three different answers
     bool starts_funcdecl(Parser::Cursor &cursor);
 
-    // does a closure literal start here? `function (` - the third of the three things the keyword
-    // introduces, and the only one that is an expression
+    // does a closure literal start here? `function (` or `function [` - the third of the three things
+    // the keyword introduces, and the only one that is an expression. `[` is the optional capture
+    // list (`function[mv $x]()` / `function[$x]()` / `function[]()`), unambiguous against
+    // `function<...>` and `function ident`
     bool starts_closure_literal(Parser::Cursor &cursor);
 
-    // `function(int32 $a) : int32 { ... }` in a value position.
+    // `function(int32 $a) : int32 { ... }` in a value position, optionally with a capture list
+    // between the keyword and the parameter list: `function[mv $buf]()` / `function[$n]()` /
+    // `function[]()`. Parser::parse_capture_list owns the list; Parser::capture_variable owns
+    // what a body read of an enclosing local becomes
     //
     // the same machinery a declaration uses - one parameter list parser, one body parser - over an
     // *anonymous* declaration that is hoisted to the file root and entered in no overload set. its
     // `args[0]` is the environment its captures will live in, exactly the way a method's is its receiver
     AST::ClosureExprNode *parse_closure_literal(Payload &payload);
-
-    // captures `vardecl` into the closure currently being parsed and answers the expression its body
-    // should read instead: a member access on the environment parameter.
-    //
-    // capture is *by value* - the place is read once, here, in the frame the closure is created in - so a
-    // closure is always safe to outlive that frame. the returned read is of the environment's copy, which
-    // is why a later write to the original is not observed
-    //
-    // null when the capture is refused, with the reason already reported
-    AST::ExprNode *capture_variable(
-        Payload &payload,
-        AST::VarDeclNode *vardecl,
-        const TokenReference &at,
-        size_t boundaries_crossed
-    );
 
     // parses a function's body, from its opening brace through its closing one, into `decl->body`.
     // `scope` is the parameter frame the body is pushed under, so a parameter resolves through it

@@ -1,0 +1,17 @@
+// `return null` of a `T?` in a generic body has to substitute the bound type on the cloned
+// NullNode, or codegen sees an untyped null at an `int32?` destination
+
+class Box<T>
+{
+    constructor()
+    {
+    }
+
+    function empty() : T?
+    {
+        return null;
+    }
+}
+
+Box<int32> $b = Box<int32>();
+echo $b->empty() == null;

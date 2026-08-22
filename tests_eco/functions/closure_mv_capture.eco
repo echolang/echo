@@ -1,0 +1,23 @@
+// `mv` in the capture list takes the local rather than copying it. a unique value has nothing to
+// copy, so this is the spelling that lets it ride into the environment
+
+#[unique]
+struct Token
+{
+    usize $id;
+
+    destructor()
+    {
+        echo 1;
+    }
+}
+
+function outer() : usize
+{
+    Token $t = Token(3);
+    function<usize()> $f = function[mv $t]() : usize { return $t->id; };
+
+    return $f();
+}
+
+echo outer();

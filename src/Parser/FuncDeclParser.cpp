@@ -12,10 +12,8 @@
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/AttributeNode.h"
 #include "AST/ExprNode.h"
-#include "AST/MemberAccessNode.h"
-#include "AST/VarNode.h"
-#include "AST/VarRefNode.h"
 
+#include "Parser/CaptureParser.h"
 #include "Parser/TypeParser.h"
 #include "Parser/ExprParser.h"
 #include "Parser/VarDeclParser.h"
@@ -26,6 +24,8 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <optional>
+#include <vector>
 
 void Parser::push_implicit_param(
     Parser::Payload &payload,
@@ -208,7 +208,14 @@ bool Parser::starts_funcdecl(Parser::Cursor &cursor)
 
 bool Parser::starts_closure_literal(Parser::Cursor &cursor)
 {
-    return cursor.is_type_sequence(0, { Token::Type::t_function, Token::Type::t_open_paren });
+    if (!cursor.is_type(Token::Type::t_function)) {
+        return false;
+    }
+
+    // `function (` - no list. `function [` - the closed capture list, then `(`. `function <`
+    // is the callable type and `function ident` is a declaration; neither is an expression
+    return cursor.peek_is_type(1, Token::Type::t_open_paren)
+        || cursor.peek_is_type(1, Token::Type::t_open_bracket);
 }
 
 void Parser::skip_declaration_body(Parser::Payload &payload)
@@ -256,72 +263,6 @@ static void push_environment_param(
     Parser::push_implicit_param(payload, decl, into, "$__env", &env_type, at);
 }
 
-AST::ExprNode *Parser::capture_variable(
-    Parser::Payload &payload,
-    AST::VarDeclNode *vardecl,
-    const TokenReference &at,
-    size_t boundaries_crossed
-)
-{
-    AST::ClosureExprNode *closure = payload.context.current_closure_ptr;
-
-    assert(closure != nullptr && closure->decl != nullptr && "capture_variable called outside a closure body");
-
-    // the environment is `args[0]`, put there by push_environment_param before the parameter list was
-    // read - the same slot a method's receiver sits in, which is what implicit_arg_count counts
-    AST::VarDeclNode *env_param = closure->decl->args[0];
-
-    // more than one frame out means the closure this is written in would have to capture it *and* hand it
-    // on. the value has to be read where it lives, and that place is not reachable from the creation site
-    // of this closure - so it is refused rather than read from the wrong frame
-    if (boundaries_crossed > 1) {
-        payload.collector.collect_issue<AST::Issue::GenericError>(
-            payload.context.code_ref(at),
-            fmt::format(
-                "'{}' is declared outside the closure that encloses this one. Capturing through a "
-                "closure is not supported yet - capture it in the outer closure first.",
-                at.value()));
-        return nullptr;
-    }
-
-    // whether the captured value owns a resource is *not* asked here: a variable's type is only
-    // final once the monomorphizer has settled the call it was inferred from. AST::OwnershipPass
-    // walks the captured places at the closure expression and classify_copy decides there
-    //
-    // a declaration whose inference failed has no type node at all, and `type()` would read through the
-    // null. unknown rather than a refusal: the failure has already been reported at the declaration, and
-    // "no information" is what every pass below reads an unresolved type as - the same answer
-    // VarRefNode::result_type gives for the same declaration
-    const AST::ValueType captured_type =
-        vardecl->has_type() ? vardecl->type() : AST::ValueType::make_unknown();
-
-    const AST::ValueType env_type = env_param->type();
-    AST::ComplexType *environment = env_type.get_complex_type();
-
-    const std::string property_name = vardecl->token_varname.value();
-
-    // already captured, so the property is reused rather than added twice. two reads of one variable are
-    // one capture - which is also what keeps the property indices in step with `captured_values`
-    if (!environment->has_property(property_name)) {
-        environment->add_property(property_name, captured_type);
-
-        // the place, read in the *enclosing* frame. it is an ordinary VarRef over the outer declaration,
-        // and it is evaluated at the closure expression rather than in the body - which is the whole of
-        // what "by value" means here
-        auto &outer_var = payload.context.emplace_node<AST::VarNode>(vardecl, at);
-        auto &outer_ref = payload.context.emplace_node<AST::VarRefNode>(&outer_var);
-
-        closure->captured_values.push_back(&outer_ref);
-    }
-
-    // and the read the body gets: `$__env->name`. the environment is a class, so its value is already a
-    // handle - the same shape a member access on any class value has
-    auto &env_var = payload.context.emplace_node<AST::VarNode>(env_param, at);
-    auto &env_ref = payload.context.emplace_node<AST::VarRefNode>(&env_var);
-
-    return &payload.context.emplace_node<AST::MemberAccessNode>(AST::make_ref(env_ref), at);
-}
-
 AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
 {
     auto &cursor = payload.cursor;
@@ -333,6 +274,18 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // way a destructor's do
     auto function_token = cursor.current();
     cursor.skip();
+
+    std::optional<std::vector<AST::ClosureExprNode::Capture>> capture_list;
+
+    if (cursor.is_type(Token::Type::t_open_bracket)) {
+        std::vector<AST::ClosureExprNode::Capture> captures;
+
+        if (!Parser::parse_capture_list(payload, captures)) {
+            return nullptr;
+        }
+
+        capture_list = std::move(captures);
+    }
 
     // a name nobody can spell, discriminated so two closures never share a symbol - including two written
     // inside one block, which the enclosing lexical namespace cannot tell apart.
@@ -385,6 +338,10 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // `args[0]`, ahead of everything the user wrote - which is where capture_variable reads it back from
     push_environment_param(payload, *closure_decl, closure_scope, environment, function_token);
 
+    if (!payload.expect_token(Token::Type::t_open_paren)) {
+        return nullptr;
+    }
+
     cursor.skip(); // the open paren
 
     if (!parse_parameter_list(payload, *closure_decl, closure_scope, function_token)) {
@@ -409,9 +366,15 @@ AST::ClosureExprNode *Parser::parse_closure_literal(Parser::Payload &payload)
     // capture rather than the error it is inside a plain nested `function`
     auto &closure_expr = payload.context.emplace_node<AST::ClosureExprNode>(closure_decl, function_token);
 
+    // stamped before the body: capture_variable reads the closed set. the enclosing nest is
+    // on the context, which FunctionBodyScope pushes this node onto once the body starts
+    closure_expr.capture_list = std::move(capture_list);
+
     if (!parse_function_body(payload, *closure_decl, closure_scope, &closure_expr)) {
         return nullptr;
     }
+
+    Parser::report_unused_captures(payload, closure_expr, *environment);
 
     // to the file root, like every other declaration: codegen emits bodies from there and
     // AST::OwnershipPass resolves drops from the same list

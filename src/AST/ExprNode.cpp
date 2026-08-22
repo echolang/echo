@@ -1,10 +1,12 @@
 #include "AST/ExprNode.h"
+#include "AST/ASTControlFlow.h"
 #include "AST/ASTOperatorSemantics.h"
 #include "AST/ASTPlaceExpr.h"
 #include "AST/FunctionDeclNode.h"
 #include "AST/VarRefNode.h"
 #include "AST/TypeCastNode.h"
 #include "AST/LiteralValueNode.h"
+
 #include <map>
 
 // **`!` answers bool whatever it was applied to, and `-` answers its operand.** the two are not one
@@ -211,6 +213,14 @@ AST::ValueType AST::StrongExprNode::result_type() const
 
 AST::ValueType AST::NullCoalesceExprNode::result_type() const
 {
+    // a right arm that never comes back contributes no type, the same skip AST::MatchResolution
+    // makes for a `die` arm. the join has only the left, so the result is the left's payload -
+    // `$n ?? die('gone')` is an `int32`, which is the whole of the expression form of
+    // `else { die('gone'); }`
+    if (expression_never_returns(*rhs)) {
+        return ValueType::make_non_nullable(lhs->result_type());
+    }
+
     const ValueType right = rhs->result_type();
 
     // a nullable right side leaves the whole expression nullable - `$a ?? $b` over two `int32?`s can still
