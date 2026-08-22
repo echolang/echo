@@ -72,6 +72,18 @@ if [ ! -f "${epm}/module.eco" ]; then
     exit 2
 fi
 
+# echoc (and Windows CPython) are native binaries. Git Bash `pwd` is `/d/a/...`,
+# and Windows std::filesystem / pathlib settle that to `D:\d\a\...`. Git Bash
+# auto-converts a *bare* unix argv to a native exe; it does not convert one
+# glued behind `search:` or handed to pathlib. every path those two see is native.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 clone() {
     local name="$1"
     local dest="${echolibs}/${name}"
@@ -96,7 +108,7 @@ clone libcurl
 # write the gate if this clone predates that line, so the echo release
 # does not wait on a second repository.
 if ! grep -q 'static_curl' "${echolibs}/libcurl/module.eco"; then
-    python3 - "${echolibs}/libcurl/module.eco" <<'PY'
+    python3 - "$(native_path "${echolibs}/libcurl/module.eco")" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text()
@@ -134,9 +146,10 @@ public const VERSION = '${version}';
 EOF
 
 # ECHOC so anything the compile shells out to sees this compiler, not PATH
-ECHOC="${echoc}" "${echoc}" build -m "${epm}" --target epm -o "${out}" \
+ECHOC="${echoc}" "${echoc}" build -m "$(native_path "${epm}")" --target epm \
+    -o "$(native_path "${out}")" \
     --define static_curl \
-    --link "search:${curl_prefix}/lib"
+    --link "search:$(native_path "${curl_prefix}/lib")"
 
 if [ ! -e "${out}" ] && [ -e "${out}.exe" ]; then
     out="${out}.exe"
