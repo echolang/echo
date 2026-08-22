@@ -14,7 +14,7 @@ REPO="echolang/echo"
 INSTALL_DIR="${ECHO_INSTALL_DIR:-/usr/local/bin}"
 
 # spelled out rather than derived: uname says Darwin where the release asset says macos, and these
-# two are the only platforms the release workflow builds
+# three are the platforms the release workflow builds (windows is install.ps1)
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64)  asset="echo-macos-arm64" ;;
     Linux-x86_64)  asset="echo-linux-x86_64" ;;

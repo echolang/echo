@@ -6,6 +6,9 @@
 #include <cstring>
 
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #include <io.h>
 #define ECO_ISATTY(fd) _isatty(fd)
 #define ECO_STDOUT_FD 1
@@ -107,7 +110,18 @@ namespace
             }
         }
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+        const HANDLE handle = GetStdHandle(fd == ECO_STDERR_FD ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+        CONSOLE_SCREEN_BUFFER_INFO info;
+
+        if (handle != INVALID_HANDLE_VALUE && handle != nullptr
+            && GetConsoleScreenBufferInfo(handle, &info)) {
+            const int cols = info.srWindow.Right - info.srWindow.Left + 1;
+            if (cols > 0) {
+                return static_cast<unsigned int>(cols);
+            }
+        }
+#else
         struct winsize size;
         if (ioctl(fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
             return size.ws_col;

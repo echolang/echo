@@ -9,10 +9,12 @@
  * animates until Ctrl-C. The first is how the picture in the README was made, and the quickest way to
  * see what a change to the drawing did; the second is the clock.
  *
- * Ctrl-C is the way out of the live one, and it cannot be trapped - so nothing about the terminal is
- * switched on that would have to be switched back off. No alternate screen buffer, no hidden cursor:
- * the screen is cleared once, and every frame after that only homes the cursor and overwrites what is
- * there.
+ * Pictures go through `std::io::print` rather than `echo`. `echo` of a string is a raw `_write`,
+ * which a Windows console decodes as OEM; `print` is `stdout->write`, and that is the path the
+ * standard library makes Unicode on every host. Ctrl-C cannot be trapped, so nothing about the
+ * terminal is switched on here that would have to be switched back off - no alternate screen, no
+ * hidden cursor. The screen is cleared once, and every frame after that only homes the cursor and
+ * overwrites what is there.
  */
 
 // a dial eleven rows in radius, in cells twice as tall as they are wide
@@ -32,10 +34,10 @@ clock::Time $fixed = clock::Time(0, 0, 0);
 
 if (clock::time_from_args(&$fixed)) {
     // no screen clear and no cursor-home dance: one picture, printed where the cursor already is
-    echo $renderer->frame(&$fixed);
+    std::io::print($renderer->frame(&$fixed));
 }
 else {
-    echo "\x1b[2J";
+    std::io::print("\x1b[2J");
 
     while (true) {
         clock::Time $now = clock::now();
@@ -44,7 +46,7 @@ else {
         // animation, and a `frame` that emitted it could not hand back one anybody could compare
         string $frame = "\x1b[H";
         $frame->append($renderer->frame(&$now));
-        echo $frame;
+        std::io::print($frame);
 
         // five redraws a second: the second hand lands on its tick promptly without the process spinning
         clock::sleep_ms(200);

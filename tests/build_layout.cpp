@@ -171,7 +171,7 @@ TEST_CASE("a manifest may name its own build directory", "[layout]")
     }
 }
 
-TEST_CASE("--build-dir outranks the manifest", "[layout]")
+TEST_CASE("`--build-dir` outranks the manifest", "[layout]")
 {
     ScopedProject project("flag_wins");
 
@@ -207,7 +207,11 @@ TEST_CASE("a build leaves nothing beside the binary it produced", "[layout]")
 
     REQUIRE(project.echoc("build -o out", project.root()).exit_code == 0);
 
+#if defined(_WIN32)
+    REQUIRE(entries_of(project.root()) == std::set<std::string>{ "module.eco", "src", "out.exe", "ecobuild" });
+#else
     REQUIRE(entries_of(project.root()) == std::set<std::string>{ "module.eco", "src", "out", "ecobuild" });
+#endif
 }
 
 TEST_CASE("a program with no project leaves only its binary", "[layout]")
@@ -221,7 +225,11 @@ TEST_CASE("a program with no project leaves only its binary", "[layout]")
 
     REQUIRE(project.echoc("build -o out x.eco", project.root()).exit_code == 0);
 
+#if defined(_WIN32)
+    REQUIRE(entries_of(project.root()) == std::set<std::string>{ "x.eco", "out.exe" });
+#else
     REQUIRE(entries_of(project.root()) == std::set<std::string>{ "x.eco", "out" });
+#endif
 }
 
 TEST_CASE("a build directory holding somebody else's work is refused", "[layout]")

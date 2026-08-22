@@ -58,16 +58,25 @@ public function cwd() : string
  */
 public function home() : string::view?
 {
+#[if: os == windows]
+    return var('USERPROFILE');
+#[else]
     return var('HOME');
+#[end]
 }
 
 /**
  * The directory for temporary files, `/tmp` when `TMPDIR` is not set.
  *
  * Not nullable, because unlike `HOME` there *is* an honest answer when the variable is missing: the
- * path every POSIX system has.
+ * path every POSIX system has. Windows answers `TEMP`, then `TMP`, then the current directory -
+ * there is no `/tmp`.
  */
 public function tmp() : string::view
 {
+#[if: os == windows]
+    return var('TEMP') ?? var('TMP', '.');
+#[else]
     return var('TMPDIR', '/tmp');
+#[end]
 }

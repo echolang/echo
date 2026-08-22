@@ -20,7 +20,9 @@ CHECK: define i32 @main(
 # stdout is buffered and the write is not, so the flush is what keeps a string in order with the
 # printf that every other `echo` still emits
 CHECK: call i32 @fflush(ptr null)
-CHECK: call i64 @write(i32 1, ptr
+CHECK-LINUX: call i64 @write(i32 1, ptr
+CHECK-DARWIN: call i64 @write(i32 1, ptr
+CHECK-WINDOWS: call i32 @_write(i32 1, ptr
 
 # the trailing newline is written separately rather than appended to the bytes - there is nowhere to
 # put a longer copy when the bytes may be a shared substring

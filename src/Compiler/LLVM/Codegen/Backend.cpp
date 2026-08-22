@@ -7,6 +7,7 @@
 #include "Compiler/TargetSubtarget.h"
 
 #include <llvm/ADT/StringSet.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
@@ -19,12 +20,26 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
+#include <llvm/TargetParser/Triple.h>
+#include <llvm/IR/Comdat.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Transforms/IPO/Inliner.h>
 #include <llvm/Transforms/IPO/GlobalDCE.h>
 #include <llvm/Transforms/IPO/Internalize.h>
 #include <llvm/Analysis/InlineCost.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#endif
 
 #include <fmt/core.h>
 
@@ -112,6 +127,89 @@ bool Backend::prepare_execution()
     // function rather than state on the machine
     const Compiler::Subtarget sub = subtarget();
     const std::vector<std::string> attributes = split_target_features(sub.features);
+
+#if defined(_WIN32)
+    // MCJIT searches loaded modules for externals. msvcrt is always loaded on
+    // Windows and exports printf/fflush/_write, so the JIT would bind those
+    // independently of the UCRT echoc itself uses. echo of a string then
+    // `_write`s through one CRT while echo of an int `printf`s through the
+    // other, and the two buffers flush in the wrong order. AddSymbol is
+    // consulted first, so these pins are the process's own UCRT.
+    const auto pin = [](const char *name, auto *fn) {
+        llvm::sys::DynamicLibrary::AddSymbol(
+            name, reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(fn)));
+    };
+
+    pin("printf", printf);
+    pin("fflush", fflush);
+    pin("setvbuf", setvbuf);
+    pin("snprintf", snprintf);
+    pin("_write", _write);
+    pin("_get_osfhandle", _get_osfhandle);
+    pin("_read", _read);
+    pin("_open", _open);
+    pin("_close", _close);
+    pin("_lseeki64", _lseeki64);
+    pin("_unlink", _unlink);
+    pin("_access", _access);
+    pin("rename", rename);
+    pin("_errno", _errno);
+    pin("strerror", strerror);
+    pin("strtod", strtod);
+    pin("GetCurrentThreadId", GetCurrentThreadId);
+    pin("SwitchToThread", SwitchToThread);
+    pin("exit", exit);
+    pin("malloc", malloc);
+    pin("free", free);
+    pin("realloc", realloc);
+    pin("getenv", getenv);
+    pin("strcmp", strcmp);
+    pin("strlen", strlen);
+    pin("memcpy", memcpy);
+    pin("memmove", memmove);
+    pin("memset", memset);
+
+    const auto pin_libm = [&](const char *name, const char *imp_name, auto fn, void *slot) {
+        pin(name, fn);
+        pin(imp_name, slot);
+    };
+
+    static double (*imp_sin)(double) = static_cast<double (*)(double)>(::sin);
+    static double (*imp_cos)(double) = static_cast<double (*)(double)>(::cos);
+    static double (*imp_tan)(double) = static_cast<double (*)(double)>(::tan);
+    static double (*imp_tanh)(double) = static_cast<double (*)(double)>(::tanh);
+    static double (*imp_atan2)(double, double) = static_cast<double (*)(double, double)>(::atan2);
+    static double (*imp_pow)(double, double) = static_cast<double (*)(double, double)>(::pow);
+    static double (*imp_exp2)(double) = static_cast<double (*)(double)>(::exp2);
+    static double (*imp_log2)(double) = static_cast<double (*)(double)>(::log2);
+    static double (*imp_log10)(double) = static_cast<double (*)(double)>(::log10);
+    static double (*imp_floor)(double) = static_cast<double (*)(double)>(::floor);
+    static double (*imp_ceil)(double) = static_cast<double (*)(double)>(::ceil);
+    static double (*imp_round)(double) = static_cast<double (*)(double)>(::round);
+    static double (*imp_trunc)(double) = static_cast<double (*)(double)>(::trunc);
+    static double (*imp_copysign)(double, double) = static_cast<double (*)(double, double)>(::copysign);
+    static double (*imp_fma)(double, double, double) =
+        static_cast<double (*)(double, double, double)>(::fma);
+    static double (*imp_fabs)(double) = static_cast<double (*)(double)>(::fabs);
+
+    pin_libm("sin", "__imp_sin", imp_sin, &imp_sin);
+    pin_libm("cos", "__imp_cos", imp_cos, &imp_cos);
+    pin_libm("tan", "__imp_tan", imp_tan, &imp_tan);
+    pin_libm("tanh", "__imp_tanh", imp_tanh, &imp_tanh);
+    pin_libm("atan2", "__imp_atan2", imp_atan2, &imp_atan2);
+    pin_libm("pow", "__imp_pow", imp_pow, &imp_pow);
+    pin_libm("exp2", "__imp_exp2", imp_exp2, &imp_exp2);
+    pin_libm("log2", "__imp_log2", imp_log2, &imp_log2);
+    pin_libm("log10", "__imp_log10", imp_log10, &imp_log10);
+    pin_libm("floor", "__imp_floor", imp_floor, &imp_floor);
+    pin_libm("ceil", "__imp_ceil", imp_ceil, &imp_ceil);
+    pin_libm("round", "__imp_round", imp_round, &imp_round);
+    pin_libm("trunc", "__imp_trunc", imp_trunc, &imp_trunc);
+    pin_libm("copysign", "__imp_copysign", imp_copysign, &imp_copysign);
+    pin_libm("fma", "__imp_fma", imp_fma, &imp_fma);
+    pin_libm("fabs", "__imp_fabs", imp_fabs, &imp_fabs);
+    pin("__acrt_iob_func", __acrt_iob_func);
+#endif
 
     std::string errorStr;
     const llvm::TargetOptions opts;
@@ -219,8 +317,16 @@ void Backend::init_target()
         _ctx.options.no_optimize ? llvm::CodeGenOptLevel::None : llvm::CodeGenOptLevel::Default;
 
     llvm::TargetOptions opt;
+    // LLVM 21 made Triple's string constructor explicit and createTargetMachine
+    // takes the Triple itself. CI still builds against 20, which takes the string.
+#if LLVM_VERSION_MAJOR >= 21
+    _target_machine.reset(target->createTargetMachine(
+        llvm::Triple(_ctx.target_triple), sub.cpu, sub.features, opt, llvm::Reloc::PIC_,
+        std::nullopt, opt_level));
+#else
     _target_machine.reset(target->createTargetMachine(
         _ctx.target_triple, sub.cpu, sub.features, opt, llvm::Reloc::PIC_, std::nullopt, opt_level));
+#endif
     if (!_target_machine) {
         throw Compiler::InternalCompilerException(fmt::format(
             "Could not create a target machine for '{}'", _ctx.target_triple));
@@ -323,6 +429,75 @@ std::optional<std::vector<std::string>> host_linker_command(
     command.insert(command.end(), link_words.begin(), link_words.end());
 
     return command;
+#elif defined(_WIN32)
+    // lld-link is the Windows spelling of the Apple `ld` path: a linker we
+    // can invoke without the clang driver. It cannot find the CRT on its
+    // own, so we only take this path when a bundled sysroot is sitting
+    // next to echoc or the environment already has LIB (vcvars / CI).
+    // Otherwise the clang driver is the one that knows how to find VS.
+    const std::filesystem::path sysroot = Compiler::windows_sysroot();
+    const char *libenv = std::getenv("LIB");
+    if (sysroot.empty() && (libenv == nullptr || *libenv == '\0')) {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> command = {
+        "lld-link",
+        "/nologo",
+        "/subsystem:console",
+        "/out:" + executable_name,
+    };
+
+    if (!sysroot.empty()) {
+        command.push_back("/libpath:" + (sysroot / "lib").string());
+    }
+
+    // Echo objects have no /DEFAULTLIB comments. These are the CRT and
+    // Win32 libs a console program needs; lld-link finds them on LIB or
+    // the sysroot libpath above.
+    command.push_back("/defaultlib:libcmt");
+    command.push_back("/defaultlib:libucrt");
+    command.push_back("/defaultlib:libvcruntime");
+    command.push_back("/defaultlib:oldnames");
+    command.push_back("/defaultlib:kernel32");
+    command.push_back("/defaultlib:user32");
+    command.push_back("/defaultlib:advapi32");
+    command.push_back("/defaultlib:shell32");
+    command.push_back("/defaultlib:ws2_32");
+
+    append_objects(command, objects);
+    append_objects(command, link_objects);
+
+    for (size_t i = 0; i < link_words.size(); i++) {
+        const std::string &word = link_words[i];
+
+        if (word == "-framework") {
+            if (i + 1 < link_words.size()) {
+                i++;
+            }
+            continue;
+        }
+
+        if (word.rfind("-L", 0) == 0) {
+            command.push_back("/libpath:" + word.substr(2));
+            continue;
+        }
+
+        if (word.rfind("-l", 0) == 0) {
+            const std::string name = word.substr(2);
+            // libm is a Unix split. UCRT already has the math symbols, and
+            // lld-link looking for m.lib is a missing-library error
+            if (name == "m") {
+                continue;
+            }
+            command.push_back(name + ".lib");
+            continue;
+        }
+
+        command.push_back(word);
+    }
+
+    return command;
 #else
     (void)executable_name;
     (void)objects;
@@ -333,6 +508,26 @@ std::optional<std::vector<std::string>> host_linker_command(
 }
 
 };
+
+// COFF does not merge `linkonce_odr` unless the symbol is in a COMDAT.
+// Without one, two units that both emit `__eco_argc` (or `__eco_abort`, ...)
+// fail at link with a duplicate symbol. Mach-O rejects COMDATs outright
+// (`LLVM ERROR: MachO doesn't support COMDATs`), so this is Windows only.
+// ELF would accept a group, but does not need one.
+static void assign_odr_comdats(llvm::Module &module)
+{
+    for (llvm::GlobalVariable &global : module.globals()) {
+        if (global.hasLinkOnceODRLinkage() && !global.hasComdat()) {
+            global.setComdat(module.getOrInsertComdat(global.getName()));
+        }
+    }
+
+    for (llvm::Function &fn : module) {
+        if (fn.hasLinkOnceODRLinkage() && !fn.hasComdat()) {
+            fn.setComdat(module.getOrInsertComdat(fn.getName()));
+        }
+    }
+}
 
 bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesystem::path &object_path)
 {
@@ -347,6 +542,10 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
         llvm::errs() << "Module for unit '" << cmp_unit.ast_module->name
                      << "' has already been consumed - nothing to emit\n";
         return false;
+    }
+
+    if (_ctx.targeting_windows()) {
+        assign_odr_comdats(*cmp_unit.llvm_module);
     }
 
     // the directory is the driver's - it prepared one before it decided to emit here at all. Creating one
@@ -392,9 +591,17 @@ bool Backend::link_executable(
     std::vector<std::string> link_words;
     Compiler::partition_link_requirements(link, link_objects, link_words);
 
-    if (const auto command = host_linker_command(executable_name, objects, link_objects, link_words)) {
+    std::string output = executable_name;
+
+#if defined(_WIN32)
+    if (std::filesystem::path(output).extension().empty()) {
+        output += ".exe";
+    }
+#endif
+
+    if (const auto command = host_linker_command(output, objects, link_objects, link_words)) {
         if (Compiler::run_tool(command.value())) {
-            gen_debug_symbols(executable_name);
+            gen_debug_symbols(output);
             return true;
         }
 
@@ -403,7 +610,8 @@ bool Backend::link_executable(
         llvm::errs() << "Note: the system linker failed, retrying through the clang driver\n";
     }
 
-    std::vector<std::string> fallback = { "clang", "-o", executable_name };
+    std::vector<std::string> fallback = { "clang", "-o", output };
+    Compiler::append_windows_sysroot_link_args(fallback);
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
     fallback.insert(fallback.end(), link_words.begin(), link_words.end());
@@ -415,7 +623,7 @@ bool Backend::link_executable(
         return false;
     }
 
-    gen_debug_symbols(executable_name);
+    gen_debug_symbols(output);
 
     return true;
 }

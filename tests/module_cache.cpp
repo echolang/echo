@@ -107,7 +107,7 @@ TEST_CASE("a project directory needs no arguments", "[cache][project]")
         const ProcessResult built = project.echoc("build -o app", project.root());
         REQUIRE(built.exit_code == 0);
 
-        const ProcessResult ran = run_capturing(quoted(project.root() / "app") + " 2>&1");
+        const ProcessResult ran = EchoTests::run_binary(project.root() / "app");
         REQUIRE(ran.exit_code == 0);
         REQUIRE(ran.output.find("42") != std::string::npos);
     }
@@ -371,8 +371,8 @@ static void check_consumer_independence(const std::string &suite, const std::str
     REQUIRE(b.exit_code == 0);
 
     // both programs must actually run, or "the objects agree" would be a statement about two broken builds
-    const ProcessResult ran_a = run_capturing(quoted(project.root() / "app_a" / "out") + " 2>&1");
-    const ProcessResult ran_b = run_capturing(quoted(project.root() / "app_b" / "out") + " 2>&1");
+    const ProcessResult ran_a = EchoTests::run_binary(project.root() / "app_a" / "out");
+    const ProcessResult ran_b = EchoTests::run_binary(project.root() / "app_b" / "out");
 
     REQUIRE(ran_a.exit_code == 0);
     REQUIRE(ran_b.exit_code == 0);
@@ -468,7 +468,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         REQUIRE(line_starting_with(warm.output, "storelib").find("hit") != std::string::npos);
 
         // and the program still works, which is the only thing a reused object is for
-        const ProcessResult ran = run_capturing(quoted(app_dir / "out") + " 2>&1");
+        const ProcessResult ran = EchoTests::run_binary(app_dir / "out");
         REQUIRE(ran.exit_code == 0);
         REQUIRE(ran.output.find("42") != std::string::npos);
     }
@@ -529,6 +529,9 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
 
     SECTION("an unwritable store is not an error")
     {
+#if defined(_WIN32)
+        SKIP("std::filesystem permissions do not make a directory unwritable for its owner on Windows");
+#endif
         // a read-only library directory, a toolchain installed system-wide, a full disk. A cache is an
         // optimization, so the only correct answer is to compile the module and not keep the result - failing
         // the build over a missed optimization would make the cache a liability
@@ -555,7 +558,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         REQUIRE(line.find("not writable") != std::string::npos);
 
         // and the program is still there and still correct
-        const ProcessResult ran = run_capturing(quoted(inner.root() / "app" / "out") + " 2>&1");
+        const ProcessResult ran = EchoTests::run_binary(inner.root() / "app" / "out");
         REQUIRE(ran.exit_code == 0);
         REQUIRE(ran.output.find("42") != std::string::npos);
     }
@@ -589,7 +592,7 @@ TEST_CASE("a stored object is reused, and a changed source is not", "[cache][sto
         REQUIRE(after.exit_code == 0);
         REQUIRE(line_starting_with(after.output, "storelib").find("miss") != std::string::npos);
 
-        const ProcessResult ran = run_capturing(quoted(app_dir / "out") + " 2>&1");
+        const ProcessResult ran = EchoTests::run_binary(app_dir / "out");
         REQUIRE(ran.output.find("42") != std::string::npos);
     }
 }
@@ -724,7 +727,7 @@ TEST_CASE("a prefixed #[requires:] resolves under vendor/<prefix>/", "[cache][pa
     REQUIRE(ran.output.find("42") != std::string::npos);
 }
 
-TEST_CASE("--package-dir overrides the vendor search", "[cache][packages]")
+TEST_CASE("`--package-dir` overrides the vendor search", "[cache][packages]")
 {
     ScopedProject project("package_dir_override");
 

@@ -30,4 +30,16 @@
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
 // `runtime: process` is the JIT half: there is no loadable `libpthread.so` on
 // modern Linux, and the symbols are already mapped. Native `build` still gets `-lpthread`.
+// Windows has no libpthread; std::thread talks to Win32 and the static-once helper
+// names GetCurrentThreadId.
+//
+// glibc also keeps libm out of libc. LLVM lowers some math intrinsics (tanh,
+// atan2) to libcalls, so a native `build` needs `-lm`. Darwin's libm is
+// libSystem; `-lm` still works. `runtime: process` is the JIT half again:
+// echoc is itself linked against libm, and `--target-os linux` on Windows
+// must not try to open `libm.dll`. Windows UCRT already has the symbols;
+// lld-link looking for m.lib is a missing-library error.
+#[if: os != windows]
 #[link: lib { name: "pthread", runtime: process }]
+#[link: lib { name: "m", runtime: process }]
+#[end]

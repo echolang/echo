@@ -36,16 +36,20 @@ fi
 
 curl_prefix="$(cd "$3" && pwd)"
 
-if [ ! -f "${curl_prefix}/lib/libcurl.a" ]; then
-    echo "build_release_epm: no libcurl.a under ${curl_prefix}/lib" >&2
+if [ ! -f "${curl_prefix}/lib/libcurl.a" ] && [ ! -f "${curl_prefix}/lib/libcurl.lib" ]; then
+    echo "build_release_epm: no libcurl.a / libcurl.lib under ${curl_prefix}/lib" >&2
     echo "  run tools/build_static_curl.sh ${curl_prefix} first" >&2
     exit 2
 fi
 
-if [ ! -f "${curl_prefix}/lib/libssl.a" ] || [ ! -f "${curl_prefix}/lib/libcrypto.a" ]; then
-    echo "build_release_epm: no libssl.a / libcrypto.a under ${curl_prefix}/lib" >&2
-    echo "  a lib64 install is the usual cause - OpenSSL must be configured --libdir=lib" >&2
-    exit 2
+# Unix seats OpenSSL next to libcurl. Windows uses Schannel, so those archives
+# are not expected and must not be demanded.
+if [ -f "${curl_prefix}/lib/libcurl.a" ]; then
+    if [ ! -f "${curl_prefix}/lib/libssl.a" ] || [ ! -f "${curl_prefix}/lib/libcrypto.a" ]; then
+        echo "build_release_epm: no libssl.a / libcrypto.a under ${curl_prefix}/lib" >&2
+        echo "  a lib64 install is the usual cause - OpenSSL must be configured --libdir=lib" >&2
+        exit 2
+    fi
 fi
 
 version="$4"
@@ -134,7 +138,11 @@ ECHOC="${echoc}" "${echoc}" build -m "${epm}" --target epm -o "${out}" \
     --define static_curl \
     --link "search:${curl_prefix}/lib"
 
-if [ ! -x "${out}" ]; then
+if [ ! -e "${out}" ] && [ -e "${out}.exe" ]; then
+    out="${out}.exe"
+fi
+
+if [ ! -x "${out}" ] && [ ! -f "${out}" ]; then
     echo "build_release_epm: ${echoc} did not write an executable to ${out}" >&2
     exit 1
 fi

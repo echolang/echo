@@ -349,14 +349,9 @@ void AbortCodegen::flush_stdout()
 void AbortCodegen::write_stderr(llvm::Value *ptr, llvm::Value *len)
 {
     // write(2, ...) rather than fprintf(stderr, ...): the `stderr` global is spelled differently
-    // per platform (`__stderrp` on Darwin) and is not portably addressable from IR
-    llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
-    llvm::Type *i64 = llvm::Type::getInt64Ty(*_ctx.llvm_context);
-    llvm::Type *opaque_ptr = _ctx.opaque_ptr_type();
-
-    _ctx.builder->CreateCall(
-        _ctx.libc_callee("write", i64, { i32, opaque_ptr, i64 }),
-        { llvm::ConstantInt::get(i32, 2), ptr, len });
+    // per platform (`__stderrp` on Darwin) and is not portably addressable from IR. Windows
+    // has no `write`; CodegenContext::emit_libc_write names `_write` there
+    _ctx.emit_libc_write(2, ptr, len);
 }
 
 void AbortCodegen::call_thunk(

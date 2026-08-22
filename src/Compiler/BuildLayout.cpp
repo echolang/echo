@@ -35,12 +35,23 @@ std::filesystem::path marker_path(const std::filesystem::path &directory)
     return directory / "CACHEDIR.TAG";
 }
 
-// `$XDG_CACHE_HOME/echo`, else `$HOME/.cache/echo`, else empty when neither is set
+// `$XDG_CACHE_HOME/echo`, else `$HOME/.cache/echo`, else empty when neither is set.
+// Windows has no HOME by default: `%LOCALAPPDATA%\echo`, else `%USERPROFILE%\.cache\echo`
 std::filesystem::path user_cache_root()
 {
     if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
         return std::filesystem::path(xdg) / "echo";
     }
+
+#if defined(_WIN32)
+    if (const char *local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0') {
+        return std::filesystem::path(local) / "echo";
+    }
+
+    if (const char *profile = std::getenv("USERPROFILE"); profile != nullptr && *profile != '\0') {
+        return std::filesystem::path(profile) / ".cache" / "echo";
+    }
+#endif
 
     if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         return std::filesystem::path(home) / ".cache" / "echo";
@@ -67,7 +78,10 @@ bool is_empty_or_absent(const std::filesystem::path &directory)
 // questions here, which differ only in whether the paths they compare exist yet
 bool relative_stays_inside(const std::filesystem::path &relative)
 {
-    return !relative.empty() && relative.native().rfind("..", 0) != 0;
+    // first component, not a byte prefix of `.native()`: on Windows that string is
+    // `wchar_t` and `".."` does not convert, while `path("..")` is the same element
+    // on every platform
+    return !relative.empty() && *relative.begin() != std::filesystem::path("..");
 }
 
 };

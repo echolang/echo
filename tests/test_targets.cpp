@@ -179,9 +179,8 @@ TEST_CASE("a dependency's tests are not this invocation's", "[test_targets]")
         "    assert(doubled(3) == 6);\n"
         "}\n");
 
-    const ProcessResult app = EchoTests::run_capturing(
-        EchoTests::quoted(ECHOC_BINARY) + " test -m "
-        + EchoTests::quoted(project.root() / "app") + " 2>&1");
+    const ProcessResult app = EchoTests::run_process({
+        ECHOC_BINARY, "test", "-m", (project.root() / "app").string() });
 
     INFO(app.output);
     REQUIRE(app.exit_code == 0);
@@ -189,9 +188,8 @@ TEST_CASE("a dependency's tests are not this invocation's", "[test_targets]")
     REQUIRE(app.output.find("the_librarys_own") == std::string::npos);
 
     // and pointing at the library is how its own are run
-    const ProcessResult lib = EchoTests::run_capturing(
-        EchoTests::quoted(ECHOC_BINARY) + " test -m "
-        + EchoTests::quoted(project.root() / "lib") + " 2>&1");
+    const ProcessResult lib = EchoTests::run_process({
+        ECHOC_BINARY, "test", "-m", (project.root() / "lib").string() });
 
     INFO(lib.output);
     REQUIRE(lib.exit_code == 0);
