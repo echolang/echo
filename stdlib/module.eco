@@ -32,16 +32,14 @@
 // modern Linux, and the symbols are already mapped. Native `build` still gets `-lpthread`.
 // Windows has no libpthread; std::thread talks to Win32 and the static-once helper
 // names GetCurrentThreadId.
-#[if: os != windows]
-#[link: lib { name: "pthread", runtime: process }]
-#[end]
-
-// glibc keeps libm out of libc. LLVM lowers some math intrinsics (tanh, atan2)
-// to libcalls, so a native `build` needs `-lm` or the linker names them as
-// undefined. Darwin's libm is libSystem; `-lm` still works. The default
-// `runtime: load` is the spelling the docs teach as `lib "m"`, so a module
-// that writes that too still merges. Windows UCRT already has the symbols;
+//
+// glibc also keeps libm out of libc. LLVM lowers some math intrinsics (tanh,
+// atan2) to libcalls, so a native `build` needs `-lm`. Darwin's libm is
+// libSystem; `-lm` still works. `runtime: process` is the JIT half again:
+// echoc is itself linked against libm, and `--target-os linux` on Windows
+// must not try to open `libm.dll`. Windows UCRT already has the symbols;
 // lld-link looking for m.lib is a missing-library error.
 #[if: os != windows]
-#[link: lib "m"]
+#[link: lib { name: "pthread", runtime: process }]
+#[link: lib { name: "m", runtime: process }]
 #[end]
