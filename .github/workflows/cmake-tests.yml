@@ -94,13 +94,13 @@ jobs:
       shell: pwsh
       run: |
         cmake -B build -G Ninja `
-          -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
-          -DCMAKE_C_COMPILER="$env:LLVM_PATH\bin\clang.exe" `
-          -DCMAKE_CXX_COMPILER="$env:LLVM_PATH\bin\clang++.exe" `
-          -DLLVM_DIR="$env:LLVM_PATH\lib\cmake\llvm"
+          "-DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}" `
+          "-DCMAKE_C_COMPILER=$env:LLVM_PATH\bin\clang.exe" `
+          "-DCMAKE_CXX_COMPILER=$env:LLVM_PATH\bin\clang++.exe" `
+          "-DLLVM_DIR=$env:LLVM_PATH\lib\cmake\llvm"
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config RelWithDebInfo --target tests
+      run: cmake --build ${{github.workspace}}/build --config ${{ env.BUILD_TYPE }} --target tests
 
     - name: Test
       working-directory: ${{github.workspace}}/build
