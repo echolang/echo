@@ -125,9 +125,8 @@ struct Canvas
         }
     }
 
-    // the whole picture as one string. `echo` prints one expression and always adds a newline, so a
-    // frame has to arrive in a single statement - printing cell by cell would flicker and cost a write
-    // syscall per glyph.
+    // the whole picture as one string. `print` takes one `string`, so a frame has to arrive in a
+    // single statement - printing cell by cell would flicker and cost a write syscall per glyph.
     //
     // nothing terminal-specific in here, deliberately: homing the cursor is what the *animation* does
     // between frames, and a canvas that knew about it could not hand back a picture anybody could

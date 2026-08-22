@@ -1,5 +1,6 @@
 #include "Compiler/TestRunner.h"
 
+#include "Compiler/HostTool.h"
 #include "Compiler/ProgressReporter.h"
 
 #include <cerrno>
@@ -101,9 +102,40 @@ namespace
 #endif
 };
 
-bool Compiler::test_isolation_available()
+Compiler::TestResult Compiler::run_test_isolated(
+    const TestCase &test,
+    const std::vector<std::string> &argv,
+    unsigned timeout_ms
+)
 {
-    return ECO_TEST_ISOLATION_POSIX != 0;
+    TestResult result;
+    result.test = test;
+
+    const auto started = std::chrono::steady_clock::now();
+
+    const CapturedProcess captured = run_captured(
+        argv,
+        timeout_ms,
+        {},
+        { { k_isolated_test_env, test.symbol } });
+
+    result.milliseconds = progress_elapsed_ms(started);
+    result.output = captured.output;
+    result.status = captured.exit_code;
+    result.signal = captured.signal;
+
+    if (captured.timed_out) {
+        result.outcome = TestOutcome::t_timed_out;
+        return result;
+    }
+
+    if (captured.signal != 0) {
+        result.outcome = TestOutcome::t_signalled;
+        return result;
+    }
+
+    result.outcome = result.status == 0 ? TestOutcome::t_passed : TestOutcome::t_failed;
+    return result;
 }
 
 #if ECO_TEST_ISOLATION_POSIX
@@ -216,27 +248,6 @@ Compiler::TestResult Compiler::run_test_isolated(
     // reach the abort thunk's `exit(1)` having already written their message, and a test calling
     // `std::env::exit(3)` has ended itself without saying it passed
     result.outcome = result.status == 0 ? TestOutcome::t_passed : TestOutcome::t_failed;
-
-    return result;
-}
-
-#else
-
-Compiler::TestResult Compiler::run_test_isolated(
-    const TestCase &test,
-    const std::function<void()> &call,
-    unsigned timeout_ms
-)
-{
-    (void)call;
-    (void)timeout_ms;
-
-    // unreachable: the subcommand refuses before the first test when test_isolation_available() is false,
-    // which is where the refusal belongs - a platform that cannot isolate is told so once
-    TestResult result;
-    result.test = test;
-    result.outcome = TestOutcome::t_failed;
-    result.output = "running a test in its own process is not implemented on this platform.\n";
 
     return result;
 }

@@ -158,6 +158,10 @@ namespace Compiler
         std::filesystem::path &out_library,
         std::string &out_error
     );
+
+    // defined COFF text/data names from `llvm-nm --extern-only --defined-only` output.
+    // isolated from the linker so the scrape can be tested without running clang
+    std::vector<std::string> coff_exports_from_nm(const std::string &nm_output);
 };
 
 #endif

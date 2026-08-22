@@ -30,4 +30,8 @@
 // glibc before 2.34 keeps pthread out of libc. Darwin's libpthread is libSystem.
 // `runtime: process` is the JIT half: there is no loadable `libpthread.so` on
 // modern Linux, and the symbols are already mapped. Native `build` still gets `-lpthread`.
+// Windows has no libpthread; std::thread talks to Win32 and the static-once helper
+// names GetCurrentThreadId.
+#[if: os != windows]
 #[link: lib { name: "pthread", runtime: process }]
+#[end]

@@ -134,6 +134,12 @@ namespace Compiler
             return _scratch;
         }
 
+        // a loose .eco file has no project directory. the fallback used to live under the
+        // system temp path; a linked runner there is what Windows Defender flags as a dropper
+        bool scratch_is_temporary() const {
+            return _scratch_is_temporary;
+        }
+
         // where a C object goes when its module's own store could not be written. The `cc` join lives
         // here beside module_cc_dir's: a caller spelling it is the fourth answer this class replaced
         std::filesystem::path scratch_cc_dir() const;

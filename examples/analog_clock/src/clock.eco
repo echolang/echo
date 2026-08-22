@@ -2,7 +2,8 @@
  * Where the time comes from, and where the program waits.
  *
  * The stdlib has neither, so both are libc through `extern`. That is the intended shape: a binding is
- * a declaration, not a wrapper the compiler has to know about.
+ * a declaration, not a wrapper the compiler has to know about. Windows has no `usleep`; the wait is
+ * kernel32 `Sleep`, in milliseconds.
  */
 
 namespace clock;
@@ -30,8 +31,17 @@ struct tm
 extern {
     function time as c_time(ptr<int64> $out) : int64;
     function localtime as c_localtime(ptr<int64> $t) : ptr<tm>;
+}
+
+#[if: os == windows]
+extern {
+    function Sleep as c_Sleep(uint32 $ms) : void;
+}
+#[else]
+extern {
     function usleep as c_usleep(uint32 $usec) : int32;
 }
+#[end]
 
 // the time of day, and nothing else - the rest of the program never sees a `tm`
 struct Time
@@ -55,7 +65,11 @@ function now() : Time
 
 function sleep_ms(uint32 $ms) : void
 {
+    #[if: os == windows]
+    c_Sleep($ms);
+    #[else]
     c_usleep($ms * 1000);
+    #[end]
 }
 
 // -- reading a time off the command line ---------------------------------------------------------

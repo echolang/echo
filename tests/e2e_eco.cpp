@@ -1,15 +1,18 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "Compiler/HostTool.h"
 #include "eco_test_file.h"
 #include "subprocess.h"
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <filesystem>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // end-to-end suite
@@ -41,7 +44,6 @@ namespace
     // the shared process primitive - see subprocess.h
     using EchoTests::ProcessResult;
     using EchoTests::quoted;
-    using EchoTests::run_capturing;
 
     // `echoc <run|build -o bin> [dump] [flags] <file>`.
     //
@@ -70,7 +72,7 @@ namespace
         return fs::path(ECO_E2E_TMP_DIR) / fs::relative(eco, root).replace_extension("");
     }
 
-    std::string echoc_command(
+    std::vector<std::string> echoc_argv(
         const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path *binary,
         const std::string &dump, const fs::path &root, const fs::path &scratch)
     {
@@ -78,32 +80,67 @@ namespace
 
         REQUIRE((binary != nullptr) == is_build);
 
-        // without --build-dir the default applies, which is `ecobuild` beside each manifest - so
-        // running the corpus would write artifacts into tests_eco/ and into stdlib/, and two cases
-        // sharing a manifest would share a cache
-        // an `args:` line reaches a JIT'd program through echoc's own `--` separator, which is what tells
-        // the driver where its command line stops and the program's begins. On the `build` path it
-        // belongs to the binary instead, so it is appended where that is invoked and not here -
-        // `echoc build -- foo` would be echoc's argument, not the program's
-        const std::string program_arguments
-            = (is_build || test.mode == EchoTests::RunMode::t_test || test.arguments.empty())
-            ? std::string()
-            : " --" + test.argument_suffix();
+        std::vector<std::string> argv = { ECHOC_BINARY };
 
-        // the subcommand, one word off the mode. `test` takes no `-o` and no `--`: it runs no program of the
-        // case's, so there is nothing for either to be about
-        const std::string subcommand = is_build
-            ? "build -o " + quoted(*binary) + " "
-            : (test.mode == EchoTests::RunMode::t_test ? std::string("test ") : std::string("run "));
+        if (is_build) {
+            argv.push_back("build");
+            argv.push_back("-o");
+            argv.push_back(binary->string());
+        }
+        else if (test.mode == EchoTests::RunMode::t_test) {
+            argv.push_back("test");
+        }
+        else {
+            argv.push_back("run");
+        }
 
-        return test.stdin_prefix()
-            + test.environment_prefix()
-            + "\"" ECHOC_BINARY "\" "
-            + subcommand
-            + (dump.empty() ? "" : dump + " ")
-            + "--build-dir " + quoted(scratch / "cache") + " "
-            + test.compiler_flags(root)
-            + quoted(eco) + program_arguments + " 2>&1";
+        if (!dump.empty()) {
+            for (const std::string &word : EchoTests::split_command_words(dump)) {
+                argv.push_back(word);
+            }
+        }
+
+        argv.push_back("--build-dir");
+        argv.push_back((scratch / "cache").string());
+
+        for (const std::string &word : EchoTests::split_command_words(test.compiler_flags(root))) {
+            argv.push_back(word);
+        }
+
+        argv.push_back(eco.string());
+
+        if (!is_build && test.mode != EchoTests::RunMode::t_test && !test.arguments.empty()) {
+            argv.push_back("--");
+            argv.insert(argv.end(), test.arguments.begin(), test.arguments.end());
+        }
+
+        return argv;
+    }
+
+    std::vector<std::pair<std::string, std::string>> extra_env_from(const EchoTests::EcoTestFile &test)
+    {
+        std::vector<std::pair<std::string, std::string>> env;
+
+        for (const std::string &pair : test.environment) {
+            const size_t eq = pair.find('=');
+            if (eq != std::string::npos) {
+                env.emplace_back(pair.substr(0, eq), pair.substr(eq + 1));
+            }
+        }
+
+        return env;
+    }
+
+    std::string stdin_text(const EchoTests::EcoTestFile &test)
+    {
+        std::string text;
+
+        for (const std::string &line : test.stdin_lines) {
+            text += line;
+            text += '\n';
+        }
+
+        return text;
     }
 
     // brackets a case's scratch directory: empty on the way in, gone on the way out.
@@ -147,16 +184,40 @@ namespace
         std::vector<ProcessResult> dumps;  // one per `test.checks`, same order
     };
 
+    std::string describe_exit(int exit_code)
+    {
+#if defined(_WIN32)
+        const auto code = static_cast<unsigned>(exit_code);
+
+        if (code == 0xC0000005u) {
+            return "0xC0000005 (access violation)";
+        }
+
+        if (code >= 0xC0000000u) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "0x%08X", code);
+            return buf;
+        }
+#endif
+        return std::to_string(exit_code);
+    }
+
     // `clang` is what Backend::link_executable falls back to. a FAIL rather than a skip: a suite
     // that quietly stops testing native builds is exactly the silent no-op this corpus refuses
     void require_clang()
     {
-        // through the suite's one process primitive, so the wait status is decoded where every other
-        // spawn's is - and a spawn failure reads as an exit code here too rather than as a crash
-        static const bool available = run_capturing("command -v clang").exit_code == 0;
+        // the same clang echoc itself will invoke, not whatever `where clang` happens to
+        // find. PATH often has a GNU-ABI clang first on Windows, and a VS/CMake session
+        // may have none at all
+        static const bool available = [] {
+            const std::string clang = Compiler::host_clang();
+            std::error_code ec;
+            return std::filesystem::is_regular_file(clang, ec);
+        }();
 
         if (!available) {
-            FAIL("a 'mode: build' test needs `clang` on PATH - echoc links the emitted object with it");
+            FAIL("a 'mode: build' test needs the host clang echoc was built with ("
+                << Compiler::host_clang() << ")");
         }
     }
 
@@ -177,7 +238,7 @@ namespace
         }
 
         FAIL_CHECK("expected this case to " << EchoTests::expectation_name(test.expect)
-            << ", but " << actor << " exited " << result.exit_code);
+            << ", but " << actor << " exited " << describe_exit(result.exit_code));
 
         return false;
     }
@@ -255,7 +316,7 @@ namespace
                 return;
             }
 
-            FAIL("echoc build exited " << build.exit_code);
+            FAIL("echoc build exited " << describe_exit(build.exit_code));
         }
 
         // the emit path used to report all of its failure paths by printing and returning, so
@@ -307,32 +368,36 @@ namespace
     // outlive the cleanup, and the program is run before a dump invocation can overwrite the binary
     // underneath it
     CaseOutcome run_case(
-        const DiscoveredCase &entry, const std::string &command,
-        const std::vector<std::string> &dump_commands)
+        const DiscoveredCase &entry, const std::vector<std::string> &command,
+        const std::vector<std::vector<std::string>> &dump_commands)
     {
         CaseOutcome outcome;
         ScopedScratch scratch(entry.scratch);
 
         const unsigned deadline = entry.test.timeout_ms;
+        const auto env = extra_env_from(entry.test);
+        const std::string input = stdin_text(entry.test);
 
-        outcome.primary = run_capturing(command, deadline);
+        // stdin belongs to the program, not to `echoc build` or a dump invocation
+        outcome.primary = EchoTests::run_process(
+            command, deadline, {}, env, entry.binary.empty() ? input : std::string());
 
         if (!entry.binary.empty()) {
             std::error_code ec;
-            outcome.binary_exists = fs::exists(entry.binary, ec);
+            outcome.binary_exists = EchoTests::file_exists(entry.binary);
 
             if (outcome.primary.exit_code == 0 && outcome.binary_exists) {
                 // the environment goes on both spawns and the arguments only on this one: a linked binary
                 // is the program, so its argv *is* the program's, with no `--` needed to say so
-                outcome.program = run_capturing(
-                    entry.test.stdin_prefix() + entry.test.environment_prefix() + quoted(entry.binary)
-                    + entry.test.argument_suffix() + " 2>&1",
-                    deadline);
+                std::vector<std::string> argv = { EchoTests::with_exe(entry.binary).string() };
+                argv.insert(argv.end(), entry.test.arguments.begin(), entry.test.arguments.end());
+
+                outcome.program = EchoTests::run_process(argv, deadline, {}, env, input);
             }
         }
 
         for (const auto &dump : dump_commands) {
-            outcome.dumps.push_back(run_capturing(dump, deadline));
+            outcome.dumps.push_back(EchoTests::run_process(dump, deadline, {}, env));
         }
 
         return outcome;
@@ -356,7 +421,15 @@ namespace
             : _cases(cases), _root(std::move(root)), _slots(cases.size())
         {
             const unsigned detected = std::thread::hardware_concurrency();
-            const unsigned workers = detected == 0 ? 4 : detected;
+            unsigned workers = detected == 0 ? 4 : detected;
+
+#if defined(_WIN32)
+            // each case is its own echoc, and a native build then starts clang. uncapped
+            // hardware_concurrency on Windows is enough concurrent compilers to AV a child
+            if (workers > 8) {
+                workers = 8;
+            }
+#endif
 
             for (unsigned i = 0; i < workers; i++) {
                 _workers.emplace_back([this] { work(); });
@@ -420,8 +493,8 @@ namespace
             enum class State { t_idle, t_claimed, t_done };
 
             State state = State::t_idle;
-            std::string command;
-            std::vector<std::string> dump_commands;
+            std::vector<std::string> command;
+            std::vector<std::vector<std::string>> dump_commands;
             CaseOutcome outcome;
         };
 
@@ -432,10 +505,10 @@ namespace
             const fs::path *binary = entry.binary.empty() ? nullptr : &entry.binary;
 
             _slots[index].command
-                = echoc_command(entry.test, entry.eco, binary, "", _root, entry.scratch);
+                = echoc_argv(entry.test, entry.eco, binary, "", _root, entry.scratch);
 
             for (const auto &section : entry.test.checks) {
-                _slots[index].dump_commands.push_back(echoc_command(
+                _slots[index].dump_commands.push_back(echoc_argv(
                     entry.test, entry.eco, binary, EchoTests::dump_flag(section.kind), _root,
                     entry.scratch));
             }
@@ -445,8 +518,8 @@ namespace
         {
             for (;;) {
                 size_t index = 0;
-                std::string command;
-                std::vector<std::string> dump_commands;
+                std::vector<std::string> command;
+                std::vector<std::vector<std::string>> dump_commands;
 
                 {
                     std::unique_lock<std::mutex> lock(_mutex);
@@ -551,7 +624,7 @@ namespace
 
             DiscoveredCase discovered;
             discovered.eco = eco;
-            discovered.rel = fs::relative(eco, root).string();
+            discovered.rel = fs::relative(eco, root).generic_string();
             discovered.has_test_file = fs::exists(test_path);
 
             if (discovered.has_test_file

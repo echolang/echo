@@ -73,10 +73,8 @@ TEST_CASE("each target runs its own entry file and nothing of the other's", "[ta
 
     REQUIRE(project.echoc("build").exit_code == 0);
 
-    const ProcessResult clock = EchoTests::run_capturing(
-        EchoTests::quoted(project.root() / "ecobuild/clock") + " 2>&1");
-    const ProcessResult serve = EchoTests::run_capturing(
-        EchoTests::quoted(project.root() / "ecobuild/serve") + " 2>&1");
+    const ProcessResult clock = EchoTests::run_binary(project.root() / "ecobuild/clock");
+    const ProcessResult serve = EchoTests::run_binary(project.root() / "ecobuild/serve");
 
     INFO("clock: " << clock.output << "\nserve: " << serve.output);
 
@@ -87,7 +85,7 @@ TEST_CASE("each target runs its own entry file and nothing of the other's", "[ta
     REQUIRE(serve.output.find("CLOCK") == std::string::npos);
 }
 
-TEST_CASE("--target builds the one named and leaves the others alone", "[targets]")
+TEST_CASE("`--target` builds the one named and leaves the others alone", "[targets]")
 {
     ScopedProject project("one_target_only");
     write_two_target_project(project);
@@ -100,7 +98,7 @@ TEST_CASE("--target builds the one named and leaves the others alone", "[targets
     REQUIRE_FALSE(EchoTests::file_exists(project.root() / "ecobuild/serve"));
 }
 
-TEST_CASE("-o overrides where one target's binary goes", "[targets]")
+TEST_CASE("`-o` overrides where one target's binary goes", "[targets]")
 {
     ScopedProject project("output_override");
     write_two_target_project(project);
@@ -256,8 +254,7 @@ TEST_CASE("a dependency's targets are its own and reach no consumer", "[targets]
     REQUIRE_FALSE(EchoTests::file_exists(project.root() / "app/ecobuild/tool"));
     REQUIRE_FALSE(EchoTests::file_exists(project.root() / "lib/ecobuild/tool"));
 
-    const ProcessResult ran = EchoTests::run_capturing(
-        EchoTests::quoted(project.root() / "app/ecobuild/app") + " 2>&1");
+    const ProcessResult ran = EchoTests::run_binary(project.root() / "app/ecobuild/app");
 
     INFO(ran.output);
     REQUIRE(ran.output.find("HELLO") != std::string::npos);

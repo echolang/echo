@@ -17,6 +17,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
+#include <llvm/TargetParser/Triple.h>
 
 #include <cassert>
 #include <filesystem>
@@ -350,6 +351,63 @@ namespace Compiler::LLVM
                 name, llvm::FunctionType::get(return_type, parameter_types, variadic));
         }
 
+        // the object is for this machine, so CRT names follow the triple rather than
+        // `--target-os`. that flag only picks `#[if:]` arms; it does not retarget
+        bool targeting_windows() const {
+            return llvm::Triple(target_triple).isOSWindows();
+        }
+
+        // `write(fd, ptr, len)` on POSIX, `_write` on Windows UCRT. length is i64 in
+        // IR either way; Windows truncates to i32 because that is the CRT's count
+        void emit_libc_write(int fd, llvm::Value *ptr, llvm::Value *len)
+        {
+            llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
+            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
+            llvm::Type *opaque_ptr = opaque_ptr_type();
+            llvm::Value *fd_val = llvm::ConstantInt::get(i32, fd);
+
+            if (targeting_windows()) {
+                llvm::Value *count = builder->CreateTrunc(len, i32, "write.n");
+                builder->CreateCall(
+                    libc_callee("_write", i32, { i32, opaque_ptr, i32 }),
+                    { fd_val, ptr, count });
+                return;
+            }
+
+            builder->CreateCall(
+                libc_callee("write", i64, { i32, opaque_ptr, i64 }),
+                { fd_val, ptr, len });
+        }
+
+        // stdout is fully buffered when it is a pipe. `echo` of a string goes through
+        // `_write` (unbuffered) after `fflush(NULL)`, and that fflush is a no-op from
+        // JIT'd code on Windows: MCJIT resolves UCRT but `fflush(NULL)` does not drain
+        // this process's FILE*. unbuffering stdout and stderr makes `printf` and
+        // `_write` the same kind of write, so program order is what the goldens record
+        void emit_unbuffer_stdio()
+        {
+            if (!targeting_windows()) {
+                return;
+            }
+
+            llvm::Type *i32 = llvm::Type::getInt32Ty(*llvm_context);
+            llvm::Type *i64 = llvm::Type::getInt64Ty(*llvm_context);
+            llvm::Type *ptr = opaque_ptr_type();
+            llvm::FunctionCallee iob = libc_callee("__acrt_iob_func", ptr, { i32 });
+            llvm::FunctionCallee setvbuf_fn = libc_callee(
+                "setvbuf", i32, { ptr, ptr, i32, i64 });
+            llvm::Value *null = llvm::ConstantPointerNull::get(
+                llvm::cast<llvm::PointerType>(ptr));
+            llvm::Value *ionbf = llvm::ConstantInt::get(i32, 4);
+            llvm::Value *zero = llvm::ConstantInt::get(i64, 0);
+
+            for (unsigned fd : { 1u, 2u }) {
+                llvm::Value *file = builder->CreateCall(
+                    iob, { llvm::ConstantInt::get(i32, fd) });
+                builder->CreateCall(setvbuf_fn, { file, null, ionbf, zero });
+            }
+        }
+
         // the opaque `ptr`, spelled once - it appears in almost every emitted runtime signature
         llvm::Type *opaque_ptr_type() const {
             return llvm::PointerType::get(*llvm_context, 0);
@@ -486,6 +544,15 @@ namespace Compiler::LLVM
         // these files is the program" and "is there a program at all" are two questions, and folding the
         // second into the first is how a target-less module would have started answering false
         bool test_mode = false;
+
+        // `main` dispatches on `ECO_INTERNAL_RUN_TEST`. only a linked runner wants that ladder;
+        // the JIT path calls each test by address and must not emit it, or a leftover env var
+        // would run a test inside the prologue
+        bool emit_native_test_runner = false;
+
+        // mangled names `echoc test` will call. empty on a `run`/`build`. a native runner's
+        // `main` looks them up, and DCE cannot drop a test nothing in `main` appeared to reach
+        std::vector<std::string> test_symbols;
 
         // the main compilation unit, or nullptr if the bundle has no main module yet
         CmpUnit *main_cmp_unit();

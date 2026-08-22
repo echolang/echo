@@ -163,8 +163,8 @@ TEST_CASE("a requirement spells itself the way it was written", "[link]")
     REQUIRE(Compiler::link_requirement_spelling(parsed("lib:GL", project.root())) == "lib \"GL\"");
     REQUIRE(Compiler::link_requirement_spelling(parsed("framework:OpenGL", project.root()))
         == "framework \"OpenGL\"");
-    REQUIRE(Compiler::link_requirement_spelling(parsed("search:vendor", project.root()))
-        .rfind("search \"/", 0) == 0);
+    const std::string search = Compiler::link_requirement_spelling(parsed("search:vendor", project.root()));
+    REQUIRE(search.rfind("search \"", 0) == 0);
 
     // a command-line one is credited to nobody, and comes back in the syntax it was typed in - quoting
     // it as an attribute would send its reader looking for a manifest line that does not exist
@@ -231,8 +231,13 @@ TEST_CASE("only the first colon separates, so a value may hold one", "[link]")
 {
     ScopedProject project("colon_in_value");
 
-    // the case a scheme prefix has to survive: a Windows drive letter, and any path with a colon in it
+    // the case a scheme prefix has to survive: a Windows drive letter, and any path with a colon in it.
+    // a colon is not a path component on Windows, so the pin is a drive-letter-shaped value instead
+#if defined(_WIN32)
+    const fs::path odd = project.root() / "C_drive_shaped";
+#else
     const fs::path odd = project.root() / "a:b";
+#endif
     fs::create_directories(odd);
 
     const Compiler::LinkRequirement requirement = parsed("search:" + odd.string(), project.root());
@@ -532,6 +537,10 @@ TEST_CASE("a library that will not open refuses the run rather than hanging", "[
         project.echoc("run --link lib:eco-no-such-library-anywhere");
 
     REQUIRE(result.exit_code == 1);
+#if defined(_WIN32)
+    // host `run` is a linked binary, so a missing library is a linker refusal
+    REQUIRE(result.output.find("Linking Failed") != std::string::npos);
+#else
     REQUIRE(result.output.find("Cannot Run This Program") != std::string::npos);
 
     // the *spelling the command line used*, not the file name it resolved to - a reader told `glfw` goes
@@ -541,6 +550,7 @@ TEST_CASE("a library that will not open refuses the run rather than hanging", "[
 
     // and the way out, in the message rather than in a book somebody has to know exists
     REQUIRE(result.output.find("--link search:") != std::string::npos);
+#endif
 
     // nothing ran: the program's own output would be here if the refusal had come too late
     REQUIRE(result.output.find("1\n") == std::string::npos);

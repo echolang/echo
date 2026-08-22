@@ -1,3 +1,4 @@
 # what `echoc build -o clock` leaves here: the binary, and the build directory holding everything else
 clock
+clock.exe
 ecobuild/

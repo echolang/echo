@@ -5,8 +5,11 @@
 
 #include "Compiler/TestSelection.h"
 
+#if defined(__unix__) || defined(__APPLE__)
 #include <functional>
+#endif
 #include <string>
+#include <vector>
 
 namespace Compiler
 {
@@ -51,33 +54,33 @@ namespace Compiler
         }
     };
 
-    // **is running a test in a child process possible on this platform at all.**
-    //
-    // false is not a diagnostic - the caller writes that - but it exists so the refusal happens at the
-    // subcommand rather than at the first test, which is the same call `#[link: framework]` makes about
-    // Darwin: a platform that cannot do the thing is told so where the thing was asked for
-    bool test_isolation_available();
+    // the environment variable a linked test runner looks up to decide which test to call.
+    // the parent sets it per child so a parallel spawn cannot leak the name into this process
+    constexpr const char *k_isolated_test_env = "ECO_INTERNAL_RUN_TEST";
 
-    // **runs one test in a forked child and reports how it ended.**
+    // **runs one test in a child process and reports how it ended.**
     //
-    // fork rather than anything in-process, and that is the design: a failed `assert` lowers to
-    // `__eco_abort`, which writes its message and calls `exit(1)`. There is no unwind, no landing pad and no
-    // signal handler anywhere in this compiler or in the standard library, so "continue after a failure" is
-    // either a new kind of assertion that skips every destructor between itself and the runner, or a process
-    // boundary. A boundary survives `assert`, `die`, `env::exit` and a segfault alike, and changes nothing
-    // about how any of them lower.
+    // a process boundary rather than anything in-process, and that is the design: a failed `assert`
+    // lowers to `__eco_abort`, which writes its message and calls `exit(1)`. There is no unwind, no
+    // landing pad and no signal handler anywhere in this compiler or in the standard library, so
+    // "continue after a failure" is either a new kind of assertion that skips every destructor
+    // between itself and the runner, or a process boundary. A boundary survives `assert`, `die`,
+    // `env::exit` and a segfault alike, and changes nothing about how any of them lower.
     //
-    // `call` is the test's body, reached through its address in the JIT - the child's whole job. It runs
-    // **only in the child**, which is what makes the parent's own state irrelevant to it.
-    //
-    // the parent flushes its streams before forking, or whatever it had buffered is duplicated into every
-    // child and written again by each
-    // `timeout_ms` is `--timeout`. zero waits forever. the parent watches the clock with
-    // poll and SIGKILL, so the flag's unit is honest and a child that ignores SIGALRM
-    // still dies. a fired deadline is `t_timed_out`, not `t_signalled`
+    // two ways to start the child, one result shape. the JIT path forks and calls `call` in the
+    // child. a linked runner is spawned as `argv` with `ECO_INTERNAL_RUN_TEST` naming this test.
+    // `timeout_ms` is `--timeout`. zero waits forever. a fired deadline is `t_timed_out`
+
+#if defined(__unix__) || defined(__APPLE__)
     TestResult run_test_isolated(
         const TestCase &test,
         const std::function<void()> &call,
+        unsigned timeout_ms = 0);
+#endif
+
+    TestResult run_test_isolated(
+        const TestCase &test,
+        const std::vector<std::string> &argv,
         unsigned timeout_ms = 0);
 };
 

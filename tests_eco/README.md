@@ -211,9 +211,21 @@ exactly the same thing whether it holds or not.
 carry their weight:
 
 ```
-CHECK:     <substring>    must appear at or after the previous CHECK's match
-CHECK-NOT: <substring>    must not appear between the surrounding CHECKs
+CHECK:            <substring>    must appear at or after the previous CHECK's match
+CHECK-NOT:        <substring>    must not appear between the surrounding CHECKs
+CHECK-<os>:       <substring>    CHECK, only when the suite's host is <os>
+CHECK-NOT-<os>:   <substring>    CHECK-NOT, only when the suite's host is <os>
 ```
+
+`<os>` is `WINDOWS`, `LINUX` or `DARWIN` — the same vocabulary as `#[if: os == ...]`, uppercase to
+match `CHECK-NOT`. A gated directive is skipped on every other host: it does not advance the cursor
+and it does not search. That is how a lowering that names `_write` on Windows and `write` on POSIX
+is pinned on each machine without dropping the assertion on the others.
+
+These follow the **host**, not `--target-os`. That flag picks `#[if:]` arms; CRT names follow the
+object's triple, which is this machine. A case that uses `--target-os` to dump a foreign stdlib arm
+(`env/exe_linux_arm`) keeps unprefixed `CHECK:`s, because that dump is the same wherever the suite
+runs.
 
 Blank lines and `#` / `//` lines are ignored. Anything else is an **error**, not a no-op — a mistyped
 `CHEK:` that silently checks nothing is the one failure mode this must not have.

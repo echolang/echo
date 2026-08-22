@@ -10,9 +10,13 @@
 namespace
 {
     // what ended a test, said the way a person would. `strsignal` rather than a table of our own: the names
-    // are the platform's, and a signal this compiler has never heard of still has one
+    // are the platform's, and a signal this compiler has never heard of still has one. Windows has no
+    // `strsignal` and no POSIX signals; the number is still the honest report
     std::string signal_description(int signal)
     {
+#if defined(_WIN32)
+        return fmt::format("signal {}", signal);
+#else
         const char *described = strsignal(signal);
 
         if (described == nullptr) {
@@ -20,6 +24,7 @@ namespace
         }
 
         return fmt::format("{} (signal {})", described, signal);
+#endif
     }
 
     // the one sentence that says how a test ended, shared by both renderings so a CI log and a terminal

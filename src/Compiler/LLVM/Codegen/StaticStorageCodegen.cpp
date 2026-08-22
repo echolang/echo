@@ -116,9 +116,20 @@ namespace Compiler::LLVM
         // i64, not ptr: stdlib declares `pthread_self` as returning usize, and two units that
         // disagree about that symbol's type emit two __eco_static_once bodies the ODR check
         // refuses. the bits in the return register are the thread id either way
-        llvm::Value *self = _ctx.builder->CreateCall(
-            _ctx.libc_callee("pthread_self", i64, {}), {}, "self");
-        _ctx.needs_pthread = true;
+        llvm::Type *i32 = llvm::Type::getInt32Ty(*_ctx.llvm_context);
+        llvm::Value *self = nullptr;
+
+        if (_ctx.targeting_windows()) {
+            // DWORD GetCurrentThreadId(void) - kernel32, already on the link line
+            llvm::Value *tid = _ctx.builder->CreateCall(
+                _ctx.libc_callee("GetCurrentThreadId", i32, {}), {}, "tid");
+            self = _ctx.builder->CreateZExt(tid, i64, "self");
+        }
+        else {
+            self = _ctx.builder->CreateCall(
+                _ctx.libc_callee("pthread_self", i64, {}), {}, "self");
+            _ctx.needs_pthread = true;
+        }
         // 0 is uninitialized and ~0 is done. a tid that collides with either would skip
         // the initializer or look finished. 1 is neither sentinel
         llvm::Value *one = llvm::ConstantInt::get(i64, 1);
@@ -166,9 +177,12 @@ namespace Compiler::LLVM
         _ctx.builder->CreateBr(done);
 
         _ctx.builder->SetInsertPoint(wait);
-        _ctx.builder->CreateCall(
-            _ctx.libc_callee(
-                "sched_yield", llvm::Type::getInt32Ty(*_ctx.llvm_context), {}));
+        if (_ctx.targeting_windows()) {
+            _ctx.builder->CreateCall(_ctx.libc_callee("SwitchToThread", i32, {}));
+        }
+        else {
+            _ctx.builder->CreateCall(_ctx.libc_callee("sched_yield", i32, {}));
+        }
         _ctx.builder->CreateBr(loop);
 
         _ctx.builder->SetInsertPoint(done);

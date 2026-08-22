@@ -9,6 +9,10 @@
 string $cwd = std::env::cwd();
 
 echo $cwd->size() > 0;
+#[if: os == windows]
+echo $cwd->byte(1) == 58;
+#[else]
 echo $cwd->starts('/');
+#[end]
 
 echo mem::live_allocations();

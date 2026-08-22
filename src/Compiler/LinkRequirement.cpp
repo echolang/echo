@@ -509,6 +509,14 @@ void Compiler::partition_link_requirements(
     for (const LinkRequirement &requirement : requirements) {
         switch (requirement.scheme) {
         case LinkScheme::t_library:
+            // libm is a Unix split. UCRT already has the math symbols, and
+            // lld-link looking for m.lib is a missing-library error rather than
+            // a redundant `-lm`
+            if (requirement.value == "m"
+                && Compiler::TargetFacts::host().operating_system == "windows") {
+                break;
+            }
+
             if (requirement.linkage == LinkLinkage::t_static) {
                 if (const auto archive = archive_in_search(requirement.value, requirements)) {
                     out_objects.push_back(archive.value());

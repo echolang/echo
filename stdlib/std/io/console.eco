@@ -1,0 +1,157 @@
+/**
+ * Writing UTF-8 to a Windows console.
+ *
+ * Unix `write(2)` to a terminal is the bytes, and the terminal draws one cell
+ * per UTF-8 glyph. Windows `_write` to a console is decoded with the OEM code
+ * page (850, 437) even inside Windows Terminal, so a glyph two or three bytes
+ * wide lands as that many CP850 characters and a picture falls apart. The
+ * documented way to write Unicode to a console is `WriteConsoleW`.
+ *
+ * This is the Windows half of `c_write`. A pipe or a file fails
+ * `GetConsoleMode` and `c_write` falls through to `_write` of the same UTF-8
+ * - which is what a redirect and every `tests_eco/io` golden see. No public
+ * API: `stdout->write` is still the surface.
+ */
+
+namespace std::io;
+
+#[if: os == windows]
+internal const uint32 CONSOLE_CP_UTF8 = 65001;
+internal const uint32 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4;
+
+/**
+ * `$count` bytes of UTF-8 at `$buf`, drawn on the console `$fd` names, or -1
+ * when `$fd` is not a console.
+ *
+ * The count it returns is the UTF-8 length, not the WCHAR count
+ * `WriteConsoleW` reports, so `raw_write_all` does not retry at a UTF-16
+ * offset.
+ */
+internal function console_write(int32 $fd, ptr<const uint8> $buf, usize $count) : isize
+{
+    ptr<uint8> $handle = c_get_osfhandle($fd);
+    uint32 $mode = 0;
+
+    if (c_GetConsoleMode($handle, &$mode) == 0) {
+        return -1;
+    }
+
+    // so `\x1b[H` and `\x1b[2J` move the cursor instead of printing as `←[H`.
+    // a mode bit, not an alternate screen - sticky after Ctrl-C, and benign
+    c_SetConsoleMode($handle, $mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
+    if ($count == 0) {
+        return 0;
+    }
+
+    // WriteConsoleW does not translate `\n` the way UCRT `_write` in text
+    // mode does. a lone LF walks the cursor down without returning to column
+    // zero. skip an LF that is already preceded by CR, so a caller who sent
+    // CRLF is not doubled
+    usize $extra = 0;
+
+    foreach (0 .. $count as $i) {
+        if ($buf:$[$i] == 10) {
+            if ($i == 0) {
+                $extra = $extra + 1;
+            }
+            else {
+                if ($buf:$[$i - 1] != 13) {
+                    $extra = $extra + 1;
+                }
+            }
+        }
+    }
+
+    ptr<const uint8> $utf8 = $buf;
+    int32 $utf8_n = $count as int32;
+
+    ptr<uint8> $expanded = ptr<uint8>(null);
+
+    if ($extra != 0) {
+        $expanded:$ = mem::alloc<uint8>($count + $extra);
+
+        if ($expanded:$ == null) {
+            return -1;
+        }
+
+        usize $at = 0;
+
+        foreach (0 .. $count as $i) {
+            uint8 $b = $buf:$[$i];
+
+            if ($b == 10) {
+                if ($i == 0) {
+                    $expanded:$[$at] = 13;
+                    $at = $at + 1;
+                }
+                else {
+                    if ($buf:$[$i - 1] != 13) {
+                        $expanded:$[$at] = 13;
+                        $at = $at + 1;
+                    }
+                }
+            }
+
+            $expanded:$[$at] = $b;
+            $at = $at + 1;
+        }
+
+        $utf8:$ = $expanded:$;
+        $utf8_n = $at as int32;
+    }
+
+    int32 $wide_n = c_MultiByteToWideChar(
+        CONSOLE_CP_UTF8, 0, $utf8, $utf8_n, ptr<uint16>(null), 0);
+
+    if ($wide_n <= 0) {
+        if ($expanded:$ != null) {
+            mem::free($expanded);
+        }
+
+        return -1;
+    }
+
+    ptr<uint16> $wide = mem::alloc<uint16>($wide_n as usize);
+
+    if ($wide:$ == null) {
+        if ($expanded:$ != null) {
+            mem::free($expanded);
+        }
+
+        return -1;
+    }
+
+    c_MultiByteToWideChar(CONSOLE_CP_UTF8, 0, $utf8, $utf8_n, $wide, $wide_n);
+
+    if ($expanded:$ != null) {
+        mem::free($expanded);
+    }
+
+    usize $off = 0;
+    usize $need = $wide_n as usize;
+
+    while ($off < $need) {
+        uint32 $written = 0;
+        uint32 $chunk = ($need - $off) as uint32;
+        int32 $ok = c_WriteConsoleW(
+            $handle, $wide:$ + $off, $chunk, &$written, ptr<uint8>(null));
+
+        if ($ok == 0) {
+            mem::free($wide);
+            return -1;
+        }
+
+        if ($written == 0) {
+            mem::free($wide);
+            return -1;
+        }
+
+        $off = $off + $written;
+    }
+
+    mem::free($wide);
+
+    return $count as isize;
+}
+#[end]

@@ -11,6 +11,9 @@
 
 #include "eco.h"
 
+#include <llvm/Config/llvm-config.h>
+#include <llvm/TargetParser/Triple.h>
+
 #include "AST/ASTAccess.h"
 #include "AST/ASTAtomicity.h"
 #include "AST/ASTBundle.h"
@@ -66,7 +69,11 @@ void TypeLowering::create_cmp_units(
         // question about type sizes during codegen gets the real target's answer, the optimizer
         // has a layout to reason with, and the JIT and object paths cannot disagree
         cmp_unit->llvm_module->setDataLayout(_ctx.layout());
+#if LLVM_VERSION_MAJOR >= 21
+        cmp_unit->llvm_module->setTargetTriple(llvm::Triple(_ctx.target_triple));
+#else
         cmp_unit->llvm_module->setTargetTriple(_ctx.target_triple);
+#endif
 
         // and its compile unit and debug module flags, for the same reason and at the same moment: all
         // three are things a module carries from the instant it exists rather than acquires later. a

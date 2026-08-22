@@ -1,3 +1,7 @@
+# the assertion is the *value*, so the linked binary is the honest path
+# on every host rather than a JIT that may not bind the libcall
+mode: build
+
 --- OUT --->
 0.000000
 1.000000

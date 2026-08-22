@@ -8,10 +8,14 @@ set(LIBNAME ${APPNAME}_lib)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -g")
-set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
-
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
+# ASan and the GCC-style debug flags are a Unix host's. MSVC (and clang-cl) reject
+# `-fsanitize=address` / `-O0 -g` as unknown options, and a Debug configure on
+# Windows would otherwise fail before compiling a single file. clang++ with the
+# GNU driver still takes them; it is `MSVC` that is the split, not `WIN32`.
+if(NOT MSVC)
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fsanitize=address")
+    set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
 # set(CMAKE_BUILD_TYPE Debug)
 
 set(VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
@@ -26,6 +30,50 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
 
+# Official LLVM Windows packages record the DIA SDK from the machine that built
+# them - VS Enterprise on the release builders. That path is a file-level Ninja
+# input, so a Community/Professional install fails at build time with "missing
+# and no known rule" rather than a link error. Rewrite it onto whichever 2022
+# edition actually has diaguids.lib here.
+if(WIN32)
+    unset(ECO_DIA_GUIDS)
+    foreach(ECO_VS_EDITION Enterprise Professional Community BuildTools)
+        set(ECO_DIA_CANDIDATE "C:/Program Files/Microsoft Visual Studio/2022/${ECO_VS_EDITION}/DIA SDK/lib/amd64/diaguids.lib")
+        if(EXISTS "${ECO_DIA_CANDIDATE}")
+            set(ECO_DIA_GUIDS "${ECO_DIA_CANDIDATE}")
+            break()
+        endif()
+    endforeach()
+
+    if(ECO_DIA_GUIDS)
+        foreach(ECO_LLVM_LIB IN LISTS LLVM_AVAILABLE_LIBS)
+            if(NOT TARGET ${ECO_LLVM_LIB})
+                continue()
+            endif()
+
+            get_target_property(ECO_LLVM_LIB_DEPS ${ECO_LLVM_LIB} INTERFACE_LINK_LIBRARIES)
+            if(NOT ECO_LLVM_LIB_DEPS)
+                continue()
+            endif()
+
+            set(ECO_LLVM_LIB_NEW_DEPS "")
+            set(ECO_LLVM_LIB_REPLACED FALSE)
+            foreach(ECO_DEP IN LISTS ECO_LLVM_LIB_DEPS)
+                if(ECO_DEP MATCHES "DIA SDK/.*/diaguids\\.lib")
+                    list(APPEND ECO_LLVM_LIB_NEW_DEPS "${ECO_DIA_GUIDS}")
+                    set(ECO_LLVM_LIB_REPLACED TRUE)
+                else()
+                    list(APPEND ECO_LLVM_LIB_NEW_DEPS "${ECO_DEP}")
+                endif()
+            endforeach()
+
+            if(ECO_LLVM_LIB_REPLACED)
+                set_property(TARGET ${ECO_LLVM_LIB} PROPERTY INTERFACE_LINK_LIBRARIES "${ECO_LLVM_LIB_NEW_DEPS}")
+            endif()
+        endforeach()
+    endif()
+endif()
+
 # DO NOT INCLUDE! THIS CAUSED AN ERROR THAT TOOK ME 3 FULL DAYS TO PIN DOWN
 # I leave this here as a warning to future me and as a totem to ward off evil spirits
 # honestly I do not even rember why I added this in the first place, it in combination 
@@ -35,10 +83,18 @@ include_directories(${LLVM_INCLUDE_DIRS})
 
 # Echo 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
-set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-Wall -Wextra -pedantic -Wno-unused-parameter")
+if(NOT MSVC)
+    set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-Wall -Wextra -pedantic -Wno-unused-parameter")
+endif()
+
+# the library is what the tests link. `main.cpp` is the driver, and two `main`s in one
+# image is lld picking the compiler's: Catch2 never runs and `--list-tests` is refused
+# as an echoc flag. the executable still compiles the driver in
+set(LIB_SOURCES ${SOURCES})
+list(FILTER LIB_SOURCES EXCLUDE REGEX "[\\/]main\\.cpp$")
 
 add_executable(${APPNAME} ${SOURCES})
-add_library(${LIBNAME} STATIC ${SOURCES})
+add_library(${LIBNAME} STATIC ${LIB_SOURCES})
 
 # where the stdlib sources live. PRIVATE on each target that needs it rather than PUBLIC on the
 # library, because a consumer of echoc_lib is not thereby a consumer of the source tree - so the three
@@ -47,6 +103,25 @@ set(ECO_STDLIB_DEFINITION "STDLIB_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/stdlib\"")
 
 target_compile_definitions(${APPNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
 target_compile_definitions(${LIBNAME} PRIVATE ${ECO_STDLIB_DEFINITION})
+
+# the clang that compiled this binary. `echoc build` / `echoc test` must not
+# pick a GNU-ABI clang that happens to sit first on PATH (llvm-mingw cannot
+# link the MSVC objects we emit)
+set(ECO_HOST_CLANG "${CMAKE_C_COMPILER}")
+if(ECO_HOST_CLANG MATCHES "clang\\+\\+")
+    get_filename_component(ECO_HOST_CLANG_DIR "${ECO_HOST_CLANG}" DIRECTORY)
+    if(WIN32)
+        set(ECO_HOST_CLANG_CANDIDATE "${ECO_HOST_CLANG_DIR}/clang.exe")
+    else()
+        set(ECO_HOST_CLANG_CANDIDATE "${ECO_HOST_CLANG_DIR}/clang")
+    endif()
+    if(EXISTS "${ECO_HOST_CLANG_CANDIDATE}")
+        set(ECO_HOST_CLANG "${ECO_HOST_CLANG_CANDIDATE}")
+    endif()
+endif()
+file(TO_CMAKE_PATH "${ECO_HOST_CLANG}" ECO_HOST_CLANG_DEF)
+target_compile_definitions(${APPNAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG_DEF}\"")
+target_compile_definitions(${LIBNAME} PRIVATE "ECO_HOST_CLANG=\"${ECO_HOST_CLANG_DEF}\"")
 
 # what a *released* binary is built with. the path above is the build machine's, so a binary someone
 # downloaded can only find the standard library if it carries it - see the comment on
@@ -143,14 +218,18 @@ set(LLVM_COMPONENTS
 )
 
 # add the native architecture to the list of components
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+#
+# Windows reports AMD64 where Unix says x86_64. compared case-insensitively so
+# a generator that spells `AMD64` and one that spells `amd64` are the same row
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" ECO_PROCESSOR)
+if (ECO_PROCESSOR MATCHES "x86_64|amd64")
     set(NATIVE_ARCH "X86")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+elseif (ECO_PROCESSOR MATCHES "arm64|aarch64")
     # Darwin says arm64, Linux says aarch64. both are AArch64 to LLVM
     set(NATIVE_ARCH "AArch64")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+elseif (ECO_PROCESSOR MATCHES "arm")
     set(NATIVE_ARCH "ARM")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+elseif (ECO_PROCESSOR MATCHES "riscv64")
     set(NATIVE_ARCH "RISCV")
 else()
     message(FATAL_ERROR "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
@@ -225,4 +304,9 @@ target_compile_definitions(tests PRIVATE
 enable_testing()
 list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
 include(Catch)
-catch_discover_tests(tests)
+# put the LLVM we built against first on PATH for each ctest invocation. Catch2
+# passes TEST_CASE names as argv, so a name starting with `-` is a Catch2 flag
+# (`-o` writes a reporter file and then runs the *entire* suite, `--help` prints
+# usage). those cases are named with backticks instead, e.g. `` `-o` overrides ``
+get_filename_component(ECO_LLVM_BIN "${ECO_HOST_CLANG}" DIRECTORY)
+catch_discover_tests(tests DL_PATHS "${ECO_LLVM_BIN}")

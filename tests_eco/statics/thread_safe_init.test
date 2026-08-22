@@ -6,7 +6,11 @@ CHECK: acquire
 CHECK: call void @__eco_static_once(
 CHECK: cmpxchg ptr @__eco_static_chain
 CHECK: define linkonce_odr void @__eco_static_once(
-CHECK: call i64 @pthread_self(
+CHECK-LINUX: call i64 @pthread_self(
+CHECK-DARWIN: call i64 @pthread_self(
+CHECK-WINDOWS: call i32 @GetCurrentThreadId(
 CHECK: cmpxchg ptr
-CHECK: call i32 @sched_yield(
+CHECK-LINUX: call i32 @sched_yield(
+CHECK-DARWIN: call i32 @sched_yield(
+CHECK-WINDOWS: call i32 @SwitchToThread(
 CHECK: load atomic ptr, ptr @__eco_static_chain

@@ -134,6 +134,24 @@ TEST_CASE("an unknown C build scheme is refused", "[cbuild]")
     REQUIRE(refusal.find("sources, include, define, flag") != std::string::npos);
 }
 
+TEST_CASE("coff_exports_from_nm keeps defined text and data", "[cbuild]")
+{
+    const std::string nm =
+        "shim.o:\n"
+        "00000000 T eco_shim_answer\n"
+        "00000004 D eco_shim_flag\n"
+        "00000008 B eco_shim_bss\n"
+        "00000000 R eco_shim_ro\n"
+        "         U printf\n"
+        "00000010 T ?mangled@@YAXXZ\n"
+        "00000020 T .text\n";
+
+    const std::vector<std::string> names = Compiler::coff_exports_from_nm(nm);
+
+    REQUIRE(names == std::vector<std::string>{
+        "eco_shim_answer", "eco_shim_flag", "eco_shim_bss", "eco_shim_ro" });
+}
+
 TEST_CASE("a C object is reused when nothing changed", "[cbuild][cache]")
 {
     ScopedProject project("reuse");

@@ -27,8 +27,8 @@
 #include "Compiler/LLVM/Codegen/Backend.h"
 
 #include <filesystem>
-#include <set>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -50,6 +50,15 @@ public:
     // because it is the other half of the same question and both have to be answered before
     // compile_bundle - see CodegenContext::test_mode
     void set_test_mode(bool test_mode);
+
+    // `main` itself looks up `ECO_INTERNAL_RUN_TEST` and calls that test. only a linked runner
+    // needs this; the JIT path calls each test by address and must not emit the ladder
+    void set_native_test_runner(bool enabled);
+
+    // the tests this compile will run, as mangled symbols. must be set before compile_bundle
+    // so a native runner's `main` can dispatch on them and so DCE cannot drop a test nothing
+    // in `main` appeared to reach
+    void set_test_symbols(std::vector<std::string> symbols);
 
     // `cached_modules` names the modules whose compiled object is being reused, so no code is generated for
     // them at all - see TypeLowering::create_cmp_units for why that is the only place it has to be said
@@ -81,8 +90,10 @@ public:
     // **a test run has no program**, so it returns having emitted nothing rather than walking and
     // narrowing to nothing: `main` keeps the prologue its caller emitted - a test may read
     // `std::env::args()` - and ends there. The tests themselves are ordinary functions the declaration
-    // walk already emitted, and Compiler::TestRunner calls each by its own symbol
+    // walk already emitted. A native runner's `main` then dispatches; the JIT path calls each
+    // symbol from TestRunner
     void emit_entry_file_roots(Compiler::LLVM::CmpUnit &main_cmp_unit);
+    void emit_test_dispatch();
 
     void visitScope(AST::ScopeNode &node);
     void visitType(AST::TypeNode &node);

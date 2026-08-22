@@ -14,6 +14,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 
 namespace
 {
@@ -515,16 +516,22 @@ bool Compiler::build_c_sources(
         std::vector<std::string> argv = {
             "clang",
             "-c",
-
-            // one object serves the executable and the loadable library both - see the header
-            "-fPIC",
-            "-o", object.string(),
-            source.string(),
-
-            // what lets the key above see this translation unit's headers, from the next build onward
-            "-MD",
-            "-MF", depfile.string(),
         };
+
+        // PIC is the Unix loadable-object rule. Windows objects are already relocatable;
+        // clang-cl rejects `-fPIC`
+        if (TargetFacts::host().operating_system != "windows") {
+            argv.push_back("-fPIC");
+        }
+
+        argv.push_back("-o");
+        argv.push_back(object.string());
+        argv.push_back(source.string());
+
+        // what lets the key above see this translation unit's headers, from the next build onward
+        argv.push_back("-MD");
+        argv.push_back("-MF");
+        argv.push_back(depfile.string());
 
         append_common_arguments(spec, options, argv);
 
@@ -604,6 +611,53 @@ bool Compiler::build_c_shared_library(
 
     argv.insert(argv.end(), link_words.begin(), link_words.end());
 
+#if defined(_WIN32)
+    // COFF hides symbols unless they are exported. Unix .so files export everything
+    // defined; without a .def the JIT's LoadLibrary finds the DLL and none of the
+    // functions, and the first call is an access violation. llvm-nm lists the
+    // defined symbols; `/DEF:` is how lld-link is told to export them
+    const std::filesystem::path def_path = out_library.string() + ".def";
+    std::vector<std::string> nm_argv = { "llvm-nm", "--extern-only", "--defined-only" };
+
+    for (const std::filesystem::path &object : objects) {
+        nm_argv.push_back(object.string());
+    }
+
+    const CapturedProcess nm = run_captured(nm_argv);
+
+    if (nm.exit_code != 0) {
+        out_error = fmt::format(
+            "listing C object symbols for module '{}' failed.", spec.module_name);
+        return false;
+    }
+
+    std::ofstream def(def_path);
+
+    if (!def) {
+        out_error = fmt::format(
+            "could not write the export list for module '{}' at '{}'.",
+            spec.module_name, def_path.string());
+        return false;
+    }
+
+    def << "EXPORTS\n";
+
+    for (const std::string &name : coff_exports_from_nm(nm.output)) {
+        def << name << "\n";
+    }
+
+    def.flush();
+
+    if (!def) {
+        out_error = fmt::format(
+            "could not write the export list for module '{}' at '{}'.",
+            spec.module_name, def_path.string());
+        return false;
+    }
+
+    argv.push_back("-Wl,/DEF:" + def_path.string());
+#endif
+
     if (!run_tool(argv)) {
         out_error = fmt::format(
             "linking the C sources of module '{}' into a loadable library failed.", spec.module_name);
@@ -611,4 +665,44 @@ bool Compiler::build_c_shared_library(
     }
 
     return true;
+}
+
+std::vector<std::string> Compiler::coff_exports_from_nm(const std::string &nm_output)
+{
+    std::vector<std::string> names;
+    std::istringstream lines(nm_output);
+    std::string line;
+
+    while (std::getline(lines, line)) {
+        if (line.empty() || line.back() == ':') {
+            continue;
+        }
+
+        std::istringstream fields(line);
+        std::string address;
+        std::string type;
+        std::string name;
+
+        if (!(fields >> address >> type >> name)) {
+            continue;
+        }
+
+        if (type.size() != 1) {
+            continue;
+        }
+
+        const char kind = type[0];
+
+        if (kind != 'T' && kind != 'D' && kind != 'B' && kind != 'R') {
+            continue;
+        }
+
+        if (name.empty() || name[0] == '.' || name[0] == '?') {
+            continue;
+        }
+
+        names.push_back(name);
+    }
+
+    return names;
 }

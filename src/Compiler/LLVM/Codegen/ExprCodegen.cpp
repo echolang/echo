@@ -1125,17 +1125,13 @@ void ExprCodegen::gen_echo_string(llvm::Value *value, const AST::ValueType &type
         _ctx.libc_callee("fflush", i32, { _ctx.opaque_ptr_type() }),
         { llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(_ctx.opaque_ptr_type())) });
 
-    _ctx.builder->CreateCall(
-        _ctx.libc_callee("write", i64, { i32, _ctx.opaque_ptr_type(), i64 }),
-        { llvm::ConstantInt::get(i32, 1), bytes, size });
+    _ctx.emit_libc_write(1, bytes, size);
 
     // the trailing newline every other `echo` conversion carries, so one statement behaves one way
     // whatever it is handed. writing it separately rather than copying the bytes to append it: the
     // bytes may be a shared substring, and there is nowhere to put a longer copy
-    _ctx.builder->CreateCall(
-        _ctx.libc_callee("write", i64, { i32, _ctx.opaque_ptr_type(), i64 }),
-        { llvm::ConstantInt::get(i32, 1), _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"),
-          llvm::ConstantInt::get(i64, 1) });
+    _ctx.emit_libc_write(
+        1, _ctx.builder->CreateGlobalStringPtr("\n", "echo.nl"), llvm::ConstantInt::get(i64, 1));
 }
 
 void ExprCodegen::gen_ref_count_builtin(AST::FunctionCallExprNode &node, AST::BuiltinKind kind)

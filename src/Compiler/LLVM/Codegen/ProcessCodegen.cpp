@@ -47,6 +47,8 @@ void ProcessCodegen::gen_capture(llvm::Function *entry)
 
     _ctx.builder->CreateStore(entry->getArg(1), get_or_create_argv());
     _ctx.builder->CreateStore(entry->getArg(2), get_or_create_envp());
+
+    _ctx.emit_unbuffer_stdio();
 }
 
 llvm::Value *ProcessCodegen::gen_argc(const llvm::Twine &name)
