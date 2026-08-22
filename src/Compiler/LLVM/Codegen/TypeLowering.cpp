@@ -11,9 +11,6 @@
 
 #include "eco.h"
 
-#include <llvm/Config/llvm-config.h>
-#include <llvm/TargetParser/Triple.h>
-
 #include "AST/ASTAccess.h"
 #include "AST/ASTAtomicity.h"
 #include "AST/ASTBundle.h"
@@ -27,10 +24,12 @@
 #include "AST/FunctionDeclNode.h"
 #include "AST/TypeDeclNode.h"
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
+#include <llvm/TargetParser/Triple.h>
 
 #include <fmt/core.h>
 

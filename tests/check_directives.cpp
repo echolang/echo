@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "eco_check_directives.h"
-
 #include <string>
 #include <vector>
+
+#include "eco_check_directives.h"
 
 using EchoTests::CheckDirective;
 using EchoTests::apply_check_directives;

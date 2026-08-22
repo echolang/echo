@@ -73,8 +73,13 @@ namespace
     }
 
     std::vector<std::string> echoc_argv(
-        const EchoTests::EcoTestFile &test, const fs::path &eco, const fs::path *binary,
-        const std::string &dump, const fs::path &root, const fs::path &scratch)
+        const EchoTests::EcoTestFile &test,
+        const fs::path &eco,
+        const fs::path *binary,
+        const std::string &dump,
+        const fs::path &root,
+        const fs::path &scratch
+    )
     {
         const bool is_build = test.mode == EchoTests::RunMode::t_build;
 
@@ -368,8 +373,10 @@ namespace
     // outlive the cleanup, and the program is run before a dump invocation can overwrite the binary
     // underneath it
     CaseOutcome run_case(
-        const DiscoveredCase &entry, const std::vector<std::string> &command,
-        const std::vector<std::vector<std::string>> &dump_commands)
+        const DiscoveredCase &entry,
+        const std::vector<std::string> &command,
+        const std::vector<std::vector<std::string>> &dump_commands
+    )
     {
         CaseOutcome outcome;
         ScopedScratch scratch(entry.scratch);

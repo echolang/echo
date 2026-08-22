@@ -190,8 +190,7 @@ namespace
         return line;
     }
 
-    std::wstring windows_environment(
-        const std::vector<std::pair<std::string, std::string>> &extra_env)
+    std::wstring windows_environment(const std::vector<std::pair<std::string, std::string>> &extra_env)
     {
         if (extra_env.empty()) {
             return std::wstring();
@@ -477,7 +476,8 @@ Compiler::CapturedProcess Compiler::run_captured(
     unsigned timeout_ms,
     const std::filesystem::path &working_directory,
     const std::vector<std::pair<std::string, std::string>> &extra_env,
-    const std::string &stdin_content)
+    const std::string &stdin_content
+)
 {
     CapturedProcess result;
 

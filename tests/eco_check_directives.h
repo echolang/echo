@@ -48,7 +48,8 @@ namespace EchoTests
         size_t first_line,
         const std::string &origin,
         std::vector<CheckDirective> &out_directives,
-        std::string &out_error);
+        std::string &out_error
+    );
 
     // applies the directives to `haystack`, "" on success or the failure message.
     //
@@ -59,15 +60,15 @@ namespace EchoTests
     // text. whole-text would be useless here: `mem::` declares `@malloc` and the class runtime
     // calls it, both above `main`, so "this function does not allocate" has to mean "not in this
     // region"
-    std::string apply_check_directives(
-        const std::vector<CheckDirective> &directives, const std::string &haystack);
+    std::string apply_check_directives(const std::vector<CheckDirective> &directives, const std::string &haystack);
 
     // same, against an explicit host (`windows` / `linux` / `darwin`) so a case can be judged
     // without asking the machine it happens to be running on
     std::string apply_check_directives(
         const std::vector<CheckDirective> &directives,
         const std::string &haystack,
-        const std::string &host_os);
+        const std::string &host_os
+    );
 
     // trims surrounding whitespace, including a trailing `\r` from an editor that writes CRLF
     std::string trim_whitespace(const std::string &s);

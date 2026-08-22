@@ -16,7 +16,8 @@ namespace EchoTests
         unsigned timeout_ms,
         const std::filesystem::path &working_directory,
         const std::vector<std::pair<std::string, std::string>> &extra_env,
-        const std::string &stdin_content)
+        const std::string &stdin_content
+    )
     {
         const Compiler::CapturedProcess captured = Compiler::run_captured(
             argv, timeout_ms, working_directory, extra_env, stdin_content);

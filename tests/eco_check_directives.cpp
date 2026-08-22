@@ -42,7 +42,8 @@ namespace
         bool &out_negated,
         std::string &out_host_os,
         size_t &out_text_at,
-        std::string &out_error)
+        std::string &out_error
+    )
     {
         out_negated = false;
         out_host_os.clear();
@@ -115,7 +116,8 @@ bool parse_check_directives(
     size_t first_line,
     const std::string &origin,
     std::vector<CheckDirective> &out_directives,
-    std::string &out_error)
+    std::string &out_error
+)
 {
     std::istringstream in(body);
 
@@ -155,7 +157,8 @@ bool parse_check_directives(
 std::string apply_check_directives(
     const std::vector<CheckDirective> &directives,
     const std::string &haystack,
-    const std::string &host_os)
+    const std::string &host_os
+)
 {
     size_t cursor = 0;
     std::vector<const CheckDirective *> pending_negations;

@@ -35,3 +35,13 @@
 #[if: os != windows]
 #[link: lib { name: "pthread", runtime: process }]
 #[end]
+
+// glibc keeps libm out of libc. LLVM lowers some math intrinsics (tanh, atan2)
+// to libcalls, so a native `build` needs `-lm` or the linker names them as
+// undefined. Darwin's libm is libSystem; `-lm` still works. The default
+// `runtime: load` is the spelling the docs teach as `lib "m"`, so a module
+// that writes that too still merges. Windows UCRT already has the symbols;
+// lld-link looking for m.lib is a missing-library error.
+#[if: os != windows]
+#[link: lib "m"]
+#[end]

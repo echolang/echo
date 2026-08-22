@@ -145,9 +145,7 @@ namespace EchoTests
         return std::filesystem::is_regular_file(with_exe(path), ec);
     }
 
-    inline ProcessResult run_binary(
-        const std::filesystem::path &exe,
-        unsigned timeout_ms = k_default_timeout_ms)
+    inline ProcessResult run_binary(const std::filesystem::path &exe, unsigned timeout_ms = k_default_timeout_ms)
     {
         return run_process({ with_exe(exe).string() }, timeout_ms);
     }

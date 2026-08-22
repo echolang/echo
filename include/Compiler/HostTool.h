@@ -87,7 +87,8 @@ namespace Compiler
         unsigned timeout_ms = 0,
         const std::filesystem::path &working_directory = {},
         const std::vector<std::pair<std::string, std::string>> &extra_env = {},
-        const std::string &stdin_content = {});
+        const std::string &stdin_content = {}
+    );
 
     // a shell command, for tests that already spelled `2>&1` / `2>nul`. Windows is `cmd /c`
     // with the payload unquoted as a unit; POSIX is `sh -c`

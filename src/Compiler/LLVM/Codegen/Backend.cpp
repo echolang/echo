@@ -509,10 +509,11 @@ std::optional<std::vector<std::string>> host_linker_command(
 
 };
 
-// COFF does not merge `linkonce_odr` the way ELF and Mach-O do unless the
-// symbol is in a COMDAT. Without one, two units that both emit `__eco_argc`
-// (or `__eco_abort`, ...) fail at link with a duplicate symbol in a single
-// object. Harmless on ELF: the group is how GNU linkonce is spelled there too
+// COFF does not merge `linkonce_odr` unless the symbol is in a COMDAT.
+// Without one, two units that both emit `__eco_argc` (or `__eco_abort`, ...)
+// fail at link with a duplicate symbol. Mach-O rejects COMDATs outright
+// (`LLVM ERROR: MachO doesn't support COMDATs`), so this is Windows only.
+// ELF would accept a group, but does not need one.
 static void assign_odr_comdats(llvm::Module &module)
 {
     for (llvm::GlobalVariable &global : module.globals()) {
@@ -543,7 +544,9 @@ bool Backend::emit_object(Compiler::LLVM::CmpUnit &cmp_unit, const std::filesyst
         return false;
     }
 
-    assign_odr_comdats(*cmp_unit.llvm_module);
+    if (_ctx.targeting_windows()) {
+        assign_odr_comdats(*cmp_unit.llvm_module);
+    }
 
     // the directory is the driver's - it prepared one before it decided to emit here at all. Creating one
     // on the way past would be a second answer to where a build artifact goes, in the layer furthest from
