@@ -118,7 +118,9 @@ if (-not $env:INCLUDE) {
 }
 
 function Include-Leaf([string]$Path) {
-    $leaf = Split-Path -LiteralPath $Path -Leaf
+    # Split-Path -LiteralPath -Leaf is not a parameter set, in Windows PowerShell
+    # or in pwsh. GetFileName does not glob and does not need a trailing-slash dance
+    $leaf = [System.IO.Path]::GetFileName($Path.TrimEnd('\', '/'))
     if ($leaf -eq "winrt" -or $leaf -eq "cppwinrt" -or $leaf -eq "atl" -or $leaf -eq "mfc") {
         return $null
     }
