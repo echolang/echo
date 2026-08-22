@@ -1558,7 +1558,8 @@ namespace AST
     };
 
     // the single, unified type-substitution routine, shared by struct and function generics
-    // - a type-parameter reference resolves to subst[index], carrying its const/pointer flags;
+    // - a type-parameter reference resolves to subst[index], carrying its level flags (const,
+    //   nullability). a rebuild that copies only const is how `Box<T>?` became `Box<int32>`;
     // - a generic application (a struct/class whose ComplexType is an instantiation) has its
     //   arguments recursively substituted and is then re-interned via `registry` - this is what
     //   makes nested generics such as Foo<Bar<T>> work;

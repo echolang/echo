@@ -3,12 +3,14 @@
 use std::thread;
 
 thread::channel<int32> $ch = thread::channel<int32>();
-$ch->tx->send(5);
-$ch->tx->close();
+thread::sender<int32> $tx = $ch->tx();
+thread::receiver<int32> $rx = $ch->rx();
+$tx->send(5);
+$tx->close();
 
-int32 $v = guard $ch->rx->recv() else {
+int32 $v = guard $rx->recv() else {
     die('drained too soon');
 }
 
 echo $v;
-echo $ch->rx->recv() == null;
+echo $rx->recv() == null;

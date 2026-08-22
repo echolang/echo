@@ -1,0 +1,8 @@
+// tx() takes the sender off the pair. a second take is a programming error,
+// the same severity as opening at capacity 0
+
+use std::thread;
+
+thread::channel<int32> $ch = thread::channel<int32>();
+thread::sender<int32> $tx = $ch->tx();
+thread::sender<int32> $again = $ch->tx();

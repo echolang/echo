@@ -320,3 +320,52 @@ TEST_CASE("A class-kind constraint admits classes and refuses everything else", 
     REQUIRE(first_constraint_violation(tmpl->type_parameters, {point}) == 0);
     REQUIRE(first_constraint_violation(tmpl->type_parameters, {int32}) == 0);
 }
+
+TEST_CASE("a nullable generic application stays nullable after substitution", "[instantiation][generics]")
+{
+    // `Box<T>?` is a nullable Box, not Box<T?>. substitute_type's instantiation arm rebuilt
+    // the application and copied const, not nullability, so `$this->x` in the instance was
+    // `Box<int32>` and a guard over it was refused
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Box<T> { T $v; constructor(T $v) { $this->v = $v; } }\n"
+        "struct Hold<T> { Box<T>? $x; }\n"
+        "Hold<int32> $h = Hold<int32>(null);\n"
+        "function take(Hold<int32> $from) : int32 {\n"
+        "    Box<int32> $b = guard $from->x else { return 0; }\n"
+        "    return $b->v;\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ValueType hold = decl_type(*bundle, "$h");
+    REQUIRE(hold.has_complex_type());
+    const ComplexType *ct = hold.get_complex_type();
+    REQUIRE(ct->property_count() == 1);
+    const ValueType &slot = ct->get_property_type(0);
+    REQUIRE(slot.is_class());
+    REQUIRE(slot.is_nullable());
+}
+
+TEST_CASE("a nullable C function pointer stays nullable after substitution", "[instantiation][generics][cfn]")
+{
+    // the signature arm rebuilt `extern function<T(T)>` and copied const, not `?`. a property
+    // of that type on a generic struct became non-nullable in every instance
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "function id(int32 $x) : int32 { return $x; }\n"
+        "struct Hold<T> { extern function<T(T)>? $op; }\n"
+        "Hold<int32> $h = Hold<int32>(null);\n"
+        "function take(Hold<int32> $from) : int32 {\n"
+        "    extern function<int32(int32)> $f = guard $from->op else { return -1; }\n"
+        "    return $f(1);\n"
+        "}\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    const ValueType hold = decl_type(*bundle, "$h");
+    REQUIRE(hold.has_complex_type());
+    const ComplexType *ct = hold.get_complex_type();
+    REQUIRE(ct->property_count() == 1);
+    const ValueType &slot = ct->get_property_type(0);
+    REQUIRE(slot.is_c_function());
+    REQUIRE(slot.is_nullable());
+}

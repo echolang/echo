@@ -2,5 +2,5 @@
 
 use std::thread;
 
-thread::sender<int32> $tx = thread::channel<int32>()->tx;
+thread::sender<int32> $tx = thread::channel<int32>()->tx();
 echo $tx->send(1);

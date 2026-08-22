@@ -914,6 +914,34 @@ bool AST::contains_type_param(const ValueType &type, const TypeParamDecl *param)
     return false;
 }
 
+// flags live on the ValueType, not on the interned layout. every rebuild arm mints a bare type
+// and must copy them from the source: copying only const is how `Box<T>?` became `Box<int32>`
+// in every instance, and how `extern function<void(T)>?` would have done the same through the
+// signature arm
+//
+// const first, then nullability, matching the type-parameter arm: over a bound type with no
+// spare null value, `const T?` with T := int32 is a tagged pair whose payload is const, not a
+// const pair of a mutable payload. OR'd rather than re-derived, so a bound type that is already
+// nullable stays so - `T?` with T := Node? is a Node?, which is idempotence
+//
+// the pointer skip is the borrow rule: a pointer level spells this bit with `ptr<T>` vs `T&`,
+// so setting it on a borrow would silently turn it into a nullable pointer. `T?` with
+// T := int32& is a case the grammar has no spelling for anyway. get_or_create_optional then
+// decides which spelling the bound type takes - flag or tagged pair - the same question
+// parse_nullable_suffix asks, asked again because only now is T known
+static AST::ValueType with_level_flags(AST::ValueType rebuilt, const AST::ValueType &source, AST::TypeRegistry &registry)
+{
+    if (source.is_const()) {
+        rebuilt = AST::ValueType::make_const(rebuilt);
+    }
+
+    if (source.is_nullable() && !rebuilt.is_pointer()) {
+        rebuilt = registry.get_or_create_optional(rebuilt);
+    }
+
+    return rebuilt;
+}
+
 AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitution &subst, TypeRegistry &registry)
 {
     // a type-parameter reference resolves to its bound type, carrying the reference's flags
@@ -925,8 +953,7 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
     // now yields ptr<ptr<int>> instead of collapsing onto a single idempotent flag
     if (type.is_pointer()) {
         ValueType inner = substitute_type(type.pointee(), subst, registry);
-        ValueType result = ValueType::make_pointer(inner, type.is_nullable());
-        return type.is_const() ? ValueType::make_const(result) : result;
+        return with_level_flags(ValueType::make_pointer(inner, type.is_nullable()), type, registry);
     }
 
     // and a weak substitutes through its target, so `weak<T>` inside a template becomes `weak<Node>` in
@@ -942,8 +969,7 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             return type;
         }
 
-        ValueType result = ValueType::make_weak(inner);
-        return type.is_const() ? ValueType::make_const(result) : result;
+        return with_level_flags(ValueType::make_weak(inner), type, registry);
     }
 
     // and structurally through a signature, for the same reason - returning it unchanged would leave
@@ -969,7 +995,7 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             ? ValueType::make_c_function(ret, std::move(params))
             : ValueType::make_callable(ret, std::move(params));
 
-        return type.is_const() ? ValueType::make_const(result) : result;
+        return with_level_flags(result, type, registry);
     }
 
     if (type.is_type_param()) {
@@ -978,33 +1004,11 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
             return type;
         }
 
-        // **every flag on the reference carries over**, because a flag describes the level it sits on and
-        // this level is being replaced by what it named. `const T` with T := Node is a `const Node`, and
-        // `T?` is a `Node?` - both are properties the *use* declared, not the bound type's to have
-        //
-        // it carries const *and* nullability. carrying only const would make a generic silently
-        // disagree with itself: the declared type of `T? $s` would substitute to `Node` while its
-        // initializer substituted to `Node?`, so a body that compiled as a template would fail at
-        // every instantiation, naming a conversion neither half of the program had asked for
-        //
-        // OR'd rather than re-derived, so a bound type that is *already* nullable stays so - `T?` with
-        // T := Node? is a Node?, which is idempotence, and both spellings of `T?` have it
-        ValueType result = *bound;
-        if (type.is_const()) {
-            result = ValueType::make_const(result);
-        }
-        if (type.is_nullable() && !result.is_pointer()) {
-            // a pointer level spells this bit with its own two forms, `ptr<T>` and `T&`, so setting it on
-            // one would silently turn a borrow into a nullable pointer - a promise laundered away rather
-            // than a flag copied. `T?` with T := int32& is a case the grammar has no spelling for anyway
-            //
-            // and which of the two spellings the substituted type takes is the *bound* type's to decide,
-            // not the reference's: `T?` with T := Node is a flag, with T := string a tagged pair. that is
-            // the same question parse_nullable_suffix asks, asked again because only now is T known
-            result = registry.get_or_create_optional(result);
-        }
-
-        return result;
+        // **every flag on the reference carries over**, because a flag describes the level it sits on
+        // and this level is being replaced by what it named. `const T` with T := Node is a
+        // `const Node`, and `T?` is a `Node?` - both are properties the *use* declared, not the
+        // bound type's to have
+        return with_level_flags(*bound, type, registry);
     }
 
     // the two arms that substitute *through* a layout, sharing the one pointer they both need - and
@@ -1027,9 +1031,7 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
                 return type;
             }
 
-            const ValueType result = registry.get_or_create_optional(payload);
-
-            return type.is_const() ? ValueType::make_const(result) : result;
+            return with_level_flags(registry.get_or_create_optional(payload), type, registry);
         }
 
         // a generic application: recursively substitute its arguments, then re-intern
@@ -1040,14 +1042,14 @@ AST::ValueType AST::substitute_type(const ValueType &type, const TypeSubstitutio
                 resolved_args.push_back(substitute_type(arg, subst, registry));
             }
             ComplexType *inst = registry.get_or_create_instantiation(ct->template_ref, resolved_args);
-            ValueType result = ValueType::make_complex(inst);
-            return type.is_const() ? ValueType::make_const(result) : result;
+            return with_level_flags(ValueType::make_complex(inst), type, registry);
         }
     }
 
     // primitives and already-concrete types are unchanged
     return type;
 }
+
 // structural, and recursive through every part: this is what makes two independently written
 // `function<void(int32)>`s one type, which is the whole point of the callable kind being structural
 bool AST::CallableSignature::operator==(const AST::CallableSignature &other) const

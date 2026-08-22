@@ -63,6 +63,26 @@ TEST_CASE("substitute_type rebuilds the pointer around the resolved pointee", "[
     REQUIRE_FALSE(resolved.pointee().is_const());
 }
 
+TEST_CASE("substitute_type keeps nullability on a rebuilt C function pointer", "[types][generics][cfn]")
+{
+    // the signature arm mints a fresh type and used to copy const, not `?`. `extern function<T()>?`
+    // became `extern function<void()>` in every instance
+    TypeRegistry reg;
+    TypeParamRegistry params;
+    ComplexType hold("Hold");
+    TypeParamDecl *t = declare_param(params, hold, "T");
+
+    ValueType sig = ValueType::make_c_function(ValueType::make_type_param(t), {});
+    ValueType nullable = ValueType::make_nullable(sig);
+    TypeSubstitution subst = TypeSubstitution::positional(
+        hold.type_parameters, { ValueType::make_void() });
+
+    ValueType resolved = substitute_type(nullable, subst, reg);
+    REQUIRE(resolved.is_c_function());
+    REQUIRE(resolved.is_nullable());
+    REQUIRE(resolved.signature().return_type.is_void());
+}
+
 TEST_CASE("substitute_type nests a pointer argument instead of collapsing it", "[types][generics]")
 {
     TypeRegistry reg;

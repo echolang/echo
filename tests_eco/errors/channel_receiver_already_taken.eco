@@ -1,0 +1,8 @@
+// rx() takes the receiver off the pair. a second take dies rather than
+// handing back a second handle of an end that is gone
+
+use std::thread;
+
+thread::channel<int32> $ch = thread::channel<int32>();
+thread::receiver<int32> $rx = $ch->rx();
+thread::receiver<int32> $again = $ch->rx();

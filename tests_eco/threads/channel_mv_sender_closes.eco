@@ -1,4 +1,6 @@
-// several threads holding the same sender. last drop of that object still closes
+// taking the ends empties the pair. mv of that sender into a worker is the last
+// retain, so join then recv-until-null sees closed rather than waiting on a
+// sender the pair still held
 
 use std::thread;
 
@@ -6,21 +8,15 @@ thread::channel<int32> $ch = thread::channel<int32>();
 thread::sender<int32> $tx = $ch->tx();
 thread::receiver<int32> $rx = $ch->rx();
 
-thread::handle $a = guard thread::spawn(function() : void {
+thread::handle $h = guard thread::spawn(function[mv $tx]() : void {
     $tx->send(1);
-}) else ($e) {
-    die($e->message());
-}
-
-thread::handle $b = guard thread::spawn(function() : void {
     $tx->send(2);
+    $tx->send(3);
 }) else ($e) {
     die($e->message());
 }
 
-$a->join();
-$b->join();
-$tx->close();
+$h->join();
 
 int32 $sum = 0;
 

@@ -1,0 +1,5 @@
+expect: fail
+
+--- OUT --->
+fatal error: channel receiver already taken
+  at channel.eco:231

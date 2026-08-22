@@ -3,20 +3,22 @@
 use std::thread;
 
 thread::channel<int32> $ch = thread::channel<int32>(1);
+thread::sender<int32> $tx = $ch->tx();
+thread::receiver<int32> $rx = $ch->rx();
 
 thread::handle $w = guard thread::spawn(function() : void {
-    $ch->tx->send(1);
-    $ch->tx->send(2);
-    $ch->tx->close();
+    $tx->send(1);
+    $tx->send(2);
+    $tx->close();
 }) else ($e) {
     die($e->message());
 }
 
-int32 $a = guard $ch->rx->recv() else {
+int32 $a = guard $rx->recv() else {
     die('first');
 }
 
-int32 $b = guard $ch->rx->recv() else {
+int32 $b = guard $rx->recv() else {
     die('second');
 }
 

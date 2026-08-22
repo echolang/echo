@@ -1,0 +1,7 @@
+// #[unique] so a struct copy cannot duplicate both ends. that copy would
+// leave two pairs each holding a sender, and recv would wait on the leftover
+
+use std::thread;
+
+thread::channel<int32> $a = thread::channel<int32>();
+thread::channel<int32> $b = $a;

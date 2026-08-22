@@ -1,0 +1,28 @@
+// `Box<T>?` is a nullable Box, not Box<T?>. substitution used to drop the `?` on the
+// generic application, so a guard over the field was refused and `Hold<int32>(null)`
+// was "cannot assign null"
+
+class Box<T>
+{
+    T $v;
+
+    constructor(T $v)
+    {
+        $this->v = $v;
+    }
+}
+
+struct Hold<T>
+{
+    Box<T>? $x;
+}
+
+Hold<int32> $empty = Hold<int32>(null);
+echo $empty->x == null;
+
+Hold<int32> $h = Hold<int32>(Box<int32>(7));
+Box<int32> $b = guard $h->x else {
+    die('absent');
+}
+
+echo $b->v;

@@ -188,16 +188,18 @@ public class receiver<T>
 }
 
 /**
- * Both ends of one stream. Bind `$tx` and `$rx` to locals before spawning:
- * capturing the pair would give the worker a receiver it does not need.
+ * Both ends of one stream. `tx()` and `rx()` take the ends off the pair, so
+ * binding them to locals does not leave a sender on `$ch`. A leftover sender
+ * there would keep `recv` waiting after the worker had already dropped.
  *
  * `channel<T>()` is unbounded. `channel<T>($cap)` blocks `send` while full.
  * Capacity `0` is refused rather than becoming a rendezvous.
  */
+#[unique]
 public struct channel<T>
 {
-    public sender<T> $tx;
-    public receiver<T> $rx;
+    private sender<T>? $sender;
+    private receiver<T>? $receiver;
 
     constructor()
     {
@@ -213,11 +215,31 @@ public struct channel<T>
         $this->open($cap);
     }
 
+    function tx() : sender<T>
+    {
+        sender<T> $s = guard $this->sender else {
+            die('channel sender already taken');
+        }
+
+        $this->sender = null;
+        return $s;
+    }
+
+    function rx() : receiver<T>
+    {
+        receiver<T> $r = guard $this->receiver else {
+            die('channel receiver already taken');
+        }
+
+        $this->receiver = null;
+        return $r;
+    }
+
     private function open(usize $cap) : void
     {
         shared<T> $core = shared<T>($cap);
-        $this->tx = sender<T>($core);
-        $this->rx = receiver<T>($core);
+        $this->sender = sender<T>($core);
+        $this->receiver = receiver<T>($core);
     }
 }
 
@@ -229,8 +251,8 @@ public struct channel<T>
 public function produce<T>(function<void(sender<T>)> $work) : result<receiver<T>, error>
 {
     channel<T> $ch = channel<T>();
-    sender<T> $tx = $ch->tx;
-    receiver<T> $rx = $ch->rx;
+    sender<T> $tx = $ch->tx();
+    receiver<T> $rx = $ch->rx();
 
     handle $h = guard handle::spawn(function[mv $tx, mv $work]() : void {
         $work($tx);
