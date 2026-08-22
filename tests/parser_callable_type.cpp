@@ -291,6 +291,27 @@ TEST_CASE("a callable stored in a property is callable", "[callable]")
     REQUIRE(call->callee->get_node_type() == NodeType::n_member_access);
 }
 
+TEST_CASE("an indirect call retains a class argument the way a direct call does", "[callable][ownership]")
+{
+    // OwnershipPass walked FunctionCallExprNode arguments as arrivals and n_expr_indirect_call
+    // as nothing, so `$f($h)` bitwise-copied the handle, the callee released it, and the
+    // caller's local then released a freed object. Linux glibc reports that as an unaligned
+    // tcache chunk; produce's `$work($tx)` is the same shape
+    auto bundle = EchoTests::tests_make_parsed_bundle(
+        "class Handle { int32 $n; constructor(int32 $n) { $this->n = $n; } }\n"
+        "Handle $h = Handle(7);\n"
+        "function<int32(Handle)> $f = function(Handle $x) : int32 { return $x->n; };\n"
+        "echo $f($h);\n");
+
+    REQUIRE_FALSE(bundle->collector.has_critical_issues());
+
+    auto &m = bundle->modules.find_module("test");
+    IndirectCallExprNode *call = first_indirect_call(m);
+    REQUIRE(call != nullptr);
+    REQUIRE(call->arguments.size() == 1);
+    REQUIRE(call->arguments[0]->get_node_type() == NodeType::n_expr_retain);
+}
+
 // -- capture -----------------------------------------------------------------
 
 TEST_CASE("reading an enclosing local from a closure captures it", "[callable]")

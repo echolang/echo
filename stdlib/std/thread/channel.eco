@@ -118,10 +118,20 @@ public class sender<T>
 public class receiver<T>
 {
     private shared<T> $core;
+    // seated by `produce`, null on a receiver from `channel()`. join before `$core`
+    // dies: a class deinit runs this, then drops fields in reverse declaration order
+    private handle? $worker;
 
     internal constructor(shared<T> $core)
     {
         $this->core = $core;
+    }
+
+    // `produce` keeps the handle here rather than detaching: last drop of the
+    // receiver joins, so `echoc run` cannot unmap under a worker still in teardown
+    internal function attach(handle $h) : void
+    {
+        $this->worker = $h;
     }
 
     destructor()
@@ -132,6 +142,12 @@ public class receiver<T>
         }
 
         $this->core->cv->notify_all();
+
+        handle $h = guard $this->worker else {
+            return;
+        }
+
+        $h->join();
     }
 
     function recv() : T?
@@ -222,6 +238,6 @@ public function produce<T>(function<void(sender<T>)> $work) : result<receiver<T>
         return .error($e);
     }
 
-    $h->detach();
+    $rx->attach($h);
     return .ok($rx);
 }

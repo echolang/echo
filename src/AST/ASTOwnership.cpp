@@ -1726,6 +1726,38 @@ ExprNode *OwnershipPass::walk_expression(ExprNode *expr)
             break;
         }
 
+        // **the same arrivals a direct call makes, named here because `default:` walks nothing.**
+        // there is no declaration to read a parameter off - the list comes from the callee's
+        // signature, which is the whole difference from the arm above. left unwalked, `$f($h)`
+        // over a class handle bitwise-copied the pointer, the callee released it, and the
+        // caller's local then released a freed object. Linux glibc reports that as an unaligned
+        // tcache chunk; `tests_eco/threads/channel_send_recv.eco` is the observable half
+        case NodeType::n_expr_indirect_call:
+        {
+            auto *call = static_cast<IndirectCallExprNode *>(expr);
+
+            call->callee = walk_expression(call->callee);
+
+            const ValueType callee_type = call->callee_type();
+            const CallableSignature *signature =
+                callee_type.has_signature() ? &callee_type.signature() : nullptr;
+
+            for (size_t i = 0; i < call->arguments.size(); i++) {
+                ValueType wanted = ValueType::make_unknown();
+
+                if (signature != nullptr && i < signature->parameter_types.size()) {
+                    wanted = signature->parameter_types[i];
+                }
+
+                // no VarDeclNode: an indirect call has no declaration, so the `mv` annotation a
+                // parameter can carry is not a question this site can ask
+                call->arguments[i] = resolve_value_arrival(
+                    call->arguments[i], wanted, nullptr, ValueDestination::t_argument);
+            }
+
+            break;
+        }
+
         case NodeType::n_expr_binary:
         {
             auto *bin = static_cast<BinaryExprNode *>(expr);
