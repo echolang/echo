@@ -614,7 +614,16 @@ bool Backend::link_executable(
     Compiler::append_windows_sysroot_link_args(fallback);
     append_objects(fallback, objects);
     append_objects(fallback, link_objects);
-    fallback.insert(fallback.end(), link_words.begin(), link_words.end());
+    for (const std::string &word : link_words) {
+#if defined(_WIN32)
+        // same skip host_linker_command makes: UCRT already has libm, and
+        // clang turning `-lm` into m.lib is a missing-library error
+        if (word == "-lm") {
+            continue;
+        }
+#endif
+        fallback.push_back(word);
+    }
 
     // **no message of its own.** Whichever tool ran has already said what went wrong, on the stderr it
     // inherited; naming which module asked for each requirement is the driver's to render, because that

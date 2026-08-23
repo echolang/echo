@@ -75,6 +75,24 @@ namespace
     {
         return builder.createPointerType(nullptr, ECO_TARGET_POINTER_SIZE * 8);
     }
+
+    // `DIType::getAlignInBits` is not safe on every derived type we mint (a class
+    // handle is a pointer whose align field is left 0, and reading it has been an
+    // access violation). Size is always populated; pick a power-of-two from that.
+    uint32_t member_align_bits(llvm::DIType *type)
+    {
+        const uint64_t size = type->getSizeInBits();
+        if (size >= 64) {
+            return 64;
+        }
+        if (size >= 32) {
+            return 32;
+        }
+        if (size >= 16) {
+            return 16;
+        }
+        return 8;
+    }
 };
 
 bool DebugInfoCodegen::enabled() const
@@ -354,7 +372,7 @@ void DebugInfoCodegen::set_location(const AST::Node &node)
     // a token AST::Module::make_virtual_token minted needs no arm here: it carries the real line and
     // column of the site it was minted at, and its *file* - the one thing it cannot answer - is not
     // part of a DILocation, which takes that from the scope
-    if (token == nullptr) {
+    if (token == nullptr || current_scope() == nullptr) {
         return;
     }
 
@@ -411,7 +429,8 @@ void DebugInfoCodegen::declare_local(
 {
     UnitDebug *unit = unit_debug();
 
-    if (unit == nullptr || _subprogram == nullptr || alloca == nullptr || !decl.has_type()) {
+    if (unit == nullptr || _subprogram == nullptr || current_scope() == nullptr
+        || alloca == nullptr || !decl.has_type()) {
         return;
     }
 
@@ -482,7 +501,7 @@ llvm::DIType *DebugInfoCodegen::tuple_type_of(
             /*File=*/nullptr,
             /*LineNumber=*/0,
             member_type->getSizeInBits(),
-            member_type->getAlignInBits(),
+            member_align_bits(member_type),
             layout->getElementOffsetInBits(i),
             llvm::DINode::FlagZero,
             member_type));
@@ -592,10 +611,32 @@ void DebugInfoCodegen::append_property_members(
     const Structure &structure = cmp_unit.structure_table->get_structure(struct_id);
     const size_t count = complex->property_count();
 
-    assert(structure.property_byte_offset.size() == count);
+    if (structure.property_byte_offset.size() != count) {
+        return;
+    }
 
     for (size_t i = 0; i < count; i++) {
         const AST::ComplexType::Property &property = complex->get_property(i);
+        const uint64_t offset = base_offset_bits + structure.property_byte_offset[i] * 8;
+
+        // a class value is a handle. describing that derived type as a member has been
+        // an access violation (the box pointer's align/size accessors, and uniquing
+        // against a replaceable composite). the slot is pointer-sized either way
+        if (property.type.is_class()) {
+            llvm::DIType *field_type = opaque_pointer(*unit.builder);
+            elements.push_back(unit.builder->createMemberType(
+                unit.cu,
+                property.name,
+                decl_file,
+                decl_line,
+                ECO_TARGET_POINTER_SIZE * 8,
+                ECO_TARGET_POINTER_SIZE * 8,
+                offset,
+                property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
+                field_type));
+            continue;
+        }
+
         llvm::DIType *member_type = type_of(property.type, cmp_unit);
 
         if (member_type == nullptr) {
@@ -608,8 +649,8 @@ void DebugInfoCodegen::append_property_members(
             decl_file,
             decl_line,
             member_type->getSizeInBits(),
-            member_type->getAlignInBits(),
-            base_offset_bits + structure.property_byte_offset[i] * 8,
+            member_align_bits(member_type),
+            offset,
             property.is_private() ? llvm::DINode::FlagPrivate : llvm::DINode::FlagZero,
             member_type));
     }
@@ -638,15 +679,11 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     const unsigned decl_line = site.has_value() ? site->line : 0;
 
     // a class *value* is a handle into the heap block, so what a debugger must be told is "pointer to
-    // the box". Interned as a placeholder first for struct_type_of's reason - a class naming itself is
-    // the ordinary case rather than the exotic one
-    llvm::DICompositeType *placeholder = unit->builder->createReplaceableCompositeType(
-        llvm::dwarf::DW_TAG_structure_type, name, unit->cu, decl_file, decl_line);
-
-    llvm::DIType *box_placeholder_ptr = unit->builder->createPointerType(
-        placeholder, ECO_TARGET_POINTER_SIZE * 8);
-
-    unit->types[type] = box_placeholder_ptr;
+    // the box". Intern an opaque pointer first rather than a pointer to a replaceable composite:
+    // `replaceTemporary` does not reliably RAUW `DIDerivedType` bases, and a later `getAlignInBits`
+    // on that dangling derived type is an access violation. An opaque stand-in is what a recursive
+    // field sees during construction; the cache is overwritten with the real handle below
+    unit->types[type] = opaque_pointer(*unit->builder);
 
     const llvm::StructLayout *box_layout = _ctx.layout().getStructLayout(class_layout.box);
     std::vector<llvm::Metadata *> elements;
@@ -666,7 +703,7 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
     for (size_t i = 0; i < header.size(); i++) {
         elements.push_back(unit->builder->createMemberType(
             unit->cu, header[i].first, decl_file, decl_line,
-            header[i].second->getSizeInBits(), header[i].second->getAlignInBits(),
+            header[i].second->getSizeInBits(), 64,
             box_layout->getElementOffsetInBits(i),
             llvm::DINode::FlagArtificial, header[i].second));
     }
@@ -700,8 +737,6 @@ llvm::DIType *DebugInfoCodegen::class_type_of(const AST::ValueType &type, CmpUni
         /*RunTimeLang=*/0,
         /*VTableHolder=*/nullptr,
         complex->mangled_token() + ".box");
-
-    unit->builder->replaceTemporary(llvm::TempDIType(placeholder), box);
 
     llvm::DIType *handle = unit->builder->createPointerType(box, ECO_TARGET_POINTER_SIZE * 8);
     unit->types[type] = handle;
